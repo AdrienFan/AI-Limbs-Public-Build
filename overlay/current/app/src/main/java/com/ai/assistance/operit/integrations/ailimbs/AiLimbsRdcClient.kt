@@ -24,6 +24,7 @@ import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
@@ -63,6 +64,7 @@ class AiLimbsRdcClient(
     private var activeAuthorization: DeviceAuth? = null
     private var reconnectAttempt: Int = 0
     private val activeCallJobs = ConcurrentHashMap<String, Job>()
+    private val housekeepingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
 
     @Volatile
     var isRunning: Boolean = false
@@ -89,20 +91,54 @@ class AiLimbsRdcClient(
         }
     }
 
-    fun stop() {
-        AppLogger.i(TAG, "RDC worker stop requested")
+    fun stopByUser() {
+        AppLogger.i(TAG, "RDC connection stop requested by user")
+        housekeepingScope.launch {
+            reportOfflineBestEffort()
+        }
+        stopWorker("连接已由用户停止", showConsole = true)
+    }
+
+    fun stopRuntime() {
+        AppLogger.i(TAG, "RDC runtime stop requested")
+        stopWorker("Android 端 RDC 运行时已停止", showConsole = false)
+    }
+
+    fun showStopped() {
+        stopWorker("连接已停止，等待用户启动", showConsole = true)
+    }
+
+    private fun stopWorker(detail: String, showConsole: Boolean) {
         runJob?.cancel()
         runJob = null
         cancelActiveCalls("RDC stopped")
         activeAuthorization = null
         isRunning = false
-        stateFlow.value = AiLimbsRdcState(AiLimbsRdcPhase.STOPPED, "Android 前台服务已停止")
-        console.cancel()
+        val stopped = AiLimbsRdcState(AiLimbsRdcPhase.STOPPED, detail)
+        stateFlow.value = stopped
+        if (showConsole) {
+            console.show(stopped)
+        } else {
+            console.cancel()
+        }
     }
 
     fun refreshConsole() {
-        AppLogger.i(TAG, "RDC console refresh requested for phase=${stateFlow.value.phase}")
-        console.show(stateFlow.value)
+        val current = stateFlow.value
+        AppLogger.i(TAG, "RDC console refresh requested for phase=${current.phase}")
+        val heartbeatAge = current.lastHeartbeatAtMs?.let { System.currentTimeMillis() - it }
+        if (
+            current.phase == AiLimbsRdcPhase.ONLINE &&
+            (heartbeatAge == null || heartbeatAge > ONLINE_STALE_AFTER_MS)
+        ) {
+            updateState(
+                AiLimbsRdcPhase.RECONNECTING,
+                "最后心跳已过期，正在重新确认连接",
+                lastHeartbeatAtMs = current.lastHeartbeatAtMs
+            )
+        } else {
+            console.show(current)
+        }
     }
 
     fun reconnect() {
@@ -377,6 +413,35 @@ class AiLimbsRdcClient(
         AppLogger.w(TAG, "RDC device authorization expired or was denied")
         throw IllegalStateException("RDC device authorization expired or was denied")
     }
+    private suspend fun reportOfflineBestEffort() {
+        val deviceId = preferences.getString(KEY_DEVICE_ID, null).orEmpty()
+        val accessToken = preferences.getString(KEY_ACCESS_TOKEN, null).orEmpty()
+        val refreshToken = preferences.getString(KEY_REFRESH_TOKEN, null).orEmpty()
+        if (deviceId.isBlank() || accessToken.isBlank()) return
+
+        runCatching {
+            val info = fetchMcpInfo()
+            val session = Session(deviceId, accessToken, refreshToken)
+            val response = authorizedRequest(
+                info,
+                session,
+                "PATCH",
+                "/rest/v1/mcp_devices?id=eq.${encode(deviceId)}",
+                JSONObject()
+                    .put("status", "offline")
+                    .put("last_seen", nowIso()),
+                prefer = "return=minimal"
+            )
+            if (response.code !in 200..299) {
+                AppLogger.w(TAG, "RDC offline status update failed: HTTP ${response.code}")
+            } else {
+                AppLogger.i(TAG, "RDC device marked offline after user stop")
+            }
+        }.onFailure { error ->
+            AppLogger.w(TAG, "Unable to mark RDC device offline during stop: ${error.message}", error)
+        }
+    }
+
     private suspend fun heartbeat(info: McpInfo, session: Session) {
         val body = JSONObject()
             .put("status", "online")
@@ -751,6 +816,7 @@ class AiLimbsRdcClient(
         private const val DEVICE_CLIENT_ID = "mcp-device"
         private const val DEVICE_SCOPE = "mcp:tools"
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
+        private const val ONLINE_STALE_AFTER_MS = HEARTBEAT_INTERVAL_MS * 3
         private const val POLL_INTERVAL_MS = 1_500L
         private const val RECONNECT_DELAY_MS = 5_000L
         private const val MAX_CONCURRENT_REMOTE_CALLS = 4

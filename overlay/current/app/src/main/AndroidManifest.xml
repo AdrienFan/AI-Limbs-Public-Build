@@ -341,7 +341,7 @@
             android:foregroundServiceType="dataSync|microphone|specialUse">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Keeps the user-requested assistant runtime alive for AI Limbs Remote Desktop Commander connectivity and external HTTP control when no standard foreground service type fully describes that mode." />
+                android:value="Keeps the user-requested assistant runtime alive for AI Limbs remote bridge connectivity and external HTTP control when no standard foreground service type fully describes that mode." />
         </service>
         
         <!-- 添加广播接收器配置 -->

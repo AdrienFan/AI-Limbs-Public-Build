@@ -44,7 +44,7 @@ import com.ai.assistance.operit.data.preferences.ExternalHttpApiConfig
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpServer
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpState
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRdcClient
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.services.UIDebuggerService
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
@@ -137,14 +137,18 @@ class AIForegroundService : Service() {
         private const val ACTION_STOP_EXTERNAL_HTTP =
             "com.ai.assistance.operit.action.STOP_EXTERNAL_HTTP"
 
-        const val ACTION_RDC_RECONNECT =
-            "com.ai.assistance.operit.action.AI_LIMBS_RDC_RECONNECT"
-        const val ACTION_RDC_REPAIR =
-            "com.ai.assistance.operit.action.AI_LIMBS_RDC_REPAIR"
-        const val ACTION_RDC_OPEN_AUTH =
-            "com.ai.assistance.operit.action.AI_LIMBS_RDC_OPEN_AUTH"
-        const val ACTION_RDC_REFRESH_CONSOLE =
-            "com.ai.assistance.operit.action.AI_LIMBS_RDC_REFRESH_CONSOLE"
+        const val ACTION_BRIDGE_CONNECT =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_CONNECT"
+        const val ACTION_BRIDGE_STOP =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_STOP"
+        const val ACTION_BRIDGE_RECONNECT =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_RECONNECT"
+        const val ACTION_BRIDGE_REPAIR =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REPAIR"
+        const val ACTION_BRIDGE_OPEN_AUTH =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_OPEN_AUTH"
+        const val ACTION_BRIDGE_REFRESH_CONSOLE =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REFRESH_CONSOLE"
 
         @Volatile
         private var lastRequestedImeVisible: Boolean = false
@@ -523,7 +527,8 @@ class AIForegroundService : Service() {
                     config.enabled && ExternalHttpApiPreferences.isValidPort(config.port)
                 }
             }.getOrDefault(false)
-            return alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled || AiLimbsRdcClient.ENABLED
+            return alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
+                AiLimbsBridgeManager.shouldKeepAlive(appContext)
         }
     }
 
@@ -735,7 +740,7 @@ class AIForegroundService : Service() {
     private var wakeSpeechProvider: SpeechService? = null
     private val workflowRepository by lazy { WorkflowRepository(applicationContext) }
     private val externalHttpPreferences by lazy { ExternalHttpApiPreferences.getInstance(applicationContext) }
-    private val aiLimbsRdcClient by lazy { AiLimbsRdcClient(applicationContext, serviceScope) }
+    private val aiLimbsBridgeManager by lazy { AiLimbsBridgeManager(applicationContext, serviceScope) }
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private var keepAliveOverlayView: View? = null
@@ -918,11 +923,15 @@ class AIForegroundService : Service() {
             alwaysListeningEnabled ||
             backgroundKeepAliveEnabled ||
             externalHttpEnabled ||
-            AiLimbsRdcClient.ENABLED
+            aiLimbsBridgeManager.shouldKeepAlive
     }
 
     private fun persistentStartMode(): Int =
-        if (AiLimbsRdcClient.ENABLED || externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()) {
+        if (
+            aiLimbsBridgeManager.shouldKeepAlive ||
+            externalHttpStateFlow.value.isRunning ||
+            isExternalHttpEnabledNow()
+        ) {
             START_STICKY
         } else {
             START_NOT_STICKY
@@ -962,7 +971,8 @@ class AIForegroundService : Service() {
             notification = notification,
             types = ForegroundServiceCompat.buildTypes(
                 dataSync = true,
-                specialUse = AiLimbsRdcClient.ENABLED || runCatching { externalHttpPreferences.getEnabled() }.getOrDefault(false)
+                specialUse = aiLimbsBridgeManager.shouldKeepAlive ||
+                    runCatching { externalHttpPreferences.getEnabled() }.getOrDefault(false)
             )
         )
         observeRuntimeTaskViewPreference()
@@ -970,8 +980,8 @@ class AIForegroundService : Service() {
         observeChatRuntimeStats()
         startWakeMonitoring()
         startExternalHttpMonitoring()
-        aiLimbsRdcClient.start()
-        AppLogger.i(TAG, "AI Limbs RDC registered as a persistent foreground responsibility")
+        aiLimbsBridgeManager.startIfDesired()
+        AppLogger.i(TAG, "AI Limbs bridge manager initialized")
         AppLogger.d(TAG, "AI 前台服务已启动。")
     }
 
@@ -1095,7 +1105,7 @@ class AIForegroundService : Service() {
         val types = ForegroundServiceCompat.buildTypes(
             dataSync = true,
             microphone = true,
-            specialUse = AiLimbsRdcClient.ENABLED || isExternalHttpEnabledNow()
+            specialUse = aiLimbsBridgeManager.shouldKeepAlive || isExternalHttpEnabledNow()
         )
         return try {
             ForegroundServiceCompat.startForeground(
@@ -1139,8 +1149,8 @@ class AIForegroundService : Service() {
             }
 
             stopExternalHttpServer(lastError = null)
-            aiLimbsRdcClient.stop()
-            AppLogger.i(TAG, "AI Limbs RDC stopped by explicit app exit")
+            aiLimbsBridgeManager.stopByUser()
+            AppLogger.i(TAG, "AI Limbs bridge stopped by explicit app exit")
 
             try {
                 val activity = ActivityLifecycleManager.getCurrentActivity()
@@ -1181,29 +1191,41 @@ class AIForegroundService : Service() {
             return START_NOT_STICKY
         }
 
-        if (intent?.action == ACTION_RDC_RECONNECT) {
-            AppLogger.i(TAG, "AI Limbs RDC reconnect requested from notification console")
-            aiLimbsRdcClient.reconnect()
+        if (intent?.action == ACTION_BRIDGE_CONNECT) {
+            AppLogger.i(TAG, "AI Limbs bridge connect requested from notification console")
+            aiLimbsBridgeManager.connect()
             return persistentStartMode()
         }
 
-        if (intent?.action == ACTION_RDC_REPAIR) {
-            AppLogger.i(TAG, "AI Limbs RDC re-pair requested from notification console")
-            aiLimbsRdcClient.rePair()
+        if (intent?.action == ACTION_BRIDGE_STOP) {
+            AppLogger.i(TAG, "AI Limbs bridge stop requested from notification console")
+            aiLimbsBridgeManager.stopByUser()
             return persistentStartMode()
         }
 
-        if (intent?.action == ACTION_RDC_OPEN_AUTH) {
-            val opened = aiLimbsRdcClient.openAuthorizationPage()
+        if (intent?.action == ACTION_BRIDGE_RECONNECT) {
+            AppLogger.i(TAG, "AI Limbs bridge reconnect requested from notification console")
+            aiLimbsBridgeManager.reconnect()
+            return persistentStartMode()
+        }
+
+        if (intent?.action == ACTION_BRIDGE_REPAIR) {
+            AppLogger.i(TAG, "AI Limbs bridge re-pair requested from notification console")
+            aiLimbsBridgeManager.rePair()
+            return persistentStartMode()
+        }
+
+        if (intent?.action == ACTION_BRIDGE_OPEN_AUTH) {
+            val opened = aiLimbsBridgeManager.openAuthorizationPage()
             if (!opened) {
-                AppLogger.w(TAG, "AI Limbs RDC authorization page requested but no active authorization is available")
+                AppLogger.w(TAG, "AI Limbs bridge authorization page requested but no active authorization is available")
             }
             return persistentStartMode()
         }
 
-        if (intent?.action == ACTION_RDC_REFRESH_CONSOLE) {
-            AppLogger.i(TAG, "AI Limbs RDC console refresh requested")
-            aiLimbsRdcClient.refreshConsole()
+        if (intent?.action == ACTION_BRIDGE_REFRESH_CONSOLE) {
+            AppLogger.i(TAG, "AI Limbs bridge console refresh requested")
+            aiLimbsBridgeManager.refreshConsole()
             return persistentStartMode()
         }
 
@@ -1353,10 +1375,9 @@ class AIForegroundService : Service() {
         hideKeepAliveOverlay()
         AppLogger.w(
             TAG,
-            "AIForegroundService onDestroy: RDC phase=${aiLimbsRdcClient.state.value.phase}, " +
-                "detail=${aiLimbsRdcClient.state.value.detail}"
+            "AIForegroundService onDestroy: bridge=${aiLimbsBridgeManager.statusSummary()}"
         )
-        aiLimbsRdcClient.stop()
+        aiLimbsBridgeManager.stopRuntime()
         stopWakeMonitoring()
         AppLogger.d(TAG, "AI 前台服务已销毁。")
     }

@@ -56,18 +56,33 @@ internal class AiLimbsRdcConsole(context: Context) {
             builder.addAction(
                 android.R.drawable.ic_menu_view,
                 "打开授权页",
-                servicePendingIntent(AIForegroundService.ACTION_RDC_OPEN_AUTH, REQUEST_OPEN_AUTH)
+                servicePendingIntent(AIForegroundService.ACTION_BRIDGE_OPEN_AUTH, REQUEST_OPEN_AUTH)
             )
         }
-        builder.addAction(
-            android.R.drawable.ic_popup_sync,
-            "重新连接",
-            servicePendingIntent(AIForegroundService.ACTION_RDC_RECONNECT, REQUEST_RECONNECT)
-        )
+
+        if (state.phase == AiLimbsRdcPhase.STOPPED) {
+            builder.addAction(
+                android.R.drawable.ic_media_play,
+                "连接",
+                servicePendingIntent(AIForegroundService.ACTION_BRIDGE_CONNECT, REQUEST_CONNECT)
+            )
+        } else {
+            builder.addAction(
+                android.R.drawable.ic_media_pause,
+                "停止连接",
+                servicePendingIntent(AIForegroundService.ACTION_BRIDGE_STOP, REQUEST_STOP)
+            )
+            builder.addAction(
+                android.R.drawable.ic_popup_sync,
+                "重新连接",
+                servicePendingIntent(AIForegroundService.ACTION_BRIDGE_RECONNECT, REQUEST_RECONNECT)
+            )
+        }
+
         builder.addAction(
             android.R.drawable.ic_menu_revert,
             "重新配对",
-            servicePendingIntent(AIForegroundService.ACTION_RDC_REPAIR, REQUEST_REPAIR)
+            servicePendingIntent(AIForegroundService.ACTION_BRIDGE_REPAIR, REQUEST_REPAIR)
         )
 
         manager.notify(NOTIFICATION_ID, builder.build())
@@ -137,10 +152,10 @@ internal class AiLimbsRdcConsole(context: Context) {
         manager.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_ID,
-                "AI Limbs RDC connection",
+                "AI Limbs bridge connection",
                 NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "AI Limbs Remote Desktop Commander connection status and controls"
+                description = "AI Limbs remote bridge connection status and controls"
             }
         )
     }
@@ -158,5 +173,7 @@ internal class AiLimbsRdcConsole(context: Context) {
         private const val REQUEST_OPEN_AUTH = 7322
         private const val REQUEST_RECONNECT = 7323
         private const val REQUEST_REPAIR = 7324
+        private const val REQUEST_CONNECT = 7325
+        private const val REQUEST_STOP = 7326
     }
 }

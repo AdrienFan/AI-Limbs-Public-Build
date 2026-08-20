@@ -117,7 +117,7 @@ class MainActivity : ComponentActivity() {
             runCatching {
                 startService(
                     Intent(this, AIForegroundService::class.java).apply {
-                        action = AIForegroundService.ACTION_RDC_REFRESH_CONSOLE
+                        action = AIForegroundService.ACTION_BRIDGE_REFRESH_CONSOLE
                     }
                 )
             }.onFailure { error ->
