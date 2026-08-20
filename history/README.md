@@ -4,4 +4,3 @@ Patches here archive the original public development increments before the proje
 
 - `v0.3.patch`: baseline -> v0.3
 - `v0.4.patch`: v0.3 -> v0.4
-- `v0.5.patch`: v0.4 -> v0.5 build 9
