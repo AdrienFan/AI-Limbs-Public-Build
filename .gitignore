@@ -1,0 +1,5 @@
+/.assembled/
+/local.properties
+*.apk
+*.aab
+*.zip

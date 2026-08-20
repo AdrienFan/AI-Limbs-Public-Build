@@ -1,0 +1,798 @@
+diff --git a/app/src/main/AndroidManifest.xml b/app/src/main/AndroidManifest.xml
+index 1408f346a..1da7dab62 100644
+--- a/app/src/main/AndroidManifest.xml
++++ b/app/src/main/AndroidManifest.xml
+@@ -341,7 +341,7 @@
+             android:foregroundServiceType="dataSync|microphone|specialUse">
+             <property
+                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+-                android:value="Keeps the user-requested assistant runtime alive for external HTTP control when no standard foreground service type fully describes that mode." />
++                android:value="Keeps the user-requested assistant runtime alive for AI Limbs Remote Desktop Commander connectivity and external HTTP control when no standard foreground service type fully describes that mode." />
+         </service>
+         
+         <!-- 添加广播接收器配置 -->
+diff --git a/app/src/main/java/com/ai/assistance/operit/api/chat/AIForegroundService.kt b/app/src/main/java/com/ai/assistance/operit/api/chat/AIForegroundService.kt
+index f438d57e3..39dc0aac9 100644
+--- a/app/src/main/java/com/ai/assistance/operit/api/chat/AIForegroundService.kt
++++ b/app/src/main/java/com/ai/assistance/operit/api/chat/AIForegroundService.kt
+@@ -137,6 +137,13 @@ class AIForegroundService : Service() {
+         private const val ACTION_STOP_EXTERNAL_HTTP =
+             "com.ai.assistance.operit.action.STOP_EXTERNAL_HTTP"
+ 
++        const val ACTION_RDC_RECONNECT =
++            "com.ai.assistance.operit.action.AI_LIMBS_RDC_RECONNECT"
++        const val ACTION_RDC_REPAIR =
++            "com.ai.assistance.operit.action.AI_LIMBS_RDC_REPAIR"
++        const val ACTION_RDC_OPEN_AUTH =
++            "com.ai.assistance.operit.action.AI_LIMBS_RDC_OPEN_AUTH"
++
+         @Volatile
+         private var lastRequestedImeVisible: Boolean = false
+ 
+@@ -902,10 +909,25 @@ class AIForegroundService : Service() {
+         }.getOrDefault(false)
+     }
+ 
+-    private fun stopSelfIfIdle(ignoreAppForeground: Boolean = false) {
++    private fun hasPersistentForegroundResponsibility(): Boolean {
+         val alwaysListeningEnabled = wakeListeningEnabled || isAlwaysListeningEnabledNow()
+         val externalHttpEnabled = externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
+-        if (isAiBusy || alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled || AiLimbsRdcClient.ENABLED) {
++        return isAiBusy ||
++            alwaysListeningEnabled ||
++            backgroundKeepAliveEnabled ||
++            externalHttpEnabled ||
++            AiLimbsRdcClient.ENABLED
++    }
++
++    private fun persistentStartMode(): Int =
++        if (AiLimbsRdcClient.ENABLED || externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()) {
++            START_STICKY
++        } else {
++            START_NOT_STICKY
++        }
++
++    private fun stopSelfIfIdle(ignoreAppForeground: Boolean = false) {
++        if (hasPersistentForegroundResponsibility()) {
+             return
+         }
+         if (!ignoreAppForeground && ActivityLifecycleManager.getCurrentActivity() != null) {
+@@ -938,7 +960,7 @@ class AIForegroundService : Service() {
+             notification = notification,
+             types = ForegroundServiceCompat.buildTypes(
+                 dataSync = true,
+-                specialUse = runCatching { externalHttpPreferences.getEnabled() }.getOrDefault(false)
++                specialUse = AiLimbsRdcClient.ENABLED || runCatching { externalHttpPreferences.getEnabled() }.getOrDefault(false)
+             )
+         )
+         observeRuntimeTaskViewPreference()
+@@ -947,6 +969,7 @@ class AIForegroundService : Service() {
+         startWakeMonitoring()
+         startExternalHttpMonitoring()
+         aiLimbsRdcClient.start()
++        AppLogger.i(TAG, "AI Limbs RDC registered as a persistent foreground responsibility")
+         AppLogger.d(TAG, "AI 前台服务已启动。")
+     }
+ 
+@@ -1067,7 +1090,11 @@ class AIForegroundService : Service() {
+             return false
+         }
+ 
+-        val types = ForegroundServiceCompat.buildTypes(dataSync = true, microphone = true)
++        val types = ForegroundServiceCompat.buildTypes(
++            dataSync = true,
++            microphone = true,
++            specialUse = AiLimbsRdcClient.ENABLED || isExternalHttpEnabledNow()
++        )
+         return try {
+             ForegroundServiceCompat.startForeground(
+                 service = this,
+@@ -1083,6 +1110,10 @@ class AIForegroundService : Service() {
+     }
+ 
+     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
++        AppLogger.d(
++            TAG,
++            "onStartCommand action=${intent?.action ?: "<null>"}, startId=$startId, persistentMode=${persistentStartMode()}"
++        )
+         if (intent?.action == ACTION_EXIT_APP) {
+             isRunning.set(false)
+             updateAiBusyState(false)
+@@ -1106,6 +1137,8 @@ class AIForegroundService : Service() {
+             }
+ 
+             stopExternalHttpServer(lastError = null)
++            aiLimbsRdcClient.stop()
++            AppLogger.i(TAG, "AI Limbs RDC stopped by explicit app exit")
+ 
+             try {
+                 val activity = ActivityLifecycleManager.getCurrentActivity()
+@@ -1146,6 +1179,26 @@ class AIForegroundService : Service() {
+             return START_NOT_STICKY
+         }
+ 
++        if (intent?.action == ACTION_RDC_RECONNECT) {
++            AppLogger.i(TAG, "AI Limbs RDC reconnect requested from notification console")
++            aiLimbsRdcClient.reconnect()
++            return persistentStartMode()
++        }
++
++        if (intent?.action == ACTION_RDC_REPAIR) {
++            AppLogger.i(TAG, "AI Limbs RDC re-pair requested from notification console")
++            aiLimbsRdcClient.rePair()
++            return persistentStartMode()
++        }
++
++        if (intent?.action == ACTION_RDC_OPEN_AUTH) {
++            val opened = aiLimbsRdcClient.openAuthorizationPage()
++            if (!opened) {
++                AppLogger.w(TAG, "AI Limbs RDC authorization page requested but no active authorization is available")
++            }
++            return persistentStartMode()
++        }
++
+         if (intent?.action == ACTION_ENSURE_MICROPHONE_FOREGROUND) {
+             serviceScope.launch {
+                 try {
+@@ -1155,19 +1208,19 @@ class AIForegroundService : Service() {
+                 }
+             }
+             stopSelfIfIdle(ignoreAppForeground = true)
+-            return START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         if (intent?.action == ACTION_START_OR_REFRESH_EXTERNAL_HTTP || intent == null) {
+             startOrRefreshExternalHttpServer()
+-            return if (externalHttpStateFlow.value.isRunning) START_STICKY else START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         if (intent?.action == ACTION_STOP_EXTERNAL_HTTP) {
+             val configuredPort = runCatching { externalHttpPreferences.getPort() }.getOrNull()
+             stopExternalHttpServer(portOverride = configuredPort, lastError = null)
+             stopSelfIfIdle(ignoreAppForeground = true)
+-            return START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         if (intent?.action == ACTION_TOGGLE_WAKE_LISTENING) {
+@@ -1184,19 +1237,19 @@ class AIForegroundService : Service() {
+                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                 manager.notify(NOTIFICATION_ID, createNotification())
+             }
+-            return START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         if (intent?.action == ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_IME) {
+             val imeVisible = intent.getBooleanExtra(EXTRA_IME_VISIBLE, false)
+             updateWakeListeningSuspendedForIme(imeVisible)
+-            return START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         if (intent?.action == ACTION_SET_WAKE_LISTENING_SUSPENDED_FOR_FLOATING_FULLSCREEN) {
+             val active = intent.getBooleanExtra(EXTRA_FLOATING_FULLSCREEN_ACTIVE, false)
+             updateWakeListeningSuspendedForFloatingFullscreen(active)
+-            return START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         if (intent?.action == ACTION_PREPARE_WAKE_HANDOFF) {
+@@ -1229,7 +1282,7 @@ class AIForegroundService : Service() {
+             } else {
+                 AppLogger.d(TAG, "Wake handoff prepare ignored: pending=$wakeHandoffPending, triggeredAt=$triggeredAt")
+             }
+-            return START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         if (intent?.action == ACTION_CANCEL_CURRENT_OPERATION) {
+@@ -1242,7 +1295,7 @@ class AIForegroundService : Service() {
+             }
+             val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+             manager.notify(NOTIFICATION_ID, createNotification())
+-            return START_NOT_STICKY
++            return persistentStartMode()
+         }
+ 
+         // 从Intent中提取通知信息
+@@ -1254,26 +1307,19 @@ class AIForegroundService : Service() {
+             val state = it.getStringExtra(EXTRA_STATE)
+             if (state != null) {
+                 updateAiBusyState(state == STATE_RUNNING)
+-                val alwaysListeningEnabled = isAlwaysListeningEnabledNow()
+-                val externalHttpEnabled =
+-                    externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
+-                if (!isAiBusy &&
+-                    !alwaysListeningEnabled &&
+-                    !backgroundKeepAliveEnabled &&
+-                    !externalHttpEnabled
+-                ) {
+-                    AppLogger.d(TAG, "服务进入空闲且无持久后台职责，停止前台服务并移除通知")
++                if (!hasPersistentForegroundResponsibility()) {
++                    AppLogger.d(TAG, "服务进入空闲且无持久后台职责，准备停止前台服务")
+                     stopSelfIfIdle(ignoreAppForeground = true)
+-                    return START_NOT_STICKY
++                    return persistentStartMode()
+                 }
+                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                 manager.notify(NOTIFICATION_ID, createNotification())
+             }
+         }
+         
+-        // 当 External HTTP 处于启用状态时，使用 START_STICKY 提高后台保活强度；
+-        // 其他场景仍由 EnhancedAIService 与前台交互精确控制生命周期。
+-        return if (isExternalHttpEnabledNow() || AiLimbsRdcClient.ENABLED) START_STICKY else START_NOT_STICKY
++        // AI Limbs RDC 或 External HTTP 启用时，保持 START_STICKY，避免 UI 状态变化
++        // 将长期连接误降级为一次性前台服务。
++        return persistentStartMode()
+     }
+ 
+     override fun onDestroy() {
+@@ -1297,6 +1343,11 @@ class AIForegroundService : Service() {
+         isRunning.set(false)
+         updateAiBusyState(false)
+         hideKeepAliveOverlay()
++        AppLogger.w(
++            TAG,
++            "AIForegroundService onDestroy: RDC phase=${aiLimbsRdcClient.state.value.phase}, " +
++                "detail=${aiLimbsRdcClient.state.value.detail}"
++        )
+         aiLimbsRdcClient.stop()
+         stopWakeMonitoring()
+         AppLogger.d(TAG, "AI 前台服务已销毁。")
+diff --git a/app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsRdcClient.kt b/app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsRdcClient.kt
+index de245f55a..9a198f17d 100644
+--- a/app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsRdcClient.kt
++++ b/app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsRdcClient.kt
+@@ -1,15 +1,11 @@
+ package com.ai.assistance.operit.integrations.ailimbs
+ 
+-import android.app.NotificationChannel
+-import android.app.NotificationManager
+-import android.app.PendingIntent
+ import android.content.Context
+ import android.content.Intent
+ import android.content.SharedPreferences
+ import android.net.Uri
+ import android.os.Build
+ import android.util.Base64
+-import androidx.core.app.NotificationCompat
+ import androidx.security.crypto.EncryptedSharedPreferences
+ import androidx.security.crypto.MasterKey
+ import com.ai.assistance.operit.BuildConfig
+@@ -22,6 +18,7 @@ import java.text.SimpleDateFormat
+ import java.util.Date
+ import java.util.Locale
+ import java.util.TimeZone
++import kotlinx.coroutines.CancellationException
+ import kotlinx.coroutines.CoroutineScope
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.Job
+@@ -29,6 +26,8 @@ import kotlinx.coroutines.currentCoroutineContext
+ import kotlinx.coroutines.delay
+ import kotlinx.coroutines.isActive
+ import kotlinx.coroutines.launch
++import kotlinx.coroutines.flow.MutableStateFlow
++import kotlinx.coroutines.flow.asStateFlow
+ import kotlinx.coroutines.withContext
+ import okhttp3.MediaType.Companion.toMediaType
+ import okhttp3.OkHttpClient
+@@ -54,36 +53,100 @@ class AiLimbsRdcClient(
+             .retryOnConnectionFailure(true)
+             .build()
+     private val preferences: SharedPreferences by lazy { createPreferences() }
++    private val console = AiLimbsRdcConsole(appContext)
++    private val stateFlow = MutableStateFlow(AiLimbsRdcState())
++    val state = stateFlow.asStateFlow()
+     private var runJob: Job? = null
+     private var lastSentAccessPrompt: String? = null
++    private var activeAuthorization: DeviceAuth? = null
++    private var reconnectAttempt: Int = 0
+ 
+     @Volatile
+     var isRunning: Boolean = false
+         private set
+ 
+     fun start() {
+-        if (!ENABLED || runJob?.isActive == true) return
++        if (!ENABLED) return
++        if (runJob?.isActive == true) {
++            AppLogger.d(TAG, "RDC start ignored: worker already active")
++            console.show(stateFlow.value)
++            return
++        }
++        updateState(AiLimbsRdcPhase.STARTING, "正在启动 Android 端 RDC 设备")
++        AppLogger.i(TAG, "RDC worker start requested")
+         runJob = scope.launch(Dispatchers.IO) {
+             isRunning = true
++            AppLogger.i(TAG, "RDC worker started")
+             try {
+                 runForever()
+             } finally {
+                 isRunning = false
++                AppLogger.i(TAG, "RDC worker stopped")
+             }
+         }
+     }
+ 
+     fun stop() {
++        AppLogger.i(TAG, "RDC worker stop requested")
+         runJob?.cancel()
+         runJob = null
++        activeAuthorization = null
+         isRunning = false
++        stateFlow.value = AiLimbsRdcState(AiLimbsRdcPhase.STOPPED, "Android 前台服务已停止")
++        console.cancel()
++    }
++
++    fun reconnect() {
++        AppLogger.i(TAG, "RDC manual reconnect requested")
++        runJob?.cancel()
++        runJob = null
++        reconnectAttempt = 0
++        updateState(AiLimbsRdcPhase.RECONNECTING, "用户请求重新连接")
++        start()
++    }
++
++    fun rePair() {
++        AppLogger.i(TAG, "RDC manual re-pair requested")
++        runJob?.cancel()
++        runJob = null
++        clearSession()
++        activeAuthorization = null
++        lastSentAccessPrompt = null
++        reconnectAttempt = 0
++        updateState(
++            AiLimbsRdcPhase.STARTING,
++            "正在申请新的 RDC 授权码",
++            deviceId = null,
++            lastHeartbeatAtMs = null
++        )
++        start()
++    }
++
++    fun openAuthorizationPage(): Boolean {
++        val auth = activeAuthorization ?: return false
++        val targetUrl = auth.verificationUriComplete.ifBlank { auth.verificationUri }
++        if (targetUrl.isBlank()) return false
++        return runCatching {
++            appContext.startActivity(
++                Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
++            )
++            AppLogger.i(TAG, "RDC authorization page opened from connection console")
++            true
++        }.getOrElse { error ->
++            AppLogger.e(TAG, "Unable to open RDC authorization page", error)
++            false
++        }
+     }
+ 
+     private suspend fun runForever() {
+         while (currentCoroutineContext().isActive) {
+             try {
++                updateState(
++                    if (reconnectAttempt == 0) AiLimbsRdcPhase.CONNECTING else AiLimbsRdcPhase.RECONNECTING,
++                    if (reconnectAttempt == 0) "正在连接 Remote Desktop Commander" else "正在执行第 ${reconnectAttempt} 次重连"
++                )
+                 val info = fetchMcpInfo()
+-                var session = ensureSession(info)
++                val session = ensureSession(info)
+                 var lastHeartbeatAt = 0L
+ 
+                 while (currentCoroutineContext().isActive) {
+@@ -91,21 +154,64 @@ class AiLimbsRdcClient(
+                     if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
+                         heartbeat(info, session)
+                         lastHeartbeatAt = now
++                        reconnectAttempt = 0
++                        updateState(
++                            AiLimbsRdcPhase.ONLINE,
++                            "连接正常，可接收 RDC 工具调用",
++                            deviceId = session.deviceId,
++                            lastHeartbeatAtMs = now,
++                            reconnectAttemptValue = 0
++                        )
+                     }
+                     pollAndHandleCalls(info, session)
+                     delay(POLL_INTERVAL_MS)
+                 }
++            } catch (e: CancellationException) {
++                throw e
+             } catch (e: UnauthorizedException) {
++                reconnectAttempt += 1
+                 AppLogger.w(TAG, "RDC session expired; attempting token refresh")
++                updateState(AiLimbsRdcPhase.RECONNECTING, "RDC 会话过期，正在刷新凭证")
+                 clearAccessTokenOnly()
+                 delay(500L)
+             } catch (e: Exception) {
+-                AppLogger.e(TAG, "AI Limbs RDC loop failed", e)
++                reconnectAttempt += 1
++                AppLogger.e(TAG, "AI Limbs RDC loop failed; reconnectAttempt=$reconnectAttempt", e)
++                updateState(
++                    AiLimbsRdcPhase.RECONNECTING,
++                    "连接失败：${e.message ?: e.javaClass.simpleName}"
++                )
+                 delay(RECONNECT_DELAY_MS)
+             }
+         }
+     }
+ 
++    private fun updateState(
++        phase: AiLimbsRdcPhase,
++        detail: String = "",
++        userCode: String? = null,
++        verificationUri: String? = null,
++        deviceId: String? = stateFlow.value.deviceId,
++        lastHeartbeatAtMs: Long? = stateFlow.value.lastHeartbeatAtMs,
++        reconnectAttemptValue: Int = reconnectAttempt
++    ) {
++        val previous = stateFlow.value
++        val next = AiLimbsRdcState(
++            phase = phase,
++            detail = detail,
++            userCode = userCode,
++            verificationUri = verificationUri,
++            deviceId = deviceId,
++            lastHeartbeatAtMs = lastHeartbeatAtMs,
++            reconnectAttempt = reconnectAttemptValue
++        )
++        stateFlow.value = next
++        if (previous.phase != next.phase || previous.detail != next.detail) {
++            AppLogger.i(TAG, "RDC state ${previous.phase} -> ${next.phase}: ${next.detail}")
++        }
++        console.show(next)
++    }
++
+     private suspend fun fetchMcpInfo(): McpInfo {
+         val response = executeHttp(
+             Request.Builder()
+@@ -131,10 +237,15 @@ class AiLimbsRdcClient(
+         val accessToken = preferences.getString(KEY_ACCESS_TOKEN, null).orEmpty()
+         val refreshToken = preferences.getString(KEY_REFRESH_TOKEN, null).orEmpty()
+         if (deviceId.isNotBlank() && accessToken.isNotBlank()) {
++            AppLogger.i(TAG, "RDC saved session restored for device=${shortDeviceId(deviceId)}")
+             return Session(deviceId, accessToken, refreshToken)
+         }
+         if (deviceId.isNotBlank() && refreshToken.isNotBlank()) {
++            AppLogger.i(TAG, "RDC access token missing; refreshing saved session for device=${shortDeviceId(deviceId)}")
+             refreshSession(info, deviceId, refreshToken)?.let { return it }
++            AppLogger.w(TAG, "RDC saved refresh token could not restore the session; new pairing required")
++        } else {
++            AppLogger.i(TAG, "RDC has no reusable session; new pairing required")
+         }
+         return pairDevice(deviceId.takeIf { it.isNotBlank() })
+     }
+@@ -154,15 +265,24 @@ class AiLimbsRdcClient(
+                 .post(body)
+                 .build()
+         )
+-        if (response.code !in 200..299) return null
++        if (response.code !in 200..299) {
++            AppLogger.w(TAG, "RDC token refresh failed: HTTP ${response.code}")
++            return null
++        }
+         val json = JSONObject(response.body)
+         val access = json.optString("access_token")
+         val refresh = json.optString("refresh_token").ifBlank { refreshToken }
+-        if (access.isBlank()) return null
++        if (access.isBlank()) {
++            AppLogger.w(TAG, "RDC token refresh response contained no access token")
++            return null
++        }
++        AppLogger.i(TAG, "RDC token refresh succeeded for device=${shortDeviceId(deviceId)}")
+         return Session(deviceId, access, refresh).also(::saveSession)
+     }
+ 
+     private suspend fun pairDevice(existingDeviceId: String?): Session {
++        updateState(AiLimbsRdcPhase.CONNECTING, "正在向 RDC 申请新的授权码")
++        AppLogger.i(TAG, "RDC device authorization flow started")
+         val verifier = randomUrlSafe(48)
+         val challenge = sha256UrlSafe(verifier)
+         val startBody = JSONObject()
+@@ -190,7 +310,16 @@ class AiLimbsRdcClient(
+             pollIntervalSeconds = startJson.optLong("interval", 5L).coerceAtLeast(2L),
+             verifier = verifier
+         )
+-        showPairingNotification(auth)
++        activeAuthorization = auth
++        updateState(
++            AiLimbsRdcPhase.PAIRING,
++            "授权码有效期约 ${auth.expiresInSeconds / 60L} 分钟",
++            userCode = auth.userCode,
++            verificationUri = auth.verificationUriComplete.ifBlank { auth.verificationUri },
++            deviceId = existingDeviceId,
++            lastHeartbeatAtMs = null
++        )
++        AppLogger.i(TAG, "RDC pairing code received; waiting for browser authorization")
+         return pollDeviceAuthorization(auth)
+     }
+ 
+@@ -212,7 +341,14 @@ class AiLimbsRdcClient(
+                 val accessToken = json.optString("access_token")
+                 val refreshToken = json.optString("refresh_token")
+                 if (deviceId.isNotBlank() && accessToken.isNotBlank()) {
+-                    cancelPairingNotification()
++                    activeAuthorization = null
++                    AppLogger.i(TAG, "RDC device authorization succeeded for device=${shortDeviceId(deviceId)}")
++                    updateState(
++                        AiLimbsRdcPhase.CONNECTING,
++                        "授权成功，正在建立设备心跳",
++                        deviceId = deviceId,
++                        lastHeartbeatAtMs = null
++                    )
+                     return Session(deviceId, accessToken, refreshToken).also(::saveSession)
+                 }
+             }
+@@ -225,7 +361,9 @@ class AiLimbsRdcClient(
+                 else -> if (response.code !in 400..499) break
+             }
+         }
+-        cancelPairingNotification()
++        activeAuthorization = null
++        updateState(AiLimbsRdcPhase.ERROR, "RDC 授权已过期或被拒绝")
++        AppLogger.w(TAG, "RDC device authorization expired or was denied")
+         throw IllegalStateException("RDC device authorization expired or was denied")
+     }
+     private suspend fun heartbeat(info: McpInfo, session: Session) {
+@@ -457,6 +595,15 @@ class AiLimbsRdcClient(
+         preferences.edit().remove(KEY_ACCESS_TOKEN).apply()
+     }
+ 
++    private fun clearSession() {
++        preferences.edit()
++            .remove(KEY_DEVICE_ID)
++            .remove(KEY_ACCESS_TOKEN)
++            .remove(KEY_REFRESH_TOKEN)
++            .apply()
++        AppLogger.i(TAG, "RDC saved session cleared")
++    }
++
+     private fun createPreferences(): SharedPreferences {
+         return try {
+             val masterKey = MasterKey.Builder(appContext)
+@@ -475,55 +622,6 @@ class AiLimbsRdcClient(
+         }
+     }
+ 
+-    private fun showPairingNotification(auth: DeviceAuth) {
+-        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+-        ensureAuthNotificationChannel(manager)
+-        val targetUrl = auth.verificationUriComplete.ifBlank { auth.verificationUri }
+-        val pendingIntent = if (targetUrl.isNotBlank()) {
+-            PendingIntent.getActivity(
+-                appContext,
+-                AUTH_NOTIFICATION_ID,
+-                Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)),
+-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+-            )
+-        } else {
+-            null
+-        }
+-        val text = buildString {
+-            append("允许 AI Limbs 连接 Remote Desktop Commander")
+-            if (auth.userCode.isNotBlank()) append("，授权码：${auth.userCode}")
+-        }
+-        val notification = NotificationCompat.Builder(appContext, AUTH_CHANNEL_ID)
+-            .setSmallIcon(android.R.drawable.stat_sys_warning)
+-            .setContentTitle("AI Limbs RDC 授权")
+-            .setContentText(text)
+-            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+-            .setPriority(NotificationCompat.PRIORITY_HIGH)
+-            .setAutoCancel(false)
+-            .setOngoing(true)
+-            .apply { if (pendingIntent != null) setContentIntent(pendingIntent) }
+-            .build()
+-        manager.notify(AUTH_NOTIFICATION_ID, notification)
+-    }
+-
+-    private fun ensureAuthNotificationChannel(manager: NotificationManager) {
+-        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
+-        manager.createNotificationChannel(
+-            NotificationChannel(
+-                AUTH_CHANNEL_ID,
+-                "AI Limbs RDC authorization",
+-                NotificationManager.IMPORTANCE_HIGH
+-            ).apply {
+-                description = "Authorize AI Limbs as a Remote Desktop Commander device"
+-            }
+-        )
+-    }
+-
+-    private fun cancelPairingNotification() {
+-        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+-        manager.cancel(AUTH_NOTIFICATION_ID)
+-    }
+-
+     private fun mcpText(text: String): JSONObject =
+         JSONObject().put(
+             "content",
+@@ -537,6 +635,9 @@ class AiLimbsRdcClient(
+     private fun deviceName(): String =
+         "AI Limbs ${Build.MANUFACTURER} ${Build.MODEL}".trim()
+ 
++    private fun shortDeviceId(deviceId: String): String =
++        if (deviceId.length <= 12) deviceId else "…${deviceId.takeLast(12)}"
++
+     private fun randomUrlSafe(byteCount: Int): String {
+         val bytes = ByteArray(byteCount)
+         SecureRandom().nextBytes(bytes)
+@@ -608,8 +709,6 @@ class AiLimbsRdcClient(
+         private const val KEY_ACCESS_TOKEN = "access_token"
+         private const val KEY_REFRESH_TOKEN = "refresh_token"
+ 
+-        private const val AUTH_CHANNEL_ID = "AI_LIMBS_RDC_AUTH"
+-        private const val AUTH_NOTIFICATION_ID = 7319
+         private const val JSON_MEDIA_TYPE_STRING = "application/json; charset=utf-8"
+         private val JSON_MEDIA_TYPE = JSON_MEDIA_TYPE_STRING.toMediaType()
+         private val EMPTY_JSON_BODY = "{}".toRequestBody(JSON_MEDIA_TYPE)
+diff --git a/app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsRdcConsole.kt b/app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsRdcConsole.kt
+new file mode 100644
+index 000000000..ead2b8f4e
+--- /dev/null
++++ b/app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsRdcConsole.kt
+@@ -0,0 +1,162 @@
++package com.ai.assistance.operit.integrations.ailimbs
++
++import android.app.NotificationChannel
++import android.app.NotificationManager
++import android.app.PendingIntent
++import android.content.Context
++import android.content.Intent
++import android.os.Build
++import androidx.core.app.NotificationCompat
++import com.ai.assistance.operit.api.chat.AIForegroundService
++import com.ai.assistance.operit.ui.main.MainActivity
++import java.text.SimpleDateFormat
++import java.util.Date
++import java.util.Locale
++
++enum class AiLimbsRdcPhase {
++    STOPPED,
++    STARTING,
++    CONNECTING,
++    PAIRING,
++    ONLINE,
++    RECONNECTING,
++    ERROR
++}
++
++data class AiLimbsRdcState(
++    val phase: AiLimbsRdcPhase = AiLimbsRdcPhase.STOPPED,
++    val detail: String = "",
++    val userCode: String? = null,
++    val verificationUri: String? = null,
++    val deviceId: String? = null,
++    val lastHeartbeatAtMs: Long? = null,
++    val reconnectAttempt: Int = 0
++)
++internal class AiLimbsRdcConsole(context: Context) {
++    private val appContext = context.applicationContext
++
++    fun show(state: AiLimbsRdcState) {
++        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
++        ensureChannel(manager)
++
++        val builder = NotificationCompat.Builder(appContext, CHANNEL_ID)
++            .setSmallIcon(android.R.drawable.ic_dialog_info)
++            .setContentTitle("AI Limbs · RDC")
++            .setContentText(statusLabel(state.phase))
++            .setStyle(NotificationCompat.BigTextStyle().bigText(buildDetails(state)))
++            .setPriority(NotificationCompat.PRIORITY_LOW)
++            .setCategory(NotificationCompat.CATEGORY_SERVICE)
++            .setOngoing(true)
++            .setOnlyAlertOnce(true)
++            .setSilent(true)
++            .setShowWhen(false)
++            .setContentIntent(mainPendingIntent())
++
++        if (state.phase == AiLimbsRdcPhase.PAIRING && !state.verificationUri.isNullOrBlank()) {
++            builder.addAction(
++                android.R.drawable.ic_menu_view,
++                "打开授权页",
++                servicePendingIntent(AIForegroundService.ACTION_RDC_OPEN_AUTH, REQUEST_OPEN_AUTH)
++            )
++        }
++        builder.addAction(
++            android.R.drawable.ic_popup_sync,
++            "重新连接",
++            servicePendingIntent(AIForegroundService.ACTION_RDC_RECONNECT, REQUEST_RECONNECT)
++        )
++        builder.addAction(
++            android.R.drawable.ic_menu_revert,
++            "重新配对",
++            servicePendingIntent(AIForegroundService.ACTION_RDC_REPAIR, REQUEST_REPAIR)
++        )
++
++        manager.notify(NOTIFICATION_ID, builder.build())
++    }
++
++    fun cancel() {
++        val manager = appContext.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
++        manager.cancel(NOTIFICATION_ID)
++    }
++
++    private fun buildDetails(state: AiLimbsRdcState): String = buildString {
++        append("状态：${statusLabel(state.phase)}")
++        append("\n设备：${Build.MANUFACTURER} ${Build.MODEL}")
++        state.userCode?.takeIf { it.isNotBlank() }?.let {
++            append("\n授权码：$it")
++        }
++        state.deviceId?.takeIf { it.isNotBlank() }?.let {
++            append("\nRDC ID：${shortDeviceId(it)}")
++        }
++        state.lastHeartbeatAtMs?.let {
++            append("\n最后心跳：${formatClock(it)}")
++        }
++        if (state.reconnectAttempt > 0) {
++            append("\n重连次数：${state.reconnectAttempt}")
++        }
++        if (state.detail.isNotBlank()) {
++            append("\n${state.detail}")
++        }
++    }
++
++    private fun statusLabel(phase: AiLimbsRdcPhase): String = when (phase) {
++        AiLimbsRdcPhase.STOPPED -> "已停止"
++        AiLimbsRdcPhase.STARTING -> "正在启动"
++        AiLimbsRdcPhase.CONNECTING -> "正在连接"
++        AiLimbsRdcPhase.PAIRING -> "等待授权"
++        AiLimbsRdcPhase.ONLINE -> "已连接"
++        AiLimbsRdcPhase.RECONNECTING -> "正在重连"
++        AiLimbsRdcPhase.ERROR -> "连接异常"
++    }
++
++    private fun mainPendingIntent(): PendingIntent {
++        val intent = Intent(appContext, MainActivity::class.java).apply {
++            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
++        }
++        return PendingIntent.getActivity(
++            appContext,
++            REQUEST_OPEN_APP,
++            intent,
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
++        )
++    }
++
++    private fun servicePendingIntent(action: String, requestCode: Int): PendingIntent {
++        val intent = Intent(appContext, AIForegroundService::class.java).apply {
++            this.action = action
++        }
++        return PendingIntent.getService(
++            appContext,
++            requestCode,
++            intent,
++            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
++        )
++    }
++
++    private fun ensureChannel(manager: NotificationManager) {
++        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
++        manager.createNotificationChannel(
++            NotificationChannel(
++                CHANNEL_ID,
++                "AI Limbs RDC connection",
++                NotificationManager.IMPORTANCE_LOW
++            ).apply {
++                description = "AI Limbs Remote Desktop Commander connection status and controls"
++            }
++        )
++    }
++
++    private fun shortDeviceId(deviceId: String): String =
++        if (deviceId.length <= 12) deviceId else "…${deviceId.takeLast(12)}"
++
++    private fun formatClock(timestampMs: Long): String =
++        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timestampMs))
++
++    companion object {
++        private const val CHANNEL_ID = "AI_LIMBS_RDC_CONSOLE"
++        private const val NOTIFICATION_ID = 7320
++        private const val REQUEST_OPEN_APP = 7321
++        private const val REQUEST_OPEN_AUTH = 7322
++        private const val REQUEST_RECONNECT = 7323
++        private const val REQUEST_REPAIR = 7324
++    }
++}
