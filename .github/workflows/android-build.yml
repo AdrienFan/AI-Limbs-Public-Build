@@ -15,12 +15,6 @@ on:
           - ':app:bundleRelease'
   push:
     branches: [main]
-    paths:
-      - .github/workflows/android-build.yml
-      - overlay/**
-      - scripts/**
-      - BASELINE.json
-      - CURRENT_VERSION
 
 concurrency:
   group: android-build-${{ github.event_name }}-${{ github.ref }}
@@ -45,36 +39,12 @@ jobs:
     timeout-minutes: 240
 
     steps:
-      - name: Checkout private AI Limbs overlay
+      - name: Checkout AI Limbs source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
-          path: .ai-limbs
-          fetch-depth: 1
-          persist-credentials: false
-
-      - name: Checkout pinned Operit baseline
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
-        with:
-          repository: AdrienFan/Operit
-          ref: 04f873a6a86916f03a1bd6547846445e317cf55a
-          path: .operit-base
           fetch-depth: 1
           persist-credentials: false
           submodules: false
-
-      - name: Assemble private AI Limbs source
-        shell: bash
-        run: |
-          set -euo pipefail
-          rsync -a .operit-base/ ./
-          rsync -a .ai-limbs/overlay/current/ ./
-          if [[ -s .ai-limbs/overlay/delete-list.txt ]]; then
-            while IFS= read -r path; do
-              [[ -z "$path" ]] || rm -rf -- "$path"
-            done < .ai-limbs/overlay/delete-list.txt
-          fi
-          rm -rf .ai-limbs .operit-base
-          test "$(git rev-parse HEAD)" = "04f873a6a86916f03a1bd6547846445e317cf55a"
 
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6

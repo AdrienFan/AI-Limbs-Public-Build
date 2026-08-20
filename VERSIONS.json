@@ -1,14 +1,29 @@
 {
-  "upstream_repo": "AdrienFan/Operit",
-  "baseline_sha": "04f873a6a86916f03a1bd6547846445e317cf55a",
+  "project": "AI Limbs",
+  "repository": "AdrienFan/AI-Limbs-Public-Build",
+  "source_layout": "full",
+  "origin": {
+    "repository": "AAswordman/Operit",
+    "v0.4_source_sha": "3a9bf139902cc0c50ea640a5b98b4a67810410e0",
+    "role": "historical origin only"
+  },
   "versions": {
     "v0.3": {
-      "public_source_sha": "2a949a7c2ccccac317ed28d1fa2849edf970ceb1",
+      "source_sha": "2a949a7c2ccccac317ed28d1fa2849edf970ceb1",
       "status": "archived"
     },
     "v0.4": {
-      "public_source_sha": "3a9bf139902cc0c50ea640a5b98b4a67810410e0",
+      "source_sha": "3a9bf139902cc0c50ea640a5b98b4a67810410e0",
       "status": "stable"
+    },
+    "v0.5-build1": {
+      "version_code": 47,
+      "status": "testing",
+      "features": [
+        "persistent bridge connection lifecycle",
+        "Bridge Manager provider abstraction",
+        "stale heartbeat live-session verification"
+      ]
     }
   }
 }

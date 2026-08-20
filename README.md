@@ -1,22 +1,17 @@
 # AI Limbs
 
-Private development repository for AI Limbs.
+AI Limbs is an Android AI-agent project with direct device, terminal and remote-bridge capabilities.
 
-This repository contains only the private AI Limbs overlay, version history and build orchestration. The large Operit codebase remains an external public upstream base pinned by `BASELINE.json`.
+## Source model
 
-## Repository model
+`main` contains the complete buildable AI Limbs source tree. The project no longer assembles itself from an external Operit baseline plus an overlay. Git commits and tags are the source/version anchors.
 
-- `overlay/current/` — current AI Limbs source overlay applied on top of the pinned Operit baseline.
-- `history/` — incremental historical patches for v0.3, v0.4 and later versions.
-- `scripts/apply-overlay.sh` — applies the private overlay to an already checked-out Operit baseline.
-- `.github/workflows/android-build.yml` — private build workflow; checks out the public baseline, applies this private overlay, then runs the Android build.
-- `stable` — last device-proven fallback line.
-- `main` — current development/release-candidate line.
+Current development build: **v0.5-build1**.
 
-## Privacy rule
+## Build
 
-AI Limbs-specific code must be committed here, not to public Operit branches. Public Operit is used only as the pinned upstream base.
+`.github/workflows/android-build.yml` checks out this repository directly, initializes the required `terminal` submodule, prepares Android/native/web dependencies, and builds the requested Android artifact.
 
-## Upstream notice
+## History and licensing
 
-Operit is licensed under LGPL-3.0. `UPSTREAM-LICENSE.txt` preserves the upstream license text used by this project.
+AI Limbs originated from Operit and retains applicable upstream copyright and LGPL-3.0 licensing obligations. `LICENSE` and `UPSTREAM-LICENSE.txt` preserve the relevant license text; `history/` keeps early migration patches for recovery/reference only.
