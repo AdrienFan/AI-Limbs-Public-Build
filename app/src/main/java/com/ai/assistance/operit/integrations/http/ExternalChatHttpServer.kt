@@ -138,7 +138,7 @@ class ExternalChatHttpServer(
             .put("service", "ai-limbs")
             .put("version", "0.3")
             .put("transport", "local-http")
-            .put("access_prompt_path", AiLimbsDocumentProvider.ACCESS_PROMPT_PATH)
+            .put("access_prompt_path", aiLimbsDocuments.accessPromptPath)
             .put("access_prompt", accessPrompt)
         return rawJsonResponse(Response.Status.OK, body).withCors()
     }

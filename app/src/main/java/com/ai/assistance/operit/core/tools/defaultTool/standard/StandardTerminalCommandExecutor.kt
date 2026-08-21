@@ -8,6 +8,8 @@ import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolResult
 import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
+import com.ai.assistance.operit.terminal.data.UbuntuRuntimePhase
+import com.ai.assistance.operit.terminal.data.UbuntuRuntimeState
 import com.ai.assistance.operit.terminal.view.domain.ansi.TerminalChar
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.Flow
@@ -378,6 +380,8 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                 val errorMessage =
                     when {
                         didTimeout -> null
+                        hiddenResult.state == HiddenExecResult.State.RUNTIME_STOPPED ->
+                            hiddenResult.error
                         !hiddenResult.isOk ->
                             context.getString(
                                 R.string.terminal_error_execute_hidden_command,
@@ -414,6 +418,48 @@ class StandardTerminalCommandExecutor(private val context: Context) {
             }
         }
     }
+
+    fun getUbuntuStatus(tool: AITool): ToolResult {
+        val state = Terminal.getInstance(context).currentUbuntuRuntimeState()
+        return ubuntuRuntimeToolResult(tool, state, success = true)
+    }
+
+    fun startUbuntu(tool: AITool): ToolResult =
+        runBlocking {
+            val state = Terminal.getInstance(context).startUbuntu()
+            ubuntuRuntimeToolResult(
+                tool = tool,
+                state = state,
+                success = state.phase == UbuntuRuntimePhase.RUNNING
+            )
+        }
+
+    fun stopUbuntu(tool: AITool): ToolResult =
+        runBlocking {
+            val state = Terminal.getInstance(context).stopUbuntu()
+            ubuntuRuntimeToolResult(
+                tool = tool,
+                state = state,
+                success = state.phase == UbuntuRuntimePhase.STOPPED
+            )
+        }
+
+    private fun ubuntuRuntimeToolResult(
+        tool: AITool,
+        state: UbuntuRuntimeState,
+        success: Boolean
+    ): ToolResult =
+        ToolResult(
+            toolName = tool.name,
+            success = success,
+            result =
+                UbuntuRuntimeStatusResultData(
+                    state = state.phase.name,
+                    detail = state.detail,
+                    error = state.error
+                ),
+            error = if (success) null else state.error ?: state.detail
+        )
 
     /** 向指定的终端会话写入输入 */
     fun inputInSession(tool: AITool): ToolResult {

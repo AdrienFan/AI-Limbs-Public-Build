@@ -365,6 +365,30 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
     )
 
     handler.registerTool(
+            name = "ubuntu.status",
+            descriptionGenerator = { s(R.string.toolreg_ubuntu_status_desc) },
+            executor = { tool ->
+                ToolGetter.getTerminalCommandExecutor(context).getUbuntuStatus(tool)
+            }
+    )
+
+    handler.registerTool(
+            name = "ubuntu.start",
+            descriptionGenerator = { s(R.string.toolreg_ubuntu_start_desc) },
+            executor = { tool ->
+                ToolGetter.getTerminalCommandExecutor(context).startUbuntu(tool)
+            }
+    )
+
+    handler.registerTool(
+            name = "ubuntu.stop",
+            descriptionGenerator = { s(R.string.toolreg_ubuntu_stop_desc) },
+            executor = { tool ->
+                ToolGetter.getTerminalCommandExecutor(context).stopUbuntu(tool)
+            }
+    )
+
+    handler.registerTool(
             name = "close_terminal_session",
             descriptionGenerator = { tool ->
                 val sessionId = tool.parameters.find { it.name == "session_id" }?.value

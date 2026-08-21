@@ -91,8 +91,7 @@ class MCPStarter(private val context: Context) {
 
     /** Check if terminal service is connected and initialized */
     private suspend fun isTerminalServiceConnected(): Boolean {
-        if (terminal.isConnected()) return true
-        return terminal.initialize()
+        return terminal.isConnected()
     }
 
     /** Initialize and start the bridge */

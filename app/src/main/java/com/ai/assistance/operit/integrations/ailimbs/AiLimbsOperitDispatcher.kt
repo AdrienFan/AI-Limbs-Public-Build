@@ -18,15 +18,15 @@ class AiLimbsOperitDispatcher(context: Context) {
     private val gson = Gson()
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject = when (tool) {
-        "ai_limbs.access_prompt.read", "laner.access_prompt.read" -> ok().put("path", AiLimbsDocumentProvider.ACCESS_PROMPT_PATH).put("content", documents.readAccessPrompt())
+        "ai_limbs.access_prompt.read", "laner.access_prompt.read" -> ok().put("path", documents.accessPromptPath).put("content", documents.readAccessPrompt())
         "ai_limbs.access_prompt.write", "laner.access_prompt.write" -> {
             documents.writeAccessPrompt(args.optString("content"))
-            ok().put("path", AiLimbsDocumentProvider.ACCESS_PROMPT_PATH)
+            ok().put("path", documents.accessPromptPath)
         }
-        "ai_limbs.work_manual.read", "laner.work_manual.read" -> ok().put("path", AiLimbsDocumentProvider.WORK_MANUAL_PATH).put("content", documents.readWorkManual())
+        "ai_limbs.work_manual.read", "laner.work_manual.read" -> ok().put("path", documents.workManualPath).put("content", documents.readWorkManual())
         "ai_limbs.work_manual.write", "laner.work_manual.write" -> {
             documents.writeWorkManual(args.optString("content"))
-            ok().put("path", AiLimbsDocumentProvider.WORK_MANUAL_PATH)
+            ok().put("path", documents.workManualPath)
         }
         "operit.tools.list" -> {
             handler.registerDefaultTools()
@@ -34,6 +34,12 @@ class AiLimbsOperitDispatcher(context: Context) {
             handler.getAllToolNames().forEach { names.put(it) }
             ok().put("tools", names).put("count", names.length())
         }
+        "ubuntu.status", "ubuntu.start", "ubuntu.stop" ->
+            executeOperitTool(
+                JSONObject()
+                    .put("name", tool)
+                    .put("parameters", args)
+            )
         "operit.tool.execute" -> executeOperitTool(args)
         else -> error("Unknown AI Limbs tool: $tool")
     }

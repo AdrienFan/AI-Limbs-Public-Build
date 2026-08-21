@@ -606,11 +606,16 @@ class AiLimbsRdcClient(
         lastSentAccessPrompt = prompt
         val handshake = buildString {
             appendLine("[AI Limbs dynamic access prompt]")
-            appendLine("Path: ${AiLimbsDocumentProvider.ACCESS_PROMPT_PATH}")
+            appendLine("Path: ${documents.accessPromptPath}")
             appendLine(prompt.ifBlank { "(empty)" })
             appendLine()
             appendLine("[AI Limbs RDC bridge]")
-            appendLine("- Normal start_process runs in Operit Terminal/PRoot Linux.")
+            appendLine("- Ubuntu is an optional AI Limbs sandbox with an explicit lifecycle.")
+            appendLine("- Use ubuntu.status, ubuntu.start, and ubuntu.stop to manage it.")
+            appendLine(
+                "- Normal start_process runs in Ubuntu and will not auto-start it when stopped."
+            )
+            appendLine("- A stopped runtime returns: Ubuntu is stopped. Call ubuntu.start first.")
             appendLine("- shell=android routes command through Operit execute_shell.")
             appendLine(
                 "- shell=operit expects command JSON: " +

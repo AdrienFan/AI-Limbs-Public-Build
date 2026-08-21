@@ -2,120 +2,112 @@ package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
 import android.os.Environment
-import com.ai.assistance.operit.core.tools.FileContentData
-import com.ai.assistance.operit.core.tools.StringResultData
-import com.ai.assistance.operit.core.tools.defaultTool.ToolGetter
-import com.ai.assistance.operit.data.model.AITool
-import com.ai.assistance.operit.data.model.ToolParameter
-import com.ai.assistance.operit.data.model.ToolResult
 import java.io.File
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 
 /**
- * Canonical AI Limbs documents live inside Operit's Linux/PRoot environment.
- * The Android toolbox edits exactly the same files that Terminal sees under /root.
+ * Stores AI Limbs documents in the Android application sandbox.
+ *
+ * Ubuntu is an optional execution environment. Reading bridge instructions must never create a
+ * terminal manager or start PRoot, so Linux paths are used only as one-time migration sources.
  */
 class AiLimbsDocumentProvider(context: Context) {
     private val appContext = context.applicationContext
-    private val fileSystemTools by lazy { ToolGetter.getFileSystemTools(appContext) }
+    private val documentsDirectory = File(appContext.filesDir, DOCUMENTS_DIRECTORY)
+    private val accessPromptFile = File(documentsDirectory, ACCESS_PROMPT_FILE_NAME)
+    private val workManualFile = File(documentsDirectory, WORK_MANUAL_FILE_NAME)
+    private val migrationMutex = Mutex()
 
-    suspend fun readAccessPrompt(): String =
-        readSharedText(ACCESS_PROMPT_PATH, LEGACY_ACCESS_PROMPT_FILE)
+    @Volatile
+    private var migrationChecked = false
 
-    suspend fun readWorkManual(): String =
-        readSharedText(WORK_MANUAL_PATH, LEGACY_WORK_MANUAL_FILE)
+    val accessPromptPath: String
+        get() = accessPromptFile.absolutePath
 
-    suspend fun writeAccessPrompt(content: String) =
-        writeSharedText(ACCESS_PROMPT_PATH, content)
+    val workManualPath: String
+        get() = workManualFile.absolutePath
 
-    suspend fun writeWorkManual(content: String) =
-        writeSharedText(WORK_MANUAL_PATH, content)
+    suspend fun readAccessPrompt(): String = readDocument(accessPromptFile)
 
-    private suspend fun readSharedText(path: String, legacyFileName: String): String {
-        val result = fileSystemTools.readFileFull(linuxTool("read_file_full", path))
-        if (result.success) {
-            return resultText(result)
+    suspend fun readWorkManual(): String = readDocument(workManualFile)
+
+    suspend fun writeAccessPrompt(content: String) = writeDocument(accessPromptFile, content)
+
+    suspend fun writeWorkManual(content: String) = writeDocument(workManualFile, content)
+
+    private suspend fun readDocument(file: File): String =
+        withContext(Dispatchers.IO) {
+            ensureLegacyDocumentsMigrated()
+            if (file.isFile) file.readText() else ""
         }
 
-        val legacyFile = File(legacyDocsDir(), legacyFileName)
-        if (legacyFile.isFile) {
-            val content = legacyFile.readText()
-            writeSharedText(path, content)
-            return content
+    private suspend fun writeDocument(file: File, content: String) =
+        withContext(Dispatchers.IO) {
+            ensureLegacyDocumentsMigrated()
+            ensureDocumentsDirectory()
+            file.writeText(content)
         }
 
-        if (isMissingFileError(result.error)) {
-            return ""
-        }
-        throw IllegalStateException(result.error ?: "Unable to read $path")
-    }
+    /**
+     * V0.5.1 and V0.5.2 stored these files in the Ubuntu rootfs. Importing them here is a data
+     * migration. After this check every read and write uses only the application-owned
+     * destination.
+     */
+    private suspend fun ensureLegacyDocumentsMigrated() {
+        if (migrationChecked) return
+        migrationMutex.withLock {
+            if (migrationChecked) return
+            ensureDocumentsDirectory()
 
-    private suspend fun writeSharedText(path: String, content: String) {
-        ensureLinuxDocsDirectory()
-        val result =
-            fileSystemTools.writeFile(
-                AITool(
-                    name = "write_file",
-                    parameters =
-                        listOf(
-                            ToolParameter("path", path),
-                            ToolParameter("content", content),
-                            ToolParameter("append", "false"),
-                            ToolParameter("environment", LINUX_ENVIRONMENT)
-                        )
+            val ubuntuRoot =
+                File(
+                    appContext.filesDir,
+                    "usr/var/lib/proot-distro/installed-rootfs/ubuntu"
                 )
+            migrateDocument(
+                destination = accessPromptFile,
+                sources =
+                    listOf(
+                        File(ubuntuRoot, "root/laner/docs/$ACCESS_PROMPT_FILE_NAME"),
+                        File(legacyDocumentsDirectory(), ACCESS_PROMPT_FILE_NAME)
+                    )
             )
-        if (!result.success) {
-            throw IllegalStateException(result.error ?: "Unable to write $path")
+            migrateDocument(
+                destination = workManualFile,
+                sources =
+                    listOf(
+                        File(ubuntuRoot, "root/$WORK_MANUAL_FILE_NAME"),
+                        File(legacyDocumentsDirectory(), WORK_MANUAL_FILE_NAME)
+                    )
+            )
+            migrationChecked = true
         }
     }
 
-    private suspend fun ensureLinuxDocsDirectory() {
-        val result =
-            fileSystemTools.makeDirectory(
-                linuxTool("make_directory", ACCESS_PROMPT_DIRECTORY)
-            )
-        if (!result.success && !result.error.orEmpty().contains("exist", ignoreCase = true)) {
+    private fun migrateDocument(destination: File, sources: List<File>) {
+        if (destination.exists()) return
+        val source = sources.firstOrNull { it.isFile } ?: return
+        source.copyTo(destination, overwrite = false)
+    }
+
+    private fun ensureDocumentsDirectory() {
+        if (documentsDirectory.isDirectory) return
+        if (!documentsDirectory.mkdirs() && !documentsDirectory.isDirectory) {
             throw IllegalStateException(
-                result.error ?: "Unable to create $ACCESS_PROMPT_DIRECTORY"
+                "Unable to create AI Limbs documents directory: ${documentsDirectory.absolutePath}"
             )
         }
     }
 
-    private fun linuxTool(name: String, path: String): AITool =
-        AITool(
-            name = name,
-            parameters =
-                listOf(
-                    ToolParameter("path", path),
-                    ToolParameter("environment", LINUX_ENVIRONMENT),
-                    ToolParameter("text_only", "true")
-                )
-        )
-
-    private fun resultText(result: ToolResult): String =
-        when (val data = result.result) {
-            is FileContentData -> data.content
-            is StringResultData -> data.value
-            else -> data.toString()
-        }
-
-    private fun isMissingFileError(error: String?): Boolean {
-        val message = error.orEmpty()
-        return message.contains("does not exist", ignoreCase = true) ||
-            message.contains("not found", ignoreCase = true) ||
-            message.contains("no such file", ignoreCase = true)
-    }
-
-    private fun legacyDocsDir(): File =
+    private fun legacyDocumentsDirectory(): File =
         File(Environment.getExternalStorageDirectory(), "Laner/docs")
 
     companion object {
-        const val ACCESS_PROMPT_DIRECTORY = "/root/laner/docs"
-        const val ACCESS_PROMPT_PATH = "$ACCESS_PROMPT_DIRECTORY/LANER_ACCESS_PROMPT.md"
-        const val WORK_MANUAL_PATH = "/root/LANER_WORK_MANUAL.md"
-
-        private const val LINUX_ENVIRONMENT = "linux"
-        private const val LEGACY_ACCESS_PROMPT_FILE = "LANER_ACCESS_PROMPT.md"
-        private const val LEGACY_WORK_MANUAL_FILE = "LANER_WORK_MANUAL.md"
+        private const val DOCUMENTS_DIRECTORY = "ai_limbs/docs"
+        private const val ACCESS_PROMPT_FILE_NAME = "LANER_ACCESS_PROMPT.md"
+        private const val WORK_MANUAL_FILE_NAME = "LANER_WORK_MANUAL.md"
     }
 }

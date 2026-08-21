@@ -6037,6 +6037,9 @@
     <string name="toolreg_create_terminal_session_desc">创建或获取终端会话: %1$s</string>
     <string name="toolreg_execute_in_terminal_session_desc">在终端会话「%1$s」中执行: %2$s</string>
     <string name="toolreg_execute_hidden_terminal_command_desc">在隐藏终端执行器「%1$s」中执行: %2$s</string>
+    <string name="toolreg_ubuntu_status_desc">查询 AI Limbs Ubuntu 运行时状态</string>
+    <string name="toolreg_ubuntu_start_desc">启动 AI Limbs Ubuntu 运行时</string>
+    <string name="toolreg_ubuntu_stop_desc">停止 AI Limbs Ubuntu 运行时及其会话</string>
     <string name="toolreg_close_terminal_session_desc">关闭终端会话: %1$s</string>
     <string name="toolreg_input_in_terminal_session_desc">向终端会话「%1$s」写入输入（control=%2$s）</string>
     <string name="toolreg_get_terminal_session_screen_desc">获取终端会话「%1$s」当前屏幕内容（单屏）</string>

@@ -75,7 +75,7 @@ fun AiLimbsAccessManagerScreen() {
         ) {
             DocumentEditorCard(
                 title = stringResource(R.string.laner_access_prompt_title),
-                path = AiLimbsDocumentProvider.ACCESS_PROMPT_PATH,
+                path = documents.accessPromptPath,
                 value = accessPrompt,
                 onValueChange = { accessPrompt = it },
                 minLines = 5,
@@ -90,7 +90,7 @@ fun AiLimbsAccessManagerScreen() {
             )
             DocumentEditorCard(
                 title = stringResource(R.string.laner_work_manual_title),
-                path = AiLimbsDocumentProvider.WORK_MANUAL_PATH,
+                path = documents.workManualPath,
                 value = workManual,
                 onValueChange = { workManual = it },
                 minLines = 14,

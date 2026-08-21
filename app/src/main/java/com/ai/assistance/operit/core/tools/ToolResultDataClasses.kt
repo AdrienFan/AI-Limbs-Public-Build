@@ -326,6 +326,27 @@ data class HiddenTerminalCommandResultData(
     }
 }
 
+/** Ubuntu 运行时生命周期结果。 */
+@Serializable
+data class UbuntuRuntimeStatusResultData(
+        val state: String,
+        val detail: String,
+        val error: String? = null
+) : ToolResultData() {
+    override fun toString(): String {
+        return buildString {
+            append("Ubuntu runtime: ")
+            append(state)
+            append("\n")
+            append(detail)
+            if (!error.isNullOrBlank()) {
+                append("\nError: ")
+                append(error)
+            }
+        }
+    }
+}
+
 /** 音乐播放结果数据 */
 @Serializable
 data class MusicPlaybackResultData(

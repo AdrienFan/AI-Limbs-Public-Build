@@ -8,6 +8,8 @@ import com.ai.assistance.operit.terminal.CommandExecutionEvent
 import com.ai.assistance.operit.terminal.SessionDirectoryEvent
 import com.ai.assistance.operit.terminal.TerminalManager
 import com.ai.assistance.operit.terminal.data.TerminalState
+import com.ai.assistance.operit.terminal.data.UbuntuRuntimePhase
+import com.ai.assistance.operit.terminal.data.UbuntuRuntimeState
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -56,6 +58,7 @@ class Terminal private constructor(private val context: Context) {
     val isInteractiveMode = terminalManager.isInteractiveMode
     val interactivePrompt = terminalManager.interactivePrompt
     val isFullscreen = terminalManager.isFullscreen
+    val ubuntuRuntimeState: StateFlow<UbuntuRuntimeState> = terminalManager.ubuntuRuntimeState
 
     /**
      * 初始化终端管理器
@@ -150,6 +153,13 @@ class Terminal private constructor(private val context: Context) {
         )
     }
 
+    fun currentUbuntuRuntimeState(): UbuntuRuntimeState =
+        terminalManager.currentUbuntuRuntimeState()
+
+    suspend fun startUbuntu(): UbuntuRuntimeState = terminalManager.startUbuntu()
+
+    suspend fun stopUbuntu(): UbuntuRuntimeState = terminalManager.stopUbuntu()
+
     /**
      * 执行命令 - Flow版本
      * 返回命令执行过程中的所有事件，直到命令完成
@@ -195,10 +205,8 @@ class Terminal private constructor(private val context: Context) {
         terminalManager.sendInterruptSignal()
     }
 
-    /**
-     * 检查服务是否已连接 (现在总是返回 true)
-     */
+    /** 检查本地 Ubuntu 运行时是否已显式启动。 */
     fun isConnected(): Boolean {
-        return true
+        return terminalManager.currentUbuntuRuntimeState().phase == UbuntuRuntimePhase.RUNNING
     }
 }

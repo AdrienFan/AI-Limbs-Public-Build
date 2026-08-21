@@ -5585,6 +5585,9 @@
     <string name="toolreg_create_terminal_session_desc">Create or get terminal session: %1$s</string>
     <string name="toolreg_execute_in_terminal_session_desc">Execute in terminal session [%1$s]: %2$s</string>
     <string name="toolreg_execute_hidden_terminal_command_desc">Execute in hidden terminal executor [%1$s]: %2$s</string>
+    <string name="toolreg_ubuntu_status_desc">Read the AI Limbs Ubuntu runtime status</string>
+    <string name="toolreg_ubuntu_start_desc">Start the AI Limbs Ubuntu runtime</string>
+    <string name="toolreg_ubuntu_stop_desc">Stop the AI Limbs Ubuntu runtime and its sessions</string>
     <string name="toolreg_close_terminal_session_desc">Close terminal session: %1$s</string>
     <string name="toolreg_input_in_terminal_session_desc">Write input to terminal session [%1$s] (control=%2$s)</string>
     <string name="toolreg_get_terminal_session_screen_desc">Get current terminal screen content for session [%1$s] (single screen)</string>
