@@ -85,7 +85,6 @@ fun AiLimbsBridgeCenterScreen() {
         ) {
             ProviderSelectionCard(
                 profiles = profiles,
-                    activeProviderId = profile.id
                 activeProviderId = activeProviderId,
                 onSelect = { profile ->
                     AIForegroundService.requestBridgeProviderSelection(
@@ -131,7 +130,6 @@ private fun ProviderSelectionCard(
                         }
                         .padding(vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
-                    enabled = profile.enabled,
             ) {
                 RadioButton(
                     selected = profile.id == activeProviderId,
