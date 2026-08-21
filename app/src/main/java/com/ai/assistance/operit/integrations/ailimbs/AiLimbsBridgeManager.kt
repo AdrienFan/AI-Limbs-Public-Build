@@ -2,21 +2,23 @@ package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.StateFlow
 
 internal interface AiLimbsBridgeProvider {
     val id: String
     val enabled: Boolean
     val isRunning: Boolean
+    val state: StateFlow<AiLimbsBridgeState>
     val statusSummary: String
 
     fun start()
     fun stopByUser()
     fun stopRuntime()
-    fun showStopped()
+    fun markStopped()
     fun reconnect()
     fun rePair()
     fun openAuthorizationPage(): Boolean
-    fun refreshConsole()
+    fun verifyLiveness()
 }
 
 private class RdcBridgeProvider(
@@ -25,22 +27,24 @@ private class RdcBridgeProvider(
 ) : AiLimbsBridgeProvider {
     private val client = AiLimbsRdcClient(context, scope)
 
-    override val id: String = "rdc"
+    override val id: String = AiLimbsRdcClient.PROVIDER_ID
     override val enabled: Boolean
         get() = AiLimbsRdcClient.ENABLED
     override val isRunning: Boolean
         get() = client.isRunning
+    override val state: StateFlow<AiLimbsBridgeState>
+        get() = client.state
     override val statusSummary: String
         get() = "${client.state.value.phase}: ${client.state.value.detail}"
 
     override fun start() = client.start()
     override fun stopByUser() = client.stopByUser()
     override fun stopRuntime() = client.stopRuntime()
-    override fun showStopped() = client.showStopped()
+    override fun markStopped() = client.markStopped()
     override fun reconnect() = client.reconnect()
     override fun rePair() = client.rePair()
     override fun openAuthorizationPage(): Boolean = client.openAuthorizationPage()
-    override fun refreshConsole() = client.refreshConsole()
+    override fun verifyLiveness() = client.verifyLiveness()
 }
 
 /**
@@ -59,6 +63,9 @@ class AiLimbsBridgeManager(
     private val preferences =
         appContext.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
 
+    val state: StateFlow<AiLimbsBridgeState>
+        get() = provider.state
+
     val shouldKeepAlive: Boolean
         get() = provider.enabled && desiredConnected()
 
@@ -66,7 +73,7 @@ class AiLimbsBridgeManager(
         if (shouldKeepAlive) {
             provider.start()
         } else {
-            provider.showStopped()
+            provider.markStopped()
         }
     }
 
@@ -96,11 +103,11 @@ class AiLimbsBridgeManager(
 
     fun openAuthorizationPage(): Boolean = provider.openAuthorizationPage()
 
-    fun refreshConsole() {
+    fun verifyLiveness() {
         if (shouldKeepAlive && !provider.isRunning) {
             provider.start()
         } else {
-            provider.refreshConsole()
+            provider.verifyLiveness()
         }
     }
 

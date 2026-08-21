@@ -6172,7 +6172,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="chat_ai_service_unavailable_summarize">El servicio de IA no está disponible, no se puede resumir</string>
     <string name="chat_summarize_failed_no_valid_summary">Error al resumir: no se pudo generar un resumen válido</string>
     <string name="chat_summarize_generation_failed">Error al generar el resumen: %1$s</string>
-    <string name="service_operit_running">Operit está en ejecución</string>
+    <string name="service_ai_limbs_running">AI Limbs está en ejecución</string>
     <string name="service_chat_complete_reminder">Recordatorio de conversación completada</string>
     <string name="service_chat_complete_reminder_sound">Recordatorio de conversación completada (sonido)</string>
     <string name="service_chat_complete_reminder_vibration">Recordatorio de conversación completada (vibración)</string>

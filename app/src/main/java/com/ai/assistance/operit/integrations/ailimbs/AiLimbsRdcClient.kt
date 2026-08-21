@@ -56,8 +56,9 @@ class AiLimbsRdcClient(
             .retryOnConnectionFailure(true)
             .build()
     private val preferences: SharedPreferences by lazy { createPreferences() }
-    private val console = AiLimbsRdcConsole(appContext)
-    private val stateFlow = MutableStateFlow(AiLimbsRdcState())
+    private val stateFlow = MutableStateFlow(
+        AiLimbsBridgeState(providerId = PROVIDER_ID, providerLabel = PROVIDER_LABEL)
+    )
     val state = stateFlow.asStateFlow()
     private var runJob: Job? = null
     private var lastSentAccessPrompt: String? = null
@@ -74,10 +75,9 @@ class AiLimbsRdcClient(
         if (!ENABLED) return
         if (runJob?.isActive == true) {
             AppLogger.d(TAG, "RDC start ignored: worker already active")
-            console.show(stateFlow.value)
             return
         }
-        updateState(AiLimbsRdcPhase.STARTING, "正在启动 Android 端 RDC 设备")
+        updateState(AiLimbsBridgePhase.STARTING, "正在启动 Android 端 RDC 设备")
         AppLogger.i(TAG, "RDC worker start requested")
         runJob = scope.launch(Dispatchers.IO) {
             isRunning = true
@@ -96,39 +96,23 @@ class AiLimbsRdcClient(
         housekeepingScope.launch {
             reportOfflineBestEffort()
         }
-        stopWorker("连接已由用户停止", showConsole = true)
+        stopWorker("连接已由用户停止")
     }
 
     fun stopRuntime() {
         AppLogger.i(TAG, "RDC runtime stop requested")
-        stopWorker("Android 端 RDC 运行时已停止", showConsole = false)
+        stopWorker("Android 端 RDC 运行时已停止")
     }
 
-    fun showStopped() {
-        stopWorker("连接已停止，等待用户启动", showConsole = true)
+    fun markStopped() {
+        stopWorker("连接已停止，等待用户启动")
     }
 
-    private fun stopWorker(detail: String, showConsole: Boolean) {
-        runJob?.cancel()
-        runJob = null
-        cancelActiveCalls("RDC stopped")
-        activeAuthorization = null
-        isRunning = false
-        val stopped = AiLimbsRdcState(AiLimbsRdcPhase.STOPPED, detail)
-        stateFlow.value = stopped
-        if (showConsole) {
-            console.show(stopped)
-        } else {
-            console.cancel()
-        }
-    }
-
-    fun refreshConsole() {
+    fun verifyLiveness() {
         val current = stateFlow.value
-        AppLogger.i(TAG, "RDC console refresh requested for phase=${current.phase}")
         val heartbeatAge = current.lastHeartbeatAtMs?.let { System.currentTimeMillis() - it }
         if (
-            current.phase == AiLimbsRdcPhase.ONLINE &&
+            current.phase == AiLimbsBridgePhase.ONLINE &&
             (heartbeatAge == null || heartbeatAge > ONLINE_STALE_AFTER_MS)
         ) {
             AppLogger.w(TAG, "RDC heartbeat is stale; restarting worker to verify the live session")
@@ -137,14 +121,27 @@ class AiLimbsRdcClient(
             cancelActiveCalls("stale heartbeat")
             reconnectAttempt = 0
             updateState(
-                AiLimbsRdcPhase.RECONNECTING,
+                AiLimbsBridgePhase.RECONNECTING,
                 "最后心跳已过期，正在重新建立连接",
                 lastHeartbeatAtMs = current.lastHeartbeatAtMs
             )
             start()
-        } else {
-            console.show(current)
         }
+    }
+
+    private fun stopWorker(detail: String) {
+        runJob?.cancel()
+        runJob = null
+        cancelActiveCalls("RDC stopped")
+        activeAuthorization = null
+        isRunning = false
+        stateFlow.value =
+            AiLimbsBridgeState(
+                providerId = PROVIDER_ID,
+                providerLabel = PROVIDER_LABEL,
+                phase = AiLimbsBridgePhase.STOPPED,
+                detail = detail
+            )
     }
 
     fun reconnect() {
@@ -153,7 +150,7 @@ class AiLimbsRdcClient(
         runJob = null
         cancelActiveCalls("manual reconnect")
         reconnectAttempt = 0
-        updateState(AiLimbsRdcPhase.RECONNECTING, "用户请求重新连接")
+        updateState(AiLimbsBridgePhase.RECONNECTING, "用户请求重新连接")
         start()
     }
 
@@ -167,7 +164,7 @@ class AiLimbsRdcClient(
         lastSentAccessPrompt = null
         reconnectAttempt = 0
         updateState(
-            AiLimbsRdcPhase.STARTING,
+            AiLimbsBridgePhase.STARTING,
             "正在申请新的 RDC 授权码",
             deviceId = null,
             lastHeartbeatAtMs = null
@@ -195,7 +192,7 @@ class AiLimbsRdcClient(
         while (currentCoroutineContext().isActive) {
             try {
                 updateState(
-                    if (reconnectAttempt == 0) AiLimbsRdcPhase.CONNECTING else AiLimbsRdcPhase.RECONNECTING,
+                    if (reconnectAttempt == 0) AiLimbsBridgePhase.CONNECTING else AiLimbsBridgePhase.RECONNECTING,
                     if (reconnectAttempt == 0) "正在连接 Remote Desktop Commander" else "正在执行第 ${reconnectAttempt} 次重连"
                 )
                 val info = fetchMcpInfo()
@@ -209,7 +206,7 @@ class AiLimbsRdcClient(
                         lastHeartbeatAt = now
                         reconnectAttempt = 0
                         updateState(
-                            AiLimbsRdcPhase.ONLINE,
+                            AiLimbsBridgePhase.ONLINE,
                             "连接正常，可接收 RDC 工具调用",
                             deviceId = session.deviceId,
                             lastHeartbeatAtMs = now,
@@ -224,14 +221,14 @@ class AiLimbsRdcClient(
             } catch (e: UnauthorizedException) {
                 reconnectAttempt += 1
                 AppLogger.w(TAG, "RDC session expired; attempting token refresh")
-                updateState(AiLimbsRdcPhase.RECONNECTING, "RDC 会话过期，正在刷新凭证")
+                updateState(AiLimbsBridgePhase.RECONNECTING, "RDC 会话过期，正在刷新凭证")
                 clearAccessTokenOnly()
                 delay(500L)
             } catch (e: Exception) {
                 reconnectAttempt += 1
                 AppLogger.e(TAG, "AI Limbs RDC loop failed; reconnectAttempt=$reconnectAttempt", e)
                 updateState(
-                    AiLimbsRdcPhase.RECONNECTING,
+                    AiLimbsBridgePhase.RECONNECTING,
                     "连接失败：${e.message ?: e.javaClass.simpleName}"
                 )
                 delay(RECONNECT_DELAY_MS)
@@ -240,7 +237,7 @@ class AiLimbsRdcClient(
     }
 
     private fun updateState(
-        phase: AiLimbsRdcPhase,
+        phase: AiLimbsBridgePhase,
         detail: String = "",
         userCode: String? = null,
         verificationUri: String? = null,
@@ -249,7 +246,9 @@ class AiLimbsRdcClient(
         reconnectAttemptValue: Int = reconnectAttempt
     ) {
         val previous = stateFlow.value
-        val next = AiLimbsRdcState(
+        val next = AiLimbsBridgeState(
+            providerId = PROVIDER_ID,
+            providerLabel = PROVIDER_LABEL,
             phase = phase,
             detail = detail,
             userCode = userCode,
@@ -262,7 +261,6 @@ class AiLimbsRdcClient(
         if (previous.phase != next.phase || previous.detail != next.detail) {
             AppLogger.i(TAG, "RDC state ${previous.phase} -> ${next.phase}: ${next.detail}")
         }
-        console.show(next)
     }
 
     private suspend fun fetchMcpInfo(): McpInfo {
@@ -334,7 +332,7 @@ class AiLimbsRdcClient(
     }
 
     private suspend fun pairDevice(existingDeviceId: String?): Session {
-        updateState(AiLimbsRdcPhase.CONNECTING, "正在向 RDC 申请新的授权码")
+        updateState(AiLimbsBridgePhase.CONNECTING, "正在向 RDC 申请新的授权码")
         AppLogger.i(TAG, "RDC device authorization flow started")
         val verifier = randomUrlSafe(48)
         val challenge = sha256UrlSafe(verifier)
@@ -365,7 +363,7 @@ class AiLimbsRdcClient(
         )
         activeAuthorization = auth
         updateState(
-            AiLimbsRdcPhase.PAIRING,
+            AiLimbsBridgePhase.PAIRING,
             "授权码有效期约 ${auth.expiresInSeconds / 60L} 分钟",
             userCode = auth.userCode,
             verificationUri = auth.verificationUriComplete.ifBlank { auth.verificationUri },
@@ -397,7 +395,7 @@ class AiLimbsRdcClient(
                     activeAuthorization = null
                     AppLogger.i(TAG, "RDC device authorization succeeded for device=${shortDeviceId(deviceId)}")
                     updateState(
-                        AiLimbsRdcPhase.CONNECTING,
+                        AiLimbsBridgePhase.CONNECTING,
                         "授权成功，正在建立设备心跳",
                         deviceId = deviceId,
                         lastHeartbeatAtMs = null
@@ -415,7 +413,7 @@ class AiLimbsRdcClient(
             }
         }
         activeAuthorization = null
-        updateState(AiLimbsRdcPhase.ERROR, "RDC 授权已过期或被拒绝")
+        updateState(AiLimbsBridgePhase.ERROR, "RDC 授权已过期或被拒绝")
         AppLogger.w(TAG, "RDC device authorization expired or was denied")
         throw IllegalStateException("RDC device authorization expired or was denied")
     }
@@ -816,6 +814,8 @@ class AiLimbsRdcClient(
 
     companion object {
         const val ENABLED = true
+        const val PROVIDER_ID = "rdc"
+        const val PROVIDER_LABEL = "RDC"
 
         private const val TAG = "AiLimbsRdcClient"
         private const val MCP_BASE_URL = "https://mcp.desktopcommander.app"

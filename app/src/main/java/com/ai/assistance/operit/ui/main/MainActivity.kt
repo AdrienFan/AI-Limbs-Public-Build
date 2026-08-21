@@ -117,11 +117,11 @@ class MainActivity : ComponentActivity() {
             runCatching {
                 startService(
                     Intent(this, AIForegroundService::class.java).apply {
-                        action = AIForegroundService.ACTION_BRIDGE_REFRESH_CONSOLE
+                        action = AIForegroundService.ACTION_BRIDGE_REFRESH
                     }
                 )
             }.onFailure { error ->
-                AppLogger.w(TAG, "通知权限授予后刷新 RDC 控制台失败: ${error.message}", error)
+                AppLogger.w(TAG, "通知权限授予后刷新 AI Limbs 桥状态失败: ${error.message}", error)
             }
         } else {
             AppLogger.d(TAG, "通知权限被拒绝")

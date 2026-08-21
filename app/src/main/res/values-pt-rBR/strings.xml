@@ -6001,7 +6001,7 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="chat_ai_service_unavailable_summarize">O serviço de IA está indisponível e não pode ser resumido</string>
     <string name="chat_summarize_failed_no_valid_summary">Falha no resumo: falha ao gerar um resumo válido</string>
     <string name="chat_summarize_generation_failed">Falha na geração do resumo: %1$s</string>
-    <string name="service_operit_running">Operat está em execução</string>
+    <string name="service_ai_limbs_running">AI Limbs está em execução</string>
     <string name="service_chat_complete_reminder">Lembrete de conclusão de conversa</string>
     <string name="service_chat_complete_reminder_sound">Lembrete de conclusão de conversa (som de bipe)</string>
     <string name="service_chat_complete_reminder_vibration">Lembrete de conclusão de conversa (vibração)</string>

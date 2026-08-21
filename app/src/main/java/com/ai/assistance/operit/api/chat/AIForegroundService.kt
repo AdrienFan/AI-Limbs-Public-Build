@@ -45,6 +45,8 @@ import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpServer
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpState
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.services.UIDebuggerService
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
@@ -74,6 +76,9 @@ import kotlinx.coroutines.sync.withLock
 import kotlin.system.exitProcess
 import java.io.FileInputStream
 import java.io.InputStream
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 
 private fun AudioRecordingConfiguration.tryGetClientUid(): Int? {
@@ -104,6 +109,7 @@ class AIForegroundService : Service() {
     companion object {
         private const val TAG = "AIForegroundService"
         private const val NOTIFICATION_ID = 1
+        private const val LEGACY_RDC_NOTIFICATION_ID = 7320
         private const val REPLY_NOTIFICATION_ID = 2001
         private const val CHANNEL_ID = "AI_SERVICE_CHANNEL"
         private const val REPLY_CHANNEL_ID_PREFIX = "AI_REPLY_COMPLETE_CHANNEL"
@@ -114,6 +120,13 @@ class AIForegroundService : Service() {
 
         private const val ACTION_EXIT_APP = "com.ai.assistance.operit.action.EXIT_APP"
         private const val REQUEST_CODE_EXIT_APP = 9003
+        private const val REQUEST_CODE_BRIDGE_CONNECT = 9010
+        private const val REQUEST_CODE_BRIDGE_STOP = 9011
+        private const val REQUEST_CODE_BRIDGE_RECONNECT = 9012
+        private const val REQUEST_CODE_BRIDGE_REPAIR = 9013
+        private const val REQUEST_CODE_BRIDGE_OPEN_AUTH = 9014
+        private const val REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED = 9015
+        private const val NOTIFICATION_WATCHDOG_INTERVAL_MS = 15_000L
 
         private const val ACTION_TOGGLE_WAKE_LISTENING = "com.ai.assistance.operit.action.TOGGLE_WAKE_LISTENING"
         private const val REQUEST_CODE_TOGGLE_WAKE_LISTENING = 9006
@@ -147,8 +160,10 @@ class AIForegroundService : Service() {
             "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REPAIR"
         const val ACTION_BRIDGE_OPEN_AUTH =
             "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_OPEN_AUTH"
-        const val ACTION_BRIDGE_REFRESH_CONSOLE =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REFRESH_CONSOLE"
+        const val ACTION_BRIDGE_REFRESH =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REFRESH"
+        private const val ACTION_FOREGROUND_NOTIFICATION_DISMISSED =
+            "com.ai.assistance.operit.action.AI_LIMBS_FOREGROUND_NOTIFICATION_DISMISSED"
 
         @Volatile
         private var lastRequestedImeVisible: Boolean = false
@@ -748,6 +763,7 @@ class AIForegroundService : Service() {
 
     private var wakeMonitorJob: Job? = null
     private var externalHttpMonitorJob: Job? = null
+    private var notificationWatchdogJob: Job? = null
     private var wakeListeningJob: Job? = null
     private var wakeResumeJob: Job? = null
 
@@ -908,6 +924,33 @@ class AIForegroundService : Service() {
         manager.notify(NOTIFICATION_ID, createNotification())
     }
 
+
+    private fun startNotificationWatchdog() {
+        if (notificationWatchdogJob?.isActive == true) return
+        notificationWatchdogJob = serviceScope.launch {
+            while (isActive) {
+                delay(NOTIFICATION_WATCHDOG_INTERVAL_MS)
+                if (!isRunning.get() || !hasPersistentForegroundResponsibility()) continue
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                if (!manager.areNotificationsEnabled()) continue
+                val present = runCatching {
+                    manager.activeNotifications.any { notification ->
+                        notification.id == NOTIFICATION_ID
+                    }
+                }.getOrDefault(true)
+                if (!present) {
+                    AppLogger.w(TAG, "Foreground notification missing while service is active; restoring")
+                    manager.notify(NOTIFICATION_ID, createNotification())
+                }
+            }
+        }
+    }
+
+    private fun stopNotificationWatchdog() {
+        notificationWatchdogJob?.cancel()
+        notificationWatchdogJob = null
+    }
+
     private fun isExternalHttpEnabledNow(): Boolean {
         return runCatching {
             externalHttpPreferences.getConfigSync().let { config ->
@@ -946,6 +989,7 @@ class AIForegroundService : Service() {
         }
 
         AppLogger.d(TAG, "No active foreground responsibilities, stopping AIForegroundService")
+        stopNotificationWatchdog()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
             @Suppress("DEPRECATION")
             stopForeground(Service.STOP_FOREGROUND_REMOVE)
@@ -975,6 +1019,9 @@ class AIForegroundService : Service() {
                     runCatching { externalHttpPreferences.getEnabled() }.getOrDefault(false)
             )
         )
+        cancelLegacyRdcNotification()
+        startNotificationWatchdog()
+        observeBridgeState()
         observeRuntimeTaskViewPreference()
         observeBackgroundKeepAlivePreference()
         observeChatRuntimeStats()
@@ -1128,6 +1175,7 @@ class AIForegroundService : Service() {
         )
         if (intent?.action == ACTION_EXIT_APP) {
             isRunning.set(false)
+            stopNotificationWatchdog()
             updateAiBusyState(false)
 
             try {
@@ -1168,6 +1216,7 @@ class AIForegroundService : Service() {
             try {
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 manager.cancel(NOTIFICATION_ID)
+                manager.cancel(LEGACY_RDC_NOTIFICATION_ID)
                 activeReplyNotificationTags.forEach { tag ->
                     manager.cancel(tag, REPLY_NOTIFICATION_ID)
                 }
@@ -1191,6 +1240,14 @@ class AIForegroundService : Service() {
             return START_NOT_STICKY
         }
 
+        if (intent?.action == ACTION_FOREGROUND_NOTIFICATION_DISMISSED) {
+            if (isRunning.get() && hasPersistentForegroundResponsibility()) {
+                AppLogger.w(TAG, "Foreground notification dismissed while service is active; restoring")
+                refreshServiceNotification()
+            }
+            return persistentStartMode()
+        }
+
         if (intent?.action == ACTION_BRIDGE_CONNECT) {
             AppLogger.i(TAG, "AI Limbs bridge connect requested from notification console")
             aiLimbsBridgeManager.connect()
@@ -1198,8 +1255,9 @@ class AIForegroundService : Service() {
         }
 
         if (intent?.action == ACTION_BRIDGE_STOP) {
-            AppLogger.i(TAG, "AI Limbs bridge stop requested from notification console")
+            AppLogger.i(TAG, "AI Limbs bridge stop requested from foreground notification")
             aiLimbsBridgeManager.stopByUser()
+            stopSelfIfIdle(ignoreAppForeground = true)
             return persistentStartMode()
         }
 
@@ -1223,9 +1281,10 @@ class AIForegroundService : Service() {
             return persistentStartMode()
         }
 
-        if (intent?.action == ACTION_BRIDGE_REFRESH_CONSOLE) {
-            AppLogger.i(TAG, "AI Limbs bridge console refresh requested")
-            aiLimbsBridgeManager.refreshConsole()
+        if (intent?.action == ACTION_BRIDGE_REFRESH) {
+            AppLogger.i(TAG, "AI Limbs bridge status refresh requested")
+            aiLimbsBridgeManager.verifyLiveness()
+            refreshServiceNotification()
             return persistentStartMode()
         }
 
@@ -1369,8 +1428,8 @@ class AIForegroundService : Service() {
             ),
             refreshNotification = false
         )
-        super.onDestroy()
         isRunning.set(false)
+        stopNotificationWatchdog()
         updateAiBusyState(false)
         hideKeepAliveOverlay()
         AppLogger.w(
@@ -1379,7 +1438,9 @@ class AIForegroundService : Service() {
         )
         aiLimbsBridgeManager.stopRuntime()
         stopWakeMonitoring()
+        cancelLegacyRdcNotification()
         AppLogger.d(TAG, "AI 前台服务已销毁。")
+        super.onDestroy()
     }
 
     override fun onBind(intent: Intent?): IBinder? {
@@ -1389,7 +1450,7 @@ class AIForegroundService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channelName = getString(R.string.service_operit_running)
+            val channelName = getString(R.string.service_ai_limbs_running)
             val serviceChannel =
                     NotificationChannel(
                             CHANNEL_ID,
@@ -1938,29 +1999,115 @@ class AIForegroundService : Service() {
         return cleaned
     }
 
-    private fun createNotification(): Notification {
-        // 为了简单起见，使用一个安卓内置图标。
-        // 在实际项目中，应替换为应用的自定义图标。
-        val wakeListeningEnabledSnapshot = wakeListeningEnabled
-        val wakeListeningSuspendedSnapshot = wakeListeningSuspendedForIme || wakeListeningSuspendedForExternalRecording || wakeListeningSuspendedForFloatingFullscreen
-        val externalHttpSnapshot = externalHttpStateFlow.value
-        val title =
-            if (isAiBusy) {
-                characterName ?: getString(R.string.service_operit_running)
-            } else {
-                if (wakeListeningEnabledSnapshot) {
-                    if (wakeListeningSuspendedSnapshot) {
-                        getString(R.string.service_running_wake_pause)
-                    } else {
-                        getString(R.string.service_running_wake_listening)
-                    }
-                } else {
-                    getString(R.string.service_operit_running)
+    private fun bridgeStatusLabel(phase: AiLimbsBridgePhase): String =
+        when (phase) {
+            AiLimbsBridgePhase.STOPPED -> "已停止"
+            AiLimbsBridgePhase.STARTING -> "正在启动"
+            AiLimbsBridgePhase.CONNECTING -> "正在连接"
+            AiLimbsBridgePhase.PAIRING -> "等待授权"
+            AiLimbsBridgePhase.ONLINE -> "已连接"
+            AiLimbsBridgePhase.RECONNECTING -> "正在重连"
+            AiLimbsBridgePhase.ERROR -> "连接异常"
+        }
+
+    private fun shortBridgeId(deviceId: String): String =
+        if (deviceId.length <= 12) deviceId else "…${deviceId.takeLast(12)}"
+
+    private fun formatBridgeClock(timestampMs: Long): String =
+        SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(timestampMs))
+
+    private fun bridgeNotificationSignature(state: AiLimbsBridgeState): String {
+        val heartbeatMinute = state.lastHeartbeatAtMs?.div(60_000L)
+        return listOf(
+            state.providerId,
+            state.phase.name,
+            state.detail,
+            state.userCode.orEmpty(),
+            state.verificationUri.orEmpty(),
+            state.deviceId.orEmpty(),
+            heartbeatMinute?.toString().orEmpty(),
+            state.reconnectAttempt.toString()
+        ).joinToString("|")
+    }
+
+    private fun observeBridgeState() {
+        serviceScope.launch {
+            var lastSignature: String? = null
+            aiLimbsBridgeManager.state.collect { state ->
+                val signature = bridgeNotificationSignature(state)
+                if (signature != lastSignature) {
+                    lastSignature = signature
+                    refreshServiceNotification()
                 }
             }
+        }
+    }
+
+    private fun cancelLegacyRdcNotification() {
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        manager.cancel(LEGACY_RDC_NOTIFICATION_ID)
+    }
+
+    private fun bridgeActionPendingIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, AIForegroundService::class.java).apply {
+            this.action = action
+        }
+        return PendingIntent.getService(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun buildBridgeDetails(
+        runtimeText: String,
+        state: AiLimbsBridgeState
+    ): String = buildString {
+        append(runtimeText)
+        append("\n${state.providerLabel}：${bridgeStatusLabel(state.phase)}")
+        state.userCode?.takeIf { it.isNotBlank() }?.let {
+            append("\n授权码：$it")
+        }
+        state.deviceId?.takeIf { it.isNotBlank() }?.let {
+            append("\nBridge ID：${shortBridgeId(it)}")
+        }
+        state.lastHeartbeatAtMs?.let {
+            append("\n最后心跳：${formatBridgeClock(it)}")
+        }
+        if (state.reconnectAttempt > 0) {
+            append("\n重连次数：${state.reconnectAttempt}")
+        }
+        if (state.detail.isNotBlank()) {
+            append("\n${state.detail}")
+        }
+    }
+
+    private fun createNotification(): Notification {
+        val wakeListeningEnabledSnapshot = wakeListeningEnabled
+        val wakeListeningSuspendedSnapshot =
+            wakeListeningSuspendedForIme ||
+                wakeListeningSuspendedForExternalRecording ||
+                wakeListeningSuspendedForFloatingFullscreen
+        val externalHttpSnapshot = externalHttpStateFlow.value
+        val bridgeState = aiLimbsBridgeManager.state.value
+
+        val title =
+            if (isAiBusy) {
+                characterName ?: getString(R.string.service_ai_limbs_running)
+            } else if (wakeListeningEnabledSnapshot) {
+                if (wakeListeningSuspendedSnapshot) {
+                    getString(R.string.service_running_wake_pause)
+                } else {
+                    getString(R.string.service_running_wake_listening)
+                }
+            } else {
+                getString(R.string.service_ai_limbs_running)
+            }
+
         val activeConversationCount = chatRuntimeHolder.activeConversationCount.value
         val currentSessionToolCount = chatRuntimeHolder.currentSessionToolCount.value
-        val contentText =
+        val runtimeText =
             if (isAiBusy && activeConversationCount > 0) {
                 val statsText = getString(
                     R.string.service_running_stats,
@@ -1982,14 +2129,37 @@ class AIForegroundService : Service() {
                     externalHttpSnapshot.port
                 )
             } else {
-                getString(R.string.service_operit_running)
+                getString(R.string.service_ai_limbs_running)
             }
+
+        val bridgeSummary = "${bridgeState.providerLabel}：${bridgeStatusLabel(bridgeState.phase)}"
+        val contentText =
+            if (runtimeText == getString(R.string.service_ai_limbs_running)) {
+                bridgeSummary
+            } else {
+                "$runtimeText · $bridgeSummary"
+            }
+
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
             .setContentTitle(title)
             .setContentText(contentText)
+            .setStyle(
+                NotificationCompat.BigTextStyle().bigText(
+                    buildBridgeDetails(runtimeText, bridgeState)
+                )
+            )
             .setSmallIcon(android.R.drawable.ic_dialog_info)
             .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setOngoing(true) // 使通知不可被用户清除
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setDeleteIntent(
+                bridgeActionPendingIntent(
+                    ACTION_FOREGROUND_NOTIFICATION_DISMISSED,
+                    REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED
+                )
+            )
 
         val contentIntent = Intent(this, MainActivity::class.java).apply {
             flags =
@@ -1997,109 +2167,141 @@ class AIForegroundService : Service() {
                     Intent.FLAG_ACTIVITY_CLEAR_TOP or
                     Intent.FLAG_ACTIVITY_SINGLE_TOP
         }
-        val contentPendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            contentIntent,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            } else {
-                PendingIntent.FLAG_UPDATE_CURRENT
-            }
-        )
-        builder.setContentIntent(contentPendingIntent)
-
-        val floatingIntent = Intent(this, FloatingChatService::class.java).apply {
-            putExtra("INITIAL_MODE", com.ai.assistance.operit.ui.floating.FloatingMode.FULLSCREEN.name)
-            putExtra(FloatingChatService.EXTRA_AUTO_ENTER_VOICE_CHAT, true)
-        }
-        val floatingPendingIntent = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            PendingIntent.getForegroundService(
+        builder.setContentIntent(
+            PendingIntent.getActivity(
                 this,
-                9005,
-                floatingIntent,
+                0,
+                contentIntent,
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
-        } else {
-            PendingIntent.getService(
-                this,
-                9005,
-                floatingIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        }
-        builder.addAction(
-            android.R.drawable.ic_btn_speak_now,
-            getString(R.string.service_voice_floating_window),
-            floatingPendingIntent
-        )
-
-        val toggleWakeIntent = Intent(this, AIForegroundService::class.java).apply {
-            action = ACTION_TOGGLE_WAKE_LISTENING
-        }
-        val toggleWakePendingIntent = PendingIntent.getService(
-            this,
-            REQUEST_CODE_TOGGLE_WAKE_LISTENING,
-            toggleWakeIntent,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            } else {
-                PendingIntent.FLAG_UPDATE_CURRENT
-            }
-        )
-        builder.addAction(
-            android.R.drawable.ic_lock_silent_mode_off,
-            if (wakeListeningEnabledSnapshot) {
-                getString(R.string.service_turn_off_wake)
-            } else {
-                getString(R.string.service_turn_on_wake)
-            },
-            toggleWakePendingIntent
-        )
-
-        val exitIntent = Intent(this, AIForegroundService::class.java).apply {
-            action = ACTION_EXIT_APP
-        }
-        val exitPendingIntent = PendingIntent.getService(
-            this,
-            REQUEST_CODE_EXIT_APP,
-            exitIntent,
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            } else {
-                PendingIntent.FLAG_UPDATE_CURRENT
-            }
-        )
-
-        builder.addAction(
-            android.R.drawable.ic_menu_close_clear_cancel,
-            getString(R.string.service_exit),
-            exitPendingIntent
         )
 
         if (isAiBusy) {
             val cancelIntent = Intent(this, AIForegroundService::class.java).apply {
                 action = ACTION_CANCEL_CURRENT_OPERATION
             }
-            val pendingIntent = PendingIntent.getService(
-                this,
-                REQUEST_CODE_CANCEL_CURRENT_OPERATION,
-                cancelIntent,
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                } else {
-                    PendingIntent.FLAG_UPDATE_CURRENT
-                }
-            )
-
             builder.addAction(
                 android.R.drawable.ic_menu_close_clear_cancel,
                 getString(R.string.service_stop),
-                pendingIntent
+                PendingIntent.getService(
+                    this,
+                    REQUEST_CODE_CANCEL_CURRENT_OPERATION,
+                    cancelIntent,
+                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+                )
             )
         }
 
+        when (bridgeState.phase) {
+            AiLimbsBridgePhase.STOPPED -> {
+                builder.addAction(
+                    android.R.drawable.ic_media_play,
+                    "连接",
+                    bridgeActionPendingIntent(ACTION_BRIDGE_CONNECT, REQUEST_CODE_BRIDGE_CONNECT)
+                )
+                if (!isAiBusy) {
+                    builder.addAction(
+                        android.R.drawable.ic_menu_revert,
+                        "重新配对",
+                        bridgeActionPendingIntent(ACTION_BRIDGE_REPAIR, REQUEST_CODE_BRIDGE_REPAIR)
+                    )
+                }
+            }
+            AiLimbsBridgePhase.PAIRING -> {
+                if (!bridgeState.verificationUri.isNullOrBlank()) {
+                    builder.addAction(
+                        android.R.drawable.ic_menu_view,
+                        "打开授权页",
+                        bridgeActionPendingIntent(
+                            ACTION_BRIDGE_OPEN_AUTH,
+                            REQUEST_CODE_BRIDGE_OPEN_AUTH
+                        )
+                    )
+                } else {
+                    builder.addAction(
+                        android.R.drawable.ic_popup_sync,
+                        "重新连接",
+                        bridgeActionPendingIntent(
+                            ACTION_BRIDGE_RECONNECT,
+                            REQUEST_CODE_BRIDGE_RECONNECT
+                        )
+                    )
+                }
+                if (!isAiBusy) {
+                    builder.addAction(
+                        android.R.drawable.ic_media_pause,
+                        "停止连接",
+                        bridgeActionPendingIntent(ACTION_BRIDGE_STOP, REQUEST_CODE_BRIDGE_STOP)
+                    )
+                }
+            }
+            AiLimbsBridgePhase.ONLINE -> {
+                builder.addAction(
+                    android.R.drawable.ic_media_pause,
+                    "停止连接",
+                    bridgeActionPendingIntent(ACTION_BRIDGE_STOP, REQUEST_CODE_BRIDGE_STOP)
+                )
+                if (!isAiBusy) {
+                    builder.addAction(
+                        android.R.drawable.ic_popup_sync,
+                        "重新连接",
+                        bridgeActionPendingIntent(
+                            ACTION_BRIDGE_RECONNECT,
+                            REQUEST_CODE_BRIDGE_RECONNECT
+                        )
+                    )
+                }
+            }
+            AiLimbsBridgePhase.ERROR -> {
+                builder.addAction(
+                    android.R.drawable.ic_popup_sync,
+                    "重新连接",
+                    bridgeActionPendingIntent(
+                        ACTION_BRIDGE_RECONNECT,
+                        REQUEST_CODE_BRIDGE_RECONNECT
+                    )
+                )
+                if (!isAiBusy) {
+                    builder.addAction(
+                        android.R.drawable.ic_menu_revert,
+                        "重新配对",
+                        bridgeActionPendingIntent(ACTION_BRIDGE_REPAIR, REQUEST_CODE_BRIDGE_REPAIR)
+                    )
+                }
+            }
+            AiLimbsBridgePhase.STARTING,
+            AiLimbsBridgePhase.CONNECTING,
+            AiLimbsBridgePhase.RECONNECTING -> {
+                builder.addAction(
+                    android.R.drawable.ic_media_pause,
+                    "停止连接",
+                    bridgeActionPendingIntent(ACTION_BRIDGE_STOP, REQUEST_CODE_BRIDGE_STOP)
+                )
+                if (!isAiBusy) {
+                    builder.addAction(
+                        android.R.drawable.ic_menu_revert,
+                        "重新配对",
+                        bridgeActionPendingIntent(ACTION_BRIDGE_REPAIR, REQUEST_CODE_BRIDGE_REPAIR)
+                    )
+                }
+            }
+        }
+
+        val exitIntent = Intent(this, AIForegroundService::class.java).apply {
+            action = ACTION_EXIT_APP
+        }
+        builder.addAction(
+            android.R.drawable.ic_menu_close_clear_cancel,
+            getString(R.string.service_exit),
+            PendingIntent.getService(
+                this,
+                REQUEST_CODE_EXIT_APP,
+                exitIntent,
+                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            )
+        )
+
         return builder.build()
     }
-    
+
 }

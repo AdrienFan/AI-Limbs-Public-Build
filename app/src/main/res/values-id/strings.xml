@@ -6338,7 +6338,7 @@ Sekarang Anda dapat menggunakan mode AutoGLM di antarmuka percakapan.</string>
 
     <string name="chat_summarize_failed_no_valid_summary">Ringkasan gagal: Tidak dapat menghasilkan ringkasan yang valid</string>
     <string name="chat_summarize_generation_failed">Pembuatan ringkasan gagal: %1$s</string>
-    <string name="service_operit_running">Operit sedang berjalan</string>
+    <string name="service_ai_limbs_running">AI Limbs sedang berjalan</string>
     <string name="service_chat_complete_reminder">Pengingat percakapan selesai</string>
     <string name="service_chat_complete_reminder_sound">Pengingat percakapan selesai (suara)</string>
     <string name="service_chat_complete_reminder_vibration">Pengingat percakapan selesai (getaran)</string>

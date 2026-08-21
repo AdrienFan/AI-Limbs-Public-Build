@@ -7322,7 +7322,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="chat_summarize_generation_failed">Eșecul generării rezumatului: %1$s</string>
 
     <!-- AIForegroundService (新增) -->
-    <string name="service_operit_running">Operit În curs de execuție</string>
+    <string name="service_ai_limbs_running">AI Limbs În curs de execuție</string>
     <string name="service_chat_complete_reminder">Notificare privind finalizarea conversației</string>
     <string name="service_chat_complete_reminder_sound">Notificare privind finalizarea conversației (semnal sonor)</string>
     <string name="service_chat_complete_reminder_vibration">Notificare privind finalizarea conversației (vibrație)</string>

@@ -7477,7 +7477,7 @@
     <string name="chat_summarize_generation_failed">总结生成失败: %1$s</string>
 
     <!-- AIForegroundService (新增) -->
-    <string name="service_operit_running">Operit 正在运行</string>
+    <string name="service_ai_limbs_running">AI Limbs 正在运行</string>
     <string name="service_chat_complete_reminder">对话完成提醒</string>
     <string name="service_chat_complete_reminder_sound">对话完成提醒（提示音）</string>
     <string name="service_chat_complete_reminder_vibration">对话完成提醒（震动）</string>
