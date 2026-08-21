@@ -2116,6 +2116,18 @@ class AIForegroundService : Service() {
         manager.cancel(LEGACY_RDC_NOTIFICATION_ID)
     }
 
+    private fun serviceActionPendingIntent(action: String, requestCode: Int): PendingIntent {
+        val intent = Intent(this, AIForegroundService::class.java).apply {
+            this.action = action
+        }
+        return PendingIntent.getService(
+            this,
+            requestCode,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
     private fun bridgeActionPendingIntent(action: BridgeAction): PendingIntent {
         val intent = Intent(this, AIForegroundService::class.java).apply {
             this.action = bridgeIntentAction(action)
@@ -2243,7 +2255,7 @@ class AIForegroundService : Service() {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setDeleteIntent(
-                bridgeActionPendingIntent(
+                serviceActionPendingIntent(
                     ACTION_FOREGROUND_NOTIFICATION_DISMISSED,
                     REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED
                 )
