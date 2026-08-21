@@ -56,7 +56,7 @@ class AiLimbsOperitDispatcher(context: Context) {
             context = appContext,
             toolHandler = handler,
             packageManager = handler.getOrCreatePackageManager(),
-            callerName = "AI Limbs RDC",
+            callerName = "AI Limbs Bridge",
             collector = object : StreamCollector<String> {
                 override suspend fun emit(value: String) { emitted += value }
             }

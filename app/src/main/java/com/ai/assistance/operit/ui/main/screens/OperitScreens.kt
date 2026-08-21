@@ -71,6 +71,7 @@ import com.ai.assistance.operit.ui.features.toolbox.screens.AppPermissionsToolSc
 import com.ai.assistance.operit.ui.features.toolbox.screens.FileManagerToolScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.LogcatToolScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.ailimbs.AiLimbsAccessManagerScreen
+import com.ai.assistance.operit.ui.features.toolbox.screens.ailimbs.AiLimbsBridgeCenterScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.ShellExecutorToolScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.StreamMarkdownDemoScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.TerminalAutoConfigToolScreen
@@ -573,6 +574,22 @@ sealed class Screen(
     }
 
 
+
+    data object AiLimbsBridgeCenter :
+            Screen(navItem = NavItem.Toolbox, titleRes = R.string.ai_limbs_bridge_center_title) {
+        @Composable
+        override fun Content(
+                navController: NavController,
+                navigateTo: ScreenNavigationHandler,
+                onGoBack: () -> Unit,
+                hasBackgroundImage: Boolean,
+                onLoading: (Boolean) -> Unit,
+                onError: (String) -> Unit,
+                onGestureConsumed: (Boolean) -> Unit
+        ) {
+            AiLimbsBridgeCenterScreen()
+        }
+    }
 
     data object LanerAccessManager :
             Screen(navItem = NavItem.Toolbox, titleRes = R.string.laner_access_manager_title) {

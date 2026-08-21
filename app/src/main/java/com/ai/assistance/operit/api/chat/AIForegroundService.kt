@@ -47,6 +47,7 @@ import com.ai.assistance.operit.integrations.http.ExternalChatHttpState
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
+import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.services.UIDebuggerService
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
@@ -126,6 +127,7 @@ class AIForegroundService : Service() {
         private const val REQUEST_CODE_BRIDGE_REPAIR = 9013
         private const val REQUEST_CODE_BRIDGE_OPEN_AUTH = 9014
         private const val REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED = 9015
+        private const val REQUEST_CODE_BRIDGE_REFRESH = 9016
         private const val NOTIFICATION_WATCHDOG_INTERVAL_MS = 15_000L
 
         private const val ACTION_TOGGLE_WAKE_LISTENING = "com.ai.assistance.operit.action.TOGGLE_WAKE_LISTENING"
@@ -162,6 +164,9 @@ class AIForegroundService : Service() {
             "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_OPEN_AUTH"
         const val ACTION_BRIDGE_REFRESH =
             "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REFRESH"
+        private const val ACTION_BRIDGE_SELECT_PROVIDER =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_SELECT_PROVIDER"
+        private const val EXTRA_BRIDGE_PROVIDER_ID = "extra_bridge_provider_id"
         private const val ACTION_FOREGROUND_NOTIFICATION_DISMISSED =
             "com.ai.assistance.operit.action.AI_LIMBS_FOREGROUND_NOTIFICATION_DISMISSED"
 
@@ -507,11 +512,64 @@ class AIForegroundService : Service() {
             startServiceForAction(context, ACTION_STOP_EXTERNAL_HTTP)
         }
 
+        fun requestBridgeAction(context: Context, action: BridgeAction) {
+            startServiceForAction(context, bridgeIntentAction(action))
+        }
+
+        fun requestBridgeProviderSelection(context: Context, providerId: String) {
+            require(providerId.isNotBlank()) {
+                "Bridge provider id must not be blank"
+            }
+            AiLimbsBridgeManager.persistActiveProvider(context, providerId)
+            val appContext = context.applicationContext
+            val intent = Intent(appContext, AIForegroundService::class.java).apply {
+                action = ACTION_BRIDGE_SELECT_PROVIDER
+                putExtra(EXTRA_BRIDGE_PROVIDER_ID, providerId)
+            }
+            startServiceIntent(context, intent)
+        }
+
+        private fun bridgeIntentAction(action: BridgeAction): String =
+            when (action) {
+                BridgeAction.CONNECT -> ACTION_BRIDGE_CONNECT
+                BridgeAction.STOP -> ACTION_BRIDGE_STOP
+                BridgeAction.RECONNECT -> ACTION_BRIDGE_RECONNECT
+                BridgeAction.REPAIR -> ACTION_BRIDGE_REPAIR
+                BridgeAction.OPEN_AUTH -> ACTION_BRIDGE_OPEN_AUTH
+                BridgeAction.REFRESH -> ACTION_BRIDGE_REFRESH
+            }
+
+        private fun bridgeActionFromIntent(action: String?): BridgeAction? =
+            when (action) {
+                ACTION_BRIDGE_CONNECT -> BridgeAction.CONNECT
+                ACTION_BRIDGE_STOP -> BridgeAction.STOP
+                ACTION_BRIDGE_RECONNECT -> BridgeAction.RECONNECT
+                ACTION_BRIDGE_REPAIR -> BridgeAction.REPAIR
+                ACTION_BRIDGE_OPEN_AUTH -> BridgeAction.OPEN_AUTH
+                ACTION_BRIDGE_REFRESH -> BridgeAction.REFRESH
+                else -> null
+            }
+
+        private fun bridgeActionRequestCode(action: BridgeAction): Int =
+            when (action) {
+                BridgeAction.CONNECT -> REQUEST_CODE_BRIDGE_CONNECT
+                BridgeAction.STOP -> REQUEST_CODE_BRIDGE_STOP
+                BridgeAction.RECONNECT -> REQUEST_CODE_BRIDGE_RECONNECT
+                BridgeAction.REPAIR -> REQUEST_CODE_BRIDGE_REPAIR
+                BridgeAction.OPEN_AUTH -> REQUEST_CODE_BRIDGE_OPEN_AUTH
+                BridgeAction.REFRESH -> REQUEST_CODE_BRIDGE_REFRESH
+            }
+
         private fun startServiceForAction(context: Context, action: String) {
             val appContext = context.applicationContext
             val intent = Intent(appContext, AIForegroundService::class.java).apply {
                 this.action = action
             }
+            startServiceIntent(context, intent)
+        }
+
+        private fun startServiceIntent(context: Context, intent: Intent) {
+            val appContext = context.applicationContext
             try {
                 if (isRunning.get()) {
                     appContext.startService(intent)
@@ -521,7 +579,11 @@ class AIForegroundService : Service() {
                     appContext.startService(intent)
                 }
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Failed to start action $action: ${e.message}", e)
+                AppLogger.e(
+                    TAG,
+                    "Failed to start action ${intent.action}: ${e.message}",
+                    e
+                )
             }
         }
 
@@ -1248,42 +1310,44 @@ class AIForegroundService : Service() {
             return persistentStartMode()
         }
 
-        if (intent?.action == ACTION_BRIDGE_CONNECT) {
-            AppLogger.i(TAG, "AI Limbs bridge connect requested from notification console")
-            aiLimbsBridgeManager.connect()
-            return persistentStartMode()
-        }
-
-        if (intent?.action == ACTION_BRIDGE_STOP) {
-            AppLogger.i(TAG, "AI Limbs bridge stop requested from foreground notification")
-            aiLimbsBridgeManager.stopByUser()
-            stopSelfIfIdle(ignoreAppForeground = true)
-            return persistentStartMode()
-        }
-
-        if (intent?.action == ACTION_BRIDGE_RECONNECT) {
-            AppLogger.i(TAG, "AI Limbs bridge reconnect requested from notification console")
-            aiLimbsBridgeManager.reconnect()
-            return persistentStartMode()
-        }
-
-        if (intent?.action == ACTION_BRIDGE_REPAIR) {
-            AppLogger.i(TAG, "AI Limbs bridge re-pair requested from notification console")
-            aiLimbsBridgeManager.rePair()
-            return persistentStartMode()
-        }
-
-        if (intent?.action == ACTION_BRIDGE_OPEN_AUTH) {
-            val opened = aiLimbsBridgeManager.openAuthorizationPage()
-            if (!opened) {
-                AppLogger.w(TAG, "AI Limbs bridge authorization page requested but no active authorization is available")
+        if (intent?.action == ACTION_BRIDGE_SELECT_PROVIDER) {
+            val providerId = intent.getStringExtra(EXTRA_BRIDGE_PROVIDER_ID)
+            if (providerId.isNullOrBlank()) {
+                AppLogger.e(TAG, "Bridge provider selection is missing a provider id")
+            } else {
+                try {
+                    aiLimbsBridgeManager.selectProvider(providerId)
+                    AppLogger.i(TAG, "AI Limbs active bridge provider changed to $providerId")
+                } catch (e: Exception) {
+                    AppLogger.e(TAG, "Unable to select bridge provider $providerId", e)
+                }
             }
+            refreshServiceNotification()
             return persistentStartMode()
         }
 
-        if (intent?.action == ACTION_BRIDGE_REFRESH) {
-            AppLogger.i(TAG, "AI Limbs bridge status refresh requested")
-            aiLimbsBridgeManager.verifyLiveness()
+        val requestedBridgeAction = bridgeActionFromIntent(intent?.action)
+        if (requestedBridgeAction != null) {
+            val handled =
+                try {
+                    aiLimbsBridgeManager.perform(requestedBridgeAction)
+                } catch (e: Exception) {
+                    AppLogger.e(
+                        TAG,
+                        "AI Limbs bridge action failed: $requestedBridgeAction",
+                        e
+                    )
+                    false
+                }
+            if (!handled) {
+                AppLogger.w(
+                    TAG,
+                    "AI Limbs bridge action was not available: $requestedBridgeAction"
+                )
+            }
+            if (handled && requestedBridgeAction == BridgeAction.STOP) {
+                stopSelfIfIdle(ignoreAppForeground = true)
+            }
             refreshServiceNotification()
             return persistentStartMode()
         }
@@ -1406,7 +1470,7 @@ class AIForegroundService : Service() {
             }
         }
         
-        // AI Limbs RDC 或 External HTTP 启用时，保持 START_STICKY，避免 UI 状态变化
+        // AI Limbs Bridge 或 External HTTP 启用时，保持 START_STICKY，避免 UI 状态变化
         // 将长期连接误降级为一次性前台服务。
         return persistentStartMode()
     }
@@ -2001,13 +2065,17 @@ class AIForegroundService : Service() {
 
     private fun bridgeStatusLabel(phase: AiLimbsBridgePhase): String =
         when (phase) {
-            AiLimbsBridgePhase.STOPPED -> "已停止"
-            AiLimbsBridgePhase.STARTING -> "正在启动"
-            AiLimbsBridgePhase.CONNECTING -> "正在连接"
-            AiLimbsBridgePhase.PAIRING -> "等待授权"
-            AiLimbsBridgePhase.ONLINE -> "已连接"
-            AiLimbsBridgePhase.RECONNECTING -> "正在重连"
-            AiLimbsBridgePhase.ERROR -> "连接异常"
+            AiLimbsBridgePhase.STOPPED ->
+                getString(R.string.ai_limbs_bridge_phase_stopped)
+            AiLimbsBridgePhase.STARTING ->
+                getString(R.string.ai_limbs_bridge_phase_starting)
+            AiLimbsBridgePhase.CONNECTING ->
+                getString(R.string.ai_limbs_bridge_phase_connecting)
+            AiLimbsBridgePhase.PAIRING -> getString(R.string.ai_limbs_bridge_phase_pairing)
+            AiLimbsBridgePhase.ONLINE -> getString(R.string.ai_limbs_bridge_phase_online)
+            AiLimbsBridgePhase.RECONNECTING ->
+                getString(R.string.ai_limbs_bridge_phase_reconnecting)
+            AiLimbsBridgePhase.ERROR -> getString(R.string.ai_limbs_bridge_phase_error)
         }
 
     private fun shortBridgeId(deviceId: String): String =
@@ -2048,17 +2116,37 @@ class AIForegroundService : Service() {
         manager.cancel(LEGACY_RDC_NOTIFICATION_ID)
     }
 
-    private fun bridgeActionPendingIntent(action: String, requestCode: Int): PendingIntent {
+    private fun bridgeActionPendingIntent(action: BridgeAction): PendingIntent {
         val intent = Intent(this, AIForegroundService::class.java).apply {
-            this.action = action
+            this.action = bridgeIntentAction(action)
         }
         return PendingIntent.getService(
             this,
-            requestCode,
+            bridgeActionRequestCode(action),
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
     }
+
+    private fun bridgeActionIcon(action: BridgeAction): Int =
+        when (action) {
+            BridgeAction.CONNECT -> android.R.drawable.ic_media_play
+            BridgeAction.STOP -> android.R.drawable.ic_media_pause
+            BridgeAction.RECONNECT,
+            BridgeAction.REFRESH -> android.R.drawable.ic_popup_sync
+            BridgeAction.REPAIR -> android.R.drawable.ic_menu_revert
+            BridgeAction.OPEN_AUTH -> android.R.drawable.ic_menu_view
+        }
+
+    private fun bridgeActionLabel(action: BridgeAction): String =
+        when (action) {
+            BridgeAction.CONNECT -> getString(R.string.ai_limbs_bridge_action_connect)
+            BridgeAction.STOP -> getString(R.string.ai_limbs_bridge_action_stop)
+            BridgeAction.RECONNECT -> getString(R.string.ai_limbs_bridge_action_reconnect)
+            BridgeAction.REPAIR -> getString(R.string.ai_limbs_bridge_action_repair)
+            BridgeAction.OPEN_AUTH -> getString(R.string.ai_limbs_bridge_action_open_auth)
+            BridgeAction.REFRESH -> getString(R.string.ai_limbs_bridge_action_refresh)
+        }
 
     private fun buildBridgeDetails(
         runtimeText: String,
@@ -2192,100 +2280,18 @@ class AIForegroundService : Service() {
             )
         }
 
-        when (bridgeState.phase) {
-            AiLimbsBridgePhase.STOPPED -> {
+        val bridgeActionLimit = if (isAiBusy) 1 else 2
+        aiLimbsBridgeManager.availableActions(bridgeState)
+            .asSequence()
+            .filter { it != BridgeAction.REFRESH }
+            .take(bridgeActionLimit)
+            .forEach { action ->
                 builder.addAction(
-                    android.R.drawable.ic_media_play,
-                    "连接",
-                    bridgeActionPendingIntent(ACTION_BRIDGE_CONNECT, REQUEST_CODE_BRIDGE_CONNECT)
+                    bridgeActionIcon(action),
+                    bridgeActionLabel(action),
+                    bridgeActionPendingIntent(action)
                 )
-                if (!isAiBusy) {
-                    builder.addAction(
-                        android.R.drawable.ic_menu_revert,
-                        "重新配对",
-                        bridgeActionPendingIntent(ACTION_BRIDGE_REPAIR, REQUEST_CODE_BRIDGE_REPAIR)
-                    )
-                }
             }
-            AiLimbsBridgePhase.PAIRING -> {
-                if (!bridgeState.verificationUri.isNullOrBlank()) {
-                    builder.addAction(
-                        android.R.drawable.ic_menu_view,
-                        "打开授权页",
-                        bridgeActionPendingIntent(
-                            ACTION_BRIDGE_OPEN_AUTH,
-                            REQUEST_CODE_BRIDGE_OPEN_AUTH
-                        )
-                    )
-                } else {
-                    builder.addAction(
-                        android.R.drawable.ic_popup_sync,
-                        "重新连接",
-                        bridgeActionPendingIntent(
-                            ACTION_BRIDGE_RECONNECT,
-                            REQUEST_CODE_BRIDGE_RECONNECT
-                        )
-                    )
-                }
-                if (!isAiBusy) {
-                    builder.addAction(
-                        android.R.drawable.ic_media_pause,
-                        "停止连接",
-                        bridgeActionPendingIntent(ACTION_BRIDGE_STOP, REQUEST_CODE_BRIDGE_STOP)
-                    )
-                }
-            }
-            AiLimbsBridgePhase.ONLINE -> {
-                builder.addAction(
-                    android.R.drawable.ic_media_pause,
-                    "停止连接",
-                    bridgeActionPendingIntent(ACTION_BRIDGE_STOP, REQUEST_CODE_BRIDGE_STOP)
-                )
-                if (!isAiBusy) {
-                    builder.addAction(
-                        android.R.drawable.ic_popup_sync,
-                        "重新连接",
-                        bridgeActionPendingIntent(
-                            ACTION_BRIDGE_RECONNECT,
-                            REQUEST_CODE_BRIDGE_RECONNECT
-                        )
-                    )
-                }
-            }
-            AiLimbsBridgePhase.ERROR -> {
-                builder.addAction(
-                    android.R.drawable.ic_popup_sync,
-                    "重新连接",
-                    bridgeActionPendingIntent(
-                        ACTION_BRIDGE_RECONNECT,
-                        REQUEST_CODE_BRIDGE_RECONNECT
-                    )
-                )
-                if (!isAiBusy) {
-                    builder.addAction(
-                        android.R.drawable.ic_menu_revert,
-                        "重新配对",
-                        bridgeActionPendingIntent(ACTION_BRIDGE_REPAIR, REQUEST_CODE_BRIDGE_REPAIR)
-                    )
-                }
-            }
-            AiLimbsBridgePhase.STARTING,
-            AiLimbsBridgePhase.CONNECTING,
-            AiLimbsBridgePhase.RECONNECTING -> {
-                builder.addAction(
-                    android.R.drawable.ic_media_pause,
-                    "停止连接",
-                    bridgeActionPendingIntent(ACTION_BRIDGE_STOP, REQUEST_CODE_BRIDGE_STOP)
-                )
-                if (!isAiBusy) {
-                    builder.addAction(
-                        android.R.drawable.ic_menu_revert,
-                        "重新配对",
-                        bridgeActionPendingIntent(ACTION_BRIDGE_REPAIR, REQUEST_CODE_BRIDGE_REPAIR)
-                    )
-                }
-            }
-        }
 
         val exitIntent = Intent(this, AIForegroundService::class.java).apply {
             action = ACTION_EXIT_APP

@@ -256,6 +256,15 @@ object ScreenRouteRegistry {
                 order = 80
             ),
             hostEntryDefinition(
+                entryId = "toolbox.ai_limbs_bridge_center",
+                screen = Screen.AiLimbsBridgeCenter,
+                surface = NavigationSurface.TOOLBOX,
+                titleResId = R.string.ai_limbs_bridge_center_title,
+                descriptionResId = R.string.ai_limbs_bridge_center_desc,
+                icon = Icons.Default.DeviceHub,
+                order = 84
+            ),
+            hostEntryDefinition(
                 entryId = "toolbox.laner_access_manager",
                 screen = Screen.LanerAccessManager,
                 surface = NavigationSurface.TOOLBOX,

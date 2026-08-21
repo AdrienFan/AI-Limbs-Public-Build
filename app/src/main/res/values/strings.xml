@@ -8246,6 +8246,33 @@
     <string name="token_stats_detail_open">点击查看详细数据</string>
 
 
+    <string name="ai_limbs_bridge_center_title">Bridge Center</string>
+    <string name="ai_limbs_bridge_center_desc">管理 AI Limbs 的桥接 Provider、状态与连接动作</string>
+    <string name="ai_limbs_bridge_provider_section">Bridge Provider</string>
+    <string name="ai_limbs_bridge_profile_metadata">ID：%1$s · 类型：%2$s</string>
+    <string name="ai_limbs_bridge_enabled">已启用</string>
+    <string name="ai_limbs_bridge_disabled">已停用</string>
+    <string name="ai_limbs_bridge_status_section">连接状态</string>
+    <string name="ai_limbs_bridge_current_provider">当前 Provider：%1$s</string>
+    <string name="ai_limbs_bridge_current_status">状态：%1$s</string>
+    <string name="ai_limbs_bridge_not_running">Bridge 前台运行时尚未启动</string>
+    <string name="ai_limbs_bridge_authorization_code">授权码：%1$s</string>
+    <string name="ai_limbs_bridge_device_id">Bridge ID：%1$s</string>
+    <string name="ai_limbs_bridge_actions_section">连接操作</string>
+    <string name="ai_limbs_bridge_phase_stopped">已停止</string>
+    <string name="ai_limbs_bridge_phase_starting">正在启动</string>
+    <string name="ai_limbs_bridge_phase_connecting">正在连接</string>
+    <string name="ai_limbs_bridge_phase_pairing">等待授权</string>
+    <string name="ai_limbs_bridge_phase_online">已连接</string>
+    <string name="ai_limbs_bridge_phase_reconnecting">正在重连</string>
+    <string name="ai_limbs_bridge_phase_error">连接异常</string>
+    <string name="ai_limbs_bridge_action_connect">连接</string>
+    <string name="ai_limbs_bridge_action_stop">停止连接</string>
+    <string name="ai_limbs_bridge_action_reconnect">重新连接</string>
+    <string name="ai_limbs_bridge_action_repair">重新配对</string>
+    <string name="ai_limbs_bridge_action_open_auth">打开授权页</string>
+    <string name="ai_limbs_bridge_action_refresh">刷新状态</string>
+
     <string name="laner_access_manager_title">兰儿接入管理</string>
     <string name="laner_access_manager_desc">管理兰儿接入提示与工作手册</string>
     <string name="laner_access_prompt_title">接入提示</string>
