@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ai_limbs_notification_current_bridge">当前桥：%1$s</string>
+</resources>

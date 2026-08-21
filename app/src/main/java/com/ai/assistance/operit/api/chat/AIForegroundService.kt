@@ -8,9 +8,11 @@ import android.app.Service
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Color
 import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
@@ -25,6 +27,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.View
 import android.view.WindowManager
+import android.widget.RemoteViews
 import android.graphics.PixelFormat
 import com.ai.assistance.operit.util.AppLogger
 import androidx.core.app.NotificationCompat
@@ -55,6 +58,7 @@ import com.ai.assistance.operit.data.preferences.WakeWordPreferences
 import com.ai.assistance.operit.data.repository.WorkflowRepository
 import com.ai.assistance.operit.ui.main.MainActivity
 import com.ai.assistance.operit.util.WaifuMessageProcessor
+import com.ai.assistance.operit.widget.ToolPkgDesktopWidgetHost
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -128,6 +132,8 @@ class AIForegroundService : Service() {
         private const val REQUEST_CODE_BRIDGE_OPEN_AUTH = 9014
         private const val REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED = 9015
         private const val REQUEST_CODE_BRIDGE_REFRESH = 9016
+        private const val REQUEST_CODE_BRIDGE_CENTER = 9017
+        private const val REQUEST_CODE_VOICE_FLOATING = 9005
         private const val NOTIFICATION_WATCHDOG_INTERVAL_MS = 15_000L
 
         private const val ACTION_TOGGLE_WAKE_LISTENING = "com.ai.assistance.operit.action.TOGGLE_WAKE_LISTENING"
@@ -2140,16 +2146,6 @@ class AIForegroundService : Service() {
         )
     }
 
-    private fun bridgeActionIcon(action: BridgeAction): Int =
-        when (action) {
-            BridgeAction.CONNECT -> android.R.drawable.ic_media_play
-            BridgeAction.STOP -> android.R.drawable.ic_media_pause
-            BridgeAction.RECONNECT,
-            BridgeAction.REFRESH -> android.R.drawable.ic_popup_sync
-            BridgeAction.REPAIR -> android.R.drawable.ic_menu_revert
-            BridgeAction.OPEN_AUTH -> android.R.drawable.ic_menu_view
-        }
-
     private fun bridgeActionLabel(action: BridgeAction): String =
         when (action) {
             BridgeAction.CONNECT -> getString(R.string.ai_limbs_bridge_action_connect)
@@ -2160,17 +2156,139 @@ class AIForegroundService : Service() {
             BridgeAction.REFRESH -> getString(R.string.ai_limbs_bridge_action_refresh)
         }
 
+    private data class NotificationPanelAction(
+        val label: String,
+        val pendingIntent: PendingIntent
+    )
+
+    private fun mainContentPendingIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+        }
+        return PendingIntent.getActivity(
+            this,
+            0,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun bridgeCenterPendingIntent(): PendingIntent {
+        val intent = Intent(this, MainActivity::class.java).apply {
+            flags =
+                Intent.FLAG_ACTIVITY_NEW_TASK or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                    Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra(
+                ToolPkgDesktopWidgetHost.EXTRA_OPEN_ROUTE_ID,
+                "native.ai_limbs_bridge_center"
+            )
+        }
+        return PendingIntent.getActivity(
+            this,
+            REQUEST_CODE_BRIDGE_CENTER,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun voiceFloatingPendingIntent(): PendingIntent {
+        val intent = Intent(this, FloatingChatService::class.java).apply {
+            putExtra(
+                "INITIAL_MODE",
+                com.ai.assistance.operit.ui.floating.FloatingMode.FULLSCREEN.name
+            )
+            putExtra(FloatingChatService.EXTRA_AUTO_ENTER_VOICE_CHAT, true)
+        }
+        return PendingIntent.getForegroundService(
+            this,
+            REQUEST_CODE_VOICE_FLOATING,
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
+    }
+
+    private fun notificationPanelActions(
+        state: AiLimbsBridgeState
+    ): List<NotificationPanelAction> = buildList {
+        if (isAiBusy) {
+            add(
+                NotificationPanelAction(
+                    label = getString(R.string.service_stop),
+                    pendingIntent =
+                        serviceActionPendingIntent(
+                            ACTION_CANCEL_CURRENT_OPERATION,
+                            REQUEST_CODE_CANCEL_CURRENT_OPERATION
+                        )
+                )
+            )
+        }
+
+        val bridgeActionLimit = if (isAiBusy) 1 else 2
+        aiLimbsBridgeManager.availableActions(state)
+            .asSequence()
+            .filter { it != BridgeAction.REFRESH }
+            .take(bridgeActionLimit)
+            .forEach { action ->
+                add(
+                    NotificationPanelAction(
+                        label = bridgeActionLabel(action),
+                        pendingIntent = bridgeActionPendingIntent(action)
+                    )
+                )
+            }
+
+        add(
+            NotificationPanelAction(
+                label = getString(R.string.service_exit),
+                pendingIntent =
+                    serviceActionPendingIntent(
+                        ACTION_EXIT_APP,
+                        REQUEST_CODE_EXIT_APP
+                    )
+            )
+        )
+    }
+
+    private fun bindNotificationPanelAction(
+        views: RemoteViews,
+        viewId: Int,
+        action: NotificationPanelAction?
+    ) {
+        if (action == null) {
+            views.setViewVisibility(viewId, View.GONE)
+            return
+        }
+        views.setViewVisibility(viewId, View.VISIBLE)
+        views.setTextViewText(viewId, action.label)
+        views.setOnClickPendingIntent(viewId, action.pendingIntent)
+        views.setContentDescription(viewId, action.label)
+    }
+
     private fun buildBridgeDetails(
         runtimeText: String,
         state: AiLimbsBridgeState
     ): String = buildString {
-        append(runtimeText)
-        append("\n${state.providerLabel}：${bridgeStatusLabel(state.phase)}")
+        if (runtimeText.isNotBlank()) {
+            append(runtimeText)
+            append('\n')
+        }
+        append(
+            getString(
+                R.string.ai_limbs_bridge_current_status,
+                bridgeStatusLabel(state.phase)
+            )
+        )
         state.userCode?.takeIf { it.isNotBlank() }?.let {
-            append("\n授权码：$it")
+            append('\n')
+            append(getString(R.string.ai_limbs_bridge_authorization_code, it))
         }
         state.deviceId?.takeIf { it.isNotBlank() }?.let {
-            append("\nBridge ID：${shortBridgeId(it)}")
+            append('\n')
+            append(getString(R.string.ai_limbs_bridge_device_id, shortBridgeId(it)))
         }
         state.lastHeartbeatAtMs?.let {
             append("\n最后心跳：${formatBridgeClock(it)}")
@@ -2183,37 +2301,109 @@ class AIForegroundService : Service() {
         }
     }
 
+    private fun createExpandedNotificationView(
+        runtimeText: String,
+        state: AiLimbsBridgeState,
+        wakeListeningEnabledSnapshot: Boolean
+    ): RemoteViews {
+        val views = RemoteViews(packageName, R.layout.notification_ai_limbs_expanded)
+        val isNightMode =
+            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
+                Configuration.UI_MODE_NIGHT_YES
+        val primaryTextColor = if (isNightMode) Color.WHITE else Color.rgb(32, 33, 36)
+        val secondaryTextColor =
+            if (isNightMode) Color.rgb(210, 214, 220) else Color.rgb(82, 86, 94)
+        val actionTextColor =
+            if (isNightMode) Color.rgb(138, 180, 248) else Color.rgb(25, 103, 210)
+
+        val providerLabel =
+            getString(R.string.ai_limbs_notification_current_bridge, state.providerLabel) + "  ▼"
+        views.setTextViewText(R.id.notification_bridge_selector, providerLabel)
+        views.setTextColor(R.id.notification_bridge_selector, primaryTextColor)
+        views.setContentDescription(R.id.notification_bridge_selector, providerLabel)
+        views.setOnClickPendingIntent(
+            R.id.notification_bridge_selector,
+            bridgeCenterPendingIntent()
+        )
+
+        views.setTextViewText(
+            R.id.notification_bridge_details,
+            buildBridgeDetails(runtimeText, state)
+        )
+        views.setTextColor(R.id.notification_bridge_details, secondaryTextColor)
+
+        val panelActions = notificationPanelActions(state)
+        bindNotificationPanelAction(
+            views,
+            R.id.notification_bridge_action_primary,
+            panelActions.getOrNull(0)
+        )
+        bindNotificationPanelAction(
+            views,
+            R.id.notification_bridge_action_secondary,
+            panelActions.getOrNull(1)
+        )
+        bindNotificationPanelAction(
+            views,
+            R.id.notification_exit_action,
+            panelActions.getOrNull(2)
+        )
+
+        val wakeLabel =
+            getString(
+                if (wakeListeningEnabledSnapshot) {
+                    R.string.service_turn_off_wake
+                } else {
+                    R.string.service_turn_on_wake
+                }
+            )
+        val voiceFloatingLabel = getString(R.string.service_voice_floating_window)
+        views.setTextViewText(R.id.notification_voice_floating_action, voiceFloatingLabel)
+        views.setContentDescription(
+            R.id.notification_voice_floating_action,
+            voiceFloatingLabel
+        )
+        views.setOnClickPendingIntent(
+            R.id.notification_voice_floating_action,
+            voiceFloatingPendingIntent()
+        )
+        views.setTextViewText(R.id.notification_wake_action, wakeLabel)
+        views.setContentDescription(R.id.notification_wake_action, wakeLabel)
+        views.setOnClickPendingIntent(
+            R.id.notification_wake_action,
+            serviceActionPendingIntent(
+                ACTION_TOGGLE_WAKE_LISTENING,
+                REQUEST_CODE_TOGGLE_WAKE_LISTENING
+            )
+        )
+
+        listOf(
+            R.id.notification_bridge_action_primary,
+            R.id.notification_bridge_action_secondary,
+            R.id.notification_exit_action,
+            R.id.notification_voice_floating_action,
+            R.id.notification_wake_action
+        ).forEach { viewId ->
+            views.setTextColor(viewId, actionTextColor)
+        }
+        return views
+    }
+
     private fun createNotification(): Notification {
         val wakeListeningEnabledSnapshot = wakeListeningEnabled
-        val wakeListeningSuspendedSnapshot =
-            wakeListeningSuspendedForIme ||
-                wakeListeningSuspendedForExternalRecording ||
-                wakeListeningSuspendedForFloatingFullscreen
         val externalHttpSnapshot = externalHttpStateFlow.value
         val bridgeState = aiLimbsBridgeManager.state.value
 
-        val title =
-            if (isAiBusy) {
-                characterName ?: getString(R.string.service_ai_limbs_running)
-            } else if (wakeListeningEnabledSnapshot) {
-                if (wakeListeningSuspendedSnapshot) {
-                    getString(R.string.service_running_wake_pause)
-                } else {
-                    getString(R.string.service_running_wake_listening)
-                }
-            } else {
-                getString(R.string.service_ai_limbs_running)
-            }
-
         val activeConversationCount = chatRuntimeHolder.activeConversationCount.value
         val currentSessionToolCount = chatRuntimeHolder.currentSessionToolCount.value
-        val runtimeText =
-            if (isAiBusy && activeConversationCount > 0) {
-                val statsText = getString(
-                    R.string.service_running_stats,
-                    activeConversationCount,
-                    currentSessionToolCount
-                )
+        val runtimeText = when {
+            isAiBusy && activeConversationCount > 0 -> {
+                val statsText =
+                    getString(
+                        R.string.service_running_stats,
+                        activeConversationCount,
+                        currentSessionToolCount
+                    )
                 if (externalHttpSnapshot.isRunning && externalHttpSnapshot.port != null) {
                     getString(
                         R.string.service_running_with_http,
@@ -2223,32 +2413,34 @@ class AIForegroundService : Service() {
                 } else {
                     statsText
                 }
-            } else if (externalHttpSnapshot.isRunning && externalHttpSnapshot.port != null) {
+            }
+            externalHttpSnapshot.isRunning && externalHttpSnapshot.port != null -> {
                 getString(
                     R.string.service_running_http_listening,
                     externalHttpSnapshot.port
                 )
-            } else {
-                getString(R.string.service_ai_limbs_running)
             }
+            else -> ""
+        }
 
         val bridgeSummary = "${bridgeState.providerLabel}：${bridgeStatusLabel(bridgeState.phase)}"
         val contentText =
-            if (runtimeText == getString(R.string.service_ai_limbs_running)) {
-                bridgeSummary
-            } else {
-                "$runtimeText · $bridgeSummary"
+            runtimeText.ifBlank {
+                bridgeState.detail.ifBlank { bridgeStatusLabel(bridgeState.phase) }
             }
+        val expandedView =
+            createExpandedNotificationView(
+                runtimeText = runtimeText,
+                state = bridgeState,
+                wakeListeningEnabledSnapshot = wakeListeningEnabledSnapshot
+            )
 
         val builder = NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(title)
+            .setContentTitle(bridgeSummary)
             .setContentText(contentText)
-            .setStyle(
-                NotificationCompat.BigTextStyle().bigText(
-                    buildBridgeDetails(runtimeText, bridgeState)
-                )
-            )
-            .setSmallIcon(android.R.drawable.ic_dialog_info)
+            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
+            .setCustomBigContentView(expandedView)
+            .setSmallIcon(R.drawable.ic_ai_limbs_notification)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
             .setOngoing(true)
@@ -2261,63 +2453,7 @@ class AIForegroundService : Service() {
                 )
             )
 
-        val contentIntent = Intent(this, MainActivity::class.java).apply {
-            flags =
-                Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TOP or
-                    Intent.FLAG_ACTIVITY_SINGLE_TOP
-        }
-        builder.setContentIntent(
-            PendingIntent.getActivity(
-                this,
-                0,
-                contentIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        )
-
-        if (isAiBusy) {
-            val cancelIntent = Intent(this, AIForegroundService::class.java).apply {
-                action = ACTION_CANCEL_CURRENT_OPERATION
-            }
-            builder.addAction(
-                android.R.drawable.ic_menu_close_clear_cancel,
-                getString(R.string.service_stop),
-                PendingIntent.getService(
-                    this,
-                    REQUEST_CODE_CANCEL_CURRENT_OPERATION,
-                    cancelIntent,
-                    PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-                )
-            )
-        }
-
-        val bridgeActionLimit = if (isAiBusy) 1 else 2
-        aiLimbsBridgeManager.availableActions(bridgeState)
-            .asSequence()
-            .filter { it != BridgeAction.REFRESH }
-            .take(bridgeActionLimit)
-            .forEach { action ->
-                builder.addAction(
-                    bridgeActionIcon(action),
-                    bridgeActionLabel(action),
-                    bridgeActionPendingIntent(action)
-                )
-            }
-
-        val exitIntent = Intent(this, AIForegroundService::class.java).apply {
-            action = ACTION_EXIT_APP
-        }
-        builder.addAction(
-            android.R.drawable.ic_menu_close_clear_cancel,
-            getString(R.string.service_exit),
-            PendingIntent.getService(
-                this,
-                REQUEST_CODE_EXIT_APP,
-                exitIntent,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        )
+        builder.setContentIntent(mainContentPendingIntent())
 
         return builder.build()
     }

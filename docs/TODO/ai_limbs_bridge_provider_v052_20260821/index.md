@@ -21,6 +21,7 @@ status: ready-for-ci
 - [RDC Provider 接入](./02_rdc_provider_integration.md) [DONE]
 - [通用动作与 Bridge Center](./03_bridge_center_and_actions.md) [DONE]
 - [静态检查与云端编译验证](./04_verification.md) [DONE]
+- [通知控制面板与品牌图标](./05_notification_panel_and_branding.md) [READY FOR CI]
 
 External Process 只定义 Profile，不实现进程 Provider。工具执行继续沿用现有权限链。
 

@@ -1,10 +1,9 @@
 package com.ai.assistance.operit.ui.features.toolbox.screens.ailimbs
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -13,8 +12,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.RadioButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -23,7 +24,6 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
@@ -86,6 +86,7 @@ fun AiLimbsBridgeCenterScreen() {
                 profiles = profiles,
                 activeProviderId = activeProviderId,
                 onSelect = { profile ->
+                    activeProviderId = profile.id
                     AIForegroundService.requestBridgeProviderSelection(
                         context,
                         profile.id
@@ -112,58 +113,78 @@ private fun ProviderSelectionCard(
     activeProviderId: String,
     onSelect: (BridgeProfile) -> Unit
 ) {
+    var expanded by remember { mutableStateOf(false) }
+    val activeProfile = profiles.first { it.id == activeProviderId }
+
     BridgeCenterCard {
         Text(
             text = stringResource(R.string.ai_limbs_bridge_provider_section),
             style = MaterialTheme.typography.titleMedium
         )
-        profiles.forEach { profile ->
-            Row(
-                modifier =
-                    Modifier
-                        .fillMaxWidth()
-                        .clickable(
-                            enabled = profile.enabled && profile.id != activeProviderId
-                        ) {
-                            onSelect(profile)
-                        }
-                        .padding(vertical = 6.dp),
-                verticalAlignment = Alignment.CenterVertically
+        Box(modifier = Modifier.fillMaxWidth()) {
+            OutlinedButton(
+                onClick = { expanded = true },
+                modifier = Modifier.fillMaxWidth()
             ) {
-                RadioButton(
-                    selected = profile.id == activeProviderId,
-                    onClick = {
-                        if (profile.enabled && profile.id != activeProviderId) {
-                            onSelect(profile)
-                        }
-                    }
-                )
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(profile.label)
-                    Text(
-                        text =
-                            stringResource(
-                                R.string.ai_limbs_bridge_profile_metadata,
-                                profile.id,
-                                profile.type
-                            ),
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
                 Text(
                     text =
                         stringResource(
-                            if (profile.enabled) {
-                                R.string.ai_limbs_bridge_enabled
-                            } else {
-                                R.string.ai_limbs_bridge_disabled
-                            }
-                        ),
-                    style = MaterialTheme.typography.labelMedium
+                            R.string.ai_limbs_notification_current_bridge,
+                            activeProfile.label
+                        ) + "  ▼"
                 )
             }
+            DropdownMenu(
+                expanded = expanded,
+                onDismissRequest = { expanded = false }
+            ) {
+                profiles.forEach { profile ->
+                    DropdownMenuItem(
+                        text = {
+                            Column {
+                                Text(
+                                    text =
+                                        if (profile.id == activeProviderId) {
+                                            "✓ ${profile.label}"
+                                        } else {
+                                            profile.label
+                                        }
+                                )
+                                Text(
+                                    text =
+                                        stringResource(
+                                            R.string.ai_limbs_bridge_profile_metadata,
+                                            profile.id,
+                                            profile.type
+                                        ),
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        },
+                        enabled = profile.enabled,
+                        onClick = {
+                            expanded = false
+                            if (profile.id != activeProviderId) {
+                                onSelect(profile)
+                            }
+                        }
+                    )
+                }
+            }
         }
+        Text(
+            text =
+                stringResource(
+                    if (activeProfile.enabled) {
+                        R.string.ai_limbs_bridge_enabled
+                    } else {
+                        R.string.ai_limbs_bridge_disabled
+                    }
+                ),
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 }
 

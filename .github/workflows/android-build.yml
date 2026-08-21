@@ -14,7 +14,7 @@ on:
           - ':app:assembleClone'
           - ':app:bundleRelease'
   push:
-    branches: [main]
+    branches: [main, v0.5.2-dev]
 
 concurrency:
   group: android-build-${{ github.event_name }}-${{ github.ref }}

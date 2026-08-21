@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/notification_panel_root"
+    android:layout_width="match_parent"
+    android:layout_height="wrap_content"
+    android:orientation="vertical"
+    android:paddingStart="8dp"
+    android:paddingTop="4dp"
+    android:paddingEnd="8dp"
+    android:paddingBottom="2dp">
+
+    <TextView
+        android:id="@+id/notification_bridge_selector"
+        android:layout_width="match_parent"
+        android:layout_height="36dp"
+        android:background="?android:attr/selectableItemBackground"
+        android:ellipsize="end"
+        android:gravity="center_vertical"
+        android:maxLines="1"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:textSize="15sp"
+        android:textStyle="bold" />
+
+    <TextView
+        android:id="@+id/notification_bridge_details"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:ellipsize="end"
+        android:maxLines="5"
+        android:paddingStart="8dp"
+        android:paddingEnd="8dp"
+        android:paddingBottom="2dp"
+        android:textSize="13sp" />
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/notification_bridge_action_primary"
+            style="@style/AiLimbsNotificationAction" />
+
+        <TextView
+            android:id="@+id/notification_bridge_action_secondary"
+            style="@style/AiLimbsNotificationAction" />
+
+        <TextView
+            android:id="@+id/notification_exit_action"
+            style="@style/AiLimbsNotificationAction" />
+    </LinearLayout>
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="40dp"
+        android:orientation="horizontal">
+
+        <TextView
+            android:id="@+id/notification_voice_floating_action"
+            style="@style/AiLimbsNotificationAction" />
+
+        <TextView
+            android:id="@+id/notification_wake_action"
+            style="@style/AiLimbsNotificationAction" />
+    </LinearLayout>
+</LinearLayout>
