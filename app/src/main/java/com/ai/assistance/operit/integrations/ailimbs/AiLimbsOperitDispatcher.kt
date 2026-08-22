@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
+import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.model.AITool
@@ -61,6 +62,9 @@ class AiLimbsOperitDispatcher(context: Context) {
                     .ifBlank { args.optString("id") }
                     .ifBlank { args.optString("invoke_id") }
             )
+        "ai_limbs.core.status" -> coreStatus()
+        "ai_limbs.dispatcher.status" -> dispatcherStatus()
+        "ai_limbs.ubuntu.share.status" -> sharedUbuntuStatus()
         "ai_limbs.ui.status" -> uiCapabilityStatus()
         "operit.tools.list" -> {
             handler.registerDefaultTools()
@@ -129,6 +133,47 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("ui_controller_image_enabled", status.uiControllerImageEnabled)
             .put("ui_subagent_ready", status.uiSubagentReady)
             .put("next_action", status.nextAction ?: JSONObject.NULL)
+    }
+
+    private fun coreStatus(): JSONObject =
+        ok()
+            .put("module", "AI Limbs Core")
+            .put("version", BuildConfig.VERSION_NAME)
+            .put("provider", AiLimbsCoreCapabilityRegistry.CORE_PROVIDER)
+            .put(
+                "registered_capabilities",
+                JSONArray(AiLimbsCoreCapabilityRegistry.registeredToolNames())
+            )
+            .put(
+                "modules",
+                JSONArray(
+                    listOf(
+                        "AI Limbs Core",
+                        "AI Limbs Capability Resolver",
+                        "AI Limbs Tool Dispatcher",
+                        "AI Limbs Ubuntu Runtime"
+                    )
+                )
+            )
+
+    private fun dispatcherStatus(): JSONObject =
+        ok()
+            .put("module", "AI Limbs Tool Dispatcher")
+            .put("route", "AiLimbsOperitDispatcher -> ToolExecutionManager -> AIToolHandler")
+            .put("permission_enforcement", "ToolPermissionSystem ALLOW / ASK / FORBID")
+            .put("transport_neutral", true)
+
+    private fun sharedUbuntuStatus(): JSONObject {
+        val state = com.ai.assistance.operit.core.tools.system.Terminal
+            .getInstance(appContext)
+            .currentSharedHiddenTerminalState()
+        return ok()
+            .put("module", "Laner Ubuntu Shared View")
+            .put("active", state.isActive)
+            .put("active_operation_count", state.activeOperationCount)
+            .put("has_recent_operation", state.operationId != null)
+            .put("read_only", true)
+            .put("persisted", false)
     }
 
     private fun parseJsonOrString(raw: String): Any = try {

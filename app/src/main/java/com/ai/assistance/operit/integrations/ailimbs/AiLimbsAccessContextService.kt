@@ -31,6 +31,16 @@ class AiLimbsAccessContextService(context: Context) {
             )
             appendLine("- Capability Resolver 只负责发现与描述；真实执行仍走原 ToolPermissionSystem 权限链。")
             appendLine(
+                "- AI Limbs Core 状态：" +
+                    "{\"name\":\"ai_limbs.core.status\",\"parameters\":{}}；" +
+                    "Dispatcher 状态：" +
+                    "{\"name\":\"ai_limbs.dispatcher.status\",\"parameters\":{}}。"
+            )
+            appendLine(
+                "- 兰儿 Ubuntu 只读共享窗口状态：" +
+                    "{\"name\":\"ai_limbs.ubuntu.share.status\",\"parameters\":{}}。"
+            )
+            appendLine(
                 "- 当任务涉及开发、调试、开发环境管理或会改变项目/设备内容时，" +
                     "先调用 ai_limbs.work_manual.read。"
             )

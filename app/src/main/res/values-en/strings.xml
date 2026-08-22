@@ -2028,7 +2028,7 @@
     <string name="tool_user_agreement_desc">View the application\'s user agreement and privacy policy</string>
     <string name="tool_default_assistant_guide">Default Assistant Setup</string>
     <string name="tool_default_assistant_guide_desc">Set Operit voice floating as system default assistant</string>
-    <string name="tool_terminal">Command Terminal</string>
+    <string name="tool_terminal">Ubuntu Command Terminal</string>
     <string name="tool_terminal_desc">Powerful command-line terminal for executing system commands</string>
     <string name="tool_terminal_auto_config">Terminal Auto Configuration</string>
     <string name="tool_terminal_auto_config_desc">Automatically install and configure Python, PIP and other development tools</string>
@@ -4217,7 +4217,7 @@
     <string name="screen_title_chat_backup_settings">Data Backup &amp; Restore</string>
     <string name="screen_title_language_settings">Language Settings</string>
     <string name="screen_title_file_manager">File Manager</string>
-    <string name="screen_title_terminal">Command Terminal</string>
+    <string name="screen_title_terminal">Ubuntu Command Terminal</string>
     <string name="screen_title_terminal_auto_config">Terminal Auto Configuration</string>
     <string name="screen_title_app_permissions">App Permissions Manager</string>
     <string name="screen_title_ui_debugger">UI Debugger</string>

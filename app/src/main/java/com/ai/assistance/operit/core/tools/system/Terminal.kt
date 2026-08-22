@@ -6,6 +6,7 @@ import com.ai.assistance.operit.util.AppLogger
 import androidx.annotation.RequiresApi
 import com.ai.assistance.operit.terminal.CommandExecutionEvent
 import com.ai.assistance.operit.terminal.SessionDirectoryEvent
+import com.ai.assistance.operit.terminal.SharedHiddenTerminalState
 import com.ai.assistance.operit.terminal.TerminalManager
 import com.ai.assistance.operit.terminal.data.TerminalState
 import com.ai.assistance.operit.terminal.data.UbuntuIdlePolicy
@@ -61,6 +62,11 @@ class Terminal private constructor(private val context: Context) {
     val isFullscreen = terminalManager.isFullscreen
     val ubuntuRuntimeState: StateFlow<UbuntuRuntimeState> = terminalManager.ubuntuRuntimeState
     val ubuntuIdlePolicy: StateFlow<UbuntuIdlePolicy> = terminalManager.ubuntuIdlePolicy
+    val sharedHiddenTerminalState: StateFlow<SharedHiddenTerminalState> =
+        terminalManager.sharedHiddenTerminalState
+
+    fun currentSharedHiddenTerminalState(): SharedHiddenTerminalState =
+        terminalManager.sharedHiddenTerminalState.value
 
     /**
      * 初始化终端管理器

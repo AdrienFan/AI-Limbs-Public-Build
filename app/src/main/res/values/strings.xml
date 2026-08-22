@@ -2117,7 +2117,7 @@
     <string name="tool_user_agreement_desc">查看应用的用户协议与隐私政策</string>
     <string name="tool_default_assistant_guide">默认助手设置</string>
     <string name="tool_default_assistant_guide_desc">设置Operit语音悬浮为系统默认助手</string>
-    <string name="tool_terminal">命令终端</string>
+    <string name="tool_terminal">Ubuntu命令终端</string>
     <string name="tool_terminal_desc">功能强大的命令行终端，执行系统指令</string>
     <string name="tool_terminal_auto_config">终端自动配置</string>
     <string name="tool_terminal_auto_config_desc">自动安装配置Python、PIP等开发工具</string>
@@ -4152,7 +4152,7 @@
     <string name="screen_title_chat_backup_settings">数据备份与恢复</string>
     <string name="screen_title_language_settings">语言设置</string>
     <string name="screen_title_file_manager">文件管理器</string>
-    <string name="screen_title_terminal">命令终端</string>
+    <string name="screen_title_terminal">Ubuntu命令终端</string>
     <string name="screen_title_terminal_auto_config">终端自动配置</string>
     <string name="screen_title_app_permissions">应用权限管理</string>
     <string name="screen_title_ui_debugger">UI调试工具</string>

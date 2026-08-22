@@ -122,7 +122,7 @@ class AiLimbsCapabilityResolver(context: Context) {
 
     private suspend fun buildDefinitions(forceRefreshPackages: Boolean): List<AiLimbsCapabilityDefinition> {
         handler.registerDefaultTools()
-        val catalog =
+        val runtimeCatalog =
             withContext(Dispatchers.IO) {
                 ToolCapabilityCatalog.build(
                     context = appContext,
@@ -132,7 +132,8 @@ class AiLimbsCapabilityResolver(context: Context) {
                     includeDisabledPackages = true,
                     forceRefreshPackages = forceRefreshPackages
                 )
-            } + coreCatalogEntries()
+            }
+        val catalog = AiLimbsCoreCapabilityRegistry.mergeInto(runtimeCatalog)
 
         return catalog
             .distinctBy { catalogIdentity(it) }
@@ -144,19 +145,24 @@ class AiLimbsCapabilityResolver(context: Context) {
         query: String,
         limit: Int
     ): List<AiLimbsCapabilityDefinition> {
-        val enrichedEntries = definitions.map { definition ->
-            definition.catalogEntry.copy(
-                displayName = definition.displayName,
-                keywords =
-                    (definition.catalogEntry.keywords +
-                        definition.aliases +
-                        definition.capabilityId +
-                        definition.invokeId +
-                        definition.displayName).distinct()
-            )
+        val searchable = definitions.map { definition ->
+            definition to
+                definition.catalogEntry.copy(
+                    displayName = definition.displayName,
+                    keywords =
+                        (definition.catalogEntry.keywords +
+                            definition.aliases +
+                            definition.capabilityId +
+                            definition.invokeId +
+                            definition.displayName).distinct()
+                )
         }
-        val definitionsByIdentity = definitions.associateBy { catalogIdentity(it.catalogEntry) }
-        return ToolCapabilityCatalog.search(enrichedEntries, query, limit)
+        // Search enrichment changes displayName. Build the reverse index from the enriched record,
+        // otherwise semantic names such as "查询 Ubuntu 状态" no longer match their source entry.
+        val definitionsByIdentity = searchable.associate { (definition, entry) ->
+            catalogIdentity(entry) to definition
+        }
+        return ToolCapabilityCatalog.search(searchable.map { it.second }, query, limit)
             .mapNotNull { definitionsByIdentity[catalogIdentity(it)] }
     }
 
@@ -490,66 +496,6 @@ class AiLimbsCapabilityResolver(context: Context) {
     private fun isUbuntuBackedTool(invokeId: String): Boolean =
         invokeId.startsWith("ubuntu.") || UBUNTU_TERMINAL_TOOLS.contains(invokeId)
 
-    private fun coreCatalogEntries(): List<ToolCatalogEntry> = listOf(
-        coreEntry(
-            name = "capability.search",
-            description = "Search the current AI Limbs capability catalog without executing a capability.",
-            parameters = listOf(
-                ToolParameterSchema("query", "string", "Capability intent or known tool name", true),
-                ToolParameterSchema("limit", "integer", "Maximum result count from 1 to 5", false, "5")
-            ),
-            keywords = listOf("能力", "查找工具", "resolver", "capability resolver")
-        ),
-        coreEntry(
-            name = "capability.describe",
-            description = "Describe one capability, including schema, permissions, prerequisites, and invocation address.",
-            parameters = listOf(
-                ToolParameterSchema("capability_id", "string", "ID returned by capability.search", true)
-            ),
-            keywords = listOf("能力详情", "参数", "schema", "调用地址")
-        ),
-        coreEntry("ai_limbs.access_context.read", "Read the compiled system access policy and user access prompt."),
-        coreEntry("ai_limbs.access_prompt.read", "Read the editable AI Limbs user access prompt."),
-        coreEntry(
-            "ai_limbs.access_prompt.write",
-            "Save the editable AI Limbs user access prompt.",
-            listOf(ToolParameterSchema("content", "string", "Complete prompt body", true))
-        ),
-        coreEntry("ai_limbs.work_manual.read", "Read the protected AI Limbs work manual."),
-        coreEntry(
-            "ai_limbs.work_manual.write",
-            "Save the editable body of the protected AI Limbs work manual.",
-            listOf(ToolParameterSchema("content", "string", "Complete editable manual body", true))
-        ),
-        coreEntry("ai_limbs.tool_manual.read", "Read the protected AI Limbs tool manual."),
-        coreEntry(
-            "ai_limbs.tool_manual.write",
-            "Save the protected AI Limbs tool manual.",
-            listOf(ToolParameterSchema("content", "string", "Complete manual body", true))
-        ),
-        coreEntry("ai_limbs.ui.status", "Read live AI Limbs UI and visual-control readiness."),
-        coreEntry("operit.tools.list", "List currently registered native Operit tool names.")
-    )
-
-    private fun coreEntry(
-        name: String,
-        description: String,
-        parameters: List<ToolParameterSchema> = emptyList(),
-        keywords: List<String> = emptyList()
-    ) = ToolCatalogEntry(
-        targetToolName = name,
-        displayName = name,
-        description = description,
-        parameterHints = parameters.map { parameter ->
-            "${parameter.name} [${parameter.type}, ${if (parameter.required) "required" else "optional"}]: ${parameter.description}"
-        },
-        sourceKind = ToolCatalogSourceKind.INTERNAL,
-        keywords = keywords,
-        parameters = parameters,
-        sourceName = PROVIDER_CORE,
-        sourceLocator = "ai-limbs://core/$name"
-    )
-
     private data class SemanticMetadata(
         val capabilityId: String,
         val displayName: String,
@@ -567,7 +513,7 @@ class AiLimbsCapabilityResolver(context: Context) {
         const val MODULE_NAME = "AI Limbs Capability Resolver"
         const val CAPABILITY_PROTOCOL_VERSION = 1
         const val MAX_SEARCH_RESULTS = 5
-        const val PROVIDER_CORE = "ai_limbs_core"
+        const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
         const val AUTOMATIC_UI_BASE_PREFIX = "Automatic_ui_base:"
         const val AUTOMATIC_UI_SUBAGENT_PREFIX = "Automatic_ui_subagent:"
 
@@ -582,6 +528,24 @@ class AiLimbsCapabilityResolver(context: Context) {
         )
 
         val SEMANTIC_METADATA = mapOf(
+            "ai_limbs.core.status" to SemanticMetadata(
+                "ai_limbs.core.status",
+                "AI Limbs Core 状态",
+                listOf("core.status"),
+                listOf("AI Limbs Core", "核心模块", "core module")
+            ),
+            "ai_limbs.dispatcher.status" to SemanticMetadata(
+                "ai_limbs.dispatcher.status",
+                "AI Limbs Tool Dispatcher 状态",
+                listOf("dispatcher.status"),
+                listOf("dispatcher", "分发器", "调度器", "权限链")
+            ),
+            "ai_limbs.ubuntu.share.status" to SemanticMetadata(
+                "ubuntu.share.status",
+                "兰儿 Ubuntu 共享窗口状态",
+                listOf("ai.ubuntu.share.status"),
+                listOf("共享窗口", "眼睛", "只读", "兰儿正在操作")
+            ),
             "Automatic_ui_base:get_page_screenshot_image" to SemanticMetadata(
                 "ui.screen.capture",
                 "获取当前屏幕截图",
