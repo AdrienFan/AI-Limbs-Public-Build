@@ -149,6 +149,7 @@ class AiLimbsRdcToolAdapter(
 
     private fun isAiLimbsCoreTool(name: String): Boolean =
         name.startsWith("ai_limbs.") ||
+            name.startsWith("capability.") ||
             name.startsWith("laner.") ||
             name == "operit.tools.list"
 

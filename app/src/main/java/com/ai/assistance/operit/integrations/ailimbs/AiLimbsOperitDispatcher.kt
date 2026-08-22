@@ -17,6 +17,7 @@ class AiLimbsOperitDispatcher(context: Context) {
     private val documents = AiLimbsDocumentProvider(appContext)
     private val accessContext = AiLimbsAccessContextService(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
+    private val capabilityResolver = AiLimbsCapabilityResolver(appContext)
     private val gson = Gson()
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject = when (tool) {
@@ -49,6 +50,17 @@ class AiLimbsOperitDispatcher(context: Context) {
             val changed = documents.writeToolManual(args.optString("content"))
             ok().put("document", AiLimbsDocumentId.TOOL_MANUAL.stableId).put("changed", changed)
         }
+        "capability.search" ->
+            capabilityResolver.search(
+                query = args.optString("query"),
+                requestedLimit = args.optInt("limit", 5)
+            )
+        "capability.describe" ->
+            capabilityResolver.describe(
+                args.optString("capability_id")
+                    .ifBlank { args.optString("id") }
+                    .ifBlank { args.optString("invoke_id") }
+            )
         "ai_limbs.ui.status" -> uiCapabilityStatus()
         "operit.tools.list" -> {
             handler.registerDefaultTools()

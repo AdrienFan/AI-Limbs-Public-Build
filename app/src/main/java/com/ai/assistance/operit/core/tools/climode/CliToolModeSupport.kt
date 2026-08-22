@@ -1,20 +1,15 @@
 package com.ai.assistance.operit.core.tools.climode
 
 import android.content.Context
-import com.ai.assistance.operit.core.config.SystemToolPrompts
-import com.ai.assistance.operit.core.tools.PackageTool
-import com.ai.assistance.operit.core.tools.PackageToolParameter
-import com.ai.assistance.operit.core.tools.ToolPackage
+import com.ai.assistance.operit.core.tools.catalog.ToolCapabilityCatalog
+import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
+import com.ai.assistance.operit.core.tools.catalog.ToolCatalogSourceKind
 import com.ai.assistance.operit.core.tools.packTool.PackageManager
-import com.ai.assistance.operit.data.mcp.MCPLocalServer
 import com.ai.assistance.operit.data.model.ApiProviderType
 import com.ai.assistance.operit.data.model.SystemToolPromptCategory
 import com.ai.assistance.operit.data.model.ToolParameterSchema
 import com.ai.assistance.operit.data.model.ToolPrompt
 import com.ai.assistance.operit.data.preferences.ResolvedCharacterCardToolAccess
-import com.ai.assistance.operit.data.skill.SkillRepository
-import java.util.Locale
-import org.json.JSONObject
 
 enum class ToolExposureMode {
     FULL,
@@ -34,33 +29,8 @@ enum class ToolExposureMode {
     }
 }
 
-enum class HiddenToolSourceKind {
-    BUILTIN,
-    INTERNAL,
-    PACKAGE,
-    MCP,
-    ACTIVATION;
-
-    fun label(useEnglish: Boolean): String {
-        return when (this) {
-            BUILTIN -> "built-in"
-            INTERNAL -> "internal"
-            PACKAGE -> "package"
-            MCP -> if (useEnglish) "mcp" else "MCP"
-            ACTIVATION -> "activation"
-        }
-    }
-}
-
-data class HiddenToolCatalogEntry(
-    val targetToolName: String,
-    val displayName: String,
-    val description: String,
-    val parameterHints: List<String>,
-    val sourceKind: HiddenToolSourceKind,
-    val keywords: List<String> = emptyList(),
-    val suggestedParamsJson: String? = null
-)
+typealias HiddenToolSourceKind = ToolCatalogSourceKind
+typealias HiddenToolCatalogEntry = ToolCatalogEntry
 
 object CliToolModeSupport {
     const val SEARCH_TOOL_NAME = "search"
@@ -199,156 +169,19 @@ object CliToolModeSupport {
         packageManager: PackageManager,
         roleCardToolAccess: ResolvedCharacterCardToolAccess,
         useEnglish: Boolean
-    ): List<HiddenToolCatalogEntry> {
-        val categories = buildBuiltinAndInternalCategories(useEnglish)
-        val builtinToolNames = buildBuiltinToolNameSet(useEnglish)
-        val entries = LinkedHashMap<String, HiddenToolCatalogEntry>()
-
-        categories.forEach { category ->
-            category.tools.forEach { tool ->
-                if (tool.name == "use_package") {
-                    return@forEach
-                }
-                if (isReservedProxyTarget(tool.name) || isCliPublicTool(tool.name)) {
-                    return@forEach
-                }
-                if (!isToolNameAllowedForRoleCard(tool.name, null, roleCardToolAccess)) {
-                    return@forEach
-                }
-
-                val sourceKind =
-                    if (builtinToolNames.contains(tool.name)) {
-                        HiddenToolSourceKind.BUILTIN
-                    } else {
-                        HiddenToolSourceKind.INTERNAL
-                    }
-                val parameterHints = buildParameterHints(tool)
-                val entry =
-                    HiddenToolCatalogEntry(
-                        targetToolName = tool.name,
-                        displayName = tool.name,
-                        description = tool.description,
-                        parameterHints = parameterHints,
-                        sourceKind = sourceKind,
-                        keywords = listOf(category.categoryName)
-                    )
-                entries.putIfAbsent("${entry.sourceKind}:${entry.targetToolName}:${entry.displayName}", entry)
-            }
-        }
-
-        val enabledPackages =
-            packageManager.getEnabledPackageNames()
-                .asSequence()
-                .map { it.trim() }
-                .filter { it.isNotEmpty() }
-                .filter { !packageManager.isToolPkgContainer(it) }
-                .filter { roleCardToolAccess.isExternalSourceAllowed(it) }
-                .toList()
-
-        enabledPackages.forEach { packageName ->
-            val toolPackage = packageManager.getEffectivePackageTools(packageName) ?: return@forEach
-            if (toolPackage.tools.isEmpty()) {
-                addActivationEntry(
-                    entries = entries,
-                    displayName = packageName,
-                    description = toolPackage.description.resolve(context),
-                    keywordTag = "package",
-                    sourceKind = HiddenToolSourceKind.ACTIVATION
-                )
-            } else {
-                addPackageToolEntries(
-                    entries = entries,
-                    prefix = packageName,
-                    toolPackage = toolPackage,
-                    descriptionResolver = { it.description.resolve(context) },
-                    paramHintResolver = { parameter ->
-                        buildParameterHint(
-                            name = parameter.name,
-                            description = parameter.description.resolve(context),
-                            type = parameter.type,
-                            required = parameter.required
-                        )
-                    },
-                    sourceKind = HiddenToolSourceKind.PACKAGE,
-                    keywordTag = "package"
-                )
-            }
-        }
-
-        val skillPackages =
-            SkillRepository.getInstance(context)
-                .getAiVisibleSkillPackages()
-                .filterKeys { roleCardToolAccess.isExternalSourceAllowed(it) }
-
-        skillPackages.forEach { (skillName, skillPackage) ->
-            addActivationEntry(
-                entries = entries,
-                displayName = skillName,
-                description = skillPackage.description,
-                keywordTag = "skill",
-                sourceKind = HiddenToolSourceKind.ACTIVATION
-            )
-        }
-
-        val mcpServers =
-            packageManager.getAvailableServerPackages()
-                .filterKeys { roleCardToolAccess.isExternalSourceAllowed(it) }
-        val mcpLocalServer = MCPLocalServer.getInstance(context)
-
-        mcpServers.forEach { (serverName, serverConfig) ->
-            val cachedTools = mcpLocalServer.getCachedTools(serverName).orEmpty()
-            if (cachedTools.isEmpty()) {
-                addActivationEntry(
-                    entries = entries,
-                    displayName = serverName,
-                    description = serverConfig.description,
-                    keywordTag = "mcp",
-                    sourceKind = HiddenToolSourceKind.ACTIVATION
-                )
-                return@forEach
-            }
-
-            addCachedMcpToolEntries(
-                entries = entries,
-                serverName = serverName,
-                serverDescription = serverConfig.description,
-                cachedTools = cachedTools
-            )
-        }
-
-        return entries.values.toList()
-    }
+    ): List<HiddenToolCatalogEntry> =
+        ToolCapabilityCatalog.build(
+            context = context,
+            packageManager = packageManager,
+            roleCardToolAccess = roleCardToolAccess,
+            useEnglish = useEnglish
+        )
 
     fun searchHiddenToolCatalog(
         catalog: List<HiddenToolCatalogEntry>,
         query: String,
         limit: Int
-    ): List<HiddenToolCatalogEntry> {
-        val normalizedQuery = normalize(query)
-        if (normalizedQuery.isBlank()) {
-            return emptyList()
-        }
-
-        val terms = normalizedQuery.split(' ').filter { it.isNotBlank() }
-        val ranked =
-            catalog.mapNotNull { entry ->
-                val score = scoreEntry(entry, normalizedQuery, terms)
-                if (score <= 0) {
-                    null
-                } else {
-                    score to entry
-                }
-            }
-
-        return ranked
-            .sortedWith(
-                compareByDescending<Pair<Int, HiddenToolCatalogEntry>> { it.first }
-                    .thenBy { it.second.targetToolName }
-                    .thenBy { it.second.displayName }
-            )
-            .take(limit.coerceIn(1, 20))
-            .map { it.second }
-    }
+    ): List<HiddenToolCatalogEntry> = ToolCapabilityCatalog.search(catalog, query, limit)
 
     fun formatSearchResults(
         query: String,
@@ -469,220 +302,4 @@ object CliToolModeSupport {
         }
     }
 
-    private fun buildBuiltinAndInternalCategories(useEnglish: Boolean): List<SystemToolPromptCategory> {
-        return if (useEnglish) {
-            SystemToolPrompts.getAllCategoriesEn()
-        } else {
-            SystemToolPrompts.getAllCategoriesCn()
-        }
-    }
-
-    private fun buildBuiltinToolNameSet(useEnglish: Boolean): Set<String> {
-        val builtinCategories =
-            if (useEnglish) {
-                SystemToolPrompts.getAIAllCategoriesEn()
-            } else {
-                SystemToolPrompts.getAIAllCategoriesCn()
-            }
-        return builtinCategories.flatMap { it.tools }.mapTo(linkedSetOf()) { it.name }
-    }
-
-    private fun buildParameterHints(tool: ToolPrompt): List<String> {
-        val structured = tool.parametersStructured.orEmpty()
-        if (structured.isNotEmpty()) {
-            return structured.map { parameter ->
-                buildParameterHint(
-                    name = parameter.name,
-                    description = parameter.description,
-                    type = parameter.type,
-                    required = parameter.required
-                )
-            }
-        }
-        return tool.parameters
-            .split(',')
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-    }
-
-    private fun buildParameterHint(
-        name: String,
-        description: String,
-        type: String,
-        required: Boolean
-    ): String {
-        val requiredText = if (required) "required" else "optional"
-        return "$name [$type, $requiredText]: $description"
-    }
-
-    private fun addActivationEntry(
-        entries: MutableMap<String, HiddenToolCatalogEntry>,
-        displayName: String,
-        description: String,
-        keywordTag: String,
-        sourceKind: HiddenToolSourceKind
-    ) {
-        val entry =
-            HiddenToolCatalogEntry(
-                targetToolName = "use_package",
-                displayName = displayName,
-                description = description,
-                parameterHints = listOf("package_name [string, required]: $displayName"),
-                sourceKind = sourceKind,
-                keywords = listOf(keywordTag, "use_package", "activate"),
-                suggestedParamsJson = "{\"package_name\":\"$displayName\"}"
-            )
-        entries.putIfAbsent("${entry.sourceKind}:${entry.targetToolName}:${entry.displayName}", entry)
-    }
-
-    private fun addPackageToolEntries(
-        entries: MutableMap<String, HiddenToolCatalogEntry>,
-        prefix: String,
-        toolPackage: ToolPackage,
-        descriptionResolver: (PackageTool) -> String,
-        paramHintResolver: (PackageToolParameter) -> String,
-        sourceKind: HiddenToolSourceKind,
-        keywordTag: String
-    ) {
-        toolPackage.tools
-            .filter { !it.advice }
-            .forEach { packageTool ->
-                val targetToolName = "$prefix:${packageTool.name}"
-                val entry =
-                    HiddenToolCatalogEntry(
-                        targetToolName = targetToolName,
-                        displayName = targetToolName,
-                        description = descriptionResolver(packageTool),
-                        parameterHints = packageTool.parameters.map(paramHintResolver),
-                        sourceKind = sourceKind,
-                        keywords = listOf(prefix, keywordTag, toolPackage.name)
-                    )
-                entries.putIfAbsent("${entry.sourceKind}:${entry.targetToolName}:${entry.displayName}", entry)
-            }
-    }
-
-    private fun addCachedMcpToolEntries(
-        entries: MutableMap<String, HiddenToolCatalogEntry>,
-        serverName: String,
-        serverDescription: String,
-        cachedTools: List<MCPLocalServer.CachedToolInfo>
-    ) {
-        cachedTools.forEach { cachedTool ->
-            val toolName = cachedTool.name.trim()
-            if (toolName.isEmpty()) {
-                return@forEach
-            }
-            val targetToolName = "$serverName:$toolName"
-            val entry =
-                HiddenToolCatalogEntry(
-                    targetToolName = targetToolName,
-                    displayName = targetToolName,
-                    description = cachedTool.description.ifBlank { serverDescription },
-                    parameterHints = buildCachedMcpParameterHints(cachedTool.inputSchema),
-                    sourceKind = HiddenToolSourceKind.MCP,
-                    keywords = listOf(serverName, "mcp", "cached")
-                )
-            entries.putIfAbsent("${entry.sourceKind}:${entry.targetToolName}:${entry.displayName}", entry)
-        }
-    }
-
-    private fun buildCachedMcpParameterHints(inputSchemaJson: String): List<String> {
-        val schema =
-            runCatching { JSONObject(inputSchemaJson) }.getOrNull()
-                ?: return emptyList()
-        val properties = schema.optJSONObject("properties") ?: return emptyList()
-
-        val requiredNames = linkedSetOf<String>()
-        val requiredArray = schema.optJSONArray("required")
-        if (requiredArray != null) {
-            for (index in 0 until requiredArray.length()) {
-                requiredArray.optString(index)
-                    .takeIf { it.isNotBlank() }
-                    ?.let(requiredNames::add)
-            }
-        }
-
-        val parameterHints = mutableListOf<String>()
-        val keys = properties.keys()
-        while (keys.hasNext()) {
-            val name = keys.next()
-            val parameterObject = properties.optJSONObject(name)
-            val type = parameterObject?.optString("type").takeUnless { it.isNullOrBlank() } ?: "string"
-            val description = parameterObject?.optString("description").orEmpty()
-            parameterHints +=
-                buildParameterHint(
-                    name = name,
-                    description = description,
-                    type = type,
-                    required = requiredNames.contains(name)
-                )
-        }
-        return parameterHints
-    }
-
-    private fun scoreEntry(
-        entry: HiddenToolCatalogEntry,
-        normalizedQuery: String,
-        terms: List<String>
-    ): Int {
-        val displayName = normalize(entry.displayName)
-        val targetName = normalize(entry.targetToolName)
-        val description = normalize(entry.description)
-        val params = normalize(entry.parameterHints.joinToString(" "))
-        val keywords = normalize(entry.keywords.joinToString(" "))
-
-        var score = 0
-        if (displayName == normalizedQuery || targetName == normalizedQuery) {
-            score += 300
-        }
-        if (displayName.startsWith(normalizedQuery) || targetName.startsWith(normalizedQuery)) {
-            score += 140
-        }
-        if (displayName.contains(normalizedQuery) || targetName.contains(normalizedQuery)) {
-            score += 100
-        }
-        if (description.contains(normalizedQuery) || keywords.contains(normalizedQuery)) {
-            score += 40
-        }
-        if (params.contains(normalizedQuery)) {
-            score += 25
-        }
-
-        var matchedTerms = 0
-        terms.forEach { term ->
-            var termMatched = false
-            if (displayName.contains(term) || targetName.contains(term)) {
-                score += 40
-                termMatched = true
-            }
-            if (keywords.contains(term)) {
-                score += 16
-                termMatched = true
-            }
-            if (description.contains(term)) {
-                score += 12
-                termMatched = true
-            }
-            if (params.contains(term)) {
-                score += 8
-                termMatched = true
-            }
-            if (termMatched) {
-                matchedTerms += 1
-            }
-        }
-        if (matchedTerms == terms.size && terms.isNotEmpty()) {
-            score += 30
-        }
-
-        return score
-    }
-
-    private fun normalize(value: String): String {
-        return value
-            .lowercase(Locale.ROOT)
-            .replace(Regex("[^\\p{L}\\p{N}:_./-]+"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-    }
 }

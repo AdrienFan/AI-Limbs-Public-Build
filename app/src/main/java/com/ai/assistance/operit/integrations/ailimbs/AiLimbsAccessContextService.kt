@@ -15,6 +15,21 @@ class AiLimbsAccessContextService(context: Context) {
         val editablePrompt = documents.readAccessPrompt()
         return buildString {
             appendLine("[AI Limbs system access policy]")
+            appendLine("- 模块：AI Limbs Capability Resolver。")
+            appendLine("- Provider：ai_limbs_core；能力协议版本：1。")
+            appendLine(
+                "- 能力查找调用：" +
+                    "{\"name\":\"capability.search\",\"parameters\":{\"query\":\"想完成的任务\",\"limit\":5}}。"
+            )
+            appendLine(
+                "- 能力详情调用：" +
+                    "{\"name\":\"capability.describe\",\"parameters\":{\"capability_id\":\"搜索返回的 ID\"}}。"
+            )
+            appendLine(
+                "- 需要 AI Limbs 能力但不知道调用地址时，必须先调用 capability.search，" +
+                    "不得猜测工具名；需要参数、权限或前置条件时再调用 capability.describe。"
+            )
+            appendLine("- Capability Resolver 只负责发现与描述；真实执行仍走原 ToolPermissionSystem 权限链。")
             appendLine(
                 "- 当任务涉及开发、调试、开发环境管理或会改变项目/设备内容时，" +
                     "先调用 ai_limbs.work_manual.read。"
