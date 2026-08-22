@@ -332,6 +332,7 @@ data class UbuntuRuntimeStatusResultData(
         val state: String,
         val detail: String,
         val error: String? = null,
+        val idleMode: String,
         val idleTimeoutMinutes: Int? = null
 ) : ToolResultData() {
     override fun toString(): String {
@@ -340,6 +341,8 @@ data class UbuntuRuntimeStatusResultData(
             append(state)
             append("\n")
             append(detail)
+            append("\nIdle mode: ")
+            append(idleMode)
             append("\nIdle auto stop: ")
             if (idleTimeoutMinutes == null) {
                 append("keep running")
@@ -353,6 +356,21 @@ data class UbuntuRuntimeStatusResultData(
             }
         }
     }
+}
+
+/** Ubuntu 空闲自动关机策略结果。 */
+@Serializable
+data class UbuntuIdlePolicyResultData(
+        val mode: String,
+        val customMinutes: Int,
+        val timeoutMinutes: Int? = null
+) : ToolResultData() {
+    override fun toString(): String =
+        if (timeoutMinutes == null) {
+            "Ubuntu idle policy: KEEP_RUNNING"
+        } else {
+            "Ubuntu idle policy: $mode (${timeoutMinutes} minutes)"
+        }
 }
 
 /** 音乐播放结果数据 */

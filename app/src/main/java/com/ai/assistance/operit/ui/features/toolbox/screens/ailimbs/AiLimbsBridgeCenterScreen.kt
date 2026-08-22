@@ -18,33 +18,61 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsUiCapabilityService
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsUiCapabilityStatus
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.ui.components.CustomScaffold
+import kotlinx.coroutines.launch
 
 @Composable
-fun AiLimbsBridgeCenterScreen() {
+fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val lifecycleOwner = LocalLifecycleOwner.current
+    val uiCapabilities = remember { AiLimbsUiCapabilityService(context) }
+    var uiStatus by remember { mutableStateOf<AiLimbsUiCapabilityStatus?>(null) }
     val profiles = remember { AiLimbsBridgeManager.availableProfiles() }
     var activeProviderId by remember {
         mutableStateOf(AiLimbsBridgeManager.activeProviderId(context))
     }
     val runtimeState by AiLimbsBridgeManager.runtimeState.collectAsState()
+
+    fun refreshUiStatus() {
+        scope.launch {
+            uiStatus = runCatching { uiCapabilities.readStatus() }.getOrNull()
+        }
+    }
+
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                refreshUiStatus()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
 
     LaunchedEffect(runtimeState.providerId) {
         if (
@@ -102,6 +130,23 @@ fun AiLimbsBridgeCenterScreen() {
                 onAction = { action ->
                     AIForegroundService.requestBridgeAction(context, action)
                 }
+            )
+            UiCapabilityCard(
+                status = uiStatus,
+                onEnableAccessibility = {
+                    scope.launch {
+                        uiCapabilities.selectAccessibilityMode()
+                        val current = uiCapabilities.readStatus()
+                        if (!current.accessibilityProviderInstalled) {
+                            uiCapabilities.installAccessibilityProvider()
+                        } else if (!current.accessibilityServiceEnabled) {
+                            uiCapabilities.openAccessibilitySettings()
+                        }
+                        uiStatus = current
+                    }
+                },
+                onConfigureUiController = onConfigureUiController,
+                onRefresh = ::refreshUiStatus
             )
         }
     }
@@ -255,6 +300,92 @@ private fun BridgeActionsCard(
             ) {
                 Text(stringResource(bridgeActionLabel(action)))
             }
+        }
+    }
+}
+
+@Composable
+private fun UiCapabilityCard(
+    status: AiLimbsUiCapabilityStatus?,
+    onEnableAccessibility: () -> Unit,
+    onConfigureUiController: () -> Unit,
+    onRefresh: () -> Unit
+) {
+    BridgeCenterCard {
+        Text(
+            text = stringResource(R.string.ai_limbs_ui_capability_section),
+            style = MaterialTheme.typography.titleMedium
+        )
+        if (status == null) {
+            Text(stringResource(R.string.ai_limbs_ui_capability_checking))
+        } else {
+            Text(
+                stringResource(
+                    R.string.ai_limbs_ui_permission_backend,
+                    status.preferredPermissionLevel.name,
+                    status.activeBackend
+                )
+            )
+            Text(
+                stringResource(
+                    R.string.ai_limbs_ui_direct_status,
+                    stringResource(
+                        if (status.directUiReady) {
+                            R.string.ai_limbs_ui_ready
+                        } else {
+                            R.string.ai_limbs_ui_not_ready
+                        }
+                    )
+                )
+            )
+            Text(
+                stringResource(
+                    R.string.ai_limbs_ui_accessibility_status,
+                    stringResource(
+                        when {
+                            !status.accessibilityProviderInstalled ->
+                                R.string.ai_limbs_ui_provider_missing
+                            status.accessibilityServiceEnabled ->
+                                R.string.ai_limbs_ui_accessibility_enabled
+                            else -> R.string.ai_limbs_ui_accessibility_disabled
+                        }
+                    )
+                )
+            )
+            Text(
+                stringResource(
+                    R.string.ai_limbs_ui_subagent_status,
+                    stringResource(
+                        if (status.uiSubagentReady) {
+                            R.string.ai_limbs_ui_ready
+                        } else {
+                            R.string.ai_limbs_ui_not_ready
+                        }
+                    )
+                )
+            )
+            if (!status.directUiReady) {
+                Button(
+                    onClick = onEnableAccessibility,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.ai_limbs_ui_enable_accessibility))
+                }
+            }
+            if (!status.uiSubagentReady) {
+                OutlinedButton(
+                    onClick = onConfigureUiController,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(R.string.ai_limbs_ui_configure_controller))
+                }
+            }
+        }
+        OutlinedButton(
+            onClick = onRefresh,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.ai_limbs_ui_refresh_status))
         }
     }
 }

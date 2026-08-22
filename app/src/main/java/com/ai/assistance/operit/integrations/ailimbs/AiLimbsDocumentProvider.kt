@@ -201,7 +201,17 @@ class AiLimbsDocumentProvider(context: Context) {
         ensureDirectory(documentsDirectory)
         migrateLegacyDocumentsLocked()
         migrateDocumentSchemaLocked()
+        ensureDocumentFilesLocked()
         documentsReady = true
+    }
+
+    private fun ensureDocumentFilesLocked() {
+        AiLimbsDocumentId.entries.forEach { documentId ->
+            val destination = documentFile(documentId)
+            if (!destination.exists()) {
+                writeAtomically(destination, "")
+            }
+        }
     }
 
     private fun migrateLegacyDocumentsLocked() {

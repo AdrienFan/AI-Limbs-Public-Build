@@ -5588,6 +5588,8 @@
     <string name="toolreg_ubuntu_status_desc">Read the AI Limbs Ubuntu runtime status</string>
     <string name="toolreg_ubuntu_start_desc">Start the AI Limbs Ubuntu runtime</string>
     <string name="toolreg_ubuntu_stop_desc">Stop the AI Limbs Ubuntu runtime and its sessions</string>
+    <string name="toolreg_ubuntu_idle_get_desc">Read the Ubuntu idle auto-shutdown policy</string>
+    <string name="toolreg_ubuntu_idle_set_desc">Set the Ubuntu idle auto-shutdown policy to %1$s with custom minutes %2$s</string>
     <string name="toolreg_close_terminal_session_desc">Close terminal session: %1$s</string>
     <string name="toolreg_input_in_terminal_session_desc">Write input to terminal session [%1$s] (control=%2$s)</string>
     <string name="toolreg_get_terminal_session_screen_desc">Get current terminal screen content for session [%1$s] (single screen)</string>
@@ -8259,12 +8261,24 @@
 
 
     <string name="laner_access_manager_title">AI Limbs Access Manager</string>
+    <string name="ai_limbs_ui_capability_section">Vision and touch capabilities</string>
+    <string name="ai_limbs_ui_capability_checking">Checking capability status…</string>
+    <string name="ai_limbs_ui_permission_backend">Permission mode: %1$s · backend: %2$s</string>
+    <string name="ai_limbs_ui_direct_status">Page structure and direct touch: %1$s</string>
+    <string name="ai_limbs_ui_accessibility_status">Accessibility service: %1$s</string>
+    <string name="ai_limbs_ui_subagent_status">Vision subagent: %1$s</string>
+    <string name="ai_limbs_ui_ready">Ready</string>
+    <string name="ai_limbs_ui_not_ready">Not ready</string>
+    <string name="ai_limbs_ui_provider_missing">Provider app not installed</string>
+    <string name="ai_limbs_ui_accessibility_enabled">Enabled</string>
+    <string name="ai_limbs_ui_accessibility_disabled">Disabled</string>
+    <string name="ai_limbs_ui_enable_accessibility">Select Accessibility mode and authorize</string>
+    <string name="ai_limbs_ui_configure_controller">Configure vision subagent model</string>
+    <string name="ai_limbs_ui_refresh_status">Refresh capability status</string>
     <string name="laner_access_manager_desc">Manage the custom access prompt, manuals, and three-version history</string>
     <string name="laner_access_prompt_title">Custom Access Prompt</string>
     <string name="laner_work_manual_title">Work Manual</string>
     <string name="laner_tool_manual_title">Tool Manual</string>
-    <string name="laner_access_prompt_protected_hint">AI Limbs manages the protected access policy internally. Only the custom section is editable here.</string>
-    <string name="laner_work_manual_protected_hint">AI Limbs protects the manual locations and reveals them only when the work manual is read.</string>
     <string name="laner_document_history">Recent backups</string>
     <string name="laner_document_history_empty">No backups yet</string>
     <string name="laner_restore">Restore backup</string>

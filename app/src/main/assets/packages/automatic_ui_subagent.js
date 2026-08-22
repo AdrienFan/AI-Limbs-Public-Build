@@ -16,6 +16,7 @@ When the user asks you to complete a UI task (e.g. open an app, search content, 
 '''
     }
     category: "Automatic"
+    enabledByDefault: true
 
     tools: []
 

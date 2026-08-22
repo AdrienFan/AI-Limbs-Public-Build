@@ -8,6 +8,8 @@ import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolResult
 import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
+import com.ai.assistance.operit.terminal.data.UbuntuIdleMode
+import com.ai.assistance.operit.terminal.data.UbuntuIdlePolicy
 import com.ai.assistance.operit.terminal.data.UbuntuRuntimePhase
 import com.ai.assistance.operit.terminal.data.UbuntuRuntimeState
 import com.ai.assistance.operit.terminal.view.domain.ansi.TerminalChar
@@ -424,6 +426,66 @@ class StandardTerminalCommandExecutor(private val context: Context) {
         return ubuntuRuntimeToolResult(tool, state, success = true)
     }
 
+    fun getUbuntuIdlePolicy(tool: AITool): ToolResult {
+        val policy = Terminal.getInstance(context).currentUbuntuIdlePolicy()
+        return ubuntuIdlePolicyToolResult(tool, policy)
+    }
+
+    fun setUbuntuIdlePolicy(tool: AITool): ToolResult {
+        val requestedMode =
+            tool.parameters
+                .find { it.name == "mode" }
+                ?.value
+                ?.trim()
+                ?.uppercase()
+                .orEmpty()
+        val mode = UbuntuIdleMode.entries.firstOrNull { it.name == requestedMode }
+            ?: return ToolResult(
+                toolName = tool.name,
+                success = false,
+                result = StringResultData(""),
+                error =
+                    "Invalid Ubuntu idle mode. Expected one of: " +
+                        UbuntuIdleMode.entries.joinToString { it.name }
+            )
+
+        val currentPolicy = Terminal.getInstance(context).currentUbuntuIdlePolicy()
+        val customMinutesParameter =
+            tool.parameters.find { it.name == "custom_minutes" }?.value?.trim()
+        if (mode == UbuntuIdleMode.CUSTOM && customMinutesParameter.isNullOrEmpty()) {
+            return ToolResult(
+                toolName = tool.name,
+                success = false,
+                result = StringResultData(""),
+                error = "custom_minutes is required when mode is CUSTOM."
+            )
+        }
+        val parsedCustomMinutes = customMinutesParameter?.toIntOrNull()
+        if (!customMinutesParameter.isNullOrEmpty() && parsedCustomMinutes == null) {
+            return ToolResult(
+                toolName = tool.name,
+                success = false,
+                result = StringResultData(""),
+                error = "custom_minutes must be an integer."
+            )
+        }
+        val customMinutes =
+            parsedCustomMinutes ?: currentPolicy.customMinutes
+
+        return try {
+            val policy = UbuntuIdlePolicy(mode = mode, customMinutes = customMinutes)
+            val updated = Terminal.getInstance(context).updateUbuntuIdlePolicy(policy)
+            ubuntuIdlePolicyToolResult(tool, updated)
+        } catch (error: IllegalArgumentException) {
+            ToolResult(
+                toolName = tool.name,
+                success = false,
+                result = StringResultData(""),
+                error = error.message
+            )
+        }
+    }
+
     fun startUbuntu(tool: AITool): ToolResult =
         runBlocking {
             val state = Terminal.getInstance(context).startUbuntu()
@@ -458,11 +520,28 @@ class StandardTerminalCommandExecutor(private val context: Context) {
                     state = state.phase.name,
                     detail = state.detail,
                     error = state.error,
+                    idleMode = idlePolicy.mode.name,
                     idleTimeoutMinutes = idlePolicy.timeoutMinutes
                 ),
             error = if (success) null else state.error ?: state.detail
         )
     }
+
+    private fun ubuntuIdlePolicyToolResult(
+        tool: AITool,
+        policy: UbuntuIdlePolicy
+    ): ToolResult =
+        ToolResult(
+            toolName = tool.name,
+            success = true,
+            result =
+                UbuntuIdlePolicyResultData(
+                    mode = policy.mode.name,
+                    customMinutes = policy.customMinutes,
+                    timeoutMinutes = policy.timeoutMinutes
+                ),
+            error = null
+        )
 
     /** 向指定的终端会话写入输入 */
     fun inputInSession(tool: AITool): ToolResult {

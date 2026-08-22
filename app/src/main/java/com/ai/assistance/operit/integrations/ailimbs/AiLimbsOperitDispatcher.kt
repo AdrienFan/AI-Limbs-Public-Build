@@ -16,6 +16,7 @@ class AiLimbsOperitDispatcher(context: Context) {
     private val handler = AIToolHandler.getInstance(appContext)
     private val documents = AiLimbsDocumentProvider(appContext)
     private val accessContext = AiLimbsAccessContextService(appContext)
+    private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
     private val gson = Gson()
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject = when (tool) {
@@ -48,13 +49,14 @@ class AiLimbsOperitDispatcher(context: Context) {
             val changed = documents.writeToolManual(args.optString("content"))
             ok().put("document", AiLimbsDocumentId.TOOL_MANUAL.stableId).put("changed", changed)
         }
+        "ai_limbs.ui.status" -> uiCapabilityStatus()
         "operit.tools.list" -> {
             handler.registerDefaultTools()
             val names = JSONArray()
             handler.getAllToolNames().forEach { names.put(it) }
             ok().put("tools", names).put("count", names.length())
         }
-        "ubuntu.status", "ubuntu.start", "ubuntu.stop" ->
+        "ubuntu.status", "ubuntu.start", "ubuntu.stop", "ubuntu.idle.get", "ubuntu.idle.set" ->
             executeOperitTool(
                 JSONObject()
                     .put("name", tool)
@@ -94,6 +96,27 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("result", parseJsonOrString(gson.toJson(result.result)))
             .put("error", result.error ?: JSONObject.NULL)
             .put("events", JSONArray(emitted))
+    }
+
+    private suspend fun uiCapabilityStatus(): JSONObject {
+        val status = uiCapabilities.readStatus()
+        return ok()
+            .put("preferred_permission_level", status.preferredPermissionLevel.name)
+            .put("active_backend", status.activeBackend)
+            .put("selected_backend_available", status.selectedBackendAvailable)
+            .put("direct_ui_ready", status.directUiReady)
+            .put("accessibility_provider_installed", status.accessibilityProviderInstalled)
+            .put(
+                "accessibility_provider_version",
+                status.accessibilityProviderVersion ?: JSONObject.NULL
+            )
+            .put("accessibility_service_enabled", status.accessibilityServiceEnabled)
+            .put("automatic_ui_base_enabled", status.automaticUiBaseEnabled)
+            .put("automatic_ui_subagent_enabled", status.automaticUiSubagentEnabled)
+            .put("ui_controller_model", status.uiControllerModelName ?: JSONObject.NULL)
+            .put("ui_controller_image_enabled", status.uiControllerImageEnabled)
+            .put("ui_subagent_ready", status.uiSubagentReady)
+            .put("next_action", status.nextAction ?: JSONObject.NULL)
     }
 
     private fun parseJsonOrString(raw: String): Any = try {

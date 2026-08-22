@@ -52,6 +52,12 @@ private data class RestoreRequest(
     val snapshotId: String
 )
 
+private val visibleDocumentIds =
+    listOf(
+        AiLimbsDocumentId.ACCESS_PROMPT,
+        AiLimbsDocumentId.WORK_MANUAL
+    )
+
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun AiLimbsAccessManagerScreen() {
@@ -60,7 +66,6 @@ fun AiLimbsAccessManagerScreen() {
     val documents = remember { AiLimbsDocumentProvider(context) }
     var accessPrompt by remember { mutableStateOf("") }
     var workManual by remember { mutableStateOf("") }
-    var toolManual by remember { mutableStateOf("") }
     var snapshots by remember {
         mutableStateOf<Map<AiLimbsDocumentId, List<AiLimbsDocumentSnapshot>>>(emptyMap())
     }
@@ -75,9 +80,8 @@ fun AiLimbsAccessManagerScreen() {
     suspend fun loadDocuments() {
         accessPrompt = documents.readAccessPrompt()
         workManual = documents.readWorkManual()
-        toolManual = documents.readToolManual()
         val loadedSnapshots =
-            AiLimbsDocumentId.entries.associateWith { documentId ->
+            visibleDocumentIds.associateWith { documentId ->
                 documents.listSnapshots(documentId)
             }
         snapshots = loadedSnapshots
@@ -153,7 +157,6 @@ fun AiLimbsAccessManagerScreen() {
         ) {
             DocumentEditorCard(
                 title = stringResource(R.string.laner_access_prompt_title),
-                supportingText = stringResource(R.string.laner_access_prompt_protected_hint),
                 value = accessPrompt,
                 onValueChange = { accessPrompt = it },
                 minLines = 5,
@@ -178,7 +181,6 @@ fun AiLimbsAccessManagerScreen() {
             )
             DocumentEditorCard(
                 title = stringResource(R.string.laner_work_manual_title),
-                supportingText = stringResource(R.string.laner_work_manual_protected_hint),
                 value = workManual,
                 onValueChange = { workManual = it },
                 minLines = 14,
@@ -197,30 +199,6 @@ fun AiLimbsAccessManagerScreen() {
                         AiLimbsDocumentId.WORK_MANUAL,
                         workManual,
                         R.string.laner_work_manual_saved
-                    )
-                }
-            )
-            DocumentEditorCard(
-                title = stringResource(R.string.laner_tool_manual_title),
-                supportingText = null,
-                value = toolManual,
-                onValueChange = { toolManual = it },
-                minLines = 12,
-                snapshots = snapshots[AiLimbsDocumentId.TOOL_MANUAL].orEmpty(),
-                selectedSnapshotId = selectedSnapshots[AiLimbsDocumentId.TOOL_MANUAL],
-                onSnapshotSelected = { snapshotId ->
-                    selectedSnapshots =
-                        selectedSnapshots + (AiLimbsDocumentId.TOOL_MANUAL to snapshotId)
-                },
-                onRestore = { snapshotId ->
-                    restoreRequest = RestoreRequest(AiLimbsDocumentId.TOOL_MANUAL, snapshotId)
-                },
-                onReload = { reload(showConfirmation = true) },
-                onSave = {
-                    saveDocument(
-                        AiLimbsDocumentId.TOOL_MANUAL,
-                        toolManual,
-                        R.string.laner_tool_manual_saved
                     )
                 }
             )
@@ -280,7 +258,6 @@ fun AiLimbsAccessManagerScreen() {
 @Composable
 private fun DocumentEditorCard(
     title: String,
-    supportingText: String?,
     value: String,
     onValueChange: (String) -> Unit,
     minLines: Int,
@@ -303,13 +280,6 @@ private fun DocumentEditorCard(
             verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             Text(title, style = MaterialTheme.typography.titleMedium)
-            supportingText?.let { text ->
-                Text(
-                    text,
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
             OutlinedTextField(
                 value = value,
                 onValueChange = onValueChange,

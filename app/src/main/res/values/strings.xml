@@ -6040,6 +6040,8 @@
     <string name="toolreg_ubuntu_status_desc">查询 AI Limbs Ubuntu 运行时状态</string>
     <string name="toolreg_ubuntu_start_desc">启动 AI Limbs Ubuntu 运行时</string>
     <string name="toolreg_ubuntu_stop_desc">停止 AI Limbs Ubuntu 运行时及其会话</string>
+    <string name="toolreg_ubuntu_idle_get_desc">查询 Ubuntu 空闲自动关机策略</string>
+    <string name="toolreg_ubuntu_idle_set_desc">将 Ubuntu 空闲自动关机策略设为 %1$s；自定义分钟数为 %2$s</string>
     <string name="toolreg_close_terminal_session_desc">关闭终端会话: %1$s</string>
     <string name="toolreg_input_in_terminal_session_desc">向终端会话「%1$s」写入输入（control=%2$s）</string>
     <string name="toolreg_get_terminal_session_screen_desc">获取终端会话「%1$s」当前屏幕内容（单屏）</string>
@@ -8251,6 +8253,20 @@
 
     <string name="ai_limbs_bridge_center_title">Bridge Center</string>
     <string name="ai_limbs_bridge_center_desc">管理 AI Limbs 的桥接 Provider、状态与连接动作</string>
+    <string name="ai_limbs_ui_capability_section">视觉与触控能力</string>
+    <string name="ai_limbs_ui_capability_checking">正在检查能力状态…</string>
+    <string name="ai_limbs_ui_permission_backend">权限模式：%1$s · 后端：%2$s</string>
+    <string name="ai_limbs_ui_direct_status">页面结构与直接触控：%1$s</string>
+    <string name="ai_limbs_ui_accessibility_status">无障碍服务：%1$s</string>
+    <string name="ai_limbs_ui_subagent_status">视觉子代理：%1$s</string>
+    <string name="ai_limbs_ui_ready">已就绪</string>
+    <string name="ai_limbs_ui_not_ready">未就绪</string>
+    <string name="ai_limbs_ui_provider_missing">服务组件未安装</string>
+    <string name="ai_limbs_ui_accessibility_enabled">已启用</string>
+    <string name="ai_limbs_ui_accessibility_disabled">未启用</string>
+    <string name="ai_limbs_ui_enable_accessibility">选择无障碍模式并授权</string>
+    <string name="ai_limbs_ui_configure_controller">配置视觉子代理模型</string>
+    <string name="ai_limbs_ui_refresh_status">刷新能力状态</string>
     <string name="ai_limbs_bridge_provider_section">Bridge Provider</string>
     <string name="ai_limbs_bridge_profile_metadata">ID：%1$s · 类型：%2$s</string>
     <string name="ai_limbs_bridge_enabled">已启用</string>
@@ -8281,8 +8297,6 @@
     <string name="laner_access_prompt_title">自定义接入提示</string>
     <string name="laner_work_manual_title">工作手册</string>
     <string name="laner_tool_manual_title">工具手册</string>
-    <string name="laner_access_prompt_protected_hint">刚性接入策略由 AI Limbs 内部管理，此处只编辑可自定义部分。</string>
-    <string name="laner_work_manual_protected_hint">手册定位与工具手册入口由系统保护，只在兰儿读取工作手册时提供。</string>
     <string name="laner_document_history">最近备份</string>
     <string name="laner_document_history_empty">暂无备份</string>
     <string name="laner_restore">恢复备份</string>

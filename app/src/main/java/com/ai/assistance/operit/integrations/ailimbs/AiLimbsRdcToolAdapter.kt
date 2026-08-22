@@ -148,7 +148,9 @@ class AiLimbsRdcToolAdapter(
     }
 
     private fun isAiLimbsCoreTool(name: String): Boolean =
-        name.startsWith("ai_limbs.") || name.startsWith("laner.")
+        name.startsWith("ai_limbs.") ||
+            name.startsWith("laner.") ||
+            name == "operit.tools.list"
 
     private fun managedDocumentTool(path: String, write: Boolean): String? {
         val normalizedPath = path.replace('\\', '/')

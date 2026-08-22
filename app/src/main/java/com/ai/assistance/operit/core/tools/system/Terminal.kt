@@ -161,6 +161,9 @@ class Terminal private constructor(private val context: Context) {
     fun currentUbuntuIdlePolicy(): UbuntuIdlePolicy =
         terminalManager.currentUbuntuIdlePolicy()
 
+    fun updateUbuntuIdlePolicy(policy: UbuntuIdlePolicy): UbuntuIdlePolicy =
+        terminalManager.updateUbuntuIdlePolicy(policy)
+
     suspend fun startUbuntu(): UbuntuRuntimeState = terminalManager.startUbuntu()
 
     suspend fun stopUbuntu(): UbuntuRuntimeState = terminalManager.stopUbuntu()

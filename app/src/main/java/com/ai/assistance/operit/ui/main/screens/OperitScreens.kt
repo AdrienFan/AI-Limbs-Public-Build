@@ -587,7 +587,9 @@ sealed class Screen(
                 onError: (String) -> Unit,
                 onGestureConsumed: (Boolean) -> Unit
         ) {
-            AiLimbsBridgeCenterScreen()
+            AiLimbsBridgeCenterScreen(
+                onConfigureUiController = { navigateTo(AutoGlmOneClick) }
+            )
         }
     }
 

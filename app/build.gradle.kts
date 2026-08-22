@@ -434,10 +434,10 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ".ailimbs.v054"
-            versionNameSuffix = "-ai-limbs-v0.5.4-build2"
+            applicationIdSuffix = ".ailimbs.v055"
+            versionNameSuffix = "-ai-limbs-v0.5.5-build1"
             signingConfig = signingConfigs.getByName("debug")
-            resValue("string", "app_name", "AI Limbs v0.5.4")
+            resValue("string", "app_name", "AI Limbs v0.5.5")
         }
         create("clone") {
             initWith(getByName("debug"))

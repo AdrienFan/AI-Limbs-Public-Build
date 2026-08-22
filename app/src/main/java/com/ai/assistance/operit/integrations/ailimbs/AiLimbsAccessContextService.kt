@@ -40,7 +40,28 @@ class AiLimbsAccessContextService(context: Context) {
                     "ubuntu.stop。"
             )
             appendLine(
-                "- ubuntu.status/start/stop 与 AI Limbs 文档工具通过 shell=operit 调用。"
+                "- 查询空闲策略调用 " +
+                    "{\"name\":\"ubuntu.idle.get\",\"parameters\":{}}；修改时调用 " +
+                    "ubuntu.idle.set，mode 可选 KEEP_RUNNING、MINUTES_10、MINUTES_15、" +
+                    "MINUTES_30、MINUTES_60、CUSTOM。"
+            )
+            appendLine(
+                "- ubuntu.idle.set 的 CUSTOM 模式必须提供 custom_minutes（1–1440）；" +
+                    "例如 {\"name\":\"ubuntu.idle.set\",\"parameters\":" +
+                    "{\"mode\":\"CUSTOM\",\"custom_minutes\":20}}。"
+            )
+            appendLine(
+                "- ubuntu.status/start/stop/idle.get/idle.set 与 AI Limbs 文档工具通过 " +
+                    "shell=operit 调用。"
+            )
+            appendLine(
+                "- 操作手机界面前先调用 " +
+                    "{\"name\":\"ai_limbs.ui.status\",\"parameters\":{}}；" +
+                    "direct_ui_ready=false 时按 next_action 请求用户完成授权，不得假定页面结构与触控已经可用。"
+            )
+            appendLine(
+                "- direct_ui_ready=true 后可使用 get_page_info、click_element、tap、swipe、" +
+                    "set_input_text 与 press_key；ui_subagent_ready=true 后才调用视觉子代理。"
             )
             appendLine("- 所有 Operit 调用继续遵守 ALLOW / ASK / FORBID 权限语义。")
             appendLine()

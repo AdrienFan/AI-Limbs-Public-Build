@@ -389,6 +389,27 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
     )
 
     handler.registerTool(
+            name = "ubuntu.idle.get",
+            descriptionGenerator = { s(R.string.toolreg_ubuntu_idle_get_desc) },
+            executor = { tool ->
+                ToolGetter.getTerminalCommandExecutor(context).getUbuntuIdlePolicy(tool)
+            }
+    )
+
+    handler.registerTool(
+            name = "ubuntu.idle.set",
+            descriptionGenerator = { tool ->
+                val mode = tool.parameters.find { it.name == "mode" }?.value.orEmpty()
+                val customMinutes =
+                    tool.parameters.find { it.name == "custom_minutes" }?.value.orEmpty()
+                s(R.string.toolreg_ubuntu_idle_set_desc, mode, customMinutes)
+            },
+            executor = { tool ->
+                ToolGetter.getTerminalCommandExecutor(context).setUbuntuIdlePolicy(tool)
+            }
+    )
+
+    handler.registerTool(
             name = "close_terminal_session",
             descriptionGenerator = { tool ->
                 val sessionId = tool.parameters.find { it.name == "session_id" }?.value
@@ -1911,9 +1932,6 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             executor = { tool -> runBlocking(Dispatchers.IO) { fileSystemTools.deleteFile(tool) } }
     )
 
-    // UI自动化工具
-    val uiTools = ToolGetter.getUITools(context)
-
     // 点击元素
     handler.registerTool(
             name = "click_element",
@@ -1940,7 +1958,9 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { uiTools.clickElement(it) }
+                    executeUiToolWithVisibility(tool) {
+                        ToolGetter.getUITools(context).clickElement(it)
+                    }
                 }
             }
     )
@@ -1955,7 +1975,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { uiTools.tap(it) }
+                    executeUiToolWithVisibility(tool) { ToolGetter.getUITools(context).tap(it) }
                 }
             }
     )
@@ -1969,7 +1989,9 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { uiTools.longPress(it) }
+                    executeUiToolWithVisibility(tool) {
+                        ToolGetter.getUITools(context).longPress(it)
+                    }
                 }
             }
     )
@@ -2633,7 +2655,9 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             descriptionGenerator = { _ -> s(R.string.toolreg_get_page_info_desc) },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { uiTools.getPageInfo(it) }
+                    executeUiToolWithVisibility(tool) {
+                        ToolGetter.getUITools(context).getPageInfo(it)
+                    }
                 }
             }
     )
@@ -2648,7 +2672,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                         showStatusIndicator = false,
                         delayMs = 200
                     ) { t ->
-                        val (path, _) = uiTools.captureScreenshot(t)
+                        val (path, _) = ToolGetter.getUITools(context).captureScreenshot(t)
                         if (path.isNullOrBlank()) {
                             ToolResult(toolName = t.name, success = false, result = StringResultData(""), error = "Screenshot failed")
                         } else {
@@ -2673,7 +2697,11 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                     append(s(R.string.toolreg_run_ui_subagent_hint))
                 }
             },
-            executor = { tool -> runBlocking(Dispatchers.IO) { uiTools.runUiSubAgent(tool) } }
+            executor = { tool ->
+                runBlocking(Dispatchers.IO) {
+                    ToolGetter.getUITools(context).runUiSubAgent(tool)
+                }
+            }
     )
 
     // 在输入框中设置文本
@@ -2685,7 +2713,9 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { uiTools.setInputText(it) }
+                    executeUiToolWithVisibility(tool) {
+                        ToolGetter.getUITools(context).setInputText(it)
+                    }
                 }
             }
     )
@@ -2699,7 +2729,9 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { uiTools.pressKey(it) }
+                    executeUiToolWithVisibility(tool) {
+                        ToolGetter.getUITools(context).pressKey(it)
+                    }
                 }
             }
     )
@@ -2716,7 +2748,9 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { uiTools.swipe(it) }
+                    executeUiToolWithVisibility(tool) {
+                        ToolGetter.getUITools(context).swipe(it)
+                    }
                 }
             }
     )
