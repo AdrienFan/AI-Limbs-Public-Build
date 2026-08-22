@@ -8277,12 +8277,25 @@
     <string name="ai_limbs_bridge_action_refresh">刷新状态</string>
 
     <string name="laner_access_manager_title">兰儿接入管理</string>
-    <string name="laner_access_manager_desc">管理兰儿接入提示与工作手册</string>
-    <string name="laner_access_prompt_title">接入提示</string>
+    <string name="laner_access_manager_desc">管理自定义接入提示、工作手册、工具手册与三代备份</string>
+    <string name="laner_access_prompt_title">自定义接入提示</string>
     <string name="laner_work_manual_title">工作手册</string>
+    <string name="laner_tool_manual_title">工具手册</string>
+    <string name="laner_access_prompt_protected_hint">刚性接入策略由 AI Limbs 内部管理，此处只编辑可自定义部分。</string>
+    <string name="laner_work_manual_protected_hint">手册定位与工具手册入口由系统保护，只在兰儿读取工作手册时提供。</string>
+    <string name="laner_document_history">最近备份</string>
+    <string name="laner_document_history_empty">暂无备份</string>
+    <string name="laner_restore">恢复备份</string>
+    <string name="laner_restore_confirm_title">恢复文档备份？</string>
+    <string name="laner_restore_confirm_message">将恢复“%1$s”的所选版本。当前内容会先自动保存为备份。</string>
+    <string name="laner_restore_confirm">确认恢复</string>
+    <string name="laner_cancel">取消</string>
     <string name="laner_reload">重新读取</string>
     <string name="laner_save">保存</string>
     <string name="laner_access_reloaded">已重新读取</string>
     <string name="laner_access_saved">接入提示已保存</string>
     <string name="laner_work_manual_saved">工作手册已保存</string>
+    <string name="laner_tool_manual_saved">工具手册已保存</string>
+    <string name="laner_document_unchanged">内容没有变化</string>
+    <string name="laner_document_restored">备份已恢复</string>
 </resources>

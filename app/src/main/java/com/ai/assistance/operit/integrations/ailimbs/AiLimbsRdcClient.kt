@@ -49,7 +49,7 @@ class AiLimbsRdcClient(
 ) {
     private val appContext = context.applicationContext
     private val dispatcher = AiLimbsOperitDispatcher(appContext)
-    private val documents = AiLimbsDocumentProvider(appContext)
+    private val accessContext = AiLimbsAccessContextService(appContext)
     private val adapter = AiLimbsRdcToolAdapter(dispatcher)
     private val httpClient =
         OkHttpClient.Builder()
@@ -61,7 +61,7 @@ class AiLimbsRdcClient(
     )
     val state = stateFlow.asStateFlow()
     private var runJob: Job? = null
-    private var lastSentAccessPrompt: String? = null
+    private var lastSentAccessContext: String? = null
     private var activeAuthorization: DeviceAuth? = null
     private var reconnectAttempt: Int = 0
     private val activeCallJobs = ConcurrentHashMap<String, Job>()
@@ -161,7 +161,7 @@ class AiLimbsRdcClient(
         cancelActiveCalls("manual re-pair")
         clearSession()
         activeAuthorization = null
-        lastSentAccessPrompt = null
+        lastSentAccessContext = null
         reconnectAttempt = 0
         updateState(
             AiLimbsBridgePhase.STARTING,
@@ -567,9 +567,9 @@ class AiLimbsRdcClient(
                     else -> adapter.execute(toolName, args)
                 }
             if (toolName == "ping") {
-                lastSentAccessPrompt = null
+                lastSentAccessContext = null
             }
-            val result = attachDynamicAccessPrompt(rawResult)
+            val result = attachAccessContext(rawResult)
             updateCall(
                 info,
                 session,
@@ -595,37 +595,18 @@ class AiLimbsRdcClient(
         }
     }
 
-    private suspend fun attachDynamicAccessPrompt(result: JSONObject): JSONObject {
-        val prompt = try {
-            documents.readAccessPrompt()
+    private suspend fun attachAccessContext(result: JSONObject): JSONObject {
+        val context = try {
+            accessContext.readAccessContext()
         } catch (e: Exception) {
-            AppLogger.w(TAG, "Unable to read dynamic AI Limbs access prompt", e)
+            AppLogger.w(TAG, "Unable to build AI Limbs access context", e)
             return result
         }
-        if (prompt == lastSentAccessPrompt) return result
-        lastSentAccessPrompt = prompt
-        val handshake = buildString {
-            appendLine("[AI Limbs dynamic access prompt]")
-            appendLine("Path: ${documents.accessPromptPath}")
-            appendLine(prompt.ifBlank { "(empty)" })
-            appendLine()
-            appendLine("[AI Limbs RDC bridge]")
-            appendLine("- Ubuntu is an optional AI Limbs sandbox with an explicit lifecycle.")
-            appendLine("- Use ubuntu.status, ubuntu.start, and ubuntu.stop to manage it.")
-            appendLine(
-                "- Normal start_process runs in Ubuntu and will not auto-start it when stopped."
-            )
-            appendLine("- A stopped runtime returns: Ubuntu is stopped. Call ubuntu.start first.")
-            appendLine("- shell=android routes command through Operit execute_shell.")
-            appendLine(
-                "- shell=operit expects command JSON: " +
-                    "{\"name\":\"tool_name\",\"parameters\":{...}}."
-            )
-            append("- All Operit calls keep ALLOW / ASK / FORBID permission semantics.")
-        }
+        if (context == lastSentAccessContext) return result
+        lastSentAccessContext = context
         val oldContent = result.optJSONArray("content") ?: JSONArray()
         val newContent = JSONArray().put(
-            JSONObject().put("type", "text").put("text", handshake)
+            JSONObject().put("type", "text").put("text", context)
         )
         for (index in 0 until oldContent.length()) {
             newContent.put(oldContent.opt(index))

@@ -331,7 +331,8 @@ data class HiddenTerminalCommandResultData(
 data class UbuntuRuntimeStatusResultData(
         val state: String,
         val detail: String,
-        val error: String? = null
+        val error: String? = null,
+        val idleTimeoutMinutes: Int? = null
 ) : ToolResultData() {
     override fun toString(): String {
         return buildString {
@@ -339,6 +340,13 @@ data class UbuntuRuntimeStatusResultData(
             append(state)
             append("\n")
             append(detail)
+            append("\nIdle auto stop: ")
+            if (idleTimeoutMinutes == null) {
+                append("keep running")
+            } else {
+                append(idleTimeoutMinutes)
+                append(" minutes")
+            }
             if (!error.isNullOrBlank()) {
                 append("\nError: ")
                 append(error)

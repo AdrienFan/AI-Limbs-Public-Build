@@ -8,6 +8,7 @@ import com.ai.assistance.operit.terminal.CommandExecutionEvent
 import com.ai.assistance.operit.terminal.SessionDirectoryEvent
 import com.ai.assistance.operit.terminal.TerminalManager
 import com.ai.assistance.operit.terminal.data.TerminalState
+import com.ai.assistance.operit.terminal.data.UbuntuIdlePolicy
 import com.ai.assistance.operit.terminal.data.UbuntuRuntimePhase
 import com.ai.assistance.operit.terminal.data.UbuntuRuntimeState
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
@@ -59,6 +60,7 @@ class Terminal private constructor(private val context: Context) {
     val interactivePrompt = terminalManager.interactivePrompt
     val isFullscreen = terminalManager.isFullscreen
     val ubuntuRuntimeState: StateFlow<UbuntuRuntimeState> = terminalManager.ubuntuRuntimeState
+    val ubuntuIdlePolicy: StateFlow<UbuntuIdlePolicy> = terminalManager.ubuntuIdlePolicy
 
     /**
      * 初始化终端管理器
@@ -155,6 +157,9 @@ class Terminal private constructor(private val context: Context) {
 
     fun currentUbuntuRuntimeState(): UbuntuRuntimeState =
         terminalManager.currentUbuntuRuntimeState()
+
+    fun currentUbuntuIdlePolicy(): UbuntuIdlePolicy =
+        terminalManager.currentUbuntuIdlePolicy()
 
     suspend fun startUbuntu(): UbuntuRuntimeState = terminalManager.startUbuntu()
 

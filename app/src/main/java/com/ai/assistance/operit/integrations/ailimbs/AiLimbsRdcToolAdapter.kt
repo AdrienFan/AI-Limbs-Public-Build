@@ -5,8 +5,8 @@ import org.json.JSONObject
 
 /**
  * Adapts the fixed Desktop Commander tool surface to Operit's native tools.
- * Every side-effecting operation still enters ToolExecutionManager and therefore
- * keeps ALLOW / ASK / FORBID semantics unchanged.
+ * Operit tools still enter ToolExecutionManager and keep ALLOW / ASK / FORBID semantics. AI Limbs
+ * managed documents route through their versioned core provider instead of raw filesystem writes.
  */
 class AiLimbsRdcToolAdapter(
     private val dispatcher: AiLimbsOperitDispatcher
@@ -22,6 +22,9 @@ class AiLimbsRdcToolAdapter(
 
     private suspend fun readFile(args: JSONObject): JSONObject {
         val path = args.optString("path")
+        managedDocumentTool(path, write = false)?.let { tool ->
+            return mcpResult(dispatcher.execute(tool, JSONObject()))
+        }
         val offset = args.optInt("offset", 0).coerceAtLeast(0)
         val length = args.optInt("length", 0).coerceAtLeast(0)
         val params = JSONObject()
@@ -38,6 +41,17 @@ class AiLimbsRdcToolAdapter(
 
     private suspend fun writeFile(args: JSONObject): JSONObject {
         val path = args.optString("path")
+        managedDocumentTool(path, write = true)?.let { tool ->
+            if (args.optString("mode").equals("append", ignoreCase = true)) {
+                return mcpError("AI Limbs managed documents require a full body save")
+            }
+            return mcpResult(
+                dispatcher.execute(
+                    tool,
+                    JSONObject().put("content", args.optString("content"))
+                )
+            )
+        }
         val params = JSONObject()
             .put("path", path)
             .put("content", args.optString("content"))
@@ -66,7 +80,13 @@ class AiLimbsRdcToolAdapter(
             val name = request.optString("name").trim()
             if (name.isBlank()) return mcpError("shell=operit requires a tool name")
             val parameters = request.optJSONObject("parameters") ?: JSONObject()
-            return mcpResult(executeOperit(name, parameters))
+            val result =
+                if (isAiLimbsCoreTool(name)) {
+                    dispatcher.execute(name, parameters)
+                } else {
+                    executeOperit(name, parameters)
+                }
+            return mcpResult(result)
         }
 
         if (shell == "android") {
@@ -89,7 +109,14 @@ class AiLimbsRdcToolAdapter(
     private suspend fun executeSameNamedOperitTool(
         toolName: String,
         args: JSONObject
-    ): JSONObject = mcpResult(executeOperit(toolName, args))
+    ): JSONObject =
+        mcpResult(
+            if (isAiLimbsCoreTool(toolName)) {
+                dispatcher.execute(toolName, args)
+            } else {
+                executeOperit(toolName, args)
+            }
+        )
 
     private suspend fun executeOperit(name: String, params: JSONObject): JSONObject =
         dispatcher.execute(
@@ -117,6 +144,21 @@ class AiLimbsRdcToolAdapter(
             "linux"
         } else {
             "android"
+        }
+    }
+
+    private fun isAiLimbsCoreTool(name: String): Boolean =
+        name.startsWith("ai_limbs.") || name.startsWith("laner.")
+
+    private fun managedDocumentTool(path: String, write: Boolean): String? {
+        val normalizedPath = path.replace('\\', '/')
+        if (!normalizedPath.contains("/ai_limbs/docs/")) return null
+        val action = if (write) "write" else "read"
+        return when (normalizedPath.substringAfterLast('/')) {
+            "LANER_ACCESS_PROMPT.md" -> "ai_limbs.access_prompt.$action"
+            "LANER_WORK_MANUAL.md" -> "ai_limbs.work_manual.$action"
+            "LANER_TOOL_MANUAL.md" -> "ai_limbs.tool_manual.$action"
+            else -> null
         }
     }
 

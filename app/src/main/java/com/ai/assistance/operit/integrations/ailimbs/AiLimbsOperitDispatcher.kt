@@ -15,18 +15,38 @@ class AiLimbsOperitDispatcher(context: Context) {
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
     private val documents = AiLimbsDocumentProvider(appContext)
+    private val accessContext = AiLimbsAccessContextService(appContext)
     private val gson = Gson()
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject = when (tool) {
-        "ai_limbs.access_prompt.read", "laner.access_prompt.read" -> ok().put("path", documents.accessPromptPath).put("content", documents.readAccessPrompt())
+        "ai_limbs.access_context.read" ->
+            ok()
+                .put("document", "access_context")
+                .put("content", accessContext.readAccessContext())
+        "ai_limbs.access_prompt.read", "laner.access_prompt.read" ->
+            ok()
+                .put("document", AiLimbsDocumentId.ACCESS_PROMPT.stableId)
+                .put("content", documents.readAccessPrompt())
         "ai_limbs.access_prompt.write", "laner.access_prompt.write" -> {
-            documents.writeAccessPrompt(args.optString("content"))
-            ok().put("path", documents.accessPromptPath)
+            val changed = documents.writeAccessPrompt(args.optString("content"))
+            ok().put("document", AiLimbsDocumentId.ACCESS_PROMPT.stableId).put("changed", changed)
         }
-        "ai_limbs.work_manual.read", "laner.work_manual.read" -> ok().put("path", documents.workManualPath).put("content", documents.readWorkManual())
+        "ai_limbs.work_manual.read", "laner.work_manual.read" ->
+            ok()
+                .put("document", AiLimbsDocumentId.WORK_MANUAL.stableId)
+                .put("content", documents.readWorkManualForAgent())
+                .put("editable_content", documents.readWorkManual())
         "ai_limbs.work_manual.write", "laner.work_manual.write" -> {
-            documents.writeWorkManual(args.optString("content"))
-            ok().put("path", documents.workManualPath)
+            val changed = documents.writeWorkManual(args.optString("content"))
+            ok().put("document", AiLimbsDocumentId.WORK_MANUAL.stableId).put("changed", changed)
+        }
+        "ai_limbs.tool_manual.read" ->
+            ok()
+                .put("document", AiLimbsDocumentId.TOOL_MANUAL.stableId)
+                .put("content", documents.readToolManual())
+        "ai_limbs.tool_manual.write" -> {
+            val changed = documents.writeToolManual(args.optString("content"))
+            ok().put("document", AiLimbsDocumentId.TOOL_MANUAL.stableId).put("changed", changed)
         }
         "operit.tools.list" -> {
             handler.registerDefaultTools()

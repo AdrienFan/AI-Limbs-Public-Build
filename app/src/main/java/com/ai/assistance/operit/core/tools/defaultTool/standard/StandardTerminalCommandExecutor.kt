@@ -448,18 +448,21 @@ class StandardTerminalCommandExecutor(private val context: Context) {
         tool: AITool,
         state: UbuntuRuntimeState,
         success: Boolean
-    ): ToolResult =
-        ToolResult(
+    ): ToolResult {
+        val idlePolicy = Terminal.getInstance(context).currentUbuntuIdlePolicy()
+        return ToolResult(
             toolName = tool.name,
             success = success,
             result =
                 UbuntuRuntimeStatusResultData(
                     state = state.phase.name,
                     detail = state.detail,
-                    error = state.error
+                    error = state.error,
+                    idleTimeoutMinutes = idlePolicy.timeoutMinutes
                 ),
             error = if (success) null else state.error ?: state.detail
         )
+    }
 
     /** 向指定的终端会话写入输入 */
     fun inputInSession(tool: AITool): ToolResult {
