@@ -253,7 +253,7 @@ object ScreenRouteRegistry {
                 titleResId = R.string.tool_terminal,
                 descriptionResId = R.string.tool_terminal_desc,
                 icon = Icons.Default.Terminal,
-                order = 80
+                order = 1
             ),
             hostEntryDefinition(
                 entryId = "toolbox.ai_limbs_bridge_center",
@@ -262,7 +262,7 @@ object ScreenRouteRegistry {
                 titleResId = R.string.ai_limbs_bridge_center_title,
                 descriptionResId = R.string.ai_limbs_bridge_center_desc,
                 icon = Icons.Default.DeviceHub,
-                order = 84
+                order = 4
             ),
             hostEntryDefinition(
                 entryId = "toolbox.laner_access_manager",
@@ -271,7 +271,7 @@ object ScreenRouteRegistry {
                 titleResId = R.string.laner_access_manager_title,
                 descriptionResId = R.string.laner_access_manager_desc,
                 icon = Icons.Default.DeviceHub,
-                order = 85
+                order = 3
             ),
             hostEntryDefinition(
                 entryId = "toolbox.ui_debugger",
@@ -298,7 +298,7 @@ object ScreenRouteRegistry {
                 titleResId = R.string.tool_shell_executor,
                 descriptionResId = R.string.tool_shell_executor_desc,
                 icon = Icons.Default.Code,
-                order = 110
+                order = 2
             ),
             hostEntryDefinition(
                 entryId = "toolbox.logcat",

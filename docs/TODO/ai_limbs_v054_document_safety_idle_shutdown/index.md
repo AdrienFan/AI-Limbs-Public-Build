@@ -20,9 +20,13 @@ Ubuntu has explicit `STOPPED`, `STARTING`, `RUNNING`, `STOPPING`, and `ERROR` li
 - Remove implementation paths from normal UI and bridge payloads
 - Deliver provider-neutral access context made from protected and editable sections
 - Add safe Ubuntu idle shutdown with presets, a custom-minute option, and long-running mode
+- Package V0.5.4 as an independently installable test app beside V0.5.3
+- Place the four most-used AI Limbs tools first in the toolbox
 
 ## Scope
 
-The main app owns document storage, history, access-context composition, and recovery UI. The Terminal submodule owns Ubuntu activity state, the idle timer, persisted policy, and terminal controls. V0.5.3 remains unchanged on its existing branch.
+The main app owns document storage, history, access-context composition, recovery UI, package identity, and toolbox ordering. The Terminal submodule owns Ubuntu activity state, the idle timer, persisted policy, and terminal controls. V0.5.3 remains unchanged on its existing branch and installed application identity.
+
+- [Independent test package and toolbox order](./3_testing_package_and_toolbox_order.md) [DONE]
 
 [DONE]
