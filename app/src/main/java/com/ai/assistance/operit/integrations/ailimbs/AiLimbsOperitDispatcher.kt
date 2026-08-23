@@ -7,8 +7,15 @@ import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolInvocation
 import com.ai.assistance.operit.data.model.ToolParameter
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatRequest
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -19,6 +26,7 @@ class AiLimbsOperitDispatcher(context: Context) {
     private val accessContext = AiLimbsAccessContextService(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
     private val capabilityResolver = AiLimbsCapabilityResolver(appContext)
+    private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val gson = Gson()
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject = when (tool) {
@@ -65,6 +73,13 @@ class AiLimbsOperitDispatcher(context: Context) {
         "ai_limbs.core.status" -> coreStatus()
         "ai_limbs.dispatcher.status" -> dispatcherStatus()
         "ai_limbs.ubuntu.share.status" -> sharedUbuntuStatus()
+        "ai_limbs.chat.status" -> lanerChatStatus()
+        "ai_limbs.chat.session.open" -> lanerChatSessionOpen(args)
+        "ai_limbs.chat.session.close" -> lanerChatSessionClose(args)
+        "ai_limbs.chat.notification.check" -> lanerChatNotificationCheck(args)
+        "ai_limbs.chat.notification.wait" -> lanerChatNotificationWait(args)
+        "ai_limbs.chat.inbox.fetch" -> lanerChatInboxFetch(args)
+        "ai_limbs.chat.reply" -> lanerChatReply(args)
         "ai_limbs.ui.status" -> uiCapabilityStatus()
         "operit.tools.list" -> {
             handler.registerDefaultTools()
@@ -151,7 +166,8 @@ class AiLimbsOperitDispatcher(context: Context) {
                         "AI Limbs Core",
                         "AI Limbs Capability Resolver",
                         "AI Limbs Tool Dispatcher",
-                        "AI Limbs Ubuntu Runtime"
+                        "AI Limbs Ubuntu Runtime",
+                        "AI Limbs Laner Chat Bridge"
                     )
                 )
             )
@@ -177,6 +193,138 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("participant_count", usage.participantCount)
             .put("user_interface_clients", usage.userInterfaceClients)
             .put("hidden_ai_operations", usage.hiddenAiOperations)
+    }
+
+    private fun lanerChatStatus(): JSONObject {
+        val mailbox = lanerChat.snapshot()
+        val bridge = AiLimbsBridgeManager.runtimeState.value
+        val agentOnline =
+            mailbox.lastAgentSeenAtMs?.let { lastSeen ->
+                System.currentTimeMillis() - lastSeen <= LanerChatContract.AGENT_ONLINE_WINDOW_MS
+            } ?: false
+        return ok()
+            .put("module", "AI Limbs Laner Chat Bridge")
+            .put("protocol_version", 1)
+            .put("provider_type_id", LanerChatContract.PROVIDER_TYPE_ID)
+            .put("bridge_provider", bridge.providerId)
+            .put("bridge_phase", bridge.phase.name)
+            .put("active_session_id", mailbox.activeSessionId ?: JSONObject.NULL)
+            .put("agent_session_online", agentOnline)
+            .put("last_agent_seen_at", isoTime(mailbox.lastAgentSeenAtMs))
+            .put("latest_seq", mailbox.latestSeq)
+            .put("unread_count", mailbox.pendingCount)
+            .put("pending_reply_count", mailbox.unresolvedCount)
+            .put("answered_count", mailbox.answeredCount)
+            .put("canceled_count", mailbox.canceledCount)
+            .put("notification_contains_body", false)
+    }
+
+    private fun lanerChatSessionOpen(args: JSONObject): JSONObject {
+        val opened =
+            lanerChat.openSession(
+                requestedSessionId = args.optString("session_id").ifBlank { null },
+                agentSessionId = args.optString("agent_session_id").ifBlank { null }
+            )
+        return ok()
+            .put("session_id", opened.session.sessionId)
+            .put("status", opened.session.status.name)
+            .put("last_user_seq", opened.lastUserSeq)
+            .put("last_reply_seq", opened.lastReplySeq)
+            .put("pending_reply_count", opened.pendingRequests)
+            .put("last_agent_seen_at", isoTime(opened.session.lastAgentSeenAtMs))
+    }
+
+    private fun lanerChatSessionClose(args: JSONObject): JSONObject {
+        val closed = lanerChat.closeSession(args.optString("session_id").ifBlank { null })
+        return ok()
+            .put("session_id", closed.sessionId)
+            .put("status", closed.status.name)
+            .put("closed_at", isoTime(closed.closedAtMs))
+    }
+
+    private fun lanerChatNotificationCheck(args: JSONObject): JSONObject {
+        val notification =
+            lanerChat.notification(
+                afterSeq = args.optLong("after_seq", 0L),
+                sessionId = args.optString("session_id").ifBlank { null }
+            )
+        return notificationJson(notification)
+    }
+
+    private suspend fun lanerChatNotificationWait(args: JSONObject): JSONObject {
+        val timeoutMs =
+            if (args.has("timeout_ms")) {
+                args.optLong("timeout_ms")
+            } else {
+                args.optLong("timeout_seconds", 25L).coerceIn(0L, 30L) * 1_000L
+            }
+        val notification =
+            lanerChat.waitForNotification(
+                afterSeq = args.optLong("after_seq", 0L),
+                timeoutMs = timeoutMs,
+                sessionId = args.optString("session_id").ifBlank { null }
+            )
+        return notificationJson(notification)
+    }
+
+    private fun notificationJson(
+        notification: com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatNotification
+    ): JSONObject =
+        ok()
+            .put("event", notification.event)
+            .put("unread_count", notification.unreadCount)
+            .put("pending_reply_count", notification.pendingReplyCount)
+            .put("latest_seq", notification.latestSeq)
+            .put("contains_body", false)
+
+    private fun lanerChatInboxFetch(args: JSONObject): JSONObject {
+        val fetched =
+            lanerChat.fetchInbox(
+                requestedSessionId = args.optString("session_id").ifBlank { null },
+                requestId = args.optString("request_id").ifBlank { null },
+                afterSeq = args.optLong("after_seq", 0L),
+                requestedLimit = args.optInt("limit", 10)
+            )
+        return ok()
+            .put("session_id", fetched.sessionId ?: JSONObject.NULL)
+            .put("latest_seq", fetched.latestSeq)
+            .put("messages", JSONArray(fetched.requests.map(::lanerChatRequestJson)))
+            .put("count", fetched.requests.size)
+    }
+
+    private fun lanerChatReply(args: JSONObject): JSONObject {
+        val replied =
+            lanerChat.reply(
+                requestId = args.optString("request_id"),
+                replyId = args.optString("reply_id").ifBlank { null },
+                content = args.optString("content")
+            )
+        return ok()
+            .put("request_id", replied.request.requestId)
+            .put("reply_id", replied.request.replyId)
+            .put("status", replied.request.status.name)
+            .put("duplicate", replied.duplicate)
+            .put("delivered_to_live_stream", replied.deliveredToLiveStream)
+            .put("answered_at", isoTime(replied.request.answeredAtMs))
+    }
+
+    private fun lanerChatRequestJson(request: LanerChatRequest): JSONObject =
+        JSONObject()
+            .put("request_id", request.requestId)
+            .put("session_id", request.sessionId)
+            .put("seq", request.seq)
+            .put("chat_id", request.chatId)
+            .put("sender", request.sender)
+            .put("text", request.text)
+            .put("created_at", isoTime(request.createdAtMs))
+            .put("status", request.status.name)
+            .put("delivery_count", request.deliveryCount)
+
+    private fun isoTime(timestampMs: Long?): Any {
+        if (timestampMs == null) return JSONObject.NULL
+        val formatter = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US)
+        formatter.timeZone = TimeZone.getTimeZone("UTC")
+        return formatter.format(Date(timestampMs))
     }
 
     private fun parseJsonOrString(raw: String): Any = try {

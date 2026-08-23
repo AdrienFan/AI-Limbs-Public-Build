@@ -23,6 +23,10 @@ import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.data.model.PromptFunctionType
+import com.ai.assistance.operit.data.model.FunctionType
+import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
+import com.ai.assistance.operit.data.preferences.ModelConfigManager
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceAttachmentProcessor
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceChangeTracker
@@ -93,12 +97,16 @@ object AIMessageManager {
     private lateinit var packageManager: PackageManager
     private lateinit var context: Context
     private lateinit var apiPreferences: ApiPreferences
+    private lateinit var functionalConfigManager: FunctionalConfigManager
+    private lateinit var modelConfigManager: ModelConfigManager
 
     fun initialize(context: Context) {
         this.context = context
         toolHandler = AIToolHandler.getInstance(context)
         packageManager = PackageManager.getInstance(context, toolHandler)
         apiPreferences = ApiPreferences.getInstance(context)
+        functionalConfigManager = FunctionalConfigManager(context)
+        modelConfigManager = ModelConfigManager(context)
     }
 
     /**
@@ -409,11 +417,29 @@ object AIMessageManager {
             )
 
             val matchPluginStartTime = messageTimingNow()
+            val activeChatMapping =
+                functionalConfigManager.getConfigMappingForFunction(FunctionType.CHAT)
+            val activeChatConfig =
+                checkNotNull(modelConfigManager.getModelConfig(activeChatMapping.configId)) {
+                    "Active chat model configuration not found: ${activeChatMapping.configId}"
+                }
+            val processingConfig =
+                if (LanerChatContract.isBridgeConfig(activeChatConfig)) {
+                    activeChatConfig
+                } else {
+                    chatModelConfigIdOverride
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { overrideId -> modelConfigManager.getModelConfig(overrideId) }
+                        ?: activeChatConfig
+                }
             val pluginExecution = MessageProcessingPluginRegistry.createExecutionIfMatched(
                 params = MessageProcessingHookParams(
                     context = context,
                     enhancedAIService = enhancedAiService,
                     chatId = chatId,
+                    chatModelConfigId = processingConfig.id,
+                    chatProviderTypeId = processingConfig.apiProviderTypeId,
+                    chatModelName = processingConfig.modelName,
                     messageContent = messageContent,
                     chatHistory = memoryForRequest,
                     workspacePath = workspacePath,

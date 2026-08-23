@@ -1,0 +1,98 @@
+package com.ai.assistance.operit.integrations.ailimbs.chat
+
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.serialization.Serializable
+
+@Serializable
+enum class LanerChatSessionStatus {
+    OPEN,
+    CLOSED
+}
+
+@Serializable
+enum class LanerChatMessageStatus {
+    PENDING,
+    DELIVERED,
+    ANSWERED,
+    CANCELED
+}
+
+@Serializable
+data class LanerChatSession(
+    val sessionId: String,
+    val status: LanerChatSessionStatus = LanerChatSessionStatus.OPEN,
+    val openedAtMs: Long,
+    val closedAtMs: Long? = null,
+    val lastAgentSeenAtMs: Long? = null,
+    val agentSessionId: String? = null
+)
+
+@Serializable
+data class LanerChatRequest(
+    val requestId: String,
+    val sessionId: String,
+    val seq: Long,
+    val chatId: String,
+    val sender: String,
+    val text: String,
+    val createdAtMs: Long,
+    val status: LanerChatMessageStatus = LanerChatMessageStatus.PENDING,
+    val deliveryCount: Int = 0,
+    val deliveredAtMs: Long? = null,
+    val answeredAtMs: Long? = null,
+    val canceledAtMs: Long? = null,
+    val replyId: String? = null,
+    val replyContent: String? = null
+)
+
+@Serializable
+internal data class LanerChatStoredState(
+    val lastSeq: Long = 0L,
+    val activeSessionId: String? = null,
+    val sessions: List<LanerChatSession> = emptyList(),
+    val requests: List<LanerChatRequest> = emptyList()
+)
+
+data class LanerChatMailboxStatus(
+    val activeSessionId: String? = null,
+    val latestSeq: Long = 0L,
+    val pendingCount: Int = 0,
+    val deliveredCount: Int = 0,
+    val answeredCount: Int = 0,
+    val canceledCount: Int = 0,
+    val lastAgentSeenAtMs: Long? = null
+) {
+    val unresolvedCount: Int
+        get() = pendingCount + deliveredCount
+}
+
+data class LanerChatNotification(
+    val event: String,
+    val unreadCount: Int,
+    val pendingReplyCount: Int,
+    val latestSeq: Long
+)
+
+data class LanerChatSessionOpenResult(
+    val session: LanerChatSession,
+    val lastUserSeq: Long,
+    val lastReplySeq: Long,
+    val pendingRequests: Int
+)
+
+data class LanerChatFetchResult(
+    val sessionId: String?,
+    val requests: List<LanerChatRequest>,
+    val latestSeq: Long
+)
+
+data class LanerChatReplyResult(
+    val request: LanerChatRequest,
+    val duplicate: Boolean,
+    val deliveredToLiveStream: Boolean
+)
+
+data class LanerChatPendingExchange(
+    val request: LanerChatRequest,
+    val reply: CompletableDeferred<String>
+)

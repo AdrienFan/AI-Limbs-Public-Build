@@ -83,6 +83,7 @@ import java.io.File
 import com.ai.assistance.operit.services.core.MessageProcessingDelegate
 import com.ai.assistance.operit.services.core.ChatHistoryDelegate
 import com.ai.assistance.operit.services.core.ApiConfigDelegate
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.services.core.TokenStatisticsDelegate
 import com.ai.assistance.operit.services.core.AttachmentDelegate
 import com.ai.assistance.operit.services.core.MessageCoordinationDelegate
@@ -575,6 +576,11 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     suspend fun saveDeepSeekConfiguration(configId: String, apiKey: String) {
         apiConfigDelegate.saveDeepSeekConfiguration(configId, apiKey)
     }
+    suspend fun activateLanerBridgeConfiguration() {
+        apiConfigDelegate.activateLanerBridgeConfiguration()
+    }
+    suspend fun activateApiChatConfiguration(): String =
+        apiConfigDelegate.activateApiChatConfiguration()
     fun useDefaultConfig() {
         if (apiConfigDelegate.useDefaultConfig()) {
             uiStateDelegate.showToast(context.getString(R.string.chat_use_default_config_continue))
@@ -1547,17 +1553,24 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             chatId
         )
         fallbackTitle?.let { titleToPreserve ->
-            viewModelScope.launch(Dispatchers.IO) {
-                try {
-                    val generatedTitle = EnhancedAIService.getChatInstance(context, chatId)
-                        .generateConversationTitle(userText = messageText)
-                        .trim()
-                    val currentTitle = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == chatId }?.title
-                    if (generatedTitle.isNotBlank() && currentTitle == titleToPreserve) {
-                        chatHistoryDelegate.updateChatTitle(chatId, generatedTitle)
+            if (LanerChatContract.isBridgeConfig(activeChatModelConfig.value)) {
+                chatHistoryDelegate.updateChatTitle(
+                    chatId,
+                    LanerChatContract.localConversationTitle(messageText)
+                )
+            } else {
+                viewModelScope.launch(Dispatchers.IO) {
+                    try {
+                        val generatedTitle = EnhancedAIService.getChatInstance(context, chatId)
+                            .generateConversationTitle(userText = messageText)
+                            .trim()
+                        val currentTitle = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == chatId }?.title
+                        if (generatedTitle.isNotBlank() && currentTitle == titleToPreserve) {
+                            chatHistoryDelegate.updateChatTitle(chatId, generatedTitle)
+                        }
+                    } catch (e: Exception) {
+                        AppLogger.e(TAG, "生成可见用户消息对话标题失败", e)
                     }
-                } catch (e: Exception) {
-                    AppLogger.e(TAG, "生成可见用户消息对话标题失败", e)
                 }
             }
         }

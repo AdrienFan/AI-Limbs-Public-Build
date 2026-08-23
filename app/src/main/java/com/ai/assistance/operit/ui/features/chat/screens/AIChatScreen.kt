@@ -20,9 +20,11 @@ import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.CodeOff
+import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Terminal
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -110,6 +112,10 @@ import com.ai.assistance.operit.ui.theme.getTextColorForBackground
 import com.ai.assistance.operit.plugins.chatview.ChatViewEvent
 import com.ai.assistance.operit.plugins.chatview.ChatViewHookParams
 import com.ai.assistance.operit.plugins.chatview.ChatViewHookPluginRegistry
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import java.util.UUID
 
 
@@ -255,6 +261,19 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     // Collect state from ViewModel
     val apiKey by actualViewModel.apiKey.collectAsState()
     val activeChatConfigId by actualViewModel.activeChatConfigId.collectAsState()
+    val activeChatModelConfig by actualViewModel.activeChatModelConfig.collectAsState()
+    val isLanerBridgeMode = LanerChatContract.isBridgeConfig(activeChatModelConfig)
+    val effectiveInputStyle =
+        if (isLanerBridgeMode) {
+            UserPreferencesManager.INPUT_STYLE_CLASSIC
+        } else {
+            inputStyle
+        }
+    val bridgeState by AiLimbsBridgeManager.runtimeState.collectAsState()
+    val lanerChatService = remember(context.applicationContext) {
+        LanerChatBridgeService.getInstance(context.applicationContext)
+    }
+    val lanerMailboxStatus by lanerChatService.status.collectAsState()
     val modelName by actualViewModel.modelName.collectAsState()
     val chatHistory by actualViewModel.chatHistory.collectAsState()
     // 仅对当前会话显示处理中状态（影响“停止/发送”按钮）
@@ -704,12 +723,27 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     }
 
     var isSavingInitialConfiguration by remember { mutableStateOf(false) }
+    var forceShowChatHome by rememberSaveable { mutableStateOf(false) }
     var initialConfigurationSaveFailed by
         rememberSaveable(activeChatConfigId) { mutableStateOf(false) }
     val showConfig =
-        shouldShowConfigDialog ||
+        forceShowChatHome ||
+            shouldShowConfigDialog ||
             isSavingInitialConfiguration ||
             initialConfigurationSaveFailed
+    var lanerStatusClockMs by remember { mutableStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(showConfig, isLanerBridgeMode) {
+        if (!showConfig && !isLanerBridgeMode) return@LaunchedEffect
+        while (true) {
+            lanerStatusClockMs = System.currentTimeMillis()
+            delay(15_000L)
+        }
+    }
+    val isLanerAgentOnline =
+        lanerMailboxStatus.activeSessionId != null &&
+            lanerMailboxStatus.lastAgentSeenAtMs?.let { lastSeen ->
+                lanerStatusClockMs - lastSeen <= LanerChatContract.AGENT_ONLINE_WINDOW_MS
+            } == true
 
     // 添加手势状态
     var chatScreenGestureConsumed by remember { mutableStateOf(false) }
@@ -736,7 +770,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     // AppContent owns the primary chat IME layout; embedded chat retains its local translation.
     val shouldUseChatLocalImeHandling =
         embedded &&
-            inputStyle == UserPreferencesManager.INPUT_STYLE_AGENT &&
+            effectiveInputStyle == UserPreferencesManager.INPUT_STYLE_AGENT &&
             !showWebView &&
             !showAiComputer
     var hasEverShownWebView by remember { mutableStateOf(false) }
@@ -794,9 +828,31 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 
     // 当showWebView或showAiComputer状态改变时，更新TopAppBar的actions
     // 使用DisposableEffect确保当AIChatScreen离开组合时，actions被清空
-    LaunchedEffect(isCurrentScreen, embedded, showWebView, showAiComputer, isWorkspacePreparing, appBarContentColor, hasBoundWorkspace) {
+    LaunchedEffect(
+        isCurrentScreen,
+        embedded,
+        showWebView,
+        showAiComputer,
+        isWorkspacePreparing,
+        appBarContentColor,
+        hasBoundWorkspace,
+        showConfig,
+        isLoading
+    ) {
         if (isCurrentScreen && !embedded) {
             setTopBarActions {
+                if (!showConfig) {
+                    IconButton(
+                        enabled = !isLoading,
+                        onClick = { forceShowChatHome = true }
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Home,
+                            contentDescription = stringResource(R.string.laner_chat_return_home),
+                            tint = appBarContentColor
+                        )
+                    }
+                }
                 // AI电脑模式切换按钮
                 IconButton(
                         enabled = !isWorkspacePreparing,
@@ -883,16 +939,64 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                 ConfigurationScreen(
                         apiKey = apiKey,
                         isSaving = isSavingInitialConfiguration,
+                        bridgePhase = bridgeState.phase,
+                        bridgeAgentOnline = isLanerAgentOnline,
+                        bridgePendingCount = lanerMailboxStatus.unresolvedCount,
                         onSaveApiKey = { normalizedApiKey ->
                             if (!isSavingInitialConfiguration) {
                                 coroutineScope.launch {
                                     isSavingInitialConfiguration = true
                                     initialConfigurationSaveFailed = false
                                     try {
+                                        val apiConfigId =
+                                            actualViewModel.activateApiChatConfiguration()
                                         actualViewModel.saveDeepSeekConfiguration(
-                                            activeChatConfigId,
+                                            apiConfigId,
                                             normalizedApiKey
                                         )
+                                        forceShowChatHome = false
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        initialConfigurationSaveFailed = true
+                                        actualViewModel.showErrorMessage(
+                                            e.message ?: context.getString(R.string.save_failed)
+                                        )
+                                    } finally {
+                                        isSavingInitialConfiguration = false
+                                    }
+                                }
+                            }
+                        },
+                        onUseApiChat = {
+                            if (!isSavingInitialConfiguration) {
+                                coroutineScope.launch {
+                                    isSavingInitialConfiguration = true
+                                    initialConfigurationSaveFailed = false
+                                    try {
+                                        actualViewModel.activateApiChatConfiguration()
+                                        forceShowChatHome = false
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        initialConfigurationSaveFailed = true
+                                        actualViewModel.showErrorMessage(
+                                            e.message ?: context.getString(R.string.save_failed)
+                                        )
+                                    } finally {
+                                        isSavingInitialConfiguration = false
+                                    }
+                                }
+                            }
+                        },
+                        onUseLanerBridge = {
+                            if (!isSavingInitialConfiguration) {
+                                coroutineScope.launch {
+                                    isSavingInitialConfiguration = true
+                                    initialConfigurationSaveFailed = false
+                                    try {
+                                        actualViewModel.activateLanerBridgeConfiguration()
+                                        forceShowChatHome = false
                                     } catch (e: CancellationException) {
                                         throw e
                                     } catch (e: Exception) {
@@ -908,8 +1012,25 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                         },
                         onNavigateToTokenConfig = onNavigateToTokenConfig,
                         onNavigateToModelConfig = {
-                            initialConfigurationSaveFailed = false
-                            onNavigateToOnboardingModelConfig()
+                            if (!isSavingInitialConfiguration) {
+                                coroutineScope.launch {
+                                    isSavingInitialConfiguration = true
+                                    initialConfigurationSaveFailed = false
+                                    try {
+                                        actualViewModel.activateApiChatConfiguration()
+                                        onNavigateToOnboardingModelConfig()
+                                    } catch (e: CancellationException) {
+                                        throw e
+                                    } catch (e: Exception) {
+                                        initialConfigurationSaveFailed = true
+                                        actualViewModel.showErrorMessage(
+                                            e.message ?: context.getString(R.string.save_failed)
+                                        )
+                                    } finally {
+                                        isSavingInitialConfiguration = false
+                                    }
+                                }
+                            }
                         }
                 )
             } else {
@@ -988,7 +1109,45 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 showChatFloatingDotsAnimation = showChatFloatingDotsAnimation,
                         )
 
-                        if (inputStyle == UserPreferencesManager.INPUT_STYLE_CLASSIC) {
+                        if (isLanerBridgeMode) {
+                            Surface(
+                                modifier =
+                                    Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(
+                                            end = 8.dp,
+                                            bottom = classicSettingsBarBottomPadding
+                                        )
+                                        .graphicsLayer {
+                                            translationY = -inputBarTranslationYPx
+                                        },
+                                shape = RoundedCornerShape(18.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f)
+                            ) {
+                                Text(
+                                    text =
+                                        if (bridgeState.phase == AiLimbsBridgePhase.ONLINE) {
+                                            stringResource(
+                                                R.string.laner_chat_status_online,
+                                                lanerMailboxStatus.unresolvedCount
+                                            )
+                                        } else {
+                                            stringResource(
+                                                R.string.laner_chat_status_offline,
+                                                lanerMailboxStatus.unresolvedCount
+                                            )
+                                        },
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                                    style = MaterialTheme.typography.labelMedium,
+                                    color =
+                                        if (bridgeState.phase == AiLimbsBridgePhase.ONLINE) {
+                                            Color(0xFF00C853)
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        }
+                                )
+                            }
+                        } else if (effectiveInputStyle == UserPreferencesManager.INPUT_STYLE_CLASSIC) {
                             ClassicChatSettingsBar(
                                     modifier =
                                             Modifier
@@ -1084,7 +1243,8 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                     ) {
                         ChatInputBottomBar(
                                 actualViewModel = actualViewModel,
-                                inputStyle = inputStyle,
+                                inputStyle = effectiveInputStyle,
+                                disableLocalAgentFeatures = isLanerBridgeMode,
                                 currentChatId = currentChatId,
                                 inputMenuRuntime = chatViewRuntime,
                                 enableEnterToSend = enableEnterToSend,
@@ -1481,6 +1641,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 private fun ChatInputBottomBar(
     actualViewModel: ChatViewModel,
     inputStyle: String,
+    disableLocalAgentFeatures: Boolean,
     currentChatId: String?,
     inputMenuRuntime: String,
     enableEnterToSend: Boolean,
@@ -1639,11 +1800,12 @@ private fun ChatInputBottomBar(
     LaunchedEffect(
         currentChatId,
         waifuMergeBuffer.size,
+        disableLocalAgentFeatures,
         isWaifuModeEnabled,
         isWaifuMergeSendEnabled,
         waifuMergeSendDelayMs
     ) {
-        if (!isWaifuModeEnabled || !isWaifuMergeSendEnabled) {
+        if (disableLocalAgentFeatures || !isWaifuModeEnabled || !isWaifuMergeSendEnabled) {
             waifuMergeBuffer.clear()
             return@LaunchedEffect
         }
@@ -1830,7 +1992,8 @@ private fun ChatInputBottomBar(
                 )
             }
             val shouldUseWaifuMergeSend =
-                isWaifuModeEnabled &&
+                !disableLocalAgentFeatures &&
+                    isWaifuModeEnabled &&
                     isWaifuMergeSendEnabled &&
                     attachments.isEmpty() &&
                     replyToMessage == null &&

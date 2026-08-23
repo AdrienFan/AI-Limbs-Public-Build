@@ -6,6 +6,7 @@ import com.ai.assistance.operit.data.model.ApiProviderType
 import com.ai.assistance.operit.data.model.ModelConfigData
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.plugins.toolpkg.ToolPkgAiProviderRegistry
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.util.AppLogger
 import java.io.IOException
 import java.net.InetAddress
@@ -285,6 +286,9 @@ object AIServiceFactory {
         context: Context
     ): AIService {
         val providerTypeId = config.apiProviderTypeId.trim()
+        if (LanerChatContract.isBridgeProvider(providerTypeId)) {
+            return LanerBridgeStubAIService()
+        }
         ToolPkgAiProviderRegistry.get(providerTypeId)?.let { provider ->
             return ToolPkgJsAiProviderService(
                 config = config,

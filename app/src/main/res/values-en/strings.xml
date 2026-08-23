@@ -610,8 +610,23 @@
     <string name="network_status_label">Network Status</string>
 
     <!-- Configuration Screen -->
-    <string name="config_title">Operit AI Assistant</string>
-    <string name="config_description">Use a DeepSeek API Key or configure another model service</string>
+    <string name="config_title">AI Limbs Chat</string>
+    <string name="config_description">Choose Laner Bridge chat or continue with an independent API model service</string>
+    <string name="laner_chat_bridge_title">Laner Bridge Chat</string>
+    <string name="laner_chat_bridge_online">Bridge online · %1$d awaiting replies</string>
+    <string name="laner_chat_bridge_offline">Bridge offline; messages will wait safely · %1$d awaiting replies</string>
+    <string name="laner_chat_rdc_online">RDC: connected</string>
+    <string name="laner_chat_rdc_offline">RDC: disconnected</string>
+    <string name="laner_chat_core_available">Laner Bridge: available</string>
+    <string name="laner_chat_session_online">Laner session: online</string>
+    <string name="laner_chat_session_offline">Laner session: waiting for connection</string>
+    <string name="laner_chat_pending_replies">Awaiting replies: %1$d</string>
+    <string name="laner_chat_bridge_enter">Open Laner Bridge Chat</string>
+    <string name="laner_chat_api_section">API Chat</string>
+    <string name="laner_chat_api_enter">Open Last API Chat</string>
+    <string name="laner_chat_return_home">Return to Chat Connection Home</string>
+    <string name="laner_chat_status_online">Laner Bridge online · %1$d awaiting replies</string>
+    <string name="laner_chat_status_offline">Laner Bridge offline · %1$d awaiting replies</string>
     <string name="config_api_key_label">API Key</string>
     <string name="config_api_key_placeholder">DeepSeek API Key</string>
     <string name="config_save_button">Confirm and Save</string>

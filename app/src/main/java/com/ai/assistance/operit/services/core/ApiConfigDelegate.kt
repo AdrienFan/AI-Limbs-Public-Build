@@ -15,6 +15,7 @@ import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -55,12 +56,19 @@ class ApiConfigDelegate(
 ) {
     companion object {
         private const val TAG = "ApiConfigDelegate"
+        private const val LANER_CHAT_PREFERENCES = "ai_limbs_laner_chat_mode"
+        private const val KEY_LAST_API_CHAT_CONFIG_ID = "last_api_chat_config_id"
     }
 
     // Preferences
     private val apiPreferences = ApiPreferences.getInstance(context)
     private val modelConfigManager = ModelConfigManager(context)
     private val functionalConfigManager = FunctionalConfigManager(context)
+    private val lanerChatPreferences =
+            context.applicationContext.getSharedPreferences(
+                    LANER_CHAT_PREFERENCES,
+                    Context.MODE_PRIVATE
+            )
     private val characterCardManager = CharacterCardManager.getInstance(context)
     private val activePromptManager = ActivePromptManager.getInstance(context)
     private val configScope =
@@ -588,6 +596,87 @@ class ApiConfigDelegate(
             AppLogger.e(TAG, "保存 DeepSeek 配置失败: ${e.message}", e)
             throw e
         }
+    }
+
+    suspend fun activateLanerBridgeConfiguration() {
+        modelConfigManager.initializeIfNeeded()
+        functionalConfigManager.initializeIfNeeded()
+        val currentConfigId = _activeConfigId.value
+        val currentConfig = modelConfigManager.getModelConfig(currentConfigId)
+        if (currentConfig != null && !LanerChatContract.isBridgeConfig(currentConfig)) {
+            check(
+                    lanerChatPreferences.edit()
+                            .putString(KEY_LAST_API_CHAT_CONFIG_ID, currentConfig.id)
+                            .commit()
+            ) {
+                "Unable to persist the previous API chat configuration"
+            }
+        }
+        val bridgeConfig =
+                ModelConfigData(
+                        id = LanerChatContract.CONFIG_ID,
+                        name = "兰儿桥接聊天",
+                        apiKey = "",
+                        apiEndpoint = "",
+                        modelName = LanerChatContract.MODEL_ID,
+                        apiProviderType = ApiProviderType.OTHER,
+                        apiProviderTypeId = LanerChatContract.PROVIDER_TYPE_ID,
+                        enableToolCall = false,
+                        enableSummary = false,
+                        enableSummaryByMessageCount = false,
+                        enableDirectImageProcessing = false,
+                        enableDirectAudioProcessing = false,
+                        enableDirectVideoProcessing = false
+                )
+        modelConfigManager.saveModelConfig(bridgeConfig)
+        functionalConfigManager.setConfigForFunction(
+                FunctionType.CHAT,
+                LanerChatContract.CONFIG_ID,
+                0
+        )
+        publishActivatedChatConfig(bridgeConfig)
+    }
+
+    suspend fun activateApiChatConfiguration(): String {
+        modelConfigManager.initializeIfNeeded()
+        functionalConfigManager.initializeIfNeeded()
+        val currentConfig = modelConfigManager.getModelConfig(_activeConfigId.value)
+        val targetConfigId =
+                if (currentConfig != null && !LanerChatContract.isBridgeConfig(currentConfig)) {
+                    currentConfig.id
+                } else {
+                    lanerChatPreferences.getString(
+                            KEY_LAST_API_CHAT_CONFIG_ID,
+                            ModelConfigManager.DEFAULT_CONFIG_ID
+                    )?.trim().orEmpty()
+                }
+        require(targetConfigId.isNotEmpty()) { "Saved API chat configuration ID is empty" }
+        val knownConfigIds = modelConfigManager.configListFlow.first()
+        check(targetConfigId in knownConfigIds) {
+            "Saved API chat configuration no longer exists: $targetConfigId"
+        }
+        val targetConfig = checkNotNull(modelConfigManager.getModelConfig(targetConfigId)) {
+            "API chat configuration not found: $targetConfigId"
+        }
+        check(!LanerChatContract.isBridgeConfig(targetConfig)) {
+            "Saved API chat configuration points to Laner Bridge"
+        }
+        functionalConfigManager.setConfigForFunction(FunctionType.CHAT, targetConfigId, 0)
+        publishActivatedChatConfig(targetConfig)
+        return targetConfigId
+    }
+
+    private suspend fun publishActivatedChatConfig(config: ModelConfigData) {
+        _activeConfigId.value = config.id
+        _activeChatModelConfig.value = config
+        updateStateFromConfig(config)
+        _isInitialized.value = true
+        val enhancedAiService =
+                withContext(Dispatchers.IO) {
+                    EnhancedAIService.refreshServiceForFunction(context, FunctionType.CHAT)
+                    EnhancedAIService.getInstance(context)
+                }
+        withContext(Dispatchers.Main) { onConfigChanged(enhancedAiService) }
     }
 
     private suspend fun persistApiSettings(

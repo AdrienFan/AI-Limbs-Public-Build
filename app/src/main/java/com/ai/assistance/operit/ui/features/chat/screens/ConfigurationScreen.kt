@@ -6,6 +6,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Link
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.*
@@ -22,13 +23,19 @@ import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.model.ApiKeyFormatValidator
 import com.ai.assistance.operit.ui.common.input.bringIntoViewOnImeFocus
 import com.ai.assistance.operit.ui.features.chat.components.config.TokenInfoDialog
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 
 /** 简洁风格的AI助手配置界面 */
 @Composable
 fun ConfigurationScreen(
         apiKey: String,
         isSaving: Boolean,
+        bridgePhase: AiLimbsBridgePhase,
+        bridgeAgentOnline: Boolean,
+        bridgePendingCount: Int,
         onSaveApiKey: (String) -> Unit,
+        onUseApiChat: () -> Unit,
+        onUseLanerBridge: () -> Unit,
         onNavigateToTokenConfig: () -> Unit = {},
         onNavigateToModelConfig: () -> Unit = {}
 ) {
@@ -82,6 +89,108 @@ fun ConfigurationScreen(
                         )
 
                         Spacer(modifier = Modifier.height(16.dp))
+
+                        ElevatedCard(
+                                modifier = Modifier.fillMaxWidth(),
+                                shape = RoundedCornerShape(8.dp)
+                        ) {
+                                Column(modifier = Modifier.fillMaxWidth().padding(16.dp)) {
+                                        Text(
+                                                text = stringResource(R.string.laner_chat_bridge_title),
+                                                style = MaterialTheme.typography.titleSmall,
+                                                fontWeight = FontWeight.Bold
+                                        )
+                                        Spacer(modifier = Modifier.height(4.dp))
+                                        Text(
+                                                text =
+                                                        stringResource(
+                                                                if (bridgePhase == AiLimbsBridgePhase.ONLINE) {
+                                                                        R.string.laner_chat_rdc_online
+                                                                } else {
+                                                                        R.string.laner_chat_rdc_offline
+                                                                }
+                                                        ),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                                text = stringResource(R.string.laner_chat_core_available),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                                text =
+                                                        stringResource(
+                                                                if (bridgeAgentOnline) {
+                                                                        R.string.laner_chat_session_online
+                                                                } else {
+                                                                        R.string.laner_chat_session_offline
+                                                                }
+                                                        ),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Text(
+                                                text =
+                                                        stringResource(
+                                                                R.string.laner_chat_pending_replies,
+                                                                bridgePendingCount
+                                                        ),
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.height(12.dp))
+                                        Button(
+                                                onClick = onUseLanerBridge,
+                                                enabled = !isSaving,
+                                                modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp),
+                                                shape = RoundedCornerShape(6.dp)
+                                        ) {
+                                                Icon(
+                                                        imageVector = Icons.Default.Link,
+                                                        contentDescription = null,
+                                                        modifier = Modifier.size(18.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text(
+                                                        stringResource(R.string.laner_chat_bridge_enter),
+                                                        fontWeight = FontWeight.Medium
+                                                )
+                                        }
+                                }
+                        }
+
+                        Spacer(modifier = Modifier.height(16.dp))
+
+                        Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                        ) {
+                                HorizontalDivider(modifier = Modifier.weight(1f))
+                                Text(
+                                        text = stringResource(R.string.laner_chat_api_section),
+                                        modifier = Modifier.padding(horizontal = 10.dp),
+                                        style = MaterialTheme.typography.labelMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                HorizontalDivider(modifier = Modifier.weight(1f))
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        OutlinedButton(
+                                onClick = onUseApiChat,
+                                enabled = !isSaving,
+                                modifier = Modifier.fillMaxWidth().heightIn(min = 46.dp),
+                                shape = RoundedCornerShape(6.dp)
+                        ) {
+                                Text(
+                                        stringResource(R.string.laner_chat_api_enter),
+                                        fontWeight = FontWeight.Medium
+                                )
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
 
                         // API密钥输入框 - 简洁设计
                         OutlinedTextField(

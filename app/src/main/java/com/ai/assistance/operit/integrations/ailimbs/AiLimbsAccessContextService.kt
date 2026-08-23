@@ -40,6 +40,34 @@ class AiLimbsAccessContextService(context: Context) {
                 "- 兰儿 Ubuntu 只读共享窗口状态：" +
                     "{\"name\":\"ai_limbs.ubuntu.share.status\",\"parameters\":{}}。"
             )
+            appendLine("- 模块：AI Limbs Laner Chat Bridge；正式调用地址前缀：ai_limbs.chat.*。")
+            appendLine(
+                "- 所有 ai_limbs.chat.* 调用均使用 start_process 的 shell=operit 与结构化 JSON；" +
+                    "例如 {\"name\":\"ai_limbs.chat.status\",\"parameters\":{}}。"
+            )
+            appendLine(
+                "- 聊天桥状态：" +
+                    "{\"name\":\"ai_limbs.chat.status\",\"parameters\":{}}；" +
+                    "接入或恢复会话：" +
+                    "{\"name\":\"ai_limbs.chat.session.open\",\"parameters\":{}}；" +
+                    "完成接入时可调用 ai_limbs.chat.session.close。"
+            )
+            appendLine(
+                "- 工作过程中在自然检查点调用 ai_limbs.chat.notification.check；空闲时可调用 " +
+                    "ai_limbs.chat.notification.wait，单次等待最长 30 秒，不得无限等待。"
+            )
+            appendLine(
+                "- notification.check/wait 只返回 unread_count、pending_reply_count 与 latest_seq，" +
+                    "绝不包含正文；只有决定阅读时才调用 ai_limbs.chat.inbox.fetch。"
+            )
+            appendLine(
+                "- inbox.fetch 返回的 DELIVERED 但未 ANSWERED 消息仍可再次读取；使用其 request_id " +
+                    "调用 ai_limbs.chat.reply，重试时复用稳定 reply_id，禁止重复发送不同回复。"
+            )
+            appendLine(
+                "- Laner Chat 是当前兰儿任务旁路邮箱，不是模型 Provider：不得把消息转发给 OpenAI、" +
+                    "DeepSeek、本地模型或 ToolPkg，不得猜测或使用 chat.exchange。"
+            )
             appendLine(
                 "- ubuntu.stop 带并发保护：若 Ubuntu 命令终端仍由用户打开，或另一个隐藏 Ubuntu " +
                     "操作仍在运行，关机会被拒绝；不得绕过该保护直接杀进程。"

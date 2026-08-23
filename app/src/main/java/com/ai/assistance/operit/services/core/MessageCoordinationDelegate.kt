@@ -36,6 +36,7 @@ import com.ai.assistance.operit.util.ChatMarkupRegex
 import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.LocaleUtils
 import com.ai.assistance.operit.data.repository.MemoryAutoSaveCandidateRepository
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -549,12 +550,16 @@ class MessageCoordinationDelegate(
             uiStateDelegate.showErrorMessage(context.getString(R.string.chat_no_active_conversation))
             return
         }
+        val isLanerBridgeTurn =
+            promptFunctionType == PromptFunctionType.CHAT &&
+                LanerChatContract.isBridgeConfig(apiConfigDelegate.activeChatModelConfig.value)
         if (!isAutoContinuation) {
             cancelPendingAutoContinuation(chatId, restoreIdleIfPendingState = false)
         }
         if (
             turnOptions.persistTurn &&
             enableGroupOrchestration &&
+            !isLanerBridgeTurn &&
             shouldRunGroupOrchestration(
                 promptFunctionType = promptFunctionType,
                 isContinuation = isContinuation,
@@ -623,6 +628,7 @@ class MessageCoordinationDelegate(
             if (promptFunctionType == PromptFunctionType.CHAT) {
                 val (resolvedChatModelConfigIdOverride, resolvedChatModelIndexOverride) =
                     when {
+                        isLanerBridgeTurn -> Pair(null, null)
                         !chatModelConfigIdOverride.isNullOrBlank() -> {
                             Pair(chatModelConfigIdOverride, (chatModelIndexOverride ?: 0).coerceAtLeast(0))
                         }
@@ -635,6 +641,7 @@ class MessageCoordinationDelegate(
                     }
                 val resolvedMemorySpaceIdOverride =
                     when {
+                        isLanerBridgeTurn -> null
                         !memorySpaceIdOverride.isNullOrBlank() -> memorySpaceIdOverride
                         isAutoContinuation -> currentMemorySpaceIdOverride
                         else -> roleCardId?.let { resolveRoleCardMemoryProfileOverride(it) }
@@ -677,7 +684,13 @@ class MessageCoordinationDelegate(
                 .toInt()
 
         // 如果不是续写，检查是否需要总结
-        if (turnOptions.persistTurn && !isBackgroundSend && !isContinuation && !skipSummaryCheck) {
+        if (
+            turnOptions.persistTurn &&
+                !isLanerBridgeTurn &&
+                !isBackgroundSend &&
+                !isContinuation &&
+                !skipSummaryCheck
+        ) {
             val currentMessages = runBlocking { chatHistoryDelegate.getCurrentRuntimeChatHistorySnapshot() }
             val currentTokens = tokenStatsDelegate.currentWindowSizeFlow.value
 
@@ -717,7 +730,7 @@ class MessageCoordinationDelegate(
         val proxySenderName = proxySenderNameOverride?.takeIf { it.isNotBlank() }
 
         // 如果是proxy sender，视为关闭记忆自动更新
-        val shouldEnableMemoryAutoUpdate = if (proxySenderName.isNullOrBlank()) {
+        val shouldEnableMemoryAutoUpdate = if (!isLanerBridgeTurn && proxySenderName.isNullOrBlank()) {
             apiConfigDelegate.enableMemoryAutoUpdate.value
         } else {
             false
@@ -733,19 +746,23 @@ class MessageCoordinationDelegate(
             workspaceEnv = workspaceEnv,
             promptFunctionType = promptFunctionType,
             roleCardId = roleCardId,
-            enableThinking = apiConfigDelegate.enableThinkingMode.value,
+            enableThinking = !isLanerBridgeTurn && apiConfigDelegate.enableThinkingMode.value,
             enableMemoryAutoUpdate = shouldEnableMemoryAutoUpdate,
             maxTokens = maxTokensForSend,
             tokenUsageThreshold = tokenUsageThresholdForSend,
             replyToMessage = if (shouldReadComposerState) uiBridge.getReplyToMessage() else null,
             isAutoContinuation = isAutoContinuation,
-            enableSummary = !forceDisableSummary && !isBackgroundSend && chatContextSettings.enableSummary,
+            enableSummary =
+                !isLanerBridgeTurn &&
+                    !forceDisableSummary &&
+                    !isBackgroundSend &&
+                    chatContextSettings.enableSummary,
             chatModelConfigIdOverride = resolvedChatModelConfigIdOverride,
             chatModelIndexOverride = resolvedChatModelIndexOverride,
             memorySpaceIdOverride = resolvedMemorySpaceIdOverride,
             suppressUserMessageInHistory = suppressUserMessageInHistory,
-            isGroupOrchestrationTurn = isGroupOrchestrationTurn,
-            groupParticipantNamesText = groupParticipantNamesText,
+            isGroupOrchestrationTurn = isGroupOrchestrationTurn && !isLanerBridgeTurn,
+            groupParticipantNamesText = groupParticipantNamesText.takeUnless { isLanerBridgeTurn },
             turnOptions = turnOptions
         )
 

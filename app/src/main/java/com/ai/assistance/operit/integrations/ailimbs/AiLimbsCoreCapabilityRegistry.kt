@@ -75,6 +75,152 @@ object AiLimbsCoreCapabilityRegistry {
             "Read shared Ubuntu activity and participant counts without returning command or output content.",
             keywords = listOf("共享窗口", "眼睛", "只读", "兰儿操作", "Ubuntu share")
         ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.status",
+            displayName = "AI Limbs Laner Chat Bridge 状态",
+            description =
+                "Read Laner Chat mailbox, active-session, unread, pending-reply, and Bridge readiness metadata without returning message bodies.",
+            keywords = listOf("兰儿聊天", "Laner Chat", "聊天桥", "收件箱", "未读消息")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.session.open",
+            displayName = "打开或恢复兰儿聊天会话",
+            description =
+                "Open the active Laner Chat session, resume a specified session, or create one when none exists.",
+            parameters = listOf(
+                ToolParameterSchema(
+                    "session_id",
+                    "string",
+                    "Optional existing Laner Chat session ID to resume",
+                    false
+                ),
+                ToolParameterSchema(
+                    "agent_session_id",
+                    "string",
+                    "Optional identifier for the current assistant task",
+                    false
+                )
+            ),
+            keywords = listOf("兰儿聊天", "session", "会话恢复", "resume", "Laner Chat")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.session.close",
+            displayName = "关闭兰儿聊天会话",
+            description =
+                "Close a specified Laner Chat session, or the currently active session when omitted.",
+            parameters = listOf(
+                ToolParameterSchema(
+                    "session_id",
+                    "string",
+                    "Optional Laner Chat session ID; defaults to the active session",
+                    false
+                )
+            ),
+            keywords = listOf("兰儿聊天", "session", "关闭会话", "Laner Chat")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.notification.check",
+            displayName = "检查兰儿聊天通知",
+            description =
+                "Check for unanswered Laner Chat messages after a cursor; returns counts and sequence metadata only, never message bodies.",
+            parameters = listOf(
+                ToolParameterSchema(
+                    "after_seq",
+                    "integer",
+                    "Return notification metadata for unanswered requests after this sequence; defaults to 0",
+                    false,
+                    "0"
+                ),
+                ToolParameterSchema(
+                    "session_id",
+                    "string",
+                    "Optional session filter",
+                    false
+                )
+            ),
+            keywords = listOf("兰儿聊天", "通知", "新消息", "unread", "notification")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.notification.wait",
+            displayName = "短时等待兰儿聊天通知",
+            description =
+                "Wait for Laner Chat notification metadata for at most 30 seconds; returns new_message or idle and never returns message bodies.",
+            parameters = listOf(
+                ToolParameterSchema(
+                    "after_seq",
+                    "integer",
+                    "Return notification metadata for unanswered requests after this sequence; defaults to 0",
+                    false,
+                    "0"
+                ),
+                ToolParameterSchema(
+                    "timeout_seconds",
+                    "integer",
+                    "Bounded wait duration in seconds; values above 30 are clamped",
+                    false,
+                    "25"
+                ),
+                ToolParameterSchema(
+                    "session_id",
+                    "string",
+                    "Optional session filter",
+                    false
+                )
+            ),
+            keywords = listOf("兰儿聊天", "等待消息", "bounded wait", "notification", "空闲")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.inbox.fetch",
+            displayName = "读取兰儿聊天收件箱",
+            description =
+                "Explicitly fetch unanswered Laner Chat message bodies and mark them delivered; delivered but unanswered messages remain fetchable.",
+            parameters = listOf(
+                ToolParameterSchema(
+                    "session_id",
+                    "string",
+                    "Optional session filter; defaults to the active session",
+                    false
+                ),
+                ToolParameterSchema(
+                    "request_id",
+                    "string",
+                    "Optional exact unanswered request ID",
+                    false
+                ),
+                ToolParameterSchema(
+                    "after_seq",
+                    "integer",
+                    "Fetch unanswered requests after this sequence when request_id is omitted",
+                    false,
+                    "0"
+                ),
+                ToolParameterSchema(
+                    "limit",
+                    "integer",
+                    "Maximum messages to fetch from 1 to 20",
+                    false,
+                    "10"
+                )
+            ),
+            keywords = listOf("兰儿聊天", "收件箱", "读取正文", "inbox", "fetch")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.reply",
+            displayName = "回复兰儿聊天消息",
+            description =
+                "Reply to one Laner Chat request idempotently and deliver the answer to its existing AI Limbs chat stream.",
+            parameters = listOf(
+                ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
+                ToolParameterSchema(
+                    "reply_id",
+                    "string",
+                    "Optional stable reply ID used for retry idempotence",
+                    false
+                ),
+                ToolParameterSchema("content", "string", "Complete reply text", true)
+            ),
+            keywords = listOf("兰儿聊天", "回复", "reply", "request_id", "幂等")
+        ),
         entry("operit.tools.list", "Operit 原生工具 Registry", "List currently registered native Operit tool names.", keywords = listOf("registry", "dispatcher", "工具注册表")),
         ubuntuEntry("ubuntu.status", "查询 Ubuntu 状态", "Read the lifecycle state of the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "沙箱", "生命周期")),
         ubuntuEntry("ubuntu.start", "启动 Ubuntu", "Start the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "开机", "启动沙箱")),
@@ -141,6 +287,22 @@ object AiLimbsCoreCapabilityRegistry {
         keywords = keywords,
         sourceName = "ubuntu",
         sourceLocator = "ubuntu://lifecycle/${name.substringAfterLast('.')}"
+    )
+
+    private fun lanerChatEntry(
+        name: String,
+        displayName: String,
+        description: String,
+        parameters: List<ToolParameterSchema> = emptyList(),
+        keywords: List<String>
+    ): ToolCatalogEntry = entry(
+        name = name,
+        displayName = displayName,
+        description = description,
+        parameters = parameters,
+        keywords = keywords,
+        sourceName = "ai_limbs_laner_chat",
+        sourceLocator = "ai-limbs://chat/${name.removePrefix("ai_limbs.chat.")}"
     )
 
     private fun entry(

@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins
 import com.ai.assistance.operit.plugins.toolbox.ToolboxPlugin
 import com.ai.assistance.operit.plugins.toolpkg.ToolPkgCommonBridgePlugin
 import com.ai.assistance.operit.plugins.workflow.WorkflowLifecyclePlugin
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPlugin
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.ConcurrentHashMap
 
@@ -31,6 +32,7 @@ object PluginRegistry {
         builtinsInitialized = true
 
         register(ToolboxPlugin)
+        register(LanerChatPlugin)
         register(ToolPkgCommonBridgePlugin)
         register(WorkflowLifecyclePlugin)
         installAll()

@@ -608,8 +608,23 @@
     <string name="network_status_label">网络状态</string>
 
     <!-- Configuration Screen -->
-    <string name="config_title">Operit AI 助手</string>
-    <string name="config_description">使用 DeepSeek API Key，或配置其他模型服务</string>
+    <string name="config_title">AI Limbs 对话</string>
+    <string name="config_description">选择兰儿桥接聊天，或继续使用独立的 API 模型服务</string>
+    <string name="laner_chat_bridge_title">兰儿桥接聊天</string>
+    <string name="laner_chat_bridge_online">Bridge 已连接 · %1$d 条待回复</string>
+    <string name="laner_chat_bridge_offline">Bridge 当前离线，消息会安全等待 · %1$d 条待回复</string>
+    <string name="laner_chat_rdc_online">RDC：已连接</string>
+    <string name="laner_chat_rdc_offline">RDC：未连接</string>
+    <string name="laner_chat_core_available">Laner Bridge：可用</string>
+    <string name="laner_chat_session_online">兰儿 Session：在线</string>
+    <string name="laner_chat_session_offline">兰儿 Session：等待接入</string>
+    <string name="laner_chat_pending_replies">待回复消息：%1$d</string>
+    <string name="laner_chat_bridge_enter">进入兰儿桥接聊天</string>
+    <string name="laner_chat_api_section">API 聊天</string>
+    <string name="laner_chat_api_enter">进入上次使用的 API 聊天</string>
+    <string name="laner_chat_return_home">返回聊天连接首页</string>
+    <string name="laner_chat_status_online">兰儿 Bridge 已连接 · 待回复 %1$d</string>
+    <string name="laner_chat_status_offline">兰儿 Bridge 离线 · 待回复 %1$d</string>
     <string name="config_api_key_label">API密钥</string>
     <string name="config_api_key_placeholder">DeepSeek API密钥</string>
     <string name="config_save_button">确认并保存</string>

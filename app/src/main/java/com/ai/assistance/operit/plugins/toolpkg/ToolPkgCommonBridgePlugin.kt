@@ -191,6 +191,9 @@ private object ToolPkgMessageProcessingBridgePlugin : MessageProcessingPlugin {
     ): Map<String, Any?> {
         return mapOf(
             "chatId" to params.chatId,
+            "chatModelConfigId" to params.chatModelConfigId,
+            "chatProviderTypeId" to params.chatProviderTypeId,
+            "chatModelName" to params.chatModelName,
             "messageContent" to params.messageContent,
             "chatHistory" to params.chatHistory.map(::promptTurnToMap),
             "workspacePath" to params.workspacePath,

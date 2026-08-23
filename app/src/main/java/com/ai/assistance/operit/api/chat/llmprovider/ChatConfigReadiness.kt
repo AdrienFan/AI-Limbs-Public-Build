@@ -7,6 +7,7 @@ import com.ai.assistance.operit.data.model.ModelConfigData
 import com.ai.assistance.operit.data.model.getModelByIndex
 import com.ai.assistance.operit.data.model.getValidModelIndex
 import java.net.URI
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 
 enum class ChatConfigReadinessIssue {
     PROVIDER_MISSING,
@@ -40,6 +41,14 @@ object ChatConfigReadiness {
         val providerTypeId = config.apiProviderTypeId.trim()
         if (providerTypeId.isEmpty()) {
             return ChatConfigReadinessResult(ChatConfigReadinessIssue.PROVIDER_MISSING)
+        }
+
+        if (LanerChatContract.isBridgeProvider(providerTypeId)) {
+            return if (config.modelName == LanerChatContract.MODEL_ID) {
+                ChatConfigReadinessResult()
+            } else {
+                ChatConfigReadinessResult(ChatConfigReadinessIssue.MODEL_MISSING)
+            }
         }
 
         val normalizedPluginIds = registeredPluginProviderIds.mapTo(mutableSetOf()) {

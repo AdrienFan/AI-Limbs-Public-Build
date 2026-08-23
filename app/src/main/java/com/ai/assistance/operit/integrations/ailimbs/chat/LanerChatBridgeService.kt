@@ -1,0 +1,398 @@
+package com.ai.assistance.operit.integrations.ailimbs.chat
+
+import android.content.Context
+import android.os.SystemClock
+import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+
+/** Durable application-internal mailbox used by the Laner chat processing plugin and RDC tools. */
+class LanerChatBridgeService private constructor(context: Context) {
+    private val preferences =
+        context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
+    private val json =
+        Json {
+            encodeDefaults = true
+            ignoreUnknownKeys = true
+        }
+    private val liveReplies = ConcurrentHashMap<String, CompletableDeferred<String>>()
+    private var storedState: LanerChatStoredState = loadState()
+    private val latestSeqFlow = MutableStateFlow(storedState.lastSeq)
+    private val mailboxStatusFlow = MutableStateFlow(buildMailboxStatus(storedState))
+
+    val status: StateFlow<LanerChatMailboxStatus> = mailboxStatusFlow.asStateFlow()
+
+    @Synchronized
+    fun openSession(
+        requestedSessionId: String?,
+        agentSessionId: String?
+    ): LanerChatSessionOpenResult {
+        val now = System.currentTimeMillis()
+        val normalizedRequested = requestedSessionId?.trim().orEmpty()
+        val sessions = storedState.sessions.toMutableList()
+        val selectedIndex =
+            when {
+                normalizedRequested.isNotEmpty() -> {
+                    val index = sessions.indexOfFirst { it.sessionId == normalizedRequested }
+                    require(index >= 0) { "Laner chat session not found: $normalizedRequested" }
+                    index
+                }
+                !storedState.activeSessionId.isNullOrBlank() ->
+                    sessions.indexOfFirst { it.sessionId == storedState.activeSessionId }
+                else ->
+                    sessions.indexOfLast { session ->
+                        storedState.requests.any { request ->
+                            request.sessionId == session.sessionId && request.isUnresolved()
+                        }
+                    }
+            }
+        val session =
+            if (selectedIndex >= 0) {
+                val existing = sessions[selectedIndex]
+                sessions[selectedIndex].copy(
+                    status = LanerChatSessionStatus.OPEN,
+                    closedAtMs = null,
+                    lastAgentSeenAtMs = now,
+                    agentSessionId =
+                        agentSessionId?.trim()?.takeIf { it.isNotEmpty() }
+                            ?: existing.agentSessionId
+                ).also { sessions[selectedIndex] = it }
+            } else {
+                LanerChatSession(
+                    sessionId = UUID.randomUUID().toString(),
+                    openedAtMs = now,
+                    lastAgentSeenAtMs = now,
+                    agentSessionId = agentSessionId?.trim()?.takeIf { it.isNotEmpty() }
+                ).also(sessions::add)
+            }
+        commitState(
+            storedState.copy(
+                activeSessionId = session.sessionId,
+                sessions = sessions
+            )
+        )
+        val requests = storedState.requests.filter { it.sessionId == session.sessionId }
+        return LanerChatSessionOpenResult(
+            session = session,
+            lastUserSeq = requests.maxOfOrNull { it.seq } ?: 0L,
+            lastReplySeq = requests.filter { it.status == LanerChatMessageStatus.ANSWERED }
+                .maxOfOrNull { it.seq } ?: 0L,
+            pendingRequests = requests.count { it.isUnresolved() }
+        )
+    }
+
+    @Synchronized
+    fun closeSession(requestedSessionId: String?): LanerChatSession {
+        val sessionId =
+            requestedSessionId?.trim()?.takeIf { it.isNotEmpty() }
+                ?: storedState.activeSessionId
+                ?: throw IllegalStateException("No active Laner chat session")
+        val sessions = storedState.sessions.toMutableList()
+        val index = sessions.indexOfFirst { it.sessionId == sessionId }
+        require(index >= 0) { "Laner chat session not found: $sessionId" }
+        if (sessions[index].status == LanerChatSessionStatus.CLOSED) {
+            return sessions[index]
+        }
+        val closed = sessions[index].copy(
+            status = LanerChatSessionStatus.CLOSED,
+            closedAtMs = System.currentTimeMillis()
+        )
+        sessions[index] = closed
+        commitState(
+            storedState.copy(
+                activeSessionId = storedState.activeSessionId.takeUnless { it == sessionId },
+                sessions = sessions
+            )
+        )
+        return closed
+    }
+
+    @Synchronized
+    fun enqueue(
+        chatId: String,
+        text: String,
+        sender: String = LanerChatContract.DEFAULT_SENDER
+    ): LanerChatPendingExchange {
+        require(text.isNotBlank()) { "Laner chat message is empty" }
+        val now = System.currentTimeMillis()
+        val session = ensureUiSessionLocked(now)
+        val nextSeq = storedState.lastSeq + 1L
+        val request =
+            LanerChatRequest(
+                requestId = UUID.randomUUID().toString(),
+                sessionId = session.sessionId,
+                seq = nextSeq,
+                chatId = chatId,
+                sender = sender,
+                text = text,
+                createdAtMs = now
+            )
+        val deferred = CompletableDeferred<String>()
+        liveReplies[request.requestId] = deferred
+        try {
+            commitState(
+                storedState.copy(
+                    lastSeq = nextSeq,
+                    activeSessionId = session.sessionId,
+                    requests = storedState.requests + request
+                )
+            )
+        } catch (error: Throwable) {
+            liveReplies.remove(request.requestId)
+            throw error
+        }
+        return LanerChatPendingExchange(request, deferred)
+    }
+
+    @Synchronized
+    fun notification(afterSeq: Long, sessionId: String? = null): LanerChatNotification {
+        touchAgentLocked(sessionId)
+        val matching = unresolvedRequests(sessionId).filter { it.seq > afterSeq.coerceAtLeast(0L) }
+        return LanerChatNotification(
+            event = if (matching.isEmpty()) EVENT_IDLE else EVENT_NEW_MESSAGE,
+            unreadCount = matching.count { it.status == LanerChatMessageStatus.PENDING },
+            pendingReplyCount = matching.size,
+            latestSeq = storedState.lastSeq
+        )
+    }
+
+    suspend fun waitForNotification(
+        afterSeq: Long,
+        timeoutMs: Long,
+        sessionId: String? = null
+    ): LanerChatNotification {
+        val boundedTimeout = timeoutMs.coerceIn(0L, MAX_WAIT_MS)
+        val deadline = SystemClock.elapsedRealtime() + boundedTimeout
+        while (true) {
+            val observedSeq = latestSeqFlow.value
+            notification(afterSeq, sessionId).let { current ->
+                if (current.event == EVENT_NEW_MESSAGE || boundedTimeout == 0L) return current
+            }
+            val remaining = deadline - SystemClock.elapsedRealtime()
+            if (remaining <= 0L) return notification(afterSeq, sessionId)
+            if (latestSeqFlow.value > observedSeq) continue
+            val changed = withTimeoutOrNull(remaining) {
+                latestSeqFlow.first { it > observedSeq }
+            }
+            if (changed == null) return notification(afterSeq, sessionId)
+        }
+    }
+
+    @Synchronized
+    fun fetchInbox(
+        requestedSessionId: String?,
+        requestId: String?,
+        afterSeq: Long,
+        requestedLimit: Int
+    ): LanerChatFetchResult {
+        val explicitSessionId = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() }
+        val normalizedRequestId = requestId?.trim().orEmpty()
+        val sessionFilter =
+            explicitSessionId
+                ?: storedState.activeSessionId.takeIf { normalizedRequestId.isEmpty() }
+        if (normalizedRequestId.isEmpty()) {
+            checkNotNull(sessionFilter) {
+                "No active Laner chat session; call ai_limbs.chat.session.open first"
+            }
+        }
+        val limit = requestedLimit.coerceIn(1, MAX_FETCH_LIMIT)
+        val selected =
+            storedState.requests.asSequence()
+                .filter { it.isUnresolved() }
+                .filter { sessionFilter == null || it.sessionId == sessionFilter }
+                .filter {
+                    if (normalizedRequestId.isNotEmpty()) {
+                        it.requestId == normalizedRequestId
+                    } else {
+                        it.seq > afterSeq.coerceAtLeast(0L)
+                    }
+                }
+                .sortedBy { it.seq }
+                .take(limit)
+                .toList()
+        if (normalizedRequestId.isNotEmpty() && selected.isEmpty()) {
+            throw IllegalArgumentException("Unanswered Laner chat request not found: $normalizedRequestId")
+        }
+        val resolvedSessionId =
+            explicitSessionId
+                ?: selected.firstOrNull()?.sessionId
+                ?: storedState.activeSessionId
+        touchAgentLocked(resolvedSessionId)
+        if (selected.isNotEmpty()) {
+            val selectedIds = selected.mapTo(mutableSetOf()) { it.requestId }
+            val now = System.currentTimeMillis()
+            val updated = storedState.requests.map { request ->
+                if (request.requestId in selectedIds) {
+                    request.copy(
+                        status = LanerChatMessageStatus.DELIVERED,
+                        deliveryCount = request.deliveryCount + 1,
+                        deliveredAtMs = now
+                    )
+                } else {
+                    request
+                }
+            }
+            commitState(storedState.copy(requests = updated))
+        }
+        val deliveredById = storedState.requests.associateBy { it.requestId }
+        return LanerChatFetchResult(
+            sessionId = resolvedSessionId,
+            requests = selected.map { deliveredById.getValue(it.requestId) },
+            latestSeq = storedState.lastSeq
+        )
+    }
+
+    @Synchronized
+    fun reply(requestId: String, replyId: String?, content: String): LanerChatReplyResult {
+        val normalizedRequestId = requestId.trim()
+        val normalizedContent = content.trim()
+        require(normalizedRequestId.isNotEmpty()) { "request_id is required" }
+        require(normalizedContent.isNotEmpty()) { "reply content is required" }
+        val index = storedState.requests.indexOfFirst { it.requestId == normalizedRequestId }
+        require(index >= 0) { "Laner chat request not found: $normalizedRequestId" }
+        val existing = storedState.requests[index]
+        touchAgentLocked(existing.sessionId)
+        val normalizedReplyId =
+            replyId?.trim()?.takeIf { it.isNotEmpty() } ?: "reply:$normalizedRequestId"
+        if (existing.status == LanerChatMessageStatus.ANSWERED) {
+            check(existing.replyId == normalizedReplyId && existing.replyContent == normalizedContent) {
+                "Laner chat request already answered with different reply data"
+            }
+            return LanerChatReplyResult(
+                request = existing,
+                duplicate = true,
+                deliveredToLiveStream = false
+            )
+        }
+        check(existing.status != LanerChatMessageStatus.CANCELED) {
+            "Laner chat request was canceled: $normalizedRequestId"
+        }
+        val answered = existing.copy(
+            status = LanerChatMessageStatus.ANSWERED,
+            answeredAtMs = System.currentTimeMillis(),
+            replyId = normalizedReplyId,
+            replyContent = normalizedContent
+        )
+        val requests = storedState.requests.toMutableList().also { it[index] = answered }
+        commitState(storedState.copy(requests = requests))
+        val deliveredLive = liveReplies.remove(normalizedRequestId)?.complete(normalizedContent) == true
+        return LanerChatReplyResult(answered, duplicate = false, deliveredToLiveStream = deliveredLive)
+    }
+
+    @Synchronized
+    fun cancelRequest(requestId: String, reason: String): Boolean {
+        val index = storedState.requests.indexOfFirst { it.requestId == requestId }
+        if (index < 0) return false
+        val existing = storedState.requests[index]
+        if (!existing.isUnresolved()) return false
+        val canceled = existing.copy(
+            status = LanerChatMessageStatus.CANCELED,
+            canceledAtMs = System.currentTimeMillis()
+        )
+        val requests = storedState.requests.toMutableList().also { it[index] = canceled }
+        commitState(storedState.copy(requests = requests))
+        liveReplies.remove(requestId)?.cancel(CancellationException(reason))
+        return true
+    }
+
+    @Synchronized
+    fun snapshot(): LanerChatMailboxStatus = buildMailboxStatus(storedState)
+
+    @Synchronized
+    private fun ensureUiSessionLocked(now: Long): LanerChatSession {
+        val active = storedState.activeSessionId?.let { id ->
+            storedState.sessions.firstOrNull {
+                it.sessionId == id && it.status == LanerChatSessionStatus.OPEN
+            }
+        }
+        if (active != null) return active
+        val created = LanerChatSession(sessionId = UUID.randomUUID().toString(), openedAtMs = now)
+        commitState(
+            storedState.copy(
+                activeSessionId = created.sessionId,
+                sessions = storedState.sessions + created
+            )
+        )
+        return created
+    }
+
+    private fun unresolvedRequests(sessionId: String?): List<LanerChatRequest> =
+        storedState.requests.filter { request ->
+            request.isUnresolved() && (sessionId.isNullOrBlank() || request.sessionId == sessionId)
+        }
+
+    private fun touchAgentLocked(sessionId: String?) {
+        val targetSessionId =
+            sessionId?.trim()?.takeIf { it.isNotEmpty() }
+                ?: storedState.activeSessionId
+                ?: return
+        val sessions = storedState.sessions.toMutableList()
+        val index = sessions.indexOfFirst { it.sessionId == targetSessionId }
+        if (index < 0) return
+        val now = System.currentTimeMillis()
+        val previous = sessions[index]
+        if (now - (previous.lastAgentSeenAtMs ?: 0L) < AGENT_SEEN_WRITE_INTERVAL_MS) return
+        sessions[index] = previous.copy(lastAgentSeenAtMs = now)
+        commitState(storedState.copy(sessions = sessions))
+    }
+
+    private fun loadState(): LanerChatStoredState {
+        val raw = preferences.getString(KEY_STATE, null) ?: return LanerChatStoredState()
+        return try {
+            json.decodeFromString(raw)
+        } catch (error: Exception) {
+            throw IllegalStateException("Stored Laner chat mailbox is invalid", error)
+        }
+    }
+
+    private fun commitState(updated: LanerChatStoredState) {
+        val committed = preferences.edit().putString(KEY_STATE, json.encodeToString(updated)).commit()
+        check(committed) { "Unable to persist Laner chat mailbox" }
+        storedState = updated
+        latestSeqFlow.value = updated.lastSeq
+        mailboxStatusFlow.value = buildMailboxStatus(updated)
+    }
+
+    private fun buildMailboxStatus(state: LanerChatStoredState): LanerChatMailboxStatus {
+        val activeSession = state.sessions.firstOrNull { it.sessionId == state.activeSessionId }
+        return LanerChatMailboxStatus(
+            activeSessionId = state.activeSessionId,
+            latestSeq = state.lastSeq,
+            pendingCount = state.requests.count { it.status == LanerChatMessageStatus.PENDING },
+            deliveredCount = state.requests.count { it.status == LanerChatMessageStatus.DELIVERED },
+            answeredCount = state.requests.count { it.status == LanerChatMessageStatus.ANSWERED },
+            canceledCount = state.requests.count { it.status == LanerChatMessageStatus.CANCELED },
+            lastAgentSeenAtMs = activeSession?.lastAgentSeenAtMs
+        )
+    }
+
+    private fun LanerChatRequest.isUnresolved(): Boolean =
+        status == LanerChatMessageStatus.PENDING || status == LanerChatMessageStatus.DELIVERED
+
+    companion object {
+        const val EVENT_NEW_MESSAGE = "new_message"
+        const val EVENT_IDLE = "idle"
+        const val MAX_WAIT_MS = 30_000L
+        const val MAX_FETCH_LIMIT = 20
+        private const val PREFERENCES_NAME = "ai_limbs_laner_chat"
+        private const val KEY_STATE = "mailbox_state"
+        private const val AGENT_SEEN_WRITE_INTERVAL_MS = 10_000L
+
+        @Volatile
+        private var instance: LanerChatBridgeService? = null
+
+        fun getInstance(context: Context): LanerChatBridgeService =
+            instance ?: synchronized(this) {
+                instance ?: LanerChatBridgeService(context.applicationContext).also { instance = it }
+            }
+    }
+}

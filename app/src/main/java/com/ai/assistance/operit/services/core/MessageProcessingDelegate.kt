@@ -24,6 +24,7 @@ import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.WaifuPreferences
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceBackupManager
@@ -861,12 +862,22 @@ class MessageProcessingDelegate(
                     details = "chatId=$chatId, contentLength=${userMessage.content.length}"
                 )
                 titleFallback?.let { fallbackTitle ->
-                    launchConversationTitleGeneration(
-                        chatId = chatId,
-                        userText = originalMessageText,
-                        attachments = attachments,
-                        fallbackTitle = fallbackTitle
-                    )
+                    if (LanerChatContract.isBridgeConfig(currentModelConfig)) {
+                        updateChatTitle(
+                            chatId,
+                            LanerChatContract.localConversationTitle(
+                                originalMessageText,
+                                attachments.map { it.fileName }
+                            )
+                        )
+                    } else {
+                        launchConversationTitleGeneration(
+                            chatId = chatId,
+                            userText = originalMessageText,
+                            attachments = attachments,
+                            fallbackTitle = fallbackTitle
+                        )
+                    }
                 }
             }
 
