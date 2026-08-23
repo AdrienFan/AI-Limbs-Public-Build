@@ -164,9 +164,9 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("transport_neutral", true)
 
     private fun sharedUbuntuStatus(): JSONObject {
-        val state = com.ai.assistance.operit.core.tools.system.Terminal
-            .getInstance(appContext)
-            .currentSharedHiddenTerminalState()
+        val terminal = com.ai.assistance.operit.core.tools.system.Terminal.getInstance(appContext)
+        val state = terminal.currentSharedHiddenTerminalState()
+        val usage = terminal.currentUbuntuUsageState()
         return ok()
             .put("module", "Laner Ubuntu Shared View")
             .put("active", state.isActive)
@@ -174,6 +174,9 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("has_recent_operation", state.operationId != null)
             .put("read_only", true)
             .put("persisted", false)
+            .put("participant_count", usage.participantCount)
+            .put("user_interface_clients", usage.userInterfaceClients)
+            .put("hidden_ai_operations", usage.hiddenAiOperations)
     }
 
     private fun parseJsonOrString(raw: String): Any = try {

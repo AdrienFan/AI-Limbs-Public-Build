@@ -12,6 +12,8 @@ import com.ai.assistance.operit.terminal.data.TerminalState
 import com.ai.assistance.operit.terminal.data.UbuntuIdlePolicy
 import com.ai.assistance.operit.terminal.data.UbuntuRuntimePhase
 import com.ai.assistance.operit.terminal.data.UbuntuRuntimeState
+import com.ai.assistance.operit.terminal.data.UbuntuStopRequester
+import com.ai.assistance.operit.terminal.data.UbuntuUsageState
 import com.ai.assistance.operit.terminal.provider.type.HiddenExecResult
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
@@ -167,12 +169,16 @@ class Terminal private constructor(private val context: Context) {
     fun currentUbuntuIdlePolicy(): UbuntuIdlePolicy =
         terminalManager.currentUbuntuIdlePolicy()
 
+    fun currentUbuntuUsageState(): UbuntuUsageState =
+        terminalManager.currentUbuntuUsageState()
+
     fun updateUbuntuIdlePolicy(policy: UbuntuIdlePolicy): UbuntuIdlePolicy =
         terminalManager.updateUbuntuIdlePolicy(policy)
 
     suspend fun startUbuntu(): UbuntuRuntimeState = terminalManager.startUbuntu()
 
-    suspend fun stopUbuntu(): UbuntuRuntimeState = terminalManager.stopUbuntu()
+    suspend fun stopUbuntu(): UbuntuRuntimeState =
+        terminalManager.stopUbuntu(UbuntuStopRequester.AI_TOOL)
 
     /**
      * 执行命令 - Flow版本

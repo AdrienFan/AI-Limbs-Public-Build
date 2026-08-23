@@ -41,6 +41,10 @@ class AiLimbsAccessContextService(context: Context) {
                     "{\"name\":\"ai_limbs.ubuntu.share.status\",\"parameters\":{}}。"
             )
             appendLine(
+                "- ubuntu.stop 带并发保护：若 Ubuntu 命令终端仍由用户打开，或另一个隐藏 Ubuntu " +
+                    "操作仍在运行，关机会被拒绝；不得绕过该保护直接杀进程。"
+            )
+            appendLine(
                 "- 当任务涉及开发、调试、开发环境管理或会改变项目/设备内容时，" +
                     "先调用 ai_limbs.work_manual.read。"
             )

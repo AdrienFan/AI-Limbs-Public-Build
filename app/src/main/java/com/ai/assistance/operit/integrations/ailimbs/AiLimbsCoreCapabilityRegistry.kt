@@ -72,13 +72,18 @@ object AiLimbsCoreCapabilityRegistry {
         entry(
             "ai_limbs.ubuntu.share.status",
             "兰儿 Ubuntu 共享窗口状态",
-            "Read whether the read-only shared Ubuntu operation window currently has an active hidden command.",
+            "Read shared Ubuntu activity and participant counts without returning command or output content.",
             keywords = listOf("共享窗口", "眼睛", "只读", "兰儿操作", "Ubuntu share")
         ),
         entry("operit.tools.list", "Operit 原生工具 Registry", "List currently registered native Operit tool names.", keywords = listOf("registry", "dispatcher", "工具注册表")),
         ubuntuEntry("ubuntu.status", "查询 Ubuntu 状态", "Read the lifecycle state of the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "沙箱", "生命周期")),
         ubuntuEntry("ubuntu.start", "启动 Ubuntu", "Start the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "开机", "启动沙箱")),
-        ubuntuEntry("ubuntu.stop", "停止 Ubuntu", "Stop the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "关机", "停止沙箱")),
+        ubuntuEntry(
+            "ubuntu.stop",
+            "停止 Ubuntu",
+            "Stop the AI Limbs Ubuntu sandbox unless another UI user or AI operation is active.",
+            listOf("Ubuntu", "Linux", "关机", "停止沙箱", "其他用户", "并发保护")
+        ),
         ubuntuEntry("ubuntu.idle.get", "查询 Ubuntu 空闲策略", "Read the Ubuntu idle auto-stop policy.", listOf("Ubuntu", "自动关机", "空闲时间")),
         ubuntuEntry(
             "ubuntu.idle.set",

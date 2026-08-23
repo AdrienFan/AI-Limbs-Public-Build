@@ -277,7 +277,8 @@ class AiLimbsCapabilityResolver(context: Context) {
         }
 
         if (definition.provider == "ubuntu") {
-            val phase = Terminal.getInstance(appContext).currentUbuntuRuntimeState().phase.name
+            val terminal = Terminal.getInstance(appContext)
+            val phase = terminal.currentUbuntuRuntimeState().phase.name
             prerequisites += "Ubuntu runtime state: $phase"
             when (definition.invokeId) {
                 "ubuntu.start" -> when (phase) {
@@ -294,15 +295,29 @@ class AiLimbsCapabilityResolver(context: Context) {
                         )
                     else -> Unit
                 }
-                "ubuntu.stop" -> if (phase != "RUNNING") {
-                    return AiLimbsCapabilityAvailability(
-                        available = false,
-                        permission = permission,
-                        requiresConfirmation = false,
-                        reason = "Ubuntu is $phase.",
-                        resolution = "Call ubuntu.start before requesting a stop.",
-                        prerequisites = prerequisites
-                    )
+                "ubuntu.stop" -> {
+                    if (phase != "RUNNING") {
+                        return AiLimbsCapabilityAvailability(
+                            available = false,
+                            permission = permission,
+                            requiresConfirmation = false,
+                            reason = "Ubuntu is $phase.",
+                            resolution = "Call ubuntu.start before requesting a stop.",
+                            prerequisites = prerequisites
+                        )
+                    }
+                    val usage = terminal.currentUbuntuUsageState()
+                    prerequisites += "Ubuntu participants: ${usage.participantCount}"
+                    if (usage.userInterfaceClients > 0 || usage.hiddenAiOperations > 0) {
+                        return AiLimbsCapabilityAvailability(
+                            available = false,
+                            permission = permission,
+                            requiresConfirmation = false,
+                            reason = "Ubuntu is still being used by another interface or hidden operation.",
+                            resolution = "Wait until the other Ubuntu participant leaves before calling ubuntu.stop.",
+                            prerequisites = prerequisites
+                        )
+                    }
                 }
                 "ubuntu.status", "ubuntu.idle.get", "ubuntu.idle.set" -> Unit
                 else -> if (phase != "RUNNING") {
