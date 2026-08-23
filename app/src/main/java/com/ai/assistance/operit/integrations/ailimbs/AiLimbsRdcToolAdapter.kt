@@ -158,7 +158,9 @@ class AiLimbsRdcToolAdapter(
         if (!normalizedPath.contains("/ai_limbs/docs/")) return null
         val action = if (write) "write" else "read"
         return when (normalizedPath.substringAfterLast('/')) {
-            "LANER_ACCESS_PROMPT.md" -> "ai_limbs.access_prompt.$action"
+            "AI_LIMBS_SYSTEM_ACCESS_PROMPT.md" -> "ai_limbs.system_access_prompt.$action"
+            "AI_LIMBS_CUSTOM_ACCESS_PROMPT.md" -> "ai_limbs.custom_access_prompt.$action"
+            "LANER_ACCESS_PROMPT.md" -> "ai_limbs.custom_access_prompt.$action"
             "LANER_WORK_MANUAL.md" -> "ai_limbs.work_manual.$action"
             "LANER_TOOL_MANUAL.md" -> "ai_limbs.tool_manual.$action"
             else -> null

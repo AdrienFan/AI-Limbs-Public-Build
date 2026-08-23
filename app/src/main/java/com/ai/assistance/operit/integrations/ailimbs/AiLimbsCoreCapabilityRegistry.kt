@@ -46,13 +46,37 @@ object AiLimbsCoreCapabilityRegistry {
             description = "Describe the AI Limbs dispatcher route and its enforced Operit permission chain.",
             keywords = listOf("dispatcher", "分发器", "调度器", "权限链", "AI Limbs Core")
         ),
-        entry("ai_limbs.access_context.read", "AI Limbs 系统接入策略", "Read the compiled system access policy and user access prompt."),
-        entry("ai_limbs.access_prompt.read", "读取自定义接入提示", "Read the editable AI Limbs user access prompt."),
         entry(
-            "ai_limbs.access_prompt.write",
-            "保存自定义接入提示",
-            "Save the editable AI Limbs user access prompt.",
-            listOf(ToolParameterSchema("content", "string", "Complete prompt body", true))
+            name = "ai_limbs.access_context.read",
+            displayName = "AI Limbs 接入 Bootstrap",
+            description = "Read the minimal AI Limbs access bootstrap with official managed-prompt references and current versions.",
+            keywords = listOf("接入", "bootstrap", "access context", "prompt reference")
+        ),
+        entry(
+            name = "ai_limbs.system_access_prompt.read",
+            displayName = "读取系统接入提示",
+            description = "Read the current official AI Limbs system access prompt, including its content version and managed document path.",
+            keywords = listOf("系统接入提示", "system access prompt", "system prompt", "managed document")
+        ),
+        entry(
+            name = "ai_limbs.system_access_prompt.write",
+            displayName = "保存系统接入提示",
+            description = "Save the official AI Limbs system access prompt through the managed-document history path.",
+            parameters = listOf(ToolParameterSchema("content", "string", "Complete non-empty system access prompt body", true)),
+            keywords = listOf("系统接入提示", "system access prompt", "保存系统提示")
+        ),
+        entry(
+            name = "ai_limbs.custom_access_prompt.read",
+            displayName = "读取自定义接入提示",
+            description = "Read the current user-editable AI Limbs custom access prompt and its content version.",
+            keywords = listOf("自定义接入提示", "custom access prompt", "user prompt")
+        ),
+        entry(
+            name = "ai_limbs.custom_access_prompt.write",
+            displayName = "保存自定义接入提示",
+            description = "Save the user-editable AI Limbs custom access prompt through the managed-document history path.",
+            parameters = listOf(ToolParameterSchema("content", "string", "Complete custom access prompt body", true)),
+            keywords = listOf("自定义接入提示", "custom access prompt", "保存接入提示")
         ),
         entry("ai_limbs.work_manual.read", "读取工作手册", "Read the protected AI Limbs work manual."),
         entry(
@@ -225,12 +249,12 @@ object AiLimbsCoreCapabilityRegistry {
             name = "ai_limbs.chat.send",
             displayName = "主动发送兰儿聊天消息",
             description =
-                "Send an AI-originated message directly to the Chat bound to an open Laner session without requiring a user request ID.",
+                "Send an AI-originated message without a user request ID; automatically open a Laner session and bootstrap a dedicated Bridge Chat when needed.",
             parameters = listOf(
                 ToolParameterSchema(
                     "session_id",
                     "string",
-                    "Optional open Laner Chat session; defaults to the active session",
+                    "Optional Laner Chat session; defaults to or automatically creates the active session",
                     false
                 ),
                 ToolParameterSchema(

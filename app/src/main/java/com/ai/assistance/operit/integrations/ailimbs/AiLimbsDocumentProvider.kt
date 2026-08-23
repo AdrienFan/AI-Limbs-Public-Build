@@ -19,10 +19,18 @@ enum class AiLimbsDocumentId(
     val stableId: String,
     internal val fileName: String
 ) {
-    ACCESS_PROMPT("access_prompt", "LANER_ACCESS_PROMPT.md"),
+    SYSTEM_ACCESS_PROMPT("system_access_prompt", "AI_LIMBS_SYSTEM_ACCESS_PROMPT.md"),
+    CUSTOM_ACCESS_PROMPT("custom_access_prompt", "AI_LIMBS_CUSTOM_ACCESS_PROMPT.md"),
     WORK_MANUAL("work_manual", "LANER_WORK_MANUAL.md"),
     TOOL_MANUAL("tool_manual", "LANER_TOOL_MANUAL.md")
 }
+
+data class AiLimbsDocumentReference(
+    val documentId: String,
+    val path: String,
+    val version: String,
+    val isEmpty: Boolean
+)
 
 data class AiLimbsDocumentSnapshot(
     val id: String,
@@ -54,8 +62,14 @@ class AiLimbsDocumentProvider(context: Context) {
     private val toolManualPath: String
         get() = documentFile(AiLimbsDocumentId.TOOL_MANUAL).absolutePath
 
-    suspend fun readAccessPrompt(): String =
-        readEditableDocument(AiLimbsDocumentId.ACCESS_PROMPT)
+    suspend fun readSystemAccessPrompt(): String =
+        readEditableDocument(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
+
+    suspend fun readCustomAccessPrompt(): String =
+        readEditableDocument(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
+
+    // Compatibility alias for callers that still use the pre-V0.6.3.2 name.
+    suspend fun readAccessPrompt(): String = readCustomAccessPrompt()
 
     suspend fun readWorkManual(): String =
         readEditableDocument(AiLimbsDocumentId.WORK_MANUAL)
@@ -76,8 +90,16 @@ class AiLimbsDocumentProvider(context: Context) {
         }
     }
 
-    suspend fun writeAccessPrompt(content: String): Boolean =
-        writeEditableDocument(AiLimbsDocumentId.ACCESS_PROMPT, content)
+    suspend fun writeSystemAccessPrompt(content: String): Boolean {
+        require(content.isNotBlank()) { "AI Limbs system access prompt must not be empty" }
+        return writeEditableDocument(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT, content)
+    }
+
+    suspend fun writeCustomAccessPrompt(content: String): Boolean =
+        writeEditableDocument(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT, content)
+
+    // Compatibility alias for callers that still use the pre-V0.6.3.2 name.
+    suspend fun writeAccessPrompt(content: String): Boolean = writeCustomAccessPrompt(content)
 
     suspend fun writeWorkManual(content: String): Boolean =
         writeEditableDocument(
@@ -93,6 +115,21 @@ class AiLimbsDocumentProvider(context: Context) {
             documentMutex.withLock {
                 ensureDocumentsReadyLocked()
                 documentFile(documentId).takeIf { it.isFile }?.readText().orEmpty()
+            }
+        }
+
+    suspend fun documentReference(documentId: AiLimbsDocumentId): AiLimbsDocumentReference =
+        withContext(Dispatchers.IO) {
+            documentMutex.withLock {
+                ensureDocumentsReadyLocked()
+                val file = documentFile(documentId)
+                val content = file.takeIf { it.isFile }?.readText().orEmpty()
+                AiLimbsDocumentReference(
+                    documentId = documentId.stableId,
+                    path = file.absolutePath,
+                    version = "sha256:${sha256(content).take(16)}",
+                    isEmpty = content.isBlank()
+                )
             }
         }
 
@@ -209,7 +246,13 @@ class AiLimbsDocumentProvider(context: Context) {
         AiLimbsDocumentId.entries.forEach { documentId ->
             val destination = documentFile(documentId)
             if (!destination.exists()) {
-                writeAtomically(destination, "")
+                val initialContent =
+                    if (documentId == AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT) {
+                        appContext.assets.open(SYSTEM_ACCESS_PROMPT_ASSET).bufferedReader().use { it.readText() }
+                    } else {
+                        ""
+                    }
+                writeAtomically(destination, initialContent)
             }
         }
     }
@@ -221,11 +264,12 @@ class AiLimbsDocumentProvider(context: Context) {
                 "usr/var/lib/proot-distro/installed-rootfs/ubuntu"
             )
         migrateDocument(
-            destination = documentFile(AiLimbsDocumentId.ACCESS_PROMPT),
+            destination = documentFile(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT),
             sources =
                 listOf(
-                    File(ubuntuRoot, "root/laner/docs/${AiLimbsDocumentId.ACCESS_PROMPT.fileName}"),
-                    File(legacyDocumentsDirectory(), AiLimbsDocumentId.ACCESS_PROMPT.fileName)
+                    File(documentsDirectory, LEGACY_ACCESS_PROMPT_FILE_NAME),
+                    File(ubuntuRoot, "root/laner/docs/$LEGACY_ACCESS_PROMPT_FILE_NAME"),
+                    File(legacyDocumentsDirectory(), LEGACY_ACCESS_PROMPT_FILE_NAME)
                 )
         )
         migrateDocument(
@@ -252,7 +296,7 @@ class AiLimbsDocumentProvider(context: Context) {
         val currentSchema = preferences.getInt(KEY_DOCUMENT_SCHEMA_VERSION, 1)
         if (currentSchema >= DOCUMENT_SCHEMA_VERSION) return
 
-        val accessPrompt = documentFile(AiLimbsDocumentId.ACCESS_PROMPT)
+        val accessPrompt = documentFile(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
         if (accessPrompt.isFile) {
             archivePreV054Document(accessPrompt)
             val content = accessPrompt.readText()
@@ -393,9 +437,12 @@ class AiLimbsDocumentProvider(context: Context) {
         private const val LEGACY_ARCHIVE_DIRECTORY = "legacy"
         private const val PREFERENCES_NAME = "ai_limbs_documents"
         private const val KEY_DOCUMENT_SCHEMA_VERSION = "document_schema_version"
-        private const val DOCUMENT_SCHEMA_VERSION = 2
+        private const val DOCUMENT_SCHEMA_VERSION = 3
         private const val MAX_SNAPSHOTS = 3
         private const val PRE_V054_ARCHIVE_SUFFIX = "_PRE_V054.md"
+        private const val LEGACY_ACCESS_PROMPT_FILE_NAME = "LANER_ACCESS_PROMPT.md"
+        private const val SYSTEM_ACCESS_PROMPT_ASSET =
+            "ai_limbs/AI_LIMBS_SYSTEM_ACCESS_PROMPT.md"
         private const val PROTECTED_HEADER_END_MARKER =
             "<!-- AI_LIMBS_PROTECTED_WORK_MANUAL_HEADER_END -->"
         private val documentMutex = Mutex()

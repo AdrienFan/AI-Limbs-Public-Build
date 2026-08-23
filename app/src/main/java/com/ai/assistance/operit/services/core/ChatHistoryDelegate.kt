@@ -777,6 +777,19 @@ class ChatHistoryDelegate(
         }
     }
 
+    /** Create a fresh Chat and wait until it becomes the selected MAIN conversation. */
+    suspend fun createAndSelectNewChat(timeoutMs: Long): String {
+        return initialChatCreationMutex.withLock {
+            val previousChatId = _currentChatId.value
+            createNewChat(inheritGroupFromCurrent = false)
+            withTimeout(timeoutMs) {
+                _currentChatId.filterNotNull().first { chatId ->
+                    chatId.isNotBlank() && chatId != previousChatId
+                }
+            }
+        }
+    }
+
     /** 创建新的聊天 */
     fun createNewChat(
         characterCardName: String? = null,

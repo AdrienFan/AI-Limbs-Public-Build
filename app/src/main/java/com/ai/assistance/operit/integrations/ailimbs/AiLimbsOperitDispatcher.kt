@@ -35,15 +35,47 @@ class AiLimbsOperitDispatcher(context: Context) {
     suspend fun execute(tool: String, args: JSONObject): JSONObject = when (tool) {
         "ai_limbs.access_context.read" ->
             ok()
-                .put("document", "access_context")
+                .put("document", "access_bootstrap")
                 .put("content", accessContext.readAccessContext())
-        "ai_limbs.access_prompt.read", "laner.access_prompt.read" ->
+        "ai_limbs.system_access_prompt.read" -> {
+            val reference = documents.documentReference(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
             ok()
-                .put("document", AiLimbsDocumentId.ACCESS_PROMPT.stableId)
-                .put("content", documents.readAccessPrompt())
-        "ai_limbs.access_prompt.write", "laner.access_prompt.write" -> {
-            val changed = documents.writeAccessPrompt(args.optString("content"))
-            ok().put("document", AiLimbsDocumentId.ACCESS_PROMPT.stableId).put("changed", changed)
+                .put("document", reference.documentId)
+                .put("version", reference.version)
+                .put("path", reference.path)
+                .put("content", documents.readSystemAccessPrompt())
+        }
+        "ai_limbs.system_access_prompt.write" -> {
+            val changed = documents.writeSystemAccessPrompt(args.optString("content"))
+            val reference = documents.documentReference(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
+            ok()
+                .put("document", reference.documentId)
+                .put("version", reference.version)
+                .put("path", reference.path)
+                .put("changed", changed)
+        }
+        "ai_limbs.custom_access_prompt.read",
+        "ai_limbs.access_prompt.read",
+        "laner.access_prompt.read" -> {
+            val reference = documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
+            ok()
+                .put("document", reference.documentId)
+                .put("version", reference.version)
+                .put("path", reference.path)
+                .put("empty", reference.isEmpty)
+                .put("content", documents.readCustomAccessPrompt())
+        }
+        "ai_limbs.custom_access_prompt.write",
+        "ai_limbs.access_prompt.write",
+        "laner.access_prompt.write" -> {
+            val changed = documents.writeCustomAccessPrompt(args.optString("content"))
+            val reference = documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
+            ok()
+                .put("document", reference.documentId)
+                .put("version", reference.version)
+                .put("path", reference.path)
+                .put("empty", reference.isEmpty)
+                .put("changed", changed)
         }
         "ai_limbs.work_manual.read", "laner.work_manual.read" ->
             ok()
@@ -318,17 +350,41 @@ class AiLimbsOperitDispatcher(context: Context) {
     }
 
     private suspend fun lanerChatSend(args: JSONObject): JSONObject {
+        val requestedSessionId = args.optString("session_id").ifBlank { null }
+        val opened =
+            lanerChat.openSession(
+                requestedSessionId = requestedSessionId,
+                agentSessionId = null
+            )
+        val core = ChatRuntimeHolder.getInstance(appContext).getCore(ChatRuntimeSlot.MAIN)
+        val chatHistory = core.getChatHistoryDelegate()
+
+        if (opened.session.chatId.isNullOrBlank()) {
+            val apiConfig = core.getApiConfigDelegate()
+            val currentChatId = chatHistory.currentChatId.value?.takeIf { it.isNotBlank() }
+            val isAlreadyBridge = LanerChatContract.isBridgeConfig(apiConfig.activeChatModelConfig.value)
+            val bridgeChatId =
+                when {
+                    isAlreadyBridge && currentChatId != null -> currentChatId
+                    currentChatId == null -> {
+                        apiConfig.activateLanerBridgeConfiguration()
+                        chatHistory.ensureCurrentChat(5_000L)
+                    }
+                    else -> {
+                        apiConfig.activateLanerBridgeConfiguration()
+                        chatHistory.createAndSelectNewChat(5_000L)
+                    }
+                }
+            lanerChat.bindUiChat(bridgeChatId)
+        }
+
         val prepared =
             lanerChat.prepareProactiveMessage(
-                requestedSessionId = args.optString("session_id").ifBlank { null },
+                requestedSessionId = opened.session.sessionId,
                 requestedMessageId = args.optString("message_id").ifBlank { null },
                 content = args.optString("content")
             )
         val proactive = prepared.message
-        val chatHistory =
-            ChatRuntimeHolder.getInstance(appContext)
-                .getCore(ChatRuntimeSlot.MAIN)
-                .getChatHistoryDelegate()
         chatHistory.addMessageToChat(
             message =
                 ChatMessage(

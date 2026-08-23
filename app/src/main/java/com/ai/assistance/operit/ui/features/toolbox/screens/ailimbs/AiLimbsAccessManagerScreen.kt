@@ -54,7 +54,8 @@ private data class RestoreRequest(
 
 private val visibleDocumentIds =
     listOf(
-        AiLimbsDocumentId.ACCESS_PROMPT,
+        AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
+        AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
         AiLimbsDocumentId.WORK_MANUAL
     )
 
@@ -64,7 +65,8 @@ fun AiLimbsAccessManagerScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val documents = remember { AiLimbsDocumentProvider(context) }
-    var accessPrompt by remember { mutableStateOf("") }
+    var systemAccessPrompt by remember { mutableStateOf("") }
+    var customAccessPrompt by remember { mutableStateOf("") }
     var workManual by remember { mutableStateOf("") }
     var snapshots by remember {
         mutableStateOf<Map<AiLimbsDocumentId, List<AiLimbsDocumentSnapshot>>>(emptyMap())
@@ -78,7 +80,8 @@ fun AiLimbsAccessManagerScreen() {
         Toast.makeText(context, context.getString(resId), Toast.LENGTH_SHORT).show()
 
     suspend fun loadDocuments() {
-        accessPrompt = documents.readAccessPrompt()
+        systemAccessPrompt = documents.readSystemAccessPrompt()
+        customAccessPrompt = documents.readCustomAccessPrompt()
         workManual = documents.readWorkManual()
         val loadedSnapshots =
             visibleDocumentIds.associateWith { documentId ->
@@ -112,8 +115,10 @@ fun AiLimbsAccessManagerScreen() {
             try {
                 val changed =
                     when (documentId) {
-                        AiLimbsDocumentId.ACCESS_PROMPT ->
-                            documents.writeAccessPrompt(content)
+                        AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT ->
+                            documents.writeSystemAccessPrompt(content)
+                        AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT ->
+                            documents.writeCustomAccessPrompt(content)
                         AiLimbsDocumentId.WORK_MANUAL ->
                             documents.writeWorkManual(content)
                         AiLimbsDocumentId.TOOL_MANUAL ->
@@ -156,25 +161,49 @@ fun AiLimbsAccessManagerScreen() {
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
             DocumentEditorCard(
-                title = stringResource(R.string.laner_access_prompt_title),
-                value = accessPrompt,
-                onValueChange = { accessPrompt = it },
-                minLines = 5,
-                snapshots = snapshots[AiLimbsDocumentId.ACCESS_PROMPT].orEmpty(),
-                selectedSnapshotId = selectedSnapshots[AiLimbsDocumentId.ACCESS_PROMPT],
+                title = stringResource(R.string.laner_system_access_prompt_title),
+                value = systemAccessPrompt,
+                onValueChange = { systemAccessPrompt = it },
+                minLines = 14,
+                snapshots = snapshots[AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT].orEmpty(),
+                selectedSnapshotId = selectedSnapshots[AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT],
                 onSnapshotSelected = { snapshotId ->
                     selectedSnapshots =
-                        selectedSnapshots + (AiLimbsDocumentId.ACCESS_PROMPT to snapshotId)
+                        selectedSnapshots + (AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT to snapshotId)
                 },
                 onRestore = { snapshotId ->
                     restoreRequest =
-                        RestoreRequest(AiLimbsDocumentId.ACCESS_PROMPT, snapshotId)
+                        RestoreRequest(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT, snapshotId)
                 },
                 onReload = { reload(showConfirmation = true) },
                 onSave = {
                     saveDocument(
-                        AiLimbsDocumentId.ACCESS_PROMPT,
-                        accessPrompt,
+                        AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
+                        systemAccessPrompt,
+                        R.string.laner_system_access_saved
+                    )
+                }
+            )
+            DocumentEditorCard(
+                title = stringResource(R.string.laner_access_prompt_title),
+                value = customAccessPrompt,
+                onValueChange = { customAccessPrompt = it },
+                minLines = 5,
+                snapshots = snapshots[AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT].orEmpty(),
+                selectedSnapshotId = selectedSnapshots[AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT],
+                onSnapshotSelected = { snapshotId ->
+                    selectedSnapshots =
+                        selectedSnapshots + (AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT to snapshotId)
+                },
+                onRestore = { snapshotId ->
+                    restoreRequest =
+                        RestoreRequest(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT, snapshotId)
+                },
+                onReload = { reload(showConfirmation = true) },
+                onSave = {
+                    saveDocument(
+                        AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
+                        customAccessPrompt,
                         R.string.laner_access_saved
                     )
                 }
@@ -209,7 +238,8 @@ fun AiLimbsAccessManagerScreen() {
         val documentTitle =
             stringResource(
                 when (request.documentId) {
-                    AiLimbsDocumentId.ACCESS_PROMPT -> R.string.laner_access_prompt_title
+                    AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> R.string.laner_system_access_prompt_title
+                    AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> R.string.laner_access_prompt_title
                     AiLimbsDocumentId.WORK_MANUAL -> R.string.laner_work_manual_title
                     AiLimbsDocumentId.TOOL_MANUAL -> R.string.laner_tool_manual_title
                 }

@@ -8311,7 +8311,8 @@
     <string name="ai_limbs_bridge_action_refresh">刷新状态</string>
 
     <string name="laner_access_manager_title">兰儿接入管理</string>
-    <string name="laner_access_manager_desc">管理自定义接入提示、工作手册、工具手册与三代备份</string>
+    <string name="laner_access_manager_desc">管理系统接入提示、自定义接入提示、工作手册与三代备份</string>
+    <string name="laner_system_access_prompt_title">系统接入提示</string>
     <string name="laner_access_prompt_title">自定义接入提示</string>
     <string name="laner_work_manual_title">工作手册</string>
     <string name="laner_tool_manual_title">工具手册</string>
@@ -8325,7 +8326,8 @@
     <string name="laner_reload">重新读取</string>
     <string name="laner_save">保存</string>
     <string name="laner_access_reloaded">已重新读取</string>
-    <string name="laner_access_saved">接入提示已保存</string>
+    <string name="laner_access_saved">自定义接入提示已保存</string>
+    <string name="laner_system_access_saved">系统接入提示已保存</string>
     <string name="laner_work_manual_saved">工作手册已保存</string>
     <string name="laner_tool_manual_saved">工具手册已保存</string>
     <string name="laner_document_unchanged">内容没有变化</string>

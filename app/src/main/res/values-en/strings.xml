@@ -8293,7 +8293,8 @@
     <string name="ai_limbs_ui_enable_accessibility">Select Accessibility mode and authorize</string>
     <string name="ai_limbs_ui_configure_controller">Configure vision subagent model</string>
     <string name="ai_limbs_ui_refresh_status">Refresh capability status</string>
-    <string name="laner_access_manager_desc">Manage the custom access prompt, manuals, and three-version history</string>
+    <string name="laner_access_manager_desc">Manage the system access prompt, custom access prompt, Work Manual, and three-version history</string>
+    <string name="laner_system_access_prompt_title">System Access Prompt</string>
     <string name="laner_access_prompt_title">Custom Access Prompt</string>
     <string name="laner_work_manual_title">Work Manual</string>
     <string name="laner_tool_manual_title">Tool Manual</string>
@@ -8307,7 +8308,8 @@
     <string name="laner_reload">Reload</string>
     <string name="laner_save">Save</string>
     <string name="laner_access_reloaded">Reloaded</string>
-    <string name="laner_access_saved">Access prompt saved</string>
+    <string name="laner_access_saved">Custom access prompt saved</string>
+    <string name="laner_system_access_saved">System access prompt saved</string>
     <string name="laner_work_manual_saved">Work manual saved</string>
     <string name="laner_tool_manual_saved">Tool manual saved</string>
     <string name="laner_document_unchanged">Content is unchanged</string>

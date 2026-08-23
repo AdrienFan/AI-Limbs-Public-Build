@@ -5,6 +5,7 @@ import com.ai.assistance.operit.core.chat.plugins.MessageProcessingExecution
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingHookParams
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingPlugin
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingPluginRegistry
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsAccessContextService
 import com.ai.assistance.operit.plugins.OperitPlugin
 import com.ai.assistance.operit.util.stream.stream
 import kotlinx.coroutines.CancellationException
@@ -25,10 +26,16 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
     ): MessageProcessingExecution? {
         if (!LanerChatContract.isBridgeProvider(params.chatProviderTypeId)) return null
         val service = LanerChatBridgeService.getInstance(params.context)
+        val promptAnchor = AiLimbsAccessContextService(params.context).buildLanerChatPromptAnchor()
+        val bridgedMessage = buildString {
+            append(promptAnchor)
+            append("\n\n[User message]\n")
+            append(params.messageContent)
+        }
         val pending =
             service.enqueue(
                 chatId = params.chatId ?: "__DEFAULT_CHAT__",
-                text = params.messageContent
+                text = bridgedMessage
             )
         return MessageProcessingExecution(
             controller =
