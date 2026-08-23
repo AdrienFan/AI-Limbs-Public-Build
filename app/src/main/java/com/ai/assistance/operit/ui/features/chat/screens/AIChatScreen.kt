@@ -116,6 +116,8 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatDraftPriorityStore
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import java.util.UUID
 
 
@@ -1797,6 +1799,9 @@ private fun ChatInputBottomBar(
     val pendingQueueMessages = pendingQueueState.messages
     val isPendingQueueExpanded = pendingQueueState.isExpanded
     val waifuMergeBuffer = remember(currentChatId) { mutableStateListOf<String>() }
+    var lanerMessagePriority by rememberSaveable(currentChatId) {
+        mutableStateOf(LanerChatPriority.NORMAL)
+    }
     val latestQueueBlocked = rememberUpdatedState(isQueueBlocked)
     val latestCurrentChatId = rememberUpdatedState(currentChatId)
 
@@ -2100,6 +2105,10 @@ private fun ChatInputBottomBar(
                 return@launch
             }
             focusManager.clearFocus()
+            if (disableLocalAgentFeatures) {
+                LanerChatDraftPriorityStore.set(ensuredChatId, lanerMessagePriority)
+                lanerMessagePriority = LanerChatPriority.NORMAL
+            }
             actualViewModel.sendUserMessage()
             actualViewModel.resetAttachmentPanelState()
             onRequestAutoScrollToBottom()
@@ -2116,7 +2125,15 @@ private fun ChatInputBottomBar(
         }
     }
 
-    if (inputStyle == UserPreferencesManager.INPUT_STYLE_AGENT) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        if (disableLocalAgentFeatures) {
+            LanerChatPrioritySelector(
+                priority = lanerMessagePriority,
+                onPriorityChange = { lanerMessagePriority = it }
+            )
+        }
+
+        if (inputStyle == UserPreferencesManager.INPUT_STYLE_AGENT) {
         AgentChatInputSection(
                 actualViewModel = actualViewModel,
                 userMessage = userMessage,
@@ -2274,6 +2291,35 @@ private fun ChatInputBottomBar(
                         }
                     }
                 },
+        )
+        }
+    }
+}
+
+@Composable
+private fun LanerChatPrioritySelector(
+    priority: LanerChatPriority,
+    onPriorityChange: (LanerChatPriority) -> Unit,
+) {
+    Row(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        FilterChip(
+            selected = priority == LanerChatPriority.HIGH,
+            onClick = { onPriorityChange(LanerChatPriority.HIGH) },
+            label = { Text("🔴 " + stringResource(R.string.laner_priority_high)) },
+        )
+        FilterChip(
+            selected = priority == LanerChatPriority.NORMAL,
+            onClick = { onPriorityChange(LanerChatPriority.NORMAL) },
+            label = { Text("🔵 " + stringResource(R.string.laner_priority_normal)) },
+        )
+        FilterChip(
+            selected = priority == LanerChatPriority.LOW,
+            onClick = { onPriorityChange(LanerChatPriority.LOW) },
+            label = { Text("🟢 " + stringResource(R.string.laner_priority_low)) },
         )
     }
 }

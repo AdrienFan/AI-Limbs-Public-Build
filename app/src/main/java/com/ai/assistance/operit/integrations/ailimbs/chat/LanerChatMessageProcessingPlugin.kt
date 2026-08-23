@@ -26,6 +26,8 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
     ): MessageProcessingExecution? {
         if (!LanerChatContract.isBridgeProvider(params.chatProviderTypeId)) return null
         val service = LanerChatBridgeService.getInstance(params.context)
+        val chatId = params.chatId ?: "__DEFAULT_CHAT__"
+        val priority = LanerChatDraftPriorityStore.consume(chatId)
         val promptAnchor = AiLimbsAccessContextService(params.context).buildLanerChatPromptAnchor()
         val bridgedMessage = buildString {
             append(promptAnchor)
@@ -34,9 +36,10 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
         }
         val pending =
             service.enqueue(
-                chatId = params.chatId ?: "__DEFAULT_CHAT__",
+                chatId = chatId,
                 text = bridgedMessage,
-                attachments = params.attachments
+                attachments = params.attachments,
+                priority = priority
             )
         return MessageProcessingExecution(
             controller =
@@ -50,7 +53,7 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
                 },
             stream = stream {
                 try {
-                    emit(pending.reply.await())
+                    pending.reply.collect { chunk -> emit(chunk) }
                 } catch (error: CancellationException) {
                     service.cancelRequest(
                         requestId = pending.request.requestId,

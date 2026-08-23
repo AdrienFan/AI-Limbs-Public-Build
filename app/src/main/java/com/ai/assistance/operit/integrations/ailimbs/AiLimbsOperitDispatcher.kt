@@ -13,6 +13,7 @@ import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatRequest
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
 import java.text.SimpleDateFormat
@@ -116,6 +117,9 @@ class AiLimbsOperitDispatcher(context: Context) {
         "ai_limbs.chat.inbox.fetch" -> lanerChatInboxFetch(args)
         "ai_limbs.chat.attachment.fetch" -> lanerChatAttachmentFetch(args)
         "ai_limbs.chat.reply" -> lanerChatReply(args)
+        "ai_limbs.chat.reply.start" -> lanerChatReplyStart(args)
+        "ai_limbs.chat.reply.delta" -> lanerChatReplyDelta(args)
+        "ai_limbs.chat.reply.complete" -> lanerChatReplyComplete(args)
         "ai_limbs.chat.send" -> lanerChatSend(args)
         "ai_limbs.ui.status" -> uiCapabilityStatus()
         "operit.tools.list" -> {
@@ -241,7 +245,7 @@ class AiLimbsOperitDispatcher(context: Context) {
             } ?: false
         return ok()
             .put("module", "AI Limbs Laner Chat Bridge")
-            .put("protocol_version", 3)
+            .put("protocol_version", 4)
             .put("provider_type_id", LanerChatContract.PROVIDER_TYPE_ID)
             .put("bridge_provider", bridge.providerId)
             .put("bridge_phase", bridge.phase.name)
@@ -258,6 +262,8 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("proactive_delivered_count", mailbox.proactiveDeliveredCount)
             .put("supports_proactive_send", true)
             .put("supports_attachments", true)
+            .put("supports_streaming_reply", true)
+            .put("supports_priority", true)
             .put("notification_contains_body", false)
     }
 
@@ -318,6 +324,10 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("unread_count", notification.unreadCount)
             .put("pending_reply_count", notification.pendingReplyCount)
             .put("latest_seq", notification.latestSeq)
+            .put("highest_priority", notification.highestPriority?.name ?: JSONObject.NULL)
+            .put("high_count", notification.highCount)
+            .put("normal_count", notification.normalCount)
+            .put("low_count", notification.lowCount)
             .put("contains_body", false)
 
     private fun lanerChatInboxFetch(args: JSONObject): JSONObject {
@@ -326,7 +336,8 @@ class AiLimbsOperitDispatcher(context: Context) {
                 requestedSessionId = args.optString("session_id").ifBlank { null },
                 requestId = args.optString("request_id").ifBlank { null },
                 afterSeq = args.optLong("after_seq", 0L),
-                requestedLimit = args.optInt("limit", 10)
+                requestedLimit = args.optInt("limit", 10),
+                requestedPriority = parseLanerChatPriority(args.optString("priority"))
             )
         return ok()
             .put("session_id", fetched.sessionId ?: JSONObject.NULL)
@@ -375,6 +386,53 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("duplicate", replied.duplicate)
             .put("delivered_to_live_stream", replied.deliveredToLiveStream)
             .put("answered_at", isoTime(replied.request.answeredAtMs))
+    }
+
+
+    private fun lanerChatReplyStart(args: JSONObject): JSONObject {
+        val result =
+            lanerChat.startReply(
+                requestId = args.optString("request_id"),
+                replyId = args.optString("reply_id").ifBlank { null }
+            )
+        return ok()
+            .put("request_id", result.request.requestId)
+            .put("reply_id", result.request.replyId)
+            .put("status", result.request.status.name)
+            .put("duplicate", result.duplicate)
+            .put("next_seq", result.request.replyChunkSeq + 1)
+    }
+
+    private fun lanerChatReplyDelta(args: JSONObject): JSONObject {
+        val result =
+            lanerChat.appendReplyDelta(
+                requestId = args.optString("request_id"),
+                replyId = args.optString("reply_id").ifBlank { null },
+                seq = args.optInt("seq", -1),
+                content = args.optString("content")
+            )
+        return ok()
+            .put("request_id", result.request.requestId)
+            .put("reply_id", result.request.replyId)
+            .put("seq", result.request.replyChunkSeq)
+            .put("duplicate", result.duplicate)
+            .put("delivered_to_live_stream", result.deliveredToLiveStream)
+            .put("accumulated_chars", result.request.replyContent?.length ?: 0)
+    }
+
+    private fun lanerChatReplyComplete(args: JSONObject): JSONObject {
+        val result =
+            lanerChat.completeReply(
+                requestId = args.optString("request_id"),
+                replyId = args.optString("reply_id").ifBlank { null }
+            )
+        return ok()
+            .put("request_id", result.request.requestId)
+            .put("reply_id", result.request.replyId)
+            .put("status", result.request.status.name)
+            .put("duplicate", result.duplicate)
+            .put("final_seq", result.request.replyChunkSeq)
+            .put("answered_at", isoTime(result.request.answeredAtMs))
     }
 
     private suspend fun lanerChatSend(args: JSONObject): JSONObject {
@@ -444,6 +502,7 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("seq", request.seq)
             .put("chat_id", request.chatId)
             .put("sender", request.sender)
+            .put("priority", request.priority.name)
             .put("text", request.text)
             .put("attachment_count", request.attachments.size)
             .put("attachments", JSONArray(request.attachments.map { attachment ->
@@ -456,6 +515,14 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("created_at", isoTime(request.createdAtMs))
             .put("status", request.status.name)
             .put("delivery_count", request.deliveryCount)
+
+
+    private fun parseLanerChatPriority(raw: String): LanerChatPriority? {
+        val normalized = raw.trim().uppercase(Locale.US)
+        if (normalized.isEmpty()) return null
+        return runCatching { LanerChatPriority.valueOf(normalized) }
+            .getOrElse { throw IllegalArgumentException("priority must be HIGH, NORMAL, or LOW") }
+    }
 
     private fun isoTime(timestampMs: Long?): Any {
         if (timestampMs == null) return JSONObject.NULL

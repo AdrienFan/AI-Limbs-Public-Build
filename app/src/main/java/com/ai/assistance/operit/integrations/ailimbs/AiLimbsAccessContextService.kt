@@ -41,7 +41,12 @@ class AiLimbsAccessContextService(context: Context) {
             appendLine("[AI Limbs context]")
             appendLine("System Access Prompt: ai_limbs.system_access_prompt.read @ ${systemPrompt.version}")
             appendLine("Custom Access Prompt: ai_limbs.custom_access_prompt.read @ ${customPrompt.version}; empty=${customPrompt.isEmpty}")
-            append("Before performing any AI Limbs action, ensure the referenced prompt versions are loaded. Do not reload unchanged prompts during ordinary conversation. If a loaded version is unknown or outdated, read the corresponding official document first.")
+            appendLine("Before performing any AI Limbs action, ensure the referenced prompt versions are loaded. Do not reload unchanged prompts during ordinary conversation. If a loaded version is unknown or outdated, read the corresponding official document first.")
+            appendLine()
+            appendLine("[Laner Chat context]")
+            appendLine("interaction_mode: FULL_CONVERSATION")
+            appendLine("user_visible_reply: true")
+            append("reply_mode: NORMAL_CHAT")
         }
     }
 }

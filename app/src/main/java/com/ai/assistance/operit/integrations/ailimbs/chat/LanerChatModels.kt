@@ -1,6 +1,6 @@
 package com.ai.assistance.operit.integrations.ailimbs.chat
 
-import kotlinx.coroutines.CompletableDeferred
+import com.ai.assistance.operit.util.stream.Stream
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -15,6 +15,13 @@ enum class LanerChatMessageStatus {
     DELIVERED,
     ANSWERED,
     CANCELED
+}
+
+@Serializable
+enum class LanerChatPriority {
+    HIGH,
+    NORMAL,
+    LOW
 }
 
 @Serializable
@@ -64,6 +71,7 @@ data class LanerChatRequest(
     val sender: String,
     val text: String,
     val createdAtMs: Long,
+    val priority: LanerChatPriority = LanerChatPriority.NORMAL,
     val attachments: List<LanerChatAttachment> = emptyList(),
     val status: LanerChatMessageStatus = LanerChatMessageStatus.PENDING,
     val deliveryCount: Int = 0,
@@ -71,7 +79,8 @@ data class LanerChatRequest(
     val answeredAtMs: Long? = null,
     val canceledAtMs: Long? = null,
     val replyId: String? = null,
-    val replyContent: String? = null
+    val replyContent: String? = null,
+    val replyChunkSeq: Int = 0
 )
 
 @Serializable
@@ -103,7 +112,11 @@ data class LanerChatNotification(
     val event: String,
     val unreadCount: Int,
     val pendingReplyCount: Int,
-    val latestSeq: Long
+    val latestSeq: Long,
+    val highestPriority: LanerChatPriority? = null,
+    val highCount: Int = 0,
+    val normalCount: Int = 0,
+    val lowCount: Int = 0
 )
 
 data class LanerChatSessionOpenResult(
@@ -125,6 +138,22 @@ data class LanerChatReplyResult(
     val deliveredToLiveStream: Boolean
 )
 
+data class LanerChatReplyStartResult(
+    val request: LanerChatRequest,
+    val duplicate: Boolean
+)
+
+data class LanerChatReplyDeltaResult(
+    val request: LanerChatRequest,
+    val duplicate: Boolean,
+    val deliveredToLiveStream: Boolean
+)
+
+data class LanerChatReplyCompleteResult(
+    val request: LanerChatRequest,
+    val duplicate: Boolean
+)
+
 data class LanerChatProactiveSendResult(
     val message: LanerChatProactiveMessage,
     val duplicate: Boolean
@@ -132,5 +161,5 @@ data class LanerChatProactiveSendResult(
 
 data class LanerChatPendingExchange(
     val request: LanerChatRequest,
-    val reply: CompletableDeferred<String>
+    val reply: Stream<String>
 )

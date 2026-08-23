@@ -8332,4 +8332,7 @@
     <string name="laner_tool_manual_saved">工具手册已保存</string>
     <string name="laner_document_unchanged">内容没有变化</string>
     <string name="laner_document_restored">备份已恢复</string>
+    <string name="laner_priority_high">重要</string>
+    <string name="laner_priority_normal">普通</string>
+    <string name="laner_priority_low">稍后</string>
 </resources>

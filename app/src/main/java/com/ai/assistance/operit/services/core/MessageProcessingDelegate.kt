@@ -25,6 +25,7 @@ import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.WaifuPreferences
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatDraftPriorityStore
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceBackupManager
@@ -807,10 +808,17 @@ class MessageProcessingDelegate(
                         originalMessageText.isBlank() &&
                         attachments.isEmpty())
             var userMessageAdded = false
+            val lanerPriority =
+                if (chatId != null && LanerChatContract.isBridgeConfig(currentModelConfig)) {
+                    LanerChatDraftPriorityStore.peek(chatId).name
+                } else {
+                    ""
+                }
             var userMessage = ChatMessage(
                 sender = "user",
                 content = finalMessageContent,
                 roleName = context.getString(R.string.message_role_user), // 用户消息的角色名固定为"用户"
+                lanerPriority = lanerPriority,
                 displayMode =
                     if (effectiveHideUserMessage) {
                         ChatMessageDisplayMode.HIDDEN_PLACEHOLDER

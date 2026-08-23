@@ -91,14 +91,26 @@ fun BubbleUserMessageComposable(
     val isHiddenPlaceholder =
         message.sender == "user" &&
             message.displayMode == ChatMessageDisplayMode.HIDDEN_PLACEHOLDER
+    val lanerPriority = message.lanerPriority.uppercase()
+    val priorityBackgroundColor =
+        when (lanerPriority) {
+            "HIGH" -> Color(0xFFC74B50)
+            "LOW" -> Color(0xFF3F8A62)
+            "NORMAL" -> backgroundColor
+            else -> backgroundColor
+        }
     val effectiveBackgroundColor =
         if (isHiddenPlaceholder) {
             Color.Transparent
         } else {
-            backgroundColor
+            priorityBackgroundColor
         }
     val effectiveTextColor =
-        textColor
+        if (!isHiddenPlaceholder && (lanerPriority == "HIGH" || lanerPriority == "LOW")) {
+            Color.White
+        } else {
+            textColor
+        }
     val preferencesManager = remember { UserPreferencesManager.getInstance(context) }
     val displayPreferencesManager = remember { DisplayPreferencesManager.getInstance(context) }
     val characterCardManager = remember { CharacterCardManager.getInstance(context) }
