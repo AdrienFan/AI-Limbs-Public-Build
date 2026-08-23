@@ -17,6 +17,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.filterNotNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
@@ -26,6 +27,7 @@ import com.ai.assistance.operit.data.preferences.ActivePromptManager
 import com.ai.assistance.operit.data.model.ActivePrompt
 import com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator
 import com.ai.assistance.operit.plugins.toolpkg.ToolPkgChatMessageHookBridge
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
 /** 委托类，负责管理聊天历史相关功能 */
@@ -52,6 +54,7 @@ class ChatHistoryDelegate(
     private val activePromptManager = ActivePromptManager.getInstance(context)
     private val isInitialized = AtomicBoolean(false)
     private val historyUpdateMutex = Mutex()
+    private val initialChatCreationMutex = Mutex()
     private val allowAddMessage = AtomicBoolean(true) // 控制是否允许添加消息，切换对话时设为false
     private var beforeDestructiveHistoryMutation: (suspend (String) -> Unit)? = null
     private var afterDestructiveHistoryMutation: (suspend (String) -> Unit)? = null
@@ -762,13 +765,16 @@ class ChatHistoryDelegate(
         AppLogger.d(TAG, "开场白同步完成，聊天ID: $chatId")
     }
 
-    /** 检查是否应该创建新聊天，确保同步 */
-    fun checkIfShouldCreateNewChat(): Boolean {
-        // 只有当历史记录和当前对话ID都已加载，且未创建过初始对话时才检查
-        if (!isInitialized.get() || _currentChatId.value == null) {
-            return false
+    /** Create and select the first Chat exactly once across concurrent UI send entry points. */
+    suspend fun ensureCurrentChat(timeoutMs: Long): String {
+        _currentChatId.value?.takeIf { it.isNotBlank() }?.let { return it }
+        return initialChatCreationMutex.withLock {
+            _currentChatId.value?.takeIf { it.isNotBlank() }?.let { return@withLock it }
+            createNewChat()
+            withTimeout(timeoutMs) {
+                _currentChatId.filterNotNull().first { it.isNotBlank() }
+            }
         }
-        return true
     }
 
     /** 创建新的聊天 */

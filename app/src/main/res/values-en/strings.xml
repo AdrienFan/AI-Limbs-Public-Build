@@ -626,7 +626,10 @@
     <string name="laner_chat_api_enter">Open Last API Chat</string>
     <string name="laner_chat_return_home">Return to Chat Connection Home</string>
     <string name="laner_chat_status_online">Laner Bridge online · %1$d awaiting replies</string>
+    <string name="laner_chat_status_waiting_agent">Bridge online, Laner session offline · %1$d awaiting replies</string>
     <string name="laner_chat_status_offline">Laner Bridge offline · %1$d awaiting replies</string>
+    <string name="laner_chat_creating_first_chat">Creating the first conversation…</string>
+    <string name="laner_chat_initialization_failed">Unable to create the first conversation: %1$s</string>
     <string name="config_api_key_label">API Key</string>
     <string name="config_api_key_placeholder">DeepSeek API Key</string>
     <string name="config_save_button">Confirm and Save</string>

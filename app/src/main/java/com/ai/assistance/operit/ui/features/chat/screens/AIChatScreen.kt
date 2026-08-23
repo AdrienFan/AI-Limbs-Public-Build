@@ -260,6 +260,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
 
     // Collect state from ViewModel
     val apiKey by actualViewModel.apiKey.collectAsState()
+    val isApiConfigInitialized by actualViewModel.isApiConfigInitialized.collectAsState()
     val activeChatConfigId by actualViewModel.activeChatConfigId.collectAsState()
     val activeChatModelConfig by actualViewModel.activeChatModelConfig.collectAsState()
     val isLanerBridgeMode = LanerChatContract.isBridgeConfig(activeChatModelConfig)
@@ -744,6 +745,52 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             lanerMailboxStatus.lastAgentSeenAtMs?.let { lastSeen ->
                 lanerStatusClockMs - lastSeen <= LanerChatContract.AGENT_ONLINE_WINDOW_MS
             } == true
+    val isLanerFullyOnline =
+        bridgeState.phase == AiLimbsBridgePhase.ONLINE && isLanerAgentOnline
+
+    LaunchedEffect(
+        isCurrentScreen,
+        showConfig,
+        isApiConfigInitialized,
+        activeChatConfigId,
+        activeChatModelConfig?.id,
+        currentChatId
+    ) {
+        if (
+            !isCurrentScreen ||
+                showConfig ||
+                !isApiConfigInitialized ||
+                activeChatModelConfig == null ||
+                !currentChatId.isNullOrBlank()
+        ) {
+            return@LaunchedEffect
+        }
+        try {
+            actualViewModel.ensureCurrentChat()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            AppLogger.e("AIChatScreen", "Failed to initialize the first Chat", error)
+            actualViewModel.showErrorMessage(
+                context.getString(
+                    R.string.laner_chat_initialization_failed,
+                    error.message.orEmpty()
+                )
+            )
+        }
+    }
+
+    LaunchedEffect(
+        isCurrentScreen,
+        showConfig,
+        isLanerBridgeMode,
+        currentChatId,
+        lanerMailboxStatus.activeSessionId
+    ) {
+        val chatId = currentChatId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
+        if (!isCurrentScreen || showConfig || !isLanerBridgeMode) return@LaunchedEffect
+        lanerChatService.bindUiChat(chatId)
+    }
 
     // 添加手势状态
     var chatScreenGestureConsumed by remember { mutableStateOf(false) }
@@ -1126,24 +1173,31 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                             ) {
                                 Text(
                                     text =
-                                        if (bridgeState.phase == AiLimbsBridgePhase.ONLINE) {
-                                            stringResource(
-                                                R.string.laner_chat_status_online,
-                                                lanerMailboxStatus.unresolvedCount
-                                            )
-                                        } else {
-                                            stringResource(
-                                                R.string.laner_chat_status_offline,
-                                                lanerMailboxStatus.unresolvedCount
-                                            )
+                                        when {
+                                            isLanerFullyOnline ->
+                                                stringResource(
+                                                    R.string.laner_chat_status_online,
+                                                    lanerMailboxStatus.unresolvedCount
+                                                )
+                                            bridgeState.phase == AiLimbsBridgePhase.ONLINE ->
+                                                stringResource(
+                                                    R.string.laner_chat_status_waiting_agent,
+                                                    lanerMailboxStatus.unresolvedCount
+                                                )
+                                            else ->
+                                                stringResource(
+                                                    R.string.laner_chat_status_offline,
+                                                    lanerMailboxStatus.unresolvedCount
+                                                )
                                         },
                                     modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
                                     style = MaterialTheme.typography.labelMedium,
                                     color =
-                                        if (bridgeState.phase == AiLimbsBridgePhase.ONLINE) {
-                                            Color(0xFF00C853)
-                                        } else {
-                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        when {
+                                            isLanerFullyOnline -> Color(0xFF00E676)
+                                            bridgeState.phase == AiLimbsBridgePhase.ONLINE ->
+                                                Color(0xFFFFC107)
+                                            else -> Color.Gray
                                         }
                                 )
                             }
@@ -1241,7 +1295,27 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 }
                                 .graphicsLayer { translationY = -inputBarTranslationYPx }
                     ) {
-                        ChatInputBottomBar(
+                        if (currentChatId.isNullOrBlank()) {
+                            Surface(
+                                modifier = Modifier.fillMaxWidth(),
+                                color = MaterialTheme.colorScheme.surfaceVariant
+                            ) {
+                                Row(
+                                    modifier =
+                                        Modifier.padding(horizontal = 20.dp, vertical = 18.dp),
+                                    horizontalArrangement = Arrangement.Center,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    CircularProgressIndicator(
+                                        modifier = Modifier.size(20.dp),
+                                        strokeWidth = 2.dp
+                                    )
+                                    Spacer(modifier = Modifier.width(12.dp))
+                                    Text(stringResource(R.string.laner_chat_creating_first_chat))
+                                }
+                            }
+                        } else {
+                            ChatInputBottomBar(
                                 actualViewModel = actualViewModel,
                                 inputStyle = effectiveInputStyle,
                                 disableLocalAgentFeatures = isLanerBridgeMode,
@@ -1285,7 +1359,8 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                     showMemoryFolderDialog = true
                                 },
                                 onRequestAutoScrollToBottom = requestAutoScrollToBottom,
-                        )
+                            )
+                        }
                     }
 
                     CharacterSelectorPanel(
@@ -1950,20 +2025,36 @@ private fun ChatInputBottomBar(
 
     val sendMessage: () -> Unit = {
         coroutineScope.launch {
-            if (currentChatId.isNullOrBlank()) {
-                Toast.makeText(
-                    context,
-                    context.getString(R.string.chat_please_create_new_chat),
-                    Toast.LENGTH_SHORT,
-                ).show()
-                return@launch
+            val ensuredChatId =
+                try {
+                    actualViewModel.ensureCurrentChat()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Exception) {
+                    AppLogger.e(
+                        "AIChatScreen",
+                        "Send blocked because Chat initialization failed",
+                        error
+                    )
+                    actualViewModel.showErrorMessage(
+                        context.getString(
+                            R.string.laner_chat_initialization_failed,
+                            error.message.orEmpty()
+                        )
+                    )
+                    return@launch
+                }
+            if (disableLocalAgentFeatures) {
+                LanerChatBridgeService.getInstance(context.applicationContext)
+                    .bindUiChat(ensuredChatId)
             }
 
             val submitDecision =
                 ChatInputHookRegistry.dispatchSubmitRequested(
                     buildChatInputHookContext(
                         eventName = ChatInputEvents.SUBMIT_REQUESTED,
-                        submitSource = "send"
+                        submitSource = "send",
+                        chatId = ensuredChatId
                     )
                 )
             when (submitDecision.action) {
@@ -2018,7 +2109,8 @@ private fun ChatInputBottomBar(
                     text = finalText,
                     selectionStart = finalText.length,
                     selectionEnd = finalText.length,
-                    submitSource = "send"
+                    submitSource = "send",
+                    chatId = ensuredChatId
                 )
             )
         }

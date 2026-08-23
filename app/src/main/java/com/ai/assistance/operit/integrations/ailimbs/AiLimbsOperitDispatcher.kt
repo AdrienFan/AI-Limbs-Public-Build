@@ -2,9 +2,12 @@ package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
 import com.ai.assistance.operit.BuildConfig
+import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
+import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
 import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.model.AITool
+import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ToolInvocation
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
@@ -80,6 +83,7 @@ class AiLimbsOperitDispatcher(context: Context) {
         "ai_limbs.chat.notification.wait" -> lanerChatNotificationWait(args)
         "ai_limbs.chat.inbox.fetch" -> lanerChatInboxFetch(args)
         "ai_limbs.chat.reply" -> lanerChatReply(args)
+        "ai_limbs.chat.send" -> lanerChatSend(args)
         "ai_limbs.ui.status" -> uiCapabilityStatus()
         "operit.tools.list" -> {
             handler.registerDefaultTools()
@@ -204,11 +208,12 @@ class AiLimbsOperitDispatcher(context: Context) {
             } ?: false
         return ok()
             .put("module", "AI Limbs Laner Chat Bridge")
-            .put("protocol_version", 1)
+            .put("protocol_version", 2)
             .put("provider_type_id", LanerChatContract.PROVIDER_TYPE_ID)
             .put("bridge_provider", bridge.providerId)
             .put("bridge_phase", bridge.phase.name)
             .put("active_session_id", mailbox.activeSessionId ?: JSONObject.NULL)
+            .put("bound_chat_id", mailbox.boundChatId ?: JSONObject.NULL)
             .put("agent_session_online", agentOnline)
             .put("last_agent_seen_at", isoTime(mailbox.lastAgentSeenAtMs))
             .put("latest_seq", mailbox.latestSeq)
@@ -216,6 +221,9 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("pending_reply_count", mailbox.unresolvedCount)
             .put("answered_count", mailbox.answeredCount)
             .put("canceled_count", mailbox.canceledCount)
+            .put("proactive_pending_count", mailbox.proactivePendingCount)
+            .put("proactive_delivered_count", mailbox.proactiveDeliveredCount)
+            .put("supports_proactive_send", true)
             .put("notification_contains_body", false)
     }
 
@@ -231,6 +239,7 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("last_user_seq", opened.lastUserSeq)
             .put("last_reply_seq", opened.lastReplySeq)
             .put("pending_reply_count", opened.pendingRequests)
+            .put("bound_chat_id", opened.session.chatId ?: JSONObject.NULL)
             .put("last_agent_seen_at", isoTime(opened.session.lastAgentSeenAtMs))
     }
 
@@ -306,6 +315,42 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("duplicate", replied.duplicate)
             .put("delivered_to_live_stream", replied.deliveredToLiveStream)
             .put("answered_at", isoTime(replied.request.answeredAtMs))
+    }
+
+    private suspend fun lanerChatSend(args: JSONObject): JSONObject {
+        val prepared =
+            lanerChat.prepareProactiveMessage(
+                requestedSessionId = args.optString("session_id").ifBlank { null },
+                requestedMessageId = args.optString("message_id").ifBlank { null },
+                content = args.optString("content")
+            )
+        val proactive = prepared.message
+        val chatHistory =
+            ChatRuntimeHolder.getInstance(appContext)
+                .getCore(ChatRuntimeSlot.MAIN)
+                .getChatHistoryDelegate()
+        chatHistory.addMessageToChat(
+            message =
+                ChatMessage(
+                    sender = "ai",
+                    content = proactive.content,
+                    timestamp = proactive.chatMessageTimestamp,
+                    roleName = LanerChatContract.DEFAULT_AGENT_NAME,
+                    provider = LanerChatContract.PROVIDER_MODEL,
+                    modelName = LanerChatContract.MODEL_ID,
+                    completedAt = System.currentTimeMillis()
+                ),
+            chatIdOverride = proactive.chatId
+        )
+        val delivered = lanerChat.markProactiveMessageDelivered(proactive.messageId)
+        return ok()
+            .put("message_id", delivered.messageId)
+            .put("session_id", delivered.sessionId)
+            .put("chat_id", delivered.chatId)
+            .put("status", delivered.status.name)
+            .put("duplicate", prepared.duplicate)
+            .put("created_at", isoTime(delivered.createdAtMs))
+            .put("delivered_at", isoTime(delivered.deliveredAtMs))
     }
 
     private fun lanerChatRequestJson(request: LanerChatRequest): JSONObject =

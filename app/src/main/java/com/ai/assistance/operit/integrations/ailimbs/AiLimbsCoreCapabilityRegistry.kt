@@ -221,6 +221,28 @@ object AiLimbsCoreCapabilityRegistry {
             ),
             keywords = listOf("兰儿聊天", "回复", "reply", "request_id", "幂等")
         ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.send",
+            displayName = "主动发送兰儿聊天消息",
+            description =
+                "Send an AI-originated message directly to the Chat bound to an open Laner session without requiring a user request ID.",
+            parameters = listOf(
+                ToolParameterSchema(
+                    "session_id",
+                    "string",
+                    "Optional open Laner Chat session; defaults to the active session",
+                    false
+                ),
+                ToolParameterSchema(
+                    "message_id",
+                    "string",
+                    "Optional stable message ID used for retry idempotence",
+                    false
+                ),
+                ToolParameterSchema("content", "string", "Complete proactive message text", true)
+            ),
+            keywords = listOf("兰儿聊天", "主动消息", "主动发送", "proactive", "send", "幂等")
+        ),
         entry("operit.tools.list", "Operit 原生工具 Registry", "List currently registered native Operit tool names.", keywords = listOf("registry", "dispatcher", "工具注册表")),
         ubuntuEntry("ubuntu.status", "查询 Ubuntu 状态", "Read the lifecycle state of the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "沙箱", "生命周期")),
         ubuntuEntry("ubuntu.start", "启动 Ubuntu", "Start the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "开机", "启动沙箱")),

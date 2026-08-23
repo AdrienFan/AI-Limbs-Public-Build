@@ -8,6 +8,7 @@ object LanerChatContract {
     const val MODEL_ID = "laner-chat"
     const val PROVIDER_MODEL = "AI_LIMBS:LANER_BRIDGE"
     const val DEFAULT_SENDER = "阿伟"
+    const val DEFAULT_AGENT_NAME = "兰儿"
     const val AGENT_ONLINE_WINDOW_MS = 60_000L
 
     fun isBridgeProvider(providerTypeId: String?): Boolean =

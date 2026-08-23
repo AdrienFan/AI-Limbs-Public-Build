@@ -2,6 +2,7 @@ package com.ai.assistance.operit.integrations.ailimbs.chat
 
 import android.content.Context
 import android.os.SystemClock
+import com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
@@ -124,7 +125,7 @@ class LanerChatBridgeService private constructor(context: Context) {
     ): LanerChatPendingExchange {
         require(text.isNotBlank()) { "Laner chat message is empty" }
         val now = System.currentTimeMillis()
-        val session = ensureUiSessionLocked(now)
+        val session = ensureUiSessionLocked(now, chatId)
         val nextSeq = storedState.lastSeq + 1L
         val request =
             LanerChatRequest(
@@ -151,6 +152,97 @@ class LanerChatBridgeService private constructor(context: Context) {
             throw error
         }
         return LanerChatPendingExchange(request, deferred)
+    }
+
+    /** Bind the visible Bridge conversation to its durable Laner session. */
+    @Synchronized
+    fun bindUiChat(chatId: String): LanerChatSession {
+        val normalizedChatId = chatId.trim()
+        require(normalizedChatId.isNotEmpty()) { "chat_id is required" }
+        return ensureUiSessionLocked(System.currentTimeMillis(), normalizedChatId)
+    }
+
+    /**
+     * Persist an AI-originated message before chat-history delivery.
+     *
+     * A stable message ID makes retries idempotent. The persisted chat timestamp is reused so a
+     * retry after an interrupted delivery updates the same chat row instead of duplicating it.
+     */
+    @Synchronized
+    fun prepareProactiveMessage(
+        requestedSessionId: String?,
+        requestedMessageId: String?,
+        content: String
+    ): LanerChatProactiveSendResult {
+        val normalizedContent = content.trim()
+        require(normalizedContent.isNotEmpty()) { "message content is required" }
+        val sessionId =
+            requestedSessionId?.trim()?.takeIf { it.isNotEmpty() }
+                ?: storedState.activeSessionId
+                ?: throw IllegalStateException(
+                    "No active Laner chat session; call ai_limbs.chat.session.open first"
+                )
+        val session = storedState.sessions.firstOrNull { it.sessionId == sessionId }
+            ?: throw IllegalArgumentException("Laner chat session not found: $sessionId")
+        val normalizedMessageId =
+            requestedMessageId?.trim()?.takeIf { it.isNotEmpty() } ?: UUID.randomUUID().toString()
+        val existing = storedState.proactiveMessages.firstOrNull {
+            it.messageId == normalizedMessageId
+        }
+        if (existing != null) {
+            check(
+                existing.sessionId == sessionId &&
+                    existing.content == normalizedContent
+            ) {
+                "Laner proactive message ID already exists with different message data"
+            }
+            touchAgentLocked(sessionId)
+            return LanerChatProactiveSendResult(existing, duplicate = true)
+        }
+        check(session.status == LanerChatSessionStatus.OPEN) {
+            "Laner chat session is closed: $sessionId"
+        }
+        val chatId = checkNotNull(session.chatId?.takeIf { it.isNotBlank() }) {
+            "No AI Limbs chat is bound to session $sessionId; open Laner Bridge Chat first"
+        }
+
+        val now = System.currentTimeMillis()
+        val created =
+            LanerChatProactiveMessage(
+                messageId = normalizedMessageId,
+                sessionId = sessionId,
+                chatId = chatId,
+                content = normalizedContent,
+                createdAtMs = now,
+                chatMessageTimestamp = ChatMessageTimestampAllocator.next(now)
+            )
+        touchAgentLocked(sessionId)
+        commitState(
+            storedState.copy(proactiveMessages = storedState.proactiveMessages + created)
+        )
+        return LanerChatProactiveSendResult(created, duplicate = false)
+    }
+
+    @Synchronized
+    fun markProactiveMessageDelivered(messageId: String): LanerChatProactiveMessage {
+        val normalizedMessageId = messageId.trim()
+        require(normalizedMessageId.isNotEmpty()) { "message_id is required" }
+        val index = storedState.proactiveMessages.indexOfFirst {
+            it.messageId == normalizedMessageId
+        }
+        require(index >= 0) { "Laner proactive message not found: $normalizedMessageId" }
+        val existing = storedState.proactiveMessages[index]
+        if (existing.status == LanerChatProactiveMessageStatus.DELIVERED) return existing
+        val delivered =
+            existing.copy(
+                status = LanerChatProactiveMessageStatus.DELIVERED,
+                deliveredAtMs = System.currentTimeMillis()
+            )
+        val messages = storedState.proactiveMessages.toMutableList().also {
+            it[index] = delivered
+        }
+        commitState(storedState.copy(proactiveMessages = messages))
+        return delivered
     }
 
     @Synchronized
@@ -308,14 +400,27 @@ class LanerChatBridgeService private constructor(context: Context) {
     fun snapshot(): LanerChatMailboxStatus = buildMailboxStatus(storedState)
 
     @Synchronized
-    private fun ensureUiSessionLocked(now: Long): LanerChatSession {
+    private fun ensureUiSessionLocked(now: Long, chatId: String? = null): LanerChatSession {
         val active = storedState.activeSessionId?.let { id ->
             storedState.sessions.firstOrNull {
                 it.sessionId == id && it.status == LanerChatSessionStatus.OPEN
             }
         }
-        if (active != null) return active
-        val created = LanerChatSession(sessionId = UUID.randomUUID().toString(), openedAtMs = now)
+        if (active != null) {
+            if (chatId.isNullOrBlank() || active.chatId == chatId) return active
+            val rebound = active.copy(chatId = chatId)
+            val sessions = storedState.sessions.map { session ->
+                if (session.sessionId == rebound.sessionId) rebound else session
+            }
+            commitState(storedState.copy(sessions = sessions))
+            return rebound
+        }
+        val created =
+            LanerChatSession(
+                sessionId = UUID.randomUUID().toString(),
+                openedAtMs = now,
+                chatId = chatId
+            )
         commitState(
             storedState.copy(
                 activeSessionId = created.sessionId,
@@ -366,11 +471,20 @@ class LanerChatBridgeService private constructor(context: Context) {
         val activeSession = state.sessions.firstOrNull { it.sessionId == state.activeSessionId }
         return LanerChatMailboxStatus(
             activeSessionId = state.activeSessionId,
+            boundChatId = activeSession?.chatId,
             latestSeq = state.lastSeq,
             pendingCount = state.requests.count { it.status == LanerChatMessageStatus.PENDING },
             deliveredCount = state.requests.count { it.status == LanerChatMessageStatus.DELIVERED },
             answeredCount = state.requests.count { it.status == LanerChatMessageStatus.ANSWERED },
             canceledCount = state.requests.count { it.status == LanerChatMessageStatus.CANCELED },
+            proactivePendingCount =
+                state.proactiveMessages.count {
+                    it.status == LanerChatProactiveMessageStatus.PENDING
+                },
+            proactiveDeliveredCount =
+                state.proactiveMessages.count {
+                    it.status == LanerChatProactiveMessageStatus.DELIVERED
+                },
             lastAgentSeenAtMs = activeSession?.lastAgentSeenAtMs
         )
     }

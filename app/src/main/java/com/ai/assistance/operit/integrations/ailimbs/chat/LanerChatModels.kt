@@ -24,7 +24,26 @@ data class LanerChatSession(
     val openedAtMs: Long,
     val closedAtMs: Long? = null,
     val lastAgentSeenAtMs: Long? = null,
-    val agentSessionId: String? = null
+    val agentSessionId: String? = null,
+    val chatId: String? = null
+)
+
+@Serializable
+enum class LanerChatProactiveMessageStatus {
+    PENDING,
+    DELIVERED
+}
+
+@Serializable
+data class LanerChatProactiveMessage(
+    val messageId: String,
+    val sessionId: String,
+    val chatId: String,
+    val content: String,
+    val createdAtMs: Long,
+    val chatMessageTimestamp: Long,
+    val status: LanerChatProactiveMessageStatus = LanerChatProactiveMessageStatus.PENDING,
+    val deliveredAtMs: Long? = null
 )
 
 @Serializable
@@ -50,16 +69,20 @@ internal data class LanerChatStoredState(
     val lastSeq: Long = 0L,
     val activeSessionId: String? = null,
     val sessions: List<LanerChatSession> = emptyList(),
-    val requests: List<LanerChatRequest> = emptyList()
+    val requests: List<LanerChatRequest> = emptyList(),
+    val proactiveMessages: List<LanerChatProactiveMessage> = emptyList()
 )
 
 data class LanerChatMailboxStatus(
     val activeSessionId: String? = null,
+    val boundChatId: String? = null,
     val latestSeq: Long = 0L,
     val pendingCount: Int = 0,
     val deliveredCount: Int = 0,
     val answeredCount: Int = 0,
     val canceledCount: Int = 0,
+    val proactivePendingCount: Int = 0,
+    val proactiveDeliveredCount: Int = 0,
     val lastAgentSeenAtMs: Long? = null
 ) {
     val unresolvedCount: Int
@@ -90,6 +113,11 @@ data class LanerChatReplyResult(
     val request: LanerChatRequest,
     val duplicate: Boolean,
     val deliveredToLiveStream: Boolean
+)
+
+data class LanerChatProactiveSendResult(
+    val message: LanerChatProactiveMessage,
+    val duplicate: Boolean
 )
 
 data class LanerChatPendingExchange(

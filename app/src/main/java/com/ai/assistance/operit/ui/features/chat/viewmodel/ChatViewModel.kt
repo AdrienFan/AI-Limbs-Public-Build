@@ -106,6 +106,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     companion object {
         private const val TAG = "ChatViewModel"
         private const val SPEECH_PREVIEW_MAX = 48
+        private const val INITIAL_CHAT_CREATION_TIMEOUT_MS = 5_000L
     }
 
     private data class ActiveMentionTrigger(
@@ -507,15 +508,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
     }
 
-    private fun checkIfShouldCreateNewChat() {
-        viewModelScope.launch {
-            // 检查历史记录加载后是否需要创建新聊天
-            if (chatHistoryDelegate.checkIfShouldCreateNewChat() && isConfigured.value) {
-                chatHistoryDelegate.createNewChat()
-            }
-        }
-    }
-
     /** 设置服务相关的流收集逻辑 */
     /**
      * 设置输入处理状态监听
@@ -665,6 +657,21 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     // 聊天历史相关方法
     fun createNewChat(characterCardName: String? = null, characterGroupId: String? = null) {
         chatHistoryDelegate.createNewChat(characterCardName = characterCardName, characterGroupId = characterGroupId)
+    }
+
+    /**
+     * Ensure the chat screen has a selected Chat before any send path continues.
+     *
+     * Both page initialization and the send action call this method. The delegate-owned creation
+     * mutex prevents duplicate first chats while the DataStore selection propagates.
+     */
+    suspend fun ensureCurrentChat(): String {
+        currentChatId.value?.takeIf { it.isNotBlank() }?.let { return it }
+        check(isConfigured.value) { "Chat configuration is not ready" }
+        AppLogger.i(TAG, "No current Chat is selected; creating the first Chat")
+        return chatHistoryDelegate.ensureCurrentChat(INITIAL_CHAT_CREATION_TIMEOUT_MS).also { createdChatId ->
+            AppLogger.i(TAG, "First Chat is ready: $createdChatId")
+        }
     }
 
     fun createNewChatWithDraft(draft: String) {

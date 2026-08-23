@@ -65,6 +65,12 @@ class AiLimbsAccessContextService(context: Context) {
                     "调用 ai_limbs.chat.reply，重试时复用稳定 reply_id，禁止重复发送不同回复。"
             )
             appendLine(
+                "- 需要主动联系阿伟且不依赖用户 request_id 时，调用 " +
+                    "{\"name\":\"ai_limbs.chat.send\",\"parameters\":{" +
+                    "\"message_id\":\"本次消息的稳定 ID\",\"content\":\"完整消息\"}}；" +
+                    "重试必须复用相同 message_id 与 content。"
+            )
+            appendLine(
                 "- Laner Chat 是当前兰儿任务旁路邮箱，不是模型 Provider：不得把消息转发给 OpenAI、" +
                     "DeepSeek、本地模型或 ToolPkg，不得猜测或使用 chat.exchange。"
             )
