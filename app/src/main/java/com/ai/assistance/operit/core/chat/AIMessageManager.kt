@@ -358,7 +358,9 @@ object AIMessageManager {
         chatModelConfigIdOverride: String? = null,
         chatModelIndexOverride: Int? = null,
         memorySpaceIdOverride: String? = null,
-        disableWarning: Boolean = false
+        disableWarning: Boolean = false,
+        rawUserText: String? = null,
+        attachments: List<AttachmentInfo> = emptyList()
     ): SharedStream<String> {
         val totalStartTime = messageTimingNow()
         val chatKey = chatId ?: DEFAULT_CHAT_KEY
@@ -445,7 +447,9 @@ object AIMessageManager {
                     workspacePath = workspacePath,
                     maxTokens = maxTokens,
                     tokenUsageThreshold = tokenUsageThreshold,
-                    onNonFatalError = onNonFatalError
+                    onNonFatalError = onNonFatalError,
+                    rawUserText = rawUserText,
+                    attachments = attachments
                 )
             )
             logMessageTiming(

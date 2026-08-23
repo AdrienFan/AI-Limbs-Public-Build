@@ -229,6 +229,17 @@ object AiLimbsCoreCapabilityRegistry {
             keywords = listOf("兰儿聊天", "收件箱", "读取正文", "inbox", "fetch")
         ),
         lanerChatEntry(
+            name = "ai_limbs.chat.attachment.fetch",
+            displayName = "读取兰儿聊天附件",
+            description =
+                "Fetch one attachment from a previously fetched Laner Chat request. Images are returned through the native direct-image path; text and documents use the native file reader.",
+            parameters = listOf(
+                ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
+                ToolParameterSchema("attachment_id", "string", "Attachment ID returned in the message attachments array", true)
+            ),
+            keywords = listOf("兰儿聊天", "附件", "图片", "文件", "attachment", "multimodal")
+        ),
+        lanerChatEntry(
             name = "ai_limbs.chat.reply",
             displayName = "回复兰儿聊天消息",
             description =

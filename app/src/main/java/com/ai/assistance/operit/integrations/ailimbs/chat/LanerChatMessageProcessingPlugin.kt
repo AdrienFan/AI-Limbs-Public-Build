@@ -30,12 +30,13 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
         val bridgedMessage = buildString {
             append(promptAnchor)
             append("\n\n[User message]\n")
-            append(params.messageContent)
+            append(params.rawUserText ?: params.messageContent)
         }
         val pending =
             service.enqueue(
                 chatId = params.chatId ?: "__DEFAULT_CHAT__",
-                text = bridgedMessage
+                text = bridgedMessage,
+                attachments = params.attachments
             )
         return MessageProcessingExecution(
             controller =

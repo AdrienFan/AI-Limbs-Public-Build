@@ -47,6 +47,15 @@ data class LanerChatProactiveMessage(
 )
 
 @Serializable
+data class LanerChatAttachment(
+    val attachmentId: String,
+    val filePath: String,
+    val fileName: String,
+    val mimeType: String,
+    val fileSize: Long
+)
+
+@Serializable
 data class LanerChatRequest(
     val requestId: String,
     val sessionId: String,
@@ -55,6 +64,7 @@ data class LanerChatRequest(
     val sender: String,
     val text: String,
     val createdAtMs: Long,
+    val attachments: List<LanerChatAttachment> = emptyList(),
     val status: LanerChatMessageStatus = LanerChatMessageStatus.PENDING,
     val deliveryCount: Int = 0,
     val deliveredAtMs: Long? = null,

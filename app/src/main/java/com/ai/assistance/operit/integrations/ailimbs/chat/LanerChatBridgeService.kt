@@ -2,6 +2,7 @@ package com.ai.assistance.operit.integrations.ailimbs.chat
 
 import android.content.Context
 import android.os.SystemClock
+import com.ai.assistance.operit.data.model.AttachmentInfo
 import com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -121,9 +122,10 @@ class LanerChatBridgeService private constructor(context: Context) {
     fun enqueue(
         chatId: String,
         text: String,
-        sender: String = LanerChatContract.DEFAULT_SENDER
+        sender: String = LanerChatContract.DEFAULT_SENDER,
+        attachments: List<AttachmentInfo> = emptyList()
     ): LanerChatPendingExchange {
-        require(text.isNotBlank()) { "Laner chat message is empty" }
+        require(text.isNotBlank() || attachments.isNotEmpty()) { "Laner chat message is empty" }
         val now = System.currentTimeMillis()
         val session = ensureUiSessionLocked(now, chatId)
         val nextSeq = storedState.lastSeq + 1L
@@ -135,7 +137,16 @@ class LanerChatBridgeService private constructor(context: Context) {
                 chatId = chatId,
                 sender = sender,
                 text = text,
-                createdAtMs = now
+                createdAtMs = now,
+                attachments = attachments.map { attachment ->
+                    LanerChatAttachment(
+                        attachmentId = UUID.randomUUID().toString(),
+                        filePath = attachment.filePath,
+                        fileName = attachment.fileName,
+                        mimeType = attachment.mimeType,
+                        fileSize = attachment.fileSize
+                    )
+                }
             )
         val deferred = CompletableDeferred<String>()
         liveReplies[request.requestId] = deferred
@@ -341,6 +352,23 @@ class LanerChatBridgeService private constructor(context: Context) {
             requests = selected.map { deliveredById.getValue(it.requestId) },
             latestSeq = storedState.lastSeq
         )
+    }
+
+    @Synchronized
+    fun attachment(requestId: String, attachmentId: String): LanerChatAttachment {
+        val normalizedRequestId = requestId.trim()
+        val normalizedAttachmentId = attachmentId.trim()
+        require(normalizedRequestId.isNotEmpty()) { "request_id is required" }
+        require(normalizedAttachmentId.isNotEmpty()) { "attachment_id is required" }
+        val request = storedState.requests.firstOrNull { it.requestId == normalizedRequestId }
+            ?: throw IllegalArgumentException("Laner chat request not found: $normalizedRequestId")
+        val attachment = request.attachments.firstOrNull { it.attachmentId == normalizedAttachmentId }
+            ?: throw IllegalArgumentException("Laner chat attachment not found: $normalizedAttachmentId")
+        check(java.io.File(attachment.filePath).isFile) {
+            "Laner chat attachment file is no longer available: ${attachment.fileName}"
+        }
+        touchAgentLocked(request.sessionId)
+        return attachment
     }
 
     @Synchronized

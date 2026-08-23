@@ -114,6 +114,7 @@ class AiLimbsOperitDispatcher(context: Context) {
         "ai_limbs.chat.notification.check" -> lanerChatNotificationCheck(args)
         "ai_limbs.chat.notification.wait" -> lanerChatNotificationWait(args)
         "ai_limbs.chat.inbox.fetch" -> lanerChatInboxFetch(args)
+        "ai_limbs.chat.attachment.fetch" -> lanerChatAttachmentFetch(args)
         "ai_limbs.chat.reply" -> lanerChatReply(args)
         "ai_limbs.chat.send" -> lanerChatSend(args)
         "ai_limbs.ui.status" -> uiCapabilityStatus()
@@ -240,7 +241,7 @@ class AiLimbsOperitDispatcher(context: Context) {
             } ?: false
         return ok()
             .put("module", "AI Limbs Laner Chat Bridge")
-            .put("protocol_version", 2)
+            .put("protocol_version", 3)
             .put("provider_type_id", LanerChatContract.PROVIDER_TYPE_ID)
             .put("bridge_provider", bridge.providerId)
             .put("bridge_phase", bridge.phase.name)
@@ -256,6 +257,7 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("proactive_pending_count", mailbox.proactivePendingCount)
             .put("proactive_delivered_count", mailbox.proactiveDeliveredCount)
             .put("supports_proactive_send", true)
+            .put("supports_attachments", true)
             .put("notification_contains_body", false)
     }
 
@@ -331,6 +333,32 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("latest_seq", fetched.latestSeq)
             .put("messages", JSONArray(fetched.requests.map(::lanerChatRequestJson)))
             .put("count", fetched.requests.size)
+    }
+
+    private suspend fun lanerChatAttachmentFetch(args: JSONObject): JSONObject {
+        val requestId = args.optString("request_id").trim()
+        val attachmentId = args.optString("attachment_id").trim()
+        val attachment = lanerChat.attachment(requestId, attachmentId)
+        val isImage = attachment.mimeType.startsWith("image/", ignoreCase = true)
+        val readResult = executeOperitTool(
+            JSONObject()
+                .put("name", "read_file_full")
+                .put("parameters", JSONObject()
+                    .put("path", attachment.filePath)
+                    .put("direct_image", isImage)
+                )
+        )
+        val response = if (readResult.optBoolean("success", false)) ok() else error("Unable to read Laner chat attachment")
+        return response
+            .put("request_id", requestId)
+            .put("attachment_id", attachmentId)
+            .put("filename", attachment.fileName)
+            .put("mime_type", attachment.mimeType)
+            .put("size", attachment.fileSize)
+            .put("content_mode", if (isImage) "multimodal_image" else "text_or_document")
+            .put("payload", readResult.opt("result") ?: JSONObject.NULL)
+            .put("read_error", readResult.opt("error") ?: JSONObject.NULL)
+            .put("events", readResult.optJSONArray("events") ?: JSONArray())
     }
 
     private fun lanerChatReply(args: JSONObject): JSONObject {
@@ -417,6 +445,14 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("chat_id", request.chatId)
             .put("sender", request.sender)
             .put("text", request.text)
+            .put("attachment_count", request.attachments.size)
+            .put("attachments", JSONArray(request.attachments.map { attachment ->
+                JSONObject()
+                    .put("attachment_id", attachment.attachmentId)
+                    .put("filename", attachment.fileName)
+                    .put("mime_type", attachment.mimeType)
+                    .put("size", attachment.fileSize)
+            }))
             .put("created_at", isoTime(request.createdAtMs))
             .put("status", request.status.name)
             .put("delivery_count", request.deliveryCount)

@@ -3,6 +3,7 @@ package com.ai.assistance.operit.core.chat.plugins
 import android.content.Context
 import com.ai.assistance.operit.api.chat.EnhancedAIService
 import com.ai.assistance.operit.core.chat.hooks.PromptTurn
+import com.ai.assistance.operit.data.model.AttachmentInfo
 import com.ai.assistance.operit.util.stream.Stream
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -18,7 +19,9 @@ data class MessageProcessingHookParams(
     val workspacePath: String?,
     val maxTokens: Int,
     val tokenUsageThreshold: Double,
-    val onNonFatalError: suspend (error: String) -> Unit
+    val onNonFatalError: suspend (error: String) -> Unit,
+    val rawUserText: String? = null,
+    val attachments: List<AttachmentInfo> = emptyList()
 )
 
 interface MessageProcessingController {

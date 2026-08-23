@@ -54,7 +54,6 @@ private data class RestoreRequest(
 
 private val visibleDocumentIds =
     listOf(
-        AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
         AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
         AiLimbsDocumentId.WORK_MANUAL
     )
@@ -65,7 +64,6 @@ fun AiLimbsAccessManagerScreen() {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val documents = remember { AiLimbsDocumentProvider(context) }
-    var systemAccessPrompt by remember { mutableStateOf("") }
     var customAccessPrompt by remember { mutableStateOf("") }
     var workManual by remember { mutableStateOf("") }
     var snapshots by remember {
@@ -80,7 +78,6 @@ fun AiLimbsAccessManagerScreen() {
         Toast.makeText(context, context.getString(resId), Toast.LENGTH_SHORT).show()
 
     suspend fun loadDocuments() {
-        systemAccessPrompt = documents.readSystemAccessPrompt()
         customAccessPrompt = documents.readCustomAccessPrompt()
         workManual = documents.readWorkManual()
         val loadedSnapshots =
@@ -160,30 +157,6 @@ fun AiLimbsAccessManagerScreen() {
                     .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            DocumentEditorCard(
-                title = stringResource(R.string.laner_system_access_prompt_title),
-                value = systemAccessPrompt,
-                onValueChange = { systemAccessPrompt = it },
-                minLines = 14,
-                snapshots = snapshots[AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT].orEmpty(),
-                selectedSnapshotId = selectedSnapshots[AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT],
-                onSnapshotSelected = { snapshotId ->
-                    selectedSnapshots =
-                        selectedSnapshots + (AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT to snapshotId)
-                },
-                onRestore = { snapshotId ->
-                    restoreRequest =
-                        RestoreRequest(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT, snapshotId)
-                },
-                onReload = { reload(showConfirmation = true) },
-                onSave = {
-                    saveDocument(
-                        AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
-                        systemAccessPrompt,
-                        R.string.laner_system_access_saved
-                    )
-                }
-            )
             DocumentEditorCard(
                 title = stringResource(R.string.laner_access_prompt_title),
                 value = customAccessPrompt,
