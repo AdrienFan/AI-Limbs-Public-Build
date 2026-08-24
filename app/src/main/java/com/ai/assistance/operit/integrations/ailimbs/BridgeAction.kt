@@ -18,18 +18,14 @@ enum class BridgeAction {
                     AiLimbsBridgePhase.STOPPED ->
                         listOf(CONNECT, REPAIR, REFRESH)
                     AiLimbsBridgePhase.PAIRING ->
-                        listOf(
-                            if (
-                                !state.verificationUri.isNullOrBlank() &&
-                                    OPEN_AUTH in supportedActions
-                            ) {
-                                OPEN_AUTH
-                            } else {
-                                RECONNECT
-                            },
-                            STOP,
-                            REFRESH
-                        )
+                        if (
+                            !state.verificationUri.isNullOrBlank() &&
+                                OPEN_AUTH in supportedActions
+                        ) {
+                            listOf(OPEN_AUTH, RECONNECT, STOP, REFRESH)
+                        } else {
+                            listOf(RECONNECT, STOP, REFRESH)
+                        }
                     AiLimbsBridgePhase.ONLINE ->
                         listOf(STOP, RECONNECT, REFRESH)
                     AiLimbsBridgePhase.ERROR ->

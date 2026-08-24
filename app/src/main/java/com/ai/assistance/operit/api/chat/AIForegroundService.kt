@@ -2235,7 +2235,7 @@ class AIForegroundService : Service() {
             .forEach { action ->
                 add(
                     NotificationPanelAction(
-                        label = bridgeActionLabel(action),
+                        label = if (state.phase == AiLimbsBridgePhase.PAIRING && action == BridgeAction.RECONNECT) getString(R.string.ai_limbs_bridge_action_refresh_auth_code) else bridgeActionLabel(action),
                         pendingIntent = bridgeActionPendingIntent(action)
                     )
                 )
