@@ -103,7 +103,7 @@ object AiLimbsCoreCapabilityRegistry {
             name = "ai_limbs.chat.status",
             displayName = "AI Limbs Laner Chat Bridge 状态",
             description =
-                "Read Laner Chat mailbox, active-session, priority, streaming-reply, unread, pending-reply, and Bridge readiness metadata without returning message bodies.",
+                "Read Laner Chat mailbox, active-session, priority, unread, pending-reply, and Bridge readiness metadata without returning message bodies.",
             keywords = listOf("兰儿聊天", "Laner Chat", "聊天桥", "收件箱", "未读消息")
         ),
         lanerChatEntry(
@@ -249,7 +249,7 @@ object AiLimbsCoreCapabilityRegistry {
             name = "ai_limbs.chat.reply",
             displayName = "回复兰儿聊天消息",
             description =
-                "Deliver one complete user-visible Laner Chat assistant response atomically. Use reply.start/delta/complete for substantial replies that should appear progressively.",
+                "Deliver one complete user-visible Laner Chat assistant response atomically.",
             parameters = listOf(
                 ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
                 ToolParameterSchema(
@@ -261,41 +261,6 @@ object AiLimbsCoreCapabilityRegistry {
                 ToolParameterSchema("content", "string", "Complete reply text", true)
             ),
             keywords = listOf("兰儿聊天", "回复", "reply", "request_id", "幂等")
-        ),
-        lanerChatEntry(
-            name = "ai_limbs.chat.reply.start",
-            displayName = "开始流式回复兰儿聊天消息",
-            description =
-                "Start one idempotent streaming user-visible reply. Follow with ordered reply.delta chunks beginning at seq=1, then reply.complete.",
-            parameters = listOf(
-                ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
-                ToolParameterSchema("reply_id", "string", "Optional stable reply ID for retries", false)
-            ),
-            keywords = listOf("兰儿聊天", "流式回复", "stream", "start", "reply")
-        ),
-        lanerChatEntry(
-            name = "ai_limbs.chat.reply.delta",
-            displayName = "追加流式回复片段",
-            description =
-                "Append one coherent user-visible reply chunk to the existing Laner Chat AI bubble. Sequence numbers are strict and start at 1.",
-            parameters = listOf(
-                ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
-                ToolParameterSchema("reply_id", "string", "Stable reply ID from reply.start; optional when using the default ID", false),
-                ToolParameterSchema("seq", "integer", "Strict next chunk sequence starting at 1", true),
-                ToolParameterSchema("content", "string", "Exact next reply chunk; use coherent chunks rather than tiny token fragments", true)
-            ),
-            keywords = listOf("兰儿聊天", "流式回复", "chunk", "delta", "seq")
-        ),
-        lanerChatEntry(
-            name = "ai_limbs.chat.reply.complete",
-            displayName = "完成流式回复",
-            description =
-                "Complete the active streaming reply after the final chunk and mark the Laner Chat request answered.",
-            parameters = listOf(
-                ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
-                ToolParameterSchema("reply_id", "string", "Stable reply ID from reply.start; optional when using the default ID", false)
-            ),
-            keywords = listOf("兰儿聊天", "流式回复", "complete", "结束回复")
         ),
         lanerChatEntry(
             name = "ai_limbs.chat.send",

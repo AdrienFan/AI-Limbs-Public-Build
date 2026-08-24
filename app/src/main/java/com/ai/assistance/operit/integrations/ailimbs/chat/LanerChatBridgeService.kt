@@ -7,21 +7,17 @@ import com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
-import com.ai.assistance.operit.util.stream.asStream
-import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.flow.receiveAsFlow
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** Durable application-internal mailbox used by the Laner chat processing plugin and RDC tools. */
-private data class LanerChatLiveReply(val channel: Channel<String>)
-
 class LanerChatBridgeService private constructor(context: Context) {
     private val preferences =
         context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -30,7 +26,7 @@ class LanerChatBridgeService private constructor(context: Context) {
             encodeDefaults = true
             ignoreUnknownKeys = true
         }
-    private val liveReplies = ConcurrentHashMap<String, LanerChatLiveReply>()
+    private val liveReplies = ConcurrentHashMap<String, CompletableDeferred<String>>()
     private var storedState: LanerChatStoredState = loadState()
     private val latestSeqFlow = MutableStateFlow(storedState.lastSeq)
     private val mailboxStatusFlow = MutableStateFlow(buildMailboxStatus(storedState))
@@ -154,8 +150,8 @@ class LanerChatBridgeService private constructor(context: Context) {
                     )
                 }
             )
-        val channel = Channel<String>(Channel.UNLIMITED)
-        liveReplies[request.requestId] = LanerChatLiveReply(channel)
+        val deferred = CompletableDeferred<String>()
+        liveReplies[request.requestId] = deferred
         try {
             commitState(
                 storedState.copy(
@@ -165,10 +161,10 @@ class LanerChatBridgeService private constructor(context: Context) {
                 )
             )
         } catch (error: Throwable) {
-            liveReplies.remove(request.requestId)?.channel?.cancel(CancellationException("Laner chat enqueue failed"))
+            liveReplies.remove(request.requestId)?.cancel(CancellationException("Laner chat enqueue failed"))
             throw error
         }
-        return LanerChatPendingExchange(request, channel.receiveAsFlow().asStream())
+        return LanerChatPendingExchange(request, deferred)
     }
 
     /** Bind the visible Bridge conversation to its durable Laner session. */
@@ -414,9 +410,6 @@ class LanerChatBridgeService private constructor(context: Context) {
         check(existing.status != LanerChatMessageStatus.CANCELED) {
             "Laner chat request was canceled: $normalizedRequestId"
         }
-        check(existing.replyChunkSeq == 0 && existing.replyId == null) {
-            "Streaming reply already started; use reply.delta and reply.complete"
-        }
         val answered = existing.copy(
             status = LanerChatMessageStatus.ANSWERED,
             answeredAtMs = System.currentTimeMillis(),
@@ -425,117 +418,8 @@ class LanerChatBridgeService private constructor(context: Context) {
         )
         val requests = storedState.requests.toMutableList().also { it[index] = answered }
         commitState(storedState.copy(requests = requests))
-        val live = liveReplies.remove(normalizedRequestId)
-        val deliveredLive = live?.channel?.trySend(normalizedContent)?.isSuccess == true
-        live?.channel?.close()
+        val deliveredLive = liveReplies.remove(normalizedRequestId)?.complete(normalizedContent) == true
         return LanerChatReplyResult(answered, duplicate = false, deliveredToLiveStream = deliveredLive)
-    }
-
-    @Synchronized
-    fun startReply(requestId: String, replyId: String?): LanerChatReplyStartResult {
-        val normalizedRequestId = requestId.trim()
-        require(normalizedRequestId.isNotEmpty()) { "request_id is required" }
-        val normalizedReplyId =
-            replyId?.trim()?.takeIf { it.isNotEmpty() } ?: "reply:$normalizedRequestId"
-        val index = storedState.requests.indexOfFirst { it.requestId == normalizedRequestId }
-        require(index >= 0) { "Laner chat request not found: $normalizedRequestId" }
-        val existing = storedState.requests[index]
-        touchAgentLocked(existing.sessionId)
-        check(existing.status != LanerChatMessageStatus.CANCELED) {
-            "Laner chat request was canceled: $normalizedRequestId"
-        }
-        if (existing.replyId != null) {
-            check(existing.replyId == normalizedReplyId) {
-                "Laner chat reply already started with a different reply_id"
-            }
-            return LanerChatReplyStartResult(existing, duplicate = true)
-        }
-        check(existing.status != LanerChatMessageStatus.ANSWERED) {
-            "Laner chat request is already answered: $normalizedRequestId"
-        }
-        val started = existing.copy(replyId = normalizedReplyId, replyContent = "", replyChunkSeq = 0)
-        val requests = storedState.requests.toMutableList().also { it[index] = started }
-        commitState(storedState.copy(requests = requests))
-        return LanerChatReplyStartResult(started, duplicate = false)
-    }
-
-    @Synchronized
-    fun appendReplyDelta(
-        requestId: String,
-        replyId: String?,
-        seq: Int,
-        content: String
-    ): LanerChatReplyDeltaResult {
-        val normalizedRequestId = requestId.trim()
-        require(normalizedRequestId.isNotEmpty()) { "request_id is required" }
-        require(seq >= 1) { "seq must start at 1" }
-        require(content.isNotEmpty()) { "delta content is required" }
-        val index = storedState.requests.indexOfFirst { it.requestId == normalizedRequestId }
-        require(index >= 0) { "Laner chat request not found: $normalizedRequestId" }
-        val existing = storedState.requests[index]
-        touchAgentLocked(existing.sessionId)
-        val expectedReplyId = checkNotNull(existing.replyId) {
-            "Streaming reply has not started; call ai_limbs.chat.reply.start first"
-        }
-        val normalizedReplyId =
-            replyId?.trim()?.takeIf { it.isNotEmpty() } ?: expectedReplyId
-        check(expectedReplyId == normalizedReplyId) {
-            "reply_id does not match the active streaming reply"
-        }
-        check(existing.status != LanerChatMessageStatus.CANCELED) {
-            "Laner chat request was canceled: $normalizedRequestId"
-        }
-        if (seq <= existing.replyChunkSeq) {
-            return LanerChatReplyDeltaResult(existing, duplicate = true, deliveredToLiveStream = false)
-        }
-        check(existing.status != LanerChatMessageStatus.ANSWERED) {
-            "Laner chat request is already answered: $normalizedRequestId"
-        }
-        check(seq == existing.replyChunkSeq + 1) {
-            "Streaming reply sequence gap: expected ${existing.replyChunkSeq + 1}, got $seq"
-        }
-        val updated = existing.copy(
-            replyContent = (existing.replyContent ?: "") + content,
-            replyChunkSeq = seq
-        )
-        val requests = storedState.requests.toMutableList().also { it[index] = updated }
-        commitState(storedState.copy(requests = requests))
-        val deliveredLive =
-            liveReplies[normalizedRequestId]?.channel?.trySend(content)?.isSuccess == true
-        return LanerChatReplyDeltaResult(updated, duplicate = false, deliveredToLiveStream = deliveredLive)
-    }
-
-    @Synchronized
-    fun completeReply(requestId: String, replyId: String?): LanerChatReplyCompleteResult {
-        val normalizedRequestId = requestId.trim()
-        require(normalizedRequestId.isNotEmpty()) { "request_id is required" }
-        val index = storedState.requests.indexOfFirst { it.requestId == normalizedRequestId }
-        require(index >= 0) { "Laner chat request not found: $normalizedRequestId" }
-        val existing = storedState.requests[index]
-        touchAgentLocked(existing.sessionId)
-        val expectedReplyId = checkNotNull(existing.replyId) {
-            "Streaming reply has not started; call ai_limbs.chat.reply.start first"
-        }
-        val normalizedReplyId =
-            replyId?.trim()?.takeIf { it.isNotEmpty() } ?: expectedReplyId
-        check(expectedReplyId == normalizedReplyId) {
-            "reply_id does not match the active streaming reply"
-        }
-        if (existing.status == LanerChatMessageStatus.ANSWERED) {
-            return LanerChatReplyCompleteResult(existing, duplicate = true)
-        }
-        check(existing.status != LanerChatMessageStatus.CANCELED) {
-            "Laner chat request was canceled: $normalizedRequestId"
-        }
-        check(!existing.replyContent.isNullOrEmpty()) { "streaming reply has no content" }
-        val answered = existing.copy(
-            status = LanerChatMessageStatus.ANSWERED,
-            answeredAtMs = System.currentTimeMillis()
-        )
-        val requests = storedState.requests.toMutableList().also { it[index] = answered }
-        commitState(storedState.copy(requests = requests))
-        liveReplies.remove(normalizedRequestId)?.channel?.close()
-        return LanerChatReplyCompleteResult(answered, duplicate = false)
     }
 
     @Synchronized
@@ -550,7 +434,7 @@ class LanerChatBridgeService private constructor(context: Context) {
         )
         val requests = storedState.requests.toMutableList().also { it[index] = canceled }
         commitState(storedState.copy(requests = requests))
-        liveReplies.remove(requestId)?.channel?.cancel(CancellationException(reason))
+        liveReplies.remove(requestId)?.cancel(CancellationException(reason))
         return true
     }
 

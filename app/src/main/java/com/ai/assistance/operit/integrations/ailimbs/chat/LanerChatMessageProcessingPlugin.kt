@@ -53,7 +53,7 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
                 },
             stream = stream {
                 try {
-                    pending.reply.collect { chunk -> emit(chunk) }
+                    emit(pending.reply.await())
                 } catch (error: CancellationException) {
                     service.cancelRequest(
                         requestId = pending.request.requestId,

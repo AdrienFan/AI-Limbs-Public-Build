@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
+import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -180,27 +181,43 @@ class AiLimbsRdcToolAdapter(
 
     private fun mcpResult(result: JSONObject): JSONObject {
         val serializedResult = result.toString(2)
+        val success = result.optBoolean("success", false)
+        val images =
+            if (success) {
+                MediaLinkParser.extractImageLinks(serializedResult)
+            } else {
+                emptyList()
+            }
+        // ImagePool links are an Operit-internal transport token. Exposing them beside an MCP
+        // ImageContent block lets the host see two competing image protocols; consume the link
+        // here so the RDC model-facing result matches Desktop Commander's text + image contract.
+        val modelText =
+            if (images.isNotEmpty()) {
+                MediaLinkParser.removeImageLinks(serializedResult).trim()
+            } else {
+                serializedResult
+            }
         val content = JSONArray().put(
             JSONObject()
                 .put("type", "text")
-                .put("text", serializedResult)
+                .put("text", modelText)
         )
-        // ImagePool links can come from attachments, screenshots, or file reads; export by result content so every visual source shares one RDC bus.
-        if (result.optBoolean("success", false)) {
-            MediaLinkParser.extractImageLinks(serializedResult).forEach { image ->
-                content.put(
-                    JSONObject()
-                        .put("type", "image")
-                        .put("mimeType", image.mimeType)
-                        .put("data", image.base64Data)
-                )
-            }
+        images.forEach { image ->
+            content.put(
+                JSONObject()
+                    .put("type", "image")
+                    .put("mimeType", image.mimeType)
+                    .put("data", image.base64Data)
+            )
+            AppLogger.i(
+                TAG,
+                "RDC image content prepared: mime=${image.mimeType} base64Chars=${image.base64Data.length}"
+            )
         }
         return JSONObject()
             .put("content", content)
-            .put("isError", !result.optBoolean("success", false))
+            .put("isError", !success)
     }
-
     private fun mcpError(message: String): JSONObject {
         val result = JSONObject()
             .put("success", false)
@@ -209,6 +226,7 @@ class AiLimbsRdcToolAdapter(
     }
 
     companion object {
+        private const val TAG = "AiLimbsRdcToolAdapter"
         private const val DEFAULT_TERMINAL_TIMEOUT_MS = 120_000L
         private val DIRECT_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
     }

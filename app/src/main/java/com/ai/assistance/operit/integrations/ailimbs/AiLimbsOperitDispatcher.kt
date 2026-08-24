@@ -117,9 +117,6 @@ class AiLimbsOperitDispatcher(context: Context) {
         "ai_limbs.chat.inbox.fetch" -> lanerChatInboxFetch(args)
         "ai_limbs.chat.attachment.fetch" -> lanerChatAttachmentFetch(args)
         "ai_limbs.chat.reply" -> lanerChatReply(args)
-        "ai_limbs.chat.reply.start" -> lanerChatReplyStart(args)
-        "ai_limbs.chat.reply.delta" -> lanerChatReplyDelta(args)
-        "ai_limbs.chat.reply.complete" -> lanerChatReplyComplete(args)
         "ai_limbs.chat.send" -> lanerChatSend(args)
         "ai_limbs.ui.status" -> uiCapabilityStatus()
         "operit.tools.list" -> {
@@ -262,7 +259,6 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("proactive_delivered_count", mailbox.proactiveDeliveredCount)
             .put("supports_proactive_send", true)
             .put("supports_attachments", true)
-            .put("supports_streaming_reply", true)
             .put("supports_priority", true)
             .put("notification_contains_body", false)
     }
@@ -389,52 +385,6 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("answered_at", isoTime(replied.request.answeredAtMs))
     }
 
-
-    private fun lanerChatReplyStart(args: JSONObject): JSONObject {
-        val result =
-            lanerChat.startReply(
-                requestId = args.optString("request_id"),
-                replyId = args.optString("reply_id").ifBlank { null }
-            )
-        return ok()
-            .put("request_id", result.request.requestId)
-            .put("reply_id", result.request.replyId)
-            .put("status", result.request.status.name)
-            .put("duplicate", result.duplicate)
-            .put("next_seq", result.request.replyChunkSeq + 1)
-    }
-
-    private fun lanerChatReplyDelta(args: JSONObject): JSONObject {
-        val result =
-            lanerChat.appendReplyDelta(
-                requestId = args.optString("request_id"),
-                replyId = args.optString("reply_id").ifBlank { null },
-                seq = args.optInt("seq", -1),
-                content = args.optString("content")
-            )
-        return ok()
-            .put("request_id", result.request.requestId)
-            .put("reply_id", result.request.replyId)
-            .put("seq", result.request.replyChunkSeq)
-            .put("duplicate", result.duplicate)
-            .put("delivered_to_live_stream", result.deliveredToLiveStream)
-            .put("accumulated_chars", result.request.replyContent?.length ?: 0)
-    }
-
-    private fun lanerChatReplyComplete(args: JSONObject): JSONObject {
-        val result =
-            lanerChat.completeReply(
-                requestId = args.optString("request_id"),
-                replyId = args.optString("reply_id").ifBlank { null }
-            )
-        return ok()
-            .put("request_id", result.request.requestId)
-            .put("reply_id", result.request.replyId)
-            .put("status", result.request.status.name)
-            .put("duplicate", result.duplicate)
-            .put("final_seq", result.request.replyChunkSeq)
-            .put("answered_at", isoTime(result.request.answeredAtMs))
-    }
 
     private suspend fun lanerChatSend(args: JSONObject): JSONObject {
         val requestedSessionId = args.optString("session_id").ifBlank { null }

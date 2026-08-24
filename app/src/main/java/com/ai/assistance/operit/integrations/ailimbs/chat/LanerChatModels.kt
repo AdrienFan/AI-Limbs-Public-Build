@@ -1,6 +1,6 @@
 package com.ai.assistance.operit.integrations.ailimbs.chat
 
-import com.ai.assistance.operit.util.stream.Stream
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.serialization.Serializable
 
 @Serializable
@@ -79,8 +79,7 @@ data class LanerChatRequest(
     val answeredAtMs: Long? = null,
     val canceledAtMs: Long? = null,
     val replyId: String? = null,
-    val replyContent: String? = null,
-    val replyChunkSeq: Int = 0
+    val replyContent: String? = null
 )
 
 @Serializable
@@ -138,22 +137,6 @@ data class LanerChatReplyResult(
     val deliveredToLiveStream: Boolean
 )
 
-data class LanerChatReplyStartResult(
-    val request: LanerChatRequest,
-    val duplicate: Boolean
-)
-
-data class LanerChatReplyDeltaResult(
-    val request: LanerChatRequest,
-    val duplicate: Boolean,
-    val deliveredToLiveStream: Boolean
-)
-
-data class LanerChatReplyCompleteResult(
-    val request: LanerChatRequest,
-    val duplicate: Boolean
-)
-
 data class LanerChatProactiveSendResult(
     val message: LanerChatProactiveMessage,
     val duplicate: Boolean
@@ -161,5 +144,5 @@ data class LanerChatProactiveSendResult(
 
 data class LanerChatPendingExchange(
     val request: LanerChatRequest,
-    val reply: Stream<String>
+    val reply: CompletableDeferred<String>
 )
