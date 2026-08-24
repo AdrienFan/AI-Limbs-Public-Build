@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
+import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -86,7 +87,10 @@ class AiLimbsRdcToolAdapter(
                 } else {
                     executeOperit(name, parameters)
                 }
-            return mcpResult(result)
+            return mcpResult(
+                result = result,
+                includeEmbeddedImages = name == "ai_limbs.chat.attachment.fetch"
+            )
         }
 
         if (shell == "android") {
@@ -167,12 +171,26 @@ class AiLimbsRdcToolAdapter(
         }
     }
 
-    private fun mcpResult(result: JSONObject): JSONObject {
+    private fun mcpResult(
+        result: JSONObject,
+        includeEmbeddedImages: Boolean = false
+    ): JSONObject {
+        val serializedResult = result.toString(2)
         val content = JSONArray().put(
             JSONObject()
                 .put("type", "text")
-                .put("text", result.toString(2))
+                .put("text", serializedResult)
         )
+        if (includeEmbeddedImages && result.optBoolean("success", false)) {
+            MediaLinkParser.extractImageLinks(serializedResult).forEach { image ->
+                content.put(
+                    JSONObject()
+                        .put("type", "image")
+                        .put("mimeType", image.mimeType)
+                        .put("data", image.base64Data)
+                )
+            }
+        }
         return JSONObject()
             .put("content", content)
             .put("isError", !result.optBoolean("success", false))
