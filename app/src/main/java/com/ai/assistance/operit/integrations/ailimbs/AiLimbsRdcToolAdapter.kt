@@ -28,12 +28,19 @@ class AiLimbsRdcToolAdapter(
         }
         val offset = args.optInt("offset", 0).coerceAtLeast(0)
         val length = args.optInt("length", 0).coerceAtLeast(0)
+        val environment = resolveEnvironment(path, args)
+        val directImage = environment == "android" && isDirectImagePath(path)
         val params = JSONObject()
             .put("path", path)
-            .put("environment", resolveEnvironment(path, args))
-            .put("text_only", "true")
-        val operitName = if (length > 0) "read_file_part" else "read_file_full"
-        if (length > 0) {
+            .put("environment", environment)
+        // RDC image reads must bypass text-only validation so the file reaches ImagePool and the remote result carries real pixels.
+        if (directImage) {
+            params.put("direct_image", true)
+        } else {
+            params.put("text_only", "true")
+        }
+        val operitName = if (directImage || length <= 0) "read_file_full" else "read_file_part"
+        if (!directImage && length > 0) {
             params.put("start_line", offset + 1)
             params.put("end_line", offset + length)
         }
@@ -87,10 +94,7 @@ class AiLimbsRdcToolAdapter(
                 } else {
                     executeOperit(name, parameters)
                 }
-            return mcpResult(
-                result = result,
-                includeEmbeddedImages = name == "ai_limbs.chat.attachment.fetch"
-            )
+            return mcpResult(result)
         }
 
         if (shell == "android") {
@@ -151,6 +155,9 @@ class AiLimbsRdcToolAdapter(
         }
     }
 
+    private fun isDirectImagePath(path: String): Boolean =
+        path.substringAfterLast('/').substringAfterLast('.', "").lowercase() in DIRECT_IMAGE_EXTENSIONS
+
     private fun isAiLimbsCoreTool(name: String): Boolean =
         name.startsWith("ai_limbs.") ||
             name.startsWith("capability.") ||
@@ -171,17 +178,15 @@ class AiLimbsRdcToolAdapter(
         }
     }
 
-    private fun mcpResult(
-        result: JSONObject,
-        includeEmbeddedImages: Boolean = false
-    ): JSONObject {
+    private fun mcpResult(result: JSONObject): JSONObject {
         val serializedResult = result.toString(2)
         val content = JSONArray().put(
             JSONObject()
                 .put("type", "text")
                 .put("text", serializedResult)
         )
-        if (includeEmbeddedImages && result.optBoolean("success", false)) {
+        // ImagePool links can come from attachments, screenshots, or file reads; export by result content so every visual source shares one RDC bus.
+        if (result.optBoolean("success", false)) {
             MediaLinkParser.extractImageLinks(serializedResult).forEach { image ->
                 content.put(
                     JSONObject()
@@ -205,5 +210,6 @@ class AiLimbsRdcToolAdapter(
 
     companion object {
         private const val DEFAULT_TERMINAL_TIMEOUT_MS = 120_000L
+        private val DIRECT_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
     }
 }

@@ -363,6 +363,7 @@ class AiLimbsOperitDispatcher(context: Context) {
         return response
             .put("request_id", requestId)
             .put("attachment_id", attachmentId)
+            .put("file_path", attachment.filePath)
             .put("filename", attachment.fileName)
             .put("mime_type", attachment.mimeType)
             .put("size", attachment.fileSize)

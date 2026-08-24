@@ -238,7 +238,7 @@ object AiLimbsCoreCapabilityRegistry {
             name = "ai_limbs.chat.attachment.fetch",
             displayName = "读取兰儿聊天附件",
             description =
-                "Fetch one attachment from a previously fetched Laner Chat request. Images are returned through the native direct-image path; text and documents use the native file reader.",
+                "Fetch one attachment from a previously fetched Laner Chat request. Image responses include file_path for the RDC read_file multimodal handoff; text and documents use the native file reader.",
             parameters = listOf(
                 ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
                 ToolParameterSchema("attachment_id", "string", "Attachment ID returned in the message attachments array", true)

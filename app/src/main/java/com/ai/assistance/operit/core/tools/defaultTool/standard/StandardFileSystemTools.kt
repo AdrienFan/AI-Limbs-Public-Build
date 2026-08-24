@@ -87,7 +87,7 @@ open class StandardFileSystemTools(protected val context: Context) {
             "doc", "docx",      // Word documents
             "pdf",              // PDF documents
             "jpg", "jpeg",      // Image files
-            "png", "gif", "bmp",
+            "png", "gif", "bmp", "webp",
             "mp3", "wav", "m4a", "aac", "flac", "ogg", "opus",
             "mp4", "mkv", "mov", "webm", "avi", "m4v"
         )
@@ -1065,7 +1065,7 @@ open class StandardFileSystemTools(protected val context: Context) {
                 }
             }
 
-            "jpg", "jpeg", "png", "gif", "bmp" -> {
+            "jpg", "jpeg", "png", "gif", "bmp", "webp" -> {
                 // 获取可选的intent参数和direct_image参数
                 val intent = tool.parameters.find { it.name == "intent" }?.value
                 val directImage = tool.parameters.find { it.name == "direct_image" }?.value?.toBoolean() ?: false

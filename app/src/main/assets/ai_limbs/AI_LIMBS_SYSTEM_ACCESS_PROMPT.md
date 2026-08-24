@@ -14,6 +14,11 @@
 - For substantial user-visible replies, when streaming reply capabilities are available, prefer ai_limbs.chat.reply.start followed by coherent ai_limbs.chat.reply.delta chunks with strict sequence numbers starting at 1, then ai_limbs.chat.reply.complete. Do not emit tiny token-sized chunks. The legacy ai_limbs.chat.reply remains valid for short atomic replies and compatibility.
 - Replies to user messages must preserve request/reply and streaming sequence idempotency semantics. Proactive messages must preserve message-level idempotency semantics. Exact parameters, invocation addresses, timeout limits, priority filters, and session creation or binding behavior are provided by the Capability Resolver.
 
+- Module: AI Limbs External Vision Transport.
+- For visual interpretation of an Android image returned by an AI Limbs capability, use its file_path as the transport handoff and call the RDC top-level read_file tool on that path before interpreting the image. RDC image reads are direct multimodal input; do not use OCR or infer visual content from the filename, path, metadata, or surrounding text.
+- For current-screen visual inspection, invoke the screenshot capability first, then pass its returned file_path to RDC read_file before interpreting the screen. get_page_info exposes structured UI semantics and must not be treated as pixel vision.
+- Laner Chat image attachments expose file_path through ai_limbs.chat.attachment.fetch; pass that path to RDC read_file for visual interpretation.
+
 - Before performing development, debugging, development-environment management, device-configuration changes, or any task that modifies project contents, device state, or persistent storage, the official AI Limbs Work Manual must be read first. Pure code analysis, status queries, read-only inspection, and tasks that do not modify projects, devices, or persistent storage do not require the Work Manual.
 - Official AI Limbs managed documents may only be modified through their corresponding document-management capabilities. Do not overwrite them through ordinary file tools or create parallel replacement manuals.
 
