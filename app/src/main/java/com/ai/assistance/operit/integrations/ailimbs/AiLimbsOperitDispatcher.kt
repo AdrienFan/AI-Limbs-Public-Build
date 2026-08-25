@@ -24,7 +24,10 @@ import java.util.TimeZone
 import org.json.JSONArray
 import org.json.JSONObject
 
-class AiLimbsOperitDispatcher(context: Context) {
+class AiLimbsOperitDispatcher(
+    context: Context,
+    private val accessGate: AiLimbsAccessGate? = null
+) {
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
     private val documents = AiLimbsDocumentProvider(appContext)
@@ -34,7 +37,14 @@ class AiLimbsOperitDispatcher(context: Context) {
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val gson = Gson()
 
-    suspend fun execute(tool: String, args: JSONObject): JSONObject = when (tool) {
+    suspend fun execute(tool: String, args: JSONObject): JSONObject {
+        accessGate?.rejectionBefore(tool)?.let { return it }
+        val result = executeUngated(tool, args)
+        accessGate?.recordSuccessfulRead(tool, result)
+        return result
+    }
+
+    private suspend fun executeUngated(tool: String, args: JSONObject): JSONObject = when (tool) {
         "ai_limbs.access_context.read" ->
             ok()
                 .put("document", "access_bootstrap")

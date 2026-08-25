@@ -28,11 +28,15 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
         val service = LanerChatBridgeService.getInstance(params.context)
         val chatId = params.chatId ?: "__DEFAULT_CHAT__"
         val priority = LanerChatDraftPriorityStore.consume(chatId)
-        val promptAnchor = AiLimbsAccessContextService(params.context).buildLanerChatPromptAnchor()
+        val accessContext = AiLimbsAccessContextService(params.context)
+        val chatContext = accessContext.buildLanerChatContextHeader()
+        val actionCheckpoint = accessContext.buildLanerChatActionCheckpoint()
         val bridgedMessage = buildString {
-            append(promptAnchor)
+            append(chatContext)
             append("\n\n[User message]\n")
             append(params.rawUserText ?: params.messageContent)
+            append("\n\n")
+            append(actionCheckpoint)
         }
         val pending =
             service.enqueue(

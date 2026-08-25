@@ -52,7 +52,8 @@ class AiLimbsRdcClient(
     private val scope: CoroutineScope
 ) {
     private val appContext = context.applicationContext
-    private val dispatcher = AiLimbsOperitDispatcher(appContext)
+    private val accessGate = AiLimbsAccessGate(appContext)
+    private val dispatcher = AiLimbsOperitDispatcher(appContext, accessGate)
     private val accessContext = AiLimbsAccessContextService(appContext)
     private val adapter = AiLimbsRdcToolAdapter(dispatcher)
     private val httpClient =
@@ -328,6 +329,8 @@ class AiLimbsRdcClient(
                 check(transport.sendHeartbeatAndAwaitAck(REALTIME_HEARTBEAT_ACK_TIMEOUT_MS)) {
                     "RDC Realtime heartbeat acknowledgement timed out"
                 }
+                accessGate.resetForNewSession()
+                lastSentAccessContext = null
                 heartbeat(info, session, broadcastCapable = true)
                 var lastHeartbeatAt = System.currentTimeMillis()
                 reconnectAttempt = 0
