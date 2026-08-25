@@ -24,6 +24,7 @@ import com.ai.assistance.operit.data.model.ApiKeyFormatValidator
 import com.ai.assistance.operit.ui.common.input.bringIntoViewOnImeFocus
 import com.ai.assistance.operit.ui.features.chat.components.config.TokenInfoDialog
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 
 /** 简洁风格的AI助手配置界面 */
 @Composable
@@ -31,7 +32,7 @@ fun ConfigurationScreen(
         apiKey: String,
         isSaving: Boolean,
         bridgePhase: AiLimbsBridgePhase,
-        bridgeAgentOnline: Boolean,
+        bridgeAgentPresence: LanerChatPresenceState,
         bridgePendingCount: Int,
         onSaveApiKey: (String) -> Unit,
         onUseApiChat: () -> Unit,
@@ -121,10 +122,10 @@ fun ConfigurationScreen(
                                         Text(
                                                 text =
                                                         stringResource(
-                                                                if (bridgeAgentOnline) {
-                                                                        R.string.laner_chat_session_online
-                                                                } else {
-                                                                        R.string.laner_chat_session_offline
+                                                                when (bridgeAgentPresence) {
+                                                                        LanerChatPresenceState.ACTIVE -> R.string.laner_chat_session_online
+                                                                        LanerChatPresenceState.RECENT -> R.string.laner_chat_session_recent
+                                                                        LanerChatPresenceState.WAITING -> R.string.laner_chat_session_offline
                                                                 }
                                                         ),
                                                 style = MaterialTheme.typography.bodySmall,

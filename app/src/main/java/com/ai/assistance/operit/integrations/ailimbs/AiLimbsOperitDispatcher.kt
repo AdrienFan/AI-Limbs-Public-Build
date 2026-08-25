@@ -14,6 +14,7 @@ import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatRequest
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
 import java.text.SimpleDateFormat
@@ -234,12 +235,17 @@ class AiLimbsOperitDispatcher(context: Context) {
     }
 
     private fun lanerChatStatus(): JSONObject {
+        // A remote status query is itself verified agent activity. Renew presence before snapshotting
+        // so a reconnecting Laner does not remain visibly stale until another chat operation occurs.
+        lanerChat.markAgentSeen()
         val mailbox = lanerChat.snapshot()
         val bridge = AiLimbsBridgeManager.runtimeState.value
-        val agentOnline =
-            mailbox.lastAgentSeenAtMs?.let { lastSeen ->
-                System.currentTimeMillis() - lastSeen <= LanerChatContract.AGENT_ONLINE_WINDOW_MS
-            } ?: false
+        val agentPresence =
+            LanerChatContract.presenceState(
+                activeSessionId = mailbox.activeSessionId,
+                lastAgentSeenAtMs = mailbox.lastAgentSeenAtMs
+            )
+        val agentOnline = agentPresence != LanerChatPresenceState.WAITING
         return ok()
             .put("module", "AI Limbs Laner Chat Bridge")
             .put("protocol_version", 4)
@@ -249,6 +255,7 @@ class AiLimbsOperitDispatcher(context: Context) {
             .put("active_session_id", mailbox.activeSessionId ?: JSONObject.NULL)
             .put("bound_chat_id", mailbox.boundChatId ?: JSONObject.NULL)
             .put("agent_session_online", agentOnline)
+            .put("agent_session_presence", agentPresence.wireValue)
             .put("last_agent_seen_at", isoTime(mailbox.lastAgentSeenAtMs))
             .put("latest_seq", mailbox.latestSeq)
             .put("unread_count", mailbox.pendingCount)

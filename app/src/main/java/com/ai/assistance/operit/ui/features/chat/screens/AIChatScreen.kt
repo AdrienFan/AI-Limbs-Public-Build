@@ -118,6 +118,7 @@ import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatDraftPriorityStore
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 import java.util.UUID
 
 
@@ -739,16 +740,18 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         if (!showConfig && !isLanerBridgeMode) return@LaunchedEffect
         while (true) {
             lanerStatusClockMs = System.currentTimeMillis()
-            delay(15_000L)
+            delay(LanerChatContract.PRESENCE_UI_TICK_MS)
         }
     }
-    val isLanerAgentOnline =
-        lanerMailboxStatus.activeSessionId != null &&
-            lanerMailboxStatus.lastAgentSeenAtMs?.let { lastSeen ->
-                lanerStatusClockMs - lastSeen <= LanerChatContract.AGENT_ONLINE_WINDOW_MS
-            } == true
+    val lanerAgentPresence =
+        LanerChatContract.presenceState(
+            activeSessionId = lanerMailboxStatus.activeSessionId,
+            lastAgentSeenAtMs = lanerMailboxStatus.lastAgentSeenAtMs,
+            nowMs = lanerStatusClockMs
+        )
     val isLanerFullyOnline =
-        bridgeState.phase == AiLimbsBridgePhase.ONLINE && isLanerAgentOnline
+        bridgeState.phase == AiLimbsBridgePhase.ONLINE &&
+            lanerAgentPresence == LanerChatPresenceState.ACTIVE
 
     LaunchedEffect(
         isCurrentScreen,
@@ -989,7 +992,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                         apiKey = apiKey,
                         isSaving = isSavingInitialConfiguration,
                         bridgePhase = bridgeState.phase,
-                        bridgeAgentOnline = isLanerAgentOnline,
+                        bridgeAgentPresence = lanerAgentPresence,
                         bridgePendingCount = lanerMailboxStatus.unresolvedCount,
                         onSaveApiKey = { normalizedApiKey ->
                             if (!isSavingInitialConfiguration) {
@@ -1176,19 +1179,24 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 Text(
                                     text =
                                         when {
-                                            isLanerFullyOnline ->
+                                            bridgeState.phase != AiLimbsBridgePhase.ONLINE ->
+                                                stringResource(
+                                                    R.string.laner_chat_status_offline,
+                                                    lanerMailboxStatus.unresolvedCount
+                                                )
+                                            lanerAgentPresence == LanerChatPresenceState.ACTIVE ->
                                                 stringResource(
                                                     R.string.laner_chat_status_online,
                                                     lanerMailboxStatus.unresolvedCount
                                                 )
-                                            bridgeState.phase == AiLimbsBridgePhase.ONLINE ->
+                                            lanerAgentPresence == LanerChatPresenceState.RECENT ->
                                                 stringResource(
-                                                    R.string.laner_chat_status_waiting_agent,
+                                                    R.string.laner_chat_status_recent,
                                                     lanerMailboxStatus.unresolvedCount
                                                 )
                                             else ->
                                                 stringResource(
-                                                    R.string.laner_chat_status_offline,
+                                                    R.string.laner_chat_status_waiting_agent,
                                                     lanerMailboxStatus.unresolvedCount
                                                 )
                                         },
@@ -1196,9 +1204,9 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                     style = MaterialTheme.typography.labelMedium,
                                     color =
                                         when {
-                                            isLanerFullyOnline -> Color(0xFF00E676)
-                                            bridgeState.phase == AiLimbsBridgePhase.ONLINE ->
-                                                Color(0xFFFFC107)
+                                            bridgeState.phase != AiLimbsBridgePhase.ONLINE -> Color.Gray
+                                            lanerAgentPresence == LanerChatPresenceState.ACTIVE -> Color(0xFF00E676)
+                                            lanerAgentPresence == LanerChatPresenceState.RECENT -> Color(0xFFFFC107)
                                             else -> Color.Gray
                                         }
                                 )

@@ -19,6 +19,7 @@ import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
@@ -31,7 +32,10 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
+import kotlin.random.Random
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
 import okhttp3.Request
@@ -65,7 +69,13 @@ class AiLimbsRdcClient(
     private var activeAuthorization: DeviceAuth? = null
     private var reconnectAttempt: Int = 0
     private val activeCallJobs = ConcurrentHashMap<String, Job>()
+    private val remoteCallSemaphore = Semaphore(MAX_CONCURRENT_REMOTE_CALLS)
     private val housekeepingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val realtimeTransportLock = Any()
+
+    @Volatile
+    private var realtimeTransport: AiLimbsRdcRealtimeTransport? = null
+    private val recoveryInProgress = AtomicBoolean(false)
 
     @Volatile
     var isRunning: Boolean = false
@@ -73,22 +83,49 @@ class AiLimbsRdcClient(
 
     fun start() {
         if (!ENABLED) return
+        if (recoveryInProgress.get()) {
+            AppLogger.d(TAG, "RDC start ignored: recovery transaction is active")
+            return
+        }
         if (runJob?.isActive == true) {
             AppLogger.d(TAG, "RDC start ignored: worker already active")
             return
         }
         updateState(AiLimbsBridgePhase.STARTING, "正在启动 Android 端 RDC 设备")
         AppLogger.i(TAG, "RDC worker start requested")
-        runJob = scope.launch(Dispatchers.IO) {
-            isRunning = true
-            AppLogger.i(TAG, "RDC worker started")
-            try {
-                runForever()
-            } finally {
-                isRunning = false
-                AppLogger.i(TAG, "RDC worker stopped")
+        launchWorker()
+    }
+
+    private fun launchWorker(recoveryDeadlineAtMs: Long? = null) {
+        val worker =
+            scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+                val currentJob = currentCoroutineContext()[Job]
+                isRunning = true
+                AppLogger.i(
+                    TAG,
+                    if (recoveryDeadlineAtMs == null) "RDC worker started" else "RDC recovery worker started"
+                )
+                try {
+                    runForever(recoveryDeadlineAtMs)
+                } finally {
+                    if (runJob === currentJob) {
+                        runJob = null
+                        isRunning = false
+                    }
+                    if (recoveryDeadlineAtMs != null) {
+                        recoveryInProgress.set(false)
+                        if (stateFlow.value.phase == AiLimbsBridgePhase.RECOVERING) {
+                            updateState(
+                                AiLimbsBridgePhase.RECOVERY_FAILED,
+                                "RDC 修复被中断，请重试"
+                            )
+                        }
+                    }
+                    AppLogger.i(TAG, "RDC worker stopped")
+                }
             }
-        }
+        runJob = worker
+        worker.start()
     }
 
     fun stopByUser() {
@@ -118,6 +155,7 @@ class AiLimbsRdcClient(
             AppLogger.w(TAG, "RDC heartbeat is stale; restarting worker to verify the live session")
             runJob?.cancel()
             runJob = null
+            closeRealtimeTransport()
             cancelActiveCalls("stale heartbeat")
             reconnectAttempt = 0
             updateState(
@@ -130,8 +168,10 @@ class AiLimbsRdcClient(
     }
 
     private fun stopWorker(detail: String) {
+        recoveryInProgress.set(false)
         runJob?.cancel()
         runJob = null
+        closeRealtimeTransport()
         cancelActiveCalls("RDC stopped")
         activeAuthorization = null
         isRunning = false
@@ -148,16 +188,41 @@ class AiLimbsRdcClient(
         AppLogger.i(TAG, "RDC manual reconnect requested")
         runJob?.cancel()
         runJob = null
+        closeRealtimeTransport()
         cancelActiveCalls("manual reconnect")
         reconnectAttempt = 0
         updateState(AiLimbsBridgePhase.RECONNECTING, "用户请求重新连接")
         start()
     }
 
+    fun recover() {
+        if (!ENABLED) return
+        if (!recoveryInProgress.compareAndSet(false, true)) {
+            AppLogger.d(TAG, "RDC recovery ignored: recovery transaction is already active")
+            return
+        }
+
+        // Recovery is intentionally a single lifecycle transaction. Without this guard, a second
+        // connect/re-pair can race the old channel teardown and recreate the fake-online state.
+        AppLogger.w(TAG, "RDC manual recovery requested")
+        runJob?.cancel()
+        runJob = null
+        closeRealtimeTransport(force = true)
+        cancelActiveCalls("manual recovery")
+        activeAuthorization = null
+        reconnectAttempt = 0
+        updateState(
+            AiLimbsBridgePhase.RECOVERING,
+            "正在关闭旧通道并重建 RDC Realtime 连接"
+        )
+        launchWorker(System.currentTimeMillis() + RECOVERY_TIMEOUT_MS)
+    }
+
     fun rePair() {
         AppLogger.i(TAG, "RDC manual re-pair requested")
         runJob?.cancel()
         runJob = null
+        closeRealtimeTransport()
         cancelActiveCalls("manual re-pair")
         clearSession()
         activeAuthorization = null
@@ -188,52 +253,207 @@ class AiLimbsRdcClient(
         }
     }
 
-    private suspend fun runForever() {
+    private suspend fun runForever(recoveryDeadlineAtMs: Long? = null) {
+        var recoveryMode = recoveryDeadlineAtMs != null
+        val recoveryDeadline = recoveryDeadlineAtMs ?: Long.MAX_VALUE
+
         while (currentCoroutineContext().isActive) {
+            if (recoveryMode && System.currentTimeMillis() >= recoveryDeadline) {
+                finishRecoveryFailure("RDC 修复超时，请重试或重新配对")
+                return
+            }
+
+            var attemptTransport: AiLimbsRdcRealtimeTransport? = null
             try {
-                updateState(
-                    if (reconnectAttempt == 0) AiLimbsBridgePhase.CONNECTING else AiLimbsBridgePhase.RECONNECTING,
-                    if (reconnectAttempt == 0) "正在连接 Remote Desktop Commander" else "正在执行第 ${reconnectAttempt} 次重连"
-                )
+                if (recoveryMode) {
+                    updateState(
+                        AiLimbsBridgePhase.RECOVERING,
+                        if (reconnectAttempt == 0) {
+                            "正在验证已有授权并重建 RDC Realtime 通道"
+                        } else {
+                            "RDC 修复第 ${reconnectAttempt} 次重试"
+                        }
+                    )
+                } else {
+                    updateState(
+                        if (reconnectAttempt == 0) AiLimbsBridgePhase.CONNECTING else AiLimbsBridgePhase.RECONNECTING,
+                        if (reconnectAttempt == 0) "正在连接 Remote Desktop Commander" else "正在执行第 ${reconnectAttempt} 次重连"
+                    )
+                }
+
                 val info = fetchMcpInfo()
-                val session = ensureSession(info)
-                var lastHeartbeatAt = 0L
+                val session = ensureSession(info, allowPairing = !recoveryMode)
+
+                // A device is not healthy merely because its REST session can be used. Validate
+                // authorization with the owner lookup, then advertise online/broadcast only after
+                // private-channel join, Presence, and a Phoenix heartbeat round-trip all succeed.
+                val userId = fetchRdcUserId(info, session)
+                val transport =
+                    AiLimbsRdcRealtimeTransport(
+                        httpClient = httpClient,
+                        supabaseUrl = info.supabaseUrl,
+                        anonKey = info.anonKey,
+                        accessToken = session.accessToken,
+                        userId = userId,
+                        deviceId = session.deviceId,
+                        deviceName = deviceName(),
+                        appVersion = BuildConfig.VERSION_NAME,
+                        onNewCall = { callId ->
+                            scope.launch(Dispatchers.IO) {
+                                try {
+                                    handleDoorbellCall(info, session, callId)
+                                } catch (e: CancellationException) {
+                                    throw e
+                                } catch (e: UnauthorizedException) {
+                                    AppLogger.w(
+                                        TAG,
+                                        "RDC doorbell call lost authorization: call=${shortCallId(callId)}"
+                                    )
+                                } catch (e: Exception) {
+                                    AppLogger.e(
+                                        TAG,
+                                        "RDC doorbell call failed: call=${shortCallId(callId)}",
+                                        e
+                                    )
+                                }
+                            }
+                        }
+                    )
+                attemptTransport = transport
+                synchronized(realtimeTransportLock) {
+                    realtimeTransport = transport
+                }
+                transport.connectAndAwaitReady(REALTIME_JOIN_TIMEOUT_MS)
+
+                check(transport.sendHeartbeatAndAwaitAck(REALTIME_HEARTBEAT_ACK_TIMEOUT_MS)) {
+                    "RDC Realtime heartbeat acknowledgement timed out"
+                }
+                heartbeat(info, session, broadcastCapable = true)
+                var lastHeartbeatAt = System.currentTimeMillis()
+                reconnectAttempt = 0
+                if (recoveryMode) {
+                    recoveryMode = false
+                    recoveryInProgress.set(false)
+                    AppLogger.i(TAG, "RDC recovery verified by Realtime heartbeat acknowledgement")
+                }
+                updateState(
+                    AiLimbsBridgePhase.ONLINE,
+                    "连接正常，RDC Realtime 往返校验已通过",
+                    deviceId = session.deviceId,
+                    lastHeartbeatAtMs = lastHeartbeatAt,
+                    reconnectAttemptValue = 0
+                )
 
                 while (currentCoroutineContext().isActive) {
+                    transport.throwIfFailed()
                     val now = System.currentTimeMillis()
                     if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
-                        heartbeat(info, session)
-                        lastHeartbeatAt = now
+                        check(transport.sendHeartbeatAndAwaitAck(REALTIME_HEARTBEAT_ACK_TIMEOUT_MS)) {
+                            "RDC Realtime heartbeat acknowledgement timed out"
+                        }
+                        heartbeat(info, session, broadcastCapable = true)
+                        lastHeartbeatAt = System.currentTimeMillis()
                         reconnectAttempt = 0
                         updateState(
                             AiLimbsBridgePhase.ONLINE,
-                            "连接正常，可接收 RDC 工具调用",
+                            "连接正常，RDC Realtime 往返校验已通过",
                             deviceId = session.deviceId,
-                            lastHeartbeatAtMs = now,
+                            lastHeartbeatAtMs = lastHeartbeatAt,
                             reconnectAttemptValue = 0
                         )
                     }
-                    pollAndHandleCalls(info, session)
-                    delay(POLL_INTERVAL_MS)
+                    delay(TRANSPORT_TICK_MS)
                 }
             } catch (e: CancellationException) {
+                attemptTransport?.let { closeRealtimeTransport(it) }
                 throw e
+            } catch (e: RecoveryRequiresPairingException) {
+                attemptTransport?.let { closeRealtimeTransport(it) }
+                finishRecoveryFailure(e.message ?: "已有 RDC 授权无法恢复，请重新配对")
+                return
             } catch (e: UnauthorizedException) {
+                attemptTransport?.let { closeRealtimeTransport(it) }
                 reconnectAttempt += 1
                 AppLogger.w(TAG, "RDC session expired; attempting token refresh")
-                updateState(AiLimbsBridgePhase.RECONNECTING, "RDC 会话过期，正在刷新凭证")
                 clearAccessTokenOnly()
-                delay(500L)
+                val retryDelay = reconnectDelayMs(reconnectAttempt)
+                if (recoveryMode) {
+                    updateState(
+                        AiLimbsBridgePhase.RECOVERING,
+                        "RDC 会话已过期，正在使用保存的凭证刷新授权"
+                    )
+                    if (!delayWithinRecoveryWindow(retryDelay, recoveryDeadline)) return
+                } else {
+                    updateState(AiLimbsBridgePhase.RECONNECTING, "RDC 会话过期，正在刷新凭证")
+                    delay(retryDelay)
+                }
             } catch (e: Exception) {
+                attemptTransport?.let { closeRealtimeTransport(it) }
                 reconnectAttempt += 1
+                val retryDelay = reconnectDelayMs(reconnectAttempt)
                 AppLogger.e(TAG, "AI Limbs RDC loop failed; reconnectAttempt=$reconnectAttempt", e)
-                updateState(
-                    AiLimbsBridgePhase.RECONNECTING,
-                    "连接失败：${e.message ?: e.javaClass.simpleName}"
-                )
-                delay(RECONNECT_DELAY_MS)
+                if (recoveryMode) {
+                    updateState(
+                        AiLimbsBridgePhase.RECOVERING,
+                        "修复步骤失败：${e.message ?: e.javaClass.simpleName}；准备重试"
+                    )
+                    if (!delayWithinRecoveryWindow(retryDelay, recoveryDeadline)) return
+                } else {
+                    updateState(
+                        AiLimbsBridgePhase.RECONNECTING,
+                        "连接失败：${e.message ?: e.javaClass.simpleName}；稍后重试"
+                    )
+                    delay(retryDelay)
+                }
             }
         }
+    }
+
+    private suspend fun delayWithinRecoveryWindow(delayMs: Long, recoveryDeadline: Long): Boolean {
+        val remaining = recoveryDeadline - System.currentTimeMillis()
+        if (remaining <= 0L) {
+            finishRecoveryFailure("RDC 修复超时，请重试或重新配对")
+            return false
+        }
+        delay(minOf(delayMs, remaining))
+        if (System.currentTimeMillis() >= recoveryDeadline) {
+            finishRecoveryFailure("RDC 修复超时，请重试或重新配对")
+            return false
+        }
+        return true
+    }
+
+    private fun finishRecoveryFailure(detail: String) {
+        recoveryInProgress.set(false)
+        updateState(AiLimbsBridgePhase.RECOVERY_FAILED, detail)
+        AppLogger.w(TAG, "RDC recovery failed: $detail")
+    }
+
+    private fun reconnectDelayMs(attempt: Int): Long {
+        val exponent = (attempt - 1).coerceIn(0, 6)
+        val baseDelay =
+            (RECONNECT_BASE_DELAY_MS * (1L shl exponent))
+                .coerceAtMost(RECONNECT_MAX_DELAY_MS)
+        val jitterWindow = (baseDelay * RECONNECT_JITTER_PERCENT / 100L).coerceAtLeast(1L)
+        val jitter = Random.nextLong(jitterWindow + 1L)
+        return (baseDelay + jitter).coerceAtMost(RECONNECT_MAX_DELAY_MS)
+    }
+
+    private fun closeRealtimeTransport(
+        expected: AiLimbsRdcRealtimeTransport? = null,
+        force: Boolean = false
+    ) {
+        val transportToClose =
+            synchronized(realtimeTransportLock) {
+                val current = realtimeTransport
+                if (current == null || (expected != null && current !== expected)) {
+                    null
+                } else {
+                    realtimeTransport = null
+                    current
+                }
+            }
+        transportToClose?.close(force)
     }
 
     private fun updateState(
@@ -283,7 +503,7 @@ class AiLimbsRdcClient(
         return McpInfo(supabaseUrl, anonKey)
     }
 
-    private suspend fun ensureSession(info: McpInfo): Session {
+    private suspend fun ensureSession(info: McpInfo, allowPairing: Boolean = true): Session {
         val deviceId = preferences.getString(KEY_DEVICE_ID, null).orEmpty()
         val accessToken = preferences.getString(KEY_ACCESS_TOKEN, null).orEmpty()
         val refreshToken = preferences.getString(KEY_REFRESH_TOKEN, null).orEmpty()
@@ -295,8 +515,14 @@ class AiLimbsRdcClient(
             AppLogger.i(TAG, "RDC access token missing; refreshing saved session for device=${shortDeviceId(deviceId)}")
             refreshSession(info, deviceId, refreshToken)?.let { return it }
             AppLogger.w(TAG, "RDC saved refresh token could not restore the session; new pairing required")
+            if (!allowPairing) {
+                throw RecoveryRequiresPairingException("保存的 RDC 授权已失效，请重新配对")
+            }
         } else {
             AppLogger.i(TAG, "RDC has no reusable session; new pairing required")
+            if (!allowPairing) {
+                throw RecoveryRequiresPairingException("没有可恢复的 RDC 授权，请重新配对")
+            }
         }
         return pairDevice(deviceId.takeIf { it.isNotBlank() })
     }
@@ -446,17 +672,22 @@ class AiLimbsRdcClient(
         }
     }
 
-    private suspend fun heartbeat(info: McpInfo, session: Session) {
+    private suspend fun heartbeat(
+        info: McpInfo,
+        session: Session,
+        broadcastCapable: Boolean
+    ) {
+        val capabilities = JSONObject()
+            .put("app_version", BuildConfig.VERSION_NAME)
+            .put("ai_limbs", true)
+        if (broadcastCapable) {
+            capabilities.put("transport_broadcast_v1", true)
+        }
         val body = JSONObject()
             .put("status", "online")
             .put("last_seen", nowIso())
             .put("device_name", deviceName())
-            .put(
-                "capabilities",
-                JSONObject()
-                    .put("app_version", BuildConfig.VERSION_NAME)
-                    .put("ai_limbs", true)
-            )
+            .put("capabilities", capabilities)
         val response = authorizedRequest(
             info,
             session,
@@ -471,26 +702,42 @@ class AiLimbsRdcClient(
         }
     }
 
-    private suspend fun pollAndHandleCalls(info: McpInfo, session: Session) {
-        val availableSlots = (MAX_CONCURRENT_REMOTE_CALLS - activeCallJobs.size).coerceAtLeast(0)
-        if (availableSlots == 0) return
-
+    private suspend fun fetchRdcUserId(info: McpInfo, session: Session): String {
         val response = authorizedRequest(
             info,
             session,
             "GET",
-            "/rest/v1/mcp_remote_calls?device_id=eq.${encode(session.deviceId)}&status=eq.pending&select=*&order=created_at.asc&limit=$availableSlots"
+            "/rest/v1/mcp_devices?id=eq.${encode(session.deviceId)}&select=user_id&limit=1"
         )
         ensureAuthorized(response)
-        if (response.code !in 200..299) return
-        val calls = JSONArray(response.body)
-        for (index in 0 until calls.length()) {
-            if (activeCallJobs.size >= MAX_CONCURRENT_REMOTE_CALLS) break
-            val call = calls.optJSONObject(index) ?: continue
-            val callId = call.optString("id")
-            if (callId.isBlank() || !claimCall(info, session, callId)) continue
-            launchClaimedCall(info, session, call)
+        if (response.code !in 200..299) {
+            throw IllegalStateException("RDC device owner lookup failed: HTTP ${response.code}")
         }
+        val row = JSONArray(response.body).optJSONObject(0)
+            ?: throw IllegalStateException("RDC device owner lookup returned no device")
+        return row.optString("user_id").takeIf { it.isNotBlank() }
+            ?: throw IllegalStateException("RDC device owner lookup returned no user_id")
+    }
+
+    private suspend fun handleDoorbellCall(
+        info: McpInfo,
+        session: Session,
+        callId: String
+    ) {
+        val response = authorizedRequest(
+            info,
+            session,
+            "GET",
+            "/rest/v1/mcp_remote_calls?id=eq.${encode(callId)}&device_id=eq.${encode(session.deviceId)}&select=*&limit=1"
+        )
+        ensureAuthorized(response)
+        if (response.code !in 200..299) {
+            throw IllegalStateException("RDC doorbell call fetch failed: HTTP ${response.code}")
+        }
+        val call = JSONArray(response.body).optJSONObject(0) ?: return
+        if (call.optString("status") != "pending") return
+        if (!claimCall(info, session, callId)) return
+        launchClaimedCall(info, session, call)
     }
 
     private fun launchClaimedCall(info: McpInfo, session: Session, call: JSONObject) {
@@ -499,7 +746,7 @@ class AiLimbsRdcClient(
         val job = scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
             AppLogger.i(TAG, "RDC tool worker started: tool=$toolName call=${shortCallId(callId)}")
             try {
-                handleClaimedCall(info, session, call)
+                remoteCallSemaphore.withPermit { handleClaimedCall(info, session, call) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: UnauthorizedException) {
@@ -570,6 +817,7 @@ class AiLimbsRdcClient(
                 lastSentAccessContext = null
             }
             val result = attachAccessContext(rawResult)
+            logOutboundResultMetadata(callId, toolName, result)
             updateCall(
                 info,
                 session,
@@ -579,6 +827,7 @@ class AiLimbsRdcClient(
                     .put("completed_at", nowIso())
                     .put("result", result)
             )
+            notifyResultDoorbell(callId)
         } catch (e: UnauthorizedException) {
             throw e
         } catch (e: Exception) {
@@ -592,7 +841,54 @@ class AiLimbsRdcClient(
                     .put("completed_at", nowIso())
                     .put("error_message", e.message ?: "AI Limbs tool call failed")
             )
+            notifyResultDoorbell(callId)
         }
+    }
+
+    private suspend fun notifyResultDoorbell(callId: String) {
+        val notified = try {
+            realtimeTransport?.notifyResult(callId) == true
+        } catch (e: CancellationException) {
+            AppLogger.d(TAG, "RDC result doorbell cancelled after terminal write: call=${shortCallId(callId)}")
+            false
+        } catch (e: Exception) {
+            AppLogger.w(
+                TAG,
+                "RDC result doorbell send failed after terminal result write: call=${shortCallId(callId)}",
+                e
+            )
+            false
+        }
+        if (notified) {
+            AppLogger.d(TAG, "RDC result doorbell acknowledged: call=${shortCallId(callId)}")
+        } else {
+            // The database row is already terminal here. Notification transport failure must not
+            // rewrite a completed tool result as failed; the result bytes remain unchanged in RDC.
+            AppLogger.w(TAG, "RDC result doorbell was not acknowledged: call=${shortCallId(callId)}")
+        }
+    }
+
+    private fun logOutboundResultMetadata(callId: String, toolName: String, result: JSONObject) {
+        val content = result.optJSONArray("content") ?: JSONArray()
+        val summary = StringBuilder("contentCount=${content.length()}")
+        for (index in 0 until content.length()) {
+            val item = content.optJSONObject(index) ?: continue
+            val type = item.optString("type").ifBlank { "unknown" }
+            summary.append(" content[").append(index).append("]=").append(type)
+            if (type == "image") {
+                summary
+                    .append("(")
+                    .append(item.optString("mimeType").ifBlank { "unknown-mime" })
+                    .append(",dataLength=")
+                    .append(item.optString("data").length)
+                    .append(")")
+            }
+        }
+        // Intentionally log metadata only. The Base64 payload itself must never enter logs.
+        AppLogger.i(
+            TAG,
+            "RDC outbound result call=${shortCallId(callId)} tool=$toolName $summary"
+        )
     }
 
     private suspend fun attachAccessContext(result: JSONObject): JSONObject {
@@ -796,6 +1092,8 @@ class AiLimbsRdcClient(
         val body: String
     )
 
+    private class RecoveryRequiresPairingException(message: String) : IllegalStateException(message)
+
     private class UnauthorizedException : IllegalStateException()
 
     companion object {
@@ -809,8 +1107,13 @@ class AiLimbsRdcClient(
         private const val DEVICE_SCOPE = "mcp:tools"
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
         private const val ONLINE_STALE_AFTER_MS = HEARTBEAT_INTERVAL_MS * 3
-        private const val POLL_INTERVAL_MS = 1_500L
-        private const val RECONNECT_DELAY_MS = 5_000L
+        private const val TRANSPORT_TICK_MS = 500L
+        private const val REALTIME_JOIN_TIMEOUT_MS = 15_000L
+        private const val REALTIME_HEARTBEAT_ACK_TIMEOUT_MS = 5_000L
+        private const val RECOVERY_TIMEOUT_MS = 120_000L
+        private const val RECONNECT_BASE_DELAY_MS = 2_000L
+        private const val RECONNECT_MAX_DELAY_MS = 120_000L
+        private const val RECONNECT_JITTER_PERCENT = 15L
         private const val MAX_CONCURRENT_REMOTE_CALLS = 4
 
         private const val PREF_FILE = "ai_limbs_rdc"

@@ -14,6 +14,8 @@ enum class AiLimbsBridgePhase {
     PAIRING,
     ONLINE,
     RECONNECTING,
+    RECOVERING,
+    RECOVERY_FAILED,
     ERROR
 }
 

@@ -128,6 +128,7 @@ class AIForegroundService : Service() {
         private const val REQUEST_CODE_BRIDGE_CONNECT = 9010
         private const val REQUEST_CODE_BRIDGE_STOP = 9011
         private const val REQUEST_CODE_BRIDGE_RECONNECT = 9012
+        private const val REQUEST_CODE_BRIDGE_RECOVER = 9018
         private const val REQUEST_CODE_BRIDGE_REPAIR = 9013
         private const val REQUEST_CODE_BRIDGE_OPEN_AUTH = 9014
         private const val REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED = 9015
@@ -164,6 +165,8 @@ class AIForegroundService : Service() {
             "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_STOP"
         const val ACTION_BRIDGE_RECONNECT =
             "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_RECONNECT"
+        const val ACTION_BRIDGE_RECOVER =
+            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_RECOVER"
         const val ACTION_BRIDGE_REPAIR =
             "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REPAIR"
         const val ACTION_BRIDGE_OPEN_AUTH =
@@ -526,7 +529,6 @@ class AIForegroundService : Service() {
             require(providerId.isNotBlank()) {
                 "Bridge provider id must not be blank"
             }
-            AiLimbsBridgeManager.persistActiveProvider(context, providerId)
             val appContext = context.applicationContext
             val intent = Intent(appContext, AIForegroundService::class.java).apply {
                 action = ACTION_BRIDGE_SELECT_PROVIDER
@@ -540,6 +542,7 @@ class AIForegroundService : Service() {
                 BridgeAction.CONNECT -> ACTION_BRIDGE_CONNECT
                 BridgeAction.STOP -> ACTION_BRIDGE_STOP
                 BridgeAction.RECONNECT -> ACTION_BRIDGE_RECONNECT
+                BridgeAction.RECOVER -> ACTION_BRIDGE_RECOVER
                 BridgeAction.REPAIR -> ACTION_BRIDGE_REPAIR
                 BridgeAction.OPEN_AUTH -> ACTION_BRIDGE_OPEN_AUTH
                 BridgeAction.REFRESH -> ACTION_BRIDGE_REFRESH
@@ -550,6 +553,7 @@ class AIForegroundService : Service() {
                 ACTION_BRIDGE_CONNECT -> BridgeAction.CONNECT
                 ACTION_BRIDGE_STOP -> BridgeAction.STOP
                 ACTION_BRIDGE_RECONNECT -> BridgeAction.RECONNECT
+                ACTION_BRIDGE_RECOVER -> BridgeAction.RECOVER
                 ACTION_BRIDGE_REPAIR -> BridgeAction.REPAIR
                 ACTION_BRIDGE_OPEN_AUTH -> BridgeAction.OPEN_AUTH
                 ACTION_BRIDGE_REFRESH -> BridgeAction.REFRESH
@@ -561,6 +565,7 @@ class AIForegroundService : Service() {
                 BridgeAction.CONNECT -> REQUEST_CODE_BRIDGE_CONNECT
                 BridgeAction.STOP -> REQUEST_CODE_BRIDGE_STOP
                 BridgeAction.RECONNECT -> REQUEST_CODE_BRIDGE_RECONNECT
+                BridgeAction.RECOVER -> REQUEST_CODE_BRIDGE_RECOVER
                 BridgeAction.REPAIR -> REQUEST_CODE_BRIDGE_REPAIR
                 BridgeAction.OPEN_AUTH -> REQUEST_CODE_BRIDGE_OPEN_AUTH
                 BridgeAction.REFRESH -> REQUEST_CODE_BRIDGE_REFRESH
@@ -2081,6 +2086,10 @@ class AIForegroundService : Service() {
             AiLimbsBridgePhase.ONLINE -> getString(R.string.ai_limbs_bridge_phase_online)
             AiLimbsBridgePhase.RECONNECTING ->
                 getString(R.string.ai_limbs_bridge_phase_reconnecting)
+            AiLimbsBridgePhase.RECOVERING ->
+                getString(R.string.ai_limbs_bridge_phase_recovering)
+            AiLimbsBridgePhase.RECOVERY_FAILED ->
+                getString(R.string.ai_limbs_bridge_phase_recovery_failed)
             AiLimbsBridgePhase.ERROR -> getString(R.string.ai_limbs_bridge_phase_error)
         }
 
@@ -2151,6 +2160,7 @@ class AIForegroundService : Service() {
             BridgeAction.CONNECT -> getString(R.string.ai_limbs_bridge_action_connect)
             BridgeAction.STOP -> getString(R.string.ai_limbs_bridge_action_stop)
             BridgeAction.RECONNECT -> getString(R.string.ai_limbs_bridge_action_reconnect)
+            BridgeAction.RECOVER -> getString(R.string.ai_limbs_bridge_action_recover)
             BridgeAction.REPAIR -> getString(R.string.ai_limbs_bridge_action_repair)
             BridgeAction.OPEN_AUTH -> getString(R.string.ai_limbs_bridge_action_open_auth)
             BridgeAction.REFRESH -> getString(R.string.ai_limbs_bridge_action_refresh)
@@ -2230,7 +2240,7 @@ class AIForegroundService : Service() {
         val bridgeActionLimit = if (isAiBusy) 1 else 2
         aiLimbsBridgeManager.availableActions(state)
             .asSequence()
-            .filter { it != BridgeAction.REFRESH }
+            .filter { it != BridgeAction.REFRESH && it != BridgeAction.RECOVER }
             .take(bridgeActionLimit)
             .forEach { action ->
                 add(

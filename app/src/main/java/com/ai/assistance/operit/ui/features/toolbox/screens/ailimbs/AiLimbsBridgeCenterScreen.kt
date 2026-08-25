@@ -99,6 +99,7 @@ fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
             context,
             displayedState
         )
+    val bridgeLifecycleLocked = displayedState.phase == AiLimbsBridgePhase.RECOVERING
 
     CustomScaffold { paddingValues ->
         Column(
@@ -113,6 +114,7 @@ fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
             ProviderSelectionCard(
                 profiles = profiles,
                 activeProviderId = activeProviderId,
+                interactionEnabled = !bridgeLifecycleLocked,
                 onSelect = { profile ->
                     activeProviderId = profile.id
                     AIForegroundService.requestBridgeProviderSelection(
@@ -127,6 +129,7 @@ fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
             )
             BridgeActionsCard(
                 actions = actions,
+                recoveryLocked = bridgeLifecycleLocked,
                 onAction = { action ->
                     AIForegroundService.requestBridgeAction(context, action)
                 }
@@ -156,6 +159,7 @@ fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
 private fun ProviderSelectionCard(
     profiles: List<BridgeProfile>,
     activeProviderId: String,
+    interactionEnabled: Boolean,
     onSelect: (BridgeProfile) -> Unit
 ) {
     var expanded by remember { mutableStateOf(false) }
@@ -169,6 +173,7 @@ private fun ProviderSelectionCard(
         Box(modifier = Modifier.fillMaxWidth()) {
             OutlinedButton(
                 onClick = { expanded = true },
+                enabled = interactionEnabled,
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
@@ -207,7 +212,7 @@ private fun ProviderSelectionCard(
                                 )
                             }
                         },
-                        enabled = profile.enabled,
+                        enabled = profile.enabled && interactionEnabled,
                         onClick = {
                             expanded = false
                             if (profile.id != activeProviderId) {
@@ -286,6 +291,7 @@ private fun BridgeStatusCard(
 @Composable
 private fun BridgeActionsCard(
     actions: List<BridgeAction>,
+    recoveryLocked: Boolean,
     onAction: (BridgeAction) -> Unit
 ) {
     BridgeCenterCard {
@@ -293,12 +299,29 @@ private fun BridgeActionsCard(
             text = stringResource(R.string.ai_limbs_bridge_actions_section),
             style = MaterialTheme.typography.titleMedium
         )
-        actions.forEach { action ->
+        if (recoveryLocked) {
+            // The UI mirrors the manager-side transaction lock. Keeping this disabled also makes
+            // the long-running recovery visibly intentional instead of looking like a frozen page.
             Button(
-                onClick = { onAction(action) },
+                onClick = {},
+                enabled = false,
                 modifier = Modifier.fillMaxWidth()
             ) {
-                Text(stringResource(bridgeActionLabel(action)))
+                Text(stringResource(R.string.ai_limbs_bridge_recovery_locked))
+            }
+            Text(
+                text = stringResource(R.string.ai_limbs_bridge_recovery_locked_detail),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        } else {
+            actions.forEach { action ->
+                Button(
+                    onClick = { onAction(action) },
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text(stringResource(bridgeActionLabel(action)))
+                }
             }
         }
     }
@@ -418,6 +441,8 @@ private fun bridgePhaseLabel(phase: AiLimbsBridgePhase): String =
             AiLimbsBridgePhase.PAIRING -> R.string.ai_limbs_bridge_phase_pairing
             AiLimbsBridgePhase.ONLINE -> R.string.ai_limbs_bridge_phase_online
             AiLimbsBridgePhase.RECONNECTING -> R.string.ai_limbs_bridge_phase_reconnecting
+            AiLimbsBridgePhase.RECOVERING -> R.string.ai_limbs_bridge_phase_recovering
+            AiLimbsBridgePhase.RECOVERY_FAILED -> R.string.ai_limbs_bridge_phase_recovery_failed
             AiLimbsBridgePhase.ERROR -> R.string.ai_limbs_bridge_phase_error
         }
     )
@@ -427,6 +452,7 @@ private fun bridgeActionLabel(action: BridgeAction): Int =
         BridgeAction.CONNECT -> R.string.ai_limbs_bridge_action_connect
         BridgeAction.STOP -> R.string.ai_limbs_bridge_action_stop
         BridgeAction.RECONNECT -> R.string.ai_limbs_bridge_action_reconnect
+        BridgeAction.RECOVER -> R.string.ai_limbs_bridge_action_recover
         BridgeAction.REPAIR -> R.string.ai_limbs_bridge_action_repair
         BridgeAction.OPEN_AUTH -> R.string.ai_limbs_bridge_action_open_auth
         BridgeAction.REFRESH -> R.string.ai_limbs_bridge_action_refresh

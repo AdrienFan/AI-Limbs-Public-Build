@@ -74,6 +74,10 @@ class AiLimbsBridgeManager(
                 reconnect()
                 true
             }
+            BridgeAction.RECOVER -> {
+                recover()
+                true
+            }
             BridgeAction.REPAIR -> {
                 rePair()
                 true
@@ -87,6 +91,9 @@ class AiLimbsBridgeManager(
     }
 
     fun selectProvider(profileId: String) {
+        check(state.value.phase != AiLimbsBridgePhase.RECOVERING) {
+            "Bridge provider cannot change while recovery is running"
+        }
         val nextProfile = registry.requireProfile(profileId)
         if (nextProfile.id == activeProfileValue.id) return
 
@@ -122,6 +129,14 @@ class AiLimbsBridgeManager(
         }
         setDesiredConnected(true)
         provider.reconnect()
+    }
+
+    fun recover() {
+        check(provider.enabled) {
+            "Bridge provider is disabled: ${activeProfileValue.id}"
+        }
+        setDesiredConnected(true)
+        provider.recover()
     }
 
     fun rePair() {

@@ -477,6 +477,11 @@ class LanerChatBridgeService private constructor(context: Context) {
             request.isUnresolved() && (sessionId.isNullOrBlank() || request.sessionId == sessionId)
         }
 
+    @Synchronized
+    fun markAgentSeen(sessionId: String? = null) {
+        touchAgentLocked(sessionId)
+    }
+
     private fun touchAgentLocked(sessionId: String?) {
         val targetSessionId =
             sessionId?.trim()?.takeIf { it.isNotEmpty() }

@@ -17,6 +17,7 @@ internal interface AiLimbsBridgeProvider {
     fun stopRuntime()
     fun markStopped()
     fun reconnect()
+    fun recover()
     fun rePair()
     fun openAuthorizationPage(): Boolean
     fun verifyLiveness()

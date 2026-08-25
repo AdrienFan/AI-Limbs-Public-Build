@@ -36,6 +36,7 @@ internal class RdcBridgeProvider private constructor(
     override fun stopRuntime() = client.stopRuntime()
     override fun markStopped() = client.markStopped()
     override fun reconnect() = client.reconnect()
+    override fun recover() = client.recover()
     override fun rePair() = client.rePair()
     override fun openAuthorizationPage(): Boolean = client.openAuthorizationPage()
     override fun verifyLiveness() = client.verifyLiveness()
@@ -78,6 +79,7 @@ internal class RdcBridgeProvider private constructor(
                 BridgeAction.CONNECT,
                 BridgeAction.STOP,
                 BridgeAction.RECONNECT,
+                BridgeAction.RECOVER,
                 BridgeAction.REPAIR,
                 BridgeAction.OPEN_AUTH,
                 BridgeAction.REFRESH
