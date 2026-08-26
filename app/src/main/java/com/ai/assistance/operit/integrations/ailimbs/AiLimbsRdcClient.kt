@@ -955,7 +955,7 @@ class AiLimbsRdcClient(
             if (toolName == "ping") {
                 lastSentAccessContext = null
             }
-            val result = attachAccessContext(rawResult)
+            val result = attachAiLimbsContext(rawResult)
             logOutboundResultMetadata(callId, toolName, result)
             updateCall(
                 info,
@@ -1060,6 +1060,11 @@ class AiLimbsRdcClient(
         )
     }
 
+    private suspend fun attachAiLimbsContext(result: JSONObject): JSONObject {
+        val withWorkNotification = attachLanerChatWorkNotification(result)
+        return attachAccessContext(withWorkNotification)
+    }
+
     private suspend fun attachAccessContext(result: JSONObject): JSONObject {
         val context = try {
             accessContext.readAccessContext()
@@ -1069,9 +1074,51 @@ class AiLimbsRdcClient(
         }
         if (context == lastSentAccessContext) return result
         lastSentAccessContext = context
+        return prependTextContent(result, context)
+    }
+
+    private fun attachLanerChatWorkNotification(result: JSONObject): JSONObject {
+        val notification = try {
+            lanerChat.workNotificationSnapshot()
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "Unable to build Laner Chat work notification", e)
+            return result
+        }
+        if (notification.unreadCount <= 0) return result
+
+        val metadata = JSONObject()
+            .put("event", notification.event)
+            .put("source", "laner_chat")
+            .put("pending_count", notification.unreadCount)
+            .put("highest_priority", notification.highestPriority?.name ?: "NONE")
+            .put("latest_seq", notification.latestSeq)
+            .put(
+                "priority_counts",
+                JSONObject()
+                    .put("HIGH", notification.highCount)
+                    .put("NORMAL", notification.normalCount)
+                    .put("LOW", notification.lowCount)
+            )
+            .put("attention_required", true)
+            .put("body_included", false)
+        val text = buildString {
+            append("[AI Limbs Work Notification]\n")
+            append(metadata.toString())
+            append("\nUnread Laner Chat message bodies are not included. ")
+            append("Follow the System Access Prompt priority timing and fetch bodies only at an appropriate safe work-switching point.")
+        }
+        AppLogger.d(
+            TAG,
+            "Laner Chat work notification attached: pending=${notification.unreadCount} " +
+                "priority=${notification.highestPriority?.name ?: "NONE"} latestSeq=${notification.latestSeq}"
+        )
+        return prependTextContent(result, text)
+    }
+
+    private fun prependTextContent(result: JSONObject, text: String): JSONObject {
         val oldContent = result.optJSONArray("content") ?: JSONArray()
         val newContent = JSONArray().put(
-            JSONObject().put("type", "text").put("text", context)
+            JSONObject().put("type", "text").put("text", text)
         )
         for (index in 0 until oldContent.length()) {
             newContent.put(oldContent.opt(index))

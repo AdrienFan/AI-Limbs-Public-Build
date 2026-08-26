@@ -8314,6 +8314,9 @@
     <string name="laner_cancel">Cancel</string>
     <string name="laner_reload">Reload</string>
     <string name="laner_save">Save</string>
+    <string name="laner_import_file">Import file</string>
+    <string name="laner_document_imported">Imported into the editor. Review it, then save to apply.</string>
+    <string name="laner_document_import_failed">Import failed: %1$s</string>
     <string name="laner_access_reloaded">Reloaded</string>
     <string name="laner_access_saved">Custom access prompt saved</string>
     <string name="laner_system_access_saved">System access prompt saved</string>

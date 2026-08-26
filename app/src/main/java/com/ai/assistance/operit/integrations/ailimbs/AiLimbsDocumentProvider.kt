@@ -110,6 +110,9 @@ class AiLimbsDocumentProvider(context: Context) {
     suspend fun writeToolManual(content: String): Boolean =
         writeEditableDocument(AiLimbsDocumentId.TOOL_MANUAL, content)
 
+    fun normalizeWorkManualImport(content: String): String =
+        extractEditableWorkManualBody(content)
+
     suspend fun readEditableDocument(documentId: AiLimbsDocumentId): String =
         withContext(Dispatchers.IO) {
             documentMutex.withLock {
@@ -258,29 +261,14 @@ class AiLimbsDocumentProvider(context: Context) {
     }
 
     private fun migrateLegacyDocumentsLocked() {
+        // Custom Access Prompt and Work Manual are app-owned documents. New installs must never
+        // silently import them from Ubuntu or shared storage; users can explicitly import text
+        // through Access Manager instead. Tool Manual migration remains until its redesign.
         val ubuntuRoot =
             File(
                 appContext.filesDir,
                 "usr/var/lib/proot-distro/installed-rootfs/ubuntu"
             )
-        migrateDocument(
-            destination = documentFile(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT),
-            sources =
-                listOf(
-                    File(documentsDirectory, LEGACY_ACCESS_PROMPT_FILE_NAME),
-                    File(ubuntuRoot, "root/laner/docs/$LEGACY_ACCESS_PROMPT_FILE_NAME"),
-                    File(legacyDocumentsDirectory(), LEGACY_ACCESS_PROMPT_FILE_NAME)
-                )
-        )
-        migrateDocument(
-            destination = documentFile(AiLimbsDocumentId.WORK_MANUAL),
-            sources =
-                listOf(
-                    File(ubuntuRoot, "root/${AiLimbsDocumentId.WORK_MANUAL.fileName}"),
-                    File(ubuntuRoot, "root/laner/docs/${AiLimbsDocumentId.WORK_MANUAL.fileName}"),
-                    File(legacyDocumentsDirectory(), AiLimbsDocumentId.WORK_MANUAL.fileName)
-                )
-        )
         migrateDocument(
             destination = documentFile(AiLimbsDocumentId.TOOL_MANUAL),
             sources =
@@ -440,7 +428,6 @@ class AiLimbsDocumentProvider(context: Context) {
         private const val DOCUMENT_SCHEMA_VERSION = 3
         private const val MAX_SNAPSHOTS = 3
         private const val PRE_V054_ARCHIVE_SUFFIX = "_PRE_V054.md"
-        private const val LEGACY_ACCESS_PROMPT_FILE_NAME = "LANER_ACCESS_PROMPT.md"
         private const val SYSTEM_ACCESS_PROMPT_ASSET =
             "ai_limbs/AI_LIMBS_SYSTEM_ACCESS_PROMPT.md"
         private const val PROTECTED_HEADER_END_MARKER =

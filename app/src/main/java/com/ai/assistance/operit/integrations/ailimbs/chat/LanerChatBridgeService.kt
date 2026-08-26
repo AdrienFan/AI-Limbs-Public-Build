@@ -298,6 +298,31 @@ class LanerChatBridgeService private constructor(context: Context) {
     fun notificationSnapshot(afterSeq: Long = 0L, sessionId: String? = null): LanerChatNotification =
         buildNotificationLocked(afterSeq, sessionId)
 
+    /**
+     * Sticky work-time notification metadata for message bodies the agent has not read yet.
+     * PENDING is the durable unread state; inbox.fetch / turn.claim move requests to DELIVERED.
+     */
+    @Synchronized
+    fun workNotificationSnapshot(sessionId: String? = null): LanerChatNotification {
+        val matching = storedState.requests.filter { request ->
+            request.status == LanerChatMessageStatus.PENDING &&
+                (sessionId == null || request.sessionId == sessionId)
+        }
+        val highCount = matching.count { it.priority == LanerChatPriority.HIGH }
+        val normalCount = matching.count { it.priority == LanerChatPriority.NORMAL }
+        val lowCount = matching.count { it.priority == LanerChatPriority.LOW }
+        return LanerChatNotification(
+            event = if (matching.isEmpty()) EVENT_IDLE else EVENT_NEW_MESSAGE,
+            unreadCount = matching.size,
+            pendingReplyCount = matching.size,
+            latestSeq = storedState.lastSeq,
+            highestPriority = highestPriority(matching),
+            highCount = highCount,
+            normalCount = normalCount,
+            lowCount = lowCount
+        )
+    }
+
     private fun buildNotificationLocked(
         afterSeq: Long,
         sessionId: String?

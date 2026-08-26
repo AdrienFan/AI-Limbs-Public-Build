@@ -8333,6 +8333,9 @@
     <string name="laner_cancel">取消</string>
     <string name="laner_reload">重新读取</string>
     <string name="laner_save">保存</string>
+    <string name="laner_import_file">导入文件</string>
+    <string name="laner_document_imported">已导入到编辑框，请检查后保存</string>
+    <string name="laner_document_import_failed">导入失败：%1$s</string>
     <string name="laner_access_reloaded">已重新读取</string>
     <string name="laner_access_saved">自定义接入提示已保存</string>
     <string name="laner_system_access_saved">系统接入提示已保存</string>

@@ -1,6 +1,8 @@
 package com.ai.assistance.operit.ui.features.toolbox.screens.ailimbs
 
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -45,7 +47,9 @@ import com.ai.assistance.operit.ui.components.CustomScaffold
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 private data class RestoreRequest(
     val documentId: AiLimbsDocumentId,
@@ -73,6 +77,7 @@ fun AiLimbsAccessManagerScreen() {
         mutableStateOf<Map<AiLimbsDocumentId, String>>(emptyMap())
     }
     var restoreRequest by remember { mutableStateOf<RestoreRequest?>(null) }
+    var importTarget by remember { mutableStateOf<AiLimbsDocumentId?>(null) }
 
     fun toast(resId: Int) =
         Toast.makeText(context, context.getString(resId), Toast.LENGTH_SHORT).show()
@@ -89,6 +94,55 @@ fun AiLimbsAccessManagerScreen() {
             loadedSnapshots.mapNotNull { (documentId, versions) ->
                 versions.firstOrNull()?.let { documentId to it.id }
             }.toMap()
+    }
+
+    val importLauncher =
+        rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+            val target = importTarget
+            importTarget = null
+            if (uri != null && target != null) {
+                scope.launch {
+                    runCatching {
+                        val importedText =
+                            withContext(Dispatchers.IO) {
+                                context.contentResolver.openInputStream(uri)
+                                    ?.bufferedReader(Charsets.UTF_8)
+                                    ?.use { it.readText() }
+                                    ?.removePrefix("\uFEFF")
+                                    ?: error("Unable to read selected text file")
+                            }
+                        when (target) {
+                            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> importedText
+                            AiLimbsDocumentId.WORK_MANUAL ->
+                                documents.normalizeWorkManualImport(importedText)
+                            else -> error("This document does not support file import")
+                        }
+                    }.onSuccess { importedText ->
+                        when (target) {
+                            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT ->
+                                customAccessPrompt = importedText
+                            AiLimbsDocumentId.WORK_MANUAL ->
+                                workManual = importedText
+                            else -> Unit
+                        }
+                        toast(R.string.laner_document_imported)
+                    }.onFailure { error ->
+                        Toast.makeText(
+                            context,
+                            context.getString(
+                                R.string.laner_document_import_failed,
+                                error.message ?: "Unknown error"
+                            ),
+                            Toast.LENGTH_LONG
+                        ).show()
+                    }
+                }
+            }
+        }
+
+    fun importDocument(documentId: AiLimbsDocumentId) {
+        importTarget = documentId
+        importLauncher.launch(arrayOf("text/*", "application/octet-stream"))
     }
 
     fun reload(showConfirmation: Boolean) {
@@ -179,7 +233,8 @@ fun AiLimbsAccessManagerScreen() {
                         customAccessPrompt,
                         R.string.laner_access_saved
                     )
-                }
+                },
+                onImport = { importDocument(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT) }
             )
             DocumentEditorCard(
                 title = stringResource(R.string.laner_work_manual_title),
@@ -202,7 +257,8 @@ fun AiLimbsAccessManagerScreen() {
                         workManual,
                         R.string.laner_work_manual_saved
                     )
-                }
+                },
+                onImport = { importDocument(AiLimbsDocumentId.WORK_MANUAL) }
             )
         }
     }
@@ -269,7 +325,8 @@ private fun DocumentEditorCard(
     onSnapshotSelected: (String) -> Unit,
     onRestore: (String) -> Unit,
     onReload: () -> Unit,
-    onSave: () -> Unit
+    onSave: () -> Unit,
+    onImport: () -> Unit
 ) {
     Card(
         modifier = Modifier.fillMaxWidth(),
@@ -297,6 +354,9 @@ private fun DocumentEditorCard(
                 Button(onClick = onSave) {
                     Icon(Icons.Default.Save, contentDescription = null)
                     Text(stringResource(R.string.laner_save))
+                }
+                TextButton(onClick = onImport) {
+                    Text(stringResource(R.string.laner_import_file))
                 }
             }
             BackupSelector(
