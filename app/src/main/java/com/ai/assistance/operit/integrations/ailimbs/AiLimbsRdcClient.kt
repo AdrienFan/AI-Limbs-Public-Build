@@ -394,7 +394,7 @@ class AiLimbsRdcClient(
                 finishRecoveryFailure(e.message ?: "已有 RDC 授权无法恢复，请重新配对")
                 return
             } catch (e: SchedulerGapException) {
-                attemptTransport?.let { closeRealtimeTransport(it) }
+                attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
                 AppLogger.w(
                     TAG,
@@ -414,7 +414,7 @@ class AiLimbsRdcClient(
                     delay(SCHEDULER_GAP_RECONNECT_DELAY_MS)
                 }
             } catch (e: UnauthorizedException) {
-                attemptTransport?.let { closeRealtimeTransport(it) }
+                attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
                 AppLogger.w(TAG, "RDC session expired; attempting token refresh")
                 clearAccessTokenOnly()
@@ -430,7 +430,7 @@ class AiLimbsRdcClient(
                     delay(retryDelay)
                 }
             } catch (e: Exception) {
-                attemptTransport?.let { closeRealtimeTransport(it) }
+                attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
                 val retryDelay = reconnectDelayMs(reconnectAttempt)
                 AppLogger.e(TAG, "AI Limbs RDC loop failed; reconnectAttempt=$reconnectAttempt", e)

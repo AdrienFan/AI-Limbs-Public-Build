@@ -38,10 +38,13 @@ internal class AiLimbsRdcRealtimeTransport(
     private val ready = CompletableDeferred<Unit>()
     private val pendingAcks = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val topic = "realtime:user:$userId"
+    private val legacyTopic = "realtime:device_tool_call_queue"
 
     @Volatile private var socket: WebSocket? = null
     @Volatile private var joinRef: String? = null
     @Volatile private var presenceRef: String? = null
+    @Volatile private var legacyJoinRef: String? = null
+    @Volatile private var legacyReadyState = false
     @Volatile private var readyState = false
     @Volatile private var closing = false
     @Volatile private var failureCause: Throwable? = null
@@ -147,8 +150,12 @@ internal class AiLimbsRdcRealtimeTransport(
         readyState = false
         val currentSocket = socket
         val currentJoinRef = joinRef
+        val currentLegacyJoinRef = legacyJoinRef
         if (currentSocket != null && currentJoinRef != null) {
             sendFrame(topic, "phx_leave", JSONObject(), ref(), currentJoinRef)
+        }
+        if (currentSocket != null && currentLegacyJoinRef != null) {
+            sendFrame(legacyTopic, "phx_leave", JSONObject(), ref(), currentLegacyJoinRef)
         }
         currentSocket?.close(1000, "AI Limbs RDC transport closing")
         if (force) {
@@ -179,7 +186,9 @@ internal class AiLimbsRdcRealtimeTransport(
                 .put("access_token", accessToken)
             if (!sendFrame(topic, "phx_join", payload, newJoinRef, newJoinRef)) {
                 fail(IllegalStateException("Unable to send RDC Realtime phx_join"))
+                return
             }
+            sendLegacyJoin()
         }
 
         override fun onMessage(webSocket: WebSocket, text: String) {
@@ -189,13 +198,27 @@ internal class AiLimbsRdcRealtimeTransport(
             }
             val event = message.optString("event")
             val ref = message.optString("ref")
+            val topicName = message.optString("topic")
             val payload = message.optJSONObject("payload") ?: JSONObject()
             when (event) {
                 "phx_reply" -> handleReply(ref, payload)
                 "broadcast" -> handleBroadcast(payload)
-                "phx_error" -> fail(IllegalStateException("RDC Realtime channel reported phx_error"))
+                "postgres_changes" -> handlePostgresChange(topicName, payload)
+                "phx_error" -> {
+                    if (topicName == legacyTopic) {
+                        legacyReadyState = false
+                        AppLogger.w(TAG, "RDC legacy Postgres Changes channel reported phx_error; primary doorbell remains active")
+                    } else {
+                        fail(IllegalStateException("RDC Realtime channel reported phx_error"))
+                    }
+                }
                 "phx_close" -> if (!closing) {
-                    fail(IllegalStateException("RDC Realtime channel closed unexpectedly"))
+                    if (topicName == legacyTopic) {
+                        legacyReadyState = false
+                        AppLogger.w(TAG, "RDC legacy Postgres Changes channel closed; primary doorbell remains active")
+                    } else {
+                        fail(IllegalStateException("RDC Realtime channel closed unexpectedly"))
+                    }
                 }
             }
         }
@@ -230,6 +253,14 @@ internal class AiLimbsRdcRealtimeTransport(
                 ready.complete(Unit)
                 AppLogger.i(TAG, "RDC Realtime private channel and Presence are ready")
             }
+            legacyJoinRef -> {
+                legacyReadyState = ok
+                if (ok) {
+                    AppLogger.i(TAG, "RDC legacy Postgres Changes safety net is ready")
+                } else {
+                    AppLogger.w(TAG, "RDC legacy Postgres Changes join was rejected; primary doorbell remains active: $payload")
+                }
+            }
             else -> pendingAcks.remove(ref)?.complete(ok)
         }
     }
@@ -251,6 +282,48 @@ internal class AiLimbsRdcRealtimeTransport(
         if (!sendFrame(topic, "presence", payload, trackRef, joinRef)) {
             fail(IllegalStateException("Unable to publish RDC Realtime Presence"))
         }
+    }
+
+    private fun sendLegacyJoin() {
+        val newLegacyJoinRef = ref()
+        legacyJoinRef = newLegacyJoinRef
+        val postgresChanges = JSONArray().put(
+            JSONObject()
+                .put("event", "INSERT")
+                .put("schema", "public")
+                .put("table", "mcp_remote_calls")
+                .put("filter", "user_id=eq.$userId")
+        )
+        val payload = JSONObject()
+            .put(
+                "config",
+                JSONObject()
+                    .put("private", false)
+                    .put("broadcast", JSONObject().put("ack", false).put("self", false))
+                    .put("presence", JSONObject().put("enabled", false))
+                    .put("postgres_changes", postgresChanges)
+            )
+            .put("access_token", accessToken)
+        if (!sendFrame(legacyTopic, "phx_join", payload, newLegacyJoinRef, newLegacyJoinRef)) {
+            legacyJoinRef = null
+            legacyReadyState = false
+            AppLogger.w(TAG, "Unable to send RDC legacy Postgres Changes phx_join; primary doorbell remains active")
+        }
+    }
+
+    private fun handlePostgresChange(topicName: String, payload: JSONObject) {
+        if (topicName != legacyTopic) return
+        val data = payload.optJSONObject("data") ?: return
+        if (data.optString("type") != "INSERT") return
+        if (data.optString("schema") != "public") return
+        if (data.optString("table") != "mcp_remote_calls") return
+        val record = data.optJSONObject("record") ?: return
+        val callId = record.optString("id")
+        val targetDeviceId = record.optString("device_id")
+        if (callId.isBlank()) return
+        if (targetDeviceId.isNotBlank() && targetDeviceId != deviceId) return
+        AppLogger.d(TAG, "RDC legacy Postgres Changes doorbell received: call=…${callId.takeLast(10)}")
+        onNewCall(callId)
     }
 
     private fun handleBroadcast(payload: JSONObject) {
@@ -284,6 +357,7 @@ internal class AiLimbsRdcRealtimeTransport(
         if (closing || failureCause != null) return
         failureCause = error
         readyState = false
+        legacyReadyState = false
         if (!ready.isCompleted) ready.completeExceptionally(error)
         pendingAcks.values.forEach { it.complete(false) }
         pendingAcks.clear()
