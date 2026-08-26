@@ -11,6 +11,8 @@ internal interface AiLimbsBridgeProvider {
     val state: StateFlow<AiLimbsBridgeState>
     val statusSummary: String
     val supportedActions: Set<BridgeAction>
+    val requiresScreenOffCpuKeepAlive: Boolean
+        get() = false
 
     fun start()
     fun stopByUser()

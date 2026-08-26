@@ -8,8 +8,11 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeoutOrNull
@@ -30,8 +33,10 @@ class LanerChatBridgeService private constructor(context: Context) {
     private var storedState: LanerChatStoredState = loadState()
     private val latestSeqFlow = MutableStateFlow(storedState.lastSeq)
     private val mailboxStatusFlow = MutableStateFlow(buildMailboxStatus(storedState))
+    private val queueEventsFlow = MutableSharedFlow<LanerChatQueueChangedEvent>(extraBufferCapacity = 32)
 
     val status: StateFlow<LanerChatMailboxStatus> = mailboxStatusFlow.asStateFlow()
+    val queueEvents: SharedFlow<LanerChatQueueChangedEvent> = queueEventsFlow.asSharedFlow()
 
     @Synchronized
     fun openSession(
@@ -126,10 +131,33 @@ class LanerChatBridgeService private constructor(context: Context) {
         attachments: List<AttachmentInfo> = emptyList(),
         priority: LanerChatPriority = LanerChatPriority.NORMAL
     ): LanerChatPendingExchange {
+        val deferred = CompletableDeferred<String>()
+        val request = enqueueLocked(chatId, text, sender, attachments, priority, deferred)
+        return LanerChatPendingExchange(request, deferred)
+    }
+
+    @Synchronized
+    fun enqueueMailbox(
+        chatId: String,
+        text: String,
+        sender: String = LanerChatContract.DEFAULT_SENDER,
+        attachments: List<AttachmentInfo> = emptyList(),
+        priority: LanerChatPriority = LanerChatPriority.NORMAL
+    ): LanerChatRequest = enqueueLocked(chatId, text, sender, attachments, priority, null)
+
+    private fun enqueueLocked(
+        chatId: String,
+        text: String,
+        sender: String,
+        attachments: List<AttachmentInfo>,
+        priority: LanerChatPriority,
+        liveReply: CompletableDeferred<String>?
+    ): LanerChatRequest {
         require(text.isNotBlank() || attachments.isNotEmpty()) { "Laner chat message is empty" }
         val now = System.currentTimeMillis()
         val session = ensureUiSessionLocked(now, chatId)
         val nextSeq = storedState.lastSeq + 1L
+        val wasPaused = storedState.schedulerPaused
         val request =
             LanerChatRequest(
                 requestId = UUID.randomUUID().toString(),
@@ -148,23 +176,25 @@ class LanerChatBridgeService private constructor(context: Context) {
                         mimeType = attachment.mimeType,
                         fileSize = attachment.fileSize
                     )
-                }
+                },
+                chatMessageTimestamp = ChatMessageTimestampAllocator.next(now)
             )
-        val deferred = CompletableDeferred<String>()
-        liveReplies[request.requestId] = deferred
+        if (liveReply != null) liveReplies[request.requestId] = liveReply
         try {
             commitState(
                 storedState.copy(
                     lastSeq = nextSeq,
                     activeSessionId = session.sessionId,
-                    requests = storedState.requests + request
+                    requests = storedState.requests + request,
+                    schedulerPaused = false
                 )
             )
         } catch (error: Throwable) {
             liveReplies.remove(request.requestId)?.cancel(CancellationException("Laner chat enqueue failed"))
             throw error
         }
-        return LanerChatPendingExchange(request, deferred)
+        emitQueueChangedLocked(session.sessionId, if (wasPaused) "enqueue_resume" else "enqueue")
+        return request
     }
 
     /** Bind the visible Bridge conversation to its durable Laner session. */
@@ -261,6 +291,17 @@ class LanerChatBridgeService private constructor(context: Context) {
     @Synchronized
     fun notification(afterSeq: Long, sessionId: String? = null): LanerChatNotification {
         touchAgentLocked(sessionId)
+        return buildNotificationLocked(afterSeq, sessionId)
+    }
+
+    @Synchronized
+    fun notificationSnapshot(afterSeq: Long = 0L, sessionId: String? = null): LanerChatNotification =
+        buildNotificationLocked(afterSeq, sessionId)
+
+    private fun buildNotificationLocked(
+        afterSeq: Long,
+        sessionId: String?
+    ): LanerChatNotification {
         val matching = unresolvedRequests(sessionId).filter { it.seq > afterSeq.coerceAtLeast(0L) }
         val highCount = matching.count { it.priority == LanerChatPriority.HIGH }
         val normalCount = matching.count { it.priority == LanerChatPriority.NORMAL }
@@ -373,6 +414,198 @@ class LanerChatBridgeService private constructor(context: Context) {
     }
 
     @Synchronized
+    fun turnStatus(requestedSessionId: String? = null): LanerChatTurnStatusSnapshot {
+        val sessionId = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() } ?: storedState.activeSessionId
+        val activeTurn = storedState.assistantTurns.lastOrNull {
+            it.status == LanerChatAssistantTurnStatus.ACTIVE &&
+                (sessionId == null || it.sessionId == sessionId)
+        }
+        val activeRequestIds = storedState.assistantTurns
+            .filter { it.status == LanerChatAssistantTurnStatus.ACTIVE }
+            .flatMapTo(mutableSetOf()) { it.requestIds }
+        val eligible = unresolvedRequests(sessionId).count { it.requestId !in activeRequestIds }
+        return LanerChatTurnStatusSnapshot(
+            sessionId = sessionId,
+            activeTurn = activeTurn,
+            schedulerPaused = storedState.schedulerPaused,
+            eligibleRequestCount = eligible,
+            latestSeq = storedState.lastSeq
+        )
+    }
+
+    @Synchronized
+    fun claimTurn(
+        requestedSessionId: String?,
+        requestedLimit: Int = MAX_TURN_REQUESTS
+    ): LanerChatTurnClaimResult? {
+        check(!storedState.schedulerPaused) {
+            "Laner Chat scheduler is paused; call ai_limbs.chat.turn.resume first"
+        }
+        val sessionId = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() } ?: storedState.activeSessionId
+        val existing = storedState.assistantTurns.lastOrNull {
+            it.status == LanerChatAssistantTurnStatus.ACTIVE &&
+                (sessionId == null || it.sessionId == sessionId)
+        }
+        if (existing != null) {
+            touchAgentLocked(existing.sessionId)
+            val requests = existing.requestIds.mapNotNull { id ->
+                storedState.requests.firstOrNull { it.requestId == id }
+            }
+            return LanerChatTurnClaimResult(existing, requests, duplicate = true)
+        }
+        val resolvedSessionId =
+            sessionId ?: unresolvedRequests(null).minByOrNull { it.seq }?.sessionId ?: return null
+        val activeRequestIds = storedState.assistantTurns
+            .filter { it.status == LanerChatAssistantTurnStatus.ACTIVE }
+            .flatMapTo(mutableSetOf()) { it.requestIds }
+        val eligible = unresolvedRequests(resolvedSessionId)
+            .asSequence()
+            .filter { it.requestId !in activeRequestIds }
+            .sortedBy { it.seq }
+            .toList()
+        val turnChatId = eligible.firstOrNull()?.chatId ?: return null
+        val selected = eligible
+            .asSequence()
+            .filter { it.chatId == turnChatId }
+            .take(requestedLimit.coerceIn(1, MAX_TURN_REQUESTS))
+            .toList()
+        if (selected.isEmpty()) return null
+
+        val now = System.currentTimeMillis()
+        val turn = LanerChatAssistantTurn(
+            turnId = UUID.randomUUID().toString(),
+            sessionId = resolvedSessionId,
+            requestIds = selected.map { it.requestId },
+            firstSeq = selected.first().seq,
+            lastSeq = selected.last().seq,
+            highestPriority = highestPriority(selected) ?: LanerChatPriority.NORMAL,
+            claimedAtMs = now
+        )
+        val selectedIds = turn.requestIds.toSet()
+        val requests = storedState.requests.map { request ->
+            if (request.requestId in selectedIds) {
+                request.copy(
+                    status = LanerChatMessageStatus.DELIVERED,
+                    deliveryCount = request.deliveryCount + 1,
+                    deliveredAtMs = now
+                )
+            } else request
+        }
+        touchAgentLocked(resolvedSessionId)
+        commitState(
+            storedState.copy(
+                requests = requests,
+                assistantTurns = storedState.assistantTurns + turn
+            )
+        )
+        // Managed Assistant Turn now owns these requests. Terminate any legacy stream without
+        // changing durable request state; the legacy adapter will observe the active Turn and exit.
+        turn.requestIds.forEach { requestId ->
+            liveReplies.remove(requestId)?.cancel(
+                CancellationException("Laner chat request claimed by managed Assistant Turn")
+            )
+        }
+        emitQueueChangedLocked(resolvedSessionId, "turn_claimed")
+        val requestsById = storedState.requests.associateBy { it.requestId }
+        return LanerChatTurnClaimResult(
+            turn = turn,
+            requests = turn.requestIds.mapNotNull(requestsById::get),
+            duplicate = false
+        )
+    }
+
+    @Synchronized
+    fun completeTurn(turnId: String, replyId: String?, content: String): LanerChatTurnReplyResult {
+        val normalizedTurnId = turnId.trim()
+        val normalizedContent = content.trim()
+        require(normalizedTurnId.isNotEmpty()) { "turn_id is required" }
+        require(normalizedContent.isNotEmpty()) { "reply content is required" }
+        val index = storedState.assistantTurns.indexOfFirst { it.turnId == normalizedTurnId }
+        require(index >= 0) { "Laner chat turn not found: $normalizedTurnId" }
+        val existing = storedState.assistantTurns[index]
+        val normalizedReplyId = replyId?.trim()?.takeIf { it.isNotEmpty() } ?: "turn:$normalizedTurnId"
+        if (existing.status == LanerChatAssistantTurnStatus.COMPLETED) {
+            check(existing.replyId == normalizedReplyId && existing.replyContent == normalizedContent) {
+                "Laner chat turn already completed with different reply data"
+            }
+            val requests = existing.requestIds.mapNotNull { id ->
+                storedState.requests.firstOrNull { it.requestId == id }
+            }
+            return LanerChatTurnReplyResult(existing, requests, duplicate = true)
+        }
+        check(existing.status == LanerChatAssistantTurnStatus.ACTIVE) {
+            "Laner chat turn is not active: ${existing.status}"
+        }
+
+        val now = System.currentTimeMillis()
+        val chatTimestamp =
+            existing.chatMessageTimestamp.takeIf { it > 0L } ?: ChatMessageTimestampAllocator.next(now)
+        val completed = existing.copy(
+            status = LanerChatAssistantTurnStatus.COMPLETED,
+            completedAtMs = now,
+            replyId = normalizedReplyId,
+            replyContent = normalizedContent,
+            chatMessageTimestamp = chatTimestamp
+        )
+        val requestIds = existing.requestIds.toSet()
+        val requests = storedState.requests.map { request ->
+            if (request.requestId in requestIds) {
+                request.copy(
+                    status = LanerChatMessageStatus.ANSWERED,
+                    answeredAtMs = now,
+                    replyId = normalizedReplyId,
+                    replyContent = normalizedContent
+                )
+            } else request
+        }
+        val turns = storedState.assistantTurns.toMutableList().also { it[index] = completed }
+        commitState(storedState.copy(requests = requests, assistantTurns = turns))
+        emitQueueChangedLocked(existing.sessionId, "turn_completed")
+        val requestsById = storedState.requests.associateBy { it.requestId }
+        return LanerChatTurnReplyResult(
+            completed,
+            completed.requestIds.mapNotNull(requestsById::get),
+            duplicate = false
+        )
+    }
+
+    @Synchronized
+    fun cancelActiveTurn(requestedSessionId: String? = null): LanerChatTurnCancelResult {
+        val sessionId = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() } ?: storedState.activeSessionId
+        val index = storedState.assistantTurns.indexOfLast {
+            it.status == LanerChatAssistantTurnStatus.ACTIVE &&
+                (sessionId == null || it.sessionId == sessionId)
+        }
+        if (index < 0) {
+            val changed = !storedState.schedulerPaused
+            if (changed) commitState(storedState.copy(schedulerPaused = true))
+            emitQueueChangedLocked(sessionId, "scheduler_paused")
+            return LanerChatTurnCancelResult(null, schedulerPaused = true, changed = changed)
+        }
+        val existing = storedState.assistantTurns[index]
+        val canceled = existing.copy(
+            status = LanerChatAssistantTurnStatus.CANCELED,
+            canceledAtMs = System.currentTimeMillis()
+        )
+        val turns = storedState.assistantTurns.toMutableList().also { it[index] = canceled }
+        commitState(storedState.copy(assistantTurns = turns, schedulerPaused = true))
+        emitQueueChangedLocked(existing.sessionId, "turn_canceled")
+        return LanerChatTurnCancelResult(canceled, schedulerPaused = true, changed = true)
+    }
+
+    @Synchronized
+    fun resumeScheduler(requestedSessionId: String? = null): LanerChatTurnStatusSnapshot {
+        val sessionId = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() } ?: storedState.activeSessionId
+        if (storedState.schedulerPaused) commitState(storedState.copy(schedulerPaused = false))
+        emitQueueChangedLocked(sessionId, "scheduler_resumed")
+        return turnStatus(sessionId)
+    }
+
+    @Synchronized
+    fun queueSnapshotEvent(reason: String = "sync"): LanerChatQueueChangedEvent =
+        buildQueueChangedEventLocked(storedState.activeSessionId, reason)
+
+    @Synchronized
     fun attachment(requestId: String, attachmentId: String): LanerChatAttachment {
         val normalizedRequestId = requestId.trim()
         val normalizedAttachmentId = attachmentId.trim()
@@ -418,8 +651,23 @@ class LanerChatBridgeService private constructor(context: Context) {
         )
         val requests = storedState.requests.toMutableList().also { it[index] = answered }
         commitState(storedState.copy(requests = requests))
+        emitQueueChangedLocked(existing.sessionId, "legacy_reply")
         val deliveredLive = liveReplies.remove(normalizedRequestId)?.complete(normalizedContent) == true
         return LanerChatReplyResult(answered, duplicate = false, deliveredToLiveStream = deliveredLive)
+    }
+
+    @Synchronized
+    fun cancelLegacyExchange(requestId: String, reason: String): Boolean {
+        val normalizedRequestId = requestId.trim()
+        val ownedByManagedTurn = storedState.assistantTurns.any { turn ->
+            turn.status == LanerChatAssistantTurnStatus.ACTIVE &&
+                normalizedRequestId in turn.requestIds
+        }
+        if (ownedByManagedTurn) {
+            liveReplies.remove(normalizedRequestId)?.cancel(CancellationException(reason))
+            return false
+        }
+        return cancelRequest(normalizedRequestId, reason)
     }
 
     @Synchronized
@@ -434,6 +682,7 @@ class LanerChatBridgeService private constructor(context: Context) {
         )
         val requests = storedState.requests.toMutableList().also { it[index] = canceled }
         commitState(storedState.copy(requests = requests))
+        emitQueueChangedLocked(existing.sessionId, "legacy_request_canceled")
         liveReplies.remove(requestId)?.cancel(CancellationException(reason))
         return true
     }
@@ -516,6 +765,10 @@ class LanerChatBridgeService private constructor(context: Context) {
 
     private fun buildMailboxStatus(state: LanerChatStoredState): LanerChatMailboxStatus {
         val activeSession = state.sessions.firstOrNull { it.sessionId == state.activeSessionId }
+        val activeTurn = state.assistantTurns.lastOrNull {
+            it.status == LanerChatAssistantTurnStatus.ACTIVE &&
+                (state.activeSessionId == null || it.sessionId == state.activeSessionId)
+        }
         return LanerChatMailboxStatus(
             activeSessionId = state.activeSessionId,
             boundChatId = activeSession?.chatId,
@@ -532,8 +785,54 @@ class LanerChatBridgeService private constructor(context: Context) {
                 state.proactiveMessages.count {
                     it.status == LanerChatProactiveMessageStatus.DELIVERED
                 },
-            lastAgentSeenAtMs = activeSession?.lastAgentSeenAtMs
+            lastAgentSeenAtMs = activeSession?.lastAgentSeenAtMs,
+            activeTurnId = activeTurn?.turnId,
+            activeTurnChatId = activeTurn?.requestIds?.firstOrNull()?.let { requestId ->
+                state.requests.firstOrNull { it.requestId == requestId }?.chatId
+            },
+            activeTurnRequestCount = activeTurn?.requestIds?.size ?: 0,
+            activeTurnHighestPriority = activeTurn?.highestPriority,
+            schedulerPaused = state.schedulerPaused
         )
+    }
+
+    private fun highestPriority(requests: List<LanerChatRequest>): LanerChatPriority? = when {
+        requests.any { it.priority == LanerChatPriority.HIGH } -> LanerChatPriority.HIGH
+        requests.any { it.priority == LanerChatPriority.NORMAL } -> LanerChatPriority.NORMAL
+        requests.any { it.priority == LanerChatPriority.LOW } -> LanerChatPriority.LOW
+        else -> null
+    }
+
+    private fun buildQueueChangedEventLocked(
+        sessionId: String?,
+        reason: String
+    ): LanerChatQueueChangedEvent {
+        val matching = unresolvedRequests(sessionId)
+        val activeTurn = storedState.assistantTurns.lastOrNull {
+            it.status == LanerChatAssistantTurnStatus.ACTIVE &&
+                (sessionId == null || it.sessionId == sessionId)
+        }
+        val activeRequestIds = activeTurn?.requestIds?.toSet().orEmpty()
+        val eligible = matching.filter { it.requestId !in activeRequestIds }
+        return LanerChatQueueChangedEvent(
+            eventId = UUID.randomUUID().toString(),
+            reason = reason,
+            sessionId = sessionId,
+            latestSeq = storedState.lastSeq,
+            pendingCount = eligible.count { it.status == LanerChatMessageStatus.PENDING },
+            unresolvedCount = matching.size,
+            highestPriority = highestPriority(eligible),
+            highCount = eligible.count { it.priority == LanerChatPriority.HIGH },
+            normalCount = eligible.count { it.priority == LanerChatPriority.NORMAL },
+            lowCount = eligible.count { it.priority == LanerChatPriority.LOW },
+            activeTurnId = activeTurn?.turnId,
+            schedulerPaused = storedState.schedulerPaused,
+            attentionRequired = eligible.isNotEmpty()
+        )
+    }
+
+    private fun emitQueueChangedLocked(sessionId: String?, reason: String) {
+        queueEventsFlow.tryEmit(buildQueueChangedEventLocked(sessionId, reason))
     }
 
     private fun LanerChatRequest.isUnresolved(): Boolean =
@@ -544,6 +843,7 @@ class LanerChatBridgeService private constructor(context: Context) {
         const val EVENT_IDLE = "idle"
         const val MAX_WAIT_MS = 30_000L
         const val MAX_FETCH_LIMIT = 20
+        const val MAX_TURN_REQUESTS = 50
         private const val PREFERENCES_NAME = "ai_limbs_laner_chat"
         private const val KEY_STATE = "mailbox_state"
         private const val AGENT_SEEN_WRITE_INTERVAL_MS = 10_000L

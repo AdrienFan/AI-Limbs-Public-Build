@@ -116,7 +116,6 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatDraftPriorityStore
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 import java.util.UUID
@@ -1763,6 +1762,23 @@ private fun ChatInputBottomBar(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
+    val lanerBridgeService = remember(context) {
+        LanerChatBridgeService.getInstance(context.applicationContext)
+    }
+    val lanerMailboxStatus by lanerBridgeService.status.collectAsState()
+    val lanerTurnActive =
+        disableLocalAgentFeatures &&
+            currentChatId != null &&
+            lanerMailboxStatus.activeTurnChatId == currentChatId &&
+            lanerMailboxStatus.activeTurnId != null
+    val lanerSchedulerPausedForCurrentChat =
+        disableLocalAgentFeatures &&
+            currentChatId != null &&
+            lanerMailboxStatus.boundChatId == currentChatId &&
+            lanerMailboxStatus.schedulerPaused
+    val effectiveIsLoading = if (disableLocalAgentFeatures) lanerTurnActive else isLoading
+    val effectiveInputState =
+        if (disableLocalAgentFeatures) InputProcessingState.Idle else inputState
     val waifuPreferences = remember(context) { WaifuPreferences.getInstance(context) }
     val userPreferences = remember(context) { UserPreferencesManager.getInstance(context) }
     val clipboardManager = remember(context) {
@@ -1791,14 +1807,14 @@ private fun ChatInputBottomBar(
         )
 
     val isMessageProcessing =
-        isLoading ||
-            inputState is InputProcessingState.Connecting ||
-            inputState is InputProcessingState.ExecutingTool ||
-            inputState is InputProcessingState.ToolProgress ||
-            inputState is InputProcessingState.Processing ||
-            inputState is InputProcessingState.ProcessingToolResult ||
-            inputState is InputProcessingState.Summarizing ||
-            inputState is InputProcessingState.Receiving
+        effectiveIsLoading ||
+            effectiveInputState is InputProcessingState.Connecting ||
+            effectiveInputState is InputProcessingState.ExecutingTool ||
+            effectiveInputState is InputProcessingState.ToolProgress ||
+            effectiveInputState is InputProcessingState.Processing ||
+            effectiveInputState is InputProcessingState.ProcessingToolResult ||
+            effectiveInputState is InputProcessingState.Summarizing ||
+            effectiveInputState is InputProcessingState.Receiving
     val isQueueBlocked = isMessageProcessing || isSummarizing || isSendTriggeredSummarizing
 
     val pendingQueueStates by actualViewModel.pendingMessageQueueStates.collectAsState()
@@ -2009,7 +2025,8 @@ private fun ChatInputBottomBar(
             }
         }
 
-    LaunchedEffect(isQueueBlocked, pendingQueueMessages.size, currentChatId) {
+    LaunchedEffect(isQueueBlocked, pendingQueueMessages.size, currentChatId, disableLocalAgentFeatures) {
+        if (disableLocalAgentFeatures) return@LaunchedEffect
         val queueChatId = currentChatId ?: return@LaunchedEffect
         if (actualViewModel.consumePendingQueueAutoDequeueSignal(queueChatId, isQueueBlocked)) {
             delay(250)
@@ -2114,11 +2131,13 @@ private fun ChatInputBottomBar(
             }
             focusManager.clearFocus()
             if (disableLocalAgentFeatures) {
-                LanerChatDraftPriorityStore.set(ensuredChatId, lanerMessagePriority)
+                val priority = lanerMessagePriority
                 lanerMessagePriority = LanerChatPriority.NORMAL
+                actualViewModel.sendLanerBridgeMessage(priority)
+            } else {
+                actualViewModel.sendUserMessage()
+                actualViewModel.resetAttachmentPanelState()
             }
-            actualViewModel.sendUserMessage()
-            actualViewModel.resetAttachmentPanelState()
             onRequestAutoScrollToBottom()
             ChatInputHookRegistry.dispatchNotification(
                 buildChatInputHookContext(
@@ -2133,12 +2152,38 @@ private fun ChatInputBottomBar(
         }
     }
 
+    val cancelCurrentAction: () -> Unit = {
+        if (disableLocalAgentFeatures) {
+            lanerBridgeService.cancelActiveTurn()
+        } else {
+            actualViewModel.cancelCurrentMessage()
+        }
+    }
+    val inputPendingQueueMessages = if (disableLocalAgentFeatures) emptyList() else pendingQueueMessages
+    val inputPendingQueueExpanded = !disableLocalAgentFeatures && isPendingQueueExpanded
+
     Column(modifier = Modifier.fillMaxWidth()) {
         if (disableLocalAgentFeatures) {
             LanerChatPrioritySelector(
                 priority = lanerMessagePriority,
                 onPriorityChange = { lanerMessagePriority = it }
             )
+            if (lanerTurnActive || lanerSchedulerPausedForCurrentChat) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
+                    horizontalArrangement = Arrangement.End,
+                ) {
+                    if (lanerTurnActive) {
+                        TextButton(onClick = cancelCurrentAction) {
+                            Text(stringResource(R.string.service_stop))
+                        }
+                    } else {
+                        TextButton(onClick = { lanerBridgeService.resumeScheduler() }) {
+                            Text(stringResource(R.string.webvisit_button_continue))
+                        }
+                    }
+                }
+            }
         }
 
         if (inputStyle == UserPreferencesManager.INPUT_STYLE_AGENT) {
@@ -2149,9 +2194,10 @@ private fun ChatInputBottomBar(
                 enableEnterToSend = enableEnterToSend,
                 onSendMessage = sendMessage,
                 onQueueMessage = { enqueueDraftToPendingQueue() },
-                onCancelMessage = actualViewModel::cancelCurrentMessage,
-                isLoading = isLoading,
-                inputState = inputState,
+                onCancelMessage = cancelCurrentAction,
+                isLoading = effectiveIsLoading,
+                directSendWhileProcessing = disableLocalAgentFeatures,
+                inputState = effectiveInputState,
                 allowTextInputWhileProcessing = true,
                 onAttachmentRequest = actualViewModel::handleAttachment,
                 attachments = attachments,
@@ -2208,8 +2254,8 @@ private fun ChatInputBottomBar(
                 characterCardBoundChatModelConfigId = characterCardBoundChatModelConfigId,
                 characterCardBoundChatModelIndex = characterCardBoundChatModelIndex,
                 characterCardBoundMemoryProfileId = characterCardBoundMemoryProfileId,
-                pendingQueueMessages = pendingQueueMessages,
-                isPendingQueueExpanded = isPendingQueueExpanded,
+                pendingQueueMessages = inputPendingQueueMessages,
+                isPendingQueueExpanded = inputPendingQueueExpanded,
                 onPendingQueueExpandedChange = { expanded ->
                     currentChatId?.let { chatId ->
                         actualViewModel.setPendingQueueExpanded(chatId, expanded)
@@ -2245,9 +2291,10 @@ private fun ChatInputBottomBar(
                 enableEnterToSend = enableEnterToSend,
                 onSendMessage = sendMessage,
                 onQueueMessage = { enqueueDraftToPendingQueue() },
-                onCancelMessage = actualViewModel::cancelCurrentMessage,
-                isLoading = isLoading,
-                inputState = inputState,
+                onCancelMessage = cancelCurrentAction,
+                isLoading = effectiveIsLoading,
+                directSendWhileProcessing = disableLocalAgentFeatures,
+                inputState = effectiveInputState,
                 allowTextInputWhileProcessing = true,
                 onAttachmentRequest = actualViewModel::handleAttachment,
                 attachments = attachments,
@@ -2271,8 +2318,8 @@ private fun ChatInputBottomBar(
                 replyToMessage = replyToMessage,
                 onClearReply = actualViewModel::clearReplyToMessage,
                 isWorkspaceOpen = isWorkspaceOpen,
-                pendingQueueMessages = pendingQueueMessages,
-                isPendingQueueExpanded = isPendingQueueExpanded,
+                pendingQueueMessages = inputPendingQueueMessages,
+                isPendingQueueExpanded = inputPendingQueueExpanded,
                 onPendingQueueExpandedChange = { expanded ->
                     currentChatId?.let { chatId ->
                         actualViewModel.setPendingQueueExpanded(chatId, expanded)

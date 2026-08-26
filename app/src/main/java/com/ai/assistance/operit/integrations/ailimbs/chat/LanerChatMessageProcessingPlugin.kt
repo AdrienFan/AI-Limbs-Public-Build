@@ -5,7 +5,6 @@ import com.ai.assistance.operit.core.chat.plugins.MessageProcessingExecution
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingHookParams
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingPlugin
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingPluginRegistry
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsAccessContextService
 import com.ai.assistance.operit.plugins.OperitPlugin
 import com.ai.assistance.operit.util.stream.stream
 import kotlinx.coroutines.CancellationException
@@ -18,6 +17,13 @@ object LanerChatPlugin : OperitPlugin {
     }
 }
 
+/**
+ * Legacy compatibility adapter for old model-runtime send paths.
+ *
+ * V0.6.4 Laner UI does not use this adapter: it writes directly to the durable mailbox and the
+ * Assistant Turn Scheduler owns batching/replies. Keep this only so older internal call sites fail
+ * safely into the existing request stream without reinjecting queue/scheduling policy into context.
+ */
 private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
     override val id: String = "builtin.ai-limbs.laner-chat.message-processing"
 
@@ -28,16 +34,7 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
         val service = LanerChatBridgeService.getInstance(params.context)
         val chatId = params.chatId ?: "__DEFAULT_CHAT__"
         val priority = LanerChatDraftPriorityStore.consume(chatId)
-        val accessContext = AiLimbsAccessContextService(params.context)
-        val chatContext = accessContext.buildLanerChatContextHeader()
-        val actionCheckpoint = accessContext.buildLanerChatActionCheckpoint()
-        val bridgedMessage = buildString {
-            append(chatContext)
-            append("\n\n[User message]\n")
-            append(params.rawUserText ?: params.messageContent)
-            append("\n\n")
-            append(actionCheckpoint)
-        }
+        val bridgedMessage = params.rawUserText ?: params.messageContent
         val pending =
             service.enqueue(
                 chatId = chatId,
@@ -49,7 +46,7 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
             controller =
                 object : MessageProcessingController {
                     override fun cancel() {
-                        service.cancelRequest(
+                        service.cancelLegacyExchange(
                             requestId = pending.request.requestId,
                             reason = "User canceled Laner Bridge chat request"
                         )
@@ -59,7 +56,7 @@ private object LanerChatMessageProcessingPlugin : MessageProcessingPlugin {
                 try {
                     emit(pending.reply.await())
                 } catch (error: CancellationException) {
-                    service.cancelRequest(
+                    service.cancelLegacyExchange(
                         requestId = pending.request.requestId,
                         reason = "Laner Bridge chat stream was canceled"
                     )

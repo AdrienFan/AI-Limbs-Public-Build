@@ -36,7 +36,9 @@ import com.ai.assistance.operit.util.ChatMarkupRegex
 import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.LocaleUtils
 import com.ai.assistance.operit.data.repository.MemoryAutoSaveCandidateRepository
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -49,6 +51,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.withTimeoutOrNull
 import org.json.JSONArray
 import org.json.JSONObject
@@ -107,6 +110,16 @@ class MessageCoordinationDelegate(
     private val activePromptManager = ActivePromptManager.getInstance(context)
     private val displayPreferencesManager = DisplayPreferencesManager.getInstance(context)
     private val plannerServiceManager = MultiServiceManager(context)
+    private data class LanerBridgeQueuedSend(
+        val chatId: String,
+        val originalText: String,
+        val attachments: List<com.ai.assistance.operit.data.model.AttachmentInfo>,
+        val replyToMessage: ChatMessage?,
+        val priority: LanerChatPriority
+    )
+
+    private val lanerBridgeSendQueue = Channel<LanerBridgeQueuedSend>(Channel.UNLIMITED)
+
     private data class PendingAutoContinuationRequest(
         val chatId: String,
         val promptFunctionType: PromptFunctionType,
@@ -124,6 +137,11 @@ class MessageCoordinationDelegate(
 
     init {
         ensureNonFatalErrorCollectorStarted()
+        coroutineScope.launch(Dispatchers.IO) {
+            for (pending in lanerBridgeSendQueue) {
+                processLanerBridgeQueuedSend(pending)
+            }
+        }
     }
 
     private fun ensureNonFatalErrorCollectorStarted() {
@@ -318,6 +336,110 @@ class MessageCoordinationDelegate(
                 "promptType=$effectivePromptFunctionType"
         )
         return newWindowSize
+    }
+
+    /**
+     * Laner Bridge messages are durable mailbox writes, not model-provider turns.
+     * Snapshot and release the composer immediately so the user can keep sending while an
+     * Assistant Turn is active. AI Limbs owns batching and turn scheduling separately.
+     */
+    fun sendLanerBridgeMessage(
+        priority: LanerChatPriority,
+        chatIdOverride: String? = null
+    ) {
+        val chatId = chatIdOverride ?: chatHistoryDelegate.currentChatId.value
+        if (chatId.isNullOrBlank()) {
+            uiStateDelegate.showErrorMessage(context.getString(R.string.chat_no_active_conversation))
+            return
+        }
+        check(LanerChatContract.isBridgeConfig(apiConfigDelegate.activeChatModelConfig.value)) {
+            "Laner direct send requires the Laner Bridge configuration"
+        }
+
+        val originalText = messageProcessingDelegate.userMessage.value.text.trim()
+        val attachments = attachmentDelegate.attachments.value.toList()
+        val replyToMessage = uiBridge.getReplyToMessage()
+        if (originalText.isBlank() && attachments.isEmpty()) return
+
+        // Capture one immutable send snapshot on the caller thread. Channel is FIFO and has one
+        // consumer, so rapid M1/M2/M3 sends cannot be reordered by Dispatchers.IO scheduling.
+        val queued = LanerBridgeQueuedSend(
+            chatId = chatId,
+            originalText = originalText,
+            attachments = attachments,
+            replyToMessage = replyToMessage,
+            priority = priority
+        )
+        if (!lanerBridgeSendQueue.trySend(queued).isSuccess) {
+            uiStateDelegate.showErrorMessage(
+                context.getString(R.string.laner_chat_initialization_failed, "send queue unavailable")
+            )
+            return
+        }
+
+        messageProcessingDelegate.updateUserMessage("")
+        if (attachments.isNotEmpty()) attachmentDelegate.clearAttachments()
+        uiBridge.resetAttachmentPanelState()
+        uiBridge.clearReplyToMessage()
+    }
+
+    private suspend fun processLanerBridgeQueuedSend(pending: LanerBridgeQueuedSend) {
+        var mailboxPersisted = false
+        try {
+            val currentChat = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == pending.chatId }
+            val isFirstMessage = !chatHistoryDelegate.hasUserMessage(pending.chatId)
+            val finalContent = messageProcessingDelegate.buildUserMessageContentForGroupOrchestration(
+                messageText = pending.originalText,
+                attachments = pending.attachments,
+                workspacePath = currentChat?.workspace,
+                workspaceEnv = currentChat?.workspaceEnv,
+                replyToMessage = pending.replyToMessage,
+                chatId = pending.chatId
+            )
+            val mailbox = LanerChatBridgeService.getInstance(context.applicationContext)
+            mailbox.bindUiChat(pending.chatId)
+            val request = mailbox.enqueueMailbox(
+                chatId = pending.chatId,
+                text = finalContent,
+                attachments = pending.attachments,
+                priority = pending.priority
+            )
+            mailboxPersisted = true
+            chatHistoryDelegate.addMessageToChat(
+                ChatMessage(
+                    sender = "user",
+                    content = finalContent,
+                    timestamp = request.chatMessageTimestamp,
+                    roleName = context.getString(R.string.message_role_user),
+                    lanerPriority = pending.priority.name
+                ),
+                pending.chatId
+            )
+            if (isFirstMessage) {
+                chatHistoryDelegate.updateChatTitle(
+                    pending.chatId,
+                    LanerChatContract.localConversationTitle(
+                        pending.originalText,
+                        pending.attachments.map { it.fileName }
+                    )
+                )
+            }
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            AppLogger.e(TAG, "Laner direct mailbox send failed", error)
+            withContext(Dispatchers.Main) {
+                if (!mailboxPersisted && messageProcessingDelegate.userMessage.value.text.isBlank()) {
+                    messageProcessingDelegate.updateUserMessage(pending.originalText)
+                }
+                if (!mailboxPersisted && attachmentDelegate.attachments.value.isEmpty() && pending.attachments.isNotEmpty()) {
+                    attachmentDelegate.addAttachments(pending.attachments)
+                }
+                uiStateDelegate.showErrorMessage(
+                    error.message ?: context.getString(R.string.laner_chat_initialization_failed, "")
+                )
+            }
+        }
     }
 
     /**

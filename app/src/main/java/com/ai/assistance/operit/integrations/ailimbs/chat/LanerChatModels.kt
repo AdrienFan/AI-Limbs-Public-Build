@@ -25,6 +25,14 @@ enum class LanerChatPriority {
 }
 
 @Serializable
+enum class LanerChatAssistantTurnStatus {
+    ACTIVE,
+    COMPLETED,
+    CANCELED,
+    INTERRUPTED
+}
+
+@Serializable
 data class LanerChatSession(
     val sessionId: String,
     val status: LanerChatSessionStatus = LanerChatSessionStatus.OPEN,
@@ -79,7 +87,25 @@ data class LanerChatRequest(
     val answeredAtMs: Long? = null,
     val canceledAtMs: Long? = null,
     val replyId: String? = null,
-    val replyContent: String? = null
+    val replyContent: String? = null,
+    val chatMessageTimestamp: Long = 0L
+)
+
+@Serializable
+data class LanerChatAssistantTurn(
+    val turnId: String,
+    val sessionId: String,
+    val requestIds: List<String>,
+    val firstSeq: Long,
+    val lastSeq: Long,
+    val highestPriority: LanerChatPriority,
+    val status: LanerChatAssistantTurnStatus = LanerChatAssistantTurnStatus.ACTIVE,
+    val claimedAtMs: Long,
+    val completedAtMs: Long? = null,
+    val canceledAtMs: Long? = null,
+    val replyId: String? = null,
+    val replyContent: String? = null,
+    val chatMessageTimestamp: Long = 0L
 )
 
 @Serializable
@@ -88,7 +114,9 @@ internal data class LanerChatStoredState(
     val activeSessionId: String? = null,
     val sessions: List<LanerChatSession> = emptyList(),
     val requests: List<LanerChatRequest> = emptyList(),
-    val proactiveMessages: List<LanerChatProactiveMessage> = emptyList()
+    val proactiveMessages: List<LanerChatProactiveMessage> = emptyList(),
+    val assistantTurns: List<LanerChatAssistantTurn> = emptyList(),
+    val schedulerPaused: Boolean = false
 )
 
 data class LanerChatMailboxStatus(
@@ -101,7 +129,12 @@ data class LanerChatMailboxStatus(
     val canceledCount: Int = 0,
     val proactivePendingCount: Int = 0,
     val proactiveDeliveredCount: Int = 0,
-    val lastAgentSeenAtMs: Long? = null
+    val lastAgentSeenAtMs: Long? = null,
+    val activeTurnId: String? = null,
+    val activeTurnChatId: String? = null,
+    val activeTurnRequestCount: Int = 0,
+    val activeTurnHighestPriority: LanerChatPriority? = null,
+    val schedulerPaused: Boolean = false
 ) {
     val unresolvedCount: Int
         get() = pendingCount + deliveredCount
@@ -118,6 +151,21 @@ data class LanerChatNotification(
     val lowCount: Int = 0
 )
 
+data class LanerChatQueueChangedEvent(
+    val eventId: String,
+    val reason: String,
+    val sessionId: String?,
+    val latestSeq: Long,
+    val pendingCount: Int,
+    val unresolvedCount: Int,
+    val highestPriority: LanerChatPriority?,
+    val highCount: Int,
+    val normalCount: Int,
+    val lowCount: Int,
+    val activeTurnId: String?,
+    val schedulerPaused: Boolean,
+    val attentionRequired: Boolean
+)
 data class LanerChatSessionOpenResult(
     val session: LanerChatSession,
     val lastUserSeq: Long,
@@ -140,6 +188,32 @@ data class LanerChatReplyResult(
 data class LanerChatProactiveSendResult(
     val message: LanerChatProactiveMessage,
     val duplicate: Boolean
+)
+
+data class LanerChatTurnStatusSnapshot(
+    val sessionId: String?,
+    val activeTurn: LanerChatAssistantTurn?,
+    val schedulerPaused: Boolean,
+    val eligibleRequestCount: Int,
+    val latestSeq: Long
+)
+
+data class LanerChatTurnClaimResult(
+    val turn: LanerChatAssistantTurn,
+    val requests: List<LanerChatRequest>,
+    val duplicate: Boolean
+)
+
+data class LanerChatTurnReplyResult(
+    val turn: LanerChatAssistantTurn,
+    val requests: List<LanerChatRequest>,
+    val duplicate: Boolean
+)
+
+data class LanerChatTurnCancelResult(
+    val turn: LanerChatAssistantTurn?,
+    val schedulerPaused: Boolean,
+    val changed: Boolean
 )
 
 data class LanerChatPendingExchange(

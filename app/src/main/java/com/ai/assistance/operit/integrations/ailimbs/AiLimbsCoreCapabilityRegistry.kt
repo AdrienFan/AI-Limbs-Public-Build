@@ -99,6 +99,13 @@ object AiLimbsCoreCapabilityRegistry {
             "Read shared Ubuntu activity and participant counts without returning command or output content.",
             keywords = listOf("共享窗口", "眼睛", "只读", "兰儿操作", "Ubuntu share")
         ),
+        bridgeEntry(
+            name = "ai_limbs.bridge.reconnect",
+            displayName = "请求 AI Limbs Bridge 重新连接",
+            description =
+                "Safely schedule the active Bridge provider's normal reconnect after returning the current tool response. Existing pairing and session credentials are preserved.",
+            keywords = listOf("Bridge", "RDC", "重连", "重新连接", "连接恢复", "reconnect")
+        ),
         lanerChatEntry(
             name = "ai_limbs.chat.status",
             displayName = "AI Limbs Laner Chat Bridge 状态",
@@ -246,10 +253,63 @@ object AiLimbsCoreCapabilityRegistry {
             keywords = listOf("兰儿聊天", "附件", "图片", "文件", "attachment", "multimodal")
         ),
         lanerChatEntry(
+            name = "ai_limbs.chat.turn.status",
+            displayName = "查询 Laner Chat Assistant Turn 状态",
+            description =
+                "Read the AI Limbs-managed Assistant Turn scheduler state without returning message bodies.",
+            parameters = listOf(
+                ToolParameterSchema("session_id", "string", "Optional Laner Chat session filter", false)
+            ),
+            keywords = listOf("Laner Chat", "Assistant Turn", "scheduler", "调度", "状态")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.turn.claim",
+            displayName = "领取下一批 Laner Chat 用户消息",
+            description =
+                "Atomically claim the current eligible Laner Chat message snapshot as one Assistant Turn. Existing active turns are returned idempotently; messages arriving after claim remain pending for the next turn.",
+            parameters = listOf(
+                ToolParameterSchema("session_id", "string", "Optional Laner Chat session; defaults to active", false),
+                ToolParameterSchema("limit", "integer", "Maximum messages to claim from 1 to 50", false, "50")
+            ),
+            keywords = listOf("Laner Chat", "Assistant Turn", "claim", "batch", "批量消息", "scheduler")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.turn.reply",
+            displayName = "完成 Laner Chat Assistant Turn",
+            description =
+                "Atomically complete one Assistant Turn, mark all covered user requests answered, and deliver one idempotent user-visible assistant reply to the bound Bridge Chat.",
+            parameters = listOf(
+                ToolParameterSchema("turn_id", "string", "Active Assistant Turn ID returned by turn.claim", true),
+                ToolParameterSchema("reply_id", "string", "Optional stable reply ID for retry idempotence", false),
+                ToolParameterSchema("content", "string", "Complete assistant reply text for the whole turn", true)
+            ),
+            keywords = listOf("Laner Chat", "Assistant Turn", "reply", "covered requests", "批量回复", "幂等")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.turn.cancel",
+            displayName = "停止当前 Laner Chat Assistant Turn",
+            description =
+                "Cancel only the current Assistant Turn and pause the scheduler while preserving all covered user messages as unresolved.",
+            parameters = listOf(
+                ToolParameterSchema("session_id", "string", "Optional Laner Chat session; defaults to active", false)
+            ),
+            keywords = listOf("Laner Chat", "Assistant Turn", "cancel", "停止", "暂停调度", "保留消息")
+        ),
+        lanerChatEntry(
+            name = "ai_limbs.chat.turn.resume",
+            displayName = "恢复 Laner Chat Assistant Turn 调度",
+            description =
+                "Resume the AI Limbs-managed Laner Chat scheduler after a user stop without discarding unresolved messages.",
+            parameters = listOf(
+                ToolParameterSchema("session_id", "string", "Optional Laner Chat session; defaults to active", false)
+            ),
+            keywords = listOf("Laner Chat", "Assistant Turn", "resume", "继续处理", "scheduler")
+        ),
+        lanerChatEntry(
             name = "ai_limbs.chat.reply",
             displayName = "回复兰儿聊天消息",
             description =
-                "Deliver one complete user-visible Laner Chat assistant response atomically.",
+                "Legacy single-request reply compatibility path. Protocol v5 Assistant Turn clients should use ai_limbs.chat.turn.reply.",
             parameters = listOf(
                 ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
                 ToolParameterSchema(
@@ -350,6 +410,20 @@ object AiLimbsCoreCapabilityRegistry {
         keywords = keywords,
         sourceName = "ubuntu",
         sourceLocator = "ubuntu://lifecycle/${name.substringAfterLast('.')}"
+    )
+
+    private fun bridgeEntry(
+        name: String,
+        displayName: String,
+        description: String,
+        keywords: List<String>
+    ): ToolCatalogEntry = entry(
+        name = name,
+        displayName = displayName,
+        description = description,
+        keywords = keywords,
+        sourceName = "ai_limbs_bridge",
+        sourceLocator = "ai-limbs://bridge/${name.removePrefix("ai_limbs.bridge.")}"
     )
 
     private fun lanerChatEntry(

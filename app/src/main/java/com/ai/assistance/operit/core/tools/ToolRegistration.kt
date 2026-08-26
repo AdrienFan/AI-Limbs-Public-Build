@@ -11,6 +11,8 @@ import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.data.model.ToolResult
 import com.ai.assistance.operit.data.preferences.CharacterCardToolAccessResolver
 import com.ai.assistance.operit.data.preferences.ResolvedCharacterCardToolAccess
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeReconnectToolExecutor
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRdcProcessToolExecutor
 import com.ai.assistance.operit.integrations.tasker.triggerAIAgentAction
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.ui.common.displays.VirtualDisplayOverlay
@@ -362,6 +364,46 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
                 terminalTool.executeHiddenCommand(tool)
             }
+    )
+
+    handler.registerTool(
+            name = "rdc_process_start",
+            descriptionGenerator = { tool -> "Start RDC process session: ${tool.parameters.find { it.name == "command" }?.value.orEmpty()}" },
+            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).start(tool) }
+    )
+
+    handler.registerTool(
+            name = "rdc_process_read",
+            descriptionGenerator = { tool -> "Read RDC process output for PID ${tool.parameters.find { it.name == "pid" }?.value.orEmpty()}" },
+            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).read(tool) }
+    )
+
+    handler.registerTool(
+            name = "rdc_process_interact",
+            descriptionGenerator = { tool ->
+                val pid = tool.parameters.find { it.name == "pid" }?.value.orEmpty()
+                val input = tool.parameters.find { it.name == "input" }?.value.orEmpty().take(240)
+                "Send input to RDC process PID $pid: $input"
+            },
+            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).interact(tool) }
+    )
+
+    handler.registerTool(
+            name = "rdc_process_list",
+            descriptionGenerator = { "List active and recently completed RDC process sessions" },
+            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).list(tool) }
+    )
+
+    handler.registerTool(
+            name = "rdc_process_terminate",
+            descriptionGenerator = { tool -> "Terminate RDC process PID ${tool.parameters.find { it.name == "pid" }?.value.orEmpty()}" },
+            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).terminate(tool) }
+    )
+
+    handler.registerTool(
+            name = "ai_limbs.bridge.reconnect",
+            descriptionGenerator = { "Schedule an AI Limbs Bridge reconnect after this tool response is returned" },
+            executor = { tool -> AiLimbsBridgeReconnectToolExecutor(context).execute(tool) }
     )
 
     handler.registerTool(

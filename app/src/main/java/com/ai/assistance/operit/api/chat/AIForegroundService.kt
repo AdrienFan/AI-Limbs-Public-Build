@@ -6,8 +6,10 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.app.ActivityManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.res.Configuration
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
@@ -22,6 +24,7 @@ import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
+import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import android.view.Gravity
@@ -829,6 +832,25 @@ class AIForegroundService : Service() {
     private val workflowRepository by lazy { WorkflowRepository(applicationContext) }
     private val externalHttpPreferences by lazy { ExternalHttpApiPreferences.getInstance(applicationContext) }
     private val aiLimbsBridgeManager by lazy { AiLimbsBridgeManager(applicationContext, serviceScope) }
+    private var bridgeScreenReceiverRegistered = false
+    private var bridgeScreenOffWakeLock: PowerManager.WakeLock? = null
+    private val bridgeScreenStateReceiver =
+        object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                val action = intent?.action ?: return
+                if (action != Intent.ACTION_SCREEN_OFF && action != Intent.ACTION_SCREEN_ON) return
+                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+                AppLogger.i(
+                    TAG,
+                    "AI Limbs bridge screen state: action=$action, interactive=${powerManager.isInteractive}, " +
+                        "deviceIdle=${powerManager.isDeviceIdleMode}"
+                )
+                updateBridgeScreenOffWakeLock("screen_broadcast:$action")
+                if (action == Intent.ACTION_SCREEN_ON && aiLimbsBridgeManager.shouldKeepAlive) {
+                    aiLimbsBridgeManager.verifyLiveness()
+                }
+            }
+        }
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private var keepAliveOverlayView: View? = null
@@ -1032,6 +1054,68 @@ class AIForegroundService : Service() {
         }.getOrDefault(false)
     }
 
+    private fun registerBridgeScreenStateReceiver() {
+        if (bridgeScreenReceiverRegistered) return
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_OFF)
+            addAction(Intent.ACTION_SCREEN_ON)
+        }
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                registerReceiver(bridgeScreenStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+            } else {
+                @Suppress("DEPRECATION")
+                registerReceiver(bridgeScreenStateReceiver, filter)
+            }
+            bridgeScreenReceiverRegistered = true
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Failed to register AI Limbs bridge screen receiver", e)
+        }
+    }
+
+    private fun unregisterBridgeScreenStateReceiver() {
+        if (!bridgeScreenReceiverRegistered) return
+        runCatching { unregisterReceiver(bridgeScreenStateReceiver) }
+            .onFailure { AppLogger.w(TAG, "Failed to unregister AI Limbs bridge screen receiver", it) }
+        bridgeScreenReceiverRegistered = false
+    }
+
+    private fun updateBridgeScreenOffWakeLock(reason: String) {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val shouldHold =
+            !powerManager.isInteractive &&
+                aiLimbsBridgeManager.shouldKeepAlive &&
+                aiLimbsBridgeManager.requiresScreenOffCpuKeepAlive
+        if (shouldHold) {
+            if (bridgeScreenOffWakeLock == null) {
+                bridgeScreenOffWakeLock =
+                    powerManager.newWakeLock(
+                        PowerManager.PARTIAL_WAKE_LOCK,
+                        "$packageName:AiLimbsBridgeScreenOff"
+                    ).apply { setReferenceCounted(false) }
+            }
+            if (bridgeScreenOffWakeLock?.isHeld != true) {
+                bridgeScreenOffWakeLock?.acquire()
+                AppLogger.i(
+                    TAG,
+                    "AI Limbs bridge screen-off WakeLock acquired: reason=$reason, " +
+                        "provider=${aiLimbsBridgeManager.activeProfile.id}, deviceIdle=${powerManager.isDeviceIdleMode}"
+                )
+            }
+        } else {
+            releaseBridgeScreenOffWakeLock(reason)
+        }
+    }
+
+    private fun releaseBridgeScreenOffWakeLock(reason: String) {
+        val wakeLock = bridgeScreenOffWakeLock ?: return
+        if (wakeLock.isHeld) {
+            runCatching { wakeLock.release() }
+                .onSuccess { AppLogger.i(TAG, "AI Limbs bridge screen-off WakeLock released: reason=$reason") }
+                .onFailure { AppLogger.w(TAG, "Failed to release AI Limbs bridge screen-off WakeLock", it) }
+        }
+    }
+
     private fun hasPersistentForegroundResponsibility(): Boolean {
         val alwaysListeningEnabled = wakeListeningEnabled || isAlwaysListeningEnabledNow()
         val externalHttpEnabled = externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
@@ -1100,7 +1184,9 @@ class AIForegroundService : Service() {
         observeChatRuntimeStats()
         startWakeMonitoring()
         startExternalHttpMonitoring()
+        registerBridgeScreenStateReceiver()
         aiLimbsBridgeManager.startIfDesired()
+        updateBridgeScreenOffWakeLock("service_create")
         AppLogger.i(TAG, "AI Limbs bridge manager initialized")
         AppLogger.d(TAG, "AI 前台服务已启动。")
     }
@@ -1512,6 +1598,8 @@ class AIForegroundService : Service() {
             "AIForegroundService onDestroy: bridge=${aiLimbsBridgeManager.statusSummary()}"
         )
         aiLimbsBridgeManager.stopRuntime()
+        releaseBridgeScreenOffWakeLock("service_destroy")
+        unregisterBridgeScreenStateReceiver()
         stopWakeMonitoring()
         cancelLegacyRdcNotification()
         AppLogger.d(TAG, "AI 前台服务已销毁。")
@@ -2117,6 +2205,7 @@ class AIForegroundService : Service() {
         serviceScope.launch {
             var lastSignature: String? = null
             aiLimbsBridgeManager.state.collect { state ->
+                updateBridgeScreenOffWakeLock("bridge_state:${state.phase}")
                 val signature = bridgeNotificationSignature(state)
                 if (signature != lastSignature) {
                     lastSignature = signature

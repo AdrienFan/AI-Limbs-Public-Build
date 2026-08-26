@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatQueueChangedEvent
 import com.ai.assistance.operit.util.AppLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -88,6 +89,36 @@ internal class AiLimbsRdcRealtimeTransport(
     }
 
     suspend fun notifyResult(callId: String): Boolean {
+        return broadcastAndAwaitAck(
+            event = "result",
+            payload = JSONObject().put("call_id", callId)
+        )
+    }
+
+    suspend fun notifyLanerChatQueueChanged(event: LanerChatQueueChangedEvent): Boolean {
+        return broadcastAndAwaitAck(
+            event = "laner_chat_queue_changed",
+            payload = JSONObject()
+                .put("schema_version", 2)
+                .put("event", "queue_changed")
+                .put("event_id", event.eventId)
+                .put("reason", event.reason)
+                .put("session_id", event.sessionId ?: JSONObject.NULL)
+                .put("latest_seq", event.latestSeq)
+                .put("pending_count", event.pendingCount)
+                .put("unresolved_count", event.unresolvedCount)
+                .put("highest_priority", event.highestPriority?.name ?: JSONObject.NULL)
+                .put("high_count", event.highCount)
+                .put("normal_count", event.normalCount)
+                .put("low_count", event.lowCount)
+                .put("active_turn_id", event.activeTurnId ?: JSONObject.NULL)
+                .put("scheduler_paused", event.schedulerPaused)
+                .put("attention_required", event.attentionRequired)
+                .put("contains_body", false)
+        )
+    }
+
+    private suspend fun broadcastAndAwaitAck(event: String, payload: JSONObject): Boolean {
         if (!readyState) return false
         val pushRef = ref()
         val ack = CompletableDeferred<Boolean>()
@@ -97,8 +128,8 @@ internal class AiLimbsRdcRealtimeTransport(
             event = "broadcast",
             payload = JSONObject()
                 .put("type", "broadcast")
-                .put("event", "result")
-                .put("payload", JSONObject().put("call_id", callId)),
+                .put("event", event)
+                .put("payload", payload),
             ref = pushRef,
             joinRef = joinRef
         )

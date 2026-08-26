@@ -5,10 +5,13 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
 import android.os.Build
+import android.os.SystemClock
 import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.ai.assistance.operit.BuildConfig
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatQueueChangedEvent
 import com.ai.assistance.operit.util.AppLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -32,6 +35,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
@@ -55,7 +59,8 @@ class AiLimbsRdcClient(
     private val accessGate = AiLimbsAccessGate(appContext)
     private val dispatcher = AiLimbsOperitDispatcher(appContext, accessGate)
     private val accessContext = AiLimbsAccessContextService(appContext)
-    private val adapter = AiLimbsRdcToolAdapter(dispatcher)
+    private val lanerChat = LanerChatBridgeService.getInstance(appContext)
+    private val adapter = AiLimbsRdcToolAdapter(appContext, dispatcher)
     private val httpClient =
         OkHttpClient.Builder()
             .retryOnConnectionFailure(true)
@@ -106,9 +111,15 @@ class AiLimbsRdcClient(
                     TAG,
                     if (recoveryDeadlineAtMs == null) "RDC worker started" else "RDC recovery worker started"
                 )
+                val queuePushJob = launch(Dispatchers.IO) {
+                    lanerChat.queueEvents.collect { event ->
+                        notifyLanerChatQueueDoorbell(event)
+                    }
+                }
                 try {
                     runForever(recoveryDeadlineAtMs)
                 } finally {
+                    queuePushJob.cancel()
                     if (runJob === currentJob) {
                         runJob = null
                         isRunning = false
@@ -346,8 +357,15 @@ class AiLimbsRdcClient(
                     lastHeartbeatAtMs = lastHeartbeatAt,
                     reconnectAttemptValue = 0
                 )
+                notifyLanerChatQueueDoorbell(lanerChat.queueSnapshotEvent("reconnect_sync"), transport)
 
+                var lastTransportTickElapsedMs = SystemClock.elapsedRealtime()
                 while (currentCoroutineContext().isActive) {
+                    val tickElapsedMs = SystemClock.elapsedRealtime()
+                    val schedulerGapMs = tickElapsedMs - lastTransportTickElapsedMs
+                    if (schedulerGapMs >= TRANSPORT_SCHEDULER_GAP_RECONNECT_MS) {
+                        throw SchedulerGapException(schedulerGapMs)
+                    }
                     transport.throwIfFailed()
                     val now = System.currentTimeMillis()
                     if (now - lastHeartbeatAt >= HEARTBEAT_INTERVAL_MS) {
@@ -365,6 +383,7 @@ class AiLimbsRdcClient(
                             reconnectAttemptValue = 0
                         )
                     }
+                    lastTransportTickElapsedMs = SystemClock.elapsedRealtime()
                     delay(TRANSPORT_TICK_MS)
                 }
             } catch (e: CancellationException) {
@@ -374,6 +393,26 @@ class AiLimbsRdcClient(
                 attemptTransport?.let { closeRealtimeTransport(it) }
                 finishRecoveryFailure(e.message ?: "已有 RDC 授权无法恢复，请重新配对")
                 return
+            } catch (e: SchedulerGapException) {
+                attemptTransport?.let { closeRealtimeTransport(it) }
+                reconnectAttempt += 1
+                AppLogger.w(
+                    TAG,
+                    "RDC scheduler gap detected: gap=${e.gapMs}ms; rebuilding Realtime transport"
+                )
+                if (recoveryMode) {
+                    updateState(
+                        AiLimbsBridgePhase.RECOVERING,
+                        "检测到系统休眠/调度暂停 ${e.gapMs}ms，正在重建 RDC Realtime"
+                    )
+                    if (!delayWithinRecoveryWindow(SCHEDULER_GAP_RECONNECT_DELAY_MS, recoveryDeadline)) return
+                } else {
+                    updateState(
+                        AiLimbsBridgePhase.RECONNECTING,
+                        "检测到系统休眠/调度暂停 ${e.gapMs}ms，正在快速重连"
+                    )
+                    delay(SCHEDULER_GAP_RECONNECT_DELAY_MS)
+                }
             } catch (e: UnauthorizedException) {
                 attemptTransport?.let { closeRealtimeTransport(it) }
                 reconnectAttempt += 1
@@ -511,6 +550,13 @@ class AiLimbsRdcClient(
         val accessToken = preferences.getString(KEY_ACCESS_TOKEN, null).orEmpty()
         val refreshToken = preferences.getString(KEY_REFRESH_TOKEN, null).orEmpty()
         if (deviceId.isNotBlank() && accessToken.isNotBlank()) {
+            val expiresAtMs = accessTokenExpiryMs(accessToken)
+            val remainingMs = expiresAtMs?.minus(System.currentTimeMillis())
+            if (remainingMs != null && remainingMs <= ACCESS_TOKEN_REFRESH_MARGIN_MS && refreshToken.isNotBlank()) {
+                AppLogger.i(TAG, "RDC access token near expiry (${remainingMs}ms remaining); proactively refreshing device=${shortDeviceId(deviceId)}")
+                refreshSession(info, deviceId, refreshToken)?.let { return it }
+                AppLogger.w(TAG, "RDC proactive token refresh failed; continuing with saved access token for retry")
+            }
             AppLogger.i(TAG, "RDC saved session restored for device=${shortDeviceId(deviceId)}")
             return Session(deviceId, accessToken, refreshToken)
         }
@@ -684,7 +730,10 @@ class AiLimbsRdcClient(
             .put("app_version", BuildConfig.VERSION_NAME)
             .put("ai_limbs", true)
         if (broadcastCapable) {
-            capabilities.put("transport_broadcast_v1", true)
+            capabilities
+                .put("transport_broadcast_v1", true)
+                .put("laner_chat_queue_push_v1", true)
+                .put("laner_chat_turn_protocol_v5", true)
         }
         val body = JSONObject()
             .put("status", "online")
@@ -845,6 +894,36 @@ class AiLimbsRdcClient(
                     .put("error_message", e.message ?: "AI Limbs tool call failed")
             )
             notifyResultDoorbell(callId)
+        }
+    }
+
+    private suspend fun notifyLanerChatQueueDoorbell(
+        event: LanerChatQueueChangedEvent,
+        transportOverride: AiLimbsRdcRealtimeTransport? = null
+    ) {
+        val transport = transportOverride ?: realtimeTransport ?: return
+        val notified = try {
+            transport.notifyLanerChatQueueChanged(event)
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            AppLogger.w(
+                TAG,
+                "Laner Chat queue doorbell send failed: reason=${event.reason}, event=${event.eventId}",
+                e
+            )
+            false
+        }
+        if (notified) {
+            AppLogger.d(
+                TAG,
+                "Laner Chat queue doorbell acknowledged: reason=${event.reason}, latestSeq=${event.latestSeq}"
+            )
+        } else {
+            AppLogger.w(
+                TAG,
+                "Laner Chat queue doorbell was not acknowledged: reason=${event.reason}, latestSeq=${event.latestSeq}"
+            )
         }
     }
 
@@ -1033,6 +1112,15 @@ class AiLimbsRdcClient(
             )
         )
 
+    private fun accessTokenExpiryMs(accessToken: String): Long? {
+        return runCatching {
+            val payload = accessToken.split('.').getOrNull(1) ?: return@runCatching null
+            val decoded = Base64.decode(payload, Base64.URL_SAFE or Base64.NO_WRAP)
+            val expSeconds = JSONObject(String(decoded, StandardCharsets.UTF_8)).optLong("exp", 0L)
+            expSeconds.takeIf { it > 0L }?.times(1000L)
+        }.getOrNull()
+    }
+
     private fun deviceName(): String =
         "AI Limbs ${Build.MANUFACTURER} ${Build.MODEL}".trim()
 
@@ -1097,6 +1185,9 @@ class AiLimbsRdcClient(
 
     private class RecoveryRequiresPairingException(message: String) : IllegalStateException(message)
 
+    private class SchedulerGapException(val gapMs: Long) :
+        IllegalStateException("RDC scheduler gap: ${gapMs}ms")
+
     private class UnauthorizedException : IllegalStateException()
 
     companion object {
@@ -1111,12 +1202,15 @@ class AiLimbsRdcClient(
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
         private const val ONLINE_STALE_AFTER_MS = HEARTBEAT_INTERVAL_MS * 3
         private const val TRANSPORT_TICK_MS = 500L
+        private const val TRANSPORT_SCHEDULER_GAP_RECONNECT_MS = 30_000L
+        private const val SCHEDULER_GAP_RECONNECT_DELAY_MS = 250L
         private const val REALTIME_JOIN_TIMEOUT_MS = 15_000L
         private const val REALTIME_HEARTBEAT_ACK_TIMEOUT_MS = 5_000L
         private const val RECOVERY_TIMEOUT_MS = 120_000L
         private const val RECONNECT_BASE_DELAY_MS = 2_000L
         private const val RECONNECT_MAX_DELAY_MS = 120_000L
         private const val RECONNECT_JITTER_PERCENT = 15L
+        private const val ACCESS_TOKEN_REFRESH_MARGIN_MS = 60_000L
         private const val MAX_CONCURRENT_REMOTE_CALLS = 4
 
         private const val PREF_FILE = "ai_limbs_rdc"

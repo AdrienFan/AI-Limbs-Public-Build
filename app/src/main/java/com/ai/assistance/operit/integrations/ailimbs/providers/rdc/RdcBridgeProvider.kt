@@ -30,6 +30,8 @@ internal class RdcBridgeProvider private constructor(
         get() = "${client.state.value.phase}: ${client.state.value.detail}"
     override val supportedActions: Set<BridgeAction>
         get() = SUPPORTED_ACTIONS
+    override val requiresScreenOffCpuKeepAlive: Boolean
+        get() = true
 
     override fun start() = client.start()
     override fun stopByUser() = client.stopByUser()

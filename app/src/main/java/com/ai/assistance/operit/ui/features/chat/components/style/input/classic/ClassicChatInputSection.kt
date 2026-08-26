@@ -87,6 +87,7 @@ fun ClassicChatInputSection(
     onQueueMessage: () -> Unit,
     onCancelMessage: () -> Unit,
     isLoading: Boolean,
+    directSendWhileProcessing: Boolean = false,
     inputState: InputProcessingState = InputProcessingState.Idle,
     allowTextInputWhileProcessing: Boolean = false,
     onAttachmentRequest: (String) -> Unit = {},
@@ -181,8 +182,8 @@ fun ClassicChatInputSection(
 
     val hasDraftText = userMessage.text.isNotBlank()
     val canSendMessage = hasDraftText || attachments.isNotEmpty()
-    val showQueueAction = isProcessing && hasDraftText
-    val showCancelAction = isProcessing && !showQueueAction
+    val showQueueAction = isProcessing && hasDraftText && !directSendWhileProcessing
+    val showCancelAction = isProcessing && !directSendWhileProcessing && !showQueueAction
     val sendButtonEnabled =
         when {
             isProcessing -> true // Queue / Cancel button

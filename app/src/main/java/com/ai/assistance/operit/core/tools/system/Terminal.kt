@@ -93,6 +93,12 @@ class Terminal private constructor(private val context: Context) {
         AppLogger.d(TAG, "Session ${newSession.id} initialized successfully")
         return newSession.id
     }
+
+    suspend fun createBackgroundSession(title: String? = null): String {
+        val newSession = terminalManager.createBackgroundSession(title)
+        AppLogger.d(TAG, "Background session ${newSession.id} initialized successfully")
+        return newSession.id
+    }
     
     /**
      * 切换到指定会话
@@ -217,6 +223,16 @@ class Terminal private constructor(private val context: Context) {
         terminalManager.sendInput(input)
     }
 
+    fun sendInputToSession(sessionId: String, input: String) {
+        terminalManager.sendInputToSession(sessionId, input)
+    }
+
+    suspend fun sendInputToSessionNow(sessionId: String, input: String): Boolean =
+        terminalManager.sendInputToSessionNow(sessionId, input)
+
+    fun isSessionWaitingForInput(sessionId: String): Boolean =
+        terminalManager.isSessionWaitingForInput(sessionId)
+
     /**
      * 发送中断信号 (Ctrl+C)
      */
@@ -224,6 +240,27 @@ class Terminal private constructor(private val context: Context) {
         terminalManager.switchToSession(sessionId)
         terminalManager.sendInterruptSignal()
     }
+
+    fun sendInterruptSignalToSession(sessionId: String) {
+        terminalManager.sendInterruptSignalToSession(sessionId)
+    }
+
+    suspend fun sendInterruptSignalToSessionNow(sessionId: String): Boolean =
+        terminalManager.sendInterruptSignalToSessionNow(sessionId)
+
+    suspend fun registerHiddenAiOperation(): Boolean = terminalManager.registerHiddenAiOperation()
+
+    fun unregisterHiddenAiOperation() = terminalManager.unregisterHiddenAiOperation()
+
+    fun beginSharedHiddenOperation(command: String): String =
+        terminalManager.beginSharedHiddenOperation(command)
+
+    fun appendSharedHiddenOperationOutput(operationId: String, chunk: String) =
+        terminalManager.appendSharedHiddenOperationOutput(operationId, chunk)
+
+    fun finishSharedHiddenOperation(operationId: String, output: String?, error: String?) =
+        terminalManager.finishSharedHiddenOperation(operationId, output, error)
+
 
     /** 检查本地 Ubuntu 运行时是否已显式启动。 */
     fun isConnected(): Boolean {

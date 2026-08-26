@@ -84,6 +84,7 @@ import com.ai.assistance.operit.services.core.MessageProcessingDelegate
 import com.ai.assistance.operit.services.core.ChatHistoryDelegate
 import com.ai.assistance.operit.services.core.ApiConfigDelegate
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import com.ai.assistance.operit.services.core.TokenStatisticsDelegate
 import com.ai.assistance.operit.services.core.AttachmentDelegate
 import com.ai.assistance.operit.services.core.MessageCoordinationDelegate
@@ -1476,6 +1477,11 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             promptFunctionType = promptFunctionType,
             preferActiveRoleCard = true,
         )
+    }
+
+    fun sendLanerBridgeMessage(priority: LanerChatPriority) {
+        hideMentionSuggestionPanel()
+        messageCoordinationDelegate.sendLanerBridgeMessage(priority)
     }
 
     fun sendTextMessage(text: String, promptFunctionType: PromptFunctionType = PromptFunctionType.CHAT) {

@@ -276,6 +276,25 @@ class AiLimbsCapabilityResolver(context: Context) {
             }
         }
 
+        if (definition.provider == PROVIDER_BRIDGE) {
+            val bridge = AiLimbsBridgeManager.runtimeState.value
+            prerequisites += "Bridge provider: ${bridge.providerId}"
+            prerequisites += "Bridge phase: ${bridge.phase.name}"
+            if (
+                definition.invokeId == "ai_limbs.bridge.reconnect" &&
+                    BridgeAction.RECONNECT !in AiLimbsBridgeManager.availableActions(appContext, bridge)
+            ) {
+                return AiLimbsCapabilityAvailability(
+                    available = false,
+                    permission = permission,
+                    requiresConfirmation = false,
+                    reason = "Bridge reconnect is not available while ${bridge.providerId} is ${bridge.phase.name}.",
+                    resolution = "Wait for a reconnectable Bridge phase or use the local Bridge Center recovery controls.",
+                    prerequisites = prerequisites
+                )
+            }
+        }
+
         if (definition.provider == "ubuntu") {
             val terminal = Terminal.getInstance(appContext)
             val phase = terminal.currentUbuntuRuntimeState().phase.name
@@ -472,6 +491,7 @@ class AiLimbsCapabilityResolver(context: Context) {
         .put("invoke_id", definition.invokeId)
 
     private fun providerFor(entry: ToolCatalogEntry): String = when {
+        entry.targetToolName.startsWith("ai_limbs.bridge.") -> PROVIDER_BRIDGE
         entry.targetToolName.startsWith("capability.") ||
             entry.targetToolName.startsWith("ai_limbs.") ||
             entry.targetToolName == "operit.tools.list" -> PROVIDER_CORE
@@ -483,6 +503,8 @@ class AiLimbsCapabilityResolver(context: Context) {
     }
 
     private fun sourceLocator(definition: AiLimbsCapabilityDefinition): String = when {
+        definition.provider == PROVIDER_BRIDGE ->
+            "ai-limbs://bridge/${definition.invokeId.removePrefix("ai_limbs.bridge.")}"
         definition.provider == PROVIDER_CORE -> "ai-limbs://core/${definition.invokeId}"
         definition.invokeId.startsWith(AUTOMATIC_UI_BASE_PREFIX) ->
             "assets://packages/automatic_ui_base.js#${definition.invokeId.substringAfter(':')}"
@@ -529,6 +551,7 @@ class AiLimbsCapabilityResolver(context: Context) {
         const val CAPABILITY_PROTOCOL_VERSION = 1
         const val MAX_SEARCH_RESULTS = 5
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
+        const val PROVIDER_BRIDGE = "ai_limbs_bridge"
         const val AUTOMATIC_UI_BASE_PREFIX = "Automatic_ui_base:"
         const val AUTOMATIC_UI_SUBAGENT_PREFIX = "Automatic_ui_subagent:"
 
@@ -560,6 +583,12 @@ class AiLimbsCapabilityResolver(context: Context) {
                 "兰儿 Ubuntu 共享窗口状态",
                 listOf("ai.ubuntu.share.status"),
                 listOf("共享窗口", "眼睛", "只读", "兰儿正在操作")
+            ),
+            "ai_limbs.bridge.reconnect" to SemanticMetadata(
+                "bridge.reconnect",
+                "请求 AI Limbs Bridge 重新连接",
+                listOf("rdc.reconnect", "ai.bridge.reconnect"),
+                listOf("Bridge", "RDC", "重连", "重新连接", "连接恢复", "reconnect")
             ),
             "Automatic_ui_base:get_page_screenshot_image" to SemanticMetadata(
                 "ui.screen.capture",

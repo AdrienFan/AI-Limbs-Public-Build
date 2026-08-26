@@ -44,6 +44,9 @@ class AiLimbsBridgeManager(
     val shouldKeepAlive: Boolean
         get() = provider.enabled && desiredConnected()
 
+    val requiresScreenOffCpuKeepAlive: Boolean
+        get() = provider.enabled && provider.requiresScreenOffCpuKeepAlive
+
     fun availableActions(
         state: AiLimbsBridgeState = this.state.value
     ): List<BridgeAction> {
