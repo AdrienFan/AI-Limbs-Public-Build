@@ -32,7 +32,7 @@ internal class AiLimbsRdcRealtimeTransport(
     private val deviceId: String,
     private val deviceName: String,
     private val appVersion: String,
-    private val onNewCall: (String) -> Unit
+    private val onNewCall: (String, String) -> Unit
 ) {
     private val nextRef = AtomicLong(0L)
     private val ready = CompletableDeferred<Unit>()
@@ -203,7 +203,13 @@ internal class AiLimbsRdcRealtimeTransport(
             when (event) {
                 "phx_reply" -> handleReply(ref, payload)
                 "broadcast" -> handleBroadcast(payload)
-                "postgres_changes" -> handlePostgresChange(topicName, payload)
+                "postgres_changes" -> {
+                    AppLogger.d(
+                        TAG,
+                        "RDC ingress frame source=postgres_changes topic=$topicName keys=${payload.names()?.toString() ?: "[]"}"
+                    )
+                    handlePostgresChange(topicName, payload)
+                }
                 "phx_error" -> {
                     if (topicName == legacyTopic) {
                         legacyReadyState = false
@@ -256,7 +262,14 @@ internal class AiLimbsRdcRealtimeTransport(
             legacyJoinRef -> {
                 legacyReadyState = ok
                 if (ok) {
-                    AppLogger.i(TAG, "RDC legacy Postgres Changes safety net is ready")
+                    val registered = payload
+                        .optJSONObject("response")
+                        ?.optJSONArray("postgres_changes")
+                        ?.length() ?: -1
+                    AppLogger.i(
+                        TAG,
+                        "RDC legacy Postgres Changes safety net is ready: registered=$registered"
+                    )
                 } else {
                     AppLogger.w(TAG, "RDC legacy Postgres Changes join was rejected; primary doorbell remains active: $payload")
                 }
@@ -313,17 +326,33 @@ internal class AiLimbsRdcRealtimeTransport(
 
     private fun handlePostgresChange(topicName: String, payload: JSONObject) {
         if (topicName != legacyTopic) return
-        val data = payload.optJSONObject("data") ?: return
+        val data = payload.optJSONObject("data")
+        if (data == null) {
+            AppLogger.w(TAG, "RDC postgres_changes frame missing data object")
+            return
+        }
         if (data.optString("type") != "INSERT") return
         if (data.optString("schema") != "public") return
         if (data.optString("table") != "mcp_remote_calls") return
-        val record = data.optJSONObject("record") ?: return
+        val record = data.optJSONObject("record")
+        if (record == null) {
+            AppLogger.w(TAG, "RDC postgres_changes INSERT missing record object")
+            return
+        }
         val callId = record.optString("id")
         val targetDeviceId = record.optString("device_id")
-        if (callId.isBlank()) return
+        if (callId.isBlank()) {
+            AppLogger.w(TAG, "RDC postgres_changes INSERT missing call id")
+            return
+        }
         if (targetDeviceId.isNotBlank() && targetDeviceId != deviceId) return
-        AppLogger.d(TAG, "RDC legacy Postgres Changes doorbell received: call=…${callId.takeLast(10)}")
-        onNewCall(callId)
+        AppLogger.i(
+            TAG,
+            "RDC ingress observed source=postgres_changes call=…${callId.takeLast(10)} " +
+                "tool=${record.optString("tool_name").ifBlank { "unknown" }} " +
+                "status=${record.optString("status").ifBlank { "unknown" }}"
+        )
+        onNewCall(callId, "postgres_changes")
     }
 
     private fun handleBroadcast(payload: JSONObject) {
@@ -333,7 +362,12 @@ internal class AiLimbsRdcRealtimeTransport(
         val targetDeviceId = doorbell.optString("device_id")
         if (callId.isBlank()) return
         if (targetDeviceId.isNotBlank() && targetDeviceId != deviceId) return
-        onNewCall(callId)
+        AppLogger.i(
+            TAG,
+            "RDC ingress observed source=broadcast call=…${callId.takeLast(10)} " +
+                "target=${if (targetDeviceId.isBlank()) "unspecified" else "…${targetDeviceId.takeLast(12)}"}"
+        )
+        onNewCall(callId, "broadcast")
     }
 
     private fun sendFrame(

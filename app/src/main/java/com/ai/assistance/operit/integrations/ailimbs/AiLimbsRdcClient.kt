@@ -276,6 +276,7 @@ class AiLimbsRdcClient(
             }
 
             var attemptTransport: AiLimbsRdcRealtimeTransport? = null
+            var attemptPendingProbeJob: Job? = null
             try {
                 if (recoveryMode) {
                     updateState(
@@ -310,10 +311,10 @@ class AiLimbsRdcClient(
                         deviceId = session.deviceId,
                         deviceName = deviceName(),
                         appVersion = BuildConfig.VERSION_NAME,
-                        onNewCall = { callId ->
+                        onNewCall = { callId, ingressSource ->
                             scope.launch(Dispatchers.IO) {
                                 try {
-                                    handleDoorbellCall(info, session, callId)
+                                    handleDoorbellCall(info, session, callId, ingressSource)
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: UnauthorizedException) {
@@ -324,7 +325,7 @@ class AiLimbsRdcClient(
                                 } catch (e: Exception) {
                                     AppLogger.e(
                                         TAG,
-                                        "RDC doorbell call failed: call=${shortCallId(callId)}",
+                                        "RDC doorbell call failed: source=$ingressSource call=${shortCallId(callId)}",
                                         e
                                     )
                                 }
@@ -358,6 +359,27 @@ class AiLimbsRdcClient(
                     reconnectAttemptValue = 0
                 )
                 notifyLanerChatQueueDoorbell(lanerChat.queueSnapshotEvent("reconnect_sync"), transport)
+
+                attemptPendingProbeJob = scope.launch(Dispatchers.IO) {
+                    var probeIteration = 0L
+                    while (isActive) {
+                        try {
+                            val pendingCount = probePendingCalls(info, session)
+                            if (pendingCount == 0 && probeIteration % PENDING_CALL_PROBE_HEALTH_EVERY == 0L) {
+                                AppLogger.d(TAG, "RDC pending REST probe healthy: pending=0")
+                            }
+                        } catch (e: CancellationException) {
+                            throw e
+                        } catch (e: UnauthorizedException) {
+                            AppLogger.w(TAG, "RDC pending REST probe lost authorization")
+                            return@launch
+                        } catch (e: Exception) {
+                            AppLogger.e(TAG, "RDC pending REST probe failed", e)
+                        }
+                        probeIteration += 1
+                        delay(PENDING_CALL_PROBE_INTERVAL_MS)
+                    }
+                }
 
                 var lastTransportTickElapsedMs = SystemClock.elapsedRealtime()
                 while (currentCoroutineContext().isActive) {
@@ -447,6 +469,8 @@ class AiLimbsRdcClient(
                     )
                     delay(retryDelay)
                 }
+            } finally {
+                attemptPendingProbeJob?.cancel()
             }
         }
     }
@@ -771,11 +795,45 @@ class AiLimbsRdcClient(
             ?: throw IllegalStateException("RDC device owner lookup returned no user_id")
     }
 
+    private suspend fun probePendingCalls(info: McpInfo, session: Session): Int {
+        val response = authorizedRequest(
+            info,
+            session,
+            "GET",
+            "/rest/v1/mcp_remote_calls?device_id=eq.${encode(session.deviceId)}" +
+                "&status=eq.pending" +
+                "&select=id,device_id,tool_name,status" +
+                "&limit=$PENDING_CALL_PROBE_LIMIT"
+        )
+        ensureAuthorized(response)
+        if (response.code !in 200..299) {
+            throw IllegalStateException("RDC pending probe failed: HTTP ${response.code}")
+        }
+        val rows = JSONArray(response.body)
+        if (rows.length() == 0) return 0
+
+        AppLogger.w(TAG, "RDC pending REST probe found ${rows.length()} pending call(s)")
+        for (index in 0 until rows.length()) {
+            val row = rows.optJSONObject(index) ?: continue
+            val callId = row.optString("id")
+            if (callId.isBlank()) continue
+            AppLogger.w(
+                TAG,
+                "RDC ingress observed source=rest_probe call=${shortCallId(callId)} " +
+                    "tool=${row.optString("tool_name").ifBlank { "unknown" }} status=pending"
+            )
+            handleDoorbellCall(info, session, callId, "rest_probe")
+        }
+        return rows.length()
+    }
+
     private suspend fun handleDoorbellCall(
         info: McpInfo,
         session: Session,
-        callId: String
+        callId: String,
+        ingressSource: String
     ) {
+        AppLogger.i(TAG, "RDC ingress dispatch source=$ingressSource call=${shortCallId(callId)}")
         val response = authorizedRequest(
             info,
             session,
@@ -786,9 +844,31 @@ class AiLimbsRdcClient(
         if (response.code !in 200..299) {
             throw IllegalStateException("RDC doorbell call fetch failed: HTTP ${response.code}")
         }
-        val call = JSONArray(response.body).optJSONObject(0) ?: return
-        if (call.optString("status") != "pending") return
-        if (!claimCall(info, session, callId)) return
+        val call = JSONArray(response.body).optJSONObject(0)
+        if (call == null) {
+            AppLogger.w(TAG, "RDC ingress fetch empty source=$ingressSource call=${shortCallId(callId)}")
+            return
+        }
+        val status = call.optString("status")
+        val toolName = call.optString("tool_name").ifBlank { "unknown" }
+        if (status != "pending") {
+            AppLogger.d(
+                TAG,
+                "RDC ingress ignored source=$ingressSource call=${shortCallId(callId)} " +
+                    "tool=$toolName status=${status.ifBlank { "unknown" }}"
+            )
+            return
+        }
+        AppLogger.i(
+            TAG,
+            "RDC claim attempt source=$ingressSource call=${shortCallId(callId)} tool=$toolName " +
+                "createdAt=${call.optString("created_at").ifBlank { "unknown" }}"
+        )
+        if (!claimCall(info, session, callId)) {
+            AppLogger.d(TAG, "RDC claim lost source=$ingressSource call=${shortCallId(callId)} tool=$toolName")
+            return
+        }
+        AppLogger.i(TAG, "RDC claim won source=$ingressSource call=${shortCallId(callId)} tool=$toolName")
         launchClaimedCall(info, session, call)
     }
 
@@ -838,8 +918,15 @@ class AiLimbsRdcClient(
             prefer = "return=representation"
         )
         ensureAuthorized(response)
-        if (response.code !in 200..299) return false
-        return runCatching { JSONArray(response.body).length() > 0 }.getOrDefault(false)
+        if (response.code !in 200..299) {
+            AppLogger.w(TAG, "RDC claim HTTP failure: call=${shortCallId(callId)} code=${response.code}")
+            return false
+        }
+        val claimed = runCatching { JSONArray(response.body).length() > 0 }.getOrDefault(false)
+        if (!claimed) {
+            AppLogger.d(TAG, "RDC claim returned no row: call=${shortCallId(callId)}")
+        }
+        return claimed
     }
 
     private suspend fun handleClaimedCall(
@@ -1202,6 +1289,9 @@ class AiLimbsRdcClient(
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
         private const val ONLINE_STALE_AFTER_MS = HEARTBEAT_INTERVAL_MS * 3
         private const val TRANSPORT_TICK_MS = 500L
+        private const val PENDING_CALL_PROBE_INTERVAL_MS = 3_000L
+        private const val PENDING_CALL_PROBE_HEALTH_EVERY = 10L
+        private const val PENDING_CALL_PROBE_LIMIT = 20
         private const val TRANSPORT_SCHEDULER_GAP_RECONNECT_MS = 30_000L
         private const val SCHEDULER_GAP_RECONNECT_DELAY_MS = 250L
         private const val REALTIME_JOIN_TIMEOUT_MS = 15_000L
