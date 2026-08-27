@@ -85,13 +85,6 @@ object AiLimbsCoreCapabilityRegistry {
             "Save the editable body of the protected AI Limbs work manual.",
             listOf(ToolParameterSchema("content", "string", "Complete editable manual body", true))
         ),
-        entry("ai_limbs.tool_manual.read", "读取工具手册", "Read the protected AI Limbs tool manual."),
-        entry(
-            "ai_limbs.tool_manual.write",
-            "保存工具手册",
-            "Save the protected AI Limbs tool manual.",
-            listOf(ToolParameterSchema("content", "string", "Complete manual body", true))
-        ),
         entry("ai_limbs.ui.status", "AI Limbs 视觉与触觉状态", "Read live AI Limbs UI and visual-control readiness."),
         entry(
             "ai_limbs.ubuntu.share.status",

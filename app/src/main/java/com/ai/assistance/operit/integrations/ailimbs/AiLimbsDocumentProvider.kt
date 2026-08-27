@@ -1,7 +1,6 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
-import android.os.Environment
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -21,8 +20,7 @@ enum class AiLimbsDocumentId(
 ) {
     SYSTEM_ACCESS_PROMPT("system_access_prompt", "AI_LIMBS_SYSTEM_ACCESS_PROMPT.md"),
     CUSTOM_ACCESS_PROMPT("custom_access_prompt", "AI_LIMBS_CUSTOM_ACCESS_PROMPT.md"),
-    WORK_MANUAL("work_manual", "LANER_WORK_MANUAL.md"),
-    TOOL_MANUAL("tool_manual", "LANER_TOOL_MANUAL.md")
+    WORK_MANUAL("work_manual", "LANER_WORK_MANUAL.md")
 }
 
 data class AiLimbsDocumentReference(
@@ -59,9 +57,6 @@ class AiLimbsDocumentProvider(context: Context) {
     private val workManualPath: String
         get() = documentFile(AiLimbsDocumentId.WORK_MANUAL).absolutePath
 
-    private val toolManualPath: String
-        get() = documentFile(AiLimbsDocumentId.TOOL_MANUAL).absolutePath
-
     suspend fun readSystemAccessPrompt(): String =
         readEditableDocument(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
 
@@ -73,9 +68,6 @@ class AiLimbsDocumentProvider(context: Context) {
 
     suspend fun readWorkManual(): String =
         readEditableDocument(AiLimbsDocumentId.WORK_MANUAL)
-
-    suspend fun readToolManual(): String =
-        readEditableDocument(AiLimbsDocumentId.TOOL_MANUAL)
 
     suspend fun readWorkManualForAgent(): String {
         val body = readWorkManual()
@@ -106,9 +98,6 @@ class AiLimbsDocumentProvider(context: Context) {
             AiLimbsDocumentId.WORK_MANUAL,
             extractEditableWorkManualBody(content)
         )
-
-    suspend fun writeToolManual(content: String): Boolean =
-        writeEditableDocument(AiLimbsDocumentId.TOOL_MANUAL, content)
 
     fun normalizeWorkManualImport(content: String): String =
         extractEditableWorkManualBody(content)
@@ -213,17 +202,14 @@ class AiLimbsDocumentProvider(context: Context) {
         本节由 AI Limbs 生成，不能通过编辑器或文档写入接口修改。
         不得另外建立同类工作手册。
 
-        ## 2. 工具手册
+        ## 2. Ubuntu 工具发现与复用原则
 
-        唯一正式工具手册：
+        Ubuntu 工具事实以 `ail-tool` 实时查询为准。
 
-        $toolManualPath
-
-        正式读取工具：ai_limbs.tool_manual.read
-        正式保存工具：ai_limbs.tool_manual.write
-
-        本节由 AI Limbs 生成，不能通过编辑器或文档写入接口修改。
-        所有开发工具、系统工具、便携工具和重要开发环境必须在工具手册中登记。
+        使用 Ubuntu 工具前：
+        - 先用 `ail-tool` 查询并优先复用现有工具；
+        - 仅在没有合适工具时安装新工具；
+        - 新工具安装并验证后，及时清理无保留价值的安装包、缓存和临时文件。
         """.trimIndent()
 
     private fun extractEditableWorkManualBody(content: String): String {
@@ -239,7 +225,6 @@ class AiLimbsDocumentProvider(context: Context) {
     private fun ensureDocumentsReadyLocked() {
         if (documentsReady) return
         ensureDirectory(documentsDirectory)
-        migrateLegacyDocumentsLocked()
         migrateDocumentSchemaLocked()
         ensureDocumentFilesLocked()
         documentsReady = true
@@ -260,29 +245,10 @@ class AiLimbsDocumentProvider(context: Context) {
         }
     }
 
-    private fun migrateLegacyDocumentsLocked() {
-        // Custom Access Prompt and Work Manual are app-owned documents. New installs must never
-        // silently import them from Ubuntu or shared storage; users can explicitly import text
-        // through Access Manager instead. Tool Manual migration remains until its redesign.
-        val ubuntuRoot =
-            File(
-                appContext.filesDir,
-                "usr/var/lib/proot-distro/installed-rootfs/ubuntu"
-            )
-        migrateDocument(
-            destination = documentFile(AiLimbsDocumentId.TOOL_MANUAL),
-            sources =
-                listOf(
-                    File(ubuntuRoot, "root/laner/docs/${AiLimbsDocumentId.TOOL_MANUAL.fileName}"),
-                    File(ubuntuRoot, "root/${AiLimbsDocumentId.TOOL_MANUAL.fileName}"),
-                    File(legacyDocumentsDirectory(), AiLimbsDocumentId.TOOL_MANUAL.fileName)
-                )
-        )
-    }
-
     private fun migrateDocumentSchemaLocked() {
         val currentSchema = preferences.getInt(KEY_DOCUMENT_SCHEMA_VERSION, 1)
         if (currentSchema >= DOCUMENT_SCHEMA_VERSION) return
+        if (currentSchema < 4) retireToolManualLocked()
 
         val accessPrompt = documentFile(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
         if (accessPrompt.isFile) {
@@ -297,13 +263,25 @@ class AiLimbsDocumentProvider(context: Context) {
         if (workManual.isFile) {
             archivePreV054Document(workManual)
             val content = workManual.readText()
-            val editableBody = extractLegacyWorkManualBody(content)
+            var editableBody = extractLegacyWorkManualBody(content)
+            if (currentSchema < 4) {
+                editableBody = migrateRetiredToolManualRules(editableBody)
+            }
             if (editableBody != content) {
                 writeAtomically(workManual, editableBody)
             }
         }
 
         preferences.edit().putInt(KEY_DOCUMENT_SCHEMA_VERSION, DOCUMENT_SCHEMA_VERSION).apply()
+    }
+
+    private fun retireToolManualLocked() {
+        File(documentsDirectory, RETIRED_TOOL_MANUAL_FILE).delete()
+        File(backupsDirectory, RETIRED_TOOL_MANUAL_STABLE_ID).deleteRecursively()
+        File(legacyArchiveDirectory, "LANER_TOOL_MANUAL_PRE_V054.md").delete()
+        val ubuntuRoot = File(appContext.filesDir, "usr/var/lib/proot-distro/installed-rootfs/ubuntu")
+        File(ubuntuRoot, "root/laner/docs/$RETIRED_TOOL_MANUAL_FILE").delete()
+        File(ubuntuRoot, "root/$RETIRED_TOOL_MANUAL_FILE").delete()
     }
 
     private fun isLegacySystemAccessPrompt(content: String): Boolean =
@@ -320,6 +298,20 @@ class AiLimbsDocumentProvider(context: Context) {
         return content.substring(firstEditableSection.range.first).trimStart('\r', '\n')
     }
 
+    private fun migrateRetiredToolManualRules(content: String): String {
+        var updated = content
+        updated = Regex("(?ms)^## 6\. Ubuntu 工具使用规则\r?\n.*?(?=^## 9\.)").replace(updated, "")
+        updated = Regex("(?ms)^## 13\. 手册同步原则\r?\n.*?(?=^## 14\.)").replace(
+            updated,
+            "## 13. 工作手册同步原则\n\n项目路径、工作目录结构、重要工作流程、当前开发基线或关键协议变化时，应同步更新工作手册。\n\n"
+        )
+        updated = Regex("(?ms)^## 14\. 基本执行顺序\r?\n.*?(?=^## 15\.)").replace(
+            updated,
+            "## 14. 基本执行顺序\n\n读取工作手册 → 使用 `ail-tool` 查询并优先复用现有工具 → 必要时安装并验证新工具 → 清理无保留价值的安装残留 → 执行任务。\n\n"
+        )
+        return updated.trimStart('\r', '\n')
+    }
+
     private fun archivePreV054Document(source: File) {
         ensureDirectory(legacyArchiveDirectory)
         val destination =
@@ -330,12 +322,6 @@ class AiLimbsDocumentProvider(context: Context) {
         if (!destination.exists()) {
             source.copyTo(destination, overwrite = false)
         }
-    }
-
-    private fun migrateDocument(destination: File, sources: List<File>) {
-        if (destination.exists()) return
-        val source = sources.firstOrNull { it.isFile } ?: return
-        source.copyTo(destination, overwrite = false)
     }
 
     private fun createSnapshotLocked(documentId: AiLimbsDocumentId, content: String) {
@@ -416,16 +402,15 @@ class AiLimbsDocumentProvider(context: Context) {
         }
     }
 
-    private fun legacyDocumentsDirectory(): File =
-        File(Environment.getExternalStorageDirectory(), "Laner/docs")
-
     companion object {
         private const val DOCUMENTS_DIRECTORY = "ai_limbs/docs"
         private const val BACKUPS_DIRECTORY = "backups"
         private const val LEGACY_ARCHIVE_DIRECTORY = "legacy"
         private const val PREFERENCES_NAME = "ai_limbs_documents"
         private const val KEY_DOCUMENT_SCHEMA_VERSION = "document_schema_version"
-        private const val DOCUMENT_SCHEMA_VERSION = 3
+        private const val DOCUMENT_SCHEMA_VERSION = 4
+        private const val RETIRED_TOOL_MANUAL_FILE = "LANER_TOOL_MANUAL.md"
+        private const val RETIRED_TOOL_MANUAL_STABLE_ID = "tool_manual"
         private const val MAX_SNAPSHOTS = 3
         private const val PRE_V054_ARCHIVE_SUFFIX = "_PRE_V054.md"
         private const val SYSTEM_ACCESS_PROMPT_ASSET =

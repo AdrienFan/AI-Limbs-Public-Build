@@ -172,8 +172,6 @@ fun AiLimbsAccessManagerScreen() {
                             documents.writeCustomAccessPrompt(content)
                         AiLimbsDocumentId.WORK_MANUAL ->
                             documents.writeWorkManual(content)
-                        AiLimbsDocumentId.TOOL_MANUAL ->
-                            documents.writeToolManual(content)
                     }
                 toast(if (changed) savedMessage else R.string.laner_document_unchanged)
                 val versions = documents.listSnapshots(documentId)
@@ -270,7 +268,6 @@ fun AiLimbsAccessManagerScreen() {
                     AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> R.string.laner_system_access_prompt_title
                     AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> R.string.laner_access_prompt_title
                     AiLimbsDocumentId.WORK_MANUAL -> R.string.laner_work_manual_title
-                    AiLimbsDocumentId.TOOL_MANUAL -> R.string.laner_tool_manual_title
                 }
             )
         AlertDialog(

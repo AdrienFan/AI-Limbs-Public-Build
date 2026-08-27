@@ -8304,7 +8304,6 @@
     <string name="laner_system_access_prompt_title">System Access Prompt</string>
     <string name="laner_access_prompt_title">Custom Access Prompt</string>
     <string name="laner_work_manual_title">Work Manual</string>
-    <string name="laner_tool_manual_title">Tool Manual</string>
     <string name="laner_document_history">Recent backups</string>
     <string name="laner_document_history_empty">No backups yet</string>
     <string name="laner_restore">Restore backup</string>
@@ -8321,7 +8320,6 @@
     <string name="laner_access_saved">Custom access prompt saved</string>
     <string name="laner_system_access_saved">System access prompt saved</string>
     <string name="laner_work_manual_saved">Work manual saved</string>
-    <string name="laner_tool_manual_saved">Tool manual saved</string>
     <string name="laner_document_unchanged">Content is unchanged</string>
     <string name="laner_document_restored">Backup restored</string>
 </resources>

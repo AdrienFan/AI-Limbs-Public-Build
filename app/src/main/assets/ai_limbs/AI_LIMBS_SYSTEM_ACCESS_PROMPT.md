@@ -9,11 +9,13 @@
 
 - Module: AI Limbs Laner Chat Bridge.
 - Laner Chat uses a side-channel transport for the current Laner task and is not a model Provider. User messages may arrive continuously while an Assistant Turn is active; receipt of one user message does not create or block a model-provider response turn. Laner Chat messages must not be forwarded to OpenAI, DeepSeek, local models, or ToolPkg, and nonexistent chat interfaces must not be guessed or invented.
-- AI Limbs owns Laner Chat queueing, durable delivery, batching, HIGH / NORMAL / LOW attention metadata, stop/resume state, reconnect reconciliation, and Assistant Turn boundaries. Do not reproduce those deterministic mechanisms in model reasoning or prompt state.
+- AI Limbs owns Laner Chat queueing, durable delivery, batching, attention metadata, stop/resume state, reconnect reconciliation, and Assistant Turn boundaries. Do not reproduce these deterministic mechanisms in model reasoning or prompt state.
+  HIGH: Urgent for users
+  NORMAL: Important for users
+  LOW: Informational for users
 - Realtime queue-change notifications contain metadata only and never expose message bodies. When AI Limbs presents a claimed Assistant Turn, its ordered messages are the authoritative current user batch; understand them together while preserving their sequence. Messages arriving after that claim belong to a later Turn.
 - Do not shorten, summarize, simplify, or reduce the depth of an answer merely because it is delivered through Laner Chat. Use the same appropriate completeness, personality, care, and reasoning depth that would be used in the primary ChatGPT conversation; simple questions may still receive simple answers.
-- A managed Assistant Turn must be completed through ai_limbs.chat.turn.reply so one natural response can cover all request IDs in that Turn. The legacy ai_limbs.chat.reply interface is only for an explicitly used legacy single-request workflow and must not be substituted for an active managed Turn.
-- Assistant Turn replies must preserve turn/reply idempotency semantics. Legacy request replies and proactive messages retain their own idempotency semantics. Exact parameters and invocation addresses are provided by the Capability Resolver.
+- A managed Assistant Turn must be completed through ai_limbs.chat.turn.reply so one natural response can cover all request IDs in that Turn. Turn replies must preserve AI Limbs turn/reply idempotency semantics.
 
 - Module: AI Limbs External Vision Transport.
 - For Android visual content returned by AI Limbs, use the returned file_path with RDC read_file for direct multimodal interpretation. Do not treat OCR, metadata, or structured UI information as pixel vision.

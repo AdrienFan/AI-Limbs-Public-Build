@@ -98,14 +98,6 @@ class AiLimbsOperitDispatcher(
             val changed = documents.writeWorkManual(args.optString("content"))
             ok().put("document", AiLimbsDocumentId.WORK_MANUAL.stableId).put("changed", changed)
         }
-        "ai_limbs.tool_manual.read" ->
-            ok()
-                .put("document", AiLimbsDocumentId.TOOL_MANUAL.stableId)
-                .put("content", documents.readToolManual())
-        "ai_limbs.tool_manual.write" -> {
-            val changed = documents.writeToolManual(args.optString("content"))
-            ok().put("document", AiLimbsDocumentId.TOOL_MANUAL.stableId).put("changed", changed)
-        }
         "capability.search" ->
             capabilityResolver.search(
                 query = args.optString("query"),

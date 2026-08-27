@@ -8323,7 +8323,6 @@
     <string name="laner_system_access_prompt_title">系统接入提示</string>
     <string name="laner_access_prompt_title">自定义接入提示</string>
     <string name="laner_work_manual_title">工作手册</string>
-    <string name="laner_tool_manual_title">工具手册</string>
     <string name="laner_document_history">最近备份</string>
     <string name="laner_document_history_empty">暂无备份</string>
     <string name="laner_restore">恢复备份</string>
@@ -8340,7 +8339,6 @@
     <string name="laner_access_saved">自定义接入提示已保存</string>
     <string name="laner_system_access_saved">系统接入提示已保存</string>
     <string name="laner_work_manual_saved">工作手册已保存</string>
-    <string name="laner_tool_manual_saved">工具手册已保存</string>
     <string name="laner_document_unchanged">内容没有变化</string>
     <string name="laner_document_restored">备份已恢复</string>
     <string name="laner_priority_high">重要</string>
