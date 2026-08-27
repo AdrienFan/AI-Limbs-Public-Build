@@ -69,7 +69,7 @@ METADATA
                 },
                 {
                     "name": "download_dir",
-                    "description": { "zh": "下载目录 (可选, 默认: /sdcard/Download/Operit/plugins/jmcomic_downloader/downloads)", "en": "Download directory (optional; default: /sdcard/Download/Operit/plugins/jmcomic_downloader/downloads)." },
+                    "description": { "zh": "下载目录 (可选, 默认: /sdcard/Download/AiLimbs/plugins/jmcomic_downloader/downloads)", "en": "Download directory (optional; default: /sdcard/Download/AiLimbs/plugins/jmcomic_downloader/downloads)." },
                     "type": "string",
                     "required": false
                 }
@@ -87,7 +87,7 @@ METADATA
                 },
                 {
                     "name": "download_dir",
-                    "description": { "zh": "下载目录 (可选, 默认: /sdcard/Download/Operit/plugins/jmcomic_downloader/downloads)", "en": "Download directory (optional; default: /sdcard/Download/Operit/plugins/jmcomic_downloader/downloads)." },
+                    "description": { "zh": "下载目录 (可选, 默认: /sdcard/Download/AiLimbs/plugins/jmcomic_downloader/downloads)", "en": "Download directory (optional; default: /sdcard/Download/AiLimbs/plugins/jmcomic_downloader/downloads)." },
                     "type": "string",
                     "required": false
                 }

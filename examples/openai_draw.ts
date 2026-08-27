@@ -7,8 +7,8 @@
       "en": "OpenAI Draw"
   },
   "description": {
-    "zh": "使用 OpenAI 格式的图像生成 API (/v1/images/generations) 根据提示词画图，将图片保存到本地 /sdcard/Download/Operit/plugins/draw/openai_draw/draws/ 目录，并返回 Markdown 图片提示。",
-    "en": "Generate images via an OpenAI-compatible image generation API (/v1/images/generations) from a prompt, save to /sdcard/Download/Operit/plugins/draw/openai_draw/draws/, and return a Markdown image reference."
+    "zh": "使用 OpenAI 格式的图像生成 API (/v1/images/generations) 根据提示词画图，将图片保存到本地 /sdcard/Download/AiLimbs/plugins/draw/openai_draw/draws/ 目录，并返回 Markdown 图片提示。",
+    "en": "Generate images via an OpenAI-compatible image generation API (/v1/images/generations) from a prompt, save to /sdcard/Download/AiLimbs/plugins/draw/openai_draw/draws/, and return a Markdown image reference."
   },
   "category": "Draw",
   "env": [

@@ -2,6 +2,6 @@
 
 This workspace template exists to verify ToolPkg workspace template registration and import.
 
-- Contains a valid `.operit/config.json`
+- Contains a valid `.ailimbs/config.json`
 - Can be selected from workspace creation
 - Can be inspected from package details

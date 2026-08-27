@@ -7,8 +7,8 @@
       "en": "Qwen Draw"
   },
   "description": {
-    "zh": "使用阿里云百炼/DashScope 文生图接口（通义万相/通义千问图像）根据提示词画图（异步任务轮询），将图片保存到本地 /sdcard/Download/Operit/plugins/draw/qwen_draw/draws/ 目录，并返回 Markdown 图片提示。",
-    "en": "Generate images via Alibaba Cloud Model Studio (DashScope) text-to-image API (async task polling), save to /sdcard/Download/Operit/plugins/draw/qwen_draw/draws/, and return a Markdown image reference."
+    "zh": "使用阿里云百炼/DashScope 文生图接口（通义万相/通义千问图像）根据提示词画图（异步任务轮询），将图片保存到本地 /sdcard/Download/AiLimbs/plugins/draw/qwen_draw/draws/ 目录，并返回 Markdown 图片提示。",
+    "en": "Generate images via Alibaba Cloud Model Studio (DashScope) text-to-image API (async task polling), save to /sdcard/Download/AiLimbs/plugins/draw/qwen_draw/draws/, and return a Markdown image reference."
   },
   "env": [
     {

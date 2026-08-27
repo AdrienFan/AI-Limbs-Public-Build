@@ -84,6 +84,6 @@ dependencies {
 - 修改 `build.gradle.kts` 更改构建配置
 - 在 `src/main/java` 中添加新的 Java 类
 - 在 `src/test/java` 中添加单元测试
-- 编辑 `.operit/config.json` 自定义 Operit 命令
+- 编辑 `.ailimbs/config.json` 自定义 AI Limbs 命令
 
 Happy Coding! ☕

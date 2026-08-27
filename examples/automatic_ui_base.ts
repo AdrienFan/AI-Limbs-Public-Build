@@ -114,7 +114,7 @@ const UIAutomationTools = (function () {
 
     async function get_page_screenshot_image(params: {}): Promise<ToolResponse> {
         try {
-            const screenshotDir = OPERIT_CLEAN_ON_EXIT_DIR;
+            const screenshotDir = AI_LIMBS_CLEAN_ON_EXIT_DIR;
 
             // Ensure the directory exists
             await Tools.Files.mkdir(screenshotDir, true);

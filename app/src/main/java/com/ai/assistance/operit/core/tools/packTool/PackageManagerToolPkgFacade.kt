@@ -540,7 +540,7 @@ internal class PackageManagerToolPkgFacade(
 
             if (!WorkspaceConfigReader.hasConfig(destinationDir.absolutePath)) {
                 throw IllegalStateException(
-                    "Workspace template is missing .operit/config.json: ${template.id}"
+                    "Workspace template is missing .ailimbs/config.json (legacy .operit/config.json is also accepted): ${template.id}"
                 )
             }
 

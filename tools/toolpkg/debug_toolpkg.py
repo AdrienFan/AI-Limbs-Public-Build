@@ -18,7 +18,8 @@ from pathlib import Path
 DEBUG_APP_PACKAGE = "com.ai.assistance.operit.debug"
 RELEASE_APP_PACKAGE = "com.ai.assistance.operit"
 SUPPORTED_APP_PACKAGES = (DEBUG_APP_PACKAGE, RELEASE_APP_PACKAGE)
-APP_PACKAGE_ENV = "OPERIT_APP_PACKAGE"
+APP_PACKAGE_ENV = "AI_LIMBS_APP_PACKAGE"
+LEGACY_APP_PACKAGE_ENV = "OPERIT_APP_PACKAGE"
 MANIFEST_FILENAMES = ("manifest.json", "manifest.hjson")
 DEFAULT_LOG_WAIT_SECONDS = 6
 LOGCAT_TAGS = (
@@ -271,7 +272,7 @@ def resolve_app_package(
 ) -> str:
     # Debug and Release APKs expose the same receivers under different applicationIds;
     # resolving before pushing prevents an archive or broadcast from reaching the other APK.
-    configured_package = (requested_package or os.environ.get(APP_PACKAGE_ENV, "")).strip()
+    configured_package = (requested_package or (os.environ.get(APP_PACKAGE_ENV, "") or os.environ.get(LEGACY_APP_PACKAGE_ENV, ""))).strip()
     if configured_package:
         if configured_package not in SUPPORTED_APP_PACKAGES:
             supported = ", ".join(SUPPORTED_APP_PACKAGES)
@@ -283,17 +284,17 @@ def resolve_app_package(
             raise ToolPkgDebugError(
                 f"Application package is not installed on {device_serial}: {configured_package}"
             )
-        print(f"Using Operit application package: {configured_package}")
+        print(f"Using AI Limbs application package: {configured_package}")
         return configured_package
 
     for app_package in SUPPORTED_APP_PACKAGES:
         if _is_app_package_installed(device_serial, app_package):
-            print(f"Using Operit application package: {app_package}")
+            print(f"Using AI Limbs application package: {app_package}")
             return app_package
 
     supported = ", ".join(SUPPORTED_APP_PACKAGES)
     raise ToolPkgDebugError(
-        f"Neither supported Operit application package is installed on {device_serial}: {supported}"
+        f"Neither supported AI Limbs application package is installed on {device_serial}: {supported}"
     )
 
 
@@ -390,7 +391,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "Operit applicationId to debug. Supports com.ai.assistance.operit.debug and "
-            "com.ai.assistance.operit; defaults to OPERIT_APP_PACKAGE or automatic Debug-first detection."
+            "com.ai.assistance.operit; defaults to AI_LIMBS_APP_PACKAGE (legacy OPERIT_APP_PACKAGE is also accepted) or automatic Debug-first detection."
         ),
     )
     parser.add_argument(

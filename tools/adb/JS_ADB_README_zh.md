@@ -175,14 +175,14 @@ tools\adb\execute_js.bat examples\my_script.js main @params.json
 如果两种 APK 同时安装，可以显式指定：
 
 ```cmd
-set OPERIT_APP_PACKAGE=com.ai.assistance.operit.debug
+set AI_LIMBS_APP_PACKAGE=com.ai.assistance.operit.debug
 tools\adb\execute_js.bat examples\my_script.js main @params.json
 ```
 
 Linux/macOS：
 
 ```bash
-OPERIT_APP_PACKAGE=com.ai.assistance.operit.debug ./tools/adb/execute_js.sh examples/my_script.js main '{}'
+AI_LIMBS_APP_PACKAGE=com.ai.assistance.operit.debug ./tools/adb/execute_js.sh examples/my_script.js main '{}'
 ```
 
 ToolPkg 调试安装器支持同样的环境变量，也支持 `--app-package <applicationId>`；示例包热更新脚本支持同名参数。指定的包必须已经安装在所选设备上。
@@ -591,3 +591,5 @@ exports.myFunction = myFunction;
 - 这套工具主要用于开发、调试、验证
 - 它们依赖应用内 Receiver 接收外部 broadcast
 - 在生产环境中应谨慎暴露这类调试入口
+
+> 兼容说明：旧环境变量 `OPERIT_APP_PACKAGE` 仍受支持；新脚本请优先使用 `AI_LIMBS_APP_PACKAGE`。

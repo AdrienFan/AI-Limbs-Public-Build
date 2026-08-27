@@ -13,13 +13,13 @@
 
 - `main.go` - 主程序入口
 - `go.mod` - Go 模块定义
-- `.operit/config.json` - Operit 工作区配置
+- `.ailimbs/config.json` - AI Limbs 工作区配置
 
 ## 自定义
 
 您可以：
 - 添加更多 Go 源文件和包
 - 在 `go.mod` 中管理依赖
-- 在 `.operit/config.json` 中自定义命令
+- 在 `.ailimbs/config.json` 中自定义命令
 
 Happy Gophering! 🐹

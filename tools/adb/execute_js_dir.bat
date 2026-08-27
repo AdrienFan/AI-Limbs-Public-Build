@@ -97,15 +97,17 @@ if %DEVICE_COUNT% equ 1 (
 )
 
 REM Resolve the installed Debug or Release application package.
-set "APP_PACKAGE=%OPERIT_APP_PACKAGE%"
+set "APP_PACKAGE=%AI_LIMBS_APP_PACKAGE%"
+?
+if not defined APP_PACKAGE set "APP_PACKAGE=%OPERIT_APP_PACKAGE%"
 if defined APP_PACKAGE (
     if /I not "!APP_PACKAGE!"=="com.ai.assistance.operit.debug" if /I not "!APP_PACKAGE!"=="com.ai.assistance.operit" (
-        echo Error: Unsupported Operit application package - !APP_PACKAGE!
+        echo Error: Unsupported AI Limbs application package - !APP_PACKAGE!
         exit /b 1
     )
     adb -s "!DEVICE_SERIAL!" shell pm list packages "!APP_PACKAGE!" | findstr /x /c:"package:!APP_PACKAGE!" >nul
     if errorlevel 1 (
-        echo Error: Operit application package is not installed - !APP_PACKAGE!
+        echo Error: AI Limbs application package is not installed - !APP_PACKAGE!
         exit /b 1
     )
 ) else (
@@ -117,13 +119,13 @@ if defined APP_PACKAGE (
         )
     )
     if not defined APP_PACKAGE (
-        echo Error: Neither supported Operit application package is installed
+        echo Error: Neither supported AI Limbs application package is installed
         exit /b 1
     )
 )
 set "EXECUTE_JS_ACTION=com.ai.assistance.operit.EXECUTE_JS"
 set "SCRIPT_EXECUTION_RECEIVER=!APP_PACKAGE!/.core.tools.javascript.ScriptExecutionReceiver"
-echo Using Operit application package: !APP_PACKAGE!
+echo Using AI Limbs application package: !APP_PACKAGE!
 
 endlocal & set "DEVICE_SERIAL=%DEVICE_SERIAL%" & set "APP_PACKAGE=%APP_PACKAGE%" & set "EXECUTE_JS_ACTION=%EXECUTE_JS_ACTION%" & set "SCRIPT_EXECUTION_RECEIVER=%SCRIPT_EXECUTION_RECEIVER%" & set "SUITE_DIR=%SUITE_DIR%" & set "ENTRY_REL=%ENTRY_REL%" & set "ENTRY_REL_LOCAL=%ENTRY_REL_LOCAL%" & set "FUNCTION_NAME=%FUNCTION_NAME%" & set "PARAMS_ARG=%PARAMS_ARG%" & set "ENV_FILE_PATH=%ENV_FILE_PATH%" & set "RESULT_WAIT_SECONDS=%RESULT_WAIT_SECONDS%"
 setlocal EnableExtensions DisableDelayedExpansion

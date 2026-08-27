@@ -51,7 +51,7 @@ fi
 resolve_app_package() {
     # The receiver and js_temp directory are application-scoped; a fixed Release id breaks
     # execution against the Debug APK even when both APKs are installed.
-    local configured_package="${OPERIT_APP_PACKAGE:-}"
+    local configured_package="${AI_LIMBS_APP_PACKAGE:-${OPERIT_APP_PACKAGE:-}}"
     local candidate
 
     if [ -n "$configured_package" ]; then
@@ -59,13 +59,13 @@ resolve_app_package() {
             com.ai.assistance.operit.debug|com.ai.assistance.operit)
                 ;;
             *)
-                echo "Error: Unsupported Operit application package - $configured_package"
+                echo "Error: Unsupported AI Limbs application package - $configured_package"
                 return 1
                 ;;
         esac
         if ! adb -s "$DEVICE_SERIAL" shell pm list packages "$configured_package" |
             tr -d '\r' | grep -Fxq "package:$configured_package"; then
-            echo "Error: Operit application package is not installed - $configured_package"
+            echo "Error: AI Limbs application package is not installed - $configured_package"
             return 1
         fi
         APP_PACKAGE="$configured_package"
@@ -82,14 +82,14 @@ resolve_app_package() {
             fi
         done
         if [ -z "$APP_PACKAGE" ]; then
-            echo "Error: Neither supported Operit application package is installed"
+            echo "Error: Neither supported AI Limbs application package is installed"
             return 1
         fi
     fi
 
     EXECUTE_JS_ACTION="com.ai.assistance.operit.EXECUTE_JS"
     SCRIPT_EXECUTION_RECEIVER="${APP_PACKAGE}/.core.tools.javascript.ScriptExecutionReceiver"
-    echo "Using Operit application package: $APP_PACKAGE"
+    echo "Using AI Limbs application package: $APP_PACKAGE"
 }
 
 # Device detection

@@ -2,7 +2,7 @@ package com.ai.assistance.operit.data.preferences
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.os.Environment
+import com.ai.assistance.operit.util.OperitPaths
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -20,7 +20,6 @@ class FreeUsagePreferences(private val context: Context) {
 
     // 外部文件存储相关
     private val EXTERNAL_VERIFY_FILENAME = "usage_verification.dat"
-    private val EXTERNAL_DIRECTORY = "Operit"
 
     private val prefs: SharedPreferences =
             context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
@@ -89,13 +88,7 @@ class FreeUsagePreferences(private val context: Context) {
 
     /** 获取外部验证文件 */
     private fun getExternalVerificationFile(): File {
-        val downloadsDir =
-                Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val operitDir = File(downloadsDir, EXTERNAL_DIRECTORY)
-        if (!operitDir.exists()) {
-            operitDir.mkdirs()
-        }
-        return File(operitDir, EXTERNAL_VERIFY_FILENAME)
+        return File(OperitPaths.aiLimbsRootDir(), EXTERNAL_VERIFY_FILENAME)
     }
 
     /** 更新外部验证文件 */

@@ -62,7 +62,7 @@ async function callTool(name, params) {
 }
 
 async function run() {
-  const rootDir = '/sdcard/Download/Operit/js_test_ffmpeg_probe_' + Date.now();
+  const rootDir = '/sdcard/Download/AiLimbs/js_test_ffmpeg_probe_' + Date.now();
   ensureDir(rootDir);
 
   const simpleOutput = rootDir + '/simple_color.mp4';

@@ -6,7 +6,8 @@ import java.io.File
 
 object OperitPaths {
 
-    private const val OPERIT_DIR_NAME = "Operit"
+    private const val AI_LIMBS_DIR_NAME = "AiLimbs"
+    private const val LEGACY_OPERIT_DIR_NAME = "Operit"
     private const val CLEAN_ON_EXIT_DIR_NAME = "cleanOnExit"
     private const val PLUGINS_DIR_NAME = "plugins"
     private const val MCP_PLUGINS_DIR_NAME = "mcp_plugins"
@@ -28,16 +29,30 @@ object OperitPaths {
         return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
     }
 
-    fun operitRootDir(): File {
-        return ensureDir(File(downloadsDir(), OPERIT_DIR_NAME))
+    fun aiLimbsRootDir(): File {
+        val downloads = downloadsDir()
+        val primary = File(downloads, AI_LIMBS_DIR_NAME)
+        if (primary.exists()) return ensureDir(primary)
+
+        val legacy = File(downloads, LEGACY_OPERIT_DIR_NAME)
+        if (legacy.exists()) {
+            if (legacy.renameTo(primary)) return ensureDir(primary)
+            return ensureDir(legacy)
+        }
+        return ensureDir(primary)
     }
 
+    /** Source compatibility for callers that still use the old helper name. */
+    fun operitRootDir(): File = aiLimbsRootDir()
+
+    fun legacyOperitRootDir(): File = File(downloadsDir(), LEGACY_OPERIT_DIR_NAME)
+
     fun cleanOnExitDir(): File {
-        return ensureDir(File(operitRootDir(), CLEAN_ON_EXIT_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), CLEAN_ON_EXIT_DIR_NAME))
     }
 
     fun pluginsDir(): File {
-        return ensureDir(File(operitRootDir(), PLUGINS_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), PLUGINS_DIR_NAME))
     }
 
     fun pluginConfigDir(pluginId: String): File {
@@ -57,31 +72,31 @@ object OperitPaths {
     }
 
     fun cleanOnExitInternalDir(context: Context): File {
-        return ensureDir(File(ensureDir(File(context.cacheDir, OPERIT_DIR_NAME)), CLEAN_ON_EXIT_DIR_NAME))
+        return ensureDir(File(ensureDir(File(context.cacheDir, AI_LIMBS_DIR_NAME)), CLEAN_ON_EXIT_DIR_NAME))
     }
 
     fun mcpPluginsDir(): File {
-        return ensureDir(File(operitRootDir(), MCP_PLUGINS_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), MCP_PLUGINS_DIR_NAME))
     }
 
     fun bridgeDir(): File {
-        return ensureDir(File(operitRootDir(), BRIDGE_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), BRIDGE_DIR_NAME))
     }
 
     fun exportsDir(): File {
-        return ensureDir(File(operitRootDir(), EXPORTS_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), EXPORTS_DIR_NAME))
     }
 
     fun workspaceDir(): File {
-        return ensureDir(File(operitRootDir(), WORKSPACE_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), WORKSPACE_DIR_NAME))
     }
 
     fun testDir(): File {
-        return ensureDir(File(operitRootDir(), TEST_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), TEST_DIR_NAME))
     }
 
     fun webSessionDir(): File {
-        return ensureDir(File(operitRootDir(), WEBSESSION_DIR_NAME))
+        return ensureDir(File(aiLimbsRootDir(), WEBSESSION_DIR_NAME))
     }
 
     fun webSessionUserscriptsDir(): File {
@@ -118,36 +133,41 @@ object OperitPaths {
         )
     }
 
-    fun operitRootPathSdcard(): String {
-        return "/sdcard/Download/$OPERIT_DIR_NAME"
+    fun aiLimbsRootPathSdcard(): String {
+        return "/sdcard/Download/${aiLimbsRootDir().name}"
     }
 
+    /** Source compatibility for callers that still use the old helper name. */
+    fun operitRootPathSdcard(): String = aiLimbsRootPathSdcard()
+
+    fun legacyOperitRootPathSdcard(): String = "/sdcard/Download/$LEGACY_OPERIT_DIR_NAME"
+
     fun cleanOnExitPathSdcard(): String {
-        return "${operitRootPathSdcard()}/$CLEAN_ON_EXIT_DIR_NAME"
+        return "${aiLimbsRootPathSdcard()}/$CLEAN_ON_EXIT_DIR_NAME"
     }
 
     fun pluginsPathSdcard(): String {
-        return "${operitRootPathSdcard()}/$PLUGINS_DIR_NAME"
+        return "${aiLimbsRootPathSdcard()}/$PLUGINS_DIR_NAME"
     }
 
     fun bridgePathSdcard(): String {
-        return "${operitRootPathSdcard()}/$BRIDGE_DIR_NAME"
+        return "${aiLimbsRootPathSdcard()}/$BRIDGE_DIR_NAME"
     }
 
     fun exportsPathSdcard(): String {
-        return "${operitRootPathSdcard()}/$EXPORTS_DIR_NAME"
+        return "${aiLimbsRootPathSdcard()}/$EXPORTS_DIR_NAME"
     }
 
     fun workspacePathSdcard(chatId: String): String {
-        return "${operitRootPathSdcard()}/$WORKSPACE_DIR_NAME/$chatId"
+        return "${aiLimbsRootPathSdcard()}/$WORKSPACE_DIR_NAME/$chatId"
     }
 
     fun testPathSdcard(): String {
-        return "${operitRootPathSdcard()}/$TEST_DIR_NAME"
+        return "${aiLimbsRootPathSdcard()}/$TEST_DIR_NAME"
     }
 
     fun webSessionUserscriptsPathSdcard(): String {
-        return "${operitRootPathSdcard()}/$WEBSESSION_DIR_NAME/$USERSCRIPTS_DIR_NAME"
+        return "${aiLimbsRootPathSdcard()}/$WEBSESSION_DIR_NAME/$USERSCRIPTS_DIR_NAME"
     }
 
     private fun ensureDir(dir: File): File {

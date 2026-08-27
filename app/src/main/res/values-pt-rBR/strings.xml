@@ -503,7 +503,7 @@
     <string name="danger_zone">Área de perigo</string>
     <string name="chat_statistics">Estatísticas do histórico de bate-papo</string>
     <string name="current_chats">Existem atualmente %1$d registros de bate-papo</string>
-    <string name="backup_location">O arquivo de backup é salvo na pasta "Downloads/Operit/backup"</string>
+    <string name="backup_location">O arquivo de backup é salvo na pasta "Downloads/AiLimbs/backup"</string>
     <string name="faq_backup">Perguntas frequentes</string>
     <string name="history_filter_role_card">Classificado por cartão de personagem</string>
     <string name="history_filter_role_card_desc">Classificação de três níveis de cartão de personagem-pasta-conversa</string>
@@ -2765,7 +2765,7 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="workspace_error_fetch_changes">Não foi possível obter alterações: %1$s</string>
     <string name="workspace_error_fetch_suggestions">Erro do sistema, verifique a configuração do espaço de trabalho</string>
     <string name="workspace_project_blank_title">Espaço de trabalho em branco</string>
-    <string name="workspace_project_blank_description">Este é um espaço de trabalho em branco contendo apenas a estrutura básica de diretórios. Você pode editar .operit/config.json para configurar o tipo de projeto, servidor e comandos, como: server.enabled, preview.type, comandos, etc.</string>
+    <string name="workspace_project_blank_description">Este é um espaço de trabalho em branco contendo apenas a estrutura básica de diretórios. Você pode editar .ailimbs/config.json para configurar o tipo de projeto, servidor e comandos, como: server.enabled, preview.type, comandos, etc.</string>
     <string name="workspace_project_web_title">Projeto web</string>
     <string name="workspace_project_web_description">Desenvolvimento web HTML/CSS/JavaScript, servidor local habilitado</string>
     <string name="workspace_project_node_title">Projeto Node.js.</string>
@@ -2792,7 +2792,7 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="workspace_close_preview">Fechar visualização</string>
     <string name="workspace_project_suffix">projeto</string>
     <string name="workspace_click_buttons_below">Clique no botão abaixo para executar o comando</string>
-    <string name="workspace_no_commands_configured">Ainda não há comando de configuração\n\nVocê pode adicionar a configuração do botão de comando em .operit/config.json</string>
+    <string name="workspace_no_commands_configured">Ainda não há comando de configuração\n\nVocê pode adicionar a configuração do botão de comando em .ailimbs/config.json</string>
     <string name="workspace_path_label">caminho do espaço de trabalho</string>
     <string name="workspace_preview_button_label_browser">Visualização do navegador</string>
     <string name="workspace_cmd_python_venv_create">Crie um ambiente virtual</string>
@@ -3686,9 +3686,9 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="import_color_qr">Importar código multidimensional</string>
     <string name="scan_color_qr">Digitalize o código QR</string>
     <string name="tavern_json">Taverna JSON</string>
-    <string name="export_tavern_json_desc">Exporte para .json e salve em Download/Operit/exports</string>
+    <string name="export_tavern_json_desc">Exporte para .json e salve em Download/AiLimbs/exports</string>
     <string name="tavern_png">Bar PNG</string>
-    <string name="export_tavern_png_desc">Exporte como uma imagem que pode ser importada para a taverna e salva em Download/Operit/exports</string>
+    <string name="export_tavern_png_desc">Exporte como uma imagem que pode ser importada para a taverna e salva em Download/AiLimbs/exports</string>
     <string name="image_read_error">Não é possível ler a imagem</string>
     <string name="image_parse_error">Não foi possível analisar a imagem</string>
     <string name="color_qr_not_recognized">Incapaz de reconhecer o código multidimensional de cores</string>
@@ -4499,7 +4499,7 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="backup_room_db_restart_later">mais tarde</string>
     <string name="backup_room_db_last_success">Último backup bem-sucedido: %1$s</string>
     <string name="backup_room_db_last_error">Último erro: %1$s</string>
-    <string name="backup_files_location_hint">提示：备份文件保存在 Download/Operit 文件夹</string>
+    <string name="backup_files_location_hint">提示：备份文件保存在 Download/AiLimbs 文件夹</string>
     <string name="backup_raw_snapshot_title">Backup de instantâneo de arquivo (experimental)</string>
     <string name="backup_raw_snapshot_subtitle">Backup e recuperação compactados gerais em unidades de arquivos/diretórios</string>
     <string name="backup_raw_snapshot_desc">Arquivos/shared_prefs/datastore/databases no diretório de dados interno do aplicativo serão empacotados (o ambiente do terminal Linux é muito grande e não tem backup por padrão). A restauração substituirá os dados atuais e exigirá a reinicialização do aplicativo para ter efeito. Alguns dados criptografados podem não estar disponíveis após alterar/reinstalar o dispositivo.</string>
@@ -4553,7 +4553,7 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="backup_faq_why">Por que fazer backup de dados?</string>
     <string name="backup_faq_why_answer">Fazer backup do seu histórico de bate-papo pode evitar que seu conteúdo importante seja perdido quando aplicativos são desinstalados ou dados são perdidos. Backups regulares são um bom hábito!</string>
     <string name="backup_faq_where">Onde os arquivos exportados são salvos?</string>
-    <string name="backup_faq_where_answer">O arquivo de backup exportado será salvo na pasta "Downloads/Operit" do seu telefone. O nome do arquivo contém o tipo de dados exportados, data e hora.</string>
+    <string name="backup_faq_where_answer">O arquivo de backup exportado será salvo na pasta "Downloads/AiLimbs" do seu telefone. O nome do arquivo contém o tipo de dados exportados, data e hora.</string>
     <string name="backup_faq_duplicate">Os dados duplicados aparecerão após a importação?</string>
     <string name="backup_faq_duplicate_answer">O sistema julgará com base no ID do registro, e os registros com o mesmo ID serão atualizados em vez de serem importados repetidamente. Registros com IDs diferentes serão adicionados como novos registros.</string>
     <string name="backup_select_export_format">Selecione o formato de exportação</string>
@@ -4582,7 +4582,7 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="backup_export_result_success">Exportado com sucesso para: %1$s</string>
     <string name="backup_character_cards_title">cartão de personagem</string>
     <string name="backup_character_cards_subtitle">Fazendo backup e restaurando configurações de cartões de personagem</string>
-    <string name="backup_character_cards_current_count">Atualmente existem %1$d cartas de personagem no total. O arquivo exportado será salvo na pasta "Downloads/Operit".</string>
+    <string name="backup_character_cards_current_count">Atualmente existem %1$d cartas de personagem no total. O arquivo exportado será salvo na pasta "Downloads/AiLimbs".</string>
     <string name="backup_character_card_count">cartão de personagem</string>
     <string name="backup_character_card_files">cartão de personagem</string>
     <string name="backup_character_cards_export_result_success">%1$d cartões de personagem foram exportados com sucesso para:\n%2$s</string>
@@ -7083,11 +7083,11 @@ Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="artifact_project_node_selection_hint">Clique no nó para selecionar, clique novamente para cancelar.</string>
     <string name="plugin_creation_fresh_task_line">Ative o operit editor e use o kit de desenvolvimento sandbox para desenvolver um novo pacote sandbox.</string>
     <string name="plugin_creation_fresh_package_rule_line">Primeiro, determine o ID do novo pacote sandbox e não o renomeie depois.</string>
-    <string name="plugin_creation_fresh_dev_directory_line">O diretório de desenvolvimento é fixo em Download/Operit/dev_package/ID definido. Desenvolvimento, instalação e teste são feitos apenas aqui.</string>
+    <string name="plugin_creation_fresh_dev_directory_line">O diretório de desenvolvimento é fixo em Download/AiLimbs/dev_package/ID definido. Desenvolvimento, instalação e teste são feitos apenas aqui.</string>
     <string name="plugin_creation_continue_task_line">Ative o operit editor, localize o pacote sandbox %1$s e continue o desenvolvimento e teste com base nesta versão.</string>
     <string name="plugin_creation_merge_task_line">Ative o operit editor, localize o pacote sandbox %1$s e faça o desenvolvimento de mesclagem e teste com base nesta versão.</string>
     <string name="plugin_creation_existing_package_rule_line">O ID do pacote sandbox atual é %1$s. O ID do pacote e o nome do plugin devem ser mantidos, não renomeie nem crie um novo pacote.</string>
-    <string name="plugin_creation_existing_dev_directory_line">O diretório de desenvolvimento é fixo em Download/Operit/dev_package/%1$s. Desenvolvimento, instalação e teste são feitos apenas aqui.</string>
+    <string name="plugin_creation_existing_dev_directory_line">O diretório de desenvolvimento é fixo em Download/AiLimbs/dev_package/%1$s. Desenvolvimento, instalação e teste são feitos apenas aqui.</string>
     <string name="plugin_creation_update_sandbox_package_dev">Primeiro, atualize o SandboxPackage_DEV.</string>
     <string name="plugin_creation_copy_types_to_dev_dir">Copie os types de skills para o diretório de desenvolvimento, substituindo os existentes.</string>
     <string name="plugin_creation_use_terminal_ts_js_hint">Use o terminal sempre que possível, priorize escrever ts e js, depois compile para o js final. Consulte os exemplos para tsconfig.</string>

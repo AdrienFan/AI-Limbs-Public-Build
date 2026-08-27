@@ -157,7 +157,7 @@ export namespace NativeInterface {
 
     /**
      * Resolve the persistent config directory for a package or toolpkg.
-     * Returns an absolute path under `/sdcard/Download/Operit/plugins/<id>`.
+     * Returns an absolute path under `/sdcard/Download/AiLimbs/plugins/<id>`.
      */
     function getPluginConfigDir(pluginId: string): string;
 

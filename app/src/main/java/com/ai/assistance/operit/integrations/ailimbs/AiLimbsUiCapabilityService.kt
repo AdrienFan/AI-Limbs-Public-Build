@@ -91,7 +91,7 @@ class AiLimbsUiCapabilityService(context: Context) {
                 preferredLevel == AndroidPermissionLevel.ACCESSIBILITY && providerVersion == null ->
                     "Install the accessibility provider app."
                 preferredLevel == AndroidPermissionLevel.ACCESSIBILITY && !accessibilityEnabled ->
-                    "Enable the Operit accessibility provider in Android settings."
+                    "Enable the AI Limbs accessibility provider in Android settings."
                 !directUiReady ->
                     "Authorize the selected ${preferredLevel.name} permission backend."
                 !subagentReady ->

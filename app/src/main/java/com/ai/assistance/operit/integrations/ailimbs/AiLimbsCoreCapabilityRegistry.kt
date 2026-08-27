@@ -337,7 +337,7 @@ object AiLimbsCoreCapabilityRegistry {
             ),
             keywords = listOf("兰儿聊天", "主动消息", "主动发送", "proactive", "send", "幂等")
         ),
-        entry("operit.tools.list", "Operit 原生工具 Registry", "List currently registered native Operit tool names.", keywords = listOf("registry", "dispatcher", "工具注册表")),
+        entry("ai_limbs.host_tools.list", "AI Limbs Host Tools Registry", "List currently registered host tool names available through AI Limbs.", keywords = listOf("registry", "dispatcher", "host tools", "工具注册表")),
         ubuntuEntry("ubuntu.status", "查询 Ubuntu 状态", "Read the lifecycle state of the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "沙箱", "生命周期")),
         ubuntuEntry("ubuntu.start", "启动 Ubuntu", "Start the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "开机", "启动沙箱")),
         ubuntuEntry(

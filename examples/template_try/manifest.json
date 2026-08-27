@@ -47,8 +47,8 @@
         "en": "Quick Start Workspace"
       },
       "description": {
-        "zh": "带有 .operit/config.json 和说明文档的最小工作区模板。",
-        "en": "A minimal workspace template with .operit/config.json and a starter readme."
+        "zh": "带有 .ailimbs/config.json 和说明文档的最小工作区模板。",
+        "en": "A minimal workspace template with .ailimbs/config.json and a starter readme."
       },
       "resource_key": "demo_workspace_template",
       "project_type": "template_try"

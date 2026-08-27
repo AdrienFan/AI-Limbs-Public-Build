@@ -1836,7 +1836,7 @@ class ChatHistoryManager private constructor(private val context: Context) {
     }
 
     /**
-     * 导出指定聊天记录到「下载/Operit」目录。
+     * 导出指定聊天记录到「下载/AiLimbs」目录。
      * @param selectedChatIds 要导出的聊天记录 ID，不能为空
      * @param format 导出格式
      * @param onProgress 超长文本导出进度回调

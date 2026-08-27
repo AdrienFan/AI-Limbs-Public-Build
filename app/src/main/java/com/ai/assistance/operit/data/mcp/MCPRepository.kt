@@ -3,10 +3,10 @@ package com.ai.assistance.operit.data.mcp
 import android.annotation.SuppressLint
 import android.content.Context
 import android.net.Uri
-import android.os.Environment
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.api.chat.EnhancedAIService
 import com.ai.assistance.operit.util.AppLogger
+import com.ai.assistance.operit.util.OperitPaths
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.mcp.MCPManager
 import com.ai.assistance.operit.core.tools.mcp.MCPPackage
@@ -57,7 +57,6 @@ class MCPRepository(private val context: Context) {
         private const val CONNECT_TIMEOUT = 10000
         private const val READ_TIMEOUT = 15000
         private const val PLUGINS_DIR_NAME = "mcp_plugins"
-        private const val OPERIT_DIR_NAME = "Operit"
     }
 
     // UI状态管理
@@ -76,12 +75,7 @@ class MCPRepository(private val context: Context) {
 
     // 插件安装目录
     private val pluginsBaseDir by lazy {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val operitDir = File(downloadsDir, OPERIT_DIR_NAME)
-        val pluginsDir = File(operitDir, PLUGINS_DIR_NAME)
-
-        if (!operitDir.exists()) operitDir.mkdirs()
-        if (!pluginsDir.exists()) pluginsDir.mkdirs()
+        val pluginsDir = OperitPaths.mcpPluginsDir()
 
         if (pluginsDir.exists() && pluginsDir.canWrite()) {
             pluginsDir

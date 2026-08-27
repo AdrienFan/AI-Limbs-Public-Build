@@ -17,7 +17,8 @@ SYNC_MODES = ("normal", "test")
 DEBUG_APP_PACKAGE = "com.ai.assistance.operit.debug"
 RELEASE_APP_PACKAGE = "com.ai.assistance.operit"
 SUPPORTED_APP_PACKAGES = (DEBUG_APP_PACKAGE, RELEASE_APP_PACKAGE)
-APP_PACKAGE_ENV = "OPERIT_APP_PACKAGE"
+APP_PACKAGE_ENV = "AI_LIMBS_APP_PACKAGE"
+LEGACY_APP_PACKAGE_ENV = "OPERIT_APP_PACKAGE"
 HOT_RELOAD_STATE_FILE = ".sync_example_packages_hot_reload_state.json"
 LOCAL_SYNC_STATE_FILE = ".sync_example_packages_local_state.json"
 
@@ -604,7 +605,7 @@ def _is_app_package_installed(device_serial: str, app_package: str) -> bool:
 def _resolve_app_package(device_serial: str, requested_package: str | None) -> str:
     # Hot reload must use the same applicationId as the installed APK, otherwise both the
     # external package directory and the refresh/install broadcasts point at the wrong app.
-    configured_package = (requested_package or os.environ.get(APP_PACKAGE_ENV, "")).strip()
+    configured_package = (requested_package or (os.environ.get(APP_PACKAGE_ENV, "") or os.environ.get(LEGACY_APP_PACKAGE_ENV, ""))).strip()
     if configured_package:
         if configured_package not in SUPPORTED_APP_PACKAGES:
             supported = ", ".join(SUPPORTED_APP_PACKAGES)
@@ -616,17 +617,17 @@ def _resolve_app_package(device_serial: str, requested_package: str | None) -> s
             raise ValueError(
                 f"Application package is not installed on {device_serial}: {configured_package}"
             )
-        print(f"Using Operit application package: {configured_package}")
+        print(f"Using AI Limbs application package: {configured_package}")
         return configured_package
 
     for app_package in SUPPORTED_APP_PACKAGES:
         if _is_app_package_installed(device_serial, app_package):
-            print(f"Using Operit application package: {app_package}")
+            print(f"Using AI Limbs application package: {app_package}")
             return app_package
 
     supported = ", ".join(SUPPORTED_APP_PACKAGES)
     raise ValueError(
-        f"Neither supported Operit application package is installed on {device_serial}: {supported}"
+        f"Neither supported AI Limbs application package is installed on {device_serial}: {supported}"
     )
 
 
@@ -932,7 +933,7 @@ def main() -> int:
         help=(
             "Operit applicationId for post-sync hot reload. Supports "
             "com.ai.assistance.operit.debug and com.ai.assistance.operit; defaults to "
-            "OPERIT_APP_PACKAGE or automatic Debug-first detection."
+            "AI_LIMBS_APP_PACKAGE (legacy OPERIT_APP_PACKAGE is also accepted) or automatic Debug-first detection."
         ),
     )
     parser.add_argument(
@@ -1084,7 +1085,7 @@ def main() -> int:
                     app_package=app_package,
                 )
             except Exception as exc:
-                if args.app_package or os.environ.get(APP_PACKAGE_ENV, "").strip():
+                if args.app_package or (os.environ.get(APP_PACKAGE_ENV, "") or os.environ.get(LEGACY_APP_PACKAGE_ENV, "")).strip():
                     print(f"ERROR: hot reload failed: {exc}", file=sys.stderr)
                     return 4
                 print(f"SKIP-HOT-RELOAD: {exc}", file=sys.stderr)

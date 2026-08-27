@@ -49,7 +49,7 @@ import org.json.JSONObject
 
 /**
  * Native Remote Desktop Commander device transport for AI Limbs.
- * Ubuntu/PRoot is not part of this transport; it is reached only through Operit Terminal tools.
+ * Ubuntu/PRoot is not part of this transport; it is reached only through AI Limbs Terminal tools.
  */
 class AiLimbsRdcClient(
     context: Context,
@@ -57,7 +57,7 @@ class AiLimbsRdcClient(
 ) {
     private val appContext = context.applicationContext
     private val accessGate = AiLimbsAccessGate(appContext)
-    private val dispatcher = AiLimbsOperitDispatcher(appContext, accessGate)
+    private val dispatcher = AiLimbsDispatcher(appContext, accessGate)
     private val accessContext = AiLimbsAccessContextService(appContext)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val adapter = AiLimbsRdcToolAdapter(appContext, dispatcher)

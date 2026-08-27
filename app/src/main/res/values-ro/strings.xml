@@ -3206,7 +3206,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
 
     <!-- Workspace Project Types (项目模板) -->
     <string name="workspace_project_blank_title">Spațiu de lucru gol</string>
-    <string name="workspace_project_blank_description">Acesta este un spațiu de lucru gol, care conține doar structura de directoare de bază. Poți edita .operit/config.json Configurați tipul de proiect, serverul și comenzile, de exemplu:server.enabled,preview.type,commands etc.</string>
+    <string name="workspace_project_blank_description">Acesta este un spațiu de lucru gol, care conține doar structura de directoare de bază. Poți edita .ailimbs/config.json Configurați tipul de proiect, serverul și comenzile, de exemplu:server.enabled,preview.type,commands etc.</string>
     <string name="workspace_project_web_title">Web Proiect</string>
     <string name="workspace_project_web_description">HTML/CSS/JavaScript Dezvoltare web, serverul local este activat</string>
     <string name="workspace_project_node_title">Node.js Proiect</string>
@@ -3235,7 +3235,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="workspace_close_preview">Închide previzualizarea</string>
     <string name="workspace_project_suffix">Proiect</string>
     <string name="workspace_click_buttons_below">Faceți clic pe butonul de mai jos pentru a executa comanda</string>
-    <string name="workspace_no_commands_configured">Nu există încă comenzi de configurare\n\nSe poate .operit/config.json Configurarea butonului de comandă în „Mijloc”</string>
+    <string name="workspace_no_commands_configured">Nu există încă comenzi de configurare\n\nSe poate .ailimbs/config.json Configurarea butonului de comandă în „Mijloc”</string>
     <string name="workspace_path_label">Calea către zona de lucru</string>
     <string name="workspace_rename_action">Redenumirea spațiului de lucru</string>
     <string name="workspace_rename_title">Redenumirea spațiului de lucru</string>
@@ -4235,9 +4235,9 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="import_color_qr">Importarea codurilor multidimensionale</string>
     <string name="scan_color_qr">Scanează codul multidimensional</string>
     <string name="tavern_json">Taverna JSON</string>
-    <string name="export_tavern_json_desc">Exportă ca .json și salvați în Download/Operit/exports</string>
+    <string name="export_tavern_json_desc">Exportă ca .json și salvați în Download/AiLimbs/exports</string>
     <string name="tavern_png">Taverna PNG</string>
-    <string name="export_tavern_png_desc">Exportă imaginea într-un format compatibil cu Taverna și salveaz-o în Download/Operit/exports</string>
+    <string name="export_tavern_png_desc">Exportă imaginea într-un format compatibil cu Taverna și salveaz-o în Download/AiLimbs/exports</string>
     <string name="image_read_error">Nu se poate citi imaginea</string>
     <string name="image_parse_error">Nu se poate interpreta imaginea</string>
     <string name="color_qr_not_recognized">Codul multidimensional color nu poate fi recunoscut</string>
@@ -5606,7 +5606,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="backup_room_db_restart_later">Mai târziu</string>
     <string name="backup_room_db_last_success">Ultima copiere de rezervă reușită:%1$s</string>
     <string name="backup_room_db_last_error">Eroarea anterioară:%1$s</string>
-    <string name="backup_files_location_hint">Notă: Fișierul de rezervă este salvat în Download/Operit Dosar</string>
+    <string name="backup_files_location_hint">Notă: Fișierul de rezervă este salvat în Download/AiLimbs Dosar</string>
 
     <string name="backup_raw_snapshot_title">Copie de rezervă a instantaneelor de fișiere (experimental)</string>
     <string name="backup_raw_snapshot_subtitle">pe baza documentului/Copierea de rezervă și restaurarea integrală, pe unități de index</string>

@@ -9,7 +9,7 @@ import java.io.File
 
 /**
  * Workspace configuration data classes
- * 定义工作区配置的数据结构，用于解析 .operit/config.json
+ * 定义工作区配置的数据结构，用于解析 .ailimbs/config.json，并兼容旧 .operit/config.json
  */
 
 @Serializable
@@ -70,11 +70,13 @@ data class WatchConfig(
     val enabled: Boolean = true,
     val maxDepth: Int = 3,
     val maxChangedFiles: Int = 80,
-    val exclude: List<String> = listOf(".git", ".operit", ".backup", "backup")
+    val exclude: List<String> = listOf(".git", ".ailimbs", ".operit", ".backup", "backup")
 )
 
 object WorkspaceConfigReader {
     private const val TAG = "WorkspaceConfigReader"
+    private const val CONFIG_PATH = ".ailimbs/config.json"
+    private const val LEGACY_CONFIG_PATH = ".operit/config.json"
     private val json = Json { 
         ignoreUnknownKeys = true
         isLenient = true
@@ -86,10 +88,9 @@ object WorkspaceConfigReader {
      * @return 解析后的配置对象，如果不存在或解析失败则返回默认配置
      */
     fun readConfig(workspacePath: String): WorkspaceConfig {
-        val configFile = File(workspacePath, ".operit/config.json")
-        
-        if (!configFile.exists()) {
-            AppLogger.d(TAG, "Config file not found at ${configFile.absolutePath}, using default")
+        val configFile = findConfigFile(workspacePath)
+        if (configFile == null) {
+            AppLogger.d(TAG, "Config file not found at $workspacePath/$CONFIG_PATH (legacy $LEGACY_CONFIG_PATH also checked), using default")
             return getDefaultWebConfig()
         }
 
@@ -105,9 +106,13 @@ object WorkspaceConfigReader {
     /**
      * 检查工作区是否有配置文件
      */
-    fun hasConfig(workspacePath: String): Boolean {
-        val configFile = File(workspacePath, ".operit/config.json")
-        return configFile.exists()
+    fun hasConfig(workspacePath: String): Boolean = findConfigFile(workspacePath) != null
+
+    private fun findConfigFile(workspacePath: String): File? {
+        val primary = File(workspacePath, CONFIG_PATH)
+        if (primary.isFile) return primary
+        val legacy = File(workspacePath, LEGACY_CONFIG_PATH)
+        return legacy.takeIf { it.isFile }
     }
 
     /**

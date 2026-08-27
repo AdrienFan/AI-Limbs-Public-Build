@@ -29,7 +29,7 @@
 - 问题核心是“配置和部署链路”，而不是普通问答
 
 【MCP：安装与排查】
-1) 配置目录：/sdcard/Download/Operit/mcp_plugins/
+1) 配置目录：/sdcard/Download/AiLimbs/mcp_plugins/
 - 主配置：mcp_config.json
 - 运行状态缓存：server_status.json（非实时快照，仅用于状态记录与工具缓存，不作为排查判定依据）
 2) 两侧路径要严格区分：
@@ -89,12 +89,12 @@
 - 检查终端依赖（node/pnpm/python/uv）与 MCP 服务状态；其中 Node 类 `npx` MCP 实际依赖 `pnpm`，若缺少 `pnpm` 将无法启动
 
 【Skill：安装与排查】
-1) 目录：/sdcard/Download/Operit/skills/
+1) 目录：/sdcard/Download/AiLimbs/skills/
 2) 识别规则：每个 Skill 必须是一个文件夹，且包含 SKILL.md（skill.md 也可）。
 3) 添加方式（按这个做）：
 - 先从可信来源下载 Skill（zip 或仓库源码均可）
-- 把下载内容解压后，直接放到 /sdcard/Download/Operit/skills/
-- 最终目录结构必须是 /sdcard/Download/Operit/skills/<skill_name>/，且该目录内有 SKILL.md
+- 把下载内容解压后，直接放到 /sdcard/Download/AiLimbs/skills/
+- 最终目录结构必须是 /sdcard/Download/AiLimbs/skills/<skill_name>/，且该目录内有 SKILL.md
 4) 元数据解析：
 - 优先读取 frontmatter 中的 name/description
 - 若缺失，回退读取文件前40行里的 name:/description:
@@ -289,7 +289,7 @@
 - The core issue is configuration/deployment flow rather than normal Q&A
 
 [MCP: install and troubleshooting]
-1) Config directory: /sdcard/Download/Operit/mcp_plugins/
+1) Config directory: /sdcard/Download/AiLimbs/mcp_plugins/
 - Main config: mcp_config.json
 - Runtime status cache: server_status.json (non-realtime snapshot for status/tool cache only; not a troubleshooting source of truth)
 2) Keep Android-side and Linux-side paths strictly separated:
@@ -349,12 +349,12 @@
 - Check terminal dependencies (node/pnpm/python/uv) and MCP service status; Node-style `npx` MCPs actually depend on `pnpm`, so missing `pnpm` will prevent startup
 
 [Skill: install and troubleshooting]
-1) Directory: /sdcard/Download/Operit/skills/
+1) Directory: /sdcard/Download/AiLimbs/skills/
 2) Recognition rule: each Skill must be a folder containing SKILL.md (skill.md is also accepted).
 3) How to add a skill (use this workflow):
 - Download the skill from a trusted source (zip or repository source code).
-- Extract it, then place the folder directly under /sdcard/Download/Operit/skills/
-- Final structure must be /sdcard/Download/Operit/skills/<skill_name>/ and that folder must contain SKILL.md
+- Extract it, then place the folder directly under /sdcard/Download/AiLimbs/skills/
+- Final structure must be /sdcard/Download/AiLimbs/skills/<skill_name>/ and that folder must contain SKILL.md
 4) Metadata parsing:
 - Prefer frontmatter name/description
 - Fallback to name:/description: in the first 40 lines
@@ -2400,7 +2400,7 @@ async function how_make_skill() {
     const lang: "zh" | "en" | "both" = locale.startsWith("zh") ? "zh" : locale.startsWith("en") ? "en" : "both";
 
     const zh = `如何制作 skill（简版）
-1. 先创建目录：/sdcard/Download/Operit/skills/<skill_name>/
+1. 先创建目录：/sdcard/Download/AiLimbs/skills/<skill_name>/
 2. 必备文件：SKILL.md
 3. 在 SKILL.md 顶部用 Markdown 元数据（frontmatter）写 name、description，例如：
 ---
@@ -2412,7 +2412,7 @@ description: 用一句话说明这个 skill 做什么
 6. 实践建议：优先下载现成 skill，直接解压过来，并确保目录下有 SKILL.md。`;
 
     const en = `How to make a skill (quick guide)
-1. Create a directory: /sdcard/Download/Operit/skills/<skill_name>/
+1. Create a directory: /sdcard/Download/AiLimbs/skills/<skill_name>/
 2. Required file: SKILL.md
 3. At the top of SKILL.md, use Markdown metadata (frontmatter) for name and description, for example:
 ---
@@ -2887,7 +2887,7 @@ async function resolve_toolpkg_source(rawSourcePath: string): Promise<ToolPkgRes
     sourceKind = "archive";
     archivePath = sourcePath;
     const tempExtractDir = path_join(
-      OPERIT_CLEAN_ON_EXIT_DIR,
+      AI_LIMBS_CLEAN_ON_EXIT_DIR,
       `operit_editor_toolpkg_extract_${safe_debug_file_stem(lowerBaseName.replace(/\.toolpkg$/i, ""), "toolpkg")}_${Date.now()}`
     );
     await ensure_android_directory(tempExtractDir);
@@ -2923,7 +2923,7 @@ async function resolve_toolpkg_source(rawSourcePath: string): Promise<ToolPkgRes
 
 async function build_toolpkg_archive_from_folder(source: ToolPkgResolvedSource) {
   const tempBuildDir = path_join(
-    OPERIT_CLEAN_ON_EXIT_DIR,
+    AI_LIMBS_CLEAN_ON_EXIT_DIR,
     `operit_editor_toolpkg_build_${safe_debug_file_stem(source.packageId, "toolpkg")}_${Date.now()}`
   );
   await ensure_android_directory(tempBuildDir);

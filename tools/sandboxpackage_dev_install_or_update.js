@@ -5,7 +5,7 @@ const SandboxPackageDevInstallerState = {
 const SandboxPackageDevInstaller = (function () {
   const ENVIRONMENT = "android";
   const SKILL_NAME = "SandboxPackage_DEV";
-  const SKILL_ROOT = `/sdcard/Download/Operit/skills/${SKILL_NAME}`;
+  const SKILL_ROOT = `/sdcard/Download/AiLimbs/skills/${SKILL_NAME}`;
   const REFERENCES_DIR = `${SKILL_ROOT}/references`;
   const TYPES_DIR = `${SKILL_ROOT}/types`;
   const SCRIPTS_DIR = `${SKILL_ROOT}/scripts`;
@@ -136,7 +136,7 @@ const SandboxPackageDevInstaller = (function () {
 
   async function run() {
     logStep(`Preparing skill root -> ${SKILL_ROOT}`);
-    await makeDirectory("/sdcard/Download/Operit/skills");
+    await makeDirectory("/sdcard/Download/AiLimbs/skills");
     await makeDirectory(SKILL_ROOT);
     await makeDirectory(REFERENCES_DIR);
     await makeDirectory(TYPES_DIR);

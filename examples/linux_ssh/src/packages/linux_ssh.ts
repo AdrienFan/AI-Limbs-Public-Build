@@ -280,13 +280,13 @@ const linuxSshTools = (function () {
             return data;
         }
 
-        await Tools.Files.mkdir(OPERIT_CLEAN_ON_EXIT_DIR, true);
+        await Tools.Files.mkdir(AI_LIMBS_CLEAN_ON_EXIT_DIR, true);
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const rand = Math.floor(Math.random() * 1_000_000);
         const safeLabel = firstNonBlank(fileLabel, "linux_ssh_output")
             .replace(/[^a-zA-Z0-9._-]+/g, "_");
-        const filePath = `${OPERIT_CLEAN_ON_EXIT_DIR}/${safeLabel}_${timestamp}_${rand}.log`;
+        const filePath = `${AI_LIMBS_CLEAN_ON_EXIT_DIR}/${safeLabel}_${timestamp}_${rand}.log`;
 
         await Tools.Files.write(filePath, outputStr, false);
 
@@ -295,7 +295,7 @@ const linuxSshTools = (function () {
             output: "(saved_to_file)",
             output_saved_to: filePath,
             output_chars: outputStr.length,
-            operit_clean_on_exit_dir: OPERIT_CLEAN_ON_EXIT_DIR,
+            operit_clean_on_exit_dir: AI_LIMBS_CLEAN_ON_EXIT_DIR,
             hint: LARGE_OUTPUT_HINT
         };
     }

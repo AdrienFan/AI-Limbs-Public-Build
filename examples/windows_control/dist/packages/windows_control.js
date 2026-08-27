@@ -585,10 +585,10 @@ const windowsControl = (function () {
         if (outputChars <= MAX_INLINE_WINDOWS_EXEC_OUTPUT_CHARS) {
             return null;
         }
-        await Tools.Files.mkdir(OPERIT_CLEAN_ON_EXIT_DIR, true);
+        await Tools.Files.mkdir(AI_LIMBS_CLEAN_ON_EXIT_DIR, true);
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const rand = Math.floor(Math.random() * 1000000);
-        const filePath = `${OPERIT_CLEAN_ON_EXIT_DIR}/windows_exec_output_${timestamp}_${rand}.log`;
+        const filePath = `${AI_LIMBS_CLEAN_ON_EXIT_DIR}/windows_exec_output_${timestamp}_${rand}.log`;
         const content = [
             `command: ${command}`,
             `shell: ${shell}`,
@@ -615,7 +615,7 @@ const windowsControl = (function () {
             stderr: "(saved_to_file)",
             outputSavedTo: filePath,
             outputChars,
-            operitCleanOnExitDir: OPERIT_CLEAN_ON_EXIT_DIR,
+            operitCleanOnExitDir: AI_LIMBS_CLEAN_ON_EXIT_DIR,
             hint: "Output is large and saved to file. Use read_file_part or grep_code to inspect it.",
             packageVersion: WINDOWS_CONTROL_PACKAGE_VERSION,
             agentVersion: versionCheck.remoteVersion,

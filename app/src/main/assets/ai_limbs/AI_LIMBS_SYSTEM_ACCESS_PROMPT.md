@@ -29,4 +29,4 @@
 
 - Before operating the phone UI, confirm that the required UI capabilities are ready. If they are not ready, follow the returned next_action and request the required authorization. Do not guess page structure, element state, or touch availability. UI capabilities and visual subagents may only be used when their corresponding availability state explicitly indicates that they are ready.
 
-- All AI Limbs / Operit capabilities remain subject to ALLOW / ASK / FORBID permission semantics. Do not use alternate execution paths to bypass permissions, prerequisites, lifecycle protections, or the Dispatcher.
+- All AI Limbs / host capabilities remain subject to ALLOW / ASK / FORBID permission semantics. Do not use alternate execution paths to bypass permissions, prerequisites, lifecycle protections, or the Dispatcher.

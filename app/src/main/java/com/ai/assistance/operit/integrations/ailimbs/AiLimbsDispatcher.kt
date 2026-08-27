@@ -24,7 +24,7 @@ import java.util.TimeZone
 import org.json.JSONArray
 import org.json.JSONObject
 
-class AiLimbsOperitDispatcher(
+class AiLimbsDispatcher(
     context: Context,
     private val accessGate: AiLimbsAccessGate? = null
 ) {
@@ -113,7 +113,7 @@ class AiLimbsOperitDispatcher(
         "ai_limbs.dispatcher.status" -> dispatcherStatus()
         "ai_limbs.ubuntu.share.status" -> sharedUbuntuStatus()
         "ai_limbs.bridge.reconnect" ->
-            executeOperitTool(
+            executeHostTool(
                 JSONObject()
                     .put("name", tool)
                     .put("parameters", args)
@@ -133,25 +133,25 @@ class AiLimbsOperitDispatcher(
         "ai_limbs.chat.reply" -> lanerChatReply(args)
         "ai_limbs.chat.send" -> lanerChatSend(args)
         "ai_limbs.ui.status" -> uiCapabilityStatus()
-        "operit.tools.list" -> {
+        "ai_limbs.host_tools.list", "operit.tools.list" -> {
             handler.registerDefaultTools()
             val names = JSONArray()
             handler.getAllToolNames().forEach { names.put(it) }
             ok().put("tools", names).put("count", names.length())
         }
         "ubuntu.status", "ubuntu.start", "ubuntu.stop", "ubuntu.idle.get", "ubuntu.idle.set" ->
-            executeOperitTool(
+            executeHostTool(
                 JSONObject()
                     .put("name", tool)
                     .put("parameters", args)
             )
-        "operit.tool.execute" -> executeOperitTool(args)
+        "ai_limbs.host_tool.execute", "operit.tool.execute" -> executeHostTool(args)
         else -> error("Unknown AI Limbs tool: $tool")
     }
 
-    private suspend fun executeOperitTool(args: JSONObject): JSONObject {
+    private suspend fun executeHostTool(args: JSONObject): JSONObject {
         val name = args.optString("name").trim()
-        if (name.isBlank()) return error("Missing Operit tool name")
+        if (name.isBlank()) return error("Missing host tool name")
         val paramsObject = args.optJSONObject("parameters") ?: JSONObject()
         val params = mutableListOf<ToolParameter>()
         val keys = paramsObject.keys()
@@ -172,7 +172,7 @@ class AiLimbsOperitDispatcher(
                 override suspend fun emit(value: String) { emitted += value }
             }
         )
-        val result = results.firstOrNull() ?: return error("Operit tool returned no result")
+        val result = results.firstOrNull() ?: return error("Host tool returned no result")
         return JSONObject()
             .put("success", result.success)
             .put("tool", result.toolName)
@@ -227,7 +227,7 @@ class AiLimbsOperitDispatcher(
     private fun dispatcherStatus(): JSONObject =
         ok()
             .put("module", "AI Limbs Tool Dispatcher")
-            .put("route", "AiLimbsOperitDispatcher -> ToolExecutionManager -> AIToolHandler")
+            .put("route", "AiLimbsDispatcher -> ToolExecutionManager -> AIToolHandler")
             .put("permission_enforcement", "ToolPermissionSystem ALLOW / ASK / FORBID")
             .put("transport_neutral", true)
 
@@ -471,7 +471,7 @@ class AiLimbsOperitDispatcher(
         val attachmentId = args.optString("attachment_id").trim()
         val attachment = lanerChat.attachment(requestId, attachmentId)
         val isImage = attachment.mimeType.startsWith("image/", ignoreCase = true)
-        val readResult = executeOperitTool(
+        val readResult = executeHostTool(
             JSONObject()
                 .put("name", "read_file_full")
                 .put("parameters", JSONObject()

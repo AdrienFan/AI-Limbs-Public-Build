@@ -40,15 +40,17 @@ if %DEVICE_COUNT% equ 1 (
 )
 
 REM Resolve the installed Debug or Release application package.
-set "APP_ID=%OPERIT_APP_PACKAGE%"
+set "APP_ID=%AI_LIMBS_APP_PACKAGE%"
+?
+if not defined APP_ID set "APP_ID=%OPERIT_APP_PACKAGE%"
 if defined APP_ID (
     if /I not "!APP_ID!"=="com.ai.assistance.operit.debug" if /I not "!APP_ID!"=="com.ai.assistance.operit" (
-        echo Error: Unsupported Operit application package - !APP_ID!
+        echo Error: Unsupported AI Limbs application package - !APP_ID!
         exit /b 1
     )
     adb -s "!DEVICE_SERIAL!" shell pm list packages "!APP_ID!" | findstr /x /c:"package:!APP_ID!" >nul
     if errorlevel 1 (
-        echo Error: Operit application package is not installed - !APP_ID!
+        echo Error: AI Limbs application package is not installed - !APP_ID!
         exit /b 1
     )
 ) else (
@@ -60,14 +62,14 @@ if defined APP_ID (
         )
     )
     if not defined APP_ID (
-        echo Error: Neither supported Operit application package is installed
+        echo Error: Neither supported AI Limbs application package is installed
         exit /b 1
     )
 )
 set "ACTION=!APP_ID!.DUMP_COMPOSE_DSL_UI"
 set "RECEIVER=!APP_ID!/.core.tools.packTool.ToolPkgComposeDslDebugDumpReceiver"
 set "REMOTE_DIR=/sdcard/Android/data/!APP_ID!/files/debug/compose_dsl_dump/current"
-echo Using Operit application package: !APP_ID!
+echo Using AI Limbs application package: !APP_ID!
 
 for /f %%i in ('powershell -NoProfile -Command "(Get-Date).ToString('yyyyMMdd-HHmmss')"') do set "TIMESTAMP=%%i"
 if not exist "%LOCAL_ROOT%" mkdir "%LOCAL_ROOT%"

@@ -35,7 +35,7 @@
 ├── dist/                 # 编译输出目录
 ├── package.json          # 项目配置
 ├── tsconfig.json         # TypeScript 配置
-└── .operit/config.json   # Operit 工作区配置
+└── .ailimbs/config.json   # AI Limbs 工作区配置
 ```
 
 ## 技术栈

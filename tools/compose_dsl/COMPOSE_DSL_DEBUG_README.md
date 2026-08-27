@@ -33,7 +33,7 @@ d:\Code\prog\assistance\tools\compose_dsl\dump_current_compose_dsl_ui.bat
 如果 Debug 和 Release APK 同时安装，可以用环境变量指定目标：
 
 ```bat
-set OPERIT_APP_PACKAGE=com.ai.assistance.operit
+set AI_LIMBS_APP_PACKAGE=com.ai.assistance.operit
 d:\Code\prog\assistance\tools\compose_dsl\dump_current_compose_dsl_ui.bat
 ```
 
@@ -118,3 +118,5 @@ d:\Code\prog\assistance\debug_output\compose_dsl_dump\20260425-153457\
 - 这套工具抓的是“当前正在显示的页面快照”，不是历史页面。
 - 如果页面还在频繁重组或异步加载，建议等稳定后再抓一次。
 - 如果宿主调试导出逻辑有更新，需要重新安装宿主后才能看到新导出字段。
+
+> Compatibility: legacy `OPERIT_APP_PACKAGE` remains supported; prefer `AI_LIMBS_APP_PACKAGE` for new usage.

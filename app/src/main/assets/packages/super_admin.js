@@ -141,10 +141,10 @@ const superAdmin = (function () {
         if (outputStr.length <= MAX_INLINE_TERMINAL_OUTPUT_CHARS) {
             return null;
         }
-        await Tools.Files.mkdir(OPERIT_CLEAN_ON_EXIT_DIR, true);
+        await Tools.Files.mkdir(AI_LIMBS_CLEAN_ON_EXIT_DIR, true);
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
         const rand = Math.floor(Math.random() * 1000000);
-        const filePath = `${OPERIT_CLEAN_ON_EXIT_DIR}/terminal_output_${timestamp}_${rand}.log`;
+        const filePath = `${AI_LIMBS_CLEAN_ON_EXIT_DIR}/terminal_output_${timestamp}_${rand}.log`;
         await Tools.Files.write(filePath, outputStr, false);
         return {
             command,
@@ -155,7 +155,7 @@ const superAdmin = (function () {
             context_preserved: result?.timedOut !== true,
             output_saved_to: filePath,
             output_chars: outputStr.length,
-            operit_clean_on_exit_dir: OPERIT_CLEAN_ON_EXIT_DIR,
+            operit_clean_on_exit_dir: AI_LIMBS_CLEAN_ON_EXIT_DIR,
             hint: "Output is large and saved to file. Use read_file_part or grep_code to inspect it.",
         };
     }

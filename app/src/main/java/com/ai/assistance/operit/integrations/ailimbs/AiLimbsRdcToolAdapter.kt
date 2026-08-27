@@ -8,13 +8,13 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Adapts the fixed Desktop Commander tool surface to Operit's native tools.
- * Operit tools still enter ToolExecutionManager and keep ALLOW / ASK / FORBID semantics. AI Limbs
+ * Adapts the fixed Desktop Commander tool surface to the host app native tools.
+ * Host tools still enter ToolExecutionManager and keep ALLOW / ASK / FORBID semantics. AI Limbs
  * managed documents route through their versioned core provider instead of raw filesystem writes.
  */
 class AiLimbsRdcToolAdapter(
     context: Context,
-    private val dispatcher: AiLimbsOperitDispatcher
+    private val dispatcher: AiLimbsDispatcher
 ) {
     private val terminal = Terminal.getInstance(context.applicationContext)
     suspend fun execute(toolName: String, args: JSONObject): JSONObject =
@@ -27,7 +27,7 @@ class AiLimbsRdcToolAdapter(
             "interact_with_process" -> rdcProcessTool("rdc_process_interact", args)
             "list_sessions" -> rdcProcessTool("rdc_process_list", args)
             "kill_process", "force_terminate" -> rdcProcessTool("rdc_process_terminate", args)
-            else -> executeSameNamedOperitTool(toolName, args)
+            else -> executeSameNamedHostTool(toolName, args)
         }
 
     private suspend fun readFile(args: JSONObject): JSONObject {
@@ -48,13 +48,13 @@ class AiLimbsRdcToolAdapter(
         } else {
             params.put("text_only", "true")
         }
-        val operitName = if (directImage || length <= 0) "read_file_full" else "read_file_part"
+        val hostToolName = if (directImage || length <= 0) "read_file_full" else "read_file_part"
         if (!directImage && length > 0) {
             params.put("start_line", offset + 1)
             params.put("end_line", offset + length)
         }
         val result = executeTrackedFileOperation(path, environment, "read_file") {
-            executeOperit(operitName, params)
+            executeHostTool(hostToolName, params)
         }
         return mcpResult(result)
     }
@@ -81,7 +81,7 @@ class AiLimbsRdcToolAdapter(
             .put("environment", environment)
         val action = if (append) "write_file --append" else "write_file"
         val result = executeTrackedFileOperation(path, environment, action) {
-            executeOperit("write_file", params)
+            executeHostTool("write_file", params)
         }
         return mcpResult(result)
     }
@@ -93,7 +93,7 @@ class AiLimbsRdcToolAdapter(
             .put("path", path)
             .put("environment", environment)
         val result = executeTrackedFileOperation(path, environment, "list_directory") {
-            executeOperit("list_files", params)
+            executeHostTool("list_files", params)
         }
         return mcpResult(result)
     }
@@ -149,14 +149,14 @@ class AiLimbsRdcToolAdapter(
                 if (isAiLimbsCoreTool(name)) {
                     dispatcher.execute(name, parameters)
                 } else {
-                    executeOperit(name, parameters)
+                    executeHostTool(name, parameters)
                 }
             return mcpResult(result)
         }
 
         if (shell == "android") {
             return mcpResult(
-                executeOperit(
+                executeHostTool(
                     "execute_shell",
                     JSONObject().put("command", command)
                 )
@@ -171,9 +171,9 @@ class AiLimbsRdcToolAdapter(
     }
 
     private suspend fun rdcProcessTool(name: String, args: JSONObject): JSONObject =
-        mcpResult(executeOperit(name, args))
+        mcpResult(executeHostTool(name, args))
 
-    private suspend fun executeSameNamedOperitTool(
+    private suspend fun executeSameNamedHostTool(
         toolName: String,
         args: JSONObject
     ): JSONObject =
@@ -181,13 +181,13 @@ class AiLimbsRdcToolAdapter(
             if (isAiLimbsCoreTool(toolName)) {
                 dispatcher.execute(toolName, args)
             } else {
-                executeOperit(toolName, args)
+                executeHostTool(toolName, args)
             }
         )
 
-    private suspend fun executeOperit(name: String, params: JSONObject): JSONObject =
+    private suspend fun executeHostTool(name: String, params: JSONObject): JSONObject =
         dispatcher.execute(
-            "operit.tool.execute",
+            "ai_limbs.host_tool.execute",
             JSONObject()
                 .put("name", name)
                 .put("parameters", params)
@@ -245,7 +245,7 @@ class AiLimbsRdcToolAdapter(
             } else {
                 emptyList()
             }
-        // ImagePool links are an Operit-internal transport token. Exposing them beside an MCP
+        // ImagePool links are a host-internal transport token. Exposing them beside an MCP
         // ImageContent block lets the host see two competing image protocols; consume the link
         // here so the RDC model-facing result matches Desktop Commander's text + image contract.
         val modelText =

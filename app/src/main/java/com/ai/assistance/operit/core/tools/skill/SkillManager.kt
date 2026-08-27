@@ -1,9 +1,9 @@
 package com.ai.assistance.operit.core.tools.skill
 
 import android.content.Context
-import android.os.Environment
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.util.AppLogger
+import com.ai.assistance.operit.util.OperitPaths
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -28,12 +28,8 @@ class SkillManager private constructor(private val context: Context) {
     private val skillLoadErrors = mutableMapOf<String, String>()
 
     private fun getSkillsRootDir(): File {
-        val downloadsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-        val operitDir = File(downloadsDir, "Operit")
-        val skillsDir = File(operitDir, "skills")
-        if (!skillsDir.exists()) {
-            skillsDir.mkdirs()
-        }
+        val skillsDir = File(OperitPaths.aiLimbsRootDir(), "skills")
+        if (!skillsDir.exists()) skillsDir.mkdirs()
         return skillsDir
     }
 

@@ -283,7 +283,7 @@ const PdfVisionParser = (function () {
     }
 
     function createOutputDirectory(): any {
-        const parserRootDir = new File(OPERIT_CLEAN_ON_EXIT_DIR, "pdf_vision_parser");
+        const parserRootDir = new File(AI_LIMBS_CLEAN_ON_EXIT_DIR, "pdf_vision_parser");
         ensureDirectoryExists(parserRootDir);
 
         const timestamp = new Date().toISOString().replace(/[:.]/g, "-");

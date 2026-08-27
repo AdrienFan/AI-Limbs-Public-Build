@@ -484,7 +484,7 @@ async function ensureQQBotAttachmentDirAsync(event: AutoReplyEvent): Promise<str
         firstNonBlank(asText(event.eventId).trim(), asText(event.messageId).trim(), hashText(asText(event.timestamp))),
         "event"
     );
-    const baseDir = `${OPERIT_CLEAN_ON_EXIT_DIR}/qqbot/${eventDirName}`;
+    const baseDir = `${AI_LIMBS_CLEAN_ON_EXIT_DIR}/qqbot/${eventDirName}`;
     await Tools.Files.mkdir(baseDir, true, "android");
     await Tools.Files.write(`${baseDir}/.nomedia`, "", false, "android");
     return baseDir;

@@ -2784,7 +2784,7 @@
     <string name="workspace_close_preview">Tutup pratonton</string>
     <string name="workspace_project_suffix">Projek</string>
     <string name="workspace_click_buttons_below">Klik butang di bawah untuk melaksanakan arahan</string>
-    <string name="workspace_no_commands_configured">Tiada arahan yang dikonfigurasi buat masa ini\n\nAnda boleh menambah konfigurasi butang arahan dalam .operit/config.json</string>
+    <string name="workspace_no_commands_configured">Tiada arahan yang dikonfigurasi buat masa ini\n\nAnda boleh menambah konfigurasi butang arahan dalam .ailimbs/config.json</string>
     <string name="workspace_path_label">Laluan ruang kerja</string>
     <string name="workspace_rename_action">Namakan semula ruang kerja</string>
     <string name="workspace_rename_title">Namakan semula ruang kerja</string>
@@ -2877,7 +2877,7 @@
     <string name="workspace_error_fetch_changes">Tidak dapat mendapatkan perubahan: %1$s</string>
     <string name="workspace_error_fetch_suggestions">Ralat sistem, sila semak konfigurasi ruang kerja</string>
     <string name="workspace_project_blank_title">Ruang kerja kosong</string>
-    <string name="workspace_project_blank_description">Ini adalah ruang kerja kosong yang hanya mengandungi struktur direktori asas. Anda boleh mengedit .operit/config.json untuk mengkonfigurasi jenis projek, pelayan dan arahan, contohnya: server.enabled, preview.type, commands, dll.</string>
+    <string name="workspace_project_blank_description">Ini adalah ruang kerja kosong yang hanya mengandungi struktur direktori asas. Anda boleh mengedit .ailimbs/config.json untuk mengkonfigurasi jenis projek, pelayan dan arahan, contohnya: server.enabled, preview.type, commands, dll.</string>
     <string name="workspace_project_web_title">Projek Web</string>
     <string name="workspace_project_web_description">Pembangunan halaman web HTML/CSS/JavaScript, pelayan tempatan telah diaktifkan</string>
     <string name="workspace_project_node_title">Projek Node.js</string>
@@ -3728,9 +3728,9 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="import_color_qr">Import Kod QR Berwarna</string>
     <string name="scan_color_qr">Imbas Kod QR Berwarna</string>
     <string name="tavern_json">JSON Tavern</string>
-    <string name="export_tavern_json_desc">Eksport sebagai .json dan simpan ke Download/Operit/exports</string>
+    <string name="export_tavern_json_desc">Eksport sebagai .json dan simpan ke Download/AiLimbs/exports</string>
     <string name="tavern_png">PNG Tavern</string>
-    <string name="export_tavern_png_desc">Eksport sebagai imej yang boleh diimport ke Tavern, dan simpan ke Download/Operit/exports</string>
+    <string name="export_tavern_png_desc">Eksport sebagai imej yang boleh diimport ke Tavern, dan simpan ke Download/AiLimbs/exports</string>
     <string name="image_read_error">Tidak dapat membaca imej</string>
     <string name="image_parse_error">Tidak dapat menghuraikan imej</string>
     <string name="color_qr_not_recognized">Tidak dapat mengenal pasti kod QR berwarna</string>
@@ -4920,7 +4920,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="backup_room_db_restart_later">Nanti</string>
     <string name="backup_room_db_last_success">Sandaran berjaya terakhir: %1$s</string>
     <string name="backup_room_db_last_error">Ralat terakhir: %1$s</string>
-    <string name="backup_files_location_hint">Petunjuk: Fail sandaran disimpan dalam folder Download/Operit</string>
+    <string name="backup_files_location_hint">Petunjuk: Fail sandaran disimpan dalam folder Download/AiLimbs</string>
 
     <string name="backup_raw_snapshot_title">Sandaran Snapshot Fail (Eksperimen)</string>
     <string name="backup_raw_snapshot_subtitle">Sandaran dan pemulihan mampatan keseluruhan berdasarkan unit fail/direktori</string>

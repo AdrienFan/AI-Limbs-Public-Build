@@ -3341,7 +3341,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="workspace_error_fetch_changes">No se pueden obtener cambios: %1$s</string>
     <string name="workspace_error_fetch_suggestions">Error del sistema, verifique la configuración del espacio de trabajo</string>
     <string name="workspace_project_blank_title">Espacio de trabajo en blanco</string>
-    <string name="workspace_project_blank_description">Este es un espacio de trabajo en blanco que solo contiene la estructura básica de directorios. Puede editar .operit/config.json para configurar el tipo de proyecto, servidor y comandos, por ejemplo: server.enabled, preview.type, commands, etc.</string>
+    <string name="workspace_project_blank_description">Este es un espacio de trabajo en blanco que solo contiene la estructura básica de directorios. Puede editar .ailimbs/config.json para configurar el tipo de proyecto, servidor y comandos, por ejemplo: server.enabled, preview.type, commands, etc.</string>
     <string name="workspace_project_web_title">Proyecto Web</string>
     <string name="workspace_project_web_description">Desarrollo web con HTML/CSS/JavaScript, servidor local habilitado</string>
     <string name="workspace_project_node_title">Proyecto Node.js</string>
@@ -3369,7 +3369,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="workspace_close_preview">Cerrar vista previa</string>
     <string name="workspace_project_suffix">Proyecto</string>
     <string name="workspace_click_buttons_below">Haga clic en los botones de abajo para ejecutar comandos</string>
-    <string name="workspace_no_commands_configured">No hay comandos configurados\n\nPuede agregar botones de comando en .operit/config.json</string>
+    <string name="workspace_no_commands_configured">No hay comandos configurados\n\nPuede agregar botones de comando en .ailimbs/config.json</string>
     <string name="workspace_path_label">Ruta del espacio de trabajo</string>
     <string name="workspace_rename_action">Renombrar espacio de trabajo</string>
     <string name="workspace_rename_title">Renombrar espacio de trabajo</string>
@@ -3959,9 +3959,9 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="import_color_qr">Importar código QR de color</string>
     <string name="scan_color_qr">Escanear código QR de color</string>
     <string name="tavern_json">JSON de Tavern</string>
-    <string name="export_tavern_json_desc">Exportar como .json y guardar en Download/Operit/exports</string>
+    <string name="export_tavern_json_desc">Exportar como .json y guardar en Download/AiLimbs/exports</string>
     <string name="tavern_png">PNG de Tavern</string>
-    <string name="export_tavern_png_desc">Exportar como imagen importable a Tavern y guardar en Download/Operit/exports</string>
+    <string name="export_tavern_png_desc">Exportar como imagen importable a Tavern y guardar en Download/AiLimbs/exports</string>
     <string name="image_read_error">No se puede leer la imagen</string>
     <string name="image_parse_error">No se puede analizar la imagen</string>
     <string name="color_qr_not_recognized">No se puede reconocer el código QR de color</string>
@@ -4954,7 +4954,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="backup_room_db_restart_later">Más tarde</string>
     <string name="backup_room_db_last_success">Último respaldo exitoso: %1$s</string>
     <string name="backup_room_db_last_error">Último error: %1$s</string>
-    <string name="backup_files_location_hint">Sugerencia: los archivos de respaldo se guardan en la carpeta Download/Operit</string>
+    <string name="backup_files_location_hint">Sugerencia: los archivos de respaldo se guardan en la carpeta Download/AiLimbs</string>
     <string name="backup_raw_snapshot_title">Respaldo de instantánea de archivos (experimental)</string>
     <string name="backup_raw_snapshot_subtitle">Respaldo y restauración comprimidos completos por archivo/directorio</string>
     <string name="backup_raw_snapshot_desc">Empaqueta los directorios files/shared_prefs/datastore/databases del directorio de datos internos de la aplicación (el entorno Linux de terminal es grande, no se respalda por defecto). La restauración sobrescribirá los datos actuales y requerirá reiniciar la aplicación para que surta efecto. Algunos datos cifrados pueden no funcionar después de cambiar de dispositivo o reinstalar.</string>

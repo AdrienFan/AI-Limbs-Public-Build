@@ -34,7 +34,7 @@
 - `main.py` - 主程序入口
 - `requirements.txt` - Python 依赖列表
 - `venv/` - 虚拟环境目录（创建后）
-- `.operit/config.json` - Operit 工作区配置
+- `.ailimbs/config.json` - AI Limbs 工作区配置
 
 ## 虚拟环境说明
 

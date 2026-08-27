@@ -1,5 +1,5 @@
  <resources>
-    <string name="app_name">Operit AI</string>
+    <string name="app_name">AI Limbs</string>
     <string name="accessibility_service_description">Used to obtain the UI hierarchy, providing faster interface analysis capabilities for AI assistants, and does not collect or store any personal information.</string>
     
     <!-- Model selector related -->
@@ -562,7 +562,7 @@
     <string name="danger_zone">Danger Zone</string>
     <string name="chat_statistics">Chat Statistics</string>
     <string name="current_chats">Currently %1$d chat records</string>
-    <string name="backup_location">Backup files are saved in the \"Download/Operit\" folder</string>
+    <string name="backup_location">Backup files are saved in the \"Download/AiLimbs\" folder</string>
     <string name="faq_backup">FAQ</string>
     
     <!-- Terminal Screen -->
@@ -582,9 +582,9 @@
     <string name="termux_setup_guide">Termux Setup Guide</string>
     
     <!-- About Screen -->
-    <string name="about_title">About Operit AI</string>
+    <string name="about_title">About AI Limbs</string>
     <string name="about_version">Version: %1$s</string>
-    <string name="about_description">Operit AI is an intelligent assistant application that helps users use their devices more efficiently, providing interface analysis, chat conversations, and more.</string>
+    <string name="about_description">AI Limbs is an intelligent assistant application that helps users use their devices more efficiently, providing interface analysis, chat conversations, and more.</string>
     <string name="about_developer">Developer: &lt;a href="https://github.com/AAswordman"&gt;AAswordman&lt;/a&gt;</string>
     <string name="about_contact">Contact Us: aaswordsman@foxmail.com</string>
     <string name="about_website">&lt;a href="https://github.com/AAswordman/Operit"&gt;GitHub: https://github.com/AAswordman/Operit&lt;/a&gt;</string>
@@ -689,7 +689,7 @@
     
     <!-- Plugin Loading Screen -->
     <string name="plugin_skip">Skip</string>
-    <string name="plugin_app_name">OPERIT</string>
+    <string name="plugin_app_name">AI Limbs</string>
     <string name="plugin_status">Started: %1$d / %2$d</string>
     <string name="plugin_loading_status_title">Plugin Loading Status</string>
     <string name="plugin_loading_success">Loading successful</string>
@@ -741,7 +741,7 @@
     <string name="permission_guide_intro_2_title">A Powerful Toolbox for Geeks and Developers</string>
     <string name="permission_guide_intro_2_desc">With over 40 built-in professional tools for file management, web requests, script execution, and system control. Combined with a robust plugin system, you can automate tasks, and take deep control of your device.</string>
     <string name="permission_guide_intro_3_title">Unleash Creativity, Always on Standby</string>
-    <string name="permission_guide_intro_3_desc">Whether designing web pages, processing media files, or accessing the AI via its floating window, Operit provides a powerful, flexible, and secure environment for creation and assistance. Your data, your control.</string>
+    <string name="permission_guide_intro_3_desc">Whether designing web pages, processing media files, or accessing the AI via its floating window, AI Limbs provides a powerful, flexible, and secure environment for creation and assistance. Your data, your control.</string>
     <string name="permission_guide_intro_page_indicator">Feature Tour %1$d/%2$d</string>
 
     <!-- Context Menu -->
@@ -1418,7 +1418,7 @@
     <string name="overlay_permission">Overlay Permission</string>
     <string name="battery_optimization">Battery Optimization Exemption</string>
     <string name="location_permission">Location Permission</string>
-    <string name="operit_terminal">Operit Terminal</string>
+    <string name="operit_terminal">AI Limbs Terminal</string>
     
     <!-- Permission Level Descriptions -->
     <string name="permission_level_standard">Standard Permission</string>
@@ -1630,7 +1630,7 @@
     <string name="accessibility_wizard_install_provider">Install Provider App</string>
     <string name="accessibility_wizard_enable_message">Now, enable the accessibility service in your device settings. This allows the provider app to analyze screen content.</string>
     <string name="accessibility_wizard_enable_note">Important Note:</string>
-    <string name="accessibility_wizard_enable_note_details">You must select and enable \"Operit Accessibility Provider\" from the list of services.</string>
+    <string name="accessibility_wizard_enable_note_details">You must select and enable \"AI Limbs Accessibility Provider\" from the list of services.</string>
     <string name="accessibility_wizard_open_settings">Open Accessibility Settings</string>
     <string name="accessibility_wizard_success_message">Accessibility service is properly configured and ready to use!</string>
 
@@ -1867,7 +1867,7 @@
     <string name="external_http_chat_health_example">Health Check Example</string>
     <string name="external_http_chat_intent_title">Intent Calling Guide</string>
     <string name="external_http_chat_intent_desc">The broadcast entry is still available for local app integration, Tasker, or adb debugging</string>
-    <string name="external_http_chat_intent_overview">HTTP and Intent share the same parameter semantics. Only the entry method is different.\n\nRequest action: %1$s\nDefault result action: %2$s\n\nCommon extras: message, request_id, group, create_new_chat, chat_id, create_if_none, show_floating, return_tool_status, initial_mode, auto_exit_after_ms, stop_after, reply_action, reply_package\n\nAfter completion, Operit returns success, chat_id, ai_response, and error by broadcast. If the result should only be delivered to one app, set reply_package.</string>
+    <string name="external_http_chat_intent_overview">HTTP and Intent share the same parameter semantics. Only the entry method is different.\n\nRequest action: %1$s\nDefault result action: %2$s\n\nCommon extras: message, request_id, group, create_new_chat, chat_id, create_if_none, show_floating, return_tool_status, initial_mode, auto_exit_after_ms, stop_after, reply_action, reply_package\n\nAfter completion, AI Limbs returns success, chat_id, ai_response, and error by broadcast. If the result should only be delivered to one app, set reply_package.</string>
     <string name="external_http_chat_copy_example">Copy Example</string>
     <string name="external_http_chat_example_copied">Example command copied</string>
     <string name="external_http_chat_service_enabled">Service enabled</string>
@@ -2047,7 +2047,7 @@
     <string name="tool_user_agreement">User Agreement</string>
     <string name="tool_user_agreement_desc">View the application\'s user agreement and privacy policy</string>
     <string name="tool_default_assistant_guide">Default Assistant Setup</string>
-    <string name="tool_default_assistant_guide_desc">Set Operit voice floating as system default assistant</string>
+    <string name="tool_default_assistant_guide_desc">Set AI Limbs voice floating as system default assistant</string>
     <string name="tool_terminal">Ubuntu Command Terminal</string>
     <string name="tool_terminal_desc">Powerful command-line terminal for executing system commands</string>
     <string name="tool_terminal_auto_config">Terminal Auto Configuration</string>
@@ -3356,7 +3356,7 @@
 
     <!-- Workspace Project Types (Project templates) -->
     <string name="workspace_project_blank_title">Blank Workspace</string>
-    <string name="workspace_project_blank_description">This is a blank workspace with only basic directory structure. You can edit .operit/config.json to configure project type, server, and commands, such as: server.enabled, preview.type, commands, etc.</string>
+    <string name="workspace_project_blank_description">This is a blank workspace with only basic directory structure. You can edit .ailimbs/config.json to configure project type, server, and commands, such as: server.enabled, preview.type, commands, etc.</string>
     <string name="workspace_project_web_title">Web Project</string>
     <string name="workspace_project_web_description">HTML/CSS/JavaScript web development with local server enabled</string>
     <string name="workspace_project_node_title">Node.js Project</string>
@@ -3385,7 +3385,7 @@
     <string name="workspace_close_preview">Close Preview</string>
     <string name="workspace_project_suffix">Project</string>
     <string name="workspace_click_buttons_below">Click buttons below to execute commands</string>
-    <string name="workspace_no_commands_configured">No commands configured\n\nYou can add command button configurations in .operit/config.json</string>
+    <string name="workspace_no_commands_configured">No commands configured\n\nYou can add command button configurations in .ailimbs/config.json</string>
     <string name="workspace_path_label">Workspace Path</string>
     <string name="workspace_rename_action">Rename Workspace</string>
     <string name="workspace_rename_title">Rename Workspace</string>
@@ -4449,9 +4449,9 @@
     <string name="import_color_qr">Import Color QR</string>
     <string name="scan_color_qr">Scan Color QR</string>
     <string name="tavern_json">Tavern JSON</string>
-    <string name="export_tavern_json_desc">Export as .json and save to Download/Operit/exports</string>
+    <string name="export_tavern_json_desc">Export as .json and save to Download/AiLimbs/exports</string>
     <string name="tavern_png">Tavern PNG</string>
-    <string name="export_tavern_png_desc">Export as image importable to Tavern and save to Download/Operit/exports</string>
+    <string name="export_tavern_png_desc">Export as image importable to Tavern and save to Download/AiLimbs/exports</string>
     <string name="image_read_error">Cannot read image</string>
     <string name="image_parse_error">Cannot parse image</string>
     <string name="color_qr_not_recognized">Cannot recognize color QR code</string>
@@ -4463,17 +4463,17 @@
     <string name="delete_tag_confirm">Are you sure you want to delete tag "%1$s"? This action cannot be undone.</string>
 
     <!-- OperitTerminal Wizard Card -->
-    <string name="operit_terminal_wizard_title">OperitTerminal Setup Wizard</string>
-    <string name="operit_terminal_not_installed">OperitTerminal not installed</string>
-    <string name="operit_terminal_update_available">OperitTerminal update available</string>
-    <string name="operit_terminal_up_to_date">OperitTerminal is up to date</string>
-    <string name="operit_terminal_install_description">OperitTerminal is a powerful terminal application that provides a complete Linux environment and package management capabilities. We need to install this application first.</string>
-    <string name="operit_terminal_install_button">Install OperitTerminal</string>
-    <string name="operit_terminal_update_description">A new version of OperitTerminal is available. It is recommended to update for better features and compatibility.</string>
+    <string name="operit_terminal_wizard_title">AI Limbs Terminal Setup Wizard</string>
+    <string name="operit_terminal_not_installed">AI Limbs Terminal not installed</string>
+    <string name="operit_terminal_update_available">AI Limbs Terminal update available</string>
+    <string name="operit_terminal_up_to_date">AI Limbs Terminal is up to date</string>
+    <string name="operit_terminal_install_description">AI Limbs Terminal is a powerful terminal application that provides a complete Linux environment and package management capabilities. We need to install this application first.</string>
+    <string name="operit_terminal_install_button">Install AI Limbs Terminal</string>
+    <string name="operit_terminal_update_description">A new version of AI Limbs Terminal is available. It is recommended to update for better features and compatibility.</string>
     <string name="operit_terminal_release_notes">Release Notes: %1$s</string>
-    <string name="operit_terminal_update_button">Update OperitTerminal</string>
-    <string name="operit_terminal_latest_description">Congratulations! You have installed the latest version of OperitTerminal and can start using its powerful terminal features.</string>
-    <string name="operit_terminal_open_button">Open OperitTerminal</string>
+    <string name="operit_terminal_update_button">Update AI Limbs Terminal</string>
+    <string name="operit_terminal_latest_description">Congratulations! You have installed the latest version of AI Limbs Terminal and can start using its powerful terminal features.</string>
+    <string name="operit_terminal_open_button">Open AI Limbs Terminal</string>
 
     <!-- Function Types -->
     <string name="function_type_translation">Translation Function</string>
@@ -4686,14 +4686,14 @@
     <string name="mcp_issue_body_title_install_info">## Installation Info</string>
     <string name="mcp_issue_body_repo_address">**Repository:** %1$s</string>
     <string name="mcp_issue_body_title_install_method">### Installation</string>
-    <string name="mcp_issue_body_install_step1">1. Open Operit MCP configuration screen and tap "Import"</string>
+    <string name="mcp_issue_body_install_step1">1. Open AI Limbs MCP configuration screen and tap "Import"</string>
     <string name="mcp_issue_body_install_step2">2. Select "Import from Repo"</string>
     <string name="mcp_issue_body_install_step3">3. Enter repository URL: `%1$s`</string>
     <string name="mcp_issue_body_install_step4">4. Set plugin name and tap import</string>
     <string name="mcp_issue_body_title_tech_info">## Technical Info</string>
-    <string name="mcp_issue_body_tech_platform">- **Platform:** Operit MCP Market</string>
+    <string name="mcp_issue_body_tech_platform">- **Platform:** AI Limbs MCP Market</string>
     <string name="mcp_issue_body_tech_publish_time">- **Published at:** %1$s</string>
-    <string name="mcp_issue_body_footer_note">*This Issue was generated automatically by Operit*</string>
+    <string name="mcp_issue_body_footer_note">*This Issue was generated automatically by AI Limbs*</string>
 
     <string name="mcp_publish_body_section_plugin_info">## 📋 Plugin Info</string>
     <string name="mcp_publish_body_label_description">**Description:** %1$s</string>
@@ -4702,18 +4702,18 @@
     <string name="mcp_publish_body_section_quick_install">## ⚡ Quick Install</string>
     <string name="mcp_publish_body_section_install_method">## 📦 Installation</string>
     <string name="mcp_publish_body_method_repo_import_title">### Method 1: Import from Repo</string>
-    <string name="mcp_publish_body_method_repo_import_step1">1. Open Operit MCP configuration screen</string>
+    <string name="mcp_publish_body_method_repo_import_step1">1. Open AI Limbs MCP configuration screen</string>
     <string name="mcp_publish_body_method_repo_import_step2">2. Tap "Import" → "Import from Repo"</string>
     <string name="mcp_publish_body_method_repo_import_step3">3. Enter repository URL: `%1$s`</string>
     <string name="mcp_publish_body_method_repo_import_step4">4. Set plugin name and import</string>
     <string name="mcp_publish_body_method_config_import_title">### Method 2: Import Config</string>
-    <string name="mcp_publish_body_method_config_import_step1">1. Open Operit MCP configuration screen</string>
+    <string name="mcp_publish_body_method_config_import_step1">1. Open AI Limbs MCP configuration screen</string>
     <string name="mcp_publish_body_method_config_import_step2">2. Tap "Import" → "Import Config"</string>
     <string name="mcp_publish_body_method_config_import_step3">3. Paste the following config:</string>
     <string name="mcp_publish_body_section_tech_info">## 🛠️ Technical Info</string>
     <string name="mcp_publish_body_table_header">| Item | Value |</string>
     <string name="mcp_publish_body_table_separator">|------|-----|</string>
-    <string name="mcp_publish_body_table_row_platform">| Platform | Operit MCP Market |</string>
+    <string name="mcp_publish_body_table_row_platform">| Platform | AI Limbs MCP Market |</string>
     <string name="mcp_publish_body_table_row_parser_version">| Parser Version | 1.0 |</string>
     <string name="mcp_publish_body_table_row_publish_time">| Published at | %1$s |</string>
     
@@ -4822,7 +4822,7 @@
     <string name="custom">Custom</string>
 
     <!-- Voice Assistant Widget -->
-    <string name="voice_assistant_widget_description">Quick launch Operit voice assistant</string>
+    <string name="voice_assistant_widget_description">Quick launch AI Limbs voice assistant</string>
     <string name="voice_assistant_widget_title">Voice Assistant</string>
     <string name="toolpkg_widget_host_label">Custom Widget</string>
     <string name="toolpkg_widget_host_description">Add it and bind it to a widget page registered by a plugin</string>
@@ -4907,15 +4907,15 @@
 
     <!-- Default Assistant Setup Guide -->
     <string name="default_assistant_guide_title">Set Default Voice Assistant</string>
-    <string name="default_assistant_guide_subtitle">Make Operit Your Smart Assistant</string>
-    <string name="default_assistant_guide_intro">After setting Operit as the default system assistant, you can quickly launch the Operit voice assistant by long-pressing the Home button or using voice wake-up, providing a more convenient AI interaction experience.</string>
+    <string name="default_assistant_guide_subtitle">Make AI Limbs Your Smart Assistant</string>
+    <string name="default_assistant_guide_intro">After setting AI Limbs as the default system assistant, you can quickly launch the AI Limbs voice assistant by long-pressing the Home button or using voice wake-up, providing a more convenient AI interaction experience.</string>
     <string name="default_assistant_guide_steps_title">Setup Steps</string>
     
     <!-- Step 1 -->
     <string name="default_assistant_guide_step1_title">Open System Settings</string>
     <string name="default_assistant_guide_step1_desc">First, you need to enter the Android system settings interface</string>
     <string name="default_assistant_guide_step1_detail1">• Open System Settings → Apps → Default apps → Digital assistant app</string>
-    <string name="default_assistant_guide_step1_detail2">• Find and select "Operit AI" in the assistant app list</string>
+    <string name="default_assistant_guide_step1_detail2">• Find and select "AI Limbs" in the assistant app list</string>
     <string name="default_assistant_guide_step1_detail_android12">Android 12+: Settings → Apps → Default apps → Digital assistant app → Default digital assistant app</string>
     <string name="default_assistant_guide_open_settings">Open Settings</string>
     
@@ -4930,24 +4930,24 @@
     <string name="default_assistant_guide_step2_detail_android12">Android 12+: Settings → Apps → Default apps → Digital assistant app → Default digital assistant app</string>
     
     <!-- Step 3 -->
-    <string name="default_assistant_guide_step3_title">Select Operit</string>
-    <string name="default_assistant_guide_step3_desc">Choose Operit AI from the assistant app list</string>
-    <string name="default_assistant_guide_step3_detail1">• Find \"Operit AI\" in the available assistant apps list</string>
-    <string name="default_assistant_guide_step3_detail2">• Tap to select, and the system will set Operit as the default assistant</string>
+    <string name="default_assistant_guide_step3_title">Select AI Limbs</string>
+    <string name="default_assistant_guide_step3_desc">Choose AI Limbs from the assistant app list</string>
+    <string name="default_assistant_guide_step3_detail1">• Find \"AI Limbs\" in the available assistant apps list</string>
+    <string name="default_assistant_guide_step3_detail2">• Tap to select, and the system will set AI Limbs as the default assistant</string>
     <string name="default_assistant_guide_step3_detail3">• You can try speaking or typing to interact with the assistant</string>
     
     <!-- Step 4 -->
     <string name="default_assistant_guide_step4_title">Test Voice Assistant</string>
     <string name="default_assistant_guide_step4_desc">After setup, test if it can be launched normally</string>
-    <string name="default_assistant_guide_step4_detail1">• Long-press the Home button (home screen button) should invoke Operit voice assistant</string>
-    <string name="default_assistant_guide_step4_detail2">• If voice wake-up is supported, saying \"Hey Google\" or your device\'s designated wake word may also trigger Operit</string>
+    <string name="default_assistant_guide_step4_detail1">• Long-press the Home button (home screen button) should invoke AI Limbs voice assistant</string>
+    <string name="default_assistant_guide_step4_detail2">• If voice wake-up is supported, saying \"Hey Google\" or your device\'s designated wake word may also trigger AI Limbs</string>
     
     <!-- Troubleshooting -->
     <string name="default_assistant_guide_troubleshooting_title">Having Problems?</string>
-    <string name="default_assistant_guide_troubleshooting_content">If you can\'t find Operit in the list, please ensure:\n\n• The app is properly installed and not disabled\n• Necessary permissions have been granted (microphone, overlay, etc.)\n• Try restarting the device and setting it up again\n\nSome custom systems may restrict third-party apps from being set as default assistants. If you encounter this situation, you can still use Operit through the in-app floating window feature.</string>
+    <string name="default_assistant_guide_troubleshooting_content">If you can\'t find AI Limbs in the list, please ensure:\n\n• The app is properly installed and not disabled\n• Necessary permissions have been granted (microphone, overlay, etc.)\n• Try restarting the device and setting it up again\n\nSome custom systems may restrict third-party apps from being set as default assistants. If you encounter this situation, you can still use AI Limbs through the in-app floating window feature.</string>
 
     <!-- Voice Interaction Service -->
-    <string name="voice_interaction_service_name">Operit AI Assistant</string>
+    <string name="voice_interaction_service_name">AI Limbs Assistant</string>
     <string name="voice_interaction_service_summary">Intelligent voice assistant service</string>
 
     <!-- Tool Permission Settings -->
@@ -5222,7 +5222,7 @@
     <string name="start_with_new_chat_description">When enabled, each app launch opens a new blank chat instead of reopening the previous conversation.</string>
     <string name="software_identity_title">Software Identity</string>
     <string name="software_identity_description">Change the software identity shown at the top of the sidebar.</string>
-    <string name="software_identity_option_operit">Operit AI</string>
+    <string name="software_identity_option_operit">AI Limbs</string>
     <string name="software_identity_option_lingshu">Lingshu AI</string>
     <string name="reset_all_display_settings">Reset All Display Settings</string>
     
@@ -5293,14 +5293,14 @@
     <string name="backup_memory_link_count">Memory Links</string>
     
     <string name="backup_files_statistics">Backup Files Statistics</string>
-    <string name="backup_files_statistics_subtitle">Backup files in Operit export directory</string>
+    <string name="backup_files_statistics_subtitle">Backup files in AI Limbs export directory</string>
     <string name="backup_refresh">Refresh</string>
     <string name="backup_scanning">Scanning</string>
     <string name="backup_chat_files">Chat History</string>
     <string name="backup_memory_files">Memory</string>
     <string name="backup_model_config_files">Model Config</string>
     <string name="backup_room_db_files">Database</string>
-    <string name="backup_files_location_hint">Tip: backup files are saved in Download/Operit folder</string>
+    <string name="backup_files_location_hint">Tip: backup files are saved in Download/AiLimbs folder</string>
 
     <string name="backup_room_db_title">Database (Auto + Manual Backup)</string>
     <string name="backup_room_db_subtitle">Daily backup of Room SQLite database, keep up to %1$d backups (older ones will be deleted automatically)</string>
@@ -5391,7 +5391,7 @@
     <string name="backup_faq_why">Why backup data?</string>
     <string name="backup_faq_why_answer">Backing up chat history prevents important content loss when the app is uninstalled or data is lost. Regular backups are a good habit!</string>
     <string name="backup_faq_where">Where are exported files saved?</string>
-    <string name="backup_faq_where_answer">Exported backup files are saved in the \"Download/Operit\" folder on your phone, with filenames containing the data type, date and time.</string>
+    <string name="backup_faq_where_answer">Exported backup files are saved in the \"Download/AiLimbs\" folder on your phone, with filenames containing the data type, date and time.</string>
     <string name="backup_faq_duplicate">Will importing create duplicate data?</string>
     <string name="backup_faq_duplicate_answer">The system uses record IDs to determine duplicates. Records with the same ID will be updated rather than duplicated. Records with different IDs will be added as new entries.</string>
     
@@ -5399,7 +5399,7 @@
     <string name="backup_select_export_format">Select Export Format</string>
     <string name="backup_select_format_hint">Please select the chat history format to export:</string>
     <string name="backup_format_json">JSON (Recommended)</string>
-    <string name="backup_format_json_desc">Operit native format, preserves variants and all other data</string>
+    <string name="backup_format_json_desc">AI Limbs native format, preserves variants and all other data</string>
     <string name="backup_format_markdown">Markdown</string>
     <string name="backup_format_markdown_desc">Lightweight markup format, easy to read and edit</string>
     <string name="backup_format_html">HTML</string>
@@ -5426,7 +5426,7 @@
 
     <string name="backup_character_cards_title">Character Cards</string>
     <string name="backup_character_cards_subtitle">Backup and restore character card settings</string>
-    <string name="backup_character_cards_current_count">Currently %1$d character card(s). Exported files will be saved in the "Download/Operit" folder.</string>
+    <string name="backup_character_cards_current_count">Currently %1$d character card(s). Exported files will be saved in the "Download/AiLimbs" folder.</string>
     <string name="backup_character_card_count">Character Cards</string>
     <string name="backup_character_card_files">Character Cards</string>
 
@@ -5572,7 +5572,7 @@
 
     <!-- Logcat -->
     <string name="logcat_no_logs_to_save">No logs to save</string>
-    <string name="logcat_header">=== Operit Logs ===</string>
+    <string name="logcat_header">=== AI Limbs Logs ===</string>
     <string name="logcat_date">Date: %1$s</string>
     <string name="logcat_total_count">Total count: %1$d</string>
     <string name="logcat_save_failed">Save failed: %1$s</string>
@@ -6103,14 +6103,14 @@
     <string name="skill_publish_body_section_repo_info">## 🔗 Repository Info</string>
     <string name="skill_publish_body_label_repo_url">**Repository URL:** %1$s</string>
     <string name="skill_publish_body_section_install_method">## 📦 Installation</string>
-    <string name="skill_publish_body_install_step1">1. Open Operit → Package Manager → Skills</string>
+    <string name="skill_publish_body_install_step1">1. Open AI Limbs → Package Manager → Skills</string>
     <string name="skill_publish_body_install_step2">2. Tap "Import Skill" → "Import from Repository"</string>
     <string name="skill_publish_body_install_step3">3. Enter repository URL: `%1$s`</string>
     <string name="skill_publish_body_install_step4">4. Confirm import</string>
     <string name="skill_publish_body_section_tech_info">## 🛠️ Technical Info</string>
     <string name="skill_publish_body_table_header">| Item | Value |</string>
     <string name="skill_publish_body_table_separator">|------|-------|</string>
-    <string name="skill_publish_body_table_row_platform">| Platform | Operit Skill Market |</string>
+    <string name="skill_publish_body_table_row_platform">| Platform | AI Limbs Skill Market |</string>
     <string name="skill_publish_body_table_row_parser_version">| Parser version | 1.0 |</string>
     <string name="skill_publish_body_table_row_publish_time">| Publish time | %1$s |</string>
 
@@ -6451,7 +6451,7 @@
     <string name="demo_cmd_list_activities">List active Activities</string>
     <string name="demo_cmd_list_services">List system services</string>
     <string name="demo_cmd_check_resolution">Check screen resolution</string>
-    <string name="demo_cmd_echo_hello">Print Hello OperitTerminal</string>
+    <string name="demo_cmd_echo_hello">Print Hello AI Limbs Terminal</string>
     <string name="demo_cmd_list_files">List files and directories</string>
     <string name="demo_cmd_show_user">Show current user</string>
     <string name="demo_cmd_update_package_manager">Update package manager (Ubuntu)</string>
@@ -7009,10 +7009,10 @@
     <string name="service_chat_complete_reminder_sound">Chat completion reminder (sound)</string>
     <string name="service_chat_complete_reminder_vibration">Chat completion reminder (vibration)</string>
     <string name="service_chat_complete_reminder_sound_vibration">Chat completion reminder (sound and vibration)</string>
-    <string name="service_keep_background">Keep Operit running in the background.</string>
+    <string name="service_keep_background">Keep AI Limbs running in the background.</string>
     <string name="service_notify_when_complete">Notify you when the conversation is complete.</string>
-    <string name="service_running_wake_pause">Operit is running (wake paused)</string>
-    <string name="service_running_wake_listening">Operit is running (wake listening)</string>
+    <string name="service_running_wake_pause">AI Limbs is running (wake paused)</string>
+    <string name="service_running_wake_listening">AI Limbs is running (wake listening)</string>
     <string name="service_running_stats">Conversations %1$d · Tools %2$d</string>
     <string name="service_running_http_listening">External HTTP listening on port %1$d</string>
     <string name="service_running_with_http">%1$s · HTTP %2$d</string>
@@ -7059,7 +7059,7 @@
     <string name="html_export_updated">Updated</string>
     <string name="html_export_group">Group</string>
     <string name="html_export_message_count">Message Count</string>
-    <string name="html_export_footer">Exported from Operit AI Assistant</string>
+    <string name="html_export_footer">Exported from AI Limbs Assistant</string>
 
     <!-- MnnModelDownloadManager -->
     <string name="mnn_no_cache_data">No cache data</string>
@@ -7839,7 +7839,7 @@
     <string name="market_allow_public_updates_title">Allow anyone to update this plugin</string>
     <string name="market_allow_public_updates_desc">When enabled, other signed-in users can submit new versions for this plugin. Only the original publisher can change this switch.</string>
     <string name="artifact_publish_encrypt_title">Encrypt published asset</string>
-    <string name="artifact_publish_encrypt_desc">When enabled, scripts are AST-minified and package resources upload in Operit protected format. Install and cache stay encrypted, and runtime reads decrypt automatically.</string>
+    <string name="artifact_publish_encrypt_desc">When enabled, scripts are AST-minified and package resources upload in AI Limbs protected format. Install and cache stay encrypted, and runtime reads decrypt automatically.</string>
     <string name="artifact_publish_encrypt_confirmation">Encrypted publish: %1$s</string>
     <string name="market_login_required_hint">Log in to GitHub to manage and publish market content</string>
     <string name="available_scripts_market">Available Scripts</string>
@@ -8122,13 +8122,13 @@
     <string name="artifact_project_node_view_title">Node View</string>
     <string name="artifact_project_nodes_loading">Loading project nodes...</string>
     <string name="artifact_project_node_selection_hint">Click to select a node, click again to deselect.</string>
-    <string name="plugin_creation_fresh_task_line">Please activate the Operit Editor and use the sandbox package dev toolkit to develop a new sandbox package.</string>
+    <string name="plugin_creation_fresh_task_line">Please activate the AI Limbs Editor and use the sandbox package dev toolkit to develop a new sandbox package.</string>
     <string name="plugin_creation_fresh_package_rule_line">First determine the new sandbox package ID, do not rename it later.</string>
-    <string name="plugin_creation_fresh_dev_directory_line">The development directory is fixed to Downloads/Operit/dev_package/your_determined_id. Development, installation, and testing are all done here.</string>
-    <string name="plugin_creation_continue_task_line">Please activate the Operit Editor, locate the sandbox package %1$s, and continue development and testing based on this version.</string>
-    <string name="plugin_creation_merge_task_line">Please activate the Operit Editor, locate the sandbox package %1$s, and perform merge development and testing based on this version.</string>
+    <string name="plugin_creation_fresh_dev_directory_line">The development directory is fixed to Downloads/AiLimbs/dev_package/your_determined_id. Development, installation, and testing are all done here.</string>
+    <string name="plugin_creation_continue_task_line">Please activate the AI Limbs Editor, locate the sandbox package %1$s, and continue development and testing based on this version.</string>
+    <string name="plugin_creation_merge_task_line">Please activate the AI Limbs Editor, locate the sandbox package %1$s, and perform merge development and testing based on this version.</string>
     <string name="plugin_creation_existing_package_rule_line">Current sandbox package ID is %1$s. The package ID and plugin name must be kept; do not rename or create a new package.</string>
-    <string name="plugin_creation_existing_dev_directory_line">The development directory is fixed to Downloads/Operit/dev_package/%1$s. Development, installation, and testing are all done here.</string>
+    <string name="plugin_creation_existing_dev_directory_line">The development directory is fixed to Downloads/AiLimbs/dev_package/%1$s. Development, installation, and testing are all done here.</string>
     <string name="plugin_creation_update_sandbox_package_dev">First update SandboxPackage_DEV.</string>
     <string name="plugin_creation_copy_types_to_dev_dir">Copy the types from skills to the development directory, overwriting existing files.</string>
     <string name="plugin_creation_use_terminal_ts_js_hint">Use the terminal as much as possible, prioritize writing ts and js, then compile to final js. Refer to examples for tsconfig.</string>

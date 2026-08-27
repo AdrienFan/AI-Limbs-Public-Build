@@ -61,8 +61,10 @@ private fun buildRuntimeConstantsScript(
             if (typeof expose !== 'function') {
                 throw new Error('__operitExpose is unavailable');
             }
-            expose('OPERIT_DOWNLOAD_DIR', ${JSONObject.quote(operitDownloadDir)});
-            expose('OPERIT_CLEAN_ON_EXIT_DIR', ${JSONObject.quote(operitCleanOnExitDir)});
+            expose('AI_LIMBS_DOWNLOAD_DIR', ${JSONObject.quote(operitDownloadDir)});
+            expose('OPERIT_DOWNLOAD_DIR', ${JSONObject.quote(operitDownloadDir)}); // legacy alias
+            expose('AI_LIMBS_CLEAN_ON_EXIT_DIR', ${JSONObject.quote(operitCleanOnExitDir)});
+            expose('OPERIT_CLEAN_ON_EXIT_DIR', ${JSONObject.quote(operitCleanOnExitDir)}); // legacy alias
         })();
     """.trimIndent()
 }

@@ -6,8 +6,8 @@
     "en": "MiniMax Draw"
   },
   "description": {
-    "zh": "使用 MiniMax 官方图像生成接口 (/v1/image_generation) 生成图片，支持文生图和带参考图的生图；结果保存到本地 /sdcard/Download/Operit/plugins/draw/minimax_draw/draws/ 目录，并返回 Markdown 图片提示。",
-    "en": "Generate images with the official MiniMax image generation API (/v1/image_generation). Supports text-to-image and reference-image generation. Saves results to /sdcard/Download/Operit/plugins/draw/minimax_draw/draws/ and returns Markdown image hints."
+    "zh": "使用 MiniMax 官方图像生成接口 (/v1/image_generation) 生成图片，支持文生图和带参考图的生图；结果保存到本地 /sdcard/Download/AiLimbs/plugins/draw/minimax_draw/draws/ 目录，并返回 Markdown 图片提示。",
+    "en": "Generate images with the official MiniMax image generation API (/v1/image_generation). Supports text-to-image and reference-image generation. Saves results to /sdcard/Download/AiLimbs/plugins/draw/minimax_draw/draws/ and returns Markdown image hints."
   },
   "category": "Draw",
   "env": [

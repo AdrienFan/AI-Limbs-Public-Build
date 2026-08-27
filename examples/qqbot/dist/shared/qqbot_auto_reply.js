@@ -297,7 +297,7 @@ function extractQQInboundAttachments(event) {
 }
 async function ensureQQBotAttachmentDirAsync(event) {
     const eventDirName = sanitizePathSegment((0, qqbot_common_1.firstNonBlank)((0, qqbot_common_1.asText)(event.eventId).trim(), (0, qqbot_common_1.asText)(event.messageId).trim(), hashText((0, qqbot_common_1.asText)(event.timestamp))), "event");
-    const baseDir = `${OPERIT_CLEAN_ON_EXIT_DIR}/qqbot/${eventDirName}`;
+    const baseDir = `${AI_LIMBS_CLEAN_ON_EXIT_DIR}/qqbot/${eventDirName}`;
     await Tools.Files.mkdir(baseDir, true, "android");
     await Tools.Files.write(`${baseDir}/.nomedia`, "", false, "android");
     return baseDir;

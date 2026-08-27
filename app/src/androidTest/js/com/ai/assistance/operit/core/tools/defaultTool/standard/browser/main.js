@@ -8,7 +8,7 @@ const OutputStreamWriter = Java.type('java.io.OutputStreamWriter');
 const Charset = Java.type('java.nio.charset.Charset');
 
 const UTF8 = Charset.forName('UTF-8');
-const BASE_DIR = '/sdcard/Download/Operit/browser_tool_suite';
+const BASE_DIR = '/sdcard/Download/AiLimbs/browser_tool_suite';
 const PAGE_PATH = BASE_DIR + '/browser_tool_suite.html';
 const PAGE_URL = 'file://' + PAGE_PATH;
 const UPLOAD_PATH = BASE_DIR + '/upload_payload.txt';

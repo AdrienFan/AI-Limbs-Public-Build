@@ -270,7 +270,7 @@ declare global {
     // Get environment variable function
     function getEnv(key: string): string | undefined;
 
-    // Get persistent plugin config directory under /sdcard/Download/Operit/plugins/<id>
+    // Get persistent plugin config directory under /sdcard/Download/AiLimbs/plugins/<id>
     function getPluginConfigDir(pluginId?: string): string;
 
     function getState(): string | undefined;
@@ -283,7 +283,11 @@ declare global {
 
     function getCallerCardId(): string | undefined;
 
+    const AI_LIMBS_DOWNLOAD_DIR: string;
+    /** @deprecated Legacy alias; use AI_LIMBS_DOWNLOAD_DIR. */
     const OPERIT_DOWNLOAD_DIR: string;
+    const AI_LIMBS_CLEAN_ON_EXIT_DIR: string;
+    /** @deprecated Legacy alias; use AI_LIMBS_CLEAN_ON_EXIT_DIR. */
     const OPERIT_CLEAN_ON_EXIT_DIR: string;
 
     // Utility objects
