@@ -300,12 +300,12 @@ class AiLimbsDocumentProvider(context: Context) {
 
     private fun migrateRetiredToolManualRules(content: String): String {
         var updated = content
-        updated = Regex("(?ms)^## 6\. Ubuntu 工具使用规则\r?\n.*?(?=^## 9\.)").replace(updated, "")
-        updated = Regex("(?ms)^## 13\. 手册同步原则\r?\n.*?(?=^## 14\.)").replace(
+        updated = Regex("""(?ms)^## 6\. Ubuntu 工具使用规则\r?\n.*?(?=^## 9\.)""").replace(updated, "")
+        updated = Regex("""(?ms)^## 13\. 手册同步原则\r?\n.*?(?=^## 14\.)""").replace(
             updated,
             "## 13. 工作手册同步原则\n\n项目路径、工作目录结构、重要工作流程、当前开发基线或关键协议变化时，应同步更新工作手册。\n\n"
         )
-        updated = Regex("(?ms)^## 14\. 基本执行顺序\r?\n.*?(?=^## 15\.)").replace(
+        updated = Regex("""(?ms)^## 14\. 基本执行顺序\r?\n.*?(?=^## 15\.)""").replace(
             updated,
             "## 14. 基本执行顺序\n\n读取工作手册 → 使用 `ail-tool` 查询并优先复用现有工具 → 必要时安装并验证新工具 → 清理无保留价值的安装残留 → 执行任务。\n\n"
         )
