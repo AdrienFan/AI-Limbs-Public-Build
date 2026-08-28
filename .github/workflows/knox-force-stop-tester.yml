@@ -1,0 +1,31 @@
+name: Knox Force Stop Tester
+
+on:
+  push:
+    branches: [experiment/knox-force-stop-tester]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+      - name: Install Android 36
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Build tester
+        run: |
+          chmod +x ./gradlew
+          ./gradlew -p experiments/knox-force-stop-tester :app:assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v6
+        with:
+          name: knox-force-stop-tester
+          path: experiments/knox-force-stop-tester/app/build/outputs/apk/debug/*.apk
