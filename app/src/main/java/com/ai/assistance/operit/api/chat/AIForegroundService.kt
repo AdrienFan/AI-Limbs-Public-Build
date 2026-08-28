@@ -48,7 +48,7 @@ import com.ai.assistance.operit.api.speech.SpeechServiceFactory
 import com.ai.assistance.operit.core.application.OperitApplication
 import com.ai.assistance.operit.core.chat.AIMessageManager
 import com.ai.assistance.operit.core.application.ActivityLifecycleManager
-import com.ai.assistance.operit.core.application.ForegroundServiceCompat
+import com.ai.assistance.operit.core.application.AiLimbsBackgroundSurvivalManager
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiConfig
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpServer
@@ -674,8 +674,7 @@ class AIForegroundService : Service() {
             stopWakeListeningLocked(releaseProvider = shouldRelease)
         }
 
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, createNotification())
+        refreshServiceNotification()
     }
 
     private fun startRecordingStateMonitoring() {
@@ -838,6 +837,9 @@ class AIForegroundService : Service() {
     private val workflowRepository by lazy { WorkflowRepository(applicationContext) }
     private val externalHttpPreferences by lazy { ExternalHttpApiPreferences.getInstance(applicationContext) }
     private val aiLimbsBridgeManager by lazy { AiLimbsBridgeManager(applicationContext, serviceScope) }
+    private val backgroundSurvivalManager by lazy {
+        AiLimbsBackgroundSurvivalManager(applicationContext)
+    }
     private var bridgeScreenReceiverRegistered = false
     private var bridgeNetworkCallbackRegistered = false
     @Volatile
@@ -867,6 +869,7 @@ class AIForegroundService : Service() {
                 val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
                 when (action) {
                     Intent.ACTION_SCREEN_OFF -> {
+                        applyBackgroundSurvivalForeground("screen_off", force = true)
                         updateBridgeScreenOffWakeLock("screen_broadcast:$action")
                         logBridgeHostHealth("screen_off")
                         aiLimbsBridgeManager.onHostSignal(AiLimbsBridgeHostSignal.ScreenOff)
@@ -1049,8 +1052,13 @@ class AIForegroundService : Service() {
         if (!isRunning.get()) {
             return
         }
+        val notification = createNotification()
+        applyBackgroundSurvivalForeground(
+            reason = "notification_refresh",
+            notification = notification
+        )
         val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, createNotification())
+        manager.notify(NOTIFICATION_ID, notification)
     }
 
 
@@ -1217,6 +1225,50 @@ class AIForegroundService : Service() {
         }
     }
 
+    private fun shouldRequestPersistentBackgroundSurvival(): Boolean {
+        return hasPersistentForegroundResponsibility() ||
+            hasPersistentForegroundResponsibilityConfigured(applicationContext)
+    }
+
+    private fun shouldUseSpecialForegroundType(): Boolean {
+        val externalHttpEnabled =
+            externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
+        return aiLimbsBridgeManager.shouldKeepAlive || externalHttpEnabled
+    }
+
+    private fun applyBackgroundSurvivalForeground(
+        reason: String,
+        notification: Notification = createNotification(),
+        microphone: Boolean = wakeListeningMicActiveForRecordingDetection,
+        force: Boolean = false
+    ) {
+        val policy = backgroundSurvivalManager.buildPolicy(
+            persistentBackgroundRequested = shouldRequestPersistentBackgroundSurvival(),
+            dataSync = true,
+            specialUse = shouldUseSpecialForegroundType(),
+            microphone = microphone
+        )
+        val result = backgroundSurvivalManager.applyForeground(
+            service = this,
+            notificationId = NOTIFICATION_ID,
+            notification = notification,
+            policy = policy,
+            reason = reason,
+            force = force
+        )
+        if (result.changed) {
+            AppLogger.i(
+                TAG,
+                "AI Limbs background survival policy applied: reason=$reason, " +
+                    "persistent=${policy.persistentBackgroundRequested}, " +
+                    "dozeAllowlisted=${policy.dozeAllowlisted}, " +
+                    "systemExemptedEligible=${policy.systemExemptedEligible}, " +
+                    "systemExemptedApplied=${result.systemExemptedApplied}, " +
+                    "types=0x${result.appliedTypes.toString(16)}"
+            )
+        }
+    }
+
     private fun hasPersistentForegroundResponsibility(): Boolean {
         val alwaysListeningEnabled = wakeListeningEnabled || isAlwaysListeningEnabledNow()
         val externalHttpEnabled = externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
@@ -1267,15 +1319,11 @@ class AIForegroundService : Service() {
         chatRuntimeHolder
         createNotificationChannel()
         val notification = createNotification()
-        ForegroundServiceCompat.startForeground(
-            service = this,
-            notificationId = NOTIFICATION_ID,
+        applyBackgroundSurvivalForeground(
+            reason = "service_create",
             notification = notification,
-            types = ForegroundServiceCompat.buildTypes(
-                dataSync = true,
-                specialUse = aiLimbsBridgeManager.shouldKeepAlive ||
-                    runCatching { externalHttpPreferences.getEnabled() }.getOrDefault(false)
-            )
+            microphone = false,
+            force = true
         )
         cancelLegacyRdcNotification()
         startNotificationWatchdog()
@@ -1411,17 +1459,12 @@ class AIForegroundService : Service() {
             return false
         }
 
-        val types = ForegroundServiceCompat.buildTypes(
-            dataSync = true,
-            microphone = true,
-            specialUse = aiLimbsBridgeManager.shouldKeepAlive || isExternalHttpEnabledNow()
-        )
         return try {
-            ForegroundServiceCompat.startForeground(
-                service = this,
-                notificationId = NOTIFICATION_ID,
+            applyBackgroundSurvivalForeground(
+                reason = "microphone_promote",
                 notification = createNotification(),
-                types = types
+                microphone = true,
+                force = true
             )
             true
         } catch (e: SecurityException) {
@@ -1587,8 +1630,7 @@ class AIForegroundService : Service() {
                     AppLogger.e(TAG, "切换唤醒监听失败: ${e.message}", e)
                 }
 
-                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                manager.notify(NOTIFICATION_ID, createNotification())
+                refreshServiceNotification()
             }
             return persistentStartMode()
         }
@@ -1646,8 +1688,7 @@ class AIForegroundService : Service() {
             } catch (e: Exception) {
                 AppLogger.e(TAG, "取消当前AI任务失败: ${e.message}", e)
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-            manager.notify(NOTIFICATION_ID, createNotification())
+            refreshServiceNotification()
             return persistentStartMode()
         }
 
@@ -1665,8 +1706,7 @@ class AIForegroundService : Service() {
                     stopSelfIfIdle(ignoreAppForeground = true)
                     return persistentStartMode()
                 }
-                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                manager.notify(NOTIFICATION_ID, createNotification())
+                refreshServiceNotification()
             }
         }
         
@@ -1820,8 +1860,7 @@ class AIForegroundService : Service() {
 
                     applyWakeListeningState()
 
-                    val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-                    manager.notify(NOTIFICATION_ID, createNotification())
+                    refreshServiceNotification()
                 }
             }
     }

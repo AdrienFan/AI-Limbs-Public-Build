@@ -1,0 +1,136 @@
+package com.ai.assistance.operit.integrations.ailimbs
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertSame
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class AiLimbsCoreCapabilityRegistryTest {
+    @Test
+    fun canonicalAndAliasesResolveToSameRegistration() {
+        val registrations = AiLimbsCoreCapabilityRegistry.registrationSnapshot()
+        assertTrue(registrations.isNotEmpty())
+
+        registrations.forEach { registration ->
+            val canonical = registration.catalogEntry.targetToolName
+            assertSame(
+                registration,
+                AiLimbsCoreCapabilityRegistry.registrationForInvokeName(canonical)
+            )
+            registration.invokeAliases.forEach { alias ->
+                assertSame(
+                    registration,
+                    AiLimbsCoreCapabilityRegistry.registrationForInvokeName(alias)
+                )
+            }
+        }
+    }
+
+    @Test
+    fun everyManagedDocumentHasOneReadAndWriteRegistration() {
+        val registrations = AiLimbsCoreCapabilityRegistry.registrationSnapshot()
+
+        AiLimbsDocumentId.entries.forEach { documentId ->
+            val reads = registrations.filter {
+                (it.route as? AiLimbsCoreRoute.ManagedDocumentRead)?.documentId == documentId
+            }
+            val writes = registrations.filter {
+                (it.route as? AiLimbsCoreRoute.ManagedDocumentWrite)?.documentId == documentId
+            }
+            assertEquals(1, reads.size)
+            assertEquals(1, writes.size)
+
+            val read = reads.single()
+            val write = writes.single()
+            assertEquals(
+                read.catalogEntry.targetToolName,
+                AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write = false)
+            )
+            assertEquals(
+                write.catalogEntry.targetToolName,
+                AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write = true)
+            )
+
+            assertEquals(
+                buildSet {
+                    add(read.catalogEntry.targetToolName)
+                    addAll(read.invokeAliases)
+                },
+                AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(documentId, write = false)
+            )
+            assertEquals(
+                buildSet {
+                    add(write.catalogEntry.targetToolName)
+                    addAll(write.invokeAliases)
+                },
+                AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(documentId, write = true)
+            )
+        }
+    }
+
+    @Test
+    fun availabilityPoliciesStayWithMatchingProvider() {
+        AiLimbsCoreCapabilityRegistry.registrationSnapshot().forEach { registration ->
+            when (registration.availabilityPolicy) {
+                AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT ->
+                    assertEquals(AiLimbsCoreProvider.BRIDGE, registration.provider)
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_STATUS,
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_START,
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_STOP,
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY ->
+                    assertEquals(AiLimbsCoreProvider.UBUNTU, registration.provider)
+                AiLimbsCoreAvailabilityPolicy.DEFAULT -> Unit
+            }
+        }
+    }
+
+    @Test
+    fun sourceLocatorsFollowProviderPolicy() {
+        AiLimbsCoreCapabilityRegistry.registrationSnapshot().forEach { registration ->
+            val locator = registration.catalogEntry.sourceLocator.orEmpty()
+            when (registration.provider) {
+                AiLimbsCoreProvider.BRIDGE -> {
+                    assertEquals(
+                        AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER,
+                        registration.catalogEntry.sourceName
+                    )
+                    assertTrue(locator.startsWith("ai-limbs://bridge/"))
+                }
+                AiLimbsCoreProvider.UBUNTU -> {
+                    assertEquals(
+                        AiLimbsCoreCapabilityRegistry.UBUNTU_PROVIDER,
+                        registration.catalogEntry.sourceName
+                    )
+                    if (
+                        registration.availabilityPolicy ==
+                            AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY
+                    ) {
+                        assertTrue(locator.startsWith("ubuntu://idle/"))
+                    } else {
+                        assertTrue(locator.startsWith("ubuntu://lifecycle/"))
+                    }
+                }
+                AiLimbsCoreProvider.CORE -> Unit
+            }
+        }
+    }
+
+    @Test
+    fun forwardedRoutesUseCatalogCanonicalNameAsSingleNameSource() {
+        val forwarded =
+            AiLimbsCoreCapabilityRegistry.registrationSnapshot()
+                .filter { it.route == AiLimbsCoreRoute.ForwardHostTool }
+        assertTrue(forwarded.isNotEmpty())
+
+        forwarded.forEach { registration ->
+            assertFalse(registration.catalogEntry.targetToolName.isBlank())
+            assertSame(
+                registration,
+                AiLimbsCoreCapabilityRegistry.registrationForInvokeName(
+                    registration.catalogEntry.targetToolName
+                )
+            )
+        }
+    }
+}

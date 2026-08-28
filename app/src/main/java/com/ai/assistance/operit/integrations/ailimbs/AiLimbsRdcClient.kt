@@ -72,6 +72,19 @@ class AiLimbsRdcClient(
     val state = stateFlow.asStateFlow()
     private var runJob: Job? = null
     private var lastSentAccessContext: String? = null
+    private val protocolToolRegistry by lazy {
+        AiLimbsRdcToolRegistry()
+            .register("ping") { _ ->
+                lastSentAccessContext = null
+                mcpText("pong ${nowIso()}")
+            }
+            .register("shutdown") { _ ->
+                mcpText(
+                    "AI Limbs RDC is managed by the Android foreground service; " +
+                        "close AI Limbs to stop the device runtime."
+                )
+            }
+    }
     private var activeAuthorization: DeviceAuth? = null
     private var reconnectAttempt: Int = 0
     @Volatile
@@ -1076,17 +1089,8 @@ class AiLimbsRdcClient(
         }
         try {
             val rawResult =
-                when (toolName) {
-                    "ping" -> mcpText("pong ${nowIso()}")
-                    "shutdown" -> mcpText(
-                        "AI Limbs RDC is managed by the Android foreground service; " +
-                            "close AI Limbs to stop the device runtime."
-                    )
-                    else -> adapter.execute(toolName, args)
-                }
-            if (toolName == "ping") {
-                lastSentAccessContext = null
-            }
+                protocolToolRegistry.executeOrNull(toolName, args)
+                    ?: adapter.execute(toolName, args)
             val result = attachAiLimbsContext(rawResult)
             logOutboundResultMetadata(callId, toolName, result)
             updateCall(

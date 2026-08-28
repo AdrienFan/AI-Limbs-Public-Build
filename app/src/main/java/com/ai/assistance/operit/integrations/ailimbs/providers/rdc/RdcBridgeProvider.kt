@@ -53,7 +53,8 @@ internal class RdcBridgeProvider private constructor(
                     id = PROFILE_ID,
                     type = PROFILE_TYPE,
                     label = AiLimbsRdcClient.PROVIDER_LABEL,
-                    enabled = AiLimbsRdcClient.ENABLED
+                    enabled = AiLimbsRdcClient.ENABLED,
+                    isDefault = true
                 )
             )
         override val supportedActions: Set<BridgeAction>

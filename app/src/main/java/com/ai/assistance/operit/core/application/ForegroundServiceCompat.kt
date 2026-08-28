@@ -10,7 +10,8 @@ object ForegroundServiceCompat {
     fun buildTypes(
         dataSync: Boolean = true,
         specialUse: Boolean = false,
-        microphone: Boolean = false
+        microphone: Boolean = false,
+        systemExempted: Boolean = false
     ): Int {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return 0
 
@@ -23,6 +24,9 @@ object ForegroundServiceCompat {
         }
         if (specialUse && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+        }
+        if (systemExempted && Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            types = types or ServiceInfo.FOREGROUND_SERVICE_TYPE_SYSTEM_EXEMPTED
         }
         return types
     }

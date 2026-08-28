@@ -17,19 +17,24 @@ class AiLimbsRdcToolAdapter(
     private val dispatcher: AiLimbsDispatcher
 ) {
     private val terminal = Terminal.getInstance(context.applicationContext)
+    private val toolRegistry =
+        AiLimbsRdcToolRegistry()
+            .register("read_file") { args -> readFile(args) }
+            .register("read_multiple_files") { args -> readMultipleFiles(args) }
+            .register("write_file") { args -> writeFile(args) }
+            .register("list_directory") { args -> listDirectory(args) }
+            .register("start_process") { args -> startProcess(args) }
+            .register("read_process_output") { args -> rdcProcessTool("rdc_process_read", args) }
+            .register("interact_with_process") { args -> rdcProcessTool("rdc_process_interact", args) }
+            .register("list_sessions") { args -> rdcProcessTool("rdc_process_list", args) }
+            .register(listOf("kill_process", "force_terminate")) { args ->
+                rdcProcessTool("rdc_process_terminate", args)
+            }
+
     suspend fun execute(toolName: String, args: JSONObject): JSONObject =
-        when (toolName) {
-            "read_file" -> readFile(args)
-            "read_multiple_files" -> readMultipleFiles(args)
-            "write_file" -> writeFile(args)
-            "list_directory" -> listDirectory(args)
-            "start_process" -> startProcess(args)
-            "read_process_output" -> rdcProcessTool("rdc_process_read", args)
-            "interact_with_process" -> rdcProcessTool("rdc_process_interact", args)
-            "list_sessions" -> rdcProcessTool("rdc_process_list", args)
-            "kill_process", "force_terminate" -> rdcProcessTool("rdc_process_terminate", args)
-            else -> executeSameNamedHostTool(toolName, args)
-        }
+        toolRegistry.executeOrNull(toolName, args) ?: executeSameNamedHostTool(toolName, args)
+
+    internal fun registeredAdapterToolNames(): Set<String> = toolRegistry.names
 
     private suspend fun readFile(args: JSONObject): JSONObject {
         val path = args.optString("path")
@@ -223,7 +228,9 @@ class AiLimbsRdcToolAdapter(
 
     private suspend fun executeHostTool(name: String, params: JSONObject): JSONObject =
         dispatcher.execute(
-            "ai_limbs.host_tool.execute",
+            AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
+                AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
+            ),
             JSONObject()
                 .put("name", name)
                 .put("parameters", params)
@@ -254,22 +261,14 @@ class AiLimbsRdcToolAdapter(
         path.substringAfterLast('/').substringAfterLast('.', "").lowercase() in DIRECT_IMAGE_EXTENSIONS
 
     private fun isAiLimbsCoreTool(name: String): Boolean =
-        name.startsWith("ai_limbs.") ||
-            name.startsWith("capability.") ||
-            name.startsWith("laner.") ||
-            name == "operit.tools.list"
+        AiLimbsCoreCapabilityRegistry.isRegisteredInvokeName(name)
 
     private fun managedDocumentTool(path: String, write: Boolean): String? {
         val normalizedPath = path.replace('\\', '/')
         if (!normalizedPath.contains("/ai_limbs/docs/")) return null
-        val action = if (write) "write" else "read"
-        return when (normalizedPath.substringAfterLast('/')) {
-            "AI_LIMBS_SYSTEM_ACCESS_PROMPT.md" -> "ai_limbs.system_access_prompt.$action"
-            "AI_LIMBS_CUSTOM_ACCESS_PROMPT.md" -> "ai_limbs.custom_access_prompt.$action"
-            "LANER_ACCESS_PROMPT.md" -> "ai_limbs.custom_access_prompt.$action"
-            "LANER_WORK_MANUAL.md" -> "ai_limbs.work_manual.$action"
-            else -> null
-        }
+        val documentId =
+            AiLimbsDocumentId.fromFileName(normalizedPath.substringAfterLast('/')) ?: return null
+        return AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write)
     }
 
     private fun mcpResult(result: JSONObject): JSONObject {

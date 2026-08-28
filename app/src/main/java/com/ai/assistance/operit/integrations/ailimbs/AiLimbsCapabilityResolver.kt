@@ -190,11 +190,14 @@ class AiLimbsCapabilityResolver(context: Context) {
         val invokeId = entry.targetToolName
         val provider = providerFor(entry)
         val generatedId = generatedCapabilityId(provider, invokeId, entry.displayName)
+        val coreRegistration = AiLimbsCoreCapabilityRegistry.registrationForInvokeName(invokeId)
         val semantic = semanticMetadata(invokeId)
-        val capabilityId = semantic?.capabilityId ?: generatedId
+        val capabilityId = coreRegistration?.capabilityId ?: semantic?.capabilityId ?: generatedId
         val aliases =
             buildList {
                 add(generatedId)
+                coreRegistration?.invokeAliases?.let(::addAll)
+                coreRegistration?.capabilityAliases?.let(::addAll)
                 semantic?.aliases?.let(::addAll)
                 add(invokeId)
             }.filter { it != capabilityId }.distinct()
@@ -215,6 +218,7 @@ class AiLimbsCapabilityResolver(context: Context) {
         definition: AiLimbsCapabilityDefinition
     ): AiLimbsCapabilityAvailability {
         val entry = definition.catalogEntry
+        val coreRegistration = AiLimbsCoreCapabilityRegistry.registrationForInvokeName(definition.invokeId)
         val permission = effectivePermission(definition)
         val prerequisites = mutableListOf<String>()
 
@@ -288,7 +292,7 @@ class AiLimbsCapabilityResolver(context: Context) {
             prerequisites += "Bridge provider: ${bridge.providerId}"
             prerequisites += "Bridge phase: ${bridge.phase.name}"
             if (
-                definition.invokeId == "ai_limbs.bridge.reconnect" &&
+                coreRegistration?.availabilityPolicy == AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT &&
                     BridgeAction.RECONNECT !in AiLimbsBridgeManager.availableActions(appContext, bridge)
             ) {
                 return AiLimbsCapabilityAvailability(
@@ -302,12 +306,12 @@ class AiLimbsCapabilityResolver(context: Context) {
             }
         }
 
-        if (definition.provider == "ubuntu") {
+        if (definition.provider == PROVIDER_UBUNTU) {
             val terminal = Terminal.getInstance(appContext)
             val phase = terminal.currentUbuntuRuntimeState().phase.name
             prerequisites += "Ubuntu runtime state: $phase"
-            when (definition.invokeId) {
-                "ubuntu.start" -> when (phase) {
+            when (coreRegistration?.availabilityPolicy ?: AiLimbsCoreAvailabilityPolicy.DEFAULT) {
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_START -> when (phase) {
                     "STARTING", "STOPPING" ->
                         return transitionalUbuntuAvailability(permission, phase)
                     "RUNNING" ->
@@ -321,7 +325,7 @@ class AiLimbsCapabilityResolver(context: Context) {
                         )
                     else -> Unit
                 }
-                "ubuntu.stop" -> {
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_STOP -> {
                     if (phase != "RUNNING") {
                         return AiLimbsCapabilityAvailability(
                             available = false,
@@ -345,8 +349,10 @@ class AiLimbsCapabilityResolver(context: Context) {
                         )
                     }
                 }
-                "ubuntu.status", "ubuntu.idle.get", "ubuntu.idle.set" -> Unit
-                else -> if (phase != "RUNNING") {
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_STATUS,
+                AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY -> Unit
+                AiLimbsCoreAvailabilityPolicy.DEFAULT,
+                AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT -> if (phase != "RUNNING") {
                     return AiLimbsCapabilityAvailability(
                         available = false,
                         permission = permission,
@@ -497,31 +503,31 @@ class AiLimbsCapabilityResolver(context: Context) {
         )
         .put("invoke_id", definition.invokeId)
 
-    private fun providerFor(entry: ToolCatalogEntry): String = when {
-        entry.targetToolName.startsWith("ai_limbs.bridge.") -> PROVIDER_BRIDGE
-        entry.targetToolName.startsWith("capability.") ||
-            entry.targetToolName.startsWith("ai_limbs.") ||
-            entry.targetToolName == "operit.tools.list" -> PROVIDER_CORE
-        isUbuntuBackedTool(entry.targetToolName) -> "ubuntu"
-        entry.sourceKind == ToolCatalogSourceKind.PACKAGE -> "toolpkg"
-        entry.sourceKind == ToolCatalogSourceKind.MCP -> "mcp"
-        entry.sourceKind == ToolCatalogSourceKind.ACTIVATION -> "activation"
-        else -> "native"
+    private fun providerFor(entry: ToolCatalogEntry): String {
+        AiLimbsCoreCapabilityRegistry.registrationForInvokeName(entry.targetToolName)?.let { registration ->
+            return when (registration.provider) {
+                AiLimbsCoreProvider.CORE -> PROVIDER_CORE
+                AiLimbsCoreProvider.BRIDGE -> PROVIDER_BRIDGE
+                AiLimbsCoreProvider.UBUNTU -> PROVIDER_UBUNTU
+            }
+        }
+        return when {
+            isUbuntuBackedTool(entry.targetToolName) -> PROVIDER_UBUNTU
+            entry.sourceKind == ToolCatalogSourceKind.PACKAGE -> "toolpkg"
+            entry.sourceKind == ToolCatalogSourceKind.MCP -> "mcp"
+            entry.sourceKind == ToolCatalogSourceKind.ACTIVATION -> "activation"
+            else -> "native"
+        }
     }
 
     private fun sourceLocator(definition: AiLimbsCapabilityDefinition): String = when {
-        definition.provider == PROVIDER_BRIDGE ->
-            "ai-limbs://bridge/${definition.invokeId.removePrefix("ai_limbs.bridge.")}"
-        definition.provider == PROVIDER_CORE -> "ai-limbs://core/${definition.invokeId}"
+        AiLimbsCoreCapabilityRegistry.isRegisteredInvokeName(definition.invokeId) ->
+            definition.catalogEntry.sourceLocator ?: "registry://${definition.invokeId}"
         definition.invokeId.startsWith(AUTOMATIC_UI_BASE_PREFIX) ->
             "assets://packages/automatic_ui_base.js#${definition.invokeId.substringAfter(':')}"
         definition.invokeId.startsWith(AUTOMATIC_UI_SUBAGENT_PREFIX) ->
             "assets://packages/automatic_ui_subagent.js#${definition.invokeId.substringAfter(':')}"
-        definition.invokeId.startsWith("ubuntu.idle.") ->
-            "ubuntu://idle/${definition.invokeId.substringAfterLast('.')}"
-        definition.invokeId.startsWith("ubuntu.") ->
-            "ubuntu://lifecycle/${definition.invokeId.substringAfterLast('.')}"
-        definition.provider == "ubuntu" -> "ubuntu://terminal/${definition.invokeId}"
+        definition.provider == PROVIDER_UBUNTU -> "ubuntu://terminal/${definition.invokeId}"
         else -> definition.catalogEntry.sourceLocator ?: "registry://${definition.invokeId}"
     }
 
@@ -538,7 +544,7 @@ class AiLimbsCapabilityResolver(context: Context) {
         invokeId.substringBefore(':').takeIf { it != invokeId }.orEmpty().ifBlank { "<package_name>" }
 
     private fun isUbuntuBackedTool(invokeId: String): Boolean =
-        invokeId.startsWith("ubuntu.") || UBUNTU_TERMINAL_TOOLS.contains(invokeId)
+        UBUNTU_TERMINAL_TOOLS.contains(invokeId)
 
     private data class SemanticMetadata(
         val capabilityId: String,
@@ -558,7 +564,8 @@ class AiLimbsCapabilityResolver(context: Context) {
         const val CAPABILITY_PROTOCOL_VERSION = 1
         const val MAX_SEARCH_RESULTS = 5
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
-        const val PROVIDER_BRIDGE = "ai_limbs_bridge"
+        const val PROVIDER_BRIDGE = AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER
+        const val PROVIDER_UBUNTU = AiLimbsCoreCapabilityRegistry.UBUNTU_PROVIDER
         const val AUTOMATIC_UI_BASE_PREFIX = "Automatic_ui_base:"
         const val AUTOMATIC_UI_SUBAGENT_PREFIX = "Automatic_ui_subagent:"
 
@@ -573,30 +580,6 @@ class AiLimbsCapabilityResolver(context: Context) {
         )
 
         val SEMANTIC_METADATA = mapOf(
-            "ai_limbs.core.status" to SemanticMetadata(
-                "ai_limbs.core.status",
-                "AI Limbs Core 状态",
-                listOf("core.status"),
-                listOf("AI Limbs Core", "核心模块", "core module")
-            ),
-            "ai_limbs.dispatcher.status" to SemanticMetadata(
-                "ai_limbs.dispatcher.status",
-                "AI Limbs Tool Dispatcher 状态",
-                listOf("dispatcher.status"),
-                listOf("dispatcher", "分发器", "调度器", "权限链")
-            ),
-            "ai_limbs.ubuntu.share.status" to SemanticMetadata(
-                "ubuntu.share.status",
-                "兰儿 Ubuntu 共享窗口状态",
-                listOf("ai.ubuntu.share.status"),
-                listOf("共享窗口", "眼睛", "只读", "兰儿正在操作")
-            ),
-            "ai_limbs.bridge.reconnect" to SemanticMetadata(
-                "bridge.reconnect",
-                "请求 AI Limbs Bridge 重新连接",
-                listOf("rdc.reconnect", "ai.bridge.reconnect"),
-                listOf("Bridge", "RDC", "重连", "重新连接", "连接恢复", "reconnect")
-            ),
             "Automatic_ui_base:get_page_screenshot_image" to SemanticMetadata(
                 "ui.screen.capture",
                 "获取当前屏幕截图",
@@ -654,36 +637,6 @@ class AiLimbsCapabilityResolver(context: Context) {
                 "启动 Android 应用",
                 listOf("ui.app.launch"),
                 listOf("打开应用", "启动应用", "package")
-            ),
-            "ubuntu.status" to SemanticMetadata(
-                "ubuntu.status",
-                "查询 Ubuntu 状态",
-                listOf("ubuntu.lifecycle.status"),
-                listOf("Ubuntu 状态", "是否开机", "linux sandbox")
-            ),
-            "ubuntu.start" to SemanticMetadata(
-                "ubuntu.start",
-                "启动 Ubuntu",
-                listOf("ubuntu.lifecycle.start"),
-                listOf("Ubuntu 开机", "开启 Ubuntu", "启动沙箱", "start linux")
-            ),
-            "ubuntu.stop" to SemanticMetadata(
-                "ubuntu.stop",
-                "停止 Ubuntu",
-                listOf("ubuntu.lifecycle.stop"),
-                listOf("Ubuntu 关机", "关闭 Ubuntu", "关掉 Ubuntu", "关闭沙箱", "stop linux")
-            ),
-            "ubuntu.idle.get" to SemanticMetadata(
-                "ubuntu.idle.get",
-                "查询 Ubuntu 空闲关机策略",
-                emptyList(),
-                listOf("自动关机", "空闲时间", "idle policy")
-            ),
-            "ubuntu.idle.set" to SemanticMetadata(
-                "ubuntu.idle.set",
-                "修改 Ubuntu 空闲关机策略",
-                emptyList(),
-                listOf("自动关机", "自定义时间", "保持开机", "idle timeout")
             )
         )
     }

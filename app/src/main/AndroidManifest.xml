@@ -54,6 +54,7 @@
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" 
         tools:ignore="ForegroundServicePermission" />
     <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES" 
@@ -338,7 +339,7 @@
             android:name=".api.chat.AIForegroundService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="dataSync|microphone|specialUse">
+            android:foregroundServiceType="dataSync|microphone|specialUse|systemExempted">
             <property
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the user-requested assistant runtime alive for AI Limbs remote bridge connectivity and external HTTP control when no standard foreground service type fully describes that mode." />

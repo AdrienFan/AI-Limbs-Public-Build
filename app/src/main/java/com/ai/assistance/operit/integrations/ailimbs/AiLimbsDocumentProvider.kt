@@ -16,11 +16,24 @@ import kotlinx.coroutines.withContext
 
 enum class AiLimbsDocumentId(
     val stableId: String,
-    internal val fileName: String
+    internal val fileName: String,
+    private val legacyFileNames: Set<String> = emptySet()
 ) {
     SYSTEM_ACCESS_PROMPT("system_access_prompt", "AI_LIMBS_SYSTEM_ACCESS_PROMPT.md"),
-    CUSTOM_ACCESS_PROMPT("custom_access_prompt", "AI_LIMBS_CUSTOM_ACCESS_PROMPT.md"),
-    WORK_MANUAL("work_manual", "LANER_WORK_MANUAL.md")
+    CUSTOM_ACCESS_PROMPT(
+        "custom_access_prompt",
+        "AI_LIMBS_CUSTOM_ACCESS_PROMPT.md",
+        setOf("LANER_ACCESS_PROMPT.md")
+    ),
+    WORK_MANUAL("work_manual", "LANER_WORK_MANUAL.md");
+
+    internal fun matchesFileName(candidate: String): Boolean =
+        candidate == fileName || candidate in legacyFileNames
+
+    companion object {
+        internal fun fromFileName(fileName: String): AiLimbsDocumentId? =
+            entries.firstOrNull { it.matchesFileName(fileName) }
+    }
 }
 
 data class AiLimbsDocumentReference(

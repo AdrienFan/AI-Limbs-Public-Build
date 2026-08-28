@@ -16,6 +16,30 @@ class AiLimbsAccessGate(context: Context) {
 
     private var systemPromptReceiptVersion: String? = null
     private var customPromptReceiptVersion: String? = null
+    private val systemPromptReadTools =
+        AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(
+            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
+            write = false
+        )
+    private val customPromptReadTools =
+        AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(
+            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
+            write = false
+        )
+    private val systemPromptCanonicalReadTool =
+        checkNotNull(
+            AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(
+                AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
+                write = false
+            )
+        )
+    private val customPromptCanonicalReadTool =
+        checkNotNull(
+            AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(
+                AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
+                write = false
+            )
+        )
 
     fun resetForNewSession() {
         synchronized(stateLock) {
@@ -30,7 +54,7 @@ class AiLimbsAccessGate(context: Context) {
         val customReference =
             documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
 
-        if (tool == SYSTEM_PROMPT_READ_TOOL) return null
+        if (tool in systemPromptReadTools) return null
 
         val systemReady = synchronized(stateLock) {
             systemPromptReceiptVersion == systemReference.version
@@ -40,12 +64,12 @@ class AiLimbsAccessGate(context: Context) {
                 code = SYSTEM_PROMPT_REQUIRED,
                 state = "bootstrap_pending",
                 reference = systemReference,
-                readTool = SYSTEM_PROMPT_READ_TOOL,
+                readTool = systemPromptCanonicalReadTool,
                 customReference = customReference
             )
         }
 
-        if (tool in CUSTOM_PROMPT_READ_TOOLS) return null
+        if (tool in customPromptReadTools) return null
         if (customReference.isEmpty) return null
 
         val customReady = synchronized(stateLock) {
@@ -56,7 +80,7 @@ class AiLimbsAccessGate(context: Context) {
                 code = CUSTOM_PROMPT_REQUIRED,
                 state = "custom_prompt_pending",
                 reference = customReference,
-                readTool = CUSTOM_PROMPT_CANONICAL_READ_TOOL,
+                readTool = customPromptCanonicalReadTool,
                 customReference = customReference
             )
         }
@@ -69,14 +93,11 @@ class AiLimbsAccessGate(context: Context) {
         if (version.isBlank()) return
 
         synchronized(stateLock) {
-            when (tool) {
-                SYSTEM_PROMPT_READ_TOOL -> {
-                    systemPromptReceiptVersion = version
-                    customPromptReceiptVersion = null
-                }
-                in CUSTOM_PROMPT_READ_TOOLS -> {
-                    customPromptReceiptVersion = version
-                }
+            if (tool in systemPromptReadTools) {
+                systemPromptReceiptVersion = version
+                customPromptReceiptVersion = null
+            } else if (tool in customPromptReadTools) {
+                customPromptReceiptVersion = version
             }
         }
     }
@@ -120,14 +141,5 @@ class AiLimbsAccessGate(context: Context) {
     companion object {
         const val SYSTEM_PROMPT_REQUIRED = "SYSTEM_ACCESS_PROMPT_REQUIRED"
         const val CUSTOM_PROMPT_REQUIRED = "CUSTOM_ACCESS_PROMPT_REQUIRED"
-        const val SYSTEM_PROMPT_READ_TOOL = "ai_limbs.system_access_prompt.read"
-        const val CUSTOM_PROMPT_CANONICAL_READ_TOOL = "ai_limbs.custom_access_prompt.read"
-
-        val CUSTOM_PROMPT_READ_TOOLS =
-            setOf(
-                CUSTOM_PROMPT_CANONICAL_READ_TOOL,
-                "ai_limbs.access_prompt.read",
-                "laner.access_prompt.read"
-            )
     }
 }

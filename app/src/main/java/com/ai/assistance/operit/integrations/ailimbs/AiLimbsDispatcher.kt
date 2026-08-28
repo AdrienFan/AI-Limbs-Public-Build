@@ -44,110 +44,139 @@ class AiLimbsDispatcher(
         return result
     }
 
-    private suspend fun executeUngated(tool: String, args: JSONObject): JSONObject = when (tool) {
-        "ai_limbs.access_context.read" ->
-            ok()
-                .put("document", "access_bootstrap")
-                .put("content", accessContext.readAccessContext())
-        "ai_limbs.system_access_prompt.read" -> {
-            val reference = documents.documentReference(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
-            ok()
-                .put("document", reference.documentId)
-                .put("version", reference.version)
-                .put("path", reference.path)
-                .put("content", documents.readSystemAccessPrompt())
-        }
-        "ai_limbs.system_access_prompt.write" -> {
-            val changed = documents.writeSystemAccessPrompt(args.optString("content"))
-            val reference = documents.documentReference(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
-            ok()
-                .put("document", reference.documentId)
-                .put("version", reference.version)
-                .put("path", reference.path)
-                .put("changed", changed)
-        }
-        "ai_limbs.custom_access_prompt.read",
-        "ai_limbs.access_prompt.read",
-        "laner.access_prompt.read" -> {
-            val reference = documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
-            ok()
-                .put("document", reference.documentId)
-                .put("version", reference.version)
-                .put("path", reference.path)
-                .put("empty", reference.isEmpty)
-                .put("content", documents.readCustomAccessPrompt())
-        }
-        "ai_limbs.custom_access_prompt.write",
-        "ai_limbs.access_prompt.write",
-        "laner.access_prompt.write" -> {
-            val changed = documents.writeCustomAccessPrompt(args.optString("content"))
-            val reference = documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
-            ok()
-                .put("document", reference.documentId)
-                .put("version", reference.version)
-                .put("path", reference.path)
-                .put("empty", reference.isEmpty)
-                .put("changed", changed)
-        }
-        "ai_limbs.work_manual.read", "laner.work_manual.read" ->
-            ok()
-                .put("document", AiLimbsDocumentId.WORK_MANUAL.stableId)
-                .put("content", documents.readWorkManualForAgent())
-                .put("editable_content", documents.readWorkManual())
-        "ai_limbs.work_manual.write", "laner.work_manual.write" -> {
-            val changed = documents.writeWorkManual(args.optString("content"))
-            ok().put("document", AiLimbsDocumentId.WORK_MANUAL.stableId).put("changed", changed)
-        }
-        "capability.search" ->
-            capabilityResolver.search(
-                query = args.optString("query"),
-                requestedLimit = args.optInt("limit", 5)
-            )
-        "capability.describe" ->
-            capabilityResolver.describe(
-                args.optString("capability_id")
-                    .ifBlank { args.optString("id") }
-                    .ifBlank { args.optString("invoke_id") }
-            )
-        "ai_limbs.core.status" -> coreStatus()
-        "ai_limbs.dispatcher.status" -> dispatcherStatus()
-        "ai_limbs.ubuntu.share.status" -> sharedUbuntuStatus()
-        "ai_limbs.bridge.reconnect" ->
-            executeHostTool(
-                JSONObject()
-                    .put("name", tool)
-                    .put("parameters", args)
-            )
-        "ai_limbs.chat.status" -> lanerChatStatus()
-        "ai_limbs.chat.session.open" -> lanerChatSessionOpen(args)
-        "ai_limbs.chat.session.close" -> lanerChatSessionClose(args)
-        "ai_limbs.chat.notification.check" -> lanerChatNotificationCheck(args)
-        "ai_limbs.chat.notification.wait" -> lanerChatNotificationWait(args)
-        "ai_limbs.chat.inbox.fetch" -> lanerChatInboxFetch(args)
-        "ai_limbs.chat.attachment.fetch" -> lanerChatAttachmentFetch(args)
-        "ai_limbs.chat.turn.status" -> lanerChatTurnStatus(args)
-        "ai_limbs.chat.turn.claim" -> lanerChatTurnClaim(args)
-        "ai_limbs.chat.turn.reply" -> lanerChatTurnReply(args)
-        "ai_limbs.chat.turn.cancel" -> lanerChatTurnCancel(args)
-        "ai_limbs.chat.turn.resume" -> lanerChatTurnResume(args)
-        "ai_limbs.chat.reply" -> lanerChatReply(args)
-        "ai_limbs.chat.send" -> lanerChatSend(args)
-        "ai_limbs.ui.status" -> uiCapabilityStatus()
-        "ai_limbs.host_tools.list", "operit.tools.list" -> {
-            handler.registerDefaultTools()
-            val names = JSONArray()
-            handler.getAllToolNames().forEach { names.put(it) }
-            ok().put("tools", names).put("count", names.length())
-        }
-        "ubuntu.status", "ubuntu.start", "ubuntu.stop", "ubuntu.idle.get", "ubuntu.idle.set" ->
-            executeHostTool(
-                JSONObject()
-                    .put("name", tool)
-                    .put("parameters", args)
-            )
-        "ai_limbs.host_tool.execute", "operit.tool.execute" -> executeHostTool(args)
-        else -> error("Unknown AI Limbs tool: $tool")
+    private suspend fun executeUngated(tool: String, args: JSONObject): JSONObject {
+        val registration =
+            AiLimbsCoreCapabilityRegistry.registrationForInvokeName(tool)
+                ?: return error("Unknown AI Limbs tool: $tool")
+        return executeRegisteredRoute(registration, args)
     }
+
+    private suspend fun executeRegisteredRoute(
+        registration: AiLimbsCoreCapabilityRegistration,
+        args: JSONObject
+    ): JSONObject =
+        when (val route = registration.route) {
+            is AiLimbsCoreRoute.Local -> executeLocalOperation(route.operation, args)
+            is AiLimbsCoreRoute.ManagedDocumentRead -> executeManagedDocumentRead(route.documentId)
+            is AiLimbsCoreRoute.ManagedDocumentWrite -> executeManagedDocumentWrite(route.documentId, args)
+            is AiLimbsCoreRoute.LanerChat -> executeLanerChatOperation(route.operation, args)
+            AiLimbsCoreRoute.ForwardHostTool ->
+                executeHostTool(
+                    JSONObject()
+                        .put("name", registration.catalogEntry.targetToolName)
+                        .put("parameters", args)
+                )
+        }
+
+    private suspend fun executeLocalOperation(
+        operation: AiLimbsCoreLocalOperation,
+        args: JSONObject
+    ): JSONObject =
+        when (operation) {
+            AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ ->
+                ok()
+                    .put("document", "access_bootstrap")
+                    .put("content", accessContext.readAccessContext())
+            AiLimbsCoreLocalOperation.CAPABILITY_SEARCH ->
+                capabilityResolver.search(
+                    query = args.optString("query"),
+                    requestedLimit = args.optInt("limit", 5)
+                )
+            AiLimbsCoreLocalOperation.CAPABILITY_DESCRIBE ->
+                capabilityResolver.describe(
+                    args.optString("capability_id")
+                        .ifBlank { args.optString("id") }
+                        .ifBlank { args.optString("invoke_id") }
+                )
+            AiLimbsCoreLocalOperation.CORE_STATUS -> coreStatus()
+            AiLimbsCoreLocalOperation.DISPATCHER_STATUS -> dispatcherStatus()
+            AiLimbsCoreLocalOperation.SHARED_UBUNTU_STATUS -> sharedUbuntuStatus()
+            AiLimbsCoreLocalOperation.UI_STATUS -> uiCapabilityStatus()
+            AiLimbsCoreLocalOperation.HOST_TOOLS_LIST -> {
+                handler.registerDefaultTools()
+                val names = JSONArray()
+                handler.getAllToolNames().forEach { names.put(it) }
+                ok().put("tools", names).put("count", names.length())
+            }
+            AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE -> executeHostTool(args)
+        }
+
+    private suspend fun executeManagedDocumentRead(documentId: AiLimbsDocumentId): JSONObject =
+        when (documentId) {
+            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> {
+                val reference = documents.documentReference(documentId)
+                ok()
+                    .put("document", reference.documentId)
+                    .put("version", reference.version)
+                    .put("path", reference.path)
+                    .put("content", documents.readSystemAccessPrompt())
+            }
+            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> {
+                val reference = documents.documentReference(documentId)
+                ok()
+                    .put("document", reference.documentId)
+                    .put("version", reference.version)
+                    .put("path", reference.path)
+                    .put("empty", reference.isEmpty)
+                    .put("content", documents.readCustomAccessPrompt())
+            }
+            AiLimbsDocumentId.WORK_MANUAL ->
+                ok()
+                    .put("document", documentId.stableId)
+                    .put("content", documents.readWorkManualForAgent())
+                    .put("editable_content", documents.readWorkManual())
+        }
+
+    private suspend fun executeManagedDocumentWrite(
+        documentId: AiLimbsDocumentId,
+        args: JSONObject
+    ): JSONObject =
+        when (documentId) {
+            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> {
+                val changed = documents.writeSystemAccessPrompt(args.optString("content"))
+                val reference = documents.documentReference(documentId)
+                ok()
+                    .put("document", reference.documentId)
+                    .put("version", reference.version)
+                    .put("path", reference.path)
+                    .put("changed", changed)
+            }
+            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> {
+                val changed = documents.writeCustomAccessPrompt(args.optString("content"))
+                val reference = documents.documentReference(documentId)
+                ok()
+                    .put("document", reference.documentId)
+                    .put("version", reference.version)
+                    .put("path", reference.path)
+                    .put("empty", reference.isEmpty)
+                    .put("changed", changed)
+            }
+            AiLimbsDocumentId.WORK_MANUAL -> {
+                val changed = documents.writeWorkManual(args.optString("content"))
+                ok().put("document", documentId.stableId).put("changed", changed)
+            }
+        }
+
+    private suspend fun executeLanerChatOperation(
+        operation: AiLimbsLanerChatOperation,
+        args: JSONObject
+    ): JSONObject =
+        when (operation) {
+            AiLimbsLanerChatOperation.STATUS -> lanerChatStatus()
+            AiLimbsLanerChatOperation.SESSION_OPEN -> lanerChatSessionOpen(args)
+            AiLimbsLanerChatOperation.SESSION_CLOSE -> lanerChatSessionClose(args)
+            AiLimbsLanerChatOperation.NOTIFICATION_CHECK -> lanerChatNotificationCheck(args)
+            AiLimbsLanerChatOperation.NOTIFICATION_WAIT -> lanerChatNotificationWait(args)
+            AiLimbsLanerChatOperation.INBOX_FETCH -> lanerChatInboxFetch(args)
+            AiLimbsLanerChatOperation.ATTACHMENT_FETCH -> lanerChatAttachmentFetch(args)
+            AiLimbsLanerChatOperation.TURN_STATUS -> lanerChatTurnStatus(args)
+            AiLimbsLanerChatOperation.TURN_CLAIM -> lanerChatTurnClaim(args)
+            AiLimbsLanerChatOperation.TURN_REPLY -> lanerChatTurnReply(args)
+            AiLimbsLanerChatOperation.TURN_CANCEL -> lanerChatTurnCancel(args)
+            AiLimbsLanerChatOperation.TURN_RESUME -> lanerChatTurnResume(args)
+            AiLimbsLanerChatOperation.LEGACY_REPLY -> lanerChatReply(args)
+            AiLimbsLanerChatOperation.SEND -> lanerChatSend(args)
+        }
 
     private suspend fun executeHostTool(args: JSONObject): JSONObject {
         val name = args.optString("name").trim()

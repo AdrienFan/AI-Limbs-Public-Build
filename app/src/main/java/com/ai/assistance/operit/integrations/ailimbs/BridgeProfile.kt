@@ -5,13 +5,16 @@ interface BridgeProfile {
     val type: String
     val label: String
     val enabled: Boolean
+    val isDefault: Boolean
+        get() = false
 }
 
 data class NativeBridgeProfile(
     override val id: String,
     override val type: String,
     override val label: String,
-    override val enabled: Boolean = true
+    override val enabled: Boolean = true,
+    override val isDefault: Boolean = false
 ) : BridgeProfile
 
 /**

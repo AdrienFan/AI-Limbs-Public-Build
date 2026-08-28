@@ -9,6 +9,18 @@ class AiLimbsAccessContextService(context: Context) {
     suspend fun readAccessContext(): String {
         val systemPrompt = documents.documentReference(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
         val customPrompt = documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
+        val systemReadTool = checkNotNull(
+            AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(
+                AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
+                write = false
+            )
+        )
+        val customReadTool = checkNotNull(
+            AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(
+                AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
+                write = false
+            )
+        )
         return buildString {
             appendLine("[AI Limbs access bootstrap]")
             appendLine("Welcome to AI Limbs.")
@@ -18,13 +30,13 @@ class AiLimbsAccessContextService(context: Context) {
             appendLine("- document_id: ${systemPrompt.documentId}")
             appendLine("- version: ${systemPrompt.version}")
             appendLine("- path: ${systemPrompt.path}")
-            appendLine("- read: {\"name\":\"ai_limbs.system_access_prompt.read\",\"parameters\":{}}")
+            appendLine("- read: {\"name\":\"$systemReadTool\",\"parameters\":{}}")
             appendLine("The AI Limbs custom access prompt is a separate user-editable managed document.")
             appendLine("- document_id: ${customPrompt.documentId}")
             appendLine("- version: ${customPrompt.version}")
             appendLine("- empty: ${customPrompt.isEmpty}")
             appendLine("- path: ${customPrompt.path}")
-            appendLine("- read: {\"name\":\"ai_limbs.custom_access_prompt.read\",\"parameters\":{}}")
+            appendLine("- read: {\"name\":\"$customReadTool\",\"parameters\":{}}")
             appendLine("If the custom access prompt is non-empty and its current body is unavailable or uncertain, read it before applying user-defined access instructions.")
             appendLine("Do not rely on a previous read, memory, source-code search, or guessed invocation path when the current prompt body is absent or uncertain.")
             append("Use only these official managed-document capabilities; do not guess or substitute another prompt document.")
