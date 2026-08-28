@@ -1,0 +1,32 @@
+name: LEV Mutual Guardian Probe Build
+
+on:
+  push:
+    branches:
+      - experiment/lev-mutual-guardian-probe
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+          cache: gradle
+      - uses: android-actions/setup-android@v4
+      - name: Install Android SDK
+        run: sdkmanager "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+      - name: Build both probes
+        run: |
+          chmod +x gradlew
+          ./gradlew -p experiments/lev-mutual-guardian-probe :guardian:assembleDebug :target:assembleDebug --no-daemon --stacktrace
+      - uses: actions/upload-artifact@v4
+        with:
+          name: lev-mutual-guardian-probe-apks
+          path: |
+            experiments/lev-mutual-guardian-probe/guardian/build/outputs/apk/debug/guardian-debug.apk
+            experiments/lev-mutual-guardian-probe/target/build/outputs/apk/debug/target-debug.apk
+          if-no-files-found: error
