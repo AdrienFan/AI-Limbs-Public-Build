@@ -157,6 +157,61 @@ class AiLimbsRdcClient(
         worker.start()
     }
 
+    private fun launchPairingWorker() {
+        val worker =
+            scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
+                val currentJob = currentCoroutineContext()[Job]
+                isRunning = true
+                AppLogger.i(TAG, "RDC pairing worker started")
+                try {
+                    var loggedWaiting = false
+                    while (currentCoroutineContext().isActive && isNetworkUnavailable()) {
+                        if (!loggedWaiting) {
+                            updateState(
+                                AiLimbsBridgePhase.STARTING,
+                                "等待可用网络后申请 RDC 授权码",
+                                deviceId = null,
+                                lastHeartbeatAtMs = null
+                            )
+                            loggedWaiting = true
+                        }
+                        delay(NETWORK_STATE_POLL_MS)
+                    }
+                    if (!currentCoroutineContext().isActive) return@launch
+
+                    val info = fetchMcpInfo()
+                    pairDevice(existingDeviceId = null)
+                    AppLogger.i(
+                        TAG,
+                        "RDC re-pair authorization completed; entering normal connection flow"
+                    )
+                    reconnectAttempt = 0
+                    runForever()
+                } catch (e: CancellationException) {
+                    throw e
+                } catch (e: Exception) {
+                    activeAuthorization = null
+                    reconnectAttempt = 0
+                    AppLogger.e(TAG, "RDC re-pair transaction failed", e)
+                    updateState(
+                        AiLimbsBridgePhase.ERROR,
+                        "重新配对失败：${e.message ?: e.javaClass.simpleName}；请重试",
+                        deviceId = null,
+                        lastHeartbeatAtMs = null,
+                        reconnectAttemptValue = 0
+                    )
+                } finally {
+                    if (runJob === currentJob) {
+                        runJob = null
+                        isRunning = false
+                    }
+                    AppLogger.i(TAG, "RDC pairing worker stopped")
+                }
+            }
+        runJob = worker
+        worker.start()
+    }
+
     fun stopByUser() {
         AppLogger.i(TAG, "RDC connection stop requested by user")
         housekeepingScope.launch {
@@ -387,7 +442,7 @@ class AiLimbsRdcClient(
             deviceId = null,
             lastHeartbeatAtMs = null
         )
-        start()
+        launchPairingWorker()
     }
 
     fun openAuthorizationPage(): Boolean {

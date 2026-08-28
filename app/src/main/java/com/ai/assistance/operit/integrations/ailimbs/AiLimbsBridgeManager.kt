@@ -31,6 +31,7 @@ class AiLimbsBridgeManager(
         registry.create(activeProfileValue, appContext, scope)
     private val stateFlow = MutableStateFlow(provider.state.value)
     private var providerStateJob: Job? = null
+    private var rePairAwaitingAuthorization = false
 
     init {
         bindProviderState()
@@ -94,6 +95,7 @@ class AiLimbsBridgeManager(
     }
 
     fun selectProvider(profileId: String) {
+        rePairAwaitingAuthorization = false
         check(state.value.phase != AiLimbsBridgePhase.RECOVERING) {
             "Bridge provider cannot change while recovery is running"
         }
@@ -110,6 +112,7 @@ class AiLimbsBridgeManager(
     }
 
     fun connect() {
+        rePairAwaitingAuthorization = false
         check(provider.enabled) {
             "Bridge provider is disabled: ${activeProfileValue.id}"
         }
@@ -118,6 +121,7 @@ class AiLimbsBridgeManager(
     }
 
     fun stopByUser() {
+        rePairAwaitingAuthorization = false
         setDesiredConnected(false)
         provider.stopByUser()
     }
@@ -127,6 +131,7 @@ class AiLimbsBridgeManager(
     }
 
     fun reconnect() {
+        rePairAwaitingAuthorization = false
         check(provider.enabled) {
             "Bridge provider is disabled: ${activeProfileValue.id}"
         }
@@ -135,6 +140,7 @@ class AiLimbsBridgeManager(
     }
 
     fun recover() {
+        rePairAwaitingAuthorization = false
         check(provider.enabled) {
             "Bridge provider is disabled: ${activeProfileValue.id}"
         }
@@ -146,7 +152,11 @@ class AiLimbsBridgeManager(
         check(provider.enabled) {
             "Bridge provider is disabled: ${activeProfileValue.id}"
         }
-        setDesiredConnected(true)
+        // Re-pairing is a one-shot authorization transaction. Keep durable auto-connect
+        // disabled until authorization succeeds, so host signals cannot start the normal
+        // reconnect loop while the user is waiting for a fresh pairing code.
+        rePairAwaitingAuthorization = true
+        setDesiredConnected(false)
         provider.rePair()
     }
 
@@ -178,6 +188,15 @@ class AiLimbsBridgeManager(
             scope.launch {
                 selectedProvider.state.collect { newState ->
                     if (provider === selectedProvider) {
+                        if (
+                            rePairAwaitingAuthorization &&
+                                ((newState.phase == AiLimbsBridgePhase.CONNECTING &&
+                                    !newState.deviceId.isNullOrBlank()) ||
+                                    newState.phase == AiLimbsBridgePhase.ONLINE)
+                        ) {
+                            rePairAwaitingAuthorization = false
+                            setDesiredConnected(true)
+                        }
                         publishState(newState)
                     }
                 }

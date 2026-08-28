@@ -17,7 +17,7 @@ enum class BridgeAction {
             val orderedActions =
                 when (state.phase) {
                     AiLimbsBridgePhase.STOPPED ->
-                        listOf(CONNECT, REPAIR, REFRESH)
+                        listOf(CONNECT, RECOVER, REPAIR, REFRESH)
                     AiLimbsBridgePhase.PAIRING ->
                         if (
                             !state.verificationUri.isNullOrBlank() &&

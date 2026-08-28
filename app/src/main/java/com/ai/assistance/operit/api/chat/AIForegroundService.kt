@@ -869,7 +869,7 @@ class AIForegroundService : Service() {
                 val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
                 when (action) {
                     Intent.ACTION_SCREEN_OFF -> {
-                        applyBackgroundSurvivalForeground("screen_off", force = true)
+                        // v0.6.4.7.1 A/B: do not re-apply survival/systemExempted on screen-off.
                         updateBridgeScreenOffWakeLock("screen_broadcast:$action")
                         logBridgeHostHealth("screen_off")
                         aiLimbsBridgeManager.onHostSignal(AiLimbsBridgeHostSignal.ScreenOff)
