@@ -1,0 +1,48 @@
+name: LEV Exact Alarm Probe Build
+
+on:
+  push:
+    branches:
+      - experiment/lev-exact-alarm-probe
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+      - name: Install Android platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-36" "build-tools;35.0.0"
+
+      - name: Build probe APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew -p experiments/lev-exact-alarm-probe :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload probe APK
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: lev-exact-alarm-probe-${{ github.run_number }}
+          path: experiments/lev-exact-alarm-probe/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
