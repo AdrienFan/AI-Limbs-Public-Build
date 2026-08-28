@@ -398,7 +398,7 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 51
+        versionCode = 52
         versionName = "1.12.1"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -434,10 +434,10 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ".ailimbs.v0645"
-            versionNameSuffix = "-ai-limbs-v0.6.4.5-build1"
+            applicationIdSuffix = ".ailimbs.v0646"
+            versionNameSuffix = "-ai-limbs-v0.6.4.6-build1"
             signingConfig = signingConfigs.getByName("debug")
-            resValue("string", "app_name", "AI Limbs v0.6.4.5")
+            resValue("string", "app_name", "AI Limbs v0.6.4.6")
         }
         create("clone") {
             initWith(getByName("debug"))

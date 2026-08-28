@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.core.tools.defaultTool.accessbility
 
+import android.content.ComponentName
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -102,7 +103,7 @@ open class AccessibilityUITools(context: Context) : StandardUITools(context) {
             }
 
             // 解析当前窗口信息
-            val focusInfo = extractFocusInfoFromAccessibility()
+            val focusInfo = extractFocusInfoFromAccessibility(uiXml)
 
             // 简化布局信息
             val simplifiedLayout = simplifyLayout(uiXml)
@@ -128,38 +129,39 @@ open class AccessibilityUITools(context: Context) : StandardUITools(context) {
         }
     }
 
-    /** 从无障碍服务获取焦点信息 */
-    private suspend fun extractFocusInfoFromAccessibility(): FocusInfo {
+    /** 从同一个无障碍层次结构快照获取焦点信息，避免跨 App 切换时混合不同时间点的数据。 */
+    private suspend fun extractFocusInfoFromAccessibility(hierarchyXml: String): FocusInfo {
         val focusInfo = FocusInfo()
-        try {
-            // 1. 获取UI层次结构的XML快照（带重试）
-            val hierarchyXml = getUIHierarchyWithRetry()
-            if (hierarchyXml.isEmpty()) {
-                AppLogger.w(TAG, "无法获取UI层次结构XML，使用默认值。")
-                focusInfo.packageName = "android"
-                // 即使XML获取失败，仍然尝试获取Activity名称
-                focusInfo.activityName = UIHierarchyManager.getCurrentActivityName(context) ?: "ForegroundActivity"
-                return focusInfo
-            }
-
-            // 2. 从XML中解析包名
+        return try {
             val (packageName, _) = UIHierarchyManager.extractWindowInfo(hierarchyXml)
-            // 3. 从服务中直接获取当前Activity名称
-            val activityName = UIHierarchyManager.getCurrentActivityName(context)
-
-            focusInfo.packageName = packageName
-            focusInfo.activityName = activityName // 使用从服务获取的Activity名称
-
-            // 如果没有获取到，使用默认值
-            if (focusInfo.packageName == null) focusInfo.packageName = "android"
-            if (focusInfo.activityName == null) focusInfo.activityName = "ForegroundActivity"
+            val normalizedPackage = packageName?.takeIf { it.isNotBlank() } ?: "android"
+            val activityCandidate = UIHierarchyManager.getCurrentActivityName(context)
+            focusInfo.packageName = normalizedPackage
+            focusInfo.activityName = validatedActivityName(normalizedPackage, activityCandidate)
+            focusInfo
         } catch (e: Exception) {
-            AppLogger.e(TAG, "从XML解析焦点信息时出错", e)
-            // 设置默认值
+            AppLogger.e(TAG, "从无障碍快照解析焦点信息时出错", e)
             focusInfo.packageName = "android"
             focusInfo.activityName = "ForegroundActivity"
+            focusInfo
         }
-        return focusInfo
+    }
+
+    private fun validatedActivityName(packageName: String, candidate: String?): String {
+        var className = candidate?.trim().orEmpty()
+        if (className.isBlank()) return "ForegroundActivity"
+        className = when {
+            className.startsWith('.') -> packageName + className
+            !className.contains('.') -> "$packageName.$className"
+            else -> className
+        }
+        return try {
+            context.packageManager.getActivityInfo(ComponentName(packageName, className), 0)
+            className
+        } catch (_: Exception) {
+            AppLogger.d(TAG, "忽略陈旧或非 Activity 的无障碍类名: package=$packageName candidate=$candidate")
+            "ForegroundActivity"
+        }
     }
 
     /** 简化XML布局为节点树 */

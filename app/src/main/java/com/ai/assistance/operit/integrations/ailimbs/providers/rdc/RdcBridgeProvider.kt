@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs.providers.rdc
 
 import android.content.Context
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeHostSignal
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeProvider
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRdcClient
@@ -42,6 +43,7 @@ internal class RdcBridgeProvider private constructor(
     override fun rePair() = client.rePair()
     override fun openAuthorizationPage(): Boolean = client.openAuthorizationPage()
     override fun verifyLiveness() = client.verifyLiveness()
+    override fun onHostSignal(signal: AiLimbsBridgeHostSignal) = client.onHostSignal(signal)
 
     internal class Factory : BridgeProviderFactory {
         override val type: String = PROFILE_TYPE

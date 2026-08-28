@@ -35,6 +35,11 @@ private data class AiLimbsCapabilityAvailability(
     val prerequisites: List<String> = emptyList()
 )
 
+private data class AiLimbsCapabilitySearchResult(
+    val matches: List<AiLimbsCapabilityDefinition>,
+    val lowConfidence: Boolean
+)
+
 /** Read-only discovery surface for all AI Limbs capabilities. */
 class AiLimbsCapabilityResolver(context: Context) {
     private val appContext = context.applicationContext
@@ -49,16 +54,16 @@ class AiLimbsCapabilityResolver(context: Context) {
         val limit = requestedLimit.coerceIn(1, MAX_SEARCH_RESULTS)
 
         var definitions = buildDefinitions(forceRefreshPackages = false)
-        var matches = searchDefinitions(definitions, normalizedQuery, limit)
+        var searchResult = searchDefinitions(definitions, normalizedQuery, limit)
         var usedLiveDiscovery = false
-        if (matches.isEmpty()) {
+        if (searchResult.lowConfidence) {
             definitions = buildDefinitions(forceRefreshPackages = true)
-            matches = searchDefinitions(definitions, normalizedQuery, limit)
+            searchResult = searchDefinitions(definitions, normalizedQuery, limit)
             usedLiveDiscovery = true
         }
 
         val results = JSONArray()
-        for (definition in matches) {
+        for (definition in searchResult.matches) {
             results.put(compactCard(definition, readAvailability(definition)))
         }
         return ok()
@@ -130,7 +135,8 @@ class AiLimbsCapabilityResolver(context: Context) {
                     roleCardToolAccess = null,
                     useEnglish = false,
                     includeDisabledPackages = true,
-                    forceRefreshPackages = forceRefreshPackages
+                    forceRefreshPackages = forceRefreshPackages,
+                    includeAlternateLanguageMetadata = true
                 )
             }
         val catalog = AiLimbsCoreCapabilityRegistry.mergeInto(runtimeCatalog)
@@ -144,26 +150,27 @@ class AiLimbsCapabilityResolver(context: Context) {
         definitions: List<AiLimbsCapabilityDefinition>,
         query: String,
         limit: Int
-    ): List<AiLimbsCapabilityDefinition> {
+    ): AiLimbsCapabilitySearchResult {
         val searchable = definitions.map { definition ->
-            definition to
-                definition.catalogEntry.copy(
-                    displayName = definition.displayName,
-                    keywords =
-                        (definition.catalogEntry.keywords +
-                            definition.aliases +
-                            definition.capabilityId +
-                            definition.invokeId +
-                            definition.displayName).distinct()
-                )
+            definition to definition.catalogEntry.copy(
+                displayName = definition.displayName,
+                searchMetadata =
+                    (definition.catalogEntry.searchMetadata +
+                        definition.aliases +
+                        definition.capabilityId +
+                        definition.invokeId +
+                        definition.displayName +
+                        definition.provider).distinct()
+            )
         }
-        // Search enrichment changes displayName. Build the reverse index from the enriched record,
-        // otherwise semantic names such as "查询 Ubuntu 状态" no longer match their source entry.
         val definitionsByIdentity = searchable.associate { (definition, entry) ->
             catalogIdentity(entry) to definition
         }
-        return ToolCapabilityCatalog.search(searchable.map { it.second }, query, limit)
-            .mapNotNull { definitionsByIdentity[catalogIdentity(it)] }
+        val catalogResult = ToolCapabilityCatalog.searchDetailed(searchable.map { it.second }, query, limit)
+        val matches = catalogResult.matches.mapNotNull { match ->
+            definitionsByIdentity[catalogIdentity(match.entry)]
+        }
+        return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence)
     }
 
     private fun findDefinition(

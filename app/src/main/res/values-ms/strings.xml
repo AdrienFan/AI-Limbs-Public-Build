@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Operit AI</string>
+    <string name="app_name">AI Limbs</string>
     <string name="accessibility_service_description">Digunakan untuk mendapatkan hierarki UI, menyediakan keupayaan analisis antara muka yang lebih pantas untuk pembantu AI, tidak akan mengumpul atau menyimpan sebarang maklumat peribadi.</string>
     <string name="model_selector_title">Pilih Konfigurasi Model</string>
     <string name="model_selector_toggle">Tunjukkan Pemilih Model</string>
@@ -514,7 +514,7 @@
     <string name="danger_zone">Zon Bahaya</string>
     <string name="chat_statistics">Statistik Rekod Perbualan</string>
     <string name="current_chats">Kini terdapat %1$d rekod perbualan</string>
-    <string name="backup_location">Fail sandaran disimpan dalam folder "Muat turun/Operit/backup"</string>
+    <string name="backup_location">Fail sandaran disimpan dalam folder "Muat turun/AI Limbs/backup"</string>
     <string name="faq_backup">Soalan Lazim</string>
     <string name="history_filter_role_card">Klasifikasi Mengikut Kad Watak</string>
     <string name="history_filter_role_card_desc">Klasifikasi tiga peringkat: Kad Watak - Folder - Perbualan</string>
@@ -539,9 +539,9 @@
     <string name="install_termux_failed">Pemasangan Termux gagal</string>
     <string name="open_termux">Buka Termux</string>
     <string name="termux_setup_guide">Panduan penyediaan Termux</string>
-    <string name="about_title">Perihal Operit AI</string>
+    <string name="about_title">Perihal AI Limbs</string>
     <string name="about_version">Versi: %1$s</string>
-    <string name="about_description">Operit AI ialah aplikasi pembantu pintar yang membantu pengguna menggunakan peranti dengan lebih cekap, menyediakan analisis antara muka, perbualan sembang dan fungsi lain.</string>
+    <string name="about_description">AI Limbs ialah aplikasi pembantu pintar yang membantu pengguna menggunakan peranti dengan lebih cekap, menyediakan analisis antara muka, perbualan sembang dan fungsi lain.</string>
     <string name="about_developer">Pembangun: &lt;a href="https://github.com/AAswordman"&gt;AAswordman&lt;/a&gt;</string>
     <string name="about_contact">Hubungi kami: aaswordsman@foxmail.com</string>
     <string name="about_website">&lt;a href="https://github.com/AAswordman/Operit"&gt;GitHub: https://github.com/AAswordman/Operit&lt;/a&gt;</string>
@@ -560,7 +560,7 @@
     <string name="network_unavailable">Sambungan rangkaian tidak tersedia, sila semak tetapan rangkaian anda</string>
     <string name="network_status">Status rangkaian: %1$s</string>
     <string name="network_status_label">Status rangkaian</string>
-    <string name="config_title">Pembantu Operit AI</string>
+    <string name="config_title">Pembantu AI Limbs</string>
     <string name="config_description">Gunakan Kunci API DeepSeek atau konfigurasikan perkhidmatan model lain</string>
     <string name="config_api_key_label">Kunci API</string>
     <string name="config_api_key_placeholder">Kunci API DeepSeek</string>
@@ -612,7 +612,7 @@
     <string name="free_usage_first_tip">Ini kali pertama guna, selepas ini perlu tunggu 1 hari sebelum boleh guna lagi~</string>
     <string name="free_usage_later_tip">Ambil pun ada hadnya, perlu tunggu %1$d hari lagi sebelum boleh ambil (๑•̀ㅂ•́)و✧</string>
     <string name="plugin_skip">Langkau</string>
-    <string name="plugin_app_name">OPERIT</string>
+    <string name="plugin_app_name">AI Limbs</string>
     <string name="plugin_status">Telah dimulakan: %1$d / %2$d</string>
     <string name="plugin_loading_status_title">Status Pemuatan Plugin</string>
     <string name="plugin_loading_success">Pemuatan berjaya</string>
@@ -1241,7 +1241,7 @@
     <string name="permission_guide_intro_2_title">Kotak alat berkuasa untuk geek dan pembangun</string>
     <string name="permission_guide_intro_2_desc">Dilengkapi lebih 40 alat profesional merangkumi pengurusan fail, permintaan rangkaian, pelaksanaan skrip dan kawalan sistem. Digabungkan dengan sistem pemalam berkuasa, anda boleh mengautomasikan tugas, mengawal peranti anda secara mendalam.</string>
     <string name="permission_guide_intro_3_title">Lepaskan kreativiti, sentiasa bersedia</string>
-    <string name="permission_guide_intro_3_desc">Sama ada mereka bentuk laman web, memproses fail media, atau membangunkan AI melalui tetingkap terapung bila-bila masa, Operit menyediakan persekitaran penciptaan dan bantuan yang berkuasa, fleksibel dan selamat. Data anda, di bawah kawalan anda.</string>
+    <string name="permission_guide_intro_3_desc">Sama ada mereka bentuk laman web, memproses fail media, atau membangunkan AI melalui tetingkap terapung bila-bila masa, AI Limbs menyediakan persekitaran penciptaan dan bantuan yang berkuasa, fleksibel dan selamat. Data anda, di bawah kawalan anda.</string>
     <string name="permission_guide_intro_page_indicator">Pengenalan fungsi %1$d/%2$d</string>
 
     <string name="no_mirrors_found">Tiada sumber cermin tersedia</string>
@@ -1327,7 +1327,7 @@
     <string name="resume_reading">Sambung Bacaan</string>
     <string name="stop_reading">Hentikan Bacaan</string>
 
-    <string name="operit_terminal">Terminal Operit</string>
+    <string name="operit_terminal">Terminal AI Limbs</string>
     <string name="permission_level_standard">Kebenaran Standard</string>
     <string name="permission_level_accessibility">Kebenaran Aksesibiliti</string>
     <string name="permission_level_admin">Kebenaran Pentadbir</string>
@@ -1951,7 +1951,7 @@
     <string name="tool_user_agreement">Perjanjian Pengguna</string>
     <string name="tool_user_agreement_desc">Lihat perjanjian pengguna dan dasar privasi aplikasi</string>
     <string name="tool_default_assistant_guide">Tetapan Pembantu Lalai</string>
-    <string name="tool_default_assistant_guide_desc">Tetapkan Operit Voice Float sebagai pembantu sistem lalai</string>
+    <string name="tool_default_assistant_guide_desc">Tetapkan AI Limbs Voice Float sebagai pembantu sistem lalai</string>
 
     <string name="host_address">Alamat Hos</string>
     <string name="port">Port</string>
@@ -2682,18 +2682,18 @@
     <string name="perm_desc_read_sms">Benarkan aplikasi membaca SMS</string>
     <string name="perm_desc_receive_wap_push">Benarkan aplikasi menerima mesej tolakan WAP</string>
     <string name="perm_desc_receive_mms">Benarkan aplikasi menerima MMS</string>
-    <string name="operit_terminal_wizard_title">Panduan Persediaan OperitTerminal</string>
-    <string name="operit_terminal_not_installed">OperitTerminal tidak dipasang</string>
-    <string name="operit_terminal_update_available">Kemas kini OperitTerminal tersedia</string>
-    <string name="operit_terminal_up_to_date">OperitTerminal sudah versi terkini</string>
-    <string name="operit_terminal_install_description">OperitTerminal ialah aplikasi terminal yang berkuasa, menawarkan persekitaran Linux lengkap dan fungsi pengurusan pakej. Kami perlu memasang aplikasi ini terlebih dahulu.</string>
-    <string name="operit_terminal_install_button">Pasang OperitTerminal</string>
+    <string name="operit_terminal_wizard_title">Panduan Persediaan AI Limbs Terminal</string>
+    <string name="operit_terminal_not_installed">AI Limbs Terminal tidak dipasang</string>
+    <string name="operit_terminal_update_available">Kemas kini AI Limbs Terminal tersedia</string>
+    <string name="operit_terminal_up_to_date">AI Limbs Terminal sudah versi terkini</string>
+    <string name="operit_terminal_install_description">AI Limbs Terminal ialah aplikasi terminal yang berkuasa, menawarkan persekitaran Linux lengkap dan fungsi pengurusan pakej. Kami perlu memasang aplikasi ini terlebih dahulu.</string>
+    <string name="operit_terminal_install_button">Pasang AI Limbs Terminal</string>
 
-    <string name="operit_terminal_update_description">Versi baharu OperitTerminal ditemui, disyorkan untuk dikemas kini bagi mendapatkan fungsi dan keserasian yang lebih baik.</string>
+    <string name="operit_terminal_update_description">Versi baharu AI Limbs Terminal ditemui, disyorkan untuk dikemas kini bagi mendapatkan fungsi dan keserasian yang lebih baik.</string>
     <string name="operit_terminal_release_notes">Nota kemas kini: %1$s</string>
-    <string name="operit_terminal_update_button">Kemas kini OperitTerminal</string>
-    <string name="operit_terminal_latest_description">Tahniah! Anda telah memasang versi terkini OperitTerminal, anda boleh mula menggunakan fungsi terminal yang berkuasa.</string>
-    <string name="operit_terminal_open_button">Buka OperitTerminal</string>
+    <string name="operit_terminal_update_button">Kemas kini AI Limbs Terminal</string>
+    <string name="operit_terminal_latest_description">Tahniah! Anda telah memasang versi terkini AI Limbs Terminal, anda boleh mula menggunakan fungsi terminal yang berkuasa.</string>
+    <string name="operit_terminal_open_button">Buka AI Limbs Terminal</string>
     <string name="functional_model_config_title">Tetapan Konfigurasi Model Fungsian</string>
     <string name="functional_model_config_desc">Tetapkan konfigurasi model berasingan untuk fungsi yang berbeza, membolehkan setiap fungsi menggunakan tetapan API yang paling sesuai.</string>
     <string name="manage_all_model_configs">Urus semua konfigurasi model</string>
@@ -4116,14 +4116,14 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="mcp_issue_body_title_install_info">## Maklumat Pemasangan</string>
     <string name="mcp_issue_body_repo_address">**Alamat Repositori:** %1$s</string>
     <string name="mcp_issue_body_title_install_method">### Kaedah Pemasangan</string>
-    <string name="mcp_issue_body_install_step1">1. Klik "Import" pada halaman konfigurasi Operit MCP</string>
+    <string name="mcp_issue_body_install_step1">1. Klik "Import" pada halaman konfigurasi AI Limbs MCP</string>
     <string name="mcp_issue_body_install_step2">2. Pilih "Import dari Repositori"</string>
     <string name="mcp_issue_body_install_step3">3. Masukkan alamat repositori: `%1$s`</string>
     <string name="mcp_issue_body_install_step4">4. Tetapkan nama plugin dan klik import</string>
     <string name="mcp_issue_body_title_tech_info">## Maklumat Teknikal</string>
-    <string name="mcp_issue_body_tech_platform">- **Platform Terbitan:** Pasaran Operit MCP</string>
+    <string name="mcp_issue_body_tech_platform">- **Platform Terbitan:** Pasaran AI Limbs MCP</string>
     <string name="mcp_issue_body_tech_publish_time">- **Masa Terbitan:** %1$s</string>
-    <string name="mcp_issue_body_footer_note">*Isu ini dijana secara automatik oleh Operit*</string>
+    <string name="mcp_issue_body_footer_note">*Isu ini dijana secara automatik oleh AI Limbs*</string>
     <string name="mcp_publish_body_section_plugin_info">## 📋 Maklumat Plugin</string>
     <string name="mcp_publish_body_label_description">**Penerangan:** %1$s</string>
     <string name="mcp_publish_body_section_repo_info">## 🔗 Maklumat Repositori</string>
@@ -4131,18 +4131,18 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="mcp_publish_body_section_quick_install">## ⚡ Pemasangan Pantas</string>
     <string name="mcp_publish_body_section_install_method">## 📦 Kaedah Pemasangan</string>
     <string name="mcp_publish_body_method_repo_import_title">### Kaedah 1: Import dari Repositori</string>
-    <string name="mcp_publish_body_method_repo_import_step1">1. Buka halaman konfigurasi Operit MCP</string>
+    <string name="mcp_publish_body_method_repo_import_step1">1. Buka halaman konfigurasi AI Limbs MCP</string>
     <string name="mcp_publish_body_method_repo_import_step2">2. Klik "Import" → "Import dari Repositori"</string>
     <string name="mcp_publish_body_method_repo_import_step3">3. Masukkan alamat repositori: `%1$s`</string>
     <string name="mcp_publish_body_method_repo_import_step4">4. Konfigurasikan nama plugin dan import</string>
     <string name="mcp_publish_body_method_config_import_title">### Kaedah 2: Import Konfigurasi</string>
-    <string name="mcp_publish_body_method_config_import_step1">1. Buka halaman konfigurasi Operit MCP</string>
+    <string name="mcp_publish_body_method_config_import_step1">1. Buka halaman konfigurasi AI Limbs MCP</string>
     <string name="mcp_publish_body_method_config_import_step2">2. Klik "Import" → "Import Konfigurasi"</string>
     <string name="mcp_publish_body_method_config_import_step3">3. Tampal konfigurasi berikut:</string>
     <string name="mcp_publish_body_section_tech_info">## 🛠️ Maklumat Teknikal</string>
     <string name="mcp_publish_body_table_header">| Item | Nilai |</string>
     <string name="mcp_publish_body_table_separator">|------|-----|</string>
-    <string name="mcp_publish_body_table_row_platform">| Platform Terbitan | Pasaran Operit MCP |</string>
+    <string name="mcp_publish_body_table_row_platform">| Platform Terbitan | Pasaran AI Limbs MCP |</string>
     <string name="mcp_publish_body_table_row_parser_version">| Versi Pengecaman | 1.0 |</string>
     <string name="mcp_publish_body_table_row_publish_time">| Masa Terbitan | %1$s |</string>
     <string name="mcp_plugin_detail_title">Butiran Plugin</string>
@@ -4158,7 +4158,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="emoji_preview">Pratonton emoji</string>
     <string name="create_group">Buat kumpulan</string>
     <string name="custom">Tersuai</string>
-    <string name="voice_assistant_widget_description">Lancarkan pembantu suara Operit dengan pantas</string>
+    <string name="voice_assistant_widget_description">Lancarkan pembantu suara AI Limbs dengan pantas</string>
     <string name="voice_assistant_widget_title">Pembantu Suara</string>
     <string name="screen_title_mnn_model_download">Muat turun model MNN</string>
     <string name="mnn_model_download">Muat turun model MNN</string>
@@ -4437,11 +4437,11 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="exporting">Sedang mengeksport</string>
 
     <string name="default_assistant_guide_step3_detail1">• Gunakan isyarat yang anda tetapkan (seperti menekan lama kekunci Utama) untuk membangkitkan pembantu</string>
-    <string name="default_assistant_guide_step3_detail2">• Jika berjaya, anda sepatutnya melihat antara muka pembantu suara Operit</string>
+    <string name="default_assistant_guide_step3_detail2">• Jika berjaya, anda sepatutnya melihat antara muka pembantu suara AI Limbs</string>
     <string name="default_assistant_guide_step3_detail3">• Anda boleh cuba bercakap atau menaip teks untuk berinteraksi dengan pembantu</string>
     <string name="default_assistant_guide_troubleshooting_title">Menghadapi masalah?</string>
-    <string name="default_assistant_guide_troubleshooting_content">Jika Operit tidak ditemui dalam senarai, pastikan:\n\n• Aplikasi telah dipasang dengan betul dan tidak dilumpuhkan\n• Keizinan yang diperlukan telah diberikan (mikrofon, tetingkap terapung, dll.)\n• Cuba tetapkan semula selepas menghidupkan semula peranti\n\nSesetengah sistem tersuai mungkin menghadkan aplikasi pihak ketiga sebagai pembantu lalai. Jika berlaku, anda masih boleh menggunakan Operit melalui fungsi tetingkap terapung dalam aplikasi.</string>
-    <string name="voice_interaction_service_name">Pembantu AI Operit</string>
+    <string name="default_assistant_guide_troubleshooting_content">Jika AI Limbs tidak ditemui dalam senarai, pastikan:\n\n• Aplikasi telah dipasang dengan betul dan tidak dilumpuhkan\n• Keizinan yang diperlukan telah diberikan (mikrofon, tetingkap terapung, dll.)\n• Cuba tetapkan semula selepas menghidupkan semula peranti\n\nSesetengah sistem tersuai mungkin menghadkan aplikasi pihak ketiga sebagai pembantu lalai. Jika berlaku, anda masih boleh menggunakan AI Limbs melalui fungsi tetingkap terapung dalam aplikasi.</string>
+    <string name="voice_interaction_service_name">Pembantu AI AI Limbs</string>
     <string name="voice_interaction_service_summary">Perkhidmatan pembantu suara pintar</string>
     <string name="tool_permissions_title">Keizinan Alat</string>
     <string name="tool_permissions_description">Secara lalai, semua alat memerlukan anda "bertanya". Anda boleh menambah pengecualian di bawah.</string>
@@ -4499,18 +4499,18 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="time_hours_ago">%1$d jam yang lalu</string>
     <string name="time_days_ago">%1$d hari yang lalu</string>
     <string name="default_assistant_guide_title">Tetapkan Pembantu Suara Lalai</string>
-    <string name="default_assistant_guide_subtitle">Jadikan Operit sebagai pembantu pintar anda</string>
-    <string name="default_assistant_guide_intro">Selepas menetapkan Operit sebagai pembantu lalai sistem, anda boleh melancarkan pembantu suara Operit dengan cepat melalui menekan lama kekunci Home atau menggunakan bangunkan suara, untuk mendapatkan pengalaman interaksi AI yang lebih mudah.</string>
+    <string name="default_assistant_guide_subtitle">Jadikan AI Limbs sebagai pembantu pintar anda</string>
+    <string name="default_assistant_guide_intro">Selepas menetapkan AI Limbs sebagai pembantu lalai sistem, anda boleh melancarkan pembantu suara AI Limbs dengan cepat melalui menekan lama kekunci Home atau menggunakan bangunkan suara, untuk mendapatkan pengalaman interaksi AI yang lebih mudah.</string>
     <string name="default_assistant_guide_steps_title">Langkah-langkah Penetapan</string>
     <string name="default_assistant_guide_step1_title">Tetapkan sebagai Pembantu Lalai</string>
-    <string name="default_assistant_guide_step1_desc">Tetapkan Operit sebagai aplikasi pembantu digital lalai sistem</string>
+    <string name="default_assistant_guide_step1_desc">Tetapkan AI Limbs sebagai aplikasi pembantu digital lalai sistem</string>
     <string name="default_assistant_guide_step1_detail1">• Buka Tetapan Sistem → Aplikasi → Aplikasi Lalai → Aplikasi Pembantu Digital</string>
-    <string name="default_assistant_guide_step1_detail2">• Cari dan pilih "Operit AI" dalam senarai aplikasi pembantu</string>
+    <string name="default_assistant_guide_step1_detail2">• Cari dan pilih "AI Limbs" dalam senarai aplikasi pembantu</string>
     <string name="default_assistant_guide_step1_detail_android12">Android 12+: Tetapan → Aplikasi → Aplikasi Lalai → Aplikasi Pembantu Digital → Aplikasi Pembantu Digital Lalai</string>
     <string name="default_assistant_guide_open_settings">Buka Tetapan Pembantu</string>
     <string name="default_assistant_guide_open_gesture_settings">Buka Tetapan Isyarat</string>
     <string name="default_assistant_guide_step2_title">Konfigurasi Isyarat Pelancaran</string>
-    <string name="default_assistant_guide_step2_desc">Tetapkan cara untuk membangkitkan pembantu Operit dengan cepat</string>
+    <string name="default_assistant_guide_step2_desc">Tetapkan cara untuk membangkitkan pembantu AI Limbs dengan cepat</string>
     <string name="default_assistant_guide_step2_detail1">• Tekan lama kekunci Home: Kaedah paling biasa digunakan, tersedia pada kebanyakan peranti</string>
     <string name="default_assistant_guide_step2_detail2">• Geser ke atas dari bahagian bawah skrin: Sesetengah peranti yang menyokong isyarat skrin penuh</string>
     <string name="default_assistant_guide_step2_detail_android12">Android 12+: Tetapan → Aplikasi → Aplikasi Lalai → Aplikasi Pembantu Digital → Aplikasi Pembantu Digital Lalai</string>
@@ -4518,10 +4518,10 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="default_assistant_guide_step2_note">Perhatian: Tetapan isyarat mungkin berbeza mengikut jenama telefon, sila semak pilihan yang tersedia dalam tetapan sistem</string>
     <string name="default_assistant_guide_step4_title">Uji Pembantu Suara</string>
     <string name="default_assistant_guide_step4_desc">Selepas selesai penetapan, uji sama ada boleh dilancarkan dengan normal</string>
-    <string name="default_assistant_guide_step4_detail1">• Menekan lama kekunci Home (butang skrin utama) sepatutnya melancarkan pembantu suara Operit</string>
-    <string name="default_assistant_guide_step4_detail2">• Jika peranti menyokong bangunkan suara, menyebut "Hey Google" atau kata bangunkan yang ditetapkan peranti juga mungkin mencetuskan Operit</string>
+    <string name="default_assistant_guide_step4_detail1">• Menekan lama kekunci Home (butang skrin utama) sepatutnya melancarkan pembantu suara AI Limbs</string>
+    <string name="default_assistant_guide_step4_detail2">• Jika peranti menyokong bangunkan suara, menyebut "Hey Google" atau kata bangunkan yang ditetapkan peranti juga mungkin mencetuskan AI Limbs</string>
     <string name="default_assistant_guide_step3_title">Uji Fungsi Pembantu</string>
-    <string name="default_assistant_guide_step3_desc">Selepas selesai penetapan, uji sama ada Operit boleh dibangkitkan dengan normal</string>
+    <string name="default_assistant_guide_step3_desc">Selepas selesai penetapan, uji sama ada AI Limbs boleh dibangkitkan dengan normal</string>
 
     <string name="export_failed">Eksport gagal</string>
     <string name="file_saved_to">Fail telah disimpan ke:</string>
@@ -4722,7 +4722,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
 
     <string name="backup_character_cards_title">Kad Karakter</string>
     <string name="backup_character_cards_subtitle">Sandarkan dan pulihkan konfigurasi kad karakter</string>
-    <string name="backup_character_cards_current_count">Kini terdapat %1$d kad karakter. Fail yang dieksport akan disimpan dalam folder "Muat turun/Operit".</string>
+    <string name="backup_character_cards_current_count">Kini terdapat %1$d kad karakter. Fail yang dieksport akan disimpan dalam folder "Muat turun/AI Limbs".</string>
     <string name="backup_character_card_count">Kad Karakter</string>
     <string name="backup_character_card_files">Kad Karakter</string>
     <string name="backup_character_cards_export_result_success">Berjaya mengeksport %1$d kad karakter ke:\n%2$s</string>
@@ -4853,13 +4853,13 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="backup_faq_why">Mengapa perlu menyandarkan data?</string>
     <string name="backup_faq_why_answer">Menyandarkan rekod sembang boleh mencegah kehilangan kandungan penting anda apabila aplikasi dipasang semula atau data hilang. Menyandarkan secara berkala adalah amalan yang baik!</string>
     <string name="backup_faq_where">Di manakah fail yang dieksport disimpan?</string>
-    <string name="backup_faq_where_answer">Fail sandaran yang dieksport akan disimpan dalam folder "Muat Turun/Operit" telefon anda, nama fail mengandungi jenis data, tarikh dan masa eksport.</string>
+    <string name="backup_faq_where_answer">Fail sandaran yang dieksport akan disimpan dalam folder "Muat Turun/AI Limbs" telefon anda, nama fail mengandungi jenis data, tarikh dan masa eksport.</string>
     <string name="backup_faq_duplicate">Adakah data akan berulang selepas import?</string>
     <string name="backup_faq_duplicate_answer">Sistem akan menilai berdasarkan ID rekod, rekod dengan ID yang sama akan dikemas kini dan bukannya diimport semula. Rekod dengan ID berbeza akan ditambah sebagai rekod baharu.</string>
     <string name="backup_select_export_format">Pilih format eksport</string>
     <string name="backup_select_format_hint">Sila pilih format rekod sembang yang ingin dieksport:</string>
     <string name="backup_format_json">JSON (disyorkan)</string>
-    <string name="backup_format_json_desc">Format asli Operit, mengekalkan semua data dengan lengkap</string>
+    <string name="backup_format_json_desc">Format asli AI Limbs, mengekalkan semua data dengan lengkap</string>
     <string name="backup_format_markdown">Markdown</string>
     <string name="backup_format_markdown_desc">Format penanda ringan, mudah dibaca dan disunting</string>
     <string name="backup_format_html">HTML</string>
@@ -4886,7 +4886,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="backup_memory_count">Entri ingatan</string>
     <string name="backup_memory_link_count">Pautan ingatan</string>
     <string name="backup_files_statistics">Statistik fail sandaran</string>
-    <string name="backup_files_statistics_subtitle">Fail sandaran dalam direktori eksport Operit</string>
+    <string name="backup_files_statistics_subtitle">Fail sandaran dalam direktori eksport AI Limbs</string>
     <string name="backup_refresh">Segar semula</string>
     <string name="backup_scanning">Sedang mengimbas</string>
     <string name="backup_chat_files">Rekod sembang</string>
@@ -4964,7 +4964,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
 
     <string name="uidebugger_element_info_size_px">Saiz: %1$d×%2$dpx</string>
     <string name="logcat_no_logs_to_save">Tiada log untuk disimpan</string>
-    <string name="logcat_header">=== Log Operit ===</string>
+    <string name="logcat_header">=== Log AI Limbs ===</string>
     <string name="logcat_date">Tarikh: %1$s</string>
     <string name="logcat_total_count">Jumlah: %1$d</string>
     <string name="logcat_save_failed">Gagal menyimpan: %1$s</string>
@@ -4974,7 +4974,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="logcat_cannot_open_output_stream">Tidak dapat membuka aliran output</string>
     <string name="logcat_mediestore_save_failed">MediaStore gagal menyimpan: %1$s</string>
     <string name="logcat_cannot_create_download_dir">Tidak dapat mencipta direktori muat turun</string>
-    <string name="logcat_cannot_create_operit_dir">Tidak dapat mencipta direktori operit</string>
+    <string name="logcat_cannot_create_operit_dir">Tidak dapat mencipta direktori AiLimbs</string>
     <string name="logcat_file_create_failed">Penciptaan fail gagal atau kosong</string>
     <string name="logcat_filesystem_save_failed">Sistem fail gagal menyimpan: %1$s</string>
     <string name="backup_export_failed_create_file">Eksport gagal: Tidak dapat mencipta fail</string>
@@ -5423,14 +5423,14 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="skill_publish_body_section_repo_info">## 🔗 Maklumat Repositori</string>
     <string name="skill_publish_body_label_repo_url">**Alamat Repositori:** %1$s</string>
     <string name="skill_publish_body_section_install_method">## 📦 Kaedah Pemasangan</string>
-    <string name="skill_publish_body_install_step1">1. Buka Operit → Pengurusan Pakej → Skills</string>
+    <string name="skill_publish_body_install_step1">1. Buka AI Limbs → Pengurusan Pakej → Skills</string>
     <string name="skill_publish_body_install_step2">2. Klik "Import Skill" → "Import dari Repositori"</string>
     <string name="skill_publish_body_install_step3">3. Masukkan alamat repositori: `%1$s`</string>
     <string name="skill_publish_body_install_step4">4. Sahkan import</string>
     <string name="skill_publish_body_section_tech_info">## 🛠️ Maklumat Teknikal</string>
     <string name="skill_publish_body_table_header">| Item | Nilai |</string>
     <string name="skill_publish_body_table_separator">|------|-----|</string>
-    <string name="skill_publish_body_table_row_platform">| Platform Terbitan | Pasaran Skill Operit |</string>
+    <string name="skill_publish_body_table_row_platform">| Platform Terbitan | Pasaran Skill AI Limbs |</string>
     <string name="skill_publish_body_table_row_parser_version">| Versi Pengecam | 1.0 |</string>
     <string name="skill_publish_body_table_row_publish_time">| Masa Terbitan | %1$s |</string>
     <string name="model_param_max_tokens">Bilangan Token Maksimum</string>
@@ -5754,7 +5754,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="demo_cmd_list_activities">Lihat Aktiviti yang aktif</string>
     <string name="demo_cmd_list_services">Senaraikan perkhidmatan sistem</string>
     <string name="demo_cmd_check_resolution">Semak resolusi skrin</string>
-    <string name="demo_cmd_echo_hello">Cetak Hello OperitTerminal</string>
+    <string name="demo_cmd_echo_hello">Cetak Hello AI Limbs Terminal</string>
     <string name="demo_cmd_list_files">Senaraikan fail dan direktori</string>
     <string name="demo_cmd_show_user">Paparkan pengguna semasa</string>
     <string name="demo_cmd_update_package_manager">Kemas kini pengurus pakej (Ubuntu)</string>
@@ -6134,7 +6134,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="html_export_updated">Dikemas kini</string>
     <string name="html_export_group">Kumpulan</string>
     <string name="html_export_message_count">Bilangan Mesej</string>
-    <string name="html_export_footer">Dieksport dari Operit AI Assistant</string>
+    <string name="html_export_footer">Dieksport dari AI Limbs Assistant</string>
     <string name="mnn_no_cache_data">Tiada data cache</string>
     <string name="mnn_response_empty">Badan respons kosong</string>
     <string name="mnn_fetch_repo_files_failed">Gagal mendapatkan senarai fail repositori: %1$s</string>
@@ -6254,10 +6254,10 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="service_chat_complete_reminder_sound">Peringatan selesai perbualan (bunyi)</string>
     <string name="service_chat_complete_reminder_vibration">Peringatan selesai perbualan (getaran)</string>
     <string name="service_chat_complete_reminder_sound_vibration">Peringatan selesai perbualan (bunyi dan getaran)</string>
-    <string name="service_keep_background">Kekalkan Operit berjalan di latar belakang.</string>
+    <string name="service_keep_background">Kekalkan AI Limbs berjalan di latar belakang.</string>
     <string name="service_notify_when_complete">Beritahu anda apabila perbualan selesai.</string>
-    <string name="service_running_wake_pause">Operit sedang berjalan (bangun dijeda)</string>
-    <string name="service_running_wake_listening">Operit sedang berjalan (bangun sedang mendengar)</string>
+    <string name="service_running_wake_pause">AI Limbs sedang berjalan (bangun dijeda)</string>
+    <string name="service_running_wake_listening">AI Limbs sedang berjalan (bangun sedang mendengar)</string>
     <string name="service_running_stats">Berjalan perbualan %1$d · Panggilan alat %2$d</string>
     <string name="service_running_http_listening">HTTP luaran sedang mendengar port %1$d</string>
     <string name="service_running_with_http">%1$s · HTTP luaran %2$d</string>
@@ -6897,7 +6897,7 @@ Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="chat_message_timing_stats_compact">masa: %1$s (pertama %2$s jana %3$s)</string>
     <string name="software_identity_title">Identiti Perisian</string>
     <string name="software_identity_description">Tukar identiti perisian yang dipaparkan di bahagian atas bar sisi.</string>
-    <string name="software_identity_option_operit">Operit AI</string>
+    <string name="software_identity_option_operit">AI Limbs</string>
     <string name="software_identity_option_lingshu">Lingshu AI</string>
     <string name="chat_auto_update_memory_failed">Gagal mengemas kini memori secara automatik: %1$s</string>
 

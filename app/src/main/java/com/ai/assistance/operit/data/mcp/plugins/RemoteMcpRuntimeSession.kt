@@ -70,7 +70,7 @@ class RemoteMcpRuntimeSession(
 
             val mcpClient = Client(
                 clientInfo = Implementation(
-                    name = "Operit",
+                    name = "AI Limbs",
                     version = "mcp-runtime"
                 )
             )

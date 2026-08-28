@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">Operit AI</string>
+    <string name="app_name">AI Limbs</string>
     <string name="accessibility_service_description">UI 계층 구조를 가져오는 데 사용되며 AI 보조자에게 더 빠른 인터페이스 분석 기능을 제공하며 개인 정보를 수집하거나 저장하지 않습니다.</string>
     <string name="model_selector_title">모델 구성 선택</string>
     <string name="model_selector_toggle">모델 선택기 표시</string>
@@ -536,9 +536,9 @@
     <string name="install_termux_failed">Termux 설치 실패</string>
     <string name="open_termux">Termux 열기</string>
     <string name="termux_setup_guide">Termux 설정 가이드</string>
-    <string name="about_title">Operit AI 소개</string>
+    <string name="about_title">AI Limbs 소개</string>
     <string name="about_version">버전: %1$s</string>
-    <string name="about_description">Operit AI는 인터페이스 분석, 채팅 대화 등을 제공하여 사용자가 장치를 보다 효율적으로 사용할 수 있도록 돕는 지능형 보조 애플리케이션입니다.</string>
+    <string name="about_description">AI Limbs는 인터페이스 분석, 채팅 대화 등을 제공하여 사용자가 장치를 보다 효율적으로 사용할 수 있도록 돕는 지능형 보조 애플리케이션입니다.</string>
     <string name="about_developer">개발자: &lt;a href="https://github.com/AAswordman"&gt;AAswordman&lt;/a&gt;</string>
     <string name="about_contact">연락처: aaswordsman@foxmail.com</string>
     <string name="about_website">&lt;a href="https://github.com/AAswordman/Operit"&gt;GitHub: https://github.com/AAswordman/Operit&lt;/a&gt;</string>
@@ -557,7 +557,7 @@
     <string name="network_unavailable">네트워크 연결이 불가능합니다. 네트워크 설정을 확인하세요.</string>
     <string name="network_status">네트워크 상태: %1$s</string>
     <string name="network_status_label">네트워크 상태</string>
-    <string name="config_title">Operit AI 도우미</string>
+    <string name="config_title">AI Limbs 도우미</string>
     <string name="config_description">DeepSeek API 키를 사용하거나 다른 모델 서비스를 구성하세요</string>
     <string name="config_api_key_label">API 키</string>
     <string name="config_api_key_placeholder">DeepSeek API 키</string>
@@ -609,7 +609,7 @@
     <string name="free_usage_first_tip">이번이 첫 번째 사용이므로 다음번에는 1일을 기다려야 합니다~</string>
     <string name="free_usage_later_tip">무료 리소스에는 제한이 있습니다. %1$d일 더 기다려 주세요. (๑•̀ㅂ•́)و✧</string>
     <string name="plugin_skip">건너뛰기</string>
-    <string name="plugin_app_name">OPERIT</string>
+    <string name="plugin_app_name">AI Limbs</string>
     <string name="plugin_status">시작됨: %1$d / %2$d</string>
     <string name="plugin_loading_status_title">플러그인 로딩 상태</string>
     <string name="plugin_loading_success">로드 성공</string>
@@ -1220,7 +1220,7 @@
     <string name="overlay_permission">오버레이 권한</string>
     <string name="battery_optimization">배터리 최적화 면제</string>
     <string name="location_permission">위치 권한</string>
-    <string name="operit_terminal">Operit 터미널</string>
+    <string name="operit_terminal">AI Limbs 터미널</string>
     <string name="permission_level_standard">표준 권한</string>
     <string name="permission_level_accessibility">접근성 권한</string>
     <string name="permission_level_admin">관리자 권한</string>
@@ -1436,7 +1436,7 @@
     <string name="accessibility_wizard_install_provider">공급자 앱 설치</string>
     <string name="accessibility_wizard_enable_message">이제 기기 설정에서 접근성 서비스를 활성화하세요. 이를 통해 제공자 앱이 화면 콘텐츠를 분석할 수 있습니다.</string>
     <string name="accessibility_wizard_enable_note">중요 사항:</string>
-    <string name="accessibility_wizard_enable_note_details">서비스 목록에서 \"Operit Accessibility Provider\"를 선택하고 활성화해야 합니다.</string>
+    <string name="accessibility_wizard_enable_note_details">서비스 목록에서 \"AI Limbs Accessibility Provider\"를 선택하고 활성화해야 합니다.</string>
     <string name="accessibility_wizard_open_settings">접근성 설정 열기</string>
     <string name="accessibility_wizard_success_message">접근성 서비스가 올바르게 구성되었으며 사용할 준비가 되었습니다!</string>
     <string name="copy_message">메시지 복사</string>
@@ -1509,7 +1509,7 @@
     <string name="permission_guide_intro_2_title">괴짜와 개발자를 위한 강력한 도구 상자</string>
     <string name="permission_guide_intro_2_desc">파일 관리, 웹 요청, 스크립트 실행 및 시스템 제어를 위한 40개 이상의 전문 도구가 내장되어 있습니다. 강력한 플러그인 시스템과 결합하면 작업을 자동화하고 장치를 심층적으로 제어할 수 있습니다.</string>
     <string name="permission_guide_intro_3_title">창의력 발휘, 상시 대기</string>
-    <string name="permission_guide_intro_3_desc">웹 페이지 디자인, 미디어 파일 처리 또는 플로팅 창을 통한 AI 액세스 등 Operit은 생성 및 지원을 위한 강력하고 유연하며 안전한 환경을 제공합니다. 귀하의 데이터, 귀하의 통제.</string>
+    <string name="permission_guide_intro_3_desc">웹 페이지 디자인, 미디어 파일 처리 또는 플로팅 창을 통한 AI 액세스 등 AI Limbs은 생성 및 지원을 위한 강력하고 유연하며 안전한 환경을 제공합니다. 귀하의 데이터, 귀하의 통제.</string>
     <string name="permission_guide_intro_page_indicator">기능 둘러보기 %1$d/%2$d</string>
     <string name="debugger_accessibility_fallback_title">접근성 가속화(고위험)</string>
     <string name="debugger_accessibility_fallback_description">디버거 모드는 기본적으로 Shell을 통해 UI 작업을 수행합니다. 접근성 서비스를 활성화하면 UI 자동화 속도가 크게 빨라질 수 있지만, 일부 애플리케이션에서 감지되어 금지될 위험도 크게 높아집니다. 최대 작동 속도가 필요한 경우가 아니면 권장되지 않습니다.</string>
@@ -1873,7 +1873,7 @@
     <string name="tool_user_agreement">사용자 계약</string>
     <string name="tool_user_agreement_desc">애플리케이션의 사용자 계약 및 개인정보 보호정책 보기</string>
     <string name="tool_default_assistant_guide">기본 어시스턴트 설정</string>
-    <string name="tool_default_assistant_guide_desc">Operit 음성 플로팅 창을 시스템 기본 어시스턴트로 설정</string>
+    <string name="tool_default_assistant_guide_desc">AI Limbs 음성 플로팅 창을 시스템 기본 어시스턴트로 설정</string>
     <string name="tool_terminal">명령 터미널</string>
     <string name="tool_terminal_desc">시스템 명령 실행을 위한 강력한 명령줄 터미널</string>
     <string name="tool_terminal_auto_config">터미널 자동 구성</string>
@@ -2592,17 +2592,17 @@
     <string name="perm_desc_read_sms">앱이 SMS 메시지를 읽도록 허용</string>
     <string name="perm_desc_receive_wap_push">앱이 WAP 푸시 메시지를 받도록 허용</string>
     <string name="perm_desc_receive_mms">앱이 MMS를 수신하도록 허용</string>
-    <string name="operit_terminal_wizard_title">OperitTerminal 설정 마법사</string>
-    <string name="operit_terminal_not_installed">OperitTerminal이 설치되지 않았습니다.</string>
-    <string name="operit_terminal_update_available">OperitTerminal 업데이트 가능</string>
-    <string name="operit_terminal_up_to_date">OperitTerminal이 최신 상태입니다.</string>
-    <string name="operit_terminal_install_description">OperitTerminal은 완전한 Linux 환경과 패키지 관리 기능을 제공하는 강력한 터미널 애플리케이션입니다. 먼저 이 애플리케이션을 설치해야 합니다.</string>
-    <string name="operit_terminal_install_button">OperitTerminal 설치</string>
-    <string name="operit_terminal_update_description">OperitTerminal의 새 버전을 사용할 수 있습니다. 더 나은 기능과 호환성을 위해 업데이트하는 것이 좋습니다.</string>
+    <string name="operit_terminal_wizard_title">AI Limbs Terminal 설정 마법사</string>
+    <string name="operit_terminal_not_installed">AI Limbs Terminal이 설치되지 않았습니다.</string>
+    <string name="operit_terminal_update_available">AI Limbs Terminal 업데이트 가능</string>
+    <string name="operit_terminal_up_to_date">AI Limbs Terminal이 최신 상태입니다.</string>
+    <string name="operit_terminal_install_description">AI Limbs Terminal은 완전한 Linux 환경과 패키지 관리 기능을 제공하는 강력한 터미널 애플리케이션입니다. 먼저 이 애플리케이션을 설치해야 합니다.</string>
+    <string name="operit_terminal_install_button">AI Limbs Terminal 설치</string>
+    <string name="operit_terminal_update_description">AI Limbs Terminal의 새 버전을 사용할 수 있습니다. 더 나은 기능과 호환성을 위해 업데이트하는 것이 좋습니다.</string>
     <string name="operit_terminal_release_notes">출시 노트: %1$s</string>
-    <string name="operit_terminal_update_button">OperitTerminal 업데이트</string>
-    <string name="operit_terminal_latest_description">축하합니다! 최신 버전의 OperitTerminal을 설치했으며 강력한 터미널 기능을 사용할 수 있습니다.</string>
-    <string name="operit_terminal_open_button">OperitTerminal 열기</string>
+    <string name="operit_terminal_update_button">AI Limbs Terminal 업데이트</string>
+    <string name="operit_terminal_latest_description">축하합니다! 최신 버전의 AI Limbs Terminal을 설치했으며 강력한 터미널 기능을 사용할 수 있습니다.</string>
+    <string name="operit_terminal_open_button">AI Limbs Terminal 열기</string>
     <string name="functional_model_config_title">기능별 모델 구성 설정</string>
     <string name="functional_model_config_desc">각 기능에 대해 별도의 모델 구성을 설정하여 각 기능이 가장 적합한 API 설정을 사용할 수 있도록 합니다.</string>
     <string name="manage_all_model_configs">모든 모델 구성 관리</string>
@@ -4200,14 +4200,14 @@
     <string name="mcp_issue_body_title_install_info">## 설치 정보</string>
     <string name="mcp_issue_body_repo_address">**저장소:** %1$s</string>
     <string name="mcp_issue_body_title_install_method">### 설치</string>
-    <string name="mcp_issue_body_install_step1">1. Operit MCP 구성 화면을 열고 "가져오기"를 탭하세요.</string>
+    <string name="mcp_issue_body_install_step1">1. AI Limbs MCP 구성 화면을 열고 "가져오기"를 탭하세요.</string>
     <string name="mcp_issue_body_install_step2">2. "Repo에서 가져오기"를 선택하세요.</string>
     <string name="mcp_issue_body_install_step3">3. 저장소 URL 입력: `%1$s`</string>
     <string name="mcp_issue_body_install_step4">4. 플러그인 이름을 설정하고 가져오기를 탭하세요.</string>
     <string name="mcp_issue_body_title_tech_info">## 기술 정보</string>
-    <string name="mcp_issue_body_tech_platform">- **플랫폼:** Operit MCP 마켓</string>
+    <string name="mcp_issue_body_tech_platform">- **플랫폼:** AI Limbs MCP 마켓</string>
     <string name="mcp_issue_body_tech_publish_time">- **게시 시간:** %1$s</string>
-    <string name="mcp_issue_body_footer_note">*이 Issue는 Operit에서 자동으로 생성했습니다*</string>
+    <string name="mcp_issue_body_footer_note">*이 Issue는 AI Limbs에서 자동으로 생성했습니다*</string>
     <string name="mcp_publish_body_section_plugin_info">## 📋 플러그인 정보</string>
     <string name="mcp_publish_body_label_description">**설명:** %1$s</string>
     <string name="mcp_publish_body_section_repo_info">## 🔗 저장소 정보</string>
@@ -4215,18 +4215,18 @@
     <string name="mcp_publish_body_section_quick_install">## ⚡ 빠른 설치</string>
     <string name="mcp_publish_body_section_install_method">## 📦 설치</string>
     <string name="mcp_publish_body_method_repo_import_title">### 방법 1: 저장소에서 가져오기</string>
-    <string name="mcp_publish_body_method_repo_import_step1">1. Operit MCP 구성 화면 열기</string>
+    <string name="mcp_publish_body_method_repo_import_step1">1. AI Limbs MCP 구성 화면 열기</string>
     <string name="mcp_publish_body_method_repo_import_step2">2. "가져오기" → "Repo에서 가져오기"를 탭하세요.</string>
     <string name="mcp_publish_body_method_repo_import_step3">3. 저장소 URL 입력: `%1$s`</string>
     <string name="mcp_publish_body_method_repo_import_step4">4. 플러그인 이름 설정 및 가져오기</string>
     <string name="mcp_publish_body_method_config_import_title">### 방법 2: 구성 가져오기</string>
-    <string name="mcp_publish_body_method_config_import_step1">1. Operit MCP 구성 화면 열기</string>
+    <string name="mcp_publish_body_method_config_import_step1">1. AI Limbs MCP 구성 화면 열기</string>
     <string name="mcp_publish_body_method_config_import_step2">2. "가져오기" → "구성 가져오기"를 탭하세요.</string>
     <string name="mcp_publish_body_method_config_import_step3">3. 다음 구성을 붙여넣습니다.</string>
     <string name="mcp_publish_body_section_tech_info">## 🛠️ 기술 정보</string>
     <string name="mcp_publish_body_table_header">| 항목 | 값 |</string>
     <string name="mcp_publish_body_table_separator">|------|------|</string>
-    <string name="mcp_publish_body_table_row_platform">| 플랫폼 | Operit MCP 마켓 |</string>
+    <string name="mcp_publish_body_table_row_platform">| 플랫폼 | AI Limbs MCP 마켓 |</string>
     <string name="mcp_publish_body_table_row_parser_version">| 파서 버전 | 1.0 |</string>
     <string name="mcp_publish_body_table_row_publish_time">| 게시일 | %1$s |</string>
     <string name="mcp_plugin_detail_title">플러그인 세부정보</string>
@@ -4370,7 +4370,7 @@
     <string name="emoji_preview">이모지 미리보기</string>
     <string name="create_group">그룹 만들기</string>
     <string name="custom">맞춤형</string>
-    <string name="voice_assistant_widget_description">Operit 음성 도우미 빠른 실행</string>
+    <string name="voice_assistant_widget_description">AI Limbs 음성 도우미 빠른 실행</string>
     <string name="voice_assistant_widget_title">음성 도우미</string>
     <string name="toolpkg_widget_host_label">사용자 정의 위젯</string>
     <string name="toolpkg_widget_host_description">추가 후 플러그인에 등록된 위젯 페이지에 바인딩합니다.</string>
@@ -4509,13 +4509,13 @@
     <string name="time_hours_ago">%1$d시간 전</string>
     <string name="time_days_ago">%1$d일 전</string>
     <string name="default_assistant_guide_title">기본 음성 도우미 설정</string>
-    <string name="default_assistant_guide_subtitle">Operit를 스마트 어시스턴트로 만들어보세요</string>
-    <string name="default_assistant_guide_intro">Operit를 기본 시스템 도우미로 설정한 후 홈 버튼을 길게 누르거나 음성 깨우기를 사용하여 Operit 음성 도우미를 빠르게 시작할 수 있어 보다 편리한 AI 상호 작용 경험을 제공합니다.</string>
+    <string name="default_assistant_guide_subtitle">AI Limbs를 스마트 어시스턴트로 만들어보세요</string>
+    <string name="default_assistant_guide_intro">AI Limbs를 기본 시스템 도우미로 설정한 후 홈 버튼을 길게 누르거나 음성 깨우기를 사용하여 AI Limbs 음성 도우미를 빠르게 시작할 수 있어 보다 편리한 AI 상호 작용 경험을 제공합니다.</string>
     <string name="default_assistant_guide_steps_title">설정 단계</string>
     <string name="default_assistant_guide_step1_title">시스템 설정 열기</string>
     <string name="default_assistant_guide_step1_desc">먼저 Android 시스템 설정 인터페이스로 들어가야 합니다.</string>
     <string name="default_assistant_guide_step1_detail1">• 시스템 설정 → 앱 → 기본 앱 → 디지털 보조 앱 열기</string>
-    <string name="default_assistant_guide_step1_detail2">• 보조 앱 목록에서 "Operit AI"를 찾아 선택하세요.</string>
+    <string name="default_assistant_guide_step1_detail2">• 보조 앱 목록에서 "AI Limbs"를 찾아 선택하세요.</string>
     <string name="default_assistant_guide_step1_detail_android12">Android 12+: 설정 → 앱 → 기본 앱 → 디지털 보조 앱 → 기본 디지털 보조 앱</string>
     <string name="default_assistant_guide_open_settings">설정 열기</string>
     <string name="default_assistant_guide_open_gesture_settings">제스처 설정 열기</string>
@@ -4528,16 +4528,16 @@
     <string name="default_assistant_guide_step2_note">참고: 제스처 설정은 휴대폰 브랜드에 따라 다를 수 있습니다. 시스템 설정에서 사용 가능한 옵션을 확인하세요.</string>
     <string name="default_assistant_guide_step4_title">음성 도우미 테스트</string>
     <string name="default_assistant_guide_step4_desc">설정 후 정상적으로 실행되는지 테스트해 보세요.</string>
-    <string name="default_assistant_guide_step4_detail1">• 홈 버튼(홈 화면 버튼)을 길게 누르면 Operit 음성 지원이 호출됩니다.</string>
-    <string name="default_assistant_guide_step4_detail2">• 음성 깨우기가 지원되는 경우 \"Hey Google\" 또는 기기에 지정된 깨우기 단어를 말하면 Operit가 실행될 수도 있습니다.</string>
-    <string name="default_assistant_guide_step3_title">Operit 선택</string>
-    <string name="default_assistant_guide_step3_desc">보조 앱 목록에서 Operit AI를 선택하세요.</string>
-    <string name="default_assistant_guide_step3_detail1">• 사용 가능한 보조 앱 목록에서 \"Operit AI\"를 찾으세요.</string>
-    <string name="default_assistant_guide_step3_detail2">• 탭하여 선택하면 시스템이 Operit를 기본 보조자로 설정합니다.</string>
+    <string name="default_assistant_guide_step4_detail1">• 홈 버튼(홈 화면 버튼)을 길게 누르면 AI Limbs 음성 지원이 호출됩니다.</string>
+    <string name="default_assistant_guide_step4_detail2">• 음성 깨우기가 지원되는 경우 \"Hey Google\" 또는 기기에 지정된 깨우기 단어를 말하면 AI Limbs가 실행될 수도 있습니다.</string>
+    <string name="default_assistant_guide_step3_title">AI Limbs 선택</string>
+    <string name="default_assistant_guide_step3_desc">보조 앱 목록에서 AI Limbs를 선택하세요.</string>
+    <string name="default_assistant_guide_step3_detail1">• 사용 가능한 보조 앱 목록에서 \"AI Limbs\"를 찾으세요.</string>
+    <string name="default_assistant_guide_step3_detail2">• 탭하여 선택하면 시스템이 AI Limbs를 기본 보조자로 설정합니다.</string>
     <string name="default_assistant_guide_step3_detail3">• 말하거나 입력하여 어시스턴트와 상호작용할 수 있습니다.</string>
     <string name="default_assistant_guide_troubleshooting_title">문제가 있나요?</string>
-    <string name="default_assistant_guide_troubleshooting_content">목록에서 Operit을 찾을 수 없는 경우 다음을 확인하세요. \n\n• 앱이 제대로 설치되었으며 비활성화되지 않았는지 \n• 필요한 권한이 부여되었습니다(마이크, 오버레이 등)\n• 장치를 다시 시작하고 다시 설정해 보세요\n\n일부 맞춤 시스템 타사 앱이 기본 도우미로 설정되는 것을 제한할 수 있습니다. 이러한 상황이 발생하더라도 앱 내 플로팅 창 기능을 통해 Operit를 계속 사용할 수 있습니다.</string>
-    <string name="voice_interaction_service_name">Operit AI 도우미</string>
+    <string name="default_assistant_guide_troubleshooting_content">목록에서 AI Limbs을 찾을 수 없는 경우 다음을 확인하세요. \n\n• 앱이 제대로 설치되었으며 비활성화되지 않았는지 \n• 필요한 권한이 부여되었습니다(마이크, 오버레이 등)\n• 장치를 다시 시작하고 다시 설정해 보세요\n\n일부 맞춤 시스템 타사 앱이 기본 도우미로 설정되는 것을 제한할 수 있습니다. 이러한 상황이 발생하더라도 앱 내 플로팅 창 기능을 통해 AI Limbs를 계속 사용할 수 있습니다.</string>
+    <string name="voice_interaction_service_name">AI Limbs 도우미</string>
     <string name="voice_interaction_service_summary">지능형 음성비서 서비스</string>
     <string name="tool_permissions_title">도구 권한</string>
     <string name="tool_permissions_description">기본적으로 모든 도구는 \'요청\' 권한이 필요합니다. 아래에서 예외를 추가할 수 있습니다.</string>
@@ -4796,7 +4796,7 @@
     <string name="enable_navigation_animation_description">휴대폰 사이드바와 페이지 전환 모두에 향상된 애니메이션 세트를 켭니다. 더 단순한 내비게이션 모션을 사용하려면 이 기능을 끄세요.</string>
     <string name="software_identity_title">소프트웨어 ID</string>
     <string name="software_identity_description">사이드바 상단에 표시된 소프트웨어 ID를 변경하세요.</string>
-    <string name="software_identity_option_operit">Operit AI</string>
+    <string name="software_identity_option_operit">AI Limbs</string>
     <string name="software_identity_option_lingshu">링슈 AI</string>
     <string name="reset_all_display_settings">모든 디스플레이 설정 재설정</string>
     <string name="ui_accessibility_mode">접근성 모드</string>
@@ -4879,7 +4879,7 @@
     <string name="backup_memory_count">메모리 항목</string>
     <string name="backup_memory_link_count">메모리 링크</string>
     <string name="backup_files_statistics">백업 파일 통계</string>
-    <string name="backup_files_statistics_subtitle">Operit 내보내기 디렉터리의 백업 파일</string>
+    <string name="backup_files_statistics_subtitle">AI Limbs 내보내기 디렉터리의 백업 파일</string>
     <string name="backup_refresh">새로 고침</string>
     <string name="backup_scanning">스캔 중</string>
     <string name="backup_chat_files">채팅 기록</string>
@@ -4975,7 +4975,7 @@
     <string name="backup_select_export_format">내보내기 형식 선택</string>
     <string name="backup_select_format_hint">내보낼 채팅 기록 형식을 선택하세요:</string>
     <string name="backup_format_json">JSON(권장)</string>
-    <string name="backup_format_json_desc">Operit 기본 형식이며 변형과 기타 모든 데이터를 보존합니다.</string>
+    <string name="backup_format_json_desc">AI Limbs 기본 형식이며 변형과 기타 모든 데이터를 보존합니다.</string>
     <string name="backup_format_markdown">마크다운</string>
     <string name="backup_format_markdown_desc">읽고 편집하기 쉬운 가벼운 마크업 형식</string>
     <string name="backup_format_html">HTML</string>
@@ -5079,7 +5079,7 @@
     <string name="uidebugger_element_info_package_name">패키지: %1$s</string>
     <string name="uidebugger_element_info_size_px">크기: %1$d×%2$dpx</string>
     <string name="logcat_no_logs_to_save">저장할 로그가 없습니다.</string>
-    <string name="logcat_header">=== Operit 로그 ===</string>
+    <string name="logcat_header">=== AI Limbs 로그 ===</string>
     <string name="logcat_date">날짜: %1$s</string>
     <string name="logcat_total_count">총 개수: %1$d</string>
     <string name="logcat_save_failed">저장 실패: %1$s</string>
@@ -5089,7 +5089,7 @@
     <string name="logcat_cannot_open_output_stream">출력 스트림을 열 수 없습니다.</string>
     <string name="logcat_mediestore_save_failed">MediaStore 저장 실패: %1$s</string>
     <string name="logcat_cannot_create_download_dir">다운로드 디렉터리를 생성할 수 없습니다.</string>
-    <string name="logcat_cannot_create_operit_dir">operit 디렉터리를 생성할 수 없습니다.</string>
+    <string name="logcat_cannot_create_operit_dir">AiLimbs 디렉터리를 생성할 수 없습니다.</string>
     <string name="logcat_file_create_failed">파일 생성에 실패했거나 비어 있습니다.</string>
     <string name="logcat_filesystem_save_failed">파일 시스템 저장 실패: %1$s</string>
     <string name="backup_export_failed_create_file">내보내기 실패: 파일을 생성할 수 없습니다.</string>
@@ -5499,14 +5499,14 @@
     <string name="skill_publish_body_section_repo_info">## 🔗 저장소 정보</string>
     <string name="skill_publish_body_label_repo_url">**저장소 URL:** %1$s</string>
     <string name="skill_publish_body_section_install_method">## 📦 설치</string>
-    <string name="skill_publish_body_install_step1">1. Operit 열기 → 패키지 관리자 → 스킬</string>
+    <string name="skill_publish_body_install_step1">1. AI Limbs 열기 → 패키지 관리자 → 스킬</string>
     <string name="skill_publish_body_install_step2">2. "스킬 가져오기" → "저장소에서 가져오기"를 탭하세요.</string>
     <string name="skill_publish_body_install_step3">3. 저장소 URL 입력: `%1$s`</string>
     <string name="skill_publish_body_install_step4">4. 가져오기 확인</string>
     <string name="skill_publish_body_section_tech_info">## 🛠️ 기술 정보</string>
     <string name="skill_publish_body_table_header">| 항목 | 값 |</string>
     <string name="skill_publish_body_table_separator">|------|-------|</string>
-    <string name="skill_publish_body_table_row_platform">| 플랫폼 | Operit 스킬 마켓 |</string>
+    <string name="skill_publish_body_table_row_platform">| 플랫폼 | AI Limbs 스킬 마켓 |</string>
     <string name="skill_publish_body_table_row_parser_version">| 파서 버전 | 1.0 |</string>
     <string name="skill_publish_body_table_row_publish_time">| 게시 시간 | %1$s |</string>
     <string name="model_param_max_tokens">최대 토큰</string>
@@ -5952,7 +5952,7 @@
     <string name="demo_cmd_list_activities">활성 Activity 나열</string>
     <string name="demo_cmd_list_services">시스템 서비스 나열</string>
     <string name="demo_cmd_check_resolution">화면 해상도 확인</string>
-    <string name="demo_cmd_echo_hello">Hello OperitTerminal 인쇄</string>
+    <string name="demo_cmd_echo_hello">Hello AI Limbs Terminal 인쇄</string>
     <string name="demo_cmd_list_files">파일 및 디렉터리 나열</string>
     <string name="demo_cmd_show_user">현재 사용자 표시</string>
     <string name="demo_cmd_update_package_manager">패키지 관리자 업데이트(Ubuntu)</string>
@@ -6448,10 +6448,10 @@
     <string name="service_chat_complete_reminder_sound">채팅 완료 알림(소리)</string>
     <string name="service_chat_complete_reminder_vibration">채팅 완료 알림(진동)</string>
     <string name="service_chat_complete_reminder_sound_vibration">채팅 완료 알림(소리 및 진동)</string>
-    <string name="service_keep_background">Operit를 백그라운드에서 계속 실행하세요.</string>
+    <string name="service_keep_background">AI Limbs를 백그라운드에서 계속 실행하세요.</string>
     <string name="service_notify_when_complete">대화가 완료되면 알려드립니다.</string>
-    <string name="service_running_wake_pause">Operit 실행 중(깨우기 일시 중지됨)</string>
-    <string name="service_running_wake_listening">Operit 실행 중(깨우기 청취)</string>
+    <string name="service_running_wake_pause">AI Limbs 실행 중(깨우기 일시 중지됨)</string>
+    <string name="service_running_wake_listening">AI Limbs 실행 중(깨우기 청취)</string>
     <string name="service_running_stats">대화 %1$d · 도구 %2$d</string>
     <string name="service_running_http_listening">포트 %1$d에서 수신 대기 중인 외부 HTTP</string>
     <string name="service_running_with_http">%1$s · HTTP %2$d</string>
@@ -6492,7 +6492,7 @@
     <string name="html_export_updated">업데이트됨</string>
     <string name="html_export_group">그룹</string>
     <string name="html_export_message_count">메시지 수</string>
-    <string name="html_export_footer">Operit AI Assistant에서 내보냄</string>
+    <string name="html_export_footer">AI Limbs Assistant에서 내보냄</string>
     <string name="mnn_no_cache_data">캐시 데이터 없음</string>
     <string name="mnn_response_empty">응답 본문이 비어 있습니다.</string>
     <string name="mnn_fetch_repo_files_failed">저장소 파일 목록을 가져오지 못했습니다: %1$s</string>

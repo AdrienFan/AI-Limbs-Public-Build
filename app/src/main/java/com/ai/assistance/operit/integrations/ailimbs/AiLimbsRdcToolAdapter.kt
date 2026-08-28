@@ -20,6 +20,7 @@ class AiLimbsRdcToolAdapter(
     suspend fun execute(toolName: String, args: JSONObject): JSONObject =
         when (toolName) {
             "read_file" -> readFile(args)
+            "read_multiple_files" -> readMultipleFiles(args)
             "write_file" -> writeFile(args)
             "list_directory" -> listDirectory(args)
             "start_process" -> startProcess(args)
@@ -57,6 +58,41 @@ class AiLimbsRdcToolAdapter(
             executeHostTool(hostToolName, params)
         }
         return mcpResult(result)
+    }
+
+    private suspend fun readMultipleFiles(args: JSONObject): JSONObject {
+        val paths = args.optJSONArray("paths") ?: return mcpError(
+            "read_multiple_files requires at least one path"
+        )
+        if (paths.length() == 0) return mcpError("read_multiple_files requires at least one path")
+
+        val content = JSONArray()
+        var successCount = 0
+        var failureCount = 0
+
+        for (index in 0 until paths.length()) {
+            val path = paths.optString(index).trim()
+            if (path.isBlank()) {
+                failureCount++
+                content.put(JSONObject().put("type", "text").put("text", "=== [empty path] ===\nInvalid path"))
+                continue
+            }
+            content.put(JSONObject().put("type", "text").put("text", "=== $path ==="))
+            val result = readFile(JSONObject().put("path", path))
+            if (result.optBoolean("isError", false)) failureCount++ else successCount++
+            val fileContent = result.optJSONArray("content") ?: JSONArray()
+            for (itemIndex in 0 until fileContent.length()) {
+                val item = fileContent.optJSONObject(itemIndex)
+                if (item != null) content.put(item)
+            }
+        }
+        content.put(
+            JSONObject().put("type", "text").put(
+                "text",
+                "read_multiple_files: $successCount succeeded, $failureCount failed"
+            )
+        )
+        return JSONObject().put("content", content).put("isError", successCount == 0)
     }
 
     private suspend fun writeFile(args: JSONObject): JSONObject {

@@ -4,6 +4,7 @@ import android.content.Context
 import android.os.Debug
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.R
 import androidx.lifecycle.Lifecycle
@@ -48,13 +49,16 @@ class AnrMonitor(
         private const val WARNING_THRESHOLD_MS = 500L // 0.5秒，警告阈值
         private const val SAMPLING_INTERVAL_MS = 100L  // 100毫秒采样间隔
         private const val MAX_STACK_TRACES = 10        // 最大堆栈跟踪数
+        private const val SYSTEM_SUSPEND_RESET_THRESHOLD_MS = 5_000L
         
         // 主线程名称
         private const val MAIN_THREAD_NAME = "main"
     }
     
     private val running = AtomicBoolean(false)
-    private val lastResponseTime = AtomicLong(System.currentTimeMillis())
+    private val lastResponseTime = AtomicLong(SystemClock.uptimeMillis())
+    private val lastWatchdogElapsedTime = AtomicLong(SystemClock.elapsedRealtime())
+    private val lastWatchdogUptimeTime = AtomicLong(SystemClock.uptimeMillis())
     private var monitoringJob: Job? = null
     private val mainThreadHandler = Handler(Looper.getMainLooper())
     
@@ -88,7 +92,9 @@ class AnrMonitor(
         }
         
         AppLogger.d(tag, "启动ANR监控器")
-        lastResponseTime.set(System.currentTimeMillis())
+        lastResponseTime.set(SystemClock.uptimeMillis())
+        lastWatchdogElapsedTime.set(SystemClock.elapsedRealtime())
+        lastWatchdogUptimeTime.set(SystemClock.uptimeMillis())
         
         // 尝试获取主线程引用
         try {
@@ -157,7 +163,7 @@ class AnrMonitor(
      * 报告主线程正常响应
      */
     fun reportThreadHealthy() {
-        lastResponseTime.set(System.currentTimeMillis())
+        lastResponseTime.set(SystemClock.uptimeMillis())
     }
     
     /**
@@ -191,13 +197,31 @@ class AnrMonitor(
      * 检查主线程健康状态
      */
     private fun checkMainThreadHealth() {
+        val nowElapsed = SystemClock.elapsedRealtime()
+        val nowUptime = SystemClock.uptimeMillis()
+        val previousElapsed = lastWatchdogElapsedTime.getAndSet(nowElapsed)
+        val previousUptime = lastWatchdogUptimeTime.getAndSet(nowUptime)
+        val elapsedDelta = (nowElapsed - previousElapsed).coerceAtLeast(0L)
+        val uptimeDelta = (nowUptime - previousUptime).coerceAtLeast(0L)
+        val suspendDelta = (elapsedDelta - uptimeDelta).coerceAtLeast(0L)
+
+        if (suspendDelta >= SYSTEM_SUSPEND_RESET_THRESHOLD_MS) {
+            lastResponseTime.set(nowUptime)
+            mainThreadHandler.post { reportThreadHealthy() }
+            AppLogger.i(
+                tag,
+                "ANR watchdog resumed from system suspend: elapsed=${elapsedDelta}ms, " +
+                    "uptime=${uptimeDelta}ms, suspend=${suspendDelta}ms; resetting baseline"
+            )
+            return
+        }
+
         mainThreadHandler.post {
             reportThreadHealthy()
         }
 
-        val now = System.currentTimeMillis()
         val lastResponse = lastResponseTime.get()
-        val timeSinceLastResponse = now - lastResponse
+        val timeSinceLastResponse = (nowUptime - lastResponse).coerceAtLeast(0L)
         
         if (timeSinceLastResponse > WARNING_THRESHOLD_MS) {
             // 主线程可能被阻塞

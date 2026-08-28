@@ -1,5 +1,5 @@
 <resources>
-    <string name="app_name">Operit AI</string>
+    <string name="app_name">AI Limbs</string>
     <string name="accessibility_service_description">Se utiliza para obtener la jerarquía de la interfaz de usuario, proporcionando al asistente de IA capacidades de análisis de interfaz más rápidas. No recopilará ni almacenará ninguna información personal.</string>
 
     <!-- Navigation -->
@@ -59,7 +59,7 @@
     <string name="danger_zone">Zona peligrosa</string>
     <string name="chat_statistics">Estadísticas del historial de chat</string>
     <string name="current_chats">Actualmente hay %1$d registros de chat</string>
-    <string name="backup_location">Los archivos de copia de seguridad se guardan en la carpeta "Descargas/Operit"</string>
+    <string name="backup_location">Los archivos de copia de seguridad se guardan en la carpeta "Descargas/AI Limbs"</string>
     <string name="faq_backup">Preguntas frecuentes</string>
 
     <string name="lock_chat">Bloquear chat</string>
@@ -83,9 +83,9 @@
     <string name="termux_wizard_title">Asistente de configuración de Termux</string>
 
     <!-- About Screen -->
-    <string name="about_title">Acerca de Operit AI</string>
+    <string name="about_title">Acerca de AI Limbs</string>
     <string name="about_version">Versión: %1$s</string>
-    <string name="about_description">Operit AI es una aplicación de asistente inteligente que ayuda a los usuarios a utilizar sus dispositivos de manera más eficiente, proporcionando funciones como análisis de interfaz y chat.</string>
+    <string name="about_description">AI Limbs es una aplicación de asistente inteligente que ayuda a los usuarios a utilizar sus dispositivos de manera más eficiente, proporcionando funciones como análisis de interfaz y chat.</string>
     <string name="about_developer">Desarrollador: &lt;a href="https://github.com/AAswordman"&gt;AAswordman&lt;/a&gt;</string>
     <string name="about_contact">Contáctenos: aaswordsman@foxmail.com</string>
     <string name="about_website">&lt;a href="https://github.com/AAswordman/Operit"&gt;GitHub: https://github.com/AAswordman/Operit&lt;/a&gt;</string>
@@ -1845,7 +1845,7 @@
     <string name="app_logo_description">Icono de la aplicación</string>
     <string name="github_star_description">Estrella de GitHub</string>
     <string name="network_status_label">Estado de red</string>
-    <string name="config_title">Asistente Operit AI</string>
+    <string name="config_title">Asistente AI Limbs</string>
     <string name="config_description">Usa una clave API de DeepSeek o configura otro servicio de modelos</string>
     <string name="config_api_key_label">Clave API</string>
     <string name="config_api_key_placeholder">Clave API de DeepSeek</string>
@@ -1894,7 +1894,7 @@
     <string name="free_usage_first_tip">Es la primera vez que lo usas, después tendrás que esperar 1 día para volver a usarlo~</string>
     <string name="free_usage_later_tip">Aprovecharse también tiene límites, necesitas esperar %1$d días más para seguir aprovechándote (๑•̀ㅂ•́)و✧</string>
     <string name="plugin_skip">Saltar</string>
-    <string name="plugin_app_name">OPERIT</string>
+    <string name="plugin_app_name">AI Limbs</string>
     <string name="plugin_status">Iniciados: %1$d / %2$d</string>
     <string name="plugin_loading_status_title">Estado de carga de plugins</string>
     <string name="plugin_loading_success">Carga exitosa</string>
@@ -1970,7 +1970,7 @@
     <string name="overlay_permission">Permiso de superposición</string>
     <string name="battery_optimization">Exención de optimización de batería</string>
     <string name="location_permission">Permiso de ubicación</string>
-    <string name="operit_terminal">Terminal Operit</string>
+    <string name="operit_terminal">Terminal AI Limbs</string>
     <string name="permission_level_standard">Permiso estándar</string>
     <string name="permission_level_accessibility">Permiso de accesibilidad</string>
     <string name="permission_level_admin">Permiso de administrador</string>
@@ -2039,7 +2039,7 @@
     <string name="permission_guide_intro_2_title">Potente caja de herramientas para geeks y desarrolladores</string>
     <string name="permission_guide_intro_2_desc">Incluye más de 40 herramientas profesionales que abarcan gestión de archivos, solicitudes de red, ejecución de scripts y control del sistema. Combinado con un potente sistema de complementos, puede automatizar tareas y tener un control profundo de su dispositivo.</string>
     <string name="permission_guide_intro_3_title">Libere su creatividad, siempre disponible</string>
-    <string name="permission_guide_intro_3_desc">Ya sea diseñando páginas web, procesando archivos multimedia o despertando a la IA en cualquier momento a través de una ventana flotante, Operit le ofrece un entorno de creación y asistencia potente, flexible y seguro. Sus datos, bajo su control.</string>
+    <string name="permission_guide_intro_3_desc">Ya sea diseñando páginas web, procesando archivos multimedia o despertando a la IA en cualquier momento a través de una ventana flotante, AI Limbs le ofrece un entorno de creación y asistencia potente, flexible y seguro. Sus datos, bajo su control.</string>
     <string name="permission_guide_intro_page_indicator">Introducción de funciones %1$d/%2$d</string>
     <string name="debugger_accessibility_fallback_title">Plan de aceleración de accesibilidad (alto riesgo)</string>
     <string name="debugger_accessibility_fallback_description">El modo de depuración ejecuta operaciones de UI a través de Shell de forma predeterminada. Habilitar el servicio de accesibilidad puede acelerar significativamente la automatización de la UI, pero aumenta considerablemente el riesgo de ser detectado por algunas aplicaciones y de que la cuenta sea suspendida. A menos que busque la máxima velocidad de operación, no se recomienda activarlo.</string>
@@ -2685,7 +2685,7 @@
     <string name="tts_debug_params_with_service">Parámetros de solicitud: texto=\'%1$s\', velocidad=%2$sx, tono=%3$sx\nTipo de servicio: %4$s</string>
     <string name="tts_usage_instructions_content">1. Ingrese el texto a convertir en voz en el cuadro de entrada\n2. Ajuste la velocidad y el tono\n3. Haga clic en «Reproducir voz» para iniciar la reproducción\n4. Haga clic en «Detener reproducción» para detener\n5. Si ocurre un error, consulte los detalles del error y la información de depuración\n6. Use el botón «Limpiar mensaje de error» para borrar la visualización de errores</string>
     <string name="tool_default_assistant_guide">Configuración del asistente predeterminado</string>
-    <string name="tool_default_assistant_guide_desc">Establecer el flotante de voz de Operit como asistente predeterminado del sistema</string>
+    <string name="tool_default_assistant_guide_desc">Establecer el flotante de voz de AI Limbs como asistente predeterminado del sistema</string>
     <string name="tool_terminal_auto_config_under_construction">La función de configuración automática del terminal está siendo reestructurada...</string>
     <string name="ui_debugger_title">Herramienta de depuración de UI</string>
     <string name="ui_debugger_description">Haga clic en el botón en la esquina inferior derecha para iniciar la ventana flotante y depurar la UI</string>
@@ -3259,17 +3259,17 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="speech_services_info_tts_desc">El servicio TTS convierte texto en voz. Puede usar el TTS del sistema integrado o conectarse a una interfaz de voz HTTP/WebSocket remota.</string>
     <string name="speech_services_info_stt_title">Voz a texto (STT)</string>
     <string name="speech_services_info_stt_desc">El servicio STT convierte voz en texto. Admite los motores integrados Sherpa NCNN y Sherpa MNN, ambos ejecutables localmente sin necesidad de conexión a internet. Sherpa MNN integra la función VAD (detección de actividad de voz) para mejorar la precisión del reconocimiento y la eficiencia de recursos.</string>
-    <string name="operit_terminal_wizard_title">Asistente de configuración de OperitTerminal</string>
-    <string name="operit_terminal_not_installed">OperitTerminal no está instalado</string>
-    <string name="operit_terminal_update_available">Hay una actualización disponible para OperitTerminal</string>
-    <string name="operit_terminal_up_to_date">OperitTerminal ya está actualizado</string>
-    <string name="operit_terminal_install_description">OperitTerminal es una potente aplicación de terminal que ofrece un entorno Linux completo y funciones de gestión de paquetes. Necesitamos instalar esta aplicación primero.</string>
-    <string name="operit_terminal_install_button">Instalar OperitTerminal</string>
-    <string name="operit_terminal_update_description">Se ha encontrado una nueva versión de OperitTerminal. Se recomienda actualizar para obtener mejores funciones y compatibilidad.</string>
+    <string name="operit_terminal_wizard_title">Asistente de configuración de AI Limbs Terminal</string>
+    <string name="operit_terminal_not_installed">AI Limbs Terminal no está instalado</string>
+    <string name="operit_terminal_update_available">Hay una actualización disponible para AI Limbs Terminal</string>
+    <string name="operit_terminal_up_to_date">AI Limbs Terminal ya está actualizado</string>
+    <string name="operit_terminal_install_description">AI Limbs Terminal es una potente aplicación de terminal que ofrece un entorno Linux completo y funciones de gestión de paquetes. Necesitamos instalar esta aplicación primero.</string>
+    <string name="operit_terminal_install_button">Instalar AI Limbs Terminal</string>
+    <string name="operit_terminal_update_description">Se ha encontrado una nueva versión de AI Limbs Terminal. Se recomienda actualizar para obtener mejores funciones y compatibilidad.</string>
     <string name="operit_terminal_release_notes">Notas de la actualización: %1$s</string>
-    <string name="operit_terminal_update_button">Actualizar OperitTerminal</string>
-    <string name="operit_terminal_latest_description">¡Felicidades! Ya tiene instalada la última versión de OperitTerminal. Puede empezar a usar sus potentes funciones de terminal.</string>
-    <string name="operit_terminal_open_button">Abrir OperitTerminal</string>
+    <string name="operit_terminal_update_button">Actualizar AI Limbs Terminal</string>
+    <string name="operit_terminal_latest_description">¡Felicidades! Ya tiene instalada la última versión de AI Limbs Terminal. Puede empezar a usar sus potentes funciones de terminal.</string>
+    <string name="operit_terminal_open_button">Abrir AI Limbs Terminal</string>
     <string name="test_item_chat">Chat</string>
     <string name="test_item_toolcall">Tool Call</string>
     <string name="test_item_image">Imagen</string>
@@ -4213,7 +4213,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="emoji_preview">Vista previa del emoji</string>
     <string name="create_group">Crear grupo</string>
     <string name="custom">Personalizado</string>
-    <string name="voice_assistant_widget_description">Inicio rápido del asistente de voz Operit</string>
+    <string name="voice_assistant_widget_description">Inicio rápido del asistente de voz AI Limbs</string>
     <string name="voice_assistant_widget_title">Asistente de voz</string>
     <string name="screen_title_mnn_model_download">Descarga de modelo MNN</string>
     <string name="mnn_model_download">Descargar modelo MNN</string>
@@ -4370,14 +4370,14 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="mcp_issue_body_title_install_info">## Información de instalación</string>
     <string name="mcp_issue_body_repo_address">**Dirección del repositorio:** %1$s</string>
     <string name="mcp_issue_body_title_install_method">### Método de instalación</string>
-    <string name="mcp_issue_body_install_step1">1. En la página de configuración de Operit MCP, haga clic en «Importar»</string>
+    <string name="mcp_issue_body_install_step1">1. En la página de configuración de AI Limbs MCP, haga clic en «Importar»</string>
     <string name="mcp_issue_body_install_step2">2. Seleccione «Importar desde repositorio»</string>
     <string name="mcp_issue_body_install_step3">3. Ingrese la dirección del repositorio: `%1$s`</string>
     <string name="mcp_issue_body_install_step4">4. Establezca el nombre del plugin y haga clic en Importar</string>
     <string name="mcp_issue_body_title_tech_info">## Información técnica</string>
-    <string name="mcp_issue_body_tech_platform">- **Plataforma de publicación:** Mercado Operit MCP</string>
+    <string name="mcp_issue_body_tech_platform">- **Plataforma de publicación:** Mercado AI Limbs MCP</string>
     <string name="mcp_issue_body_tech_publish_time">- **Fecha de publicación:** %1$s</string>
-    <string name="mcp_issue_body_footer_note">*Este issue fue generado automáticamente por Operit*</string>
+    <string name="mcp_issue_body_footer_note">*Este issue fue generado automáticamente por AI Limbs*</string>
     <string name="mcp_publish_body_section_plugin_info">## 📋 Información del plugin</string>
     <string name="mcp_publish_body_label_description">**Descripción:** %1$s</string>
     <string name="mcp_publish_body_section_repo_info">## 🔗 Información del repositorio</string>
@@ -4385,18 +4385,18 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="mcp_publish_body_section_quick_install">## ⚡ Instalación rápida</string>
     <string name="mcp_publish_body_section_install_method">## 📦 Método de instalación</string>
     <string name="mcp_publish_body_method_repo_import_title">### Método 1: Importar desde repositorio</string>
-    <string name="mcp_publish_body_method_repo_import_step1">1. Abra la página de configuración de Operit MCP</string>
+    <string name="mcp_publish_body_method_repo_import_step1">1. Abra la página de configuración de AI Limbs MCP</string>
     <string name="mcp_publish_body_method_repo_import_step2">2. Haga clic en «Importar» → «Importar desde repositorio»</string>
     <string name="mcp_publish_body_method_repo_import_step3">3. Ingrese la dirección del repositorio: `%1$s`</string>
     <string name="mcp_publish_body_method_repo_import_step4">4. Configure el nombre del plugin e impórtelo</string>
     <string name="mcp_publish_body_method_config_import_title">### Método 2: Importar configuración</string>
-    <string name="mcp_publish_body_method_config_import_step1">1. Abra la página de configuración de Operit MCP</string>
+    <string name="mcp_publish_body_method_config_import_step1">1. Abra la página de configuración de AI Limbs MCP</string>
     <string name="mcp_publish_body_method_config_import_step2">2. Haga clic en «Importar» → «Importar configuración»</string>
     <string name="mcp_publish_body_method_config_import_step3">3. Pegue la siguiente configuración:</string>
     <string name="mcp_publish_body_section_tech_info">## 🛠️ Información técnica</string>
     <string name="mcp_publish_body_table_header">| Elemento | Valor |</string>
     <string name="mcp_publish_body_table_separator">|------|-----|</string>
-    <string name="mcp_publish_body_table_row_platform">| Plataforma de publicación | Mercado Operit MCP |</string>
+    <string name="mcp_publish_body_table_row_platform">| Plataforma de publicación | Mercado AI Limbs MCP |</string>
     <string name="mcp_publish_body_table_row_parser_version">| Versión del analizador | 1.0 |</string>
     <string name="mcp_publish_body_table_row_publish_time">| Fecha de publicación | %1$s |</string>
     <string name="mcp_plugin_detail_title">Detalles del plugin</string>
@@ -4520,16 +4520,16 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="default_assistant_guide_step2_note">Nota: los gestos pueden variar según la marca del teléfono. Consulte las opciones disponibles en la configuración del sistema.</string>
     <string name="default_assistant_guide_step4_title">Probar el asistente de voz</string>
     <string name="default_assistant_guide_step4_desc">Una vez configurado, compruebe si se inicia correctamente.</string>
-    <string name="default_assistant_guide_step4_detail1">• Mantener presionado el botón de inicio debería abrir el asistente de voz Operit.</string>
-    <string name="default_assistant_guide_step4_detail2">• Si el dispositivo admite activación por voz, decir "Hey Google" o la palabra de activación especificada también puede activar Operit.</string>
+    <string name="default_assistant_guide_step4_detail1">• Mantener presionado el botón de inicio debería abrir el asistente de voz AI Limbs.</string>
+    <string name="default_assistant_guide_step4_detail2">• Si el dispositivo admite activación por voz, decir "Hey Google" o la palabra de activación especificada también puede activar AI Limbs.</string>
     <string name="default_assistant_guide_step3_title">Probar la función del asistente</string>
-    <string name="default_assistant_guide_step3_desc">Una vez configurado, compruebe si Operit se activa correctamente.</string>
+    <string name="default_assistant_guide_step3_desc">Una vez configurado, compruebe si AI Limbs se activa correctamente.</string>
     <string name="default_assistant_guide_step3_detail1">• Use el gesto configurado (como mantener presionado el botón de inicio) para activar el asistente.</string>
-    <string name="default_assistant_guide_step3_detail2">• Si tiene éxito, debería ver la interfaz del asistente de voz de Operit.</string>
+    <string name="default_assistant_guide_step3_detail2">• Si tiene éxito, debería ver la interfaz del asistente de voz de AI Limbs.</string>
     <string name="default_assistant_guide_step3_detail3">• Puede intentar hablar o escribir texto para interactuar con el asistente.</string>
     <string name="default_assistant_guide_troubleshooting_title">¿Problemas?</string>
-    <string name="default_assistant_guide_troubleshooting_content">Si no encuentra Operit en la lista, asegúrese de que:\n\n• La aplicación esté instalada correctamente y no esté deshabilitada.\n• Se hayan concedido los permisos necesarios (micrófono, ventana flotante, etc.).\n• Intente reiniciar el dispositivo y configurarlo de nuevo.\n\nAlgunos sistemas personalizados pueden restringir aplicaciones de terceros como asistente predeterminado. En ese caso, aún puede usar Operit mediante la función de ventana flotante dentro de la aplicación.</string>
-    <string name="voice_interaction_service_name">Asistente Operit AI</string>
+    <string name="default_assistant_guide_troubleshooting_content">Si no encuentra AI Limbs en la lista, asegúrese de que:\n\n• La aplicación esté instalada correctamente y no esté deshabilitada.\n• Se hayan concedido los permisos necesarios (micrófono, ventana flotante, etc.).\n• Intente reiniciar el dispositivo y configurarlo de nuevo.\n\nAlgunos sistemas personalizados pueden restringir aplicaciones de terceros como asistente predeterminado. En ese caso, aún puede usar AI Limbs mediante la función de ventana flotante dentro de la aplicación.</string>
+    <string name="voice_interaction_service_name">Asistente AI Limbs</string>
     <string name="voice_interaction_service_summary">Servicio de asistente de voz inteligente</string>
     <string name="tool_permissions_title">Permisos de herramientas</string>
     <string name="tool_permissions_description">De forma predeterminada, todas las herramientas requieren su "consulta". Puede agregar excepciones a continuación.</string>
@@ -4742,18 +4742,18 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="time_hours_ago">Hace %1$d horas</string>
     <string name="time_days_ago">Hace %1$d días</string>
     <string name="default_assistant_guide_title">Configurar asistente de voz predeterminado</string>
-    <string name="default_assistant_guide_subtitle">Haz de Operit tu asistente inteligente</string>
-    <string name="default_assistant_guide_intro">Al configurar Operit como asistente predeterminado del sistema, puedes iniciar rápidamente el asistente de voz de Operit manteniendo presionado el botón de inicio o usando activación por voz, obteniendo una experiencia de interacción con IA más conveniente.</string>
+    <string name="default_assistant_guide_subtitle">Haz de AI Limbs tu asistente inteligente</string>
+    <string name="default_assistant_guide_intro">Al configurar AI Limbs como asistente predeterminado del sistema, puedes iniciar rápidamente el asistente de voz de AI Limbs manteniendo presionado el botón de inicio o usando activación por voz, obteniendo una experiencia de interacción con IA más conveniente.</string>
     <string name="default_assistant_guide_steps_title">Pasos de configuración</string>
     <string name="default_assistant_guide_step1_title">Configurar como asistente predeterminado</string>
-    <string name="default_assistant_guide_step1_desc">Configurar Operit como la aplicación de asistente digital predeterminada del sistema</string>
+    <string name="default_assistant_guide_step1_desc">Configurar AI Limbs como la aplicación de asistente digital predeterminada del sistema</string>
     <string name="default_assistant_guide_step1_detail1">• Abre Configuración del sistema → Aplicaciones → Aplicaciones predeterminadas → Aplicación de asistente digital</string>
-    <string name="default_assistant_guide_step1_detail2">• En la lista de aplicaciones de asistente, busca y selecciona "Operit AI"</string>
+    <string name="default_assistant_guide_step1_detail2">• En la lista de aplicaciones de asistente, busca y selecciona "AI Limbs"</string>
     <string name="default_assistant_guide_step1_detail_android12">Android 12+: Configuración → Aplicaciones → Aplicaciones predeterminadas → Aplicación de asistente digital → Aplicación de asistente digital predeterminada</string>
     <string name="default_assistant_guide_open_settings">Abrir configuración del asistente</string>
     <string name="default_assistant_guide_open_gesture_settings">Abrir configuración de gestos</string>
     <string name="default_assistant_guide_step2_title">Configurar gesto de activación</string>
-    <string name="default_assistant_guide_step2_desc">Configurar cómo invocar rápidamente al asistente Operit</string>
+    <string name="default_assistant_guide_step2_desc">Configurar cómo invocar rápidamente al asistente AI Limbs</string>
     <string name="default_assistant_guide_step2_detail1">• Mantener presionado el botón de inicio: la forma más común, disponible en la mayoría de dispositivos</string>
     <string name="default_assistant_guide_step2_detail2">• Deslizar hacia arriba desde la parte inferior de la pantalla: en algunos dispositivos con gestos de pantalla completa</string>
     <string name="default_assistant_guide_step2_detail_android12">Android 12+: Configuración → Aplicaciones → Aplicaciones predeterminadas → Aplicación de asistente digital → Aplicación de asistente digital predeterminada</string>
@@ -4856,7 +4856,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="keep_screen_on_description">Mantener la pantalla encendida para evitar que se bloquee automáticamente durante la conversación</string>
     <string name="software_identity_title">Identidad del software</string>
     <string name="software_identity_description">Cambiar la identidad del software que se muestra en la parte superior de la barra lateral.</string>
-    <string name="software_identity_option_operit">Operit AI</string>
+    <string name="software_identity_option_operit">AI Limbs</string>
     <string name="software_identity_option_lingshu">Lingshu AI</string>
     <string name="reset_all_display_settings">Restablecer toda la configuración de pantalla</string>
     <string name="ui_accessibility_mode">Modo de accesibilidad</string>
@@ -4920,7 +4920,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="backup_memory_count">Entradas de memoria</string>
     <string name="backup_memory_link_count">Vínculos de memoria</string>
     <string name="backup_files_statistics">Estadísticas de archivos de respaldo</string>
-    <string name="backup_files_statistics_subtitle">Archivos de respaldo en el directorio de exportación de Operit</string>
+    <string name="backup_files_statistics_subtitle">Archivos de respaldo en el directorio de exportación de AI Limbs</string>
     <string name="backup_refresh">Actualizar</string>
     <string name="backup_scanning">Escaneando</string>
     <string name="backup_chat_files">Registros de chat</string>
@@ -5009,13 +5009,13 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="backup_faq_why">¿Por qué hacer una copia de seguridad de los datos?</string>
     <string name="backup_faq_why_answer">Hacer una copia de seguridad del historial de chat evita que pierda contenido importante al desinstalar la aplicación o en caso de pérdida de datos. ¡Hacer copias de seguridad periódicas es un buen hábito!</string>
     <string name="backup_faq_where">¿Dónde se guardan los archivos exportados?</string>
-    <string name="backup_faq_where_answer">Los archivos de copia de seguridad exportados se guardan en la carpeta «Descargas/Operit» de su teléfono. El nombre del archivo incluye el tipo de datos exportados, la fecha y la hora.</string>
+    <string name="backup_faq_where_answer">Los archivos de copia de seguridad exportados se guardan en la carpeta «Descargas/AI Limbs» de su teléfono. El nombre del archivo incluye el tipo de datos exportados, la fecha y la hora.</string>
     <string name="backup_faq_duplicate">¿Aparecerán datos duplicados después de la importación?</string>
     <string name="backup_faq_duplicate_answer">El sistema juzga según el ID del registro. Los registros con el mismo ID se actualizarán en lugar de importarse duplicados. Los registros con ID diferente se agregarán como nuevos registros.</string>
     <string name="backup_select_export_format">Seleccionar formato de exportación</string>
     <string name="backup_select_format_hint">Seleccione el formato del historial de chat a exportar:</string>
     <string name="backup_format_json">JSON (recomendado)</string>
-    <string name="backup_format_json_desc">Formato nativo de Operit, conserva todos los datos como el cambio de mensajes.</string>
+    <string name="backup_format_json_desc">Formato nativo de AI Limbs, conserva todos los datos como el cambio de mensajes.</string>
     <string name="backup_format_markdown">Markdown</string>
     <string name="backup_format_markdown_desc">Formato de marcado ligero, fácil de leer y editar.</string>
     <string name="backup_format_html">HTML</string>
@@ -5038,7 +5038,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="backup_export_result_success">Exportación exitosa a: %1$s</string>
     <string name="backup_character_cards_title">Tarjetas de personaje</string>
     <string name="backup_character_cards_subtitle">Copia de seguridad y restauración de la configuración de tarjetas de personaje.</string>
-    <string name="backup_character_cards_current_count">Actualmente hay %1$d tarjetas de personaje. Los archivos exportados se guardarán en la carpeta «Descargas/Operit».</string>
+    <string name="backup_character_cards_current_count">Actualmente hay %1$d tarjetas de personaje. Los archivos exportados se guardarán en la carpeta «Descargas/AI Limbs».</string>
     <string name="backup_character_card_count">Tarjetas de personaje</string>
     <string name="backup_character_card_files">Tarjetas de personaje</string>
     <string name="backup_character_cards_export_result_success">Exportación exitosa de %1$d tarjetas de personaje a:\n%2$s</string>
@@ -5119,7 +5119,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="uidebugger_element_info_package_name">nombre del paquete: %1$s</string>
     <string name="uidebugger_element_info_size_px">tamaño: %1$d×%2$dpx</string>
     <string name="logcat_no_logs_to_save">no hay registros para guardar</string>
-    <string name="logcat_header">=== Registros de Operit ===</string>
+    <string name="logcat_header">=== Registros de AI Limbs ===</string>
     <string name="logcat_date">fecha: %1$s</string>
     <string name="logcat_total_count">total: %1$d</string>
     <string name="logcat_save_failed">error al guardar: %1$s</string>
@@ -5129,7 +5129,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="logcat_cannot_open_output_stream">no se pudo abrir el flujo de salida</string>
     <string name="logcat_mediestore_save_failed">error al guardar en MediaStore: %1$s</string>
     <string name="logcat_cannot_create_download_dir">no se pudo crear el directorio de descargas</string>
-    <string name="logcat_cannot_create_operit_dir">no se pudo crear el directorio operit</string>
+    <string name="logcat_cannot_create_operit_dir">no se pudo crear el directorio AiLimbs</string>
     <string name="logcat_file_create_failed">no se pudo crear el archivo o está vacío</string>
     <string name="logcat_filesystem_save_failed">error al guardar en el sistema de archivos: %1$s</string>
     <string name="backup_export_failed_create_file">error al exportar: no se pudo crear el archivo</string>
@@ -5368,14 +5368,14 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="skill_publish_body_section_repo_info">## 🔗 Información del repositorio</string>
     <string name="skill_publish_body_label_repo_url">**URL del repositorio:** %1$s</string>
     <string name="skill_publish_body_section_install_method">## 📦 Método de instalación</string>
-    <string name="skill_publish_body_install_step1">1. Abre Operit → Gestión de paquetes → Skills</string>
+    <string name="skill_publish_body_install_step1">1. Abre AI Limbs → Gestión de paquetes → Skills</string>
     <string name="skill_publish_body_install_step2">2. Haz clic en «Importar Skill» → «Importar desde repositorio»</string>
     <string name="skill_publish_body_install_step3">3. Introduce la URL del repositorio: `%1$s`</string>
     <string name="skill_publish_body_install_step4">4. Confirma la importación</string>
     <string name="skill_publish_body_section_tech_info">## 🛠️ Información técnica</string>
     <string name="skill_publish_body_table_header">| Elemento | Valor |</string>
     <string name="skill_publish_body_table_separator">|------|-----|</string>
-    <string name="skill_publish_body_table_row_platform">| Plataforma de publicación | Mercado de Skills de Operit |</string>
+    <string name="skill_publish_body_table_row_platform">| Plataforma de publicación | Mercado de Skills de AI Limbs |</string>
     <string name="skill_publish_body_table_row_parser_version">| Versión del analizador | 1.0 |</string>
     <string name="skill_publish_body_table_row_publish_time">| Fecha de publicación | %1$s |</string>
     <string name="model_param_max_tokens">Máximo de tokens generados</string>
@@ -5899,7 +5899,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="demo_cmd_list_activities">Ver actividades activas</string>
     <string name="demo_cmd_list_services">Listar servicios del sistema</string>
     <string name="demo_cmd_check_resolution">Ver resolución de pantalla</string>
-    <string name="demo_cmd_echo_hello">Imprimir Hello OperitTerminal</string>
+    <string name="demo_cmd_echo_hello">Imprimir Hello AI Limbs Terminal</string>
     <string name="demo_cmd_list_files">Listar archivos y directorios</string>
     <string name="demo_cmd_show_user">Mostrar usuario actual</string>
     <string name="demo_cmd_update_package_manager">Actualizar gestor de paquetes (Ubuntu)</string>
@@ -6177,10 +6177,10 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="service_chat_complete_reminder_sound">Recordatorio de conversación completada (sonido)</string>
     <string name="service_chat_complete_reminder_vibration">Recordatorio de conversación completada (vibración)</string>
     <string name="service_chat_complete_reminder_sound_vibration">Recordatorio de conversación completada (sonido y vibración)</string>
-    <string name="service_keep_background">Mantener Operit ejecutándose en segundo plano.</string>
+    <string name="service_keep_background">Mantener AI Limbs ejecutándose en segundo plano.</string>
     <string name="service_notify_when_complete">Notificarle cuando la conversación esté completa.</string>
-    <string name="service_running_wake_pause">Operit está en ejecución (pausa de activación)</string>
-    <string name="service_running_wake_listening">Operit está en ejecución (escuchando activación)</string>
+    <string name="service_running_wake_pause">AI Limbs está en ejecución (pausa de activación)</string>
+    <string name="service_running_wake_listening">AI Limbs está en ejecución (escuchando activación)</string>
     <string name="service_running_stats">Ejecutando conversaciones %1$d · herramientas invocadas %2$d</string>
     <string name="service_running_http_listening">HTTP externo escuchando en el puerto %1$d</string>
     <string name="service_running_with_http">%1$s · HTTP externo %2$d</string>
@@ -6221,7 +6221,7 @@ Ahora puede usar el modo AutoGLM en la interfaz de conversación.</string>
     <string name="html_export_updated">Actualizado</string>
     <string name="html_export_group">Grupo</string>
     <string name="html_export_message_count">Mensajes</string>
-    <string name="html_export_footer">Exportado desde Operit AI Assistant</string>
+    <string name="html_export_footer">Exportado desde AI Limbs Assistant</string>
     <string name="mnn_no_cache_data">Sin datos en caché</string>
     <string name="mnn_response_empty">El cuerpo de la respuesta está vacío</string>
     <string name="mnn_fetch_repo_files_failed">Error al obtener la lista de archivos del repositorio: %1$s</string>

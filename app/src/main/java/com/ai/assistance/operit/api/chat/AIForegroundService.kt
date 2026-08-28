@@ -19,6 +19,9 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.media.MediaRecorder
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
@@ -50,7 +53,10 @@ import com.ai.assistance.operit.data.preferences.ExternalHttpApiConfig
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpServer
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpState
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeHostSignal
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkState
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
@@ -833,21 +839,49 @@ class AIForegroundService : Service() {
     private val externalHttpPreferences by lazy { ExternalHttpApiPreferences.getInstance(applicationContext) }
     private val aiLimbsBridgeManager by lazy { AiLimbsBridgeManager(applicationContext, serviceScope) }
     private var bridgeScreenReceiverRegistered = false
+    private var bridgeNetworkCallbackRegistered = false
+    @Volatile
+    private var bridgeNetworkState = AiLimbsBridgeNetworkState.UNKNOWN
+    @Volatile
+    private var bridgeNetworkTransport = AiLimbsBridgeNetworkTransport.NONE
     private var bridgeScreenOffWakeLock: PowerManager.WakeLock? = null
+    private val bridgeNetworkCallback =
+        object : ConnectivityManager.NetworkCallback() {
+            override fun onAvailable(network: Network) {
+                publishBridgeNetworkState("network_available")
+            }
+
+            override fun onLost(network: Network) {
+                publishBridgeNetworkState("network_lost")
+            }
+
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                publishBridgeNetworkState("network_capabilities_changed")
+            }
+        }
     private val bridgeScreenStateReceiver =
         object : BroadcastReceiver() {
             override fun onReceive(context: Context?, intent: Intent?) {
+                if (!isRunning.get()) return
                 val action = intent?.action ?: return
-                if (action != Intent.ACTION_SCREEN_OFF && action != Intent.ACTION_SCREEN_ON) return
                 val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-                AppLogger.i(
-                    TAG,
-                    "AI Limbs bridge screen state: action=$action, interactive=${powerManager.isInteractive}, " +
-                        "deviceIdle=${powerManager.isDeviceIdleMode}"
-                )
-                updateBridgeScreenOffWakeLock("screen_broadcast:$action")
-                if (action == Intent.ACTION_SCREEN_ON && aiLimbsBridgeManager.shouldKeepAlive) {
-                    aiLimbsBridgeManager.verifyLiveness()
+                when (action) {
+                    Intent.ACTION_SCREEN_OFF -> {
+                        updateBridgeScreenOffWakeLock("screen_broadcast:$action")
+                        logBridgeHostHealth("screen_off")
+                        aiLimbsBridgeManager.onHostSignal(AiLimbsBridgeHostSignal.ScreenOff)
+                    }
+                    Intent.ACTION_SCREEN_ON -> {
+                        updateBridgeScreenOffWakeLock("screen_broadcast:$action")
+                        logBridgeHostHealth("screen_on")
+                        aiLimbsBridgeManager.onHostSignal(AiLimbsBridgeHostSignal.ScreenOn)
+                    }
+                    PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
+                        logBridgeHostHealth("device_idle_changed")
+                        aiLimbsBridgeManager.onHostSignal(
+                            AiLimbsBridgeHostSignal.DeviceIdleChanged(powerManager.isDeviceIdleMode)
+                        )
+                    }
                 }
             }
         }
@@ -1059,6 +1093,7 @@ class AIForegroundService : Service() {
         val filter = IntentFilter().apply {
             addAction(Intent.ACTION_SCREEN_OFF)
             addAction(Intent.ACTION_SCREEN_ON)
+            addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
         }
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
@@ -1078,6 +1113,72 @@ class AIForegroundService : Service() {
         runCatching { unregisterReceiver(bridgeScreenStateReceiver) }
             .onFailure { AppLogger.w(TAG, "Failed to unregister AI Limbs bridge screen receiver", it) }
         bridgeScreenReceiverRegistered = false
+    }
+
+    private fun registerBridgeNetworkCallback() {
+        if (bridgeNetworkCallbackRegistered) return
+        val connectivityManager =
+            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        try {
+            connectivityManager.registerDefaultNetworkCallback(bridgeNetworkCallback)
+            bridgeNetworkCallbackRegistered = true
+            publishBridgeNetworkState("network_callback_registered")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Failed to register AI Limbs bridge network callback", e)
+        }
+    }
+
+    private fun unregisterBridgeNetworkCallback() {
+        if (!bridgeNetworkCallbackRegistered) return
+        val connectivityManager =
+            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        runCatching { connectivityManager.unregisterNetworkCallback(bridgeNetworkCallback) }
+            .onFailure { AppLogger.w(TAG, "Failed to unregister AI Limbs bridge network callback", it) }
+        bridgeNetworkCallbackRegistered = false
+    }
+
+    private fun publishBridgeNetworkState(reason: String) {
+        if (!isRunning.get()) return
+        val connectivityManager =
+            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val activeNetwork = connectivityManager.activeNetwork
+        val capabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
+        val nextState = when {
+            activeNetwork == null -> AiLimbsBridgeNetworkState.LOST
+            capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true ->
+                AiLimbsBridgeNetworkState.VALIDATED
+            else -> AiLimbsBridgeNetworkState.AVAILABLE_UNVALIDATED
+        }
+        val nextTransport = when {
+            capabilities == null -> AiLimbsBridgeNetworkTransport.NONE
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> AiLimbsBridgeNetworkTransport.VPN
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> AiLimbsBridgeNetworkTransport.WIFI
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> AiLimbsBridgeNetworkTransport.CELLULAR
+            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> AiLimbsBridgeNetworkTransport.ETHERNET
+            else -> AiLimbsBridgeNetworkTransport.OTHER
+        }
+        val changed = nextState != bridgeNetworkState || nextTransport != bridgeNetworkTransport
+        if (!changed && reason != "network_callback_registered") return
+        bridgeNetworkState = nextState
+        bridgeNetworkTransport = nextTransport
+        logBridgeHostHealth(reason)
+        aiLimbsBridgeManager.onHostSignal(
+            AiLimbsBridgeHostSignal.NetworkChanged(nextState, nextTransport)
+        )
+    }
+
+    private fun logBridgeHostHealth(reason: String) {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        val batteryOptimizationIgnored =
+            runCatching { powerManager.isIgnoringBatteryOptimizations(packageName) }.getOrDefault(false)
+        AppLogger.i(
+            TAG,
+            "AI Limbs bridge host health: reason=$reason, interactive=${powerManager.isInteractive}, " +
+                "deviceIdle=${powerManager.isDeviceIdleMode}, wakeLockHeld=${bridgeScreenOffWakeLock?.isHeld == true}, " +
+                "batteryOptimizationIgnored=$batteryOptimizationIgnored, " +
+                "network=$bridgeNetworkState/$bridgeNetworkTransport, " +
+                "bridge=${aiLimbsBridgeManager.state.value.phase}"
+        )
     }
 
     private fun updateBridgeScreenOffWakeLock(reason: String) {
@@ -1186,7 +1287,9 @@ class AIForegroundService : Service() {
         startExternalHttpMonitoring()
         registerBridgeScreenStateReceiver()
         aiLimbsBridgeManager.startIfDesired()
+        registerBridgeNetworkCallback()
         updateBridgeScreenOffWakeLock("service_create")
+        logBridgeHostHealth("service_create")
         AppLogger.i(TAG, "AI Limbs bridge manager initialized")
         AppLogger.d(TAG, "AI 前台服务已启动。")
     }
@@ -1597,9 +1700,10 @@ class AIForegroundService : Service() {
             TAG,
             "AIForegroundService onDestroy: bridge=${aiLimbsBridgeManager.statusSummary()}"
         )
+        unregisterBridgeNetworkCallback()
+        unregisterBridgeScreenStateReceiver()
         aiLimbsBridgeManager.stopRuntime()
         releaseBridgeScreenOffWakeLock("service_destroy")
-        unregisterBridgeScreenStateReceiver()
         stopWakeMonitoring()
         cancelLegacyRdcNotification()
         AppLogger.d(TAG, "AI 前台服务已销毁。")

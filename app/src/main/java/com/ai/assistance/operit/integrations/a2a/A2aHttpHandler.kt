@@ -41,8 +41,8 @@ class A2aHttpHandler(
         }
         val card = JSONObject().apply {
             put("protocolVersion", A2A_PROTOCOL_VERSION)
-            put("name", "Operit")
-            put("description", "Operit assistant with text chat and tool-use capabilities")
+            put("name", "AI Limbs")
+            put("description", "AI Limbs assistant with text chat and tool-use capabilities")
             put(
                 "supportedInterfaces",
                 JSONArray().put(

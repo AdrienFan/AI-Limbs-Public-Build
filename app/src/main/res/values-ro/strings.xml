@@ -1,6 +1,6 @@
 <?xml version='1.0' encoding='utf-8'?>
 <resources>
-    <string name="app_name">Operit AI</string>
+    <string name="app_name">AI Limbs</string>
     <string name="accessibility_service_description">Utilizat pentru a obțineUIIerarhie, pentruAIAsistentul oferă capacități mai rapide de analiză a interfeței și nu colectează sau stochează nicio informație personală.</string>
 
     <!-- 模型选择器相关 -->
@@ -554,7 +554,7 @@
     <string name="danger_zone">Zonă periculoasă</string>
     <string name="chat_statistics">Statistici privind istoricul conversațiilor</string>
     <string name="current_chats">În prezent, există în total %1$d Istoric de conversație</string>
-    <string name="backup_location">Fișierele de rezervă sunt salvate în folderul „Descărcări”/Operit/backupîn folderul „”</string>
+    <string name="backup_location">Fișierele de rezervă sunt salvate în folderul „Descărcări”/AI Limbs/backupîn folderul „”</string>
     <string name="faq_backup">Întrebări frecvente</string>
     <string name="history_filter_role_card">Clasificare după cărțile de personaj</string>
     <string name="history_filter_role_card_desc">Carte de personaj-Dosar-Clasificarea pe trei niveluri a dialogurilor</string>
@@ -584,9 +584,9 @@
     <string name="termux_setup_guide">Termux Ghidul de configurare</string>
 
     <!-- About Screen -->
-    <string name="about_title">Despre Operit AI</string>
+    <string name="about_title">Despre AI Limbs</string>
     <string name="about_version">Versiune: %1$s</string>
-    <string name="about_description">Operit AIEste o aplicație de asistență inteligentă, care ajută utilizatorii să-și folosească dispozitivele mai eficient, oferind funcții precum analiza interfeței și conversații prin chat.</string>
+    <string name="about_description">AI LimbsEste o aplicație de asistență inteligentă, care ajută utilizatorii să-și folosească dispozitivele mai eficient, oferind funcții precum analiza interfeței și conversații prin chat.</string>
     <string name="about_developer">Dezvoltator: &lt;a href="https://github.com/AAswordman"&gt;AAswordman&lt;/a&gt;</string>
     <string name="about_contact">Contactați-ne: aaswordsman@foxmail.com</string>
     <string name="about_website">&lt;a href="https://github.com/AAswordman/Operit"&gt;GitHub: https://github.com/AAswordman/Operit&lt;/a&gt;</string>
@@ -609,7 +609,7 @@
     <string name="network_status_label">Starea rețelei</string>
 
     <!-- Configuration Screen -->
-    <string name="config_title">Operit AI asistent</string>
+    <string name="config_title">AI Limbs asistent</string>
     <string name="config_description">Utilizare DeepSeek API Key, sau să configurați alte servicii de modelare</string>
     <string name="config_api_key_label">APICheie</string>
     <string name="config_api_key_placeholder">DeepSeek APICheie</string>
@@ -668,7 +668,7 @@
 
     <!-- Plugin Loading Screen -->
     <string name="plugin_skip">Sari peste</string>
-    <string name="plugin_app_name">OPERIT</string>
+    <string name="plugin_app_name">AI Limbs</string>
     <string name="plugin_status">A fost lansat: %1$d / %2$d</string>
     <string name="plugin_loading_status_title">Starea de încărcare a pluginului</string>
     <string name="plugin_loading_success">S-a încărcat cu succes</string>
@@ -1352,7 +1352,7 @@
     <string name="overlay_permission">Permisiuni pentru ferestrele plutitoare</string>
     <string name="battery_optimization">Derogare privind optimizarea bateriilor</string>
     <string name="location_permission">Permisiuni de localizare</string>
-    <string name="operit_terminal">OperitTerminal</string>
+    <string name="operit_terminal">AI Limbs Terminal</string>
 
     <!-- 权限级别描述 -->
     <string name="permission_level_standard">Drepturi standard</string>
@@ -1692,7 +1692,7 @@
     <string name="permission_guide_intro_2_title">O trusă de instrumente puternică concepută pentru pasionații de tehnologie și dezvoltatori</string>
     <string name="permission_guide_intro_2_desc">Cu peste40O serie de instrumente profesionale, care acoperă gestionarea fișierelor, solicitările de rețea, executarea scripturilor și controlul sistemului. Împreună cu un sistem puternic de pluginuri, puteți automatiza sarcinile și obține un control complet asupra dispozitivului dumneavoastră.</string>
     <string name="permission_guide_intro_3_title">Dă frâu liber creativității, fii mereu pregătit</string>
-    <string name="permission_guide_intro_3_desc">Fie că este vorba de proiectarea paginilor web, gestionarea fișierelor media sau activarea oricând prin fereastra flotantăAI,OperitToate acestea vă oferă un mediu de creație și asistență puternic, flexibil și sigur. Datele dvs. sunt sub controlul dvs.</string>
+    <string name="permission_guide_intro_3_desc">Fie că este vorba de proiectarea paginilor web, gestionarea fișierelor media sau activarea oricând prin fereastra flotantăAI,AI LimbsToate acestea vă oferă un mediu de creație și asistență puternic, flexibil și sigur. Datele dvs. sunt sub controlul dvs.</string>
     <string name="permission_guide_intro_page_indicator">Prezentarea funcțiilor %1$d/%2$d</string>
 
     <!-- 调试模式 -->
@@ -2088,7 +2088,7 @@
     <string name="tool_user_agreement">Acordul de utilizare</string>
     <string name="tool_user_agreement_desc">Consultați Termenii și condițiile de utilizare și Politica de confidențialitate ale aplicației</string>
     <string name="tool_default_assistant_guide">Setările implicite ale Asistentului</string>
-    <string name="tool_default_assistant_guide_desc">SetăriOperitAsistența vocală este setată ca asistență implicită a sistemului</string>
+    <string name="tool_default_assistant_guide_desc">SetăriAI LimbsAsistența vocală este setată ca asistență implicită a sistemului</string>
     <string name="tool_terminal">Terminalul de comenzi</string>
     <string name="tool_terminal_desc">Un terminal de linie de comandă puternic, care execută comenzi de sistem</string>
     <string name="tool_terminal_auto_config">Configurarea automată a terminalelor</string>
@@ -2888,17 +2888,17 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="perm_desc_receive_mms">Permite aplicației să primească mesaje MMS</string>
 
     <!-- OperitTerminal Wizard Card -->
-    <string name="operit_terminal_wizard_title">OperitTerminal Ghidul de configurare</string>
-    <string name="operit_terminal_not_installed">OperitTerminal Nu este instalat</string>
-    <string name="operit_terminal_update_available">OperitTerminal Este disponibilă o actualizare</string>
-    <string name="operit_terminal_up_to_date">OperitTerminal Este deja cea mai recentă versiune</string>
-    <string name="operit_terminal_install_description">OperitTerminal Este o aplicație terminală puternică, care oferă o gamă completă de Linux Funcții de gestionare a mediului și a pachetelor. Trebuie să instalăm mai întâi această aplicație.</string>
-    <string name="operit_terminal_install_button">Instalare OperitTerminal</string>
-    <string name="operit_terminal_update_description">Descoperire OperitTerminal Noua versiune; vă recomandăm să efectuați actualizarea pentru a beneficia de funcționalități îmbunătățite și de o compatibilitate mai bună.</string>
+    <string name="operit_terminal_wizard_title">AI Limbs Terminal Ghidul de configurare</string>
+    <string name="operit_terminal_not_installed">AI Limbs Terminal Nu este instalat</string>
+    <string name="operit_terminal_update_available">AI Limbs Terminal Este disponibilă o actualizare</string>
+    <string name="operit_terminal_up_to_date">AI Limbs Terminal Este deja cea mai recentă versiune</string>
+    <string name="operit_terminal_install_description">AI Limbs Terminal Este o aplicație terminală puternică, care oferă o gamă completă de Linux Funcții de gestionare a mediului și a pachetelor. Trebuie să instalăm mai întâi această aplicație.</string>
+    <string name="operit_terminal_install_button">Instalare AI Limbs Terminal</string>
+    <string name="operit_terminal_update_description">Descoperire AI Limbs Terminal Noua versiune; vă recomandăm să efectuați actualizarea pentru a beneficia de funcționalități îmbunătățite și de o compatibilitate mai bună.</string>
     <string name="operit_terminal_release_notes">Note de actualizare:%1$s</string>
-    <string name="operit_terminal_update_button">Actualizare OperitTerminal</string>
-    <string name="operit_terminal_latest_description">Felicitări! Ați instalat cea mai recentă versiune a OperitTerminal, puteți începe să utilizați funcțiile sale puternice de terminal.</string>
-    <string name="operit_terminal_open_button">Deschide OperitTerminal</string>
+    <string name="operit_terminal_update_button">Actualizare AI Limbs Terminal</string>
+    <string name="operit_terminal_latest_description">Felicitări! Ați instalat cea mai recentă versiune a AI Limbs Terminal, puteți începe să utilizați funcțiile sale puternice de terminal.</string>
+    <string name="operit_terminal_open_button">Deschide AI Limbs Terminal</string>
 
     <!-- Functional Config Screen -->
     <string name="functional_model_config_title">Setări de configurare a modelului funcțional</string>
@@ -4822,14 +4822,14 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="mcp_issue_body_title_install_info">## Informații privind instalarea</string>
     <string name="mcp_issue_body_repo_address">**Adresa depozitului:** %1$s</string>
     <string name="mcp_issue_body_title_install_method">### Modalități de instalare</string>
-    <string name="mcp_issue_body_install_step1">1. în Operit MCP Pe pagina de configurare, faceți clic pe „Import”</string>
+    <string name="mcp_issue_body_install_step1">1. în AI Limbs MCP Pe pagina de configurare, faceți clic pe „Import”</string>
     <string name="mcp_issue_body_install_step2">2. Selectați „Import din depozit”</string>
     <string name="mcp_issue_body_install_step3">3. Introduceți adresa depozitului: `%1$s`</string>
     <string name="mcp_issue_body_install_step4">4. Setați numele pluginului și faceți clic pe „Import”</string>
     <string name="mcp_issue_body_title_tech_info">## Informații tehnice</string>
-    <string name="mcp_issue_body_tech_platform">- **Platforma de publicare:** Operit MCP Piața</string>
+    <string name="mcp_issue_body_tech_platform">- **Platforma de publicare:** AI Limbs MCP Piața</string>
     <string name="mcp_issue_body_tech_publish_time">- **Data publicării:** %1$s</string>
-    <string name="mcp_issue_body_footer_note">*AcestaIssueDe către Operit Generare automată*</string>
+    <string name="mcp_issue_body_footer_note">*AcestaIssueDe către AI Limbs Generare automată*</string>
 
     <string name="mcp_publish_body_section_plugin_info">## 📋 Informații despre plugin</string>
     <string name="mcp_publish_body_label_description">**Descriere:** %1$s</string>
@@ -4838,18 +4838,18 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="mcp_publish_body_section_quick_install">## ⚡ Instalare rapidă</string>
     <string name="mcp_publish_body_section_install_method">## 📦 Mod de instalare</string>
     <string name="mcp_publish_body_method_repo_import_title">### Metoda 1: Import din depozit</string>
-    <string name="mcp_publish_body_method_repo_import_step1">1. Deschide Operit MCP Pagina de configurare</string>
+    <string name="mcp_publish_body_method_repo_import_step1">1. Deschide AI Limbs MCP Pagina de configurare</string>
     <string name="mcp_publish_body_method_repo_import_step2">2. Faceți clic pe „Import” → „Import din depozit”</string>
     <string name="mcp_publish_body_method_repo_import_step3">3. Introduceți adresa depozitului:`%1$s`</string>
     <string name="mcp_publish_body_method_repo_import_step4">4. Configurați numele pluginului și importați-l</string>
     <string name="mcp_publish_body_method_config_import_title">### Metoda 2: Importarea configurației</string>
-    <string name="mcp_publish_body_method_config_import_step1">1. Deschide Operit MCP Pagina de configurare</string>
+    <string name="mcp_publish_body_method_config_import_step1">1. Deschide AI Limbs MCP Pagina de configurare</string>
     <string name="mcp_publish_body_method_config_import_step2">2. Faceți clic pe „Import” → „Import configurare”</string>
     <string name="mcp_publish_body_method_config_import_step3">3. Lipiți următoarea configurație:</string>
     <string name="mcp_publish_body_section_tech_info">## 🛠️ Informații tehnice</string>
     <string name="mcp_publish_body_table_header">| Proiect | valoare |</string>
     <string name="mcp_publish_body_table_separator">|------|-----|</string>
-    <string name="mcp_publish_body_table_row_platform">| Platforma de publicare | Operit MCP Piața |</string>
+    <string name="mcp_publish_body_table_row_platform">| Platforma de publicare | AI Limbs MCP Piața |</string>
     <string name="mcp_publish_body_table_row_parser_version">| Versiunea de analiză | 1.0 |</string>
     <string name="mcp_publish_body_table_row_publish_time">| Data publicării | %1$s |</string>
 
@@ -5004,7 +5004,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="custom">Personalizare</string>
 
     <!-- Voice Assistant Widget -->
-    <string name="voice_assistant_widget_description">Pornire rapidă Operit Asistent vocal</string>
+    <string name="voice_assistant_widget_description">Pornire rapidă AI Limbs Asistent vocal</string>
     <string name="voice_assistant_widget_title">Asistent vocal</string>
     <string name="toolpkg_widget_host_label">Widgeturi personalizate</string>
     <string name="toolpkg_widget_host_description">După adăugare, poate fi asociat cu pagina unui widget înregistrat de un anumit plugin</string>
@@ -5155,22 +5155,22 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
 
     <!-- 默认助手设置引导 -->
     <string name="default_assistant_guide_title">Setarea asistentului vocal implicit</string>
-    <string name="default_assistant_guide_subtitle">SăOperitSă fiu asistentul tău inteligent</string>
-    <string name="default_assistant_guide_intro">VaOperitDupă ce l-ați setat ca asistent implicit al sistemului, puteți, prin apăsarea îndelungatăHomeApăsați tasta sau folosiți activarea vocală pentru pornire rapidăOperitAsistentul vocal, pentru o experiență mai comodăAIExperiența interactivă.</string>
+    <string name="default_assistant_guide_subtitle">SăAI LimbsSă fiu asistentul tău inteligent</string>
+    <string name="default_assistant_guide_intro">VaAI LimbsDupă ce l-ați setat ca asistent implicit al sistemului, puteți, prin apăsarea îndelungatăHomeApăsați tasta sau folosiți activarea vocală pentru pornire rapidăAI LimbsAsistentul vocal, pentru o experiență mai comodăAIExperiența interactivă.</string>
     <string name="default_assistant_guide_steps_title">Pași de configurare</string>
 
     <!-- 步骤1: 设置为默认助理 -->
     <string name="default_assistant_guide_step1_title">Setează ca asistent implicit</string>
-    <string name="default_assistant_guide_step1_desc">Va Operit Setați ca aplicație implicită de asistență digitală a sistemului</string>
+    <string name="default_assistant_guide_step1_desc">Va AI Limbs Setați ca aplicație implicită de asistență digitală a sistemului</string>
     <string name="default_assistant_guide_step1_detail1">• Deschideți Setări sistem → Aplicații → Aplicații implicite → Aplicația Asistent digital</string>
-    <string name="default_assistant_guide_step1_detail2">• Găsiți și selectați „” din lista de aplicații a asistentuluiOperit AI"</string>
+    <string name="default_assistant_guide_step1_detail2">• Găsiți și selectați „” din lista de aplicații a asistentuluiAI Limbs"</string>
     <string name="default_assistant_guide_step1_detail_android12">Android 12+: Setări → Aplicații → Aplicații implicite → Aplicația Asistent digital → Aplicația implicită pentru Asistentul digital</string>
     <string name="default_assistant_guide_open_settings">Deschideți setările Asistentului</string>
 
     <!-- 步骤2: 配置启动手势 -->
     <string name="default_assistant_guide_open_gesture_settings">Deschide setările pentru gesturi</string>
     <string name="default_assistant_guide_step2_title">Configurarea gesturilor de pornire</string>
-    <string name="default_assistant_guide_step2_desc">Setări pentru activare rapidă Operit asistent</string>
+    <string name="default_assistant_guide_step2_desc">Setări pentru activare rapidă AI Limbs asistent</string>
     <string name="default_assistant_guide_step2_detail1">• Apăsați și țineți apăsatHomeTastă: cea mai utilizată metodă, disponibilă pe majoritatea dispozitivelor</string>
     <string name="default_assistant_guide_step2_detail2">• Glisați în sus din partea de jos a ecranului: anumite dispozitive care acceptă gesturile pentru ecranul integral</string>
     <string name="default_assistant_guide_step2_detail_android12">Android 12+: Setări → Aplicații → Aplicații implicite → Aplicația Asistent digital → Aplicația implicită pentru Asistentul digital</string>
@@ -5180,22 +5180,22 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <!-- 步骤4: 测试语音助手 -->
     <string name="default_assistant_guide_step4_title">Testarea asistentului vocal</string>
     <string name="default_assistant_guide_step4_desc">După finalizarea configurării, verificați dacă sistemul pornește corect</string>
-    <string name="default_assistant_guide_step4_detail1">• Apăsați și țineți apăsatHomeTasta (butonul de pe ecranul principal) ar trebui să activeze Operit Asistent vocal</string>
-    <string name="default_assistant_guide_step4_detail2">• Dacă dispozitivul acceptă activarea prin comandă vocală, spuneți „Hey Google„Este posibil ca și cuvintele de activare specificate de dispozitiv să declanșeze această funcție” Operit</string>
+    <string name="default_assistant_guide_step4_detail1">• Apăsați și țineți apăsatHomeTasta (butonul de pe ecranul principal) ar trebui să activeze AI Limbs Asistent vocal</string>
+    <string name="default_assistant_guide_step4_detail2">• Dacă dispozitivul acceptă activarea prin comandă vocală, spuneți „Hey Google„Este posibil ca și cuvintele de activare specificate de dispozitiv să declanșeze această funcție” AI Limbs</string>
 
     <!-- 步骤3: 测试助手功能 -->
     <string name="default_assistant_guide_step3_title">Funcția Asistent de testare</string>
-    <string name="default_assistant_guide_step3_desc">După finalizarea configurării, efectuați un test Operit Se poate activa în mod normal?</string>
+    <string name="default_assistant_guide_step3_desc">După finalizarea configurării, efectuați un test AI Limbs Se poate activa în mod normal?</string>
     <string name="default_assistant_guide_step3_detail1">• Folosiți gesturile pe care le-ați configurat (de exemplu, apăsarea îndelungatăHome(Tastă) Activare asistent</string>
-    <string name="default_assistant_guide_step3_detail2">• Dacă operațiunea are succes, ar trebui să vedeți Operit Interfața asistentului vocal</string>
+    <string name="default_assistant_guide_step3_detail2">• Dacă operațiunea are succes, ar trebui să vedeți AI Limbs Interfața asistentului vocal</string>
     <string name="default_assistant_guide_step3_detail3">• Puteți încerca să interacționați cu asistentul vorbind sau introducând text</string>
 
     <!-- 疑难解答 -->
     <string name="default_assistant_guide_troubleshooting_title">Ai vreo problemă?</string>
-    <string name="default_assistant_guide_troubleshooting_content">Dacă nu îl găsiți în listăOperit, vă rugăm să vă asigurați că:\n\n• Aplicația a fost instalată corect și nu a fost dezactivată\n• Au fost acordate permisiunile necesare (microfon, fereastră flotantă etc.)\n• Încercați să reconfigurați dispozitivul după ce îl reporniți\n\nAnumite sisteme personalizate pot restricționa utilizarea aplicațiilor terțe ca asistenți impliciți; în acest caz, puteți utiliza în continuare aplicația prin intermediul funcției de fereastră plutitoare din cadrul acesteiaOperit.</string>
+    <string name="default_assistant_guide_troubleshooting_content">Dacă nu îl găsiți în listăAI Limbs, vă rugăm să vă asigurați că:\n\n• Aplicația a fost instalată corect și nu a fost dezactivată\n• Au fost acordate permisiunile necesare (microfon, fereastră flotantă etc.)\n• Încercați să reconfigurați dispozitivul după ce îl reporniți\n\nAnumite sisteme personalizate pot restricționa utilizarea aplicațiilor terțe ca asistenți impliciți; în acest caz, puteți utiliza în continuare aplicația prin intermediul funcției de fereastră plutitoare din cadrul acesteiaAI Limbs.</string>
 
     <!-- Voice Interaction Service -->
-    <string name="voice_interaction_service_name">Operit AI asistent</string>
+    <string name="voice_interaction_service_name">AI Limbs asistent</string>
     <string name="voice_interaction_service_summary">Servicii de asistență vocală inteligentă</string>
 
     <!-- Tool Permission Settings -->
@@ -5483,7 +5483,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="start_with_new_chat_description">După activare, la fiecare pornire a aplicației se va deschide o nouă fereastră de chat goală, iar conversația anterioară nu se va mai deschide automat.</string>
     <string name="software_identity_title">Logo-ul software-ului</string>
     <string name="software_identity_description">Modificați sigla aplicației afișată în partea de sus a barei laterale.</string>
-    <string name="software_identity_option_operit">Operit AI</string>
+    <string name="software_identity_option_operit">AI Limbs</string>
     <string name="software_identity_option_lingshu">Ling Shu AI</string>
     <string name="reset_all_display_settings">Resetează toate setările de afișare</string>
     <string name="ui_accessibility_mode">Modul de adaptare pentru accesibilitate</string>
@@ -5572,7 +5572,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="backup_memory_count">Intrări de memorie</string>
     <string name="backup_memory_link_count">Asocieri de memorie</string>
     <string name="backup_files_statistics">Statistici privind fișierele de rezervă</string>
-    <string name="backup_files_statistics_subtitle">Operit Exportarea fișierelor de rezervă din director</string>
+    <string name="backup_files_statistics_subtitle">AI Limbs Exportarea fișierelor de rezervă din director</string>
     <string name="backup_refresh">Reîmprospătare</string>
     <string name="backup_scanning">Se scanează</string>
     <string name="backup_chat_files">Istoric de conversații</string>
@@ -5668,7 +5668,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="backup_faq_why">De ce este necesar să se facă o copie de rezervă a datelor?</string>
     <string name="backup_faq_why_answer">Realizarea unei copii de siguranță a istoricului conversațiilor vă poate proteja conținutul important în cazul dezinstalării aplicației sau al pierderii datelor. Este o idee bună să faceți copii de siguranță în mod regulat!</string>
     <string name="backup_faq_where">Unde sunt salvate fișierele exportate?</string>
-    <string name="backup_faq_where_answer">Fișierul de rezervă exportat va fi salvat în folderul „Descărcări” de pe telefonul dumneavoastră/OperitÎn folderul „”, numele fișierelor conțin tipul datelor exportate, data și ora.</string>
+    <string name="backup_faq_where_answer">Fișierul de rezervă exportat va fi salvat în folderul „Descărcări” de pe telefonul dumneavoastră/AI LimbsÎn folderul „”, numele fișierelor conțin tipul datelor exportate, data și ora.</string>
     <string name="backup_faq_duplicate">După import, vor apărea date duplicate?</string>
     <string name="backup_faq_duplicate_answer">Sistemul va lua în considerare înregistrărileIDConcluzie: identicIDÎnregistrările vor fi actualizate, nu importate din nou. DiferitIDÎnregistrarea respectivă va fi adăugată ca o înregistrare nouă.</string>
 
@@ -5676,7 +5676,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="backup_select_export_format">Alegeți formatul de export</string>
     <string name="backup_select_format_hint">Vă rugăm să selectați formatul în care doriți să exportați istoricul conversațiilor:</string>
     <string name="backup_format_json">JSON(Recomandat)</string>
-    <string name="backup_format_json_desc">Operit Format nativ, care păstrează integral toate datele, inclusiv comutarea mesajelor</string>
+    <string name="backup_format_json_desc">AI Limbs Format nativ, care păstrează integral toate datele, inclusiv comutarea mesajelor</string>
     <string name="backup_format_markdown">Markdown</string>
     <string name="backup_format_markdown_desc">Un format de marcare ușor, ușor de citit și de editat</string>
     <string name="backup_format_html">HTML</string>
@@ -5703,7 +5703,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
 
     <string name="backup_character_cards_title">Carte de personaj</string>
     <string name="backup_character_cards_subtitle">Configurarea rolurilor pentru copierea de rezervă și restaurare</string>
-    <string name="backup_character_cards_current_count">În prezent, există în total %1$d Carte de personaj. Fișierul exportat va fi salvat în „Descărcări”/Operit» din folder.</string>
+    <string name="backup_character_cards_current_count">În prezent, există în total %1$d Carte de personaj. Fișierul exportat va fi salvat în „Descărcări”/AI Limbs» din folder.</string>
     <string name="backup_character_card_count">Carte de personaj</string>
     <string name="backup_character_card_files">Carte de personaj</string>
 
@@ -5797,7 +5797,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
 
     <!-- Logcat -->
     <string name="logcat_no_logs_to_save">Nu există jurnale care pot fi salvate</string>
-    <string name="logcat_header">=== Operit Jurnal ===</string>
+    <string name="logcat_header">=== AI Limbs Jurnal ===</string>
     <string name="logcat_date">Data: %1$s</string>
     <string name="logcat_total_count">Numărul total de articole: %1$d</string>
     <string name="logcat_save_failed">Eroare la salvare:%1$s</string>
@@ -5807,7 +5807,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="logcat_cannot_open_output_stream">Nu se poate deschide fluxul de ieșire</string>
     <string name="logcat_mediestore_save_failed">MediaStoreEroare la salvare:%1$s</string>
     <string name="logcat_cannot_create_download_dir">Nu se poate crea directorul de descărcări</string>
-    <string name="logcat_cannot_create_operit_dir">Nu se poate creaoperitCuprins</string>
+    <string name="logcat_cannot_create_operit_dir">Nu se poate creaAiLimbsCuprins</string>
     <string name="logcat_file_create_failed">Fișierul nu a putut fi creat sau este gol</string>
     <string name="logcat_filesystem_save_failed">Eroare la salvarea sistemului de fișiere:%1$s</string>
 
@@ -6252,14 +6252,14 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="skill_publish_body_section_repo_info">## 🔗 Informații despre depozit</string>
     <string name="skill_publish_body_label_repo_url">**Adresa depozitului:** %1$s</string>
     <string name="skill_publish_body_section_install_method">## 📦 Mod de instalare</string>
-    <string name="skill_publish_body_install_step1">1. Deschide Operit → Gestionarea pachetelor → Skills</string>
+    <string name="skill_publish_body_install_step1">1. Deschide AI Limbs → Gestionarea pachetelor → Skills</string>
     <string name="skill_publish_body_install_step2">2. Faceți clic pe „Import” Skill」→ 「Import din depozit」</string>
     <string name="skill_publish_body_install_step3">3. Introduceți adresa depozitului:`%1$s`</string>
     <string name="skill_publish_body_install_step4">4. Confirmare import</string>
     <string name="skill_publish_body_section_tech_info">## 🛠️ Informații tehnice</string>
     <string name="skill_publish_body_table_header">| Proiect | valoare |</string>
     <string name="skill_publish_body_table_separator">|------|-----|</string>
-    <string name="skill_publish_body_table_row_platform">| Platforma de publicare | Operit Skill Piața |</string>
+    <string name="skill_publish_body_table_row_platform">| Platforma de publicare | AI Limbs Skill Piața |</string>
     <string name="skill_publish_body_table_row_parser_version">| Versiunea de analiză | 1.0 |</string>
     <string name="skill_publish_body_table_row_publish_time">| Data publicării | %1$s |</string>
 
@@ -6761,7 +6761,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="demo_cmd_list_activities">Vezi evenimenteleActivity</string>
     <string name="demo_cmd_list_services">Afișează serviciile sistemului</string>
     <string name="demo_cmd_check_resolution">Verifică rezoluția ecranului</string>
-    <string name="demo_cmd_echo_hello">ImprimareHello OperitTerminal</string>
+    <string name="demo_cmd_echo_hello">ImprimareHello AI Limbs Terminal</string>
     <string name="demo_cmd_list_files">Afișează fișierele și directoarele</string>
     <string name="demo_cmd_show_user">Afișează utilizatorul curent</string>
     <string name="demo_cmd_update_package_manager">Actualizarea managerului de pachete (Ubuntu)</string>
@@ -7327,10 +7327,10 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="service_chat_complete_reminder_sound">Notificare privind finalizarea conversației (semnal sonor)</string>
     <string name="service_chat_complete_reminder_vibration">Notificare privind finalizarea conversației (vibrație)</string>
     <string name="service_chat_complete_reminder_sound_vibration">Notificare la finalizarea conversației (sunet și vibrație)</string>
-    <string name="service_keep_background">Menținere Operit Se execută în fundal.</string>
+    <string name="service_keep_background">Menținere AI Limbs Se execută în fundal.</string>
     <string name="service_notify_when_complete">Te va avertiza după finalizarea conversației.</string>
-    <string name="service_running_wake_pause">Operit În curs de execuție (în așteptare)</string>
-    <string name="service_running_wake_listening">Operit În execuție (în așteptare de activare)</string>
+    <string name="service_running_wake_pause">AI Limbs În curs de execuție (în așteptare)</string>
+    <string name="service_running_wake_listening">AI Limbs În execuție (în așteptare de activare)</string>
     <string name="service_running_stats">Fereastra de dialog de execuție %1$d · Instrumente de apelare %2$d</string>
     <string name="service_running_http_listening">Extern HTTP Se monitorizează portul %1$d</string>
     <string name="service_running_with_http">%1$s · Extern HTTP %2$d</string>
@@ -7377,7 +7377,7 @@ Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</str
     <string name="html_export_updated">Actualizare</string>
     <string name="html_export_group">Grupare</string>
     <string name="html_export_message_count">Numărul de mesaje</string>
-    <string name="html_export_footer">Extras din Operit AI Assistant</string>
+    <string name="html_export_footer">Extras din AI Limbs Assistant</string>
 
     <!-- MnnModelDownloadManager (新增) -->
     <string name="mnn_no_cache_data">Date fără cache</string>

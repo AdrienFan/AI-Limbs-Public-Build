@@ -160,6 +160,13 @@ class AiLimbsBridgeManager(
         }
     }
 
+    internal fun onHostSignal(signal: AiLimbsBridgeHostSignal) {
+        if (shouldKeepAlive && !provider.isRunning) {
+            provider.start()
+        }
+        provider.onHostSignal(signal)
+    }
+
     fun statusSummary(): String =
         "${activeProfileValue.id} ${provider.statusSummary}"
 

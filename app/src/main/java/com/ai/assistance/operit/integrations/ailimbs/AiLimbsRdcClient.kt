@@ -74,6 +74,10 @@ class AiLimbsRdcClient(
     private var lastSentAccessContext: String? = null
     private var activeAuthorization: DeviceAuth? = null
     private var reconnectAttempt: Int = 0
+    @Volatile
+    private var networkState: AiLimbsBridgeNetworkState = AiLimbsBridgeNetworkState.UNKNOWN
+    @Volatile
+    private var networkTransport: AiLimbsBridgeNetworkTransport = AiLimbsBridgeNetworkTransport.NONE
     private val activeCallJobs = ConcurrentHashMap<String, Job>()
     private val remoteCallSemaphore = Semaphore(MAX_CONCURRENT_REMOTE_CALLS)
     private val housekeepingScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
@@ -165,18 +169,142 @@ class AiLimbsRdcClient(
             (heartbeatAge == null || heartbeatAge > ONLINE_STALE_AFTER_MS)
         ) {
             AppLogger.w(TAG, "RDC heartbeat is stale; restarting worker to verify the live session")
-            runJob?.cancel()
-            runJob = null
-            closeRealtimeTransport()
-            cancelActiveCalls("stale heartbeat")
-            reconnectAttempt = 0
-            updateState(
-                AiLimbsBridgePhase.RECONNECTING,
-                "最后心跳已过期，正在重新建立连接",
-                lastHeartbeatAtMs = current.lastHeartbeatAtMs
-            )
-            start()
+            restartWorkerFast("stale_heartbeat", "最后心跳已过期，正在重新建立连接")
         }
+    }
+
+    internal fun onHostSignal(signal: AiLimbsBridgeHostSignal) {
+        when (signal) {
+            AiLimbsBridgeHostSignal.ScreenOff -> logHostHealth("screen_off")
+            AiLimbsBridgeHostSignal.ScreenOn -> {
+                logHostHealth("screen_on")
+                val current = stateFlow.value
+                val heartbeatAge = current.lastHeartbeatAtMs?.let {
+                    (System.currentTimeMillis() - it).coerceAtLeast(0L)
+                }
+                if (
+                    current.phase == AiLimbsBridgePhase.ONLINE &&
+                    (heartbeatAge == null || heartbeatAge > SCREEN_ON_STALE_AFTER_MS) &&
+                    !isNetworkUnavailable()
+                ) {
+                    restartWorkerFast(
+                        "screen_on_stale",
+                        "屏幕唤醒后检测到 RDC 心跳陈旧，正在快速重建连接"
+                    )
+                }
+            }
+            is AiLimbsBridgeHostSignal.DeviceIdleChanged ->
+                logHostHealth("device_idle=${signal.isIdle}")
+            is AiLimbsBridgeHostSignal.NetworkChanged -> {
+                val previous = networkState
+                networkState = signal.state
+                networkTransport = signal.transport
+                AppLogger.i(
+                    TAG,
+                    "RDC host network: $previous -> ${signal.state}, transport=${signal.transport}"
+                )
+                if (
+                    signal.state == AiLimbsBridgeNetworkState.VALIDATED &&
+                    previous != AiLimbsBridgeNetworkState.VALIDATED
+                ) {
+                    AppLogger.i(TAG, "RDC network validated; pending retry waits may resume immediately")
+                    if (stateFlow.value.phase == AiLimbsBridgePhase.ONLINE) {
+                        restartWorkerFast(
+                            "network_restored",
+                            "网络恢复，正在快速重建 RDC Realtime 连接"
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private fun isNetworkUnavailable(): Boolean =
+        networkState == AiLimbsBridgeNetworkState.LOST ||
+            networkState == AiLimbsBridgeNetworkState.AVAILABLE_UNVALIDATED
+
+    private fun logHostHealth(reason: String) {
+        val current = stateFlow.value
+        val heartbeatAgeMs = current.lastHeartbeatAtMs?.let {
+            (System.currentTimeMillis() - it).coerceAtLeast(0L)
+        }
+        AppLogger.i(
+            TAG,
+            "RDC host health: reason=$reason, network=$networkState/$networkTransport, " +
+                "phase=${current.phase}, running=$isRunning, reconnectAttempt=$reconnectAttempt, " +
+                "lastHeartbeatAgeMs=${heartbeatAgeMs ?: -1L}"
+        )
+    }
+
+    private fun restartWorkerFast(reason: String, detail: String) {
+        if (recoveryInProgress.get()) {
+            AppLogger.d(TAG, "RDC fast restart ignored during recovery: reason=$reason")
+            return
+        }
+        AppLogger.w(TAG, "RDC fast restart: reason=$reason, network=$networkState/$networkTransport")
+        val previousHeartbeat = stateFlow.value.lastHeartbeatAtMs
+        runJob?.cancel()
+        runJob = null
+        closeRealtimeTransport(force = true)
+        cancelActiveCalls(reason)
+        reconnectAttempt = 0
+        updateState(
+            AiLimbsBridgePhase.RECONNECTING,
+            detail,
+            lastHeartbeatAtMs = previousHeartbeat,
+            reconnectAttemptValue = 0
+        )
+        launchWorker()
+    }
+
+    private suspend fun waitForUsableNetwork(
+        recoveryMode: Boolean,
+        recoveryDeadline: Long
+    ): Boolean {
+        var loggedWaiting = false
+        while (currentCoroutineContext().isActive && isNetworkUnavailable()) {
+            if (!loggedWaiting) {
+                AppLogger.w(TAG, "RDC waiting for validated network: state=$networkState, transport=$networkTransport")
+                updateState(
+                    if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                    "等待可用网络后继续 RDC 连接"
+                )
+                loggedWaiting = true
+            }
+            if (recoveryMode && System.currentTimeMillis() >= recoveryDeadline) {
+                finishRecoveryFailure("RDC 修复等待网络超时，请检查网络后重试")
+                return false
+            }
+            delay(NETWORK_STATE_POLL_MS)
+        }
+        if (loggedWaiting) {
+            AppLogger.i(TAG, "RDC network wait finished: state=$networkState, transport=$networkTransport")
+        }
+        return currentCoroutineContext().isActive
+    }
+
+    private suspend fun delayRetryAware(
+        delayMs: Long,
+        recoveryMode: Boolean,
+        recoveryDeadline: Long
+    ): Boolean {
+        if (isNetworkUnavailable()) {
+            return waitForUsableNetwork(recoveryMode, recoveryDeadline)
+        }
+        val deadlineUptime = SystemClock.uptimeMillis() + delayMs
+        while (currentCoroutineContext().isActive) {
+            if (recoveryMode && System.currentTimeMillis() >= recoveryDeadline) {
+                finishRecoveryFailure("RDC 修复超时，请重试或重新配对")
+                return false
+            }
+            if (isNetworkUnavailable()) {
+                return waitForUsableNetwork(recoveryMode, recoveryDeadline)
+            }
+            val remaining = deadlineUptime - SystemClock.uptimeMillis()
+            if (remaining <= 0L) return true
+            delay(minOf(NETWORK_STATE_POLL_MS, remaining))
+        }
+        return false
     }
 
     private fun stopWorker(detail: String) {
@@ -278,6 +406,8 @@ class AiLimbsRdcClient(
             var attemptTransport: AiLimbsRdcRealtimeTransport? = null
             var attemptPendingProbeJob: Job? = null
             try {
+                if (!waitForUsableNetwork(recoveryMode, recoveryDeadline)) return
+
                 if (recoveryMode) {
                     updateState(
                         AiLimbsBridgePhase.RECOVERING,
@@ -382,11 +512,18 @@ class AiLimbsRdcClient(
                 }
 
                 var lastTransportTickElapsedMs = SystemClock.elapsedRealtime()
+                var lastTransportTickUptimeMs = SystemClock.uptimeMillis()
                 while (currentCoroutineContext().isActive) {
                     val tickElapsedMs = SystemClock.elapsedRealtime()
-                    val schedulerGapMs = tickElapsedMs - lastTransportTickElapsedMs
-                    if (schedulerGapMs >= TRANSPORT_SCHEDULER_GAP_RECONNECT_MS) {
-                        throw SchedulerGapException(schedulerGapMs)
+                    val tickUptimeMs = SystemClock.uptimeMillis()
+                    val elapsedDeltaMs = tickElapsedMs - lastTransportTickElapsedMs
+                    val uptimeDeltaMs = tickUptimeMs - lastTransportTickUptimeMs
+                    val suspendDeltaMs = (elapsedDeltaMs - uptimeDeltaMs).coerceAtLeast(0L)
+                    if (suspendDeltaMs >= HOST_SUSPEND_RESUME_THRESHOLD_MS) {
+                        throw SuspendResumeException(elapsedDeltaMs, uptimeDeltaMs, suspendDeltaMs)
+                    }
+                    if (elapsedDeltaMs >= TRANSPORT_SCHEDULER_GAP_RECONNECT_MS) {
+                        throw SchedulerGapException(elapsedDeltaMs, uptimeDeltaMs, suspendDeltaMs)
                     }
                     transport.throwIfFailed()
                     val now = System.currentTimeMillis()
@@ -406,6 +543,7 @@ class AiLimbsRdcClient(
                         )
                     }
                     lastTransportTickElapsedMs = SystemClock.elapsedRealtime()
+                    lastTransportTickUptimeMs = SystemClock.uptimeMillis()
                     delay(TRANSPORT_TICK_MS)
                 }
             } catch (e: CancellationException) {
@@ -415,78 +553,72 @@ class AiLimbsRdcClient(
                 attemptTransport?.let { closeRealtimeTransport(it) }
                 finishRecoveryFailure(e.message ?: "已有 RDC 授权无法恢复，请重新配对")
                 return
+            } catch (e: SuspendResumeException) {
+                attemptTransport?.let { closeRealtimeTransport(it, force = true) }
+                reconnectAttempt = 0
+                AppLogger.w(
+                    TAG,
+                    "RDC resumed from system suspend: elapsed=${e.elapsedDeltaMs}ms, " +
+                        "uptime=${e.uptimeDeltaMs}ms, suspend=${e.suspendDeltaMs}ms, " +
+                        "network=$networkState/$networkTransport"
+                )
+                updateState(
+                    if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                    "检测到系统深睡恢复 ${e.suspendDeltaMs}ms，正在快速重建 RDC Realtime",
+                    reconnectAttemptValue = 0
+                )
+                if (!delayRetryAware(SCHEDULER_GAP_RECONNECT_DELAY_MS, recoveryMode, recoveryDeadline)) return
             } catch (e: SchedulerGapException) {
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
                 AppLogger.w(
                     TAG,
-                    "RDC scheduler gap detected: gap=${e.gapMs}ms; rebuilding Realtime transport"
+                    "RDC scheduler starvation detected: elapsed=${e.elapsedDeltaMs}ms, " +
+                        "uptime=${e.uptimeDeltaMs}ms, suspend=${e.suspendDeltaMs}ms; rebuilding Realtime transport"
                 )
-                if (recoveryMode) {
-                    updateState(
-                        AiLimbsBridgePhase.RECOVERING,
-                        "检测到系统休眠/调度暂停 ${e.gapMs}ms，正在重建 RDC Realtime"
-                    )
-                    if (!delayWithinRecoveryWindow(SCHEDULER_GAP_RECONNECT_DELAY_MS, recoveryDeadline)) return
-                } else {
-                    updateState(
-                        AiLimbsBridgePhase.RECONNECTING,
-                        "检测到系统休眠/调度暂停 ${e.gapMs}ms，正在快速重连"
-                    )
-                    delay(SCHEDULER_GAP_RECONNECT_DELAY_MS)
-                }
+                updateState(
+                    if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                    "检测到 RDC 调度停顿 ${e.elapsedDeltaMs}ms，正在快速重连"
+                )
+                if (!delayRetryAware(SCHEDULER_GAP_RECONNECT_DELAY_MS, recoveryMode, recoveryDeadline)) return
             } catch (e: UnauthorizedException) {
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
                 AppLogger.w(TAG, "RDC session expired; attempting token refresh")
                 clearAccessTokenOnly()
                 val retryDelay = reconnectDelayMs(reconnectAttempt)
-                if (recoveryMode) {
-                    updateState(
-                        AiLimbsBridgePhase.RECOVERING,
+                updateState(
+                    if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                    if (recoveryMode) {
                         "RDC 会话已过期，正在使用保存的凭证刷新授权"
-                    )
-                    if (!delayWithinRecoveryWindow(retryDelay, recoveryDeadline)) return
-                } else {
-                    updateState(AiLimbsBridgePhase.RECONNECTING, "RDC 会话过期，正在刷新凭证")
-                    delay(retryDelay)
-                }
+                    } else {
+                        "RDC 会话过期，正在刷新凭证"
+                    }
+                )
+                if (!delayRetryAware(retryDelay, recoveryMode, recoveryDeadline)) return
             } catch (e: Exception) {
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
                 val retryDelay = reconnectDelayMs(reconnectAttempt)
-                AppLogger.e(TAG, "AI Limbs RDC loop failed; reconnectAttempt=$reconnectAttempt", e)
-                if (recoveryMode) {
-                    updateState(
-                        AiLimbsBridgePhase.RECOVERING,
+                AppLogger.e(
+                    TAG,
+                    "AI Limbs RDC loop failed; reconnectAttempt=$reconnectAttempt, " +
+                        "network=$networkState/$networkTransport",
+                    e
+                )
+                updateState(
+                    if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                    if (recoveryMode) {
                         "修复步骤失败：${e.message ?: e.javaClass.simpleName}；准备重试"
-                    )
-                    if (!delayWithinRecoveryWindow(retryDelay, recoveryDeadline)) return
-                } else {
-                    updateState(
-                        AiLimbsBridgePhase.RECONNECTING,
+                    } else {
                         "连接失败：${e.message ?: e.javaClass.simpleName}；稍后重试"
-                    )
-                    delay(retryDelay)
-                }
+                    }
+                )
+                if (!delayRetryAware(retryDelay, recoveryMode, recoveryDeadline)) return
             } finally {
                 attemptPendingProbeJob?.cancel()
             }
         }
-    }
-
-    private suspend fun delayWithinRecoveryWindow(delayMs: Long, recoveryDeadline: Long): Boolean {
-        val remaining = recoveryDeadline - System.currentTimeMillis()
-        if (remaining <= 0L) {
-            finishRecoveryFailure("RDC 修复超时，请重试或重新配对")
-            return false
-        }
-        delay(minOf(delayMs, remaining))
-        if (System.currentTimeMillis() >= recoveryDeadline) {
-            finishRecoveryFailure("RDC 修复超时，请重试或重新配对")
-            return false
-        }
-        return true
     }
 
     private fun finishRecoveryFailure(detail: String) {
@@ -1319,8 +1451,21 @@ class AiLimbsRdcClient(
 
     private class RecoveryRequiresPairingException(message: String) : IllegalStateException(message)
 
-    private class SchedulerGapException(val gapMs: Long) :
-        IllegalStateException("RDC scheduler gap: ${gapMs}ms")
+    private class SuspendResumeException(
+        val elapsedDeltaMs: Long,
+        val uptimeDeltaMs: Long,
+        val suspendDeltaMs: Long
+    ) : IllegalStateException(
+        "RDC resumed from suspend: elapsed=${elapsedDeltaMs}ms, uptime=${uptimeDeltaMs}ms, suspend=${suspendDeltaMs}ms"
+    )
+
+    private class SchedulerGapException(
+        val elapsedDeltaMs: Long,
+        val uptimeDeltaMs: Long,
+        val suspendDeltaMs: Long
+    ) : IllegalStateException(
+        "RDC scheduler starvation: elapsed=${elapsedDeltaMs}ms, uptime=${uptimeDeltaMs}ms, suspend=${suspendDeltaMs}ms"
+    )
 
     private class UnauthorizedException : IllegalStateException()
 
@@ -1335,7 +1480,10 @@ class AiLimbsRdcClient(
         private const val DEVICE_SCOPE = "mcp:tools"
         private const val HEARTBEAT_INTERVAL_MS = 15_000L
         private const val ONLINE_STALE_AFTER_MS = HEARTBEAT_INTERVAL_MS * 3
+        private const val SCREEN_ON_STALE_AFTER_MS = HEARTBEAT_INTERVAL_MS * 2
         private const val TRANSPORT_TICK_MS = 500L
+        private const val NETWORK_STATE_POLL_MS = 500L
+        private const val HOST_SUSPEND_RESUME_THRESHOLD_MS = 5_000L
         private const val PENDING_CALL_PROBE_INTERVAL_MS = 3_000L
         private const val PENDING_CALL_PROBE_HEALTH_EVERY = 10L
         private const val PENDING_CALL_PROBE_LIMIT = 20

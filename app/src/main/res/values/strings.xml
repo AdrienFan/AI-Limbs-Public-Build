@@ -5981,7 +5981,7 @@
     <string name="logcat_cannot_open_output_stream">无法打开输出流</string>
     <string name="logcat_mediestore_save_failed">MediaStore保存失败：%1$s</string>
     <string name="logcat_cannot_create_download_dir">无法创建下载目录</string>
-    <string name="logcat_cannot_create_operit_dir">无法创建operit目录</string>
+    <string name="logcat_cannot_create_operit_dir">无法创建AiLimbs目录</string>
     <string name="logcat_file_create_failed">文件创建失败或为空</string>
     <string name="logcat_filesystem_save_failed">文件系统保存失败：%1$s</string>
 

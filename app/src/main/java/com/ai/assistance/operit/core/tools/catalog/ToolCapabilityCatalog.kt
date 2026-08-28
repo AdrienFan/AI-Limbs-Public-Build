@@ -45,7 +45,24 @@ data class ToolCatalogEntry(
     val sourceName: String? = null,
     val sourceLocator: String? = null,
     val sourceEnabled: Boolean = true,
-    val inputSchema: String? = null
+    val inputSchema: String? = null,
+    val searchMetadata: List<String> = emptyList()
+)
+
+data class ToolCatalogSearchMatch(
+    val entry: ToolCatalogEntry,
+    val score: Int,
+    val matchedTerms: Int,
+    val totalTerms: Int,
+    val strongIdentityMatch: Boolean
+) {
+    val coverage: Double
+        get() = if (totalTerms == 0) 0.0 else matchedTerms.toDouble() / totalTerms.toDouble()
+}
+
+data class ToolCatalogSearchResult(
+    val matches: List<ToolCatalogSearchMatch>,
+    val lowConfidence: Boolean
 )
 
 /**
@@ -54,6 +71,21 @@ data class ToolCatalogEntry(
  */
 object ToolCapabilityCatalog {
     private val RESERVED_TARGETS = setOf("search", "proxy", "package_proxy")
+    private val ENGLISH_STOP_WORDS = setOf(
+        "a", "an", "the", "by", "to", "for", "of", "with", "from", "on", "in", "at", "via"
+    )
+    private val GENERIC_KEYWORDS = setOf(
+        "package", "cached", "activate", "activation", "internal", "built-in", "builtin", "内部工具"
+    )
+    private const val MIN_SEARCH_SCORE = 20
+    private const val LOW_CONFIDENCE_SCORE = 70
+
+    private data class SearchScore(
+        val score: Int,
+        val matchedTerms: Int,
+        val totalTerms: Int,
+        val strongIdentityMatch: Boolean
+    )
 
     suspend fun build(
         context: Context,
@@ -61,10 +93,13 @@ object ToolCapabilityCatalog {
         roleCardToolAccess: ResolvedCharacterCardToolAccess? = null,
         useEnglish: Boolean,
         includeDisabledPackages: Boolean = false,
-        forceRefreshPackages: Boolean = false
+        forceRefreshPackages: Boolean = false,
+        includeAlternateLanguageMetadata: Boolean = false
     ): List<ToolCatalogEntry> {
         val categories = buildBuiltinAndInternalCategories(useEnglish)
         val builtinToolNames = buildBuiltinToolNameSet(useEnglish)
+        val alternateSearchMetadata =
+            if (includeAlternateLanguageMetadata) buildAlternateSearchMetadata(!useEnglish) else emptyMap()
         val entries = LinkedHashMap<String, ToolCatalogEntry>()
 
         categories.forEach { category ->
@@ -91,6 +126,7 @@ object ToolCapabilityCatalog {
                         sourceKind = sourceKind,
                         keywords = listOf(category.categoryName),
                         parameters = tool.parametersStructured.orEmpty(),
+                        searchMetadata = alternateSearchMetadata[tool.name].orEmpty(),
                         sourceLocator =
                             if (sourceKind == ToolCatalogSourceKind.BUILTIN) {
                                 "native://SystemToolPrompts/${tool.name}"
@@ -197,23 +233,52 @@ object ToolCapabilityCatalog {
         return entries.values.toList()
     }
 
-    fun search(catalog: List<ToolCatalogEntry>, query: String, limit: Int): List<ToolCatalogEntry> {
-        val normalizedQuery = normalize(query)
-        if (normalizedQuery.isBlank()) return emptyList()
+    fun search(catalog: List<ToolCatalogEntry>, query: String, limit: Int): List<ToolCatalogEntry> =
+        searchDetailed(catalog, query, limit).matches.map { it.entry }
 
+    fun searchDetailed(
+        catalog: List<ToolCatalogEntry>,
+        query: String,
+        limit: Int
+    ): ToolCatalogSearchResult {
+        val normalizedQuery = normalize(query)
+        if (normalizedQuery.isBlank()) {
+            return ToolCatalogSearchResult(emptyList(), lowConfidence = true)
+        }
         val terms = buildSearchTerms(normalizedQuery)
-        return catalog
+        if (terms.isEmpty()) {
+            return ToolCatalogSearchResult(emptyList(), lowConfidence = true)
+        }
+
+        val matches = catalog
             .mapNotNull { entry ->
-                val score = scoreEntry(entry, normalizedQuery, terms)
-                if (score <= 0) null else score to entry
+                val scored = scoreEntry(entry, normalizedQuery, terms)
+                if (!isRelevant(scored)) {
+                    null
+                } else {
+                    ToolCatalogSearchMatch(
+                        entry = entry,
+                        score = scored.score,
+                        matchedTerms = scored.matchedTerms,
+                        totalTerms = scored.totalTerms,
+                        strongIdentityMatch = scored.strongIdentityMatch
+                    )
+                }
             }
             .sortedWith(
-                compareByDescending<Pair<Int, ToolCatalogEntry>> { it.first }
-                    .thenBy { it.second.targetToolName }
-                    .thenBy { it.second.displayName }
+                compareByDescending<ToolCatalogSearchMatch> { it.score }
+                    .thenByDescending { it.coverage }
+                    .thenBy { it.entry.targetToolName }
+                    .thenBy { it.entry.displayName }
             )
             .take(limit.coerceIn(1, 20))
-            .map { it.second }
+
+        val top = matches.firstOrNull()
+        val lowConfidence = top == null ||
+            (!top.strongIdentityMatch &&
+                (top.score < LOW_CONFIDENCE_SCORE ||
+                    (top.totalTerms >= 6 && top.matchedTerms < 3)))
+        return ToolCatalogSearchResult(matches, lowConfidence)
     }
 
     private fun addRuntimeRegistryEntries(
@@ -292,6 +357,20 @@ object ToolCapabilityCatalog {
 
     private fun buildBuiltinAndInternalCategories(useEnglish: Boolean): List<SystemToolPromptCategory> =
         if (useEnglish) SystemToolPrompts.getAllCategoriesEn() else SystemToolPrompts.getAllCategoriesCn()
+
+    private fun buildAlternateSearchMetadata(useEnglish: Boolean): Map<String, List<String>> {
+        val metadata = linkedMapOf<String, MutableList<String>>()
+        buildBuiltinAndInternalCategories(useEnglish).forEach { category ->
+            category.tools.forEach { tool ->
+                metadata.getOrPut(tool.name) { mutableListOf() }.apply {
+                    add(category.categoryName)
+                    add(tool.description)
+                    addAll(buildParameterHints(tool))
+                }
+            }
+        }
+        return metadata.mapValues { (_, values) -> values.filter { it.isNotBlank() }.distinct() }
+    }
 
     private fun buildBuiltinToolNameSet(useEnglish: Boolean): Set<String> {
         val categories =
@@ -441,48 +520,116 @@ object ToolCapabilityCatalog {
         entry: ToolCatalogEntry,
         normalizedQuery: String,
         terms: List<String>
-    ): Int {
+    ): SearchScore {
         val displayName = normalize(entry.displayName)
         val targetName = normalize(entry.targetToolName)
         val description = normalize(entry.description)
-        val params = normalize(entry.parameterHints.joinToString(" "))
-        val keywords = normalize(entry.keywords.joinToString(" "))
-        val individualKeywords = entry.keywords.map(::normalize).filter { it.length >= 2 }
+        val parameterNames = normalize(entry.parameters.joinToString(" ") { it.name })
+        val parameterDescriptions = normalize(
+            entry.parameters.joinToString(" ") { it.description } +
+                " " + entry.parameterHints.joinToString(" ")
+        )
+        val metadata = normalize(entry.searchMetadata.joinToString(" "))
+
+        val displayTokens = tokenize(entry.displayName).toSet()
+        val targetTokens = tokenize(entry.targetToolName).toSet()
+        val descriptionTokens = tokenize(entry.description).toSet()
+        val parameterNameTokens = entry.parameters.flatMap { tokenize(it.name) }.toSet()
+        val parameterDescriptionTokens =
+            (entry.parameters.flatMap { tokenize(it.description) } +
+                entry.parameterHints.flatMap(::tokenize)).toSet()
+        val metadataTokens = entry.searchMetadata.flatMap(::tokenize).toSet()
 
         var score = 0
-        if (displayName == normalizedQuery || targetName == normalizedQuery) score += 300
-        if (displayName.startsWith(normalizedQuery) || targetName.startsWith(normalizedQuery)) score += 140
-        if (displayName.contains(normalizedQuery) || targetName.contains(normalizedQuery)) score += 100
-        if (description.contains(normalizedQuery) || keywords.contains(normalizedQuery)) score += 40
-        if (params.contains(normalizedQuery)) score += 25
-        individualKeywords.forEach { keyword ->
-            if (normalizedQuery.contains(keyword) || keyword.contains(normalizedQuery)) score += 24
+        var strongIdentityMatch = false
+        if (displayName == normalizedQuery || targetName == normalizedQuery) {
+            score += 400
+            strongIdentityMatch = true
+        } else if (displayName.startsWith(normalizedQuery) || targetName.startsWith(normalizedQuery)) {
+            score += 180
+            strongIdentityMatch = true
         }
+
+        val phraseLike = normalizedQuery.contains(' ') || normalizedQuery.any(::isCommonHanCharacter)
+        if (phraseLike) {
+            if (description.contains(normalizedQuery)) score += 70
+            if (parameterDescriptions.contains(normalizedQuery)) score += 45
+            if (metadata.contains(normalizedQuery)) score += 55
+        }
+        if (entry.keywords.any {
+                normalize(it) == normalizedQuery && normalize(it) !in GENERIC_KEYWORDS
+            }
+        ) {
+            score += 100
+        }
+        if (entry.searchMetadata.any { normalize(it) == normalizedQuery }) score += 90
+        if (entry.parameters.any { normalize(it.name) == normalizedQuery }) score += 70
 
         var matchedTerms = 0
         terms.forEach { term ->
             var termMatched = false
-            if (displayName.contains(term) || targetName.contains(term)) {
-                score += 40
+            if (matchesTerm(displayName, displayTokens, term) ||
+                matchesTerm(targetName, targetTokens, term)
+            ) {
+                score += 55
                 termMatched = true
             }
-            if (keywords.contains(term)) {
-                score += 16
+
+            val keywordWeight = entry.keywords
+                .filter { keyword ->
+                    matchesTerm(normalize(keyword), tokenize(keyword).toSet(), term)
+                }
+                .maxOfOrNull { keyword ->
+                    if (normalize(keyword) in GENERIC_KEYWORDS) 4 else 30
+                } ?: 0
+            if (keywordWeight > 0) {
+                score += keywordWeight
                 termMatched = true
             }
-            if (description.contains(term)) {
-                score += 12
+            if (matchesTerm(description, descriptionTokens, term)) {
+                score += 18
                 termMatched = true
             }
-            if (params.contains(term)) {
-                score += 8
+            if (matchesTerm(parameterNames, parameterNameTokens, term)) {
+                score += 24
+                termMatched = true
+            }
+            if (matchesTerm(parameterDescriptions, parameterDescriptionTokens, term)) {
+                score += 10
+                termMatched = true
+            }
+            if (matchesTerm(metadata, metadataTokens, term)) {
+                score += 22
                 termMatched = true
             }
             if (termMatched) matchedTerms += 1
         }
-        if (matchedTerms == terms.size && terms.isNotEmpty()) score += 30
-        return score
+
+        if (terms.isNotEmpty()) {
+            score += matchedTerms * 50 / terms.size
+            if (matchedTerms == terms.size) score += 60
+            else if (matchedTerms >= 2) score += 20
+        }
+        return SearchScore(score, matchedTerms, terms.size, strongIdentityMatch)
     }
+
+    private fun isRelevant(score: SearchScore): Boolean {
+        if (score.strongIdentityMatch) return true
+        if (score.score < MIN_SEARCH_SCORE) return false
+        if (score.totalTerms >= 4 && score.matchedTerms < 2) return false
+        return score.matchedTerms > 0
+    }
+
+    private fun matchesTerm(
+        normalizedField: String,
+        fieldTokens: Set<String>,
+        term: String
+    ): Boolean =
+        if (term.any(::isCommonHanCharacter)) {
+            normalizedField.contains(term)
+        } else {
+            fieldTokens.contains(term)
+        }
 
     private fun entryKey(entry: ToolCatalogEntry): String =
         if (entry.sourceKind == ToolCatalogSourceKind.ACTIVATION) {
@@ -492,9 +639,9 @@ object ToolCapabilityCatalog {
         }
 
     private fun buildSearchTerms(normalizedQuery: String): List<String> =
-        normalizedQuery
-            .split(' ')
-            .filter { it.isNotBlank() }
+        tokenize(normalizedQuery)
+            .filterNot { it in ENGLISH_STOP_WORDS }
+            .filter { it.any(::isCommonHanCharacter) || it.length >= 2 }
             .flatMap { token ->
                 if (token.length > 2 && token.any(::isCommonHanCharacter)) {
                     listOf(token) + token.windowed(size = 2, step = 1)
@@ -503,6 +650,12 @@ object ToolCapabilityCatalog {
                 }
             }
             .distinct()
+
+    private fun tokenize(value: String): List<String> =
+        normalize(value)
+            .replace(Regex("[:_./-]+"), " ")
+            .split(' ')
+            .filter { it.isNotBlank() }
 
     private fun isCommonHanCharacter(character: Char): Boolean =
         character in '\u3400'..'\u4DBF' || character in '\u4E00'..'\u9FFF'
