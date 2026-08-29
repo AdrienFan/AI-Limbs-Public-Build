@@ -5,10 +5,10 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Builds the provider-neutral AI Limbs access bootstrap as a compact machine protocol.
+ * Builds an explicit diagnostic snapshot of the AI Limbs access gate as a compact machine protocol.
  *
- * Human-facing rationale stays in source comments. Runtime context receives only AIL_ACCESS_V1,
- * so deterministic access metadata is not duplicated as natural-language instructions.
+ * Runtime enforcement lives in AiLimbsAccessGate. This payload is available only through explicit
+ * diagnostic reads and must not be automatically prepended to model-facing tool results.
  */
 class AiLimbsAccessContextService(context: Context) {
     private val documents = AiLimbsDocumentProvider(context.applicationContext)

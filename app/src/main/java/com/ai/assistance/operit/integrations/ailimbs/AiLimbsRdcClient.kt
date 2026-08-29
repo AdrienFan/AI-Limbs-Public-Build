@@ -58,7 +58,6 @@ class AiLimbsRdcClient(
     private val appContext = context.applicationContext
     private val accessGate = AiLimbsAccessGate(appContext)
     private val dispatcher = AiLimbsDispatcher(appContext, accessGate)
-    private val accessContext = AiLimbsAccessContextService(appContext)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val adapter = AiLimbsRdcToolAdapter(appContext, dispatcher)
     private val httpClient =
@@ -71,11 +70,9 @@ class AiLimbsRdcClient(
     )
     val state = stateFlow.asStateFlow()
     private var runJob: Job? = null
-    private var lastSentAccessContext: String? = null
     private val protocolToolRegistry by lazy {
         AiLimbsRdcToolRegistry()
             .register("ping") { _ ->
-                lastSentAccessContext = null
                 mcpText("pong ${nowIso()}")
             }
             .register("shutdown") { _ ->
@@ -434,7 +431,6 @@ class AiLimbsRdcClient(
         cancelActiveCalls("manual re-pair")
         clearSession()
         activeAuthorization = null
-        lastSentAccessContext = null
         reconnectAttempt = 0
         updateState(
             AiLimbsBridgePhase.STARTING,
@@ -540,7 +536,6 @@ class AiLimbsRdcClient(
                     "RDC Realtime heartbeat acknowledgement timed out"
                 }
                 accessGate.resetForNewSession()
-                lastSentAccessContext = null
                 heartbeat(info, session, broadcastCapable = true)
                 var lastHeartbeatAt = System.currentTimeMillis()
                 reconnectAttempt = 0
@@ -1146,7 +1141,7 @@ class AiLimbsRdcClient(
             val rawResult =
                 protocolToolRegistry.executeOrNull(toolName, args)
                     ?: adapter.execute(toolName, args)
-            val result = attachAiLimbsContext(rawResult)
+            val result = attachLanerChatWorkNotification(rawResult)
             logOutboundResultMetadata(callId, toolName, result)
             updateCall(
                 info,
@@ -1249,23 +1244,6 @@ class AiLimbsRdcClient(
             TAG,
             "RDC outbound result call=${shortCallId(callId)} tool=$toolName $summary"
         )
-    }
-
-    private suspend fun attachAiLimbsContext(result: JSONObject): JSONObject {
-        val withWorkNotification = attachLanerChatWorkNotification(result)
-        return attachAccessContext(withWorkNotification)
-    }
-
-    private suspend fun attachAccessContext(result: JSONObject): JSONObject {
-        val context = try {
-            accessContext.readAccessContext()
-        } catch (e: Exception) {
-            AppLogger.w(TAG, "Unable to build AI Limbs access context", e)
-            return result
-        }
-        if (context == lastSentAccessContext) return result
-        lastSentAccessContext = context
-        return prependTextContent(result, context)
     }
 
     private fun attachLanerChatWorkNotification(result: JSONObject): JSONObject {
