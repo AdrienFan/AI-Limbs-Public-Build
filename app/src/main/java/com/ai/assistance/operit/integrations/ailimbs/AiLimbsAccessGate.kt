@@ -55,7 +55,7 @@ class AiLimbsAccessGate(context: Context) {
         }
     }
 
-    suspend fun firstMissing(
+    internal suspend fun firstMissing(
         requiredReceipts: Set<AiLimbsRequiredReceipt>
     ): AiLimbsMissingReceipt? {
         if (AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT in requiredReceipts) {
@@ -91,7 +91,7 @@ class AiLimbsAccessGate(context: Context) {
         return null
     }
 
-    fun recordSuccessfulRead(invocation: AiLimbsNormalizedInvocation, result: JSONObject) {
+    internal fun recordSuccessfulRead(invocation: AiLimbsNormalizedInvocation, result: JSONObject) {
         if (!result.optBoolean("success", false)) return
         val version = result.optString("version").trim()
         if (version.isBlank()) return

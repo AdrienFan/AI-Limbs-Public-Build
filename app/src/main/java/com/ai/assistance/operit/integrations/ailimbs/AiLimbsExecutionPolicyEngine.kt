@@ -303,7 +303,7 @@ class AiLimbsExecutionPolicyEngine(
         )
     }
 
-    private fun readAvailability(
+    private suspend fun readAvailability(
         targetName: String,
         parameters: JSONObject,
         registration: AiLimbsCoreCapabilityRegistration?,

@@ -208,3 +208,221 @@ fun AiLimbsAccessManagerScreen() {
                     .padding(16.dp)
                     .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            DocumentEditorCard(
+                title = stringResource(R.string.laner_access_prompt_title),
+                value = customAccessPrompt,
+                onValueChange = { customAccessPrompt = it },
+                minLines = 5,
+                snapshots = snapshots[AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT].orEmpty(),
+                selectedSnapshotId = selectedSnapshots[AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT],
+                onSnapshotSelected = { snapshotId ->
+                    selectedSnapshots =
+                        selectedSnapshots + (AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT to snapshotId)
+                },
+                onRestore = { snapshotId ->
+                    restoreRequest =
+                        RestoreRequest(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT, snapshotId)
+                },
+                onReload = { reload(showConfirmation = true) },
+                onSave = {
+                    saveDocument(
+                        AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
+                        customAccessPrompt,
+                        R.string.laner_access_saved
+                    )
+                },
+                onImport = { importDocument(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT) }
+            )
+            DocumentEditorCard(
+                title = stringResource(R.string.laner_work_manual_title),
+                value = workManual,
+                onValueChange = { workManual = it },
+                minLines = 14,
+                snapshots = snapshots[AiLimbsDocumentId.WORK_MANUAL].orEmpty(),
+                selectedSnapshotId = selectedSnapshots[AiLimbsDocumentId.WORK_MANUAL],
+                onSnapshotSelected = { snapshotId ->
+                    selectedSnapshots =
+                        selectedSnapshots + (AiLimbsDocumentId.WORK_MANUAL to snapshotId)
+                },
+                onRestore = { snapshotId ->
+                    restoreRequest = RestoreRequest(AiLimbsDocumentId.WORK_MANUAL, snapshotId)
+                },
+                onReload = { reload(showConfirmation = true) },
+                onSave = {
+                    saveDocument(
+                        AiLimbsDocumentId.WORK_MANUAL,
+                        workManual,
+                        R.string.laner_work_manual_saved
+                    )
+                },
+                onImport = { importDocument(AiLimbsDocumentId.WORK_MANUAL) }
+            )
+        }
+    }
+
+    restoreRequest?.let { request ->
+        val documentTitle =
+            stringResource(
+                when (request.documentId) {
+                    AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> R.string.laner_system_access_prompt_title
+                    AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> R.string.laner_access_prompt_title
+                    AiLimbsDocumentId.WORK_MANUAL -> R.string.laner_work_manual_title
+                }
+            )
+        AlertDialog(
+            onDismissRequest = { restoreRequest = null },
+            title = { Text(stringResource(R.string.laner_restore_confirm_title)) },
+            text = {
+                Text(stringResource(R.string.laner_restore_confirm_message, documentTitle))
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        restoreRequest = null
+                        scope.launch {
+                            try {
+                                documents.restoreSnapshot(
+                                    request.documentId,
+                                    request.snapshotId
+                                )
+                                loadDocuments()
+                                toast(R.string.laner_document_restored)
+                            } catch (error: Exception) {
+                                Toast.makeText(
+                                    context,
+                                    error.message ?: "Restore failed",
+                                    Toast.LENGTH_LONG
+                                ).show()
+                            }
+                        }
+                    }
+                ) {
+                    Text(stringResource(R.string.laner_restore_confirm))
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { restoreRequest = null }) {
+                    Text(stringResource(R.string.laner_cancel))
+                }
+            }
+        )
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun DocumentEditorCard(
+    title: String,
+    value: String,
+    onValueChange: (String) -> Unit,
+    minLines: Int,
+    snapshots: List<AiLimbsDocumentSnapshot>,
+    selectedSnapshotId: String?,
+    onSnapshotSelected: (String) -> Unit,
+    onRestore: (String) -> Unit,
+    onReload: () -> Unit,
+    onSave: () -> Unit,
+    onImport: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        colors =
+            CardDefaults.cardColors(
+                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.25f)
+            )
+    ) {
+        Column(
+            modifier = Modifier.padding(14.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            Text(title, style = MaterialTheme.typography.titleMedium)
+            OutlinedTextField(
+                value = value,
+                onValueChange = onValueChange,
+                modifier = Modifier.fillMaxWidth().heightIn(min = (minLines * 24).dp),
+                minLines = minLines
+            )
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onReload) {
+                    Icon(Icons.Default.Refresh, contentDescription = null)
+                    Text(stringResource(R.string.laner_reload))
+                }
+                Button(onClick = onSave) {
+                    Icon(Icons.Default.Save, contentDescription = null)
+                    Text(stringResource(R.string.laner_save))
+                }
+                TextButton(onClick = onImport) {
+                    Text(stringResource(R.string.laner_import_file))
+                }
+            }
+            BackupSelector(
+                snapshots = snapshots,
+                selectedSnapshotId = selectedSnapshotId,
+                onSnapshotSelected = onSnapshotSelected,
+                onRestore = onRestore
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun BackupSelector(
+    snapshots: List<AiLimbsDocumentSnapshot>,
+    selectedSnapshotId: String?,
+    onSnapshotSelected: (String) -> Unit,
+    onRestore: (String) -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    val selectedSnapshot = snapshots.firstOrNull { it.id == selectedSnapshotId }
+    val selectedLabel =
+        selectedSnapshot?.let(::formatSnapshot)
+            ?: stringResource(R.string.laner_document_history_empty)
+
+    ExposedDropdownMenuBox(
+        expanded = expanded,
+        onExpandedChange = {
+            if (snapshots.isNotEmpty()) expanded = !expanded
+        }
+    ) {
+        OutlinedTextField(
+            value = selectedLabel,
+            onValueChange = {},
+            readOnly = true,
+            enabled = snapshots.isNotEmpty(),
+            label = { Text(stringResource(R.string.laner_document_history)) },
+            trailingIcon = {
+                ExposedDropdownMenuDefaults.TrailingIcon(expanded = expanded)
+            },
+            modifier = Modifier.fillMaxWidth().menuAnchor()
+        )
+        ExposedDropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false }
+        ) {
+            snapshots.forEach { snapshot ->
+                DropdownMenuItem(
+                    text = { Text(formatSnapshot(snapshot)) },
+                    onClick = {
+                        onSnapshotSelected(snapshot.id)
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+    Button(
+        onClick = { selectedSnapshot?.let { onRestore(it.id) } },
+        enabled = selectedSnapshot != null
+    ) {
+        Text(stringResource(R.string.laner_restore))
+    }
+}
+
+private fun formatSnapshot(snapshot: AiLimbsDocumentSnapshot): String {
+    val timestamp =
+        SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault())
+            .format(Date(snapshot.createdAtEpochMillis))
+    return "$timestamp · ${snapshot.sha256.take(8)}"
+}
