@@ -20,7 +20,11 @@
 - Module: AI Limbs External Vision Transport.
 - For Android visual content returned by AI Limbs, use the returned file_path with RDC read_file for direct multimodal interpretation. Do not treat OCR, metadata, or structured UI information as pixel vision.
 
-- Before performing development, debugging, development-environment management, device-configuration changes, or any task that modifies project contents, device state, or persistent storage, the official AI Limbs Work Manual must be read first. Pure code analysis, status queries, read-only inspection, and tasks that do not modify projects, devices, or persistent storage do not require the Work Manual.
+- Before performing development, debugging, development-environment management, device-configuration changes, or any task that modifies project contents, device state, or persistent storage, the official AI Limbs Work Manual must be read first.
+- Work Manual:
+  document_id: work_manual
+  read: {"name":"ai_limbs.work_manual.read","parameters":{}}
+- Pure code analysis, status queries, read-only inspection, and tasks that do not modify projects, devices, or persistent storage do not require the Work Manual.
 - Official AI Limbs managed documents may only be modified through their corresponding document-management capabilities. Do not overwrite them through ordinary file tools or create parallel replacement manuals.
 
 - Laner's dedicated directory in shared phone storage is /storage/emulated/0/Laner. This directory may store files and content that Laner creates, obtains, organizes, saves, or wishes to retain long-term, regardless of their source or purpose. Unless data already belongs to another explicitly managed storage domain, Laner's own files may be stored here by default. It does not replace other storage locations that already have explicit ownership or management rules.

@@ -31,6 +31,7 @@ class AiLimbsBridgeManager(
         registry.create(activeProfileValue, appContext, scope)
     private val stateFlow = MutableStateFlow(provider.state.value)
     private var providerStateJob: Job? = null
+    @Volatile
     private var rePairAwaitingAuthorization = false
 
     init {
@@ -44,6 +45,9 @@ class AiLimbsBridgeManager(
 
     val shouldKeepAlive: Boolean
         get() = provider.enabled && desiredConnected()
+
+    val hasActivePairingTransaction: Boolean
+        get() = provider.enabled && rePairAwaitingAuthorization
 
     val requiresScreenOffCpuKeepAlive: Boolean
         get() = provider.enabled && provider.requiresScreenOffCpuKeepAlive
@@ -127,6 +131,7 @@ class AiLimbsBridgeManager(
     }
 
     fun stopRuntime() {
+        rePairAwaitingAuthorization = false
         provider.stopRuntime()
     }
 
@@ -157,7 +162,12 @@ class AiLimbsBridgeManager(
         // reconnect loop while the user is waiting for a fresh pairing code.
         rePairAwaitingAuthorization = true
         setDesiredConnected(false)
-        provider.rePair()
+        try {
+            provider.rePair()
+        } catch (e: Exception) {
+            rePairAwaitingAuthorization = false
+            throw e
+        }
     }
 
     fun openAuthorizationPage(): Boolean = provider.openAuthorizationPage()
@@ -188,14 +198,19 @@ class AiLimbsBridgeManager(
             scope.launch {
                 selectedProvider.state.collect { newState ->
                     if (provider === selectedProvider) {
-                        if (
-                            rePairAwaitingAuthorization &&
-                                ((newState.phase == AiLimbsBridgePhase.CONNECTING &&
+                        if (rePairAwaitingAuthorization) {
+                            when {
+                                (newState.phase == AiLimbsBridgePhase.CONNECTING &&
                                     !newState.deviceId.isNullOrBlank()) ||
-                                    newState.phase == AiLimbsBridgePhase.ONLINE)
-                        ) {
-                            rePairAwaitingAuthorization = false
-                            setDesiredConnected(true)
+                                    newState.phase == AiLimbsBridgePhase.ONLINE -> {
+                                    rePairAwaitingAuthorization = false
+                                    setDesiredConnected(true)
+                                }
+                                newState.phase == AiLimbsBridgePhase.ERROR ||
+                                    newState.phase == AiLimbsBridgePhase.RECOVERY_FAILED -> {
+                                    rePairAwaitingAuthorization = false
+                                }
+                            }
                         }
                         publishState(newState)
                     }

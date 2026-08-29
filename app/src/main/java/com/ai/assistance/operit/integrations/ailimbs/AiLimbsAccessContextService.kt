@@ -1,8 +1,15 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
+import org.json.JSONArray
+import org.json.JSONObject
 
-/** Builds the minimal, provider-neutral AI Limbs access bootstrap. */
+/**
+ * Builds the provider-neutral AI Limbs access bootstrap as a compact machine protocol.
+ *
+ * Human-facing rationale stays in source comments. Runtime context receives only AIL_ACCESS_V1,
+ * so deterministic access metadata is not duplicated as natural-language instructions.
+ */
 class AiLimbsAccessContextService(context: Context) {
     private val documents = AiLimbsDocumentProvider(context.applicationContext)
 
@@ -21,27 +28,60 @@ class AiLimbsAccessContextService(context: Context) {
                 write = false
             )
         )
-        return buildString {
-            appendLine("[AI Limbs access bootstrap]")
-            appendLine("Welcome to AI Limbs.")
-            appendLine("This bootstrap is an execution gate, not background information.")
-            appendLine("Before performing any AI Limbs action, the current official AI Limbs system access prompt body must be clearly available in the active context.")
-            appendLine("An unchanged prompt version does not prove that its body is still present after context compaction or loss. If the current body is unavailable or uncertain, read it before acting.")
-            appendLine("- document_id: ${systemPrompt.documentId}")
-            appendLine("- version: ${systemPrompt.version}")
-            appendLine("- path: ${systemPrompt.path}")
-            appendLine("- read: {\"name\":\"$systemReadTool\",\"parameters\":{}}")
-            appendLine("The AI Limbs custom access prompt is a separate user-editable managed document.")
-            appendLine("- document_id: ${customPrompt.documentId}")
-            appendLine("- version: ${customPrompt.version}")
-            appendLine("- empty: ${customPrompt.isEmpty}")
-            appendLine("- path: ${customPrompt.path}")
-            appendLine("- read: {\"name\":\"$customReadTool\",\"parameters\":{}}")
-            appendLine("If the custom access prompt is non-empty and its current body is unavailable or uncertain, read it before applying user-defined access instructions.")
-            appendLine("Do not rely on a previous read, memory, source-code search, or guessed invocation path when the current prompt body is absent or uncertain.")
-            append("Use only these official managed-document capabilities; do not guess or substitute another prompt document.")
-        }
+
+        return JSONObject()
+            .put("protocol", "AIL_ACCESS_V1")
+            .put("kind", "EXECUTION_GATE")
+            .put("before", "ANY_AI_LIMBS_ACTION")
+            .put(
+                "system_access_prompt",
+                JSONObject()
+                    .put("document_id", systemPrompt.documentId)
+                    .put("version", systemPrompt.version)
+                    .put("path", systemPrompt.path)
+                    .put("require", "BODY_IN_ACTIVE_CONTEXT")
+                    .put("version_only_proves_body", false)
+                    .put(
+                        "refresh_if",
+                        JSONArray()
+                            .put("CONTEXT_COMPACTION")
+                            .put("CONTEXT_LOSS")
+                            .put("BODY_UNAVAILABLE")
+                            .put("BODY_UNCERTAIN")
+                    )
+                    .put("read", capabilityInvocation(systemReadTool))
+            )
+            .put(
+                "custom_access_prompt",
+                JSONObject()
+                    .put("document_id", customPrompt.documentId)
+                    .put("version", customPrompt.version)
+                    .put("empty", customPrompt.isEmpty)
+                    .put("path", customPrompt.path)
+                    .put("require_if_not_empty", "BODY_IN_ACTIVE_CONTEXT")
+                    .put(
+                        "refresh_if",
+                        JSONArray()
+                            .put("BODY_UNAVAILABLE")
+                            .put("BODY_UNCERTAIN")
+                    )
+                    .put("read", capabilityInvocation(customReadTool))
+            )
+            .put(
+                "forbid",
+                JSONArray()
+                    .put("PREVIOUS_READ_AS_CURRENT")
+                    .put("MEMORY_AS_DOCUMENT")
+                    .put("SOURCE_SEARCH_AS_DOCUMENT")
+                    .put("GUESSED_INVOCATION")
+                    .put("DOCUMENT_SUBSTITUTION")
+            )
+            .put("managed_document_only", true)
+            .toString()
     }
 
-
+    private fun capabilityInvocation(name: String): JSONObject =
+        JSONObject()
+            .put("name", name)
+            .put("parameters", JSONObject())
 }

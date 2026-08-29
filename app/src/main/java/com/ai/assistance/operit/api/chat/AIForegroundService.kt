@@ -869,7 +869,7 @@ class AIForegroundService : Service() {
                 val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
                 when (action) {
                     Intent.ACTION_SCREEN_OFF -> {
-                        // v0.6.4.7.1 A/B: do not re-apply survival/systemExempted on screen-off.
+                        applyBackgroundSurvivalForeground("screen_off", force = true)
                         updateBridgeScreenOffWakeLock("screen_broadcast:$action")
                         logBridgeHostHealth("screen_off")
                         aiLimbsBridgeManager.onHostSignal(AiLimbsBridgeHostSignal.ScreenOff)
@@ -1193,7 +1193,8 @@ class AIForegroundService : Service() {
         val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
         val shouldHold =
             !powerManager.isInteractive &&
-                aiLimbsBridgeManager.shouldKeepAlive &&
+                (aiLimbsBridgeManager.shouldKeepAlive ||
+                    aiLimbsBridgeManager.hasActivePairingTransaction) &&
                 aiLimbsBridgeManager.requiresScreenOffCpuKeepAlive
         if (shouldHold) {
             if (bridgeScreenOffWakeLock == null) {
@@ -1276,6 +1277,7 @@ class AIForegroundService : Service() {
             alwaysListeningEnabled ||
             backgroundKeepAliveEnabled ||
             externalHttpEnabled ||
+            aiLimbsBridgeManager.hasActivePairingTransaction ||
             aiLimbsBridgeManager.shouldKeepAlive
     }
 
@@ -1361,6 +1363,7 @@ class AIForegroundService : Service() {
     private fun observeBackgroundKeepAlivePreference() {
         serviceScope.launch {
             try {
+                var initialized = false
                 DisplayPreferencesManager
                     .getInstance(applicationContext)
                     .enableBackgroundKeepAlive
@@ -1369,9 +1372,10 @@ class AIForegroundService : Service() {
                         updateKeepAliveOverlayVisibility()
                         if (enabled) {
                             refreshServiceNotification()
-                        } else {
+                        } else if (initialized) {
                             stopSelfIfIdle(ignoreAppForeground = true)
                         }
+                        initialized = true
                     }
             } catch (e: Exception) {
                 AppLogger.e(TAG, "监听后台保活设置失败: ${e.message}", e)
@@ -1789,6 +1793,7 @@ class AIForegroundService : Service() {
 
         externalHttpMonitorJob =
             serviceScope.launch {
+                var initialized = false
                 combine(
                     externalHttpPreferences.enabledFlow,
                     externalHttpPreferences.portFlow
@@ -1802,8 +1807,11 @@ class AIForegroundService : Service() {
                         )
                     } else {
                         stopExternalHttpServer(portOverride = port, lastError = null)
-                        stopSelfIfIdle(ignoreAppForeground = true)
+                        if (initialized) {
+                            stopSelfIfIdle(ignoreAppForeground = true)
+                        }
                     }
+                    initialized = true
                 }
             }
     }
