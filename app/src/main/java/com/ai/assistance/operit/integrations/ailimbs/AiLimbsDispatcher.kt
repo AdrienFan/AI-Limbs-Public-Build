@@ -12,6 +12,7 @@ import com.ai.assistance.operit.data.model.ToolInvocation
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatManagedTurnReplyRequiredException
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatRequest
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
@@ -26,29 +27,32 @@ import org.json.JSONObject
 
 class AiLimbsDispatcher(
     context: Context,
-    private val accessGate: AiLimbsAccessGate? = null
+    private val policyEngine: AiLimbsExecutionPolicyEngine
 ) {
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
     private val documents = AiLimbsDocumentProvider(appContext)
     private val accessContext = AiLimbsAccessContextService(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
-    private val capabilityResolver = AiLimbsCapabilityResolver(appContext)
+    private val capabilityResolver = AiLimbsCapabilityResolver(appContext, policyEngine)
+    private val storageIndex = AiLimbsStorageIndex(appContext)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val gson = Gson()
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject {
-        accessGate?.rejectionBefore(tool)?.let { return it }
-        val result = executeUngated(tool, args)
-        accessGate?.recordSuccessfulRead(tool, result)
-        return result
-    }
-
-    private suspend fun executeUngated(tool: String, args: JSONObject): JSONObject {
-        val registration =
-            AiLimbsCoreCapabilityRegistry.registrationForInvokeName(tool)
-                ?: return error("Unknown AI Limbs tool: $tool")
-        return executeRegisteredRoute(registration, args)
+        val invocation =
+            runCatching { policyEngine.normalize(tool, args) }
+                .getOrElse { failure ->
+                    return error(failure.message ?: "Unknown AI Limbs capability")
+                        .put("error_code", "UNKNOWN_CAPABILITY")
+                }
+        val decision = policyEngine.evaluate(invocation)
+        if (!decision.proceed) {
+            return policyEngine.rejectionJson(invocation, decision)
+        }
+        val result = executeRegisteredRoute(invocation.registration, args)
+        policyEngine.recordSuccessfulExecution(invocation, result)
+        return result.put("execution_policy", decision.inspection.toJson())
     }
 
     private suspend fun executeRegisteredRoute(
@@ -76,6 +80,8 @@ class AiLimbsDispatcher(
             AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ ->
                 ok()
                     .put("document", "access_bootstrap")
+                    .put("version", AiLimbsSystemAccessPrompt.version)
+                    .put("policy_version", AiLimbsExecutionPolicyDescriptor.policyVersion)
                     .put("content", accessContext.readAccessContext())
             AiLimbsCoreLocalOperation.CAPABILITY_SEARCH ->
                 capabilityResolver.search(
@@ -99,6 +105,22 @@ class AiLimbsDispatcher(
                 ok().put("tools", names).put("count", names.length())
             }
             AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE -> executeHostTool(args)
+            AiLimbsCoreLocalOperation.POLICY_DESCRIBE -> policyEngine.describePolicy()
+            AiLimbsCoreLocalOperation.POLICY_SESSION_RESET ->
+                policyEngine.resetSessionReceipts()
+            AiLimbsCoreLocalOperation.STORAGE_SEARCH ->
+                storageIndex.search(
+                    query = args.optString("query"),
+                    projectId = args.optString("project_id").ifBlank { null },
+                    requestedLimit = args.optInt("limit", 20)
+                )
+            AiLimbsCoreLocalOperation.STORAGE_DESCRIBE ->
+                storageIndex.describe(args.optString("artifact_id"))
+            AiLimbsCoreLocalOperation.STORAGE_PROJECT_FILES ->
+                storageIndex.projectFiles(
+                    projectId = args.optString("project_id"),
+                    logicalOwner = args.optString("logical_owner").ifBlank { null }
+                )
         }
 
     private suspend fun executeManagedDocumentRead(documentId: AiLimbsDocumentId): JSONObject =
@@ -120,11 +142,15 @@ class AiLimbsDispatcher(
                     .put("empty", reference.isEmpty)
                     .put("content", documents.readCustomAccessPrompt())
             }
-            AiLimbsDocumentId.WORK_MANUAL ->
+            AiLimbsDocumentId.WORK_MANUAL -> {
+                val reference = documents.documentReference(documentId)
                 ok()
-                    .put("document", documentId.stableId)
+                    .put("document", reference.documentId)
+                    .put("version", reference.version)
+                    .put("path", reference.path)
                     .put("content", documents.readWorkManualForAgent())
                     .put("editable_content", documents.readWorkManual())
+            }
         }
 
     private suspend fun executeManagedDocumentWrite(
@@ -132,15 +158,9 @@ class AiLimbsDispatcher(
         args: JSONObject
     ): JSONObject =
         when (documentId) {
-            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> {
-                val changed = documents.writeSystemAccessPrompt(args.optString("content"))
-                val reference = documents.documentReference(documentId)
-                ok()
-                    .put("document", reference.documentId)
-                    .put("version", reference.version)
-                    .put("path", reference.path)
-                    .put("changed", changed)
-            }
+            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT ->
+                error("AI Limbs system access prompt is immutable code")
+                    .put("error_code", "IMMUTABLE_SYSTEM_ACCESS_PROMPT")
             AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> {
                 val changed = documents.writeCustomAccessPrompt(args.optString("content"))
                 val reference = documents.documentReference(documentId)
@@ -153,7 +173,12 @@ class AiLimbsDispatcher(
             }
             AiLimbsDocumentId.WORK_MANUAL -> {
                 val changed = documents.writeWorkManual(args.optString("content"))
-                ok().put("document", documentId.stableId).put("changed", changed)
+                val reference = documents.documentReference(documentId)
+                ok()
+                    .put("document", reference.documentId)
+                    .put("version", reference.version)
+                    .put("path", reference.path)
+                    .put("changed", changed)
             }
         }
 
@@ -172,6 +197,7 @@ class AiLimbsDispatcher(
             AiLimbsLanerChatOperation.TURN_STATUS -> lanerChatTurnStatus(args)
             AiLimbsLanerChatOperation.TURN_CLAIM -> lanerChatTurnClaim(args)
             AiLimbsLanerChatOperation.TURN_REPLY -> lanerChatTurnReply(args)
+            AiLimbsLanerChatOperation.TURN_RESOLVE -> lanerChatTurnResolve(args)
             AiLimbsLanerChatOperation.TURN_CANCEL -> lanerChatTurnCancel(args)
             AiLimbsLanerChatOperation.TURN_RESUME -> lanerChatTurnResume(args)
             AiLimbsLanerChatOperation.LEGACY_REPLY -> lanerChatReply(args)
@@ -181,26 +207,57 @@ class AiLimbsDispatcher(
     private suspend fun executeHostTool(args: JSONObject): JSONObject {
         val name = args.optString("name").trim()
         if (name.isBlank()) return error("Missing host tool name")
-        val paramsObject = args.optJSONObject("parameters") ?: JSONObject()
+        val parameters = args.optJSONObject("parameters") ?: JSONObject()
+        val operation: suspend () -> JSONObject = {
+            executeHostToolNow(name, parameters)
+        }
+        return if (storageIndex.isPersistentHostTool(name)) {
+            storageIndex.executePersistentHostOperation(
+                hostToolName = name,
+                parameters = parameters,
+                source =
+                    policyEngine.session.transport.wireValue +
+                        ":" +
+                        policyEngine.session.scopeId,
+                operation = operation
+            )
+        } else {
+            operation()
+        }
+    }
+
+    private suspend fun executeHostToolNow(
+        name: String,
+        parameters: JSONObject
+    ): JSONObject {
         val params = mutableListOf<ToolParameter>()
-        val keys = paramsObject.keys()
+        val keys = parameters.keys()
         while (keys.hasNext()) {
             val key = keys.next()
-            params += ToolParameter(key, paramsObject.opt(key)?.toString() ?: "")
+            params += ToolParameter(key, parameters.opt(key)?.toString() ?: "")
         }
         val aiTool = AITool(name = name, parameters = params)
-        val invocation = ToolInvocation(aiTool, rawText = "<ai-limbs-direct-tool/>", responseLocation = 0..0)
+        val invocation =
+            ToolInvocation(
+                aiTool,
+                rawText = "<ai-limbs-direct-tool/>",
+                responseLocation = 0..0
+            )
         val emitted = mutableListOf<String>()
-        val results = ToolExecutionManager.executeInvocations(
-            invocations = listOf(invocation),
-            context = appContext,
-            toolHandler = handler,
-            packageManager = handler.getOrCreatePackageManager(),
-            callerName = "AI Limbs Bridge",
-            collector = object : StreamCollector<String> {
-                override suspend fun emit(value: String) { emitted += value }
-            }
-        )
+        val results =
+            ToolExecutionManager.executeInvocations(
+                invocations = listOf(invocation),
+                context = appContext,
+                toolHandler = handler,
+                packageManager = handler.getOrCreatePackageManager(),
+                callerName = "AI Limbs Bridge",
+                collector =
+                    object : StreamCollector<String> {
+                        override suspend fun emit(value: String) {
+                            emitted += value
+                        }
+                    }
+            )
         val result = results.firstOrNull() ?: return error("Host tool returned no result")
         return JSONObject()
             .put("success", result.success)
@@ -247,6 +304,8 @@ class AiLimbsDispatcher(
                         "AI Limbs Core",
                         "AI Limbs Capability Resolver",
                         "AI Limbs Tool Dispatcher",
+                        "AI Limbs Execution Policy Engine",
+                        "AI Limbs Storage Index",
                         "AI Limbs Ubuntu Runtime",
                         "AI Limbs Laner Chat Bridge"
                     )
@@ -256,8 +315,14 @@ class AiLimbsDispatcher(
     private fun dispatcherStatus(): JSONObject =
         ok()
             .put("module", "AI Limbs Tool Dispatcher")
-            .put("route", "AiLimbsDispatcher -> ToolExecutionManager -> AIToolHandler")
-            .put("permission_enforcement", "ToolPermissionSystem ALLOW / ASK / FORBID")
+            .put(
+                "route",
+                "Transport -> AiLimbsExecutionPolicyEngine -> AiLimbsDispatcher -> domain service"
+            )
+            .put("permission_enforcement", "Unified ALLOW / ASK / FORBID policy")
+            .put("policy_version", AiLimbsExecutionPolicyDescriptor.policyVersion)
+            .put("session_scope", policyEngine.session.scopeId)
+            .put("transport", policyEngine.session.transport.wireValue)
             .put("transport_neutral", true)
 
     private fun sharedUbuntuStatus(): JSONObject {
@@ -290,7 +355,7 @@ class AiLimbsDispatcher(
         val agentOnline = agentPresence != LanerChatPresenceState.WAITING
         return ok()
             .put("module", "AI Limbs Laner Chat Bridge")
-            .put("protocol_version", 5)
+            .put("protocol_version", 6)
             .put("provider_type_id", LanerChatContract.PROVIDER_TYPE_ID)
             .put("bridge_provider", bridge.providerId)
             .put("bridge_phase", bridge.phase.name)
@@ -301,8 +366,10 @@ class AiLimbsDispatcher(
             .put("last_agent_seen_at", isoTime(mailbox.lastAgentSeenAtMs))
             .put("latest_seq", mailbox.latestSeq)
             .put("unread_count", mailbox.pendingCount)
+            .put("attention_count", mailbox.unresolvedCount)
             .put("pending_reply_count", mailbox.unresolvedCount)
             .put("answered_count", mailbox.answeredCount)
+            .put("resolved_no_reply_count", mailbox.resolvedNoReplyCount)
             .put("canceled_count", mailbox.canceledCount)
             .put("proactive_pending_count", mailbox.proactivePendingCount)
             .put("proactive_delivered_count", mailbox.proactiveDeliveredCount)
@@ -315,6 +382,7 @@ class AiLimbsDispatcher(
             .put("supports_priority", true)
             .put("supports_turn_scheduler", true)
             .put("supports_batch_claim", true)
+            .put("supports_no_reply_resolution", true)
             .put("notification_contains_body", false)
     }
 
@@ -416,6 +484,10 @@ class AiLimbsDispatcher(
             .put("turn", lanerChatTurnJson(claimed.turn))
             .put("messages", JSONArray(claimed.requests.map(::lanerChatRequestJson)))
             .put("count", claimed.requests.size)
+            .put(
+                "terminal_actions",
+                JSONArray(listOf("ai_limbs.chat.turn.reply", "ai_limbs.chat.turn.resolve"))
+            )
             .put("contains_body", true)
     }
 
@@ -450,6 +522,18 @@ class AiLimbsDispatcher(
             .put("duplicate", replied.duplicate)
             .put("delivered_to_chat", true)
             .put("completed_at", isoTime(replied.turn.completedAtMs))
+    }
+
+    private fun lanerChatTurnResolve(args: JSONObject): JSONObject {
+        val resolved = lanerChat.resolveTurnWithoutReply(args.optString("turn_id"))
+        return ok()
+            .put("turn_id", resolved.turn.turnId)
+            .put("status", resolved.turn.status.name)
+            .put("covered_request_ids", JSONArray(resolved.turn.requestIds))
+            .put("covered_request_count", resolved.turn.requestIds.size)
+            .put("duplicate", resolved.duplicate)
+            .put("delivered_to_chat", false)
+            .put("completed_at", isoTime(resolved.turn.completedAtMs))
     }
 
     private fun lanerChatTurnCancel(args: JSONObject): JSONObject {
@@ -500,7 +584,10 @@ class AiLimbsDispatcher(
         val attachmentId = args.optString("attachment_id").trim()
         val attachment = lanerChat.attachment(requestId, attachmentId)
         val isImage = attachment.mimeType.startsWith("image/", ignoreCase = true)
-        val readResult = executeHostTool(
+        val readResult = execute(
+            AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
+                AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
+            ),
             JSONObject()
                 .put("name", "read_file_full")
                 .put("parameters", JSONObject()
@@ -524,11 +611,18 @@ class AiLimbsDispatcher(
 
     private fun lanerChatReply(args: JSONObject): JSONObject {
         val replied =
-            lanerChat.reply(
-                requestId = args.optString("request_id"),
-                replyId = args.optString("reply_id").ifBlank { null },
-                content = args.optString("content")
-            )
+            try {
+                lanerChat.reply(
+                    requestId = args.optString("request_id"),
+                    replyId = args.optString("reply_id").ifBlank { null },
+                    content = args.optString("content")
+                )
+            } catch (failure: LanerChatManagedTurnReplyRequiredException) {
+                return error(failure.message ?: "Managed turn reply is required")
+                    .put("error_code", "TURN_REPLY_REQUIRED")
+                    .put("reply_via", "ai_limbs.chat.turn.reply")
+                    .put("resolve_via", "ai_limbs.chat.turn.resolve")
+            }
         return ok()
             .put("request_id", replied.request.requestId)
             .put("reply_id", replied.request.replyId)

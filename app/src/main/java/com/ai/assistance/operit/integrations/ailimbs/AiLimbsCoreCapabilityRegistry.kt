@@ -68,6 +68,28 @@ object AiLimbsCoreCapabilityRegistry {
                     )
         ),
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.POLICY_DESCRIBE),
+            capabilityId = "ai_limbs.policy.describe",
+            catalogEntry =
+                entry(
+                    name = "ai_limbs.policy.describe",
+                    displayName = "AI Limbs 统一执行政策",
+                    description = "Read the generated, transport-neutral AI Limbs execution policy and Chinese explanation.",
+                    keywords = listOf("执行政策", "policy engine", "ALLOW", "ASK", "FORBID")
+                )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.POLICY_SESSION_RESET),
+            capabilityId = "ai_limbs.policy.session.reset",
+            catalogEntry =
+                entry(
+                    name = "ai_limbs.policy.session.reset",
+                    displayName = "重置 AI Limbs 上下文收据",
+                    description = "Clear managed-document receipts only at an explicit model-context boundary.",
+                    keywords = listOf("上下文边界", "session receipt", "context reset")
+                )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ),
             catalogEntry =
             entry(
@@ -85,17 +107,6 @@ object AiLimbsCoreCapabilityRegistry {
                         displayName = "读取系统接入提示",
                         description = "Read the current official AI Limbs system access prompt, including its content version and managed document path.",
                         keywords = listOf("系统接入提示", "system access prompt", "system prompt", "managed document")
-                    )
-        ),
-        registration(
-            route = AiLimbsCoreRoute.ManagedDocumentWrite(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT),
-            catalogEntry =
-            entry(
-                        name = "ai_limbs.system_access_prompt.write",
-                        displayName = "保存系统接入提示",
-                        description = "Save the official AI Limbs system access prompt through the managed-document history path.",
-                        parameters = listOf(ToolParameterSchema("content", "string", "Complete non-empty system access prompt body", true)),
-                        keywords = listOf("系统接入提示", "system access prompt", "保存系统提示")
                     )
         ),
         registration(
@@ -137,6 +148,48 @@ object AiLimbsCoreCapabilityRegistry {
                         "Save the editable body of the protected AI Limbs work manual.",
                         listOf(ToolParameterSchema("content", "string", "Complete editable manual body", true))
                     )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.STORAGE_SEARCH),
+            catalogEntry =
+                entry(
+                    name = "ai_limbs.storage.search",
+                    displayName = "搜索 AI Limbs 持久产物",
+                    description = "Search the durable artifact index by owner, project, purpose, source, or canonical path.",
+                    parameters = listOf(
+                        ToolParameterSchema("query", "string", "Optional text query", false),
+                        ToolParameterSchema("project_id", "string", "Optional exact project filter", false),
+                        ToolParameterSchema("limit", "integer", "Maximum results from 1 to 100", false, "20")
+                    ),
+                    keywords = listOf("持久产物", "文件归属", "恢复索引", "storage search")
+                )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.STORAGE_DESCRIBE),
+            catalogEntry =
+                entry(
+                    name = "ai_limbs.storage.describe",
+                    displayName = "读取 AI Limbs 产物归属",
+                    description = "Describe one durable artifact by its stable artifact_id.",
+                    parameters = listOf(
+                        ToolParameterSchema("artifact_id", "string", "Stable artifact identifier", true)
+                    ),
+                    keywords = listOf("artifact id", "文件地址", "logical owner")
+                )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.STORAGE_PROJECT_FILES),
+            catalogEntry =
+                entry(
+                    name = "ai_limbs.storage.project.files",
+                    displayName = "列出项目持久文件",
+                    description = "List canonical durable files owned by one project, optionally filtered by logical owner.",
+                    parameters = listOf(
+                        ToolParameterSchema("project_id", "string", "Stable project identifier", true),
+                        ToolParameterSchema("logical_owner", "string", "Optional exact logical owner", false)
+                    ),
+                    keywords = listOf("项目文件", "canonical path", "恢复", "project files")
+                )
         ),
         registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.UI_STATUS),
@@ -390,6 +443,20 @@ object AiLimbsCoreCapabilityRegistry {
                     )
         ),
         registration(
+            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_RESOLVE),
+            catalogEntry =
+            lanerChatEntry(
+                        name = "ai_limbs.chat.turn.resolve",
+                        displayName = "无需回复地完成 Laner Chat Assistant Turn",
+                        description =
+                            "Complete one active Assistant Turn without sending a user-visible reply. All covered requests become resolved-no-reply and leave the unresolved attention set.",
+                        parameters = listOf(
+                            ToolParameterSchema("turn_id", "string", "Active Assistant Turn ID returned by turn.claim", true)
+                        ),
+                        keywords = listOf("Laner Chat", "Assistant Turn", "resolve", "no reply", "无需回复", "处理完成")
+                    )
+        ),
+        registration(
             route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_CANCEL),
             catalogEntry =
             lanerChatEntry(
@@ -424,7 +491,7 @@ object AiLimbsCoreCapabilityRegistry {
                         name = "ai_limbs.chat.reply",
                         displayName = "回复兰儿聊天消息",
                         description =
-                            "Legacy single-request reply compatibility path. Protocol v5 Assistant Turn clients should use ai_limbs.chat.turn.reply.",
+                            "Legacy single-request reply compatibility path. Assistant Turn clients should use ai_limbs.chat.turn.reply or ai_limbs.chat.turn.resolve.",
                         parameters = listOf(
                             ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
                             ToolParameterSchema(

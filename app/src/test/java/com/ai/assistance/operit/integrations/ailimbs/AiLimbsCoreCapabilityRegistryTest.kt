@@ -39,19 +39,15 @@ class AiLimbsCoreCapabilityRegistryTest {
                 (it.route as? AiLimbsCoreRoute.ManagedDocumentWrite)?.documentId == documentId
             }
             assertEquals(1, reads.size)
-            assertEquals(1, writes.size)
+            val expectedWriteCount =
+                if (documentId == AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT) 0 else 1
+            assertEquals(expectedWriteCount, writes.size)
 
             val read = reads.single()
-            val write = writes.single()
             assertEquals(
                 read.catalogEntry.targetToolName,
                 AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write = false)
             )
-            assertEquals(
-                write.catalogEntry.targetToolName,
-                AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write = true)
-            )
-
             assertEquals(
                 buildSet {
                     add(read.catalogEntry.targetToolName)
@@ -59,13 +55,20 @@ class AiLimbsCoreCapabilityRegistryTest {
                 },
                 AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(documentId, write = false)
             )
-            assertEquals(
-                buildSet {
-                    add(write.catalogEntry.targetToolName)
-                    addAll(write.invokeAliases)
-                },
-                AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(documentId, write = true)
-            )
+
+            writes.singleOrNull()?.let { write ->
+                assertEquals(
+                    write.catalogEntry.targetToolName,
+                    AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write = true)
+                )
+                assertEquals(
+                    buildSet {
+                        add(write.catalogEntry.targetToolName)
+                        addAll(write.invokeAliases)
+                    },
+                    AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(documentId, write = true)
+                )
+            }
         }
     }
 
@@ -113,6 +116,39 @@ class AiLimbsCoreCapabilityRegistryTest {
                 }
                 AiLimbsCoreProvider.CORE -> Unit
             }
+        }
+    }
+
+    @Test
+    fun lanerChatNoReplyResolveIsRegistered() {
+        val registration =
+            AiLimbsCoreCapabilityRegistry.registrationForInvokeName("ai_limbs.chat.turn.resolve")
+        assertTrue(registration != null)
+        assertEquals(
+            AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_RESOLVE),
+            registration?.route
+        )
+    }
+
+    @Test
+    fun immutableSystemPromptAndPolicyCapabilitiesAreRegisteredCorrectly() {
+        assertEquals(
+            null,
+            AiLimbsCoreCapabilityRegistry.registrationForInvokeName(
+                "ai_limbs.system_access_prompt.write"
+            )
+        )
+        listOf(
+            "ai_limbs.policy.describe",
+            "ai_limbs.policy.session.reset",
+            "ai_limbs.storage.search",
+            "ai_limbs.storage.describe",
+            "ai_limbs.storage.project.files"
+        ).forEach { name ->
+            assertTrue(
+                "Expected registered capability: $name",
+                AiLimbsCoreCapabilityRegistry.registrationForInvokeName(name) != null
+            )
         }
     }
 

@@ -21,6 +21,12 @@ import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 
 /** Durable application-internal mailbox used by the Laner chat processing plugin and RDC tools. */
+internal class LanerChatManagedTurnReplyRequiredException :
+    IllegalStateException(
+        "Laner chat request belongs to an active managed turn; use " +
+            "ai_limbs.chat.turn.reply or ai_limbs.chat.turn.resolve"
+    )
+
 class LanerChatBridgeService private constructor(context: Context) {
     private val preferences =
         context.applicationContext.getSharedPreferences(PREFERENCES_NAME, Context.MODE_PRIVATE)
@@ -299,13 +305,14 @@ class LanerChatBridgeService private constructor(context: Context) {
         buildNotificationLocked(afterSeq, sessionId)
 
     /**
-     * Sticky work-time notification metadata for message bodies the agent has not read yet.
-     * PENDING is the durable unread state; inbox.fetch / turn.claim move requests to DELIVERED.
+     * Sticky work-time attention metadata for user messages that still need an explicit decision.
+     * Reading or claiming moves PENDING to DELIVERED, but DELIVERED remains attention-worthy until
+     * the agent replies, explicitly resolves without reply, or the request is canceled.
      */
     @Synchronized
     fun workNotificationSnapshot(sessionId: String? = null): LanerChatNotification {
         val matching = storedState.requests.filter { request ->
-            request.status == LanerChatMessageStatus.PENDING &&
+            request.status.requiresAttention() &&
                 (sessionId == null || request.sessionId == sessionId)
         }
         val highCount = matching.count { it.priority == LanerChatPriority.HIGH }
@@ -313,7 +320,7 @@ class LanerChatBridgeService private constructor(context: Context) {
         val lowCount = matching.count { it.priority == LanerChatPriority.LOW }
         return LanerChatNotification(
             event = if (matching.isEmpty()) EVENT_IDLE else EVENT_NEW_MESSAGE,
-            unreadCount = matching.size,
+            unreadCount = matching.count { it.status == LanerChatMessageStatus.PENDING },
             pendingReplyCount = matching.size,
             latestSeq = storedState.lastSeq,
             highestPriority = highestPriority(matching),
@@ -595,6 +602,47 @@ class LanerChatBridgeService private constructor(context: Context) {
     }
 
     @Synchronized
+    fun resolveTurnWithoutReply(turnId: String): LanerChatTurnResolveResult {
+        val normalizedTurnId = turnId.trim()
+        require(normalizedTurnId.isNotEmpty()) { "turn_id is required" }
+        val index = storedState.assistantTurns.indexOfFirst { it.turnId == normalizedTurnId }
+        require(index >= 0) { "Laner chat turn not found: $normalizedTurnId" }
+        val existing = storedState.assistantTurns[index]
+        if (existing.status == LanerChatAssistantTurnStatus.COMPLETED_NO_REPLY) {
+            val requests = existing.requestIds.mapNotNull { id ->
+                storedState.requests.firstOrNull { it.requestId == id }
+            }
+            return LanerChatTurnResolveResult(existing, requests, duplicate = true)
+        }
+        check(existing.status == LanerChatAssistantTurnStatus.ACTIVE) {
+            "Laner chat turn is not active: ${existing.status}"
+        }
+        val now = System.currentTimeMillis()
+        val completed = existing.copy(
+            status = LanerChatAssistantTurnStatus.COMPLETED_NO_REPLY,
+            completedAtMs = now
+        )
+        val requestIds = existing.requestIds.toSet()
+        val requests = storedState.requests.map { request ->
+            if (request.requestId in requestIds) {
+                request.copy(
+                    status = LanerChatMessageStatus.RESOLVED_NO_REPLY,
+                    resolvedAtMs = now
+                )
+            } else request
+        }
+        val turns = storedState.assistantTurns.toMutableList().also { it[index] = completed }
+        commitState(storedState.copy(requests = requests, assistantTurns = turns))
+        emitQueueChangedLocked(existing.sessionId, "turn_resolved_no_reply")
+        val requestsById = storedState.requests.associateBy { it.requestId }
+        return LanerChatTurnResolveResult(
+            completed,
+            completed.requestIds.mapNotNull(requestsById::get),
+            duplicate = false
+        )
+    }
+
+    @Synchronized
     fun cancelActiveTurn(requestedSessionId: String? = null): LanerChatTurnCancelResult {
         val sessionId = requestedSessionId?.trim()?.takeIf { it.isNotEmpty() } ?: storedState.activeSessionId
         val index = storedState.assistantTurns.indexOfLast {
@@ -655,6 +703,14 @@ class LanerChatBridgeService private constructor(context: Context) {
         require(normalizedContent.isNotEmpty()) { "reply content is required" }
         val index = storedState.requests.indexOfFirst { it.requestId == normalizedRequestId }
         require(index >= 0) { "Laner chat request not found: $normalizedRequestId" }
+        if (
+            storedState.assistantTurns.any { turn ->
+                turn.status == LanerChatAssistantTurnStatus.ACTIVE &&
+                    normalizedRequestId in turn.requestIds
+            }
+        ) {
+            throw LanerChatManagedTurnReplyRequiredException()
+        }
         val existing = storedState.requests[index]
         touchAgentLocked(existing.sessionId)
         val normalizedReplyId =
@@ -667,6 +723,9 @@ class LanerChatBridgeService private constructor(context: Context) {
         }
         check(existing.status != LanerChatMessageStatus.CANCELED) {
             "Laner chat request was canceled: $normalizedRequestId"
+        }
+        check(existing.status != LanerChatMessageStatus.RESOLVED_NO_REPLY) {
+            "Laner chat request was resolved without reply: $normalizedRequestId"
         }
         val answered = existing.copy(
             status = LanerChatMessageStatus.ANSWERED,
@@ -801,6 +860,8 @@ class LanerChatBridgeService private constructor(context: Context) {
             pendingCount = state.requests.count { it.status == LanerChatMessageStatus.PENDING },
             deliveredCount = state.requests.count { it.status == LanerChatMessageStatus.DELIVERED },
             answeredCount = state.requests.count { it.status == LanerChatMessageStatus.ANSWERED },
+            resolvedNoReplyCount =
+                state.requests.count { it.status == LanerChatMessageStatus.RESOLVED_NO_REPLY },
             canceledCount = state.requests.count { it.status == LanerChatMessageStatus.CANCELED },
             proactivePendingCount =
                 state.proactiveMessages.count {
@@ -860,8 +921,7 @@ class LanerChatBridgeService private constructor(context: Context) {
         queueEventsFlow.tryEmit(buildQueueChangedEventLocked(sessionId, reason))
     }
 
-    private fun LanerChatRequest.isUnresolved(): Boolean =
-        status == LanerChatMessageStatus.PENDING || status == LanerChatMessageStatus.DELIVERED
+    private fun LanerChatRequest.isUnresolved(): Boolean = status.requiresAttention()
 
     companion object {
         const val EVENT_NEW_MESSAGE = "new_message"

@@ -3,35 +3,35 @@ package com.ai.assistance.operit.integrations.ailimbs
 import android.content.Context
 import org.json.JSONObject
 
+internal data class AiLimbsMissingReceipt(
+    val receipt: AiLimbsRequiredReceipt,
+    val reference: AiLimbsDocumentReference,
+    val readTool: String
+)
+
 /**
- * Connection-scoped protocol gate for AI Limbs capabilities.
+ * Receipt ledger owned by one explicit AI Limbs execution session.
  *
- * A prompt receipt is valid only for the exact managed-document version that was read.
- * New bridge sessions reset all receipts, and document version changes invalidate them
- * automatically on the next capability call.
+ * The execution policy engine is the only component that turns a missing receipt into a decision.
+ * Realtime transport reconnects do not reset this ledger; an actual model-context boundary calls
+ * ai_limbs.policy.session.reset.
  */
 class AiLimbsAccessGate(context: Context) {
     private val documents = AiLimbsDocumentProvider(context.applicationContext)
     private val stateLock = Any()
 
-    private var systemPromptReceiptVersion: String? = null
     private var customPromptReceiptVersion: String? = null
-    private val systemPromptReadTools =
-        AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(
-            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
-            write = false
-        )
+    private var workManualReceiptVersion: String? = null
+
     private val customPromptReadTools =
         AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(
             AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
             write = false
         )
-    private val systemPromptCanonicalReadTool =
-        checkNotNull(
-            AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(
-                AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
-                write = false
-            )
+    private val workManualReadTools =
+        AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(
+            AiLimbsDocumentId.WORK_MANUAL,
+            write = false
         )
     private val customPromptCanonicalReadTool =
         checkNotNull(
@@ -40,106 +40,67 @@ class AiLimbsAccessGate(context: Context) {
                 write = false
             )
         )
+    private val workManualCanonicalReadTool =
+        checkNotNull(
+            AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(
+                AiLimbsDocumentId.WORK_MANUAL,
+                write = false
+            )
+        )
 
-    fun resetForNewSession() {
+    fun resetForContextBoundary() {
         synchronized(stateLock) {
-            systemPromptReceiptVersion = null
             customPromptReceiptVersion = null
+            workManualReceiptVersion = null
         }
     }
 
-    suspend fun rejectionBefore(tool: String): JSONObject? {
-        val systemReference =
-            documents.documentReference(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
-        val customReference =
-            documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
-
-        if (tool in systemPromptReadTools) return null
-
-        val systemReady = synchronized(stateLock) {
-            systemPromptReceiptVersion == systemReference.version
-        }
-        if (!systemReady) {
-            return requiredPromptError(
-                code = SYSTEM_PROMPT_REQUIRED,
-                state = "bootstrap_pending",
-                reference = systemReference,
-                readTool = systemPromptCanonicalReadTool,
-                customReference = customReference
-            )
+    suspend fun firstMissing(
+        requiredReceipts: Set<AiLimbsRequiredReceipt>
+    ): AiLimbsMissingReceipt? {
+        if (AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT in requiredReceipts) {
+            val reference = documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
+            val ready =
+                reference.isEmpty ||
+                    synchronized(stateLock) {
+                        customPromptReceiptVersion == reference.version
+                    }
+            if (!ready) {
+                return AiLimbsMissingReceipt(
+                    receipt = AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT,
+                    reference = reference,
+                    readTool = customPromptCanonicalReadTool
+                )
+            }
         }
 
-        if (tool in customPromptReadTools) return null
-        if (customReference.isEmpty) return null
-
-        val customReady = synchronized(stateLock) {
-            customPromptReceiptVersion == customReference.version
-        }
-        if (!customReady) {
-            return requiredPromptError(
-                code = CUSTOM_PROMPT_REQUIRED,
-                state = "custom_prompt_pending",
-                reference = customReference,
-                readTool = customPromptCanonicalReadTool,
-                customReference = customReference
-            )
+        if (AiLimbsRequiredReceipt.WORK_MANUAL in requiredReceipts) {
+            val reference = documents.documentReference(AiLimbsDocumentId.WORK_MANUAL)
+            val ready =
+                synchronized(stateLock) {
+                    workManualReceiptVersion == reference.version
+                }
+            if (!ready) {
+                return AiLimbsMissingReceipt(
+                    receipt = AiLimbsRequiredReceipt.WORK_MANUAL,
+                    reference = reference,
+                    readTool = workManualCanonicalReadTool
+                )
+            }
         }
         return null
     }
 
-    fun recordSuccessfulRead(tool: String, result: JSONObject) {
+    fun recordSuccessfulRead(invocation: AiLimbsNormalizedInvocation, result: JSONObject) {
         if (!result.optBoolean("success", false)) return
         val version = result.optString("version").trim()
         if (version.isBlank()) return
 
         synchronized(stateLock) {
-            if (tool in systemPromptReadTools) {
-                systemPromptReceiptVersion = version
-                customPromptReceiptVersion = null
-            } else if (tool in customPromptReadTools) {
-                customPromptReceiptVersion = version
+            when (invocation.canonicalName) {
+                in customPromptReadTools -> customPromptReceiptVersion = version
+                in workManualReadTools -> workManualReceiptVersion = version
             }
         }
-    }
-
-    private fun requiredPromptError(
-        code: String,
-        state: String,
-        reference: AiLimbsDocumentReference,
-        readTool: String,
-        customReference: AiLimbsDocumentReference
-    ): JSONObject =
-        JSONObject()
-            .put("success", false)
-            .put("error_code", code)
-            .put("gate_state", state)
-            .put("required_document", reference.documentId)
-            .put("required_version", reference.version)
-            .put("required_path", reference.path)
-            .put(
-                "required_read",
-                JSONObject()
-                    .put("name", readTool)
-                    .put("parameters", JSONObject())
-            )
-            .put(
-                "current_versions",
-                JSONObject()
-                    .put("system", if (code == SYSTEM_PROMPT_REQUIRED) reference.version else JSONObject.NULL)
-                    .put("custom", customReference.version)
-                    .put("custom_empty", customReference.isEmpty)
-            )
-            .put(
-                "error",
-                if (code == SYSTEM_PROMPT_REQUIRED) {
-                    "Read the current AI Limbs system access prompt before using other AI Limbs capabilities."
-                } else {
-                    "Read the current non-empty AI Limbs custom access prompt before using other AI Limbs capabilities."
-                }
-            )
-
-    companion object {
-        const val SYSTEM_PROMPT_REQUIRED = "SYSTEM_ACCESS_PROMPT_REQUIRED"
-        const val CUSTOM_PROMPT_REQUIRED = "CUSTOM_ACCESS_PROMPT_REQUIRED"
     }
 }

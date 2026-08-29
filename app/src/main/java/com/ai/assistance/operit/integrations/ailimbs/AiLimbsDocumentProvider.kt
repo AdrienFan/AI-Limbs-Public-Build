@@ -71,7 +71,7 @@ class AiLimbsDocumentProvider(context: Context) {
         get() = documentFile(AiLimbsDocumentId.WORK_MANUAL).absolutePath
 
     suspend fun readSystemAccessPrompt(): String =
-        readEditableDocument(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
+        AiLimbsSystemAccessPrompt.content
 
     suspend fun readCustomAccessPrompt(): String =
         readEditableDocument(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
@@ -82,23 +82,8 @@ class AiLimbsDocumentProvider(context: Context) {
     suspend fun readWorkManual(): String =
         readEditableDocument(AiLimbsDocumentId.WORK_MANUAL)
 
-    suspend fun readWorkManualForAgent(): String {
-        val body = readWorkManual()
-        return buildString {
-            append(protectedWorkManualHeader())
-            appendLine()
-            appendLine(PROTECTED_HEADER_END_MARKER)
-            if (body.isNotBlank()) {
-                appendLine()
-                append(body)
-            }
-        }
-    }
-
-    suspend fun writeSystemAccessPrompt(content: String): Boolean {
-        require(content.isNotBlank()) { "AI Limbs system access prompt must not be empty" }
-        return writeEditableDocument(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT, content)
-    }
+    suspend fun readWorkManualForAgent(): String =
+        renderWorkManualForAgent(readWorkManual())
 
     suspend fun writeCustomAccessPrompt(content: String): Boolean =
         writeEditableDocument(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT, content)
@@ -115,28 +100,47 @@ class AiLimbsDocumentProvider(context: Context) {
     fun normalizeWorkManualImport(content: String): String =
         extractEditableWorkManualBody(content)
 
-    suspend fun readEditableDocument(documentId: AiLimbsDocumentId): String =
-        withContext(Dispatchers.IO) {
+    suspend fun readEditableDocument(documentId: AiLimbsDocumentId): String {
+        if (documentId == AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT) {
+            return AiLimbsSystemAccessPrompt.content
+        }
+        return withContext(Dispatchers.IO) {
             documentMutex.withLock {
                 ensureDocumentsReadyLocked()
                 documentFile(documentId).takeIf { it.isFile }?.readText().orEmpty()
             }
         }
+    }
 
-    suspend fun documentReference(documentId: AiLimbsDocumentId): AiLimbsDocumentReference =
-        withContext(Dispatchers.IO) {
+    suspend fun documentReference(documentId: AiLimbsDocumentId): AiLimbsDocumentReference {
+        if (documentId == AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT) {
+            return AiLimbsDocumentReference(
+                documentId = documentId.stableId,
+                path = AiLimbsSystemAccessPrompt.SOURCE_URI,
+                version = AiLimbsSystemAccessPrompt.version,
+                isEmpty = false
+            )
+        }
+        return withContext(Dispatchers.IO) {
             documentMutex.withLock {
                 ensureDocumentsReadyLocked()
                 val file = documentFile(documentId)
-                val content = file.takeIf { it.isFile }?.readText().orEmpty()
+                val body = file.takeIf { it.isFile }?.readText().orEmpty()
+                val effectiveContent =
+                    if (documentId == AiLimbsDocumentId.WORK_MANUAL) {
+                        renderWorkManualForAgent(body)
+                    } else {
+                        body
+                    }
                 AiLimbsDocumentReference(
                     documentId = documentId.stableId,
                     path = file.absolutePath,
-                    version = "sha256:${sha256(content).take(16)}",
-                    isEmpty = content.isBlank()
+                    version = "sha256:" + sha256(effectiveContent).take(16),
+                    isEmpty = effectiveContent.isBlank()
                 )
             }
         }
+    }
 
     /**
      * A changed save archives the previous active body before replacing it. The protected work
@@ -148,6 +152,9 @@ class AiLimbsDocumentProvider(context: Context) {
     ): Boolean =
         withContext(Dispatchers.IO) {
             documentMutex.withLock {
+                require(documentId != AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT) {
+                    "AI Limbs system access prompt is immutable code"
+                }
                 ensureDocumentsReadyLocked()
                 val destination = documentFile(documentId)
                 val current = destination.takeIf { it.isFile }?.readText().orEmpty()
@@ -176,6 +183,9 @@ class AiLimbsDocumentProvider(context: Context) {
     ): Boolean =
         withContext(Dispatchers.IO) {
             documentMutex.withLock {
+                require(documentId != AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT) {
+                    "AI Limbs system access prompt snapshots are read-only history"
+                }
                 ensureDocumentsReadyLocked()
                 val snapshot =
                     snapshotDirectory(documentId)
@@ -193,6 +203,17 @@ class AiLimbsDocumentProvider(context: Context) {
                 }
                 writeAtomically(destination, restoredContent)
                 true
+            }
+        }
+
+    private fun renderWorkManualForAgent(body: String): String =
+        buildString {
+            append(protectedWorkManualHeader())
+            appendLine()
+            appendLine(PROTECTED_HEADER_END_MARKER)
+            if (body.isNotBlank()) {
+                appendLine()
+                append(body)
             }
         }
 
@@ -244,16 +265,13 @@ class AiLimbsDocumentProvider(context: Context) {
     }
 
     private fun ensureDocumentFilesLocked() {
-        AiLimbsDocumentId.entries.forEach { documentId ->
+        listOf(
+            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT,
+            AiLimbsDocumentId.WORK_MANUAL
+        ).forEach { documentId ->
             val destination = documentFile(documentId)
             if (!destination.exists()) {
-                val initialContent =
-                    if (documentId == AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT) {
-                        appContext.assets.open(SYSTEM_ACCESS_PROMPT_ASSET).bufferedReader().use { it.readText() }
-                    } else {
-                        ""
-                    }
-                writeAtomically(destination, initialContent)
+                writeAtomically(destination, "")
             }
         }
     }
@@ -262,6 +280,7 @@ class AiLimbsDocumentProvider(context: Context) {
         val currentSchema = preferences.getInt(KEY_DOCUMENT_SCHEMA_VERSION, 1)
         if (currentSchema >= DOCUMENT_SCHEMA_VERSION) return
         if (currentSchema < 4) retireToolManualLocked()
+        if (currentSchema < 5) retireEditableSystemPromptLocked()
 
         val accessPrompt = documentFile(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
         if (accessPrompt.isFile) {
@@ -286,6 +305,23 @@ class AiLimbsDocumentProvider(context: Context) {
         }
 
         preferences.edit().putInt(KEY_DOCUMENT_SCHEMA_VERSION, DOCUMENT_SCHEMA_VERSION).apply()
+    }
+
+    private fun retireEditableSystemPromptLocked() {
+        val source = documentFile(AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT)
+        if (!source.isFile) return
+        ensureDirectory(legacyArchiveDirectory)
+        val destination =
+            File(
+                legacyArchiveDirectory,
+                source.nameWithoutExtension + PRE_CODE_POLICY_ARCHIVE_SUFFIX
+            )
+        if (!destination.exists()) {
+            source.copyTo(destination, overwrite = false)
+        }
+        if (!source.delete()) {
+            throw IllegalStateException("Unable to retire editable AI Limbs system prompt")
+        }
     }
 
     private fun retireToolManualLocked() {
@@ -421,13 +457,12 @@ class AiLimbsDocumentProvider(context: Context) {
         private const val LEGACY_ARCHIVE_DIRECTORY = "legacy"
         private const val PREFERENCES_NAME = "ai_limbs_documents"
         private const val KEY_DOCUMENT_SCHEMA_VERSION = "document_schema_version"
-        private const val DOCUMENT_SCHEMA_VERSION = 4
+        private const val DOCUMENT_SCHEMA_VERSION = 5
         private const val RETIRED_TOOL_MANUAL_FILE = "LANER_TOOL_MANUAL.md"
         private const val RETIRED_TOOL_MANUAL_STABLE_ID = "tool_manual"
         private const val MAX_SNAPSHOTS = 3
         private const val PRE_V054_ARCHIVE_SUFFIX = "_PRE_V054.md"
-        private const val SYSTEM_ACCESS_PROMPT_ASSET =
-            "ai_limbs/AI_LIMBS_SYSTEM_ACCESS_PROMPT.md"
+        private const val PRE_CODE_POLICY_ARCHIVE_SUFFIX = "_PRE_CODE_POLICY.md"
         private const val PROTECTED_HEADER_END_MARKER =
             "<!-- AI_LIMBS_PROTECTED_WORK_MANUAL_HEADER_END -->"
         private val documentMutex = Mutex()

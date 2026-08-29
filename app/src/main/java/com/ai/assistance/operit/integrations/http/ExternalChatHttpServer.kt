@@ -15,6 +15,9 @@ import com.ai.assistance.operit.integrations.externalchat.ExternalChatStreamEnve
 import com.ai.assistance.operit.integrations.externalchat.ExternalChatStreamingStartResult
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsAccessContextService
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.data.model.InputProcessingState
 import com.ai.assistance.operit.util.AppLogger
 import fi.iki.elonen.NanoHTTPD
@@ -25,6 +28,7 @@ import java.io.PipedInputStream
 import java.io.PipedOutputStream
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets
+import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.CancellationException
@@ -49,7 +53,16 @@ class ExternalChatHttpServer(
 
     private val appContext = context.applicationContext
     private val executor = ExternalChatRequestExecutor(appContext)
-    private val aiLimbsDispatcher = AiLimbsDispatcher(appContext)
+    private val aiLimbsPolicyEngine =
+        AiLimbsExecutionPolicyEngine(
+            appContext,
+            AiLimbsExecutionSession(
+                transport = AiLimbsExecutionTransport.EXTERNAL_HTTP,
+                scopeId = "http-" + UUID.randomUUID()
+            )
+        )
+    private val aiLimbsDispatcher =
+        AiLimbsDispatcher(appContext, aiLimbsPolicyEngine)
     private val aiLimbsAccessContext = AiLimbsAccessContextService(appContext)
     private val a2aHandler = A2aHttpHandler(appContext, serviceScope, ::requireBearerToken)
     private val webChatBridge = WebChatHttpBridge(appContext, preferences, serviceScope)
@@ -138,6 +151,8 @@ class ExternalChatHttpServer(
             .put("service", "ai-limbs")
             .put("version", "0.4")
             .put("transport", "local-http")
+            .put("execution_scope", aiLimbsPolicyEngine.session.scopeId)
+            .put("policy", aiLimbsPolicyEngine.describePolicy())
             .put("access_prompt", accessPrompt)
         return rawJsonResponse(Response.Status.OK, body).withCors()
     }

@@ -11,7 +11,12 @@ internal enum class AiLimbsCoreLocalOperation {
     SHARED_UBUNTU_STATUS,
     UI_STATUS,
     HOST_TOOLS_LIST,
-    HOST_TOOL_EXECUTE
+    HOST_TOOL_EXECUTE,
+    POLICY_DESCRIBE,
+    POLICY_SESSION_RESET,
+    STORAGE_SEARCH,
+    STORAGE_DESCRIBE,
+    STORAGE_PROJECT_FILES
 }
 
 internal enum class AiLimbsLanerChatOperation {
@@ -25,6 +30,7 @@ internal enum class AiLimbsLanerChatOperation {
     TURN_STATUS,
     TURN_CLAIM,
     TURN_REPLY,
+    TURN_RESOLVE,
     TURN_CANCEL,
     TURN_RESUME,
     LEGACY_REPLY,

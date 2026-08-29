@@ -12,6 +12,7 @@ import androidx.security.crypto.MasterKey
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatQueueChangedEvent
+import com.ai.assistance.operit.integrations.ailimbs.chat.requiresWorkAttention
 import com.ai.assistance.operit.util.AppLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
@@ -21,6 +22,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import kotlinx.coroutines.CancellationException
@@ -56,8 +58,15 @@ class AiLimbsRdcClient(
     private val scope: CoroutineScope
 ) {
     private val appContext = context.applicationContext
-    private val accessGate = AiLimbsAccessGate(appContext)
-    private val dispatcher = AiLimbsDispatcher(appContext, accessGate)
+    private val policyEngine =
+        AiLimbsExecutionPolicyEngine(
+            appContext,
+            AiLimbsExecutionSession(
+                transport = AiLimbsExecutionTransport.RDC,
+                scopeId = "rdc-" + UUID.randomUUID()
+            )
+        )
+    private val dispatcher = AiLimbsDispatcher(appContext, policyEngine)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val adapter = AiLimbsRdcToolAdapter(appContext, dispatcher)
     private val httpClient =
@@ -535,7 +544,6 @@ class AiLimbsRdcClient(
                 check(transport.sendHeartbeatAndAwaitAck(REALTIME_HEARTBEAT_ACK_TIMEOUT_MS)) {
                     "RDC Realtime heartbeat acknowledgement timed out"
                 }
-                accessGate.resetForNewSession()
                 heartbeat(info, session, broadcastCapable = true)
                 var lastHeartbeatAt = System.currentTimeMillis()
                 reconnectAttempt = 0
@@ -953,6 +961,7 @@ class AiLimbsRdcClient(
                 .put("transport_broadcast_v1", true)
                 .put("laner_chat_queue_push_v1", true)
                 .put("laner_chat_turn_protocol_v5", true)
+                .put("laner_chat_turn_protocol_v6", true)
         }
         val body = JSONObject()
             .put("status", "online")
@@ -1253,12 +1262,15 @@ class AiLimbsRdcClient(
             AppLogger.w(TAG, "Unable to build Laner Chat work notification", e)
             return result
         }
-        if (notification.unreadCount <= 0) return result
+        if (!notification.requiresWorkAttention()) return result
 
         val metadata = JSONObject()
             .put("event", notification.event)
             .put("source", "laner_chat")
-            .put("pending_count", notification.unreadCount)
+            .put("pending_count", notification.pendingReplyCount)
+            .put("attention_count", notification.pendingReplyCount)
+            .put("unread_count", notification.unreadCount)
+            .put("pending_reply_count", notification.pendingReplyCount)
             .put("highest_priority", notification.highestPriority?.name ?: "NONE")
             .put("latest_seq", notification.latestSeq)
             .put(
@@ -1273,13 +1285,13 @@ class AiLimbsRdcClient(
         val text = buildString {
             append("[AI Limbs Work Notification]\n")
             append(metadata.toString())
-            append("\nUnread Laner Chat message bodies are not included. ")
-            append("Follow the System Access Prompt priority timing and fetch bodies only at an appropriate safe work-switching point.")
+            append("\nLaner Chat message bodies are not included in this notification.")
         }
         AppLogger.d(
             TAG,
-            "Laner Chat work notification attached: pending=${notification.unreadCount} " +
-                "priority=${notification.highestPriority?.name ?: "NONE"} latestSeq=${notification.latestSeq}"
+            "Laner Chat work notification attached: unresolved=${notification.pendingReplyCount} " +
+                "unread=${notification.unreadCount} priority=${notification.highestPriority?.name ?: "NONE"} " +
+                "latestSeq=${notification.latestSeq}"
         )
         return prependTextContent(result, text)
     }

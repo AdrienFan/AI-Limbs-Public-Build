@@ -6,6 +6,7 @@ import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 
 /**
  * Adapts the fixed Desktop Commander tool surface to the host app native tools.
@@ -17,6 +18,8 @@ class AiLimbsRdcToolAdapter(
     private val dispatcher: AiLimbsDispatcher
 ) {
     private val terminal = Terminal.getInstance(context.applicationContext)
+    private val managedDocumentRoot =
+        File(context.applicationContext.filesDir, "ai_limbs/docs").canonicalFile
     private val toolRegistry =
         AiLimbsRdcToolRegistry()
             .register("read_file") { args -> readFile(args) }
@@ -264,22 +267,29 @@ class AiLimbsRdcToolAdapter(
         AiLimbsCoreCapabilityRegistry.isRegisteredInvokeName(name)
 
     private fun managedDocumentTool(path: String, write: Boolean): String? {
-        val normalizedPath = path.replace('\\', '/')
-        if (!normalizedPath.contains("/ai_limbs/docs/")) return null
-        val documentId =
-            AiLimbsDocumentId.fromFileName(normalizedPath.substringAfterLast('/')) ?: return null
+        val candidate = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
+        if (candidate.parentFile != managedDocumentRoot) return null
+        val documentId = AiLimbsDocumentId.fromFileName(candidate.name) ?: return null
         return AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write)
     }
 
     private fun mcpResult(result: JSONObject): JSONObject {
-        val serializedResult = result.toString(2)
         val success = result.optBoolean("success", false)
         val images =
             if (success) {
-                MediaLinkParser.extractImageLinks(serializedResult)
+                MediaLinkParser.extractImageLinks(result.toString())
             } else {
                 emptyList()
             }
+        result.put(
+            "payload_kind",
+            if (images.isNotEmpty()) {
+                AiLimbsPayloadKind.IMAGE_PIXELS.name
+            } else {
+                AiLimbsPayloadKind.STRUCTURED_DATA.name
+            }
+        )
+        val serializedResult = result.toString(2)
         // ImagePool links are a host-internal transport token. Exposing them beside an MCP
         // ImageContent block lets the host see two competing image protocols; consume the link
         // here so the RDC model-facing result matches Desktop Commander's text + image contract.

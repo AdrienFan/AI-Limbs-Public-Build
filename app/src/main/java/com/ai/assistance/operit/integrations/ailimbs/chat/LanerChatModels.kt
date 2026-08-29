@@ -14,6 +14,7 @@ enum class LanerChatMessageStatus {
     PENDING,
     DELIVERED,
     ANSWERED,
+    RESOLVED_NO_REPLY,
     CANCELED
 }
 
@@ -28,6 +29,7 @@ enum class LanerChatPriority {
 enum class LanerChatAssistantTurnStatus {
     ACTIVE,
     COMPLETED,
+    COMPLETED_NO_REPLY,
     CANCELED,
     INTERRUPTED
 }
@@ -85,6 +87,7 @@ data class LanerChatRequest(
     val deliveryCount: Int = 0,
     val deliveredAtMs: Long? = null,
     val answeredAtMs: Long? = null,
+    val resolvedAtMs: Long? = null,
     val canceledAtMs: Long? = null,
     val replyId: String? = null,
     val replyContent: String? = null,
@@ -126,6 +129,7 @@ data class LanerChatMailboxStatus(
     val pendingCount: Int = 0,
     val deliveredCount: Int = 0,
     val answeredCount: Int = 0,
+    val resolvedNoReplyCount: Int = 0,
     val canceledCount: Int = 0,
     val proactivePendingCount: Int = 0,
     val proactiveDeliveredCount: Int = 0,
@@ -210,6 +214,12 @@ data class LanerChatTurnReplyResult(
     val duplicate: Boolean
 )
 
+data class LanerChatTurnResolveResult(
+    val turn: LanerChatAssistantTurn,
+    val requests: List<LanerChatRequest>,
+    val duplicate: Boolean
+)
+
 data class LanerChatTurnCancelResult(
     val turn: LanerChatAssistantTurn?,
     val schedulerPaused: Boolean,
@@ -220,3 +230,8 @@ data class LanerChatPendingExchange(
     val request: LanerChatRequest,
     val reply: CompletableDeferred<String>
 )
+
+internal fun LanerChatMessageStatus.requiresAttention(): Boolean =
+    this == LanerChatMessageStatus.PENDING || this == LanerChatMessageStatus.DELIVERED
+
+internal fun LanerChatNotification.requiresWorkAttention(): Boolean = pendingReplyCount > 0
