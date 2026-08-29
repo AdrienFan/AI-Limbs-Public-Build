@@ -27,3 +27,30 @@ tasks.register("assembleDebugClone") {
     dependsOn(":app:assembleClone")
     description = "Build the clone (co-installable) debug APK with package name suffix .clone"
 }
+
+
+// Freecess lab branch only: keep the existing cloud workflow unchanged while
+// making its ordinary assembleDebug build and export the isolated probe APKs.
+val freecessProbeDebugTasks = listOf(
+    ":freecess-probe:assembleBaseline0643Debug",
+    ":freecess-probe:assembleSystemExemptedDebug",
+    ":freecess-probe:assembleScreenReapplyDebug",
+    ":freecess-probe:assembleHostSignalsDebug",
+    ":freecess-probe:assembleSuspendDetectDebug",
+    ":freecess-probe:assembleForceRebuildDebug"
+)
+
+val exportFreecessProbeApks = tasks.register<Copy>("exportFreecessProbeApks") {
+    dependsOn(freecessProbeDebugTasks)
+    from(project(":freecess-probe").layout.buildDirectory.dir("outputs/apk")) {
+        include("**/*.apk")
+    }
+    into(project(":app").layout.buildDirectory.dir("outputs/apk/freecess-probe"))
+}
+
+gradle.projectsEvaluated {
+    project(":app").tasks.named("assembleDebug").configure {
+        dependsOn(freecessProbeDebugTasks)
+        finalizedBy(exportFreecessProbeApks)
+    }
+}
