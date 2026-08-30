@@ -2,6 +2,7 @@ package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
 import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
+import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONArray
@@ -13,19 +14,31 @@ import java.io.File
  * Host tools still enter ToolExecutionManager and keep ALLOW / ASK / FORBID semantics. AI Limbs
  * managed documents route through their versioned core provider instead of raw filesystem writes.
  */
+internal val AI_LIMBS_RDC_HOST_TOOL_ALIASES = mapOf(
+    "get_file_info" to "file_info",
+    "create_directory" to "make_directory"
+)
+
+internal fun aiLimbsRdcHostAlias(toolName: String): String? =
+    AI_LIMBS_RDC_HOST_TOOL_ALIASES[toolName]
+
 class AiLimbsRdcToolAdapter(
     context: Context,
     private val dispatcher: AiLimbsDispatcher
 ) {
-    private val terminal = Terminal.getInstance(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val terminal = Terminal.getInstance(appContext)
+    private val handler = AIToolHandler.getInstance(appContext)
     private val managedDocumentRoot =
-        File(context.applicationContext.filesDir, "ai_limbs/docs").canonicalFile
+        File(appContext.filesDir, "ai_limbs/docs").canonicalFile
     private val toolRegistry =
         AiLimbsRdcToolRegistry()
             .register("read_file") { args -> readFile(args) }
             .register("read_multiple_files") { args -> readMultipleFiles(args) }
             .register("write_file") { args -> writeFile(args) }
             .register("list_directory") { args -> listDirectory(args) }
+            .register("get_file_info") { args -> executeAliasedHostTool("get_file_info", args) }
+            .register("create_directory") { args -> executeAliasedHostTool("create_directory", args) }
             .register("start_process") { args -> startProcess(args) }
             .register("read_process_output") { args -> rdcProcessTool("rdc_process_read", args) }
             .register("interact_with_process") { args -> rdcProcessTool("rdc_process_interact", args) }
@@ -217,17 +230,35 @@ class AiLimbsRdcToolAdapter(
     private suspend fun rdcProcessTool(name: String, args: JSONObject): JSONObject =
         mcpResult(executeHostTool(name, args))
 
+    private suspend fun executeAliasedHostTool(
+        rdcToolName: String,
+        args: JSONObject
+    ): JSONObject {
+        val hostToolName = aiLimbsRdcHostAlias(rdcToolName)
+            ?: return mcpError("RDC tool '$rdcToolName' has no AI Limbs host alias")
+        val params = JSONObject(args.toString())
+        val path = params.optString("path")
+        if (path.isNotBlank() && !params.has("environment")) {
+            params.put("environment", resolveEnvironment(path, args))
+        }
+        return mcpResult(executeHostTool(hostToolName, params))
+    }
+
     private suspend fun executeSameNamedHostTool(
         toolName: String,
         args: JSONObject
-    ): JSONObject =
-        mcpResult(
-            if (isAiLimbsCoreTool(toolName)) {
-                dispatcher.execute(toolName, args)
-            } else {
-                executeHostTool(toolName, args)
-            }
-        )
+    ): JSONObject {
+        if (isAiLimbsCoreTool(toolName)) {
+            return mcpResult(dispatcher.execute(toolName, args))
+        }
+        handler.registerDefaultTools()
+        if (toolName !in handler.getAllToolNames()) {
+            return mcpError(
+                "RDC tool '$toolName' is not mapped to an AI Limbs adapter or registered host tool"
+            )
+        }
+        return mcpResult(executeHostTool(toolName, args))
+    }
 
     private suspend fun executeHostTool(name: String, params: JSONObject): JSONObject =
         dispatcher.execute(

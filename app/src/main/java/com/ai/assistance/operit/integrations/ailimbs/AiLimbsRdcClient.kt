@@ -90,6 +90,13 @@ class AiLimbsRdcClient(
                         "close AI Limbs to stop the device runtime."
                 )
             }
+            .register("get_config") { _ -> rdcCompatibilityConfig() }
+            .register("set_config_value") { _ ->
+                mcpErrorText(
+                    "Desktop Commander server configuration is not mutable through the AI Limbs Android RDC device; " +
+                        "use AI Limbs settings and execution policy instead."
+                )
+            }
     }
     private var activeAuthorization: DeviceAuth? = null
     private var reconnectAttempt: Int = 0
@@ -1416,6 +1423,25 @@ class AiLimbsRdcClient(
             appContext.getSharedPreferences("${PREF_FILE}_fallback", Context.MODE_PRIVATE)
         }
     }
+
+
+    private fun rdcCompatibilityConfig(): JSONObject =
+        mcpText(
+            JSONObject()
+                .put("runtime", "AI Limbs Android RDC Bridge")
+                .put("version", BuildConfig.VERSION_NAME)
+                .put("configuration_owner", "AI Limbs")
+                .put("execution_policy", AiLimbsExecutionPolicyDescriptor.policyVersion)
+                .put("dispatcher", "AiLimbsDispatcher")
+                .put(
+                    "note",
+                    "Desktop Commander server config fields are not authoritative for this Android-backed device; " +
+                        "capabilities and permissions are governed by AI Limbs."
+                )
+                .toString(2)
+        )
+
+    private fun mcpErrorText(text: String): JSONObject = mcpText(text).put("isError", true)
 
     private fun mcpText(text: String): JSONObject =
         JSONObject().put(

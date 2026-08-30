@@ -16,6 +16,13 @@ class AiLimbsRdcToolRegistryTest {
     }
 
     @Test
+    fun mapsRdcCompatibilityNamesToCanonicalHostTools() {
+        assertEquals("file_info", aiLimbsRdcHostAlias("get_file_info"))
+        assertEquals("make_directory", aiLimbsRdcHostAlias("create_directory"))
+        assertEquals(null, aiLimbsRdcHostAlias("start_search"))
+    }
+
+    @Test
     fun duplicateToolNamesAreRejected() {
         val registry =
             AiLimbsRdcToolRegistry()

@@ -125,7 +125,8 @@ object AiLimbsExecutionPolicyDescriptor {
             "list_files",
             "rdc_process_read",
             "rdc_process_list",
-            "get_terminal_session_screen"
+            "get_terminal_session_screen",
+            "file_info"
         )
 
     private val processHostTools =
@@ -146,7 +147,7 @@ object AiLimbsExecutionPolicyDescriptor {
         setOf(
             "write_file",
             "move_file",
-            "create_directory"
+            "make_directory"
         )
 
     private val ubuntuHostTools = processHostTools - "execute_shell"

@@ -48,6 +48,20 @@ class AiLimbsExecutionPolicyDescriptorTest {
     }
 
     @Test
+    fun canonicalRdcAliasesKeepCorrectPolicySemantics() {
+        val fileInfo = AiLimbsExecutionPolicyDescriptor.specForHostTool("file_info", JSONObject())
+        val projectDirectory = AiLimbsExecutionPolicyDescriptor.specForHostTool(
+            "make_directory",
+            JSONObject().put("path", "/root/laner/projects/new-module")
+        )
+
+        assertEquals(AiLimbsEffect.READ_ONLY, fileInfo.effect)
+        assertEquals(AiLimbsDomain.STORAGE, fileInfo.domain)
+        assertEquals(AiLimbsEffect.PERSISTENT_WRITE, projectDirectory.effect)
+        assertTrue(AiLimbsRequiredReceipt.WORK_MANUAL in projectDirectory.requiredReceipts)
+    }
+
+    @Test
     fun imageIntentNeverPretendsPixelsWereActuallyAttached() {
         val spec =
             AiLimbsExecutionPolicyDescriptor.specForHostTool(
