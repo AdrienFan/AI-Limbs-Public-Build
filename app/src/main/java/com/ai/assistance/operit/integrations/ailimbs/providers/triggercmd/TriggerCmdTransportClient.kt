@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs.providers.triggercmd
 
 import android.content.SharedPreferences
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsTriggerCmdContract
 import io.socket.client.Ack
 import io.socket.client.IO
 import io.socket.client.Socket
@@ -8,6 +9,7 @@ import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.FormBody
@@ -25,16 +27,16 @@ internal class TriggerCmdTransportClient(
         fun onStage(stage: String, detail: String)
         fun onComputerId(computerId: String)
         fun onSocketState(state: String)
-        fun onCommand(params: String)
+        fun onCommand(params: String, respond: (String) -> Unit)
         fun onResult(result: String)
         fun onLog(message: String)
     }
 
     companion object {
         const val BASE_URL = "https://www.triggercmd.com"
-        const val COMMAND_NAME = "AI Limbs Bridge"
+        const val COMMAND_NAME = AiLimbsTriggerCmdContract.COMMAND_NAME
         const val COMMAND_DESCRIPTION =
-            "AI Limbs remote bridge transport. Parameters use the AIL_TRIGGER_BRIDGE protocol."
+            "AI Limbs structured remote bridge. Params: AIL_TRIGGER_BRIDGE_V1 JSON or b64:Base64URL(JSON); plain Ping remains a transport probe."
 
         private const val PREF_COMPUTER_ID = TriggerCmdBridgeStorage.KEY_COMPUTER_ID
         private const val PREF_COMPUTER_NAME = TriggerCmdBridgeStorage.KEY_COMPUTER_NAME
@@ -331,16 +333,14 @@ internal class TriggerCmdTransportClient(
             return
         }
 
-        listener.onCommand(params)
-        val result = when {
-            params.trim().equals("ping", ignoreCase = true) -> "Pong"
-            else -> JSONObject()
-                .put("ok", false)
-                .put("code", "BRIDGE_EXECUTOR_NOT_WIRED")
-                .put("message", "TRIGGERcmd transport is online; structured AI Limbs execution is enabled in the next integration stage.")
-                .toString()
+        val replied = AtomicBoolean(false)
+        listener.onCommand(params) { result ->
+            if (replied.compareAndSet(false, true)) {
+                sendResult(token, computerId, commandId, result)
+            } else {
+                listener.onLog("Ignored duplicate result callback for command id $commandId")
+            }
         }
-        sendResult(token, computerId, commandId, result)
     }
 
     private fun sendResult(
@@ -395,7 +395,7 @@ internal class TriggerCmdTransportClient(
         Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $token")
-            .header("User-Agent", "AI-Limbs-TRIGGERcmd-Bridge/0.6.4.7.5")
+            .header("User-Agent", "AI-Limbs-TRIGGERcmd-Bridge/0.6.4.7.6")
 
     private fun executeJson(
         request: Request,

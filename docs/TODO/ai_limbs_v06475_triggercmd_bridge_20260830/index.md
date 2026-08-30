@@ -20,3 +20,7 @@ TRIGGERcmd 是 Transport Provider，不是新的 Capability Provider。
 - `controlState` 表示 Bridge Center / 通知栏当前操作的 Provider。
 - BridgeAction 支持显式 providerId；RDC 自救固定定向 RDC，避免 UI 焦点切到 TRIGGERcmd 后重连错桥。
 - immutable System Access Bootstrap 动态公开当前 Work Manual read capability，避免无历史上下文时主动猜测或搜索手册入口。
+
+## 后续阶段
+
+- [V0.6.4.7.6 · Structured Executor](../ai_limbs_v06476_triggercmd_structured_executor_20260830/index.md)

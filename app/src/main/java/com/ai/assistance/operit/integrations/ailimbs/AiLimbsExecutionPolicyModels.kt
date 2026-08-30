@@ -6,6 +6,7 @@ import org.json.JSONObject
 
 enum class AiLimbsExecutionTransport(val wireValue: String) {
     RDC("rdc"),
+    TRIGGERCMD("triggercmd"),
     EXTERNAL_HTTP("external_http")
 }
 

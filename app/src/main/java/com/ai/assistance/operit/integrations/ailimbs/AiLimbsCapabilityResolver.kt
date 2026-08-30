@@ -114,6 +114,17 @@ class AiLimbsCapabilityResolver(
             .put("error_guidance", errorGuidance(definition, availability))
     }
 
+    internal suspend fun containsInvokeId(invokeId: String): Boolean {
+        val normalizedInvokeId = invokeId.trim()
+        if (normalizedInvokeId.isEmpty()) return false
+
+        var definitions = buildDefinitions(forceRefreshPackages = false)
+        if (definitions.any { it.invokeId == normalizedInvokeId }) return true
+
+        definitions = buildDefinitions(forceRefreshPackages = true)
+        return definitions.any { it.invokeId == normalizedInvokeId }
+    }
+
     private suspend fun buildDefinitions(forceRefreshPackages: Boolean): List<AiLimbsCapabilityDefinition> {
         handler.registerDefaultTools()
         val runtimeCatalog =

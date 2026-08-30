@@ -206,6 +206,8 @@ class AiLimbsExecutionPolicyEngine(
                                     .toString()
                             )
                     )
+            AiLimbsExecutionTransport.TRIGGERCMD ->
+                AiLimbsTriggerCmdContract.transportInvocation(name, parameters)
             AiLimbsExecutionTransport.EXTERNAL_HTTP ->
                 JSONObject()
                     .put("method", "POST")

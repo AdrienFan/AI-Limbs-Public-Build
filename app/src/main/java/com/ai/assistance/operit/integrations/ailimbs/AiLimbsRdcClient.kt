@@ -58,17 +58,16 @@ class AiLimbsRdcClient(
     private val scope: CoroutineScope
 ) {
     private val appContext = context.applicationContext
-    private val policyEngine =
-        AiLimbsExecutionPolicyEngine(
+    private val remoteExecutor =
+        AiLimbsRemoteInvocationExecutor(
             appContext,
             AiLimbsExecutionSession(
                 transport = AiLimbsExecutionTransport.RDC,
                 scopeId = "rdc-" + UUID.randomUUID()
             )
         )
-    private val dispatcher = AiLimbsDispatcher(appContext, policyEngine)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
-    private val adapter = AiLimbsRdcToolAdapter(appContext, dispatcher)
+    private val adapter = AiLimbsRdcToolAdapter(appContext, remoteExecutor)
     private val httpClient =
         OkHttpClient.Builder()
             .retryOnConnectionFailure(true)

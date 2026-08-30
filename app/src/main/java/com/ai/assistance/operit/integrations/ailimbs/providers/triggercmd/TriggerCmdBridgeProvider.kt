@@ -12,18 +12,21 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory
 import com.ai.assistance.operit.integrations.ailimbs.NativeBridgeProfile
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
 internal class TriggerCmdBridgeProvider private constructor(
     context: Context,
-    @Suppress("UNUSED_PARAMETER") scope: CoroutineScope,
+    private val scope: CoroutineScope,
     private val profile: NativeBridgeProfile
 ) : AiLimbsBridgeProvider, TriggerCmdTransportClient.Listener {
     private val appContext = context.applicationContext
     private val storage = TriggerCmdBridgeStorage(appContext)
     private val client = TriggerCmdTransportClient(storage.transportPreferences(), this)
+    private val structuredExecutor = TriggerCmdStructuredBridgeExecutor(appContext)
     private val stateFlow = MutableStateFlow(initialState())
 
     override val id: String
@@ -152,9 +155,16 @@ internal class TriggerCmdBridgeProvider private constructor(
         )
     }
 
-    override fun onCommand(params: String) {
+    override fun onCommand(params: String, respond: (String) -> Unit) {
         stateFlow.value = state.value.copy(lastHeartbeatAtMs = System.currentTimeMillis())
         AppLogger.i(TAG, "TRIGGERcmd bridge request received (${params.length} chars)")
+        if (params.trim().equals("ping", ignoreCase = true)) {
+            respond("Pong")
+            return
+        }
+        scope.launch(Dispatchers.IO) {
+            respond(structuredExecutor.execute(params))
+        }
     }
 
     override fun onResult(result: String) {
