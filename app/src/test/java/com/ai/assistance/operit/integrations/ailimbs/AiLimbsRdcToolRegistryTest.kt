@@ -19,6 +19,7 @@ class AiLimbsRdcToolRegistryTest {
     fun mapsRdcCompatibilityNamesToCanonicalHostTools() {
         assertEquals("file_info", aiLimbsRdcHostAlias("get_file_info"))
         assertEquals("make_directory", aiLimbsRdcHostAlias("create_directory"))
+        // Streaming search is handled by the RDC protocol registry, never flattened into a host-tool alias.
         assertEquals(null, aiLimbsRdcHostAlias("start_search"))
     }
 

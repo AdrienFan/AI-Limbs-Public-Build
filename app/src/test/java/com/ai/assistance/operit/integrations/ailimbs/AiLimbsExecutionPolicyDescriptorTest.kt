@@ -62,6 +62,17 @@ class AiLimbsExecutionPolicyDescriptorTest {
     }
 
     @Test
+    fun rdcSearchBackendsRemainReadOnlyStorageCapabilities() {
+        val findFiles = AiLimbsExecutionPolicyDescriptor.specForHostTool("find_files", JSONObject())
+        val grepCode = AiLimbsExecutionPolicyDescriptor.specForHostTool("grep_code", JSONObject())
+
+        listOf(findFiles, grepCode).forEach { spec ->
+            assertEquals(AiLimbsEffect.READ_ONLY, spec.effect)
+            assertEquals(AiLimbsDomain.STORAGE, spec.domain)
+        }
+    }
+
+    @Test
     fun imageIntentNeverPretendsPixelsWereActuallyAttached() {
         val spec =
             AiLimbsExecutionPolicyDescriptor.specForHostTool(

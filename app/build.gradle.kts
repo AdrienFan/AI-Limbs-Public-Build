@@ -399,7 +399,7 @@ android {
         minSdk = 26
         targetSdk = 34
         versionCode = 59
-        versionName = "0.6.4.7.7"
+        versionName = "0.6.4.7.8"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -434,7 +434,7 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ".ailimbs.v06477"
+            applicationIdSuffix = ".ailimbs.v06478"
             versionNameSuffix = "-build1"
             signingConfig = signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")

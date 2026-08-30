@@ -68,6 +68,7 @@ class AiLimbsRdcClient(
         )
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val adapter = AiLimbsRdcToolAdapter(appContext, remoteExecutor)
+    private val searchCompat = AiLimbsRdcSearchCompat(remoteExecutor, scope)
     private val httpClient =
         OkHttpClient.Builder()
             .retryOnConnectionFailure(true)
@@ -90,6 +91,9 @@ class AiLimbsRdcClient(
                 )
             }
             .register("get_config") { _ -> rdcCompatibilityConfig() }
+            .register("start_search") { args -> searchCompat.start(args) }
+            .register("get_more_search_results") { args -> searchCompat.getMore(args) }
+            .register("stop_search") { args -> searchCompat.stop(args) }
             .register("set_config_value") { _ ->
                 mcpErrorText(
                     "Desktop Commander server configuration is not mutable through the AI Limbs Android RDC device; " +

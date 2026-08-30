@@ -127,7 +127,9 @@ object AiLimbsExecutionPolicyDescriptor {
             "rdc_process_read",
             "rdc_process_list",
             "get_terminal_session_screen",
-            "file_info"
+            "file_info",
+            "find_files",
+            "grep_code"
         )
 
     private val processHostTools =
