@@ -398,8 +398,8 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 59
-        versionName = "0.6.4.7.8"
+        versionCode = 60
+        versionName = "0.7.0"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -434,7 +434,7 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ".ailimbs.v06478"
+            applicationIdSuffix = ".ailimbs.v070"
             versionNameSuffix = "-build1"
             signingConfig = signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")

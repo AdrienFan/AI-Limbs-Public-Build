@@ -663,20 +663,6 @@ fun ShizukuDemoScreen(
                 Spacer(modifier = Modifier.height(12.dp))
             }
 
-            // NodeJS和Python环境配置向导卡片
-            if (needOperitTerminalSetupGuide) {
-                OperitTerminalWizardCard(
-                    isPnpmInstalled = viewModel.isPnpmInstalled.value,
-                    isPipInstalled = viewModel.isPythonInstalled.value,
-                    isEnvironmentReady = viewModel.isNodejsPythonEnvironmentReady.value,
-                    showWizard = uiState.showOperitTerminalWizard.value,
-                    onToggleWizard = { viewModel.toggleOperitTerminalWizard() },
-                    onOpenTerminalScreen = { 
-                        // 跳转到TerminalSetup，直接显示配置界面
-                        navigateTo?.invoke(Screen.TerminalSetup)
-                    }
-                )
-            }
         }
     }
 }

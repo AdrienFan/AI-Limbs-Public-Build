@@ -559,11 +559,11 @@ internal class PackageManagerToolPkgFacade(
         packageManager.ensureInitialized()
         val normalizedPackageName = packageManager.normalizePackageName(subpackagePackageName)
         val subpackageRuntime = packageManager.toolPkgSubpackageByPackageNameInternal[normalizedPackageName]
-        if (subpackageRuntime == null) {
+        if (subpackageRuntime == null || packageManager.isManagedToolPkgPackage(normalizedPackageName)) {
             return false
         }
 
-        val enabledPackageNames = LinkedHashSet(packageManager.getEnabledPackageNames())
+        val enabledPackageNames = LinkedHashSet(packageManager.getLegacyEnabledPackageNamesForMutation())
         val subpackageStates = packageManager.getToolPkgSubpackageStatesInternal().toMutableMap()
         val containerEnabled = enabledPackageNames.contains(subpackageRuntime.containerPackageName)
 
@@ -582,9 +582,9 @@ internal class PackageManagerToolPkgFacade(
         val stateSaved = packageManager.getToolPkgSubpackageStatesInternal()[normalizedPackageName] == enabled
         val importedMatches =
             if (containerEnabled) {
-                packageManager.getEnabledPackageNames().contains(normalizedPackageName) == enabled
+                packageManager.getLegacyEnabledPackageNamesForMutation().contains(normalizedPackageName) == enabled
             } else {
-                !packageManager.getEnabledPackageNames().contains(normalizedPackageName)
+                !packageManager.getLegacyEnabledPackageNamesForMutation().contains(normalizedPackageName)
             }
         return stateSaved && importedMatches
     }

@@ -18,6 +18,7 @@ import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
+import kotlinx.coroutines.CancellationException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -50,12 +51,47 @@ class AiLimbsDispatcher(
         if (!decision.proceed) {
             return policyEngine.rejectionJson(invocation, decision)
         }
-        val result = executeRegisteredRoute(invocation.registration, args)
+        val result = executeCapabilityRoute(invocation)
         policyEngine.recordSuccessfulExecution(invocation, result)
         return result.put("execution_policy", decision.inspection.toJson())
     }
 
-    private suspend fun executeRegisteredRoute(
+    private suspend fun executeCapabilityRoute(
+        invocation: AiLimbsNormalizedInvocation
+    ): JSONObject =
+        when (val route = invocation.route) {
+            is AiLimbsCapabilityRoute.Core ->
+                executeCoreRoute(route.registration, invocation.parameters)
+            is AiLimbsCapabilityRoute.HostTool ->
+                executeHostTool(
+                    JSONObject()
+                        .put("name", route.targetName)
+                        .put("parameters", invocation.parameters)
+                )
+            is AiLimbsCapabilityRoute.Plugin ->
+                executePluginCapability(route.registration, invocation.parameters)
+        }
+
+    private suspend fun executePluginCapability(
+        registration: AiLimbsPluginCapabilityRegistration,
+        parameters: JSONObject
+    ): JSONObject {
+        if (!AiLimbsPluginCapabilityRegistry.isCurrent(registration)) {
+            return error("Plugin capability is no longer active: ${registration.catalogEntry.targetToolName}")
+                .put("error_code", "PLUGIN_CAPABILITY_UNAVAILABLE")
+        }
+        return try {
+            val result = registration.capability.executor.execute(JSONObject(parameters.toString()))
+            if (!result.has("success")) result.put("success", true) else result
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            error(error.message ?: error::class.java.simpleName)
+                .put("error_code", "PLUGIN_CAPABILITY_EXECUTION_FAILED")
+        }
+    }
+
+    private suspend fun executeCoreRoute(
         registration: AiLimbsCoreCapabilityRegistration,
         args: JSONObject
     ): JSONObject =
@@ -65,11 +101,8 @@ class AiLimbsDispatcher(
             is AiLimbsCoreRoute.ManagedDocumentWrite -> executeManagedDocumentWrite(route.documentId, args)
             is AiLimbsCoreRoute.LanerChat -> executeLanerChatOperation(route.operation, args)
             AiLimbsCoreRoute.ForwardHostTool ->
-                executeHostTool(
-                    JSONObject()
-                        .put("name", registration.catalogEntry.targetToolName)
-                        .put("parameters", args)
-                )
+                error("ForwardHostTool must be normalized to HostTool before dispatch")
+                    .put("error_code", "INVALID_CAPABILITY_ROUTE")
         }
 
     private suspend fun executeLocalOperation(
@@ -207,6 +240,10 @@ class AiLimbsDispatcher(
     private suspend fun executeHostTool(args: JSONObject): JSONObject {
         val name = args.optString("name").trim()
         if (name.isBlank()) return error("Missing host tool name")
+        if (AiLimbsPluginCapabilityRegistry.isReservedInvokeName(name)) {
+            return error("Host tools cannot use the reserved plugin capability namespace: $name")
+                .put("error_code", "PLUGIN_CAPABILITY_NAMESPACE_RESERVED")
+        }
         val parameters = args.optJSONObject("parameters") ?: JSONObject()
         val operation: suspend () -> JSONObject = {
             executeHostToolNow(name, parameters)
@@ -317,7 +354,7 @@ class AiLimbsDispatcher(
             .put("module", "AI Limbs Tool Dispatcher")
             .put(
                 "route",
-                "Transport -> AiLimbsExecutionPolicyEngine -> AiLimbsDispatcher -> domain service"
+                "Transport -> AiLimbsExecutionPolicyEngine -> AiLimbsDispatcher -> Core | HostTool | Plugin"
             )
             .put("permission_enforcement", "Unified ALLOW / ASK / FORBID policy")
             .put("policy_version", AiLimbsExecutionPolicyDescriptor.policyVersion)

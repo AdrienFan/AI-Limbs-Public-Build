@@ -8,6 +8,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Code
 import androidx.compose.material.icons.filled.DataObject
 import androidx.compose.material.icons.filled.DeviceHub
+import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material.icons.filled.Folder
 import androidx.compose.material.icons.filled.Html
 import androidx.compose.material.icons.filled.LockOpen
@@ -182,187 +183,13 @@ object ScreenRouteRegistry {
                 order = 30
             ),
             hostEntryDefinition(
-                entryId = "toolbox.tool_tester",
-                screen = Screen.ToolTester,
+                entryId = "toolbox.plugin_center",
+                screen = Screen.PluginCenter,
                 surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_test_center,
-                descriptionResId = R.string.tool_test_center_desc,
-                icon = Icons.Default.Build,
+                titleResId = R.string.plugin_center_title,
+                descriptionResId = R.string.plugin_center_description,
+                icon = Icons.Default.Extension,
                 order = 10
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.file_manager",
-                screen = Screen.FileManager,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_file_manager,
-                descriptionResId = R.string.tool_file_manager_desc,
-                icon = Icons.Default.Folder,
-                order = 20
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.text_to_speech",
-                screen = Screen.TextToSpeech,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_tts,
-                descriptionResId = R.string.tool_tts_desc,
-                icon = Icons.Default.RecordVoiceOver,
-                order = 30
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.speech_to_text",
-                screen = Screen.SpeechToText,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_speech_recognition,
-                descriptionResId = R.string.tool_speech_recognition_desc,
-                icon = Icons.Default.Mic,
-                order = 40
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.app_permissions",
-                screen = Screen.AppPermissions,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_permission_manager,
-                descriptionResId = R.string.tool_permission_manager_desc,
-                icon = Icons.Default.Security,
-                order = 50
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.agreement",
-                screen = Screen.Agreement,
-                surface = NavigationSurface.TOOLBOX,
-                launchNavItem = NavItem.Agreement,
-                titleResId = R.string.tool_user_agreement,
-                descriptionResId = R.string.tool_user_agreement_desc,
-                icon = Icons.Default.Policy,
-                order = 60
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.default_assistant_guide",
-                screen = Screen.DefaultAssistantGuide,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_default_assistant_guide,
-                descriptionResId = R.string.tool_default_assistant_guide_desc,
-                icon = Icons.Default.SmartToy,
-                order = 70
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.terminal",
-                screen = Screen.Terminal,
-                surface = NavigationSurface.TOOLBOX,
-                launchNavItem = NavItem.Terminal,
-                titleResId = R.string.tool_terminal,
-                descriptionResId = R.string.tool_terminal_desc,
-                icon = Icons.Default.Terminal,
-                order = 1
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.ai_limbs_bridge_center",
-                screen = Screen.AiLimbsBridgeCenter,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.ai_limbs_bridge_center_title,
-                descriptionResId = R.string.ai_limbs_bridge_center_desc,
-                icon = Icons.Default.DeviceHub,
-                order = 4
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.laner_access_manager",
-                screen = Screen.LanerAccessManager,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.laner_access_manager_title,
-                descriptionResId = R.string.laner_access_manager_desc,
-                icon = Icons.Default.DeviceHub,
-                order = 3
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.ui_debugger",
-                screen = Screen.UIDebugger,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_ui_debugger,
-                descriptionResId = R.string.tool_ui_debugger_desc,
-                icon = Icons.Default.DeviceHub,
-                order = 90
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.ffmpeg_toolbox",
-                screen = Screen.FFmpegToolbox,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_ffmpeg_toolbox,
-                descriptionResId = R.string.tool_ffmpeg_toolbox_desc,
-                icon = Icons.Default.VideoSettings,
-                order = 100
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.shell_executor",
-                screen = Screen.ShellExecutor,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_shell_executor,
-                descriptionResId = R.string.tool_shell_executor_desc,
-                icon = Icons.Default.Code,
-                order = 2
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.logcat",
-                screen = Screen.Logcat,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_log_viewer,
-                descriptionResId = R.string.tool_log_viewer_desc,
-                icon = Icons.Default.DataObject,
-                order = 120
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.sql_viewer",
-                screen = Screen.SqlViewer,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_sql_viewer,
-                descriptionResId = R.string.tool_sql_viewer_desc,
-                icon = Icons.Default.TableView,
-                order = 130
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.token_config",
-                screen = Screen.TokenConfig,
-                surface = NavigationSurface.TOOLBOX,
-                launchNavItem = NavItem.TokenConfig,
-                titleResId = R.string.token_config,
-                descriptionResId = R.string.tool_token_config_desc,
-                icon = Icons.Default.Token,
-                order = 140
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.process_limit_remover",
-                screen = Screen.ProcessLimitRemover,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_process_limit_remover,
-                descriptionResId = R.string.tool_process_limit_remover_desc,
-                icon = Icons.Default.LockOpen,
-                order = 150
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.html_packager",
-                screen = Screen.HtmlPackager,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_html_packager,
-                descriptionResId = R.string.tool_html_packager_desc,
-                icon = Icons.Default.Html,
-                order = 160
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.auto_glm_one_click",
-                screen = Screen.AutoGlmOneClick,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_autoglm_one_click,
-                descriptionResId = R.string.tool_autoglm_one_click_desc,
-                icon = Icons.Default.AutoMode,
-                order = 170
-            ),
-            hostEntryDefinition(
-                entryId = "toolbox.auto_glm_tool",
-                screen = Screen.AutoGlmTool,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.tool_autoglm_tool,
-                descriptionResId = R.string.tool_autoglm_tool_desc,
-                icon = Icons.Default.AutoMode,
-                order = 180
             ),
             hostEntryDefinition(
                 entryId = "hidden.toolbox",

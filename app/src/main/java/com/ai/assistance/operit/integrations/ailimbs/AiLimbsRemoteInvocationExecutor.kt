@@ -11,11 +11,15 @@ internal data class AiLimbsDispatcherInvocation(
 internal fun routeRemoteInvocation(
     requestedTool: String,
     args: JSONObject,
-    isCoreCapability: Boolean,
+    isManagedCapability: Boolean,
     isResolvedHostCapability: Boolean,
     hostToolExecutor: String
 ): AiLimbsDispatcherInvocation =
-    if (!isCoreCapability && isResolvedHostCapability) {
+    if (
+        !isManagedCapability &&
+            !AiLimbsPluginCapabilityRegistry.isReservedInvokeName(requestedTool) &&
+            isResolvedHostCapability
+    ) {
         AiLimbsDispatcherInvocation(
             tool = hostToolExecutor,
             args =
@@ -49,10 +53,14 @@ class AiLimbsRemoteInvocationExecutor(
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject {
         val requestedTool = tool.trim()
-        val isCoreCapability =
-            AiLimbsCoreCapabilityRegistry.isRegisteredInvokeName(requestedTool)
+        val isManagedCapability =
+            AiLimbsCapabilityRegistry.isRegisteredInvokeName(requestedTool)
         val isResolvedHostCapability =
-            if (isCoreCapability || requestedTool.isBlank()) {
+            if (
+                isManagedCapability ||
+                    AiLimbsPluginCapabilityRegistry.isReservedInvokeName(requestedTool) ||
+                    requestedTool.isBlank()
+            ) {
                 false
             } else {
                 capabilityResolver.containsInvokeId(requestedTool)
@@ -61,7 +69,7 @@ class AiLimbsRemoteInvocationExecutor(
             routeRemoteInvocation(
                 requestedTool = requestedTool,
                 args = args,
-                isCoreCapability = isCoreCapability,
+                isManagedCapability = isManagedCapability,
                 isResolvedHostCapability = isResolvedHostCapability,
                 hostToolExecutor = hostToolExecutor
             )
