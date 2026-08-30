@@ -7,7 +7,8 @@ import org.json.JSONObject
 enum class AiLimbsExecutionTransport(val wireValue: String) {
     RDC("rdc"),
     TRIGGERCMD("triggercmd"),
-    EXTERNAL_HTTP("external_http")
+    EXTERNAL_HTTP("external_http"),
+    PLUGIN_RUNTIME("plugin_runtime")
 }
 
 data class AiLimbsExecutionSession(
@@ -42,7 +43,8 @@ enum class AiLimbsDomain {
     UBUNTU,
     ANDROID_UI,
     STORAGE,
-    HOST
+    HOST,
+    PLUGIN
 }
 
 enum class AiLimbsRequiredReceipt {
@@ -75,7 +77,8 @@ internal data class AiLimbsNormalizedInvocation(
     val canonicalName: String,
     val targetName: String,
     val parameters: JSONObject,
-    val registration: AiLimbsCoreCapabilityRegistration,
+    val route: AiLimbsCapabilityRoute,
+    val sourceEnabled: Boolean,
     val spec: AiLimbsPolicySpec
 )
 
@@ -117,7 +120,7 @@ internal data class AiLimbsPolicyDecision(
 
 object AiLimbsExecutionPolicyDescriptor {
     const val PROTOCOL_VERSION = 2
-    private const val POLICY_SCHEMA_REVISION = "execution-policy-v2.1"
+    private const val POLICY_SCHEMA_REVISION = "execution-policy-v2.2"
 
     private val readOnlyHostTools =
         setOf(
@@ -214,6 +217,15 @@ object AiLimbsExecutionPolicyDescriptor {
                 error("ForwardHostTool requires target-aware policy metadata")
         }
 
+    internal fun specForPluginCapability(): AiLimbsPolicySpec =
+        standard(
+            effect = AiLimbsEffect.EXTERNAL_CAPABILITY,
+            domain = AiLimbsDomain.PLUGIN,
+            requireWorkManual = false,
+            hostPermissionEnforced = false,
+            payloadKind = AiLimbsPayloadKind.STRUCTURED_DATA
+        )
+
     internal fun specForHostTool(targetName: String, parameters: JSONObject): AiLimbsPolicySpec {
         val uiTool = isUiTool(targetName)
         val ubuntuTool =
@@ -298,6 +310,7 @@ object AiLimbsExecutionPolicyDescriptor {
             appendLine()
             appendLine("- 所有入口先规范化为真实能力名、真实参数、传输与会话范围。")
             appendLine("- Resolver 解释政策；Dispatcher 执行同一份政策；领域服务原子复核最终不变量。")
+            appendLine("- Core、HostTool 与 Plugin Capability 进入同一 Policy Engine；插件不得绕过 ALLOW、ASK、FORBID。")
             appendLine("- 权限结果只有 ALLOW、ASK、FORBID，未知外层调用不会绕开 Dispatcher。")
             appendLine("- 任意进程命令、项目修改、开发环境和设备配置要求当前工作手册收据。")
             appendLine("- 普通长期保存不要求反复读取手册，但持久产物必须有确定归属、唯一地址与可恢复索引。")

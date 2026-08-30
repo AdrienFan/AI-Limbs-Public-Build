@@ -41,29 +41,62 @@ class AiLimbsExecutionPolicyEngine(
 
     internal fun normalize(tool: String, args: JSONObject): AiLimbsNormalizedInvocation {
         val registration =
-            AiLimbsCoreCapabilityRegistry.registrationForInvokeName(tool)
+            AiLimbsCapabilityRegistry.registrationForInvokeName(tool)
                 ?: throw IllegalArgumentException("Unknown AI Limbs tool: " + tool)
-        val canonicalName = registration.catalogEntry.targetToolName
-        val route = registration.route
+
+        val canonicalName: String
         val targetName: String
         val parameters: JSONObject
+        val route: AiLimbsCapabilityRoute
+        val sourceEnabled: Boolean
         val spec: AiLimbsPolicySpec
 
-        if (
-            route == AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE)
-        ) {
-            targetName = args.optString("name").trim()
-            require(targetName.isNotBlank()) { "Missing host tool name" }
-            parameters = args.optJSONObject("parameters") ?: JSONObject()
-            spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters)
-        } else if (route == AiLimbsCoreRoute.ForwardHostTool) {
-            targetName = canonicalName
-            parameters = args
-            spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters)
-        } else {
-            targetName = canonicalName
-            parameters = args
-            spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(route)
+        when (registration) {
+            is AiLimbsCapabilityRegistration.Core -> {
+                val core = registration.registration
+                canonicalName = core.catalogEntry.targetToolName
+                sourceEnabled = core.catalogEntry.sourceEnabled
+                when (val coreRoute = core.route) {
+                    AiLimbsCoreRoute.ForwardHostTool -> {
+                        targetName = canonicalName
+                        parameters = args
+                        route = AiLimbsCapabilityRoute.HostTool(targetName)
+                        spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters)
+                    }
+                    is AiLimbsCoreRoute.Local -> {
+                        if (coreRoute.operation == AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE) {
+                            targetName = args.optString("name").trim()
+                            require(targetName.isNotBlank()) { "Missing host tool name" }
+                            require(!AiLimbsPluginCapabilityRegistry.isReservedInvokeName(targetName)) {
+                                "Host tool target uses reserved plugin capability namespace: $targetName"
+                            }
+                            parameters = args.optJSONObject("parameters") ?: JSONObject()
+                            route = AiLimbsCapabilityRoute.HostTool(targetName)
+                            spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters)
+                        } else {
+                            targetName = canonicalName
+                            parameters = args
+                            route = AiLimbsCapabilityRoute.Core(core)
+                            spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(coreRoute)
+                        }
+                    }
+                    else -> {
+                        targetName = canonicalName
+                        parameters = args
+                        route = AiLimbsCapabilityRoute.Core(core)
+                        spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(coreRoute)
+                    }
+                }
+            }
+            is AiLimbsCapabilityRegistration.Plugin -> {
+                val plugin = registration.registration
+                canonicalName = plugin.catalogEntry.targetToolName
+                targetName = canonicalName
+                parameters = args
+                route = AiLimbsCapabilityRoute.Plugin(plugin)
+                sourceEnabled = plugin.catalogEntry.sourceEnabled
+                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
+            }
         }
 
         return AiLimbsNormalizedInvocation(
@@ -71,7 +104,8 @@ class AiLimbsExecutionPolicyEngine(
             canonicalName = canonicalName,
             targetName = targetName,
             parameters = parameters,
-            registration = registration,
+            route = route,
+            sourceEnabled = sourceEnabled,
             spec = spec
         )
     }
@@ -82,8 +116,8 @@ class AiLimbsExecutionPolicyEngine(
         inspectSpec(
             targetName = invocation.targetName,
             parameters = invocation.parameters,
-            registration = invocation.registration,
-            sourceEnabled = invocation.registration.catalogEntry.sourceEnabled,
+            route = invocation.route,
+            sourceEnabled = invocation.sourceEnabled,
             spec = invocation.spec
         )
 
@@ -91,24 +125,34 @@ class AiLimbsExecutionPolicyEngine(
         targetName: String,
         entry: ToolCatalogEntry
     ): AiLimbsPolicyInspection {
-        val registration = AiLimbsCoreCapabilityRegistry.registrationForInvokeName(targetName)
-        val spec =
-            when {
-                registration == null ->
-                    AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject())
-                registration.route ==
-                    AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE) ->
-                    AiLimbsExecutionPolicyDescriptor.specForCoreRoute(registration.route)
-                registration.route == AiLimbsCoreRoute.ForwardHostTool ->
-                    AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject())
-                else ->
-                    AiLimbsExecutionPolicyDescriptor.specForCoreRoute(registration.route)
+        val registration = AiLimbsCapabilityRegistry.registrationForInvokeName(targetName)
+        val route: AiLimbsCapabilityRoute
+        val spec: AiLimbsPolicySpec
+        when (registration) {
+            is AiLimbsCapabilityRegistration.Core -> {
+                val core = registration.registration
+                if (core.route == AiLimbsCoreRoute.ForwardHostTool) {
+                    route = AiLimbsCapabilityRoute.HostTool(targetName)
+                    spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject())
+                } else {
+                    route = AiLimbsCapabilityRoute.Core(core)
+                    spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(core.route)
+                }
             }
+            is AiLimbsCapabilityRegistration.Plugin -> {
+                route = AiLimbsCapabilityRoute.Plugin(registration.registration)
+                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
+            }
+            null -> {
+                route = AiLimbsCapabilityRoute.HostTool(targetName)
+                spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject())
+            }
+        }
         val inspection =
             inspectSpec(
                 targetName = targetName,
                 parameters = JSONObject(),
-                registration = registration,
+                route = route,
                 sourceEnabled = entry.sourceEnabled,
                 spec = spec
             )
@@ -218,6 +262,11 @@ class AiLimbsExecutionPolicyEngine(
                             .put("tool", name)
                             .put("args", parameters)
                     )
+            AiLimbsExecutionTransport.PLUGIN_RUNTIME ->
+                JSONObject()
+                    .put("type", "PLUGIN_CAPABILITY_INVOKE")
+                    .put("capability", name)
+                    .put("parameters", JSONObject(parameters.toString()))
         }
 
     internal fun rejectionJson(
@@ -243,7 +292,7 @@ class AiLimbsExecutionPolicyEngine(
     private suspend fun inspectSpec(
         targetName: String,
         parameters: JSONObject,
-        registration: AiLimbsCoreCapabilityRegistration?,
+        route: AiLimbsCapabilityRoute,
         sourceEnabled: Boolean,
         spec: AiLimbsPolicySpec
     ): AiLimbsPolicyInspection {
@@ -258,7 +307,7 @@ class AiLimbsExecutionPolicyEngine(
             readAvailability(
                 targetName = targetName,
                 parameters = parameters,
-                registration = registration,
+                route = route,
                 sourceEnabled = sourceEnabled,
                 spec = spec
             )
@@ -299,7 +348,7 @@ class AiLimbsExecutionPolicyEngine(
                     spec.hostPermissionEnforced ->
                         "AiLimbsExecutionPolicyEngine + ToolExecutionManager"
                     else ->
-                        "AiLimbsExecutionPolicyEngine"
+                        "AiLimbsExecutionPolicyEngine + ToolPermissionSystem"
                 },
             payloadKind = spec.payloadKind
         )
@@ -308,7 +357,7 @@ class AiLimbsExecutionPolicyEngine(
     private suspend fun readAvailability(
         targetName: String,
         parameters: JSONObject,
-        registration: AiLimbsCoreCapabilityRegistration?,
+        route: AiLimbsCapabilityRoute,
         sourceEnabled: Boolean,
         spec: AiLimbsPolicySpec
     ): AiLimbsAvailabilityResult {
@@ -317,6 +366,16 @@ class AiLimbsExecutionPolicyEngine(
                 available = false,
                 reasonCode = "SOURCE_DISABLED",
                 reason = "The capability source is disabled."
+            )
+        }
+
+        val coreRegistration = (route as? AiLimbsCapabilityRoute.Core)?.registration
+        val pluginRegistration = (route as? AiLimbsCapabilityRoute.Plugin)?.registration
+        if (pluginRegistration != null && !AiLimbsPluginCapabilityRegistry.isCurrent(pluginRegistration)) {
+            return AiLimbsAvailabilityResult(
+                available = false,
+                reasonCode = "PLUGIN_CAPABILITY_UNAVAILABLE",
+                reason = "The plugin capability is no longer mounted."
             )
         }
 
@@ -358,8 +417,8 @@ class AiLimbsExecutionPolicyEngine(
         }
 
         if (
-            registration?.provider == AiLimbsCoreProvider.BRIDGE &&
-                registration.availabilityPolicy == AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT
+            coreRegistration?.provider == AiLimbsCoreProvider.BRIDGE &&
+                coreRegistration.availabilityPolicy == AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT
         ) {
             val bridge = AiLimbsBridgeManager.runtimeState.value
             if (BridgeAction.RECONNECT !in AiLimbsBridgeManager.availableActions(appContext, bridge)) {
@@ -377,10 +436,10 @@ class AiLimbsExecutionPolicyEngine(
         }
 
         val usesUbuntu =
-            registration?.provider == AiLimbsCoreProvider.UBUNTU ||
+            coreRegistration?.provider == AiLimbsCoreProvider.UBUNTU ||
                 AiLimbsExecutionPolicyDescriptor.isUbuntuTool(targetName, parameters)
         if (usesUbuntu) {
-            return ubuntuAvailability(registration)
+            return ubuntuAvailability(coreRegistration)
         }
         return AiLimbsAvailabilityResult(available = true)
     }

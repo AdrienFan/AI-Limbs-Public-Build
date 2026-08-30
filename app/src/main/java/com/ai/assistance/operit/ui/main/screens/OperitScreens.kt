@@ -67,28 +67,9 @@ import com.ai.assistance.operit.ui.features.settings.screens.MnnModelDownloadScr
 import com.ai.assistance.operit.ui.features.settings.screens.UserPreferencesSettingsScreen
 import com.ai.assistance.operit.ui.features.tokenstats.TokenUsageStatisticsScreen
 import com.ai.assistance.operit.ui.features.token.TokenConfigWebViewScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.AppPermissionsToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.FileManagerToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.LogcatToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.ailimbs.AiLimbsAccessManagerScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.ailimbs.AiLimbsBridgeCenterScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.ShellExecutorToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.StreamMarkdownDemoScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.TerminalAutoConfigToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.TerminalToolScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.ToolboxScreen
+import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.PluginCenterScreen
 import com.ai.assistance.operit.ui.common.composedsl.ToolPkgComposeDslToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.UIDebuggerToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.DefaultAssistantGuideToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.ProcessLimitRemoverToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.sqlviewer.SqlViewerToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.ffmpegtoolbox.FFmpegToolboxScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.htmlpackager.HtmlPackagerScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.speechtotext.SpeechToTextToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.texttospeech.TextToSpeechToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.tooltester.ToolTesterScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.autoglm.AutoGlmOneClickToolScreen
-import com.ai.assistance.operit.ui.features.toolbox.screens.autoglm.AutoGlmToolScreen
 import com.ai.assistance.operit.ui.features.update.screens.UpdateScreen
 import com.ai.assistance.operit.ui.features.workflow.screens.WorkflowListScreen
 import com.ai.assistance.operit.ui.features.workflow.screens.WorkflowDetailScreen
@@ -556,58 +537,39 @@ sealed class Screen(
                 onGestureConsumed: (Boolean) -> Unit
         ) {
             ToolboxScreen(
-                    navController = navController,
-                    onNavigationEntrySelected = { entry ->
-                        val nativeScreen = ScreenRouteRegistry.buildScreen(entry.routeId, entry.routeArgs)
-                        if (nativeScreen != null) {
-                            navigateTo(nativeScreen)
-                        } else {
-                            AppRouterGateway.navigate(
-                                routeId = entry.routeId,
-                                args = entry.routeArgs,
-                                source = com.ai.assistance.operit.ui.main.navigation.RouteEntrySource.DEFAULT
-                            )
-                        }
+                navController = navController,
+                onNavigationEntrySelected = { entry ->
+                    val nativeScreen = ScreenRouteRegistry.buildScreen(entry.routeId, entry.routeArgs)
+                    if (nativeScreen != null) {
+                        navigateTo(nativeScreen)
+                    } else {
+                        AppRouterGateway.navigate(
+                            routeId = entry.routeId,
+                            args = entry.routeArgs,
+                            source = com.ai.assistance.operit.ui.main.navigation.RouteEntrySource.DEFAULT
+                        )
                     }
+                }
             )
         }
     }
 
-
-
-    data object AiLimbsBridgeCenter :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.ai_limbs_bridge_center_title) {
+    data object PluginCenter : Screen(navItem = NavItem.Toolbox, titleRes = R.string.plugin_center_title) {
         @Composable
         override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
+            navController: NavController,
+            navigateTo: ScreenNavigationHandler,
+            onGoBack: () -> Unit,
+            hasBackgroundImage: Boolean,
+            onLoading: (Boolean) -> Unit,
+            onError: (String) -> Unit,
+            onGestureConsumed: (Boolean) -> Unit
         ) {
-            AiLimbsBridgeCenterScreen(
-                onConfigureUiController = { navigateTo(AutoGlmOneClick) }
-            )
+            PluginCenterScreen()
         }
     }
 
-    data object LanerAccessManager :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.laner_access_manager_title) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            AiLimbsAccessManagerScreen()
-        }
-    }
+
 
     data object ShizukuCommands : Screen(navItem = NavItem.ShizukuCommands) {
         @Composable
@@ -1253,316 +1215,7 @@ sealed class Screen(
         override fun getTitle(): String = title
     }
 
-    // Toolbox secondary screens
-
-    data object FileManager :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_file_manager) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            FileManagerToolScreen(navController = navController)
-        }
-    }
-
-    data object Terminal :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_terminal) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            TerminalToolScreen(navController = navController)
-        }
-    }
-
-    data object TerminalSetup :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_terminal) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            TerminalToolScreen(navController = navController, forceShowSetup = true)
-        }
-    }
-
-    data object TerminalAutoConfig :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_terminal_auto_config) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            TerminalAutoConfigToolScreen(navController = navController)
-        }
-    }
-
-    data object AppPermissions :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_app_permissions) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            AppPermissionsToolScreen(navController = navController)
-        }
-    }
-
-    data object UIDebugger :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_ui_debugger) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            UIDebuggerToolScreen(navController = navController)
-        }
-    }
-
-    data object ShellExecutor :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_shell_executor) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            ShellExecutorToolScreen(navController = navController)
-        }
-    }
-
-    data object Logcat :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_logcat) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            LogcatToolScreen(navController = navController)
-        }
-    }
-
-    data object SqlViewer :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_sql_viewer) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            SqlViewerToolScreen(navController = navController)
-        }
-    }
-
-    // FFmpeg Toolbox screen
-    data object FFmpegToolbox :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_ffmpeg_toolbox) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            FFmpegToolboxScreen(navController = navController)
-        }
-    }
-
-    // 流式Markdown演示屏幕
-    data object MarkdownDemo :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_markdown_demo) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            StreamMarkdownDemoScreen(onBackClick = onGoBack)
-        }
-    }
-
-    // 工具测试屏幕
-    data object ToolTester :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_tool_tester) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            ToolTesterScreen(navController = navController)
-        }
-    }
-
-    // 在MarkdownDemo对象后添加TextToSpeech对象
-    data object TextToSpeech :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_text_to_speech) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            TextToSpeechToolScreen(navController = navController)
-        }
-    }
-
-    // Tools screens
-    data object SpeechToText :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_speech_to_text) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            SpeechToTextToolScreen(navController = navController)
-        }
-    }
-
-    data object DefaultAssistantGuide :
-            Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_default_assistant_guide) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            DefaultAssistantGuideToolScreen(navController = navController)
-        }
-    }
-
-
-    data object ProcessLimitRemover : Screen(navItem = NavItem.Toolbox, titleRes = R.string.tool_process_limit_remover) {
-        @Composable
-        override fun Content(
-            navController: NavController,
-            navigateTo: ScreenNavigationHandler,
-            onGoBack: () -> Unit,
-            hasBackgroundImage: Boolean,
-            onLoading: (Boolean) -> Unit,
-            onError: (String) -> Unit,
-            onGestureConsumed: (Boolean) -> Unit
-        ) {
-            ProcessLimitRemoverToolScreen(navController = navController)
-        }
-    }
-
-    data object HtmlPackager : Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_html_packager) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            HtmlPackagerScreen(onGoBack = onGoBack)
-        }
-    }
-
-    data object AutoGlmOneClick : Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_autoglm_one_click) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            AutoGlmOneClickToolScreen(
-                navController = navController,
-                onNavigateToModelConfig = { navigateTo(ModelConfig) }
-            )
-        }
-    }
-    
-    data object AutoGlmTool : Screen(navItem = NavItem.Toolbox, titleRes = R.string.screen_title_autoglm_tool) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            AutoGlmToolScreen()
-        }
-    }
+    // v0.7: legacy Toolbox feature routes removed. Plugin Center will own extension UI.
 
     // 获取屏幕标题
     @Composable

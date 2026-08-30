@@ -32,7 +32,7 @@ object AppRouteCatalog {
             packageManager.getToolPkgNavigationEntries(resolveContext = context).mapNotNull { entry ->
                 val surface =
                     when (entry.surface.trim().lowercase()) {
-                        TOOLPKG_NAV_SURFACE_TOOLBOX -> NavigationSurface.TOOLBOX
+                        TOOLPKG_NAV_SURFACE_TOOLBOX -> null
                         TOOLPKG_NAV_SURFACE_MAIN_SIDEBAR_PLUGINS ->
                             NavigationSurface.MAIN_SIDEBAR_PLUGINS
                         else -> null

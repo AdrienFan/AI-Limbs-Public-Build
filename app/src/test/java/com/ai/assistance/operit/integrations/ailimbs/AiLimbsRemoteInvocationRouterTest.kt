@@ -13,12 +13,43 @@ class AiLimbsRemoteInvocationRouterTest {
             routeRemoteInvocation(
                 requestedTool = "capability.search",
                 args = args,
-                isCoreCapability = true,
+                isManagedCapability = true,
                 isResolvedHostCapability = false,
                 hostToolExecutor = "ai_limbs.host_tool.execute"
             )
 
         assertEquals("capability.search", invocation.tool)
+        assertSame(args, invocation.args)
+    }
+
+    @Test
+    fun pluginCapabilityEntersDispatcherDirectly() {
+        val args = JSONObject().put("text", "hello")
+        val invocation =
+            routeRemoteInvocation(
+                requestedTool = "plugin.test.echo",
+                args = args,
+                isManagedCapability = true,
+                isResolvedHostCapability = false,
+                hostToolExecutor = "ai_limbs.host_tool.execute"
+            )
+
+        assertEquals("plugin.test.echo", invocation.tool)
+        assertSame(args, invocation.args)
+    }
+
+    @Test
+    fun unknownReservedPluginCapabilityNeverFallsBackToHostExecutor() {
+        val args = JSONObject().put("text", "hello")
+        val invocation =
+            routeRemoteInvocation(
+                requestedTool = "plugin.missing.echo",
+                args = args,
+                isManagedCapability = false,
+                isResolvedHostCapability = true,
+                hostToolExecutor = "ai_limbs.host_tool.execute"
+            )
+        assertEquals("plugin.missing.echo", invocation.tool)
         assertSame(args, invocation.args)
     }
 
@@ -29,7 +60,7 @@ class AiLimbsRemoteInvocationRouterTest {
             routeRemoteInvocation(
                 requestedTool = "example_pkg:read",
                 args = args,
-                isCoreCapability = false,
+                isManagedCapability = false,
                 isResolvedHostCapability = true,
                 hostToolExecutor = "ai_limbs.host_tool.execute"
             )
@@ -46,7 +77,7 @@ class AiLimbsRemoteInvocationRouterTest {
             routeRemoteInvocation(
                 requestedTool = "unknown.tool",
                 args = args,
-                isCoreCapability = false,
+                isManagedCapability = false,
                 isResolvedHostCapability = false,
                 hostToolExecutor = "ai_limbs.host_tool.execute"
             )

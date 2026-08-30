@@ -24,7 +24,9 @@ private val TOOLPKG_DIRECTORY_RESOURCE_MIME_TYPES =
 
 internal enum class ToolPkgSourceType {
     ASSET,
-    EXTERNAL
+    EXTERNAL,
+    /** Immutable .toolpkg payload owned by the AI Limbs Plugin Store. */
+    MANAGED_PLUGIN
 }
 
 internal data class ToolPkgResourceRuntime(

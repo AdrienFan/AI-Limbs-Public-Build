@@ -390,16 +390,6 @@
             </intent-filter>
         </receiver>
 
-        <service
-            android:name=".services.UIDebuggerService"
-            android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="specialUse">
-            <property
-                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
-                android:value="Shows a user-triggered floating UI debugger overlay across apps for inspection tasks that do not match other foreground service types." />
-        </service>
-        
         <!-- Voice Assistant Widget Receiver -->
         <receiver
             android:name=".widget.VoiceAssistantWidgetReceiver"
