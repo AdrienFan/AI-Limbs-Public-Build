@@ -1,10 +1,14 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import com.ai.assistance.operit.integrations.ailimbs.providers.rdc.RdcBridgeProvider
+import com.ai.assistance.operit.integrations.ailimbs.providers.triggercmd.TriggerCmdBridgeProvider
 
 internal object AiLimbsBridgeProviderCatalog {
     private val factories: List<BridgeProviderFactory> =
-        listOf(RdcBridgeProvider.Factory())
+        listOf(
+            RdcBridgeProvider.Factory(),
+            TriggerCmdBridgeProvider.Factory()
+        )
 
     val DEFAULT_PROFILE_ID: String =
         factories

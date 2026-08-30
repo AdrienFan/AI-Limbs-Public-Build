@@ -398,8 +398,8 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 57
-        versionName = "0.6.4.7.4"
+        versionCode = 58
+        versionName = "0.6.4.7.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables {
@@ -434,7 +434,7 @@ android {
             }
         }
         debug {
-            applicationIdSuffix = ".ailimbs.v06474"
+            applicationIdSuffix = ".ailimbs.v06475"
             versionNameSuffix = "-build1"
             signingConfig = signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")
@@ -827,6 +827,9 @@ dependencies {
 
     // Security
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
+    implementation("io.socket:socket.io-client:1.0.2") {
+        exclude(group = "org.json", module = "json")
+    }
     
     // BouncyCastle - explicitly include jdk18on version to avoid conflicts
     implementation("org.bouncycastle:bcprov-jdk18on:1.78")

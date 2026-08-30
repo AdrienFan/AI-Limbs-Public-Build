@@ -8344,4 +8344,18 @@
     <string name="laner_priority_high">重要</string>
     <string name="laner_priority_normal">普通</string>
     <string name="laner_priority_low">稍后</string>
+
+    <string name="ai_limbs_triggercmd_config_title">TRIGGERcmd Bridge 配置</string>
+    <string name="ai_limbs_triggercmd_token_configured">Agent Token：已安全配置（不会显示明文）</string>
+    <string name="ai_limbs_triggercmd_token_not_configured">Agent Token：未配置</string>
+    <string name="ai_limbs_triggercmd_secure_storage_unavailable">安全凭据存储不可用；TRIGGERcmd 不会以明文方式保存 Token</string>
+    <string name="ai_limbs_triggercmd_agent_token">Agent Token</string>
+    <string name="ai_limbs_triggercmd_computer_name">Computer Name</string>
+    <string name="ai_limbs_triggercmd_computer_id">Computer ID：%1$s</string>
+    <string name="ai_limbs_triggercmd_not_registered">尚未注册</string>
+    <string name="ai_limbs_triggercmd_provider_grant_full">Provider Grant：FULL（完整申请资格，仍受统一 Policy / Permission 管理）</string>
+    <string name="ai_limbs_triggercmd_save_connect">保存并连接</string>
+    <string name="ai_limbs_triggercmd_clear_binding">清除绑定</string>
+    <string name="ai_limbs_triggercmd_saved_connecting">配置已保存，正在连接 TRIGGERcmd…</string>
+    <string name="ai_limbs_triggercmd_binding_cleared">TRIGGERcmd 绑定已清除</string>
 </resources>

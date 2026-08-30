@@ -93,7 +93,11 @@ class AiLimbsBridgeReconnectToolExecutor(context: Context) {
                 delay(AGENT_RECONNECT_DELAY_MS)
                 try {
                     AppLogger.i(TAG, "Dispatching deferred Bridge reconnect: requestId=$requestId")
-                    AIForegroundService.requestBridgeAction(context, BridgeAction.RECONNECT)
+                    AIForegroundService.requestBridgeAction(
+                        context,
+                        BridgeAction.RECONNECT,
+                        AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID
+                    )
                 } catch (error: Throwable) {
                     AppLogger.e(TAG, "Deferred Bridge reconnect failed: requestId=$requestId", error)
                 } finally {

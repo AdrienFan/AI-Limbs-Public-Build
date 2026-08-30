@@ -16,6 +16,7 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -30,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -42,6 +44,8 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsUiCapabilityService
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsUiCapabilityStatus
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
+import com.ai.assistance.operit.integrations.ailimbs.providers.triggercmd.TriggerCmdBridgeProvider
+import com.ai.assistance.operit.integrations.ailimbs.providers.triggercmd.TriggerCmdBridgeStorage
 import com.ai.assistance.operit.ui.components.CustomScaffold
 import kotlinx.coroutines.launch
 
@@ -56,7 +60,7 @@ fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
     var activeProviderId by remember {
         mutableStateOf(AiLimbsBridgeManager.activeProviderId(context))
     }
-    val runtimeState by AiLimbsBridgeManager.runtimeState.collectAsState()
+    val controlState by AiLimbsBridgeManager.controlState.collectAsState()
 
     fun refreshUiStatus() {
         scope.launch {
@@ -74,19 +78,19 @@ fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
-    LaunchedEffect(runtimeState.providerId) {
+    LaunchedEffect(controlState.providerId) {
         if (
-            runtimeState.providerId.isNotBlank() &&
-                runtimeState.providerId == AiLimbsBridgeManager.activeProviderId(context)
+            controlState.providerId.isNotBlank() &&
+                controlState.providerId == AiLimbsBridgeManager.activeProviderId(context)
         ) {
-            activeProviderId = runtimeState.providerId
+            activeProviderId = controlState.providerId
         }
     }
 
     val activeProfile = profiles.first { it.id == activeProviderId }
     val displayedState =
-        if (runtimeState.providerId == activeProfile.id) {
-            runtimeState
+        if (controlState.providerId == activeProfile.id) {
+            controlState
         } else {
             AiLimbsBridgeState(
                 providerId = activeProfile.id,
@@ -127,11 +131,31 @@ fun AiLimbsBridgeCenterScreen(onConfigureUiController: () -> Unit) {
                 profile = activeProfile,
                 state = displayedState
             )
+            if (activeProfile.id == TriggerCmdBridgeProvider.PROFILE_ID) {
+                TriggerCmdConfigurationCard(
+                    context = context,
+                    refreshKey = displayedState.lastHeartbeatAtMs ?: displayedState.phase.ordinal.toLong(),
+                    onConnect = {
+                        AIForegroundService.requestBridgeAction(
+                            context,
+                            BridgeAction.CONNECT,
+                            activeProfile.id
+                        )
+                    },
+                    onStop = {
+                        AIForegroundService.requestBridgeAction(
+                            context,
+                            BridgeAction.STOP,
+                            activeProfile.id
+                        )
+                    }
+                )
+            }
             BridgeActionsCard(
                 actions = actions,
                 recoveryLocked = bridgeLifecycleLocked,
                 onAction = { action ->
-                    AIForegroundService.requestBridgeAction(context, action)
+                    AIForegroundService.requestBridgeAction(context, action, activeProfile.id)
                 }
             )
             UiCapabilityCard(
@@ -283,6 +307,105 @@ private fun BridgeStatusCard(
                     R.string.ai_limbs_bridge_device_id,
                     deviceId
                 )
+            )
+        }
+    }
+}
+
+@Composable
+private fun TriggerCmdConfigurationCard(
+    context: android.content.Context,
+    refreshKey: Long,
+    onConnect: () -> Unit,
+    onStop: () -> Unit
+) {
+    val storage = remember { TriggerCmdBridgeStorage(context) }
+    var tokenInput by remember { mutableStateOf("") }
+    var computerNameInput by remember { mutableStateOf(storage.readConfig().computerName) }
+    var feedback by remember { mutableStateOf<String?>(null) }
+    val config = remember(refreshKey, feedback) { storage.readConfig() }
+
+    BridgeCenterCard {
+        Text(
+            text = stringResource(R.string.ai_limbs_triggercmd_config_title),
+            style = MaterialTheme.typography.titleMedium
+        )
+        Text(
+            text = stringResource(
+                when {
+                    !config.secureStorageAvailable -> R.string.ai_limbs_triggercmd_secure_storage_unavailable
+                    config.configured -> R.string.ai_limbs_triggercmd_token_configured
+                    else -> R.string.ai_limbs_triggercmd_token_not_configured
+                }
+            ),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        OutlinedTextField(
+            value = tokenInput,
+            onValueChange = { tokenInput = it },
+            label = { Text(stringResource(R.string.ai_limbs_triggercmd_agent_token)) },
+            visualTransformation = PasswordVisualTransformation(),
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        OutlinedTextField(
+            value = computerNameInput,
+            onValueChange = { computerNameInput = it },
+            label = { Text(stringResource(R.string.ai_limbs_triggercmd_computer_name)) },
+            singleLine = true,
+            modifier = Modifier.fillMaxWidth()
+        )
+        Text(
+            text = stringResource(
+                R.string.ai_limbs_triggercmd_computer_id,
+                config.computerId ?: stringResource(R.string.ai_limbs_triggercmd_not_registered)
+            ),
+            style = MaterialTheme.typography.bodySmall
+        )
+        Text(
+            text = stringResource(R.string.ai_limbs_triggercmd_provider_grant_full),
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant
+        )
+        Button(
+            onClick = {
+                val result = runCatching {
+                    storage.saveBinding(tokenInput, computerNameInput)
+                }
+                if (result.isSuccess) {
+                    tokenInput = ""
+                    computerNameInput = storage.readConfig().computerName
+                    feedback = context.getString(R.string.ai_limbs_triggercmd_saved_connecting)
+                    onConnect()
+                } else {
+                    feedback = result.exceptionOrNull()?.message
+                }
+            },
+            enabled = tokenInput.isNotBlank() && config.secureStorageAvailable,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(stringResource(R.string.ai_limbs_triggercmd_save_connect))
+        }
+        if (config.configured) {
+            OutlinedButton(
+                onClick = {
+                    storage.clearBinding()
+                    tokenInput = ""
+                    computerNameInput = storage.readConfig().computerName
+                    feedback = context.getString(R.string.ai_limbs_triggercmd_binding_cleared)
+                    onStop()
+                },
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Text(stringResource(R.string.ai_limbs_triggercmd_clear_binding))
+            }
+        }
+        feedback?.takeIf { it.isNotBlank() }?.let { message ->
+            Text(
+                text = message,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
             )
         }
     }

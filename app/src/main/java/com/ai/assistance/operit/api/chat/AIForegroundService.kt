@@ -530,8 +530,19 @@ class AIForegroundService : Service() {
             startServiceForAction(context, ACTION_STOP_EXTERNAL_HTTP)
         }
 
-        fun requestBridgeAction(context: Context, action: BridgeAction) {
-            startServiceForAction(context, bridgeIntentAction(action))
+        fun requestBridgeAction(
+            context: Context,
+            action: BridgeAction,
+            providerId: String? = null
+        ) {
+            val appContext = context.applicationContext
+            val intent = Intent(appContext, AIForegroundService::class.java).apply {
+                this.action = bridgeIntentAction(action)
+                providerId?.takeIf { it.isNotBlank() }?.let {
+                    putExtra(EXTRA_BRIDGE_PROVIDER_ID, it)
+                }
+            }
+            startServiceIntent(context, intent)
         }
 
         fun requestBridgeProviderSelection(context: Context, providerId: String) {
@@ -1577,7 +1588,10 @@ class AIForegroundService : Service() {
         if (requestedBridgeAction != null) {
             val handled =
                 try {
-                    aiLimbsBridgeManager.perform(requestedBridgeAction)
+                    aiLimbsBridgeManager.perform(
+                        requestedBridgeAction,
+                        intent?.getStringExtra(EXTRA_BRIDGE_PROVIDER_ID)
+                    )
                 } catch (e: Exception) {
                     AppLogger.e(
                         TAG,
@@ -2383,13 +2397,17 @@ class AIForegroundService : Service() {
         )
     }
 
-    private fun bridgeActionPendingIntent(action: BridgeAction): PendingIntent {
+    private fun bridgeActionPendingIntent(
+        action: BridgeAction,
+        providerId: String
+    ): PendingIntent {
         val intent = Intent(this, AIForegroundService::class.java).apply {
             this.action = bridgeIntentAction(action)
+            putExtra(EXTRA_BRIDGE_PROVIDER_ID, providerId)
         }
         return PendingIntent.getService(
             this,
-            bridgeActionRequestCode(action),
+            bridgeActionRequestCode(action) xor providerId.hashCode(),
             intent,
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
@@ -2486,7 +2504,7 @@ class AIForegroundService : Service() {
                 add(
                     NotificationPanelAction(
                         label = if (state.phase == AiLimbsBridgePhase.PAIRING && action == BridgeAction.RECONNECT) getString(R.string.ai_limbs_bridge_action_refresh_auth_code) else bridgeActionLabel(action),
-                        pendingIntent = bridgeActionPendingIntent(action)
+                        pendingIntent = bridgeActionPendingIntent(action, state.providerId)
                     )
                 )
             }

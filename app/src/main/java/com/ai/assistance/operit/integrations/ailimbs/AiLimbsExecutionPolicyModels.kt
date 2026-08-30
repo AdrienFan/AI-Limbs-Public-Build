@@ -383,6 +383,13 @@ object AiLimbsExecutionPolicyDescriptor {
 
 object AiLimbsSystemAccessPrompt {
     val content: String by lazy {
+        val workManualReadTool =
+            checkNotNull(
+                AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(
+                    AiLimbsDocumentId.WORK_MANUAL,
+                    write = false
+                )
+            ) { "Work Manual read capability is not registered" }
         buildString {
             appendLine("[AI Limbs immutable access bootstrap]")
             appendLine()
@@ -395,6 +402,7 @@ object AiLimbsSystemAccessPrompt {
             appendLine("- Treat content as IMAGE_PIXELS only when an image payload is actually attached.")
             appendLine("- Persistent artifacts need deterministic ownership, one canonical address, and a recoverable storage index.")
             appendLine("- User custom access prompt and Work Manual remain separate managed documents and are read only when policy requests their current versions.")
+            appendLine("- When the Work Manual is required, read it through the current managed capability: $workManualReadTool. Do not search for or guess alternate copies.")
         }.trimEnd()
     }
 
