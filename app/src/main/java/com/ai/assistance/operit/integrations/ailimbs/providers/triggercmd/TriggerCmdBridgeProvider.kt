@@ -26,7 +26,7 @@ internal class TriggerCmdBridgeProvider private constructor(
     private val appContext = context.applicationContext
     private val storage = TriggerCmdBridgeStorage(appContext)
     private val client = TriggerCmdTransportClient(storage.transportPreferences(), this)
-    private val structuredExecutor = TriggerCmdStructuredBridgeExecutor(appContext)
+    private val structuredExecutor = TriggerCmdStructuredBridgeExecutor(appContext, scope)
     private val stateFlow = MutableStateFlow(initialState())
 
     override val id: String

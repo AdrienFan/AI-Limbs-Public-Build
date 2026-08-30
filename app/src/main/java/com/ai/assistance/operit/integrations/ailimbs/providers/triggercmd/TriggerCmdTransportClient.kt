@@ -395,7 +395,7 @@ internal class TriggerCmdTransportClient(
         Request.Builder()
             .url(url)
             .header("Authorization", "Bearer $token")
-            .header("User-Agent", "AI-Limbs-TRIGGERcmd-Bridge/0.6.4.7.6")
+            .header("User-Agent", "AI-Limbs-TRIGGERcmd-Bridge/0.6.4.7.7")
 
     private fun executeJson(
         request: Request,

@@ -31,6 +31,7 @@ internal object TriggerCmdBridgeProtocol {
     private const val MAX_PARAMS_CHARS = 32_768
     private const val MAX_REQUEST_ID_CHARS = 128
     private const val MAX_TOOL_CHARS = 192
+    private const val RETRY_AFTER_MS = 60_000
     private val requestIdPattern = Regex("[A-Za-z0-9._:-]+")
     private val toolPattern = Regex("[A-Za-z0-9_.:-]+")
 
@@ -84,6 +85,12 @@ internal object TriggerCmdBridgeProtocol {
         )
     }
 
+    fun accepted(request: TriggerCmdBridgeRequest): String =
+        progressResponse(request, "accepted")
+
+    fun running(request: TriggerCmdBridgeRequest): String =
+        progressResponse(request, "running")
+
     fun completed(request: TriggerCmdBridgeRequest, result: JSONObject): String {
         val ok = if (result.has("success")) result.optBoolean("success", false) else true
         val response = JSONObject()
@@ -113,8 +120,26 @@ internal object TriggerCmdBridgeProtocol {
             "rejected"
         )
 
+    fun bridgeBusy(requestId: String): String =
+        errorResponse(
+            requestId,
+            "BRIDGE_BUSY",
+            "Too many structured TRIGGERcmd requests are currently running",
+            "rejected"
+        )
+
     fun decodeFailure(failure: TriggerCmdBridgeDecodeResult.Failure): String =
         errorResponse(failure.requestId, failure.code, failure.message, "rejected")
+
+    private fun progressResponse(request: TriggerCmdBridgeRequest, status: String): String =
+        JSONObject()
+            .put("protocol", PROTOCOL)
+            .put("request_id", request.requestId)
+            .put("status", status)
+            .put("ok", true)
+            .put("tool", request.tool)
+            .put("retry_after_ms", RETRY_AFTER_MS)
+            .toString()
 
     private fun failure(
         requestId: String?,
