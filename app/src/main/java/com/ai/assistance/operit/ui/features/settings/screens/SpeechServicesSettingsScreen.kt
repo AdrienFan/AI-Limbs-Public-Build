@@ -101,8 +101,7 @@ import androidx.compose.runtime.LaunchedEffect
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SpeechServicesSettingsScreen(
-    onBackPressed: () -> Unit,
-    onNavigateToTextToSpeech: () -> Unit = {}
+    onBackPressed: () -> Unit
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -2336,37 +2335,6 @@ fun SpeechServicesSettingsScreen(
                                 title = stringResource(R.string.speech_services_info_stt_title),
                                 description = stringResource(R.string.speech_services_info_stt_desc)
                             )
-                        }
-                    }
-                }
-                
-                // 底部区域
-                Spacer(modifier = Modifier.height(16.dp))
-                
-                Card(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 8.dp),
-                    shape = RoundedCornerShape(12.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f)
-                    )
-                ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(16.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        OutlinedButton(
-                            onClick = onNavigateToTextToSpeech,
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.VolumeUp,
-                                contentDescription = null,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(stringResource(R.string.speech_services_test_tts))
                         }
                     }
                 }
