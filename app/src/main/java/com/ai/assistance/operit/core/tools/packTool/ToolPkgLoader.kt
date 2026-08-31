@@ -12,7 +12,37 @@ internal object ToolPkgLoader {
         jsEngine: JsEngine,
         parseJsPackage: (String, (String, String) -> Unit) -> ToolPackage?,
         reportPackageLoadError: (key: String, error: String) -> Unit
+    ): ToolPkgLoadResult =
+        loadToolPkgFromFile(
+            file = file,
+            sourceType = ToolPkgSourceType.EXTERNAL,
+            jsEngine = jsEngine,
+            parseJsPackage = parseJsPackage,
+            reportPackageLoadError = reportPackageLoadError
+        )
+
+    fun loadManagedToolPkgFromFile(
+        file: File,
+        jsEngine: JsEngine,
+        parseJsPackage: (String, (String, String) -> Unit) -> ToolPackage?,
+        reportPackageLoadError: (key: String, error: String) -> Unit
+    ): ToolPkgLoadResult =
+        loadToolPkgFromFile(
+            file = file,
+            sourceType = ToolPkgSourceType.MANAGED_PLUGIN,
+            jsEngine = jsEngine,
+            parseJsPackage = parseJsPackage,
+            reportPackageLoadError = reportPackageLoadError
+        )
+
+    private fun loadToolPkgFromFile(
+        file: File,
+        sourceType: ToolPkgSourceType,
+        jsEngine: JsEngine,
+        parseJsPackage: (String, (String, String) -> Unit) -> ToolPackage?,
+        reportPackageLoadError: (key: String, error: String) -> Unit
     ): ToolPkgLoadResult {
+        require(sourceType != ToolPkgSourceType.ASSET) { "File loader cannot use ASSET source type" }
         ZipFile(file).use { archive ->
             val entryIndex = ToolPkgArchiveParser.buildZipEntryIndex(archive)
             val readEntryText =
@@ -29,8 +59,8 @@ internal object ToolPkgLoader {
                 ToolPkgArchiveParser.parseToolPkgFromIndexedEntries(
                     entryIndex = entryIndex,
                     readEntryText = readEntryText,
-                    sourceType = ToolPkgSourceType.EXTERNAL,
-                    sourcePath = file.absolutePath,
+                    sourceType = sourceType,
+                    sourcePath = file.canonicalPath,
                     isBuiltIn = false,
                     parseJsPackage = parseJsPackage,
                     parseMainRegistration = { mainScriptText, toolPkgId, mainScriptPath ->

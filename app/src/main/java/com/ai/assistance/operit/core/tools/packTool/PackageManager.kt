@@ -65,6 +65,21 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         val marketOrigin: ToolPkgMarketOrigin? = null
     )
 
+    internal data class ManagedToolPkgMountResult(
+        val pluginId: String,
+        val containerPackageName: String,
+        val version: String,
+        val managedPath: String,
+        val activePackageNames: Set<String>
+    )
+
+    private data class ManagedToolPkgMount(
+        val pluginId: String,
+        val managedPath: String,
+        val loadResult: ToolPkgLoadResult,
+        val activePackageNames: Set<String>
+    )
+
     companion object {
         private const val TAG = "PackageManager"
         private const val TOOLPKG_TAG = "ToolPkg"
@@ -298,6 +313,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     private var assetPackageScanSnapshot: PackageScanSnapshot? = null
     @Volatile
     private var externalPackageScanCache: Map<String, ExternalPackageScanCacheEntry> = emptyMap()
+    private val managedToolPkgMounts = ConcurrentHashMap<String, ManagedToolPkgMount>()
 
     private val skillManager by lazy { SkillManager.getInstance(context) }
 
@@ -485,18 +501,12 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
 
     internal fun getEnabledPackageNameSetInternal(): Set<String> {
         ensureInitialized()
-        if (runtimeCachesReady) {
-            return enabledPackageNameSetCache
-        }
-        return getEnabledPackageNamesInternal().toSet()
+        return getEffectiveEnabledPackageNamesInternal().toSet()
     }
 
     internal fun getEnabledToolPkgContainerRuntimes(): List<ToolPkgContainerRuntime> {
         ensureInitialized()
-        if (runtimeCachesReady) {
-            return buildEnabledToolPkgContainerRuntimes(enabledPackageNamesCache)
-        }
-        return buildEnabledToolPkgContainerRuntimes(getEnabledPackageNamesInternal())
+        return buildEnabledToolPkgContainerRuntimes(getEffectiveEnabledPackageNamesInternal())
     }
 
     fun cancelToolPkgExecutionsForChat(
@@ -791,13 +801,14 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         mainEntry: String
     ): String? {
         return when (sourceType) {
-            ToolPkgSourceType.EXTERNAL -> {
+            ToolPkgSourceType.EXTERNAL,
+            ToolPkgSourceType.MANAGED_PLUGIN -> {
                 val sourceFile = File(sourcePath)
                 if (!sourceFile.exists()) {
                     null
                 } else {
                     buildString {
-                        append("external|")
+                        append(if (sourceType == ToolPkgSourceType.MANAGED_PLUGIN) "managed|" else "external|")
                         append(sourceFile.absolutePath)
                         append('|')
                         append(sourceFile.length())
@@ -843,7 +854,8 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
 
     private fun extractToolPkgArchive(runtime: ToolPkgContainerRuntime, destinationDir: File): Boolean {
         return when (runtime.sourceType) {
-            ToolPkgSourceType.EXTERNAL ->
+            ToolPkgSourceType.EXTERNAL,
+            ToolPkgSourceType.MANAGED_PLUGIN ->
                 ToolPkgArchiveParser.extractZipEntriesFromExternal(
                     zipFilePath = runtime.sourcePath,
                     destinationDir = destinationDir
@@ -869,7 +881,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
 
     private fun reconcileToolPkgCaches() {
         synchronized(toolPkgCacheLock) {
-            val enabledPackageNames = getEnabledPackageNamesInternal().toSet()
+            val enabledPackageNames = getEffectiveEnabledPackageNamesInternal().toSet()
             val availableContainerNames = toolPkgContainers.keys.toSet()
             val enabledContainerNames = linkedSetOf<String>().apply {
                 toolPkgContainers.keys.forEach { containerName ->
@@ -940,6 +952,54 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
 
             toolPkgSubpackageByPackageName.clear()
             toolPkgSubpackageByPackageName.putAll(snapshot.toolPkgSubpackages)
+
+            managedToolPkgMounts.values
+                .sortedBy { it.pluginId }
+                .forEach { mount ->
+                    overlayManagedToolPkgInto(
+                        loadResult = mount.loadResult,
+                        availablePackagesTarget = availablePackages,
+                        toolPkgContainersTarget = toolPkgContainers,
+                        toolPkgSubpackageByPackageNameTarget = toolPkgSubpackageByPackageName
+                    )
+                }
+        }
+    }
+
+    private fun overlayManagedToolPkgInto(
+        loadResult: ToolPkgLoadResult,
+        availablePackagesTarget: MutableMap<String, ToolPackage>,
+        toolPkgContainersTarget: MutableMap<String, ToolPkgContainerRuntime>,
+        toolPkgSubpackageByPackageNameTarget: MutableMap<String, ToolPkgSubpackageRuntime>
+    ) {
+        val claimedNames = buildList {
+            add(loadResult.containerPackage.name)
+            addAll(loadResult.subpackagePackages.map(ToolPackage::name))
+        }
+        val conflictingContainers = linkedSetOf<String>()
+        claimedNames.forEach { name ->
+            toolPkgContainersTarget[name]?.let { conflictingContainers += it.packageName }
+            toolPkgSubpackageByPackageNameTarget[name]?.let { conflictingContainers += it.containerPackageName }
+        }
+        conflictingContainers.forEach { containerName ->
+            removeToolPkgContainerFromTargets(
+                containerPackageName = containerName,
+                availablePackagesTarget = availablePackagesTarget,
+                toolPkgContainersTarget = toolPkgContainersTarget,
+                toolPkgSubpackageByPackageNameTarget = toolPkgSubpackageByPackageNameTarget
+            )
+        }
+        claimedNames.forEach { name ->
+            availablePackagesTarget.remove(name)
+            toolPkgSubpackageByPackageNameTarget.remove(name)
+        }
+        availablePackagesTarget[loadResult.containerPackage.name] = loadResult.containerPackage
+        toolPkgContainersTarget[loadResult.containerPackage.name] = loadResult.containerRuntime
+        loadResult.subpackagePackages.forEach { subpackage ->
+            availablePackagesTarget[subpackage.name] = subpackage
+        }
+        loadResult.containerRuntime.subpackages.forEach { runtime ->
+            toolPkgSubpackageByPackageNameTarget[runtime.packageName] = runtime
         }
     }
 
@@ -1762,6 +1822,130 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         return true
     }
 
+    internal fun mountManagedToolPkg(
+        pluginId: String,
+        managedPath: File,
+        expectedVersion: String
+    ): ManagedToolPkgMountResult {
+        ensureInitialized()
+        val normalizedPluginId = pluginId.trim()
+        require(normalizedPluginId.isNotBlank()) { "Managed ToolPkg pluginId must not be blank" }
+        require(expectedVersion.isNotBlank()) { "Managed ToolPkg expectedVersion must not be blank" }
+
+        val sourceFile = managedPath.canonicalFile
+        require(sourceFile.isFile) { "Managed ToolPkg payload does not exist: ${sourceFile.absolutePath}" }
+        require(sourceFile.name.endsWith(TOOLPKG_EXTENSION, ignoreCase = true)) {
+            "Managed ToolPkg payload must use $TOOLPKG_EXTENSION"
+        }
+
+        val loadResult = loadManagedToolPkgFile(sourceFile)
+        val runtime = loadResult.containerRuntime
+        require(runtime.sourceType == ToolPkgSourceType.MANAGED_PLUGIN) {
+            "Managed ToolPkg loader returned non-managed runtime: ${runtime.sourceType}"
+        }
+        require(loadResult.containerPackage.name == normalizedPluginId) {
+            "ToolPkg identity mismatch: plugin_id=$normalizedPluginId, toolpkg_id=${loadResult.containerPackage.name}"
+        }
+        require(runtime.version == expectedVersion) {
+            "ToolPkg version mismatch: plugin=$expectedVersion, toolpkg=${runtime.version}"
+        }
+
+        val activePackageNames = linkedSetOf<String>().apply {
+            add(runtime.packageName)
+            runtime.subpackages.filter { it.enabledByDefault }.forEach { add(it.packageName) }
+        }.toSet()
+        val mount = ManagedToolPkgMount(
+            pluginId = normalizedPluginId,
+            managedPath = sourceFile.absolutePath,
+            loadResult = loadResult,
+            activePackageNames = activePackageNames
+        )
+
+        synchronized(initLock) {
+            check(!managedToolPkgMounts.containsKey(normalizedPluginId)) {
+                "Managed ToolPkg is already mounted: $normalizedPluginId"
+            }
+            val claimedNames = buildList {
+                add(loadResult.containerPackage.name)
+                addAll(loadResult.subpackagePackages.map(ToolPackage::name))
+            }
+            val conflicts = claimedNames.filter { availablePackages.containsKey(it) }
+            check(conflicts.isEmpty()) {
+                "Managed ToolPkg conflicts with existing package names: ${conflicts.joinToString()}"
+            }
+            check(registerToolPkg(loadResult)) {
+                "Failed to register managed ToolPkg: $normalizedPluginId"
+            }
+            managedToolPkgMounts[normalizedPluginId] = mount
+        }
+
+        try {
+            checkNotNull(ensureToolPkgCache(runtime)) {
+                "Failed to prepare managed ToolPkg runtime cache: $normalizedPluginId"
+            }
+            notifyToolPkgRuntimeChangeListeners()
+        } catch (error: Throwable) {
+            synchronized(initLock) {
+                managedToolPkgMounts.remove(normalizedPluginId, mount)
+                removeToolPkgContainerFromTargets(
+                    containerPackageName = runtime.packageName,
+                    availablePackagesTarget = availablePackages,
+                    toolPkgContainersTarget = toolPkgContainers,
+                    toolPkgSubpackageByPackageNameTarget = toolPkgSubpackageByPackageName
+                )
+            }
+            deleteToolPkgCacheDir(runtime.packageName)
+            throw error
+        }
+
+        return ManagedToolPkgMountResult(
+            pluginId = normalizedPluginId,
+            containerPackageName = runtime.packageName,
+            version = runtime.version,
+            managedPath = sourceFile.absolutePath,
+            activePackageNames = activePackageNames
+        )
+    }
+
+    internal fun unmountManagedToolPkg(pluginId: String): Boolean {
+        ensureInitialized()
+        val normalizedPluginId = pluginId.trim()
+        if (normalizedPluginId.isBlank()) return false
+        val mount = managedToolPkgMounts[normalizedPluginId] ?: return true
+        val runtime = mount.loadResult.containerRuntime
+
+        mount.activePackageNames.forEach(::unregisterPackageTools)
+        runtime.subpackages.map(ToolPkgSubpackageRuntime::packageName).forEach(::unregisterPackageTools)
+        destroyToolPkgExecutionEngines(runtime.packageName)
+
+        synchronized(initLock) {
+            val current = toolPkgContainers[runtime.packageName]
+            if (
+                current?.sourceType == ToolPkgSourceType.MANAGED_PLUGIN &&
+                    runCatching { File(current.sourcePath).canonicalPath }.getOrNull() == mount.managedPath
+            ) {
+                removeToolPkgContainerFromTargets(
+                    containerPackageName = runtime.packageName,
+                    availablePackagesTarget = availablePackages,
+                    toolPkgContainersTarget = toolPkgContainers,
+                    toolPkgSubpackageByPackageNameTarget = toolPkgSubpackageByPackageName
+                )
+            }
+            managedToolPkgMounts.remove(normalizedPluginId, mount)
+        }
+        deleteToolPkgCacheDir(runtime.packageName)
+        notifyToolPkgRuntimeChangeListeners()
+        return true
+    }
+
+    internal fun isManagedToolPkgPackage(packageName: String): Boolean {
+        val normalized = normalizePackageName(packageName)
+        val container = toolPkgContainers[normalized]
+        if (container?.sourceType == ToolPkgSourceType.MANAGED_PLUGIN) return true
+        val subpackage = toolPkgSubpackageByPackageName[normalized] ?: return false
+        return toolPkgContainers[subpackage.containerPackageName]?.sourceType == ToolPkgSourceType.MANAGED_PLUGIN
+    }
+
     /** Loads a complete ToolPackage from a JavaScript file */
     private fun loadPackageFromJsFile(
         file: File,
@@ -1875,6 +2059,25 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
             )
             null
         }
+    }
+
+    private fun loadManagedToolPkgFile(file: File): ToolPkgLoadResult {
+        val loadErrors = linkedMapOf<String, String>()
+        val result = withToolPkgRegistrationEngine { registrationEngine ->
+            ToolPkgLoader.loadManagedToolPkgFromFile(
+                file = file,
+                jsEngine = registrationEngine,
+                parseJsPackage = { jsContent, onError -> parseJsPackage(jsContent, onError) },
+                reportPackageLoadError = { key, error -> loadErrors[key] = error }
+            )
+        }
+        if (loadErrors.isNotEmpty()) {
+            throw IllegalStateException(
+                "Managed ToolPkg contains registration errors: " +
+                    loadErrors.entries.joinToString(" | ") { (key, value) -> "$key: $value" }
+            )
+        }
+        return result
     }
 
     private fun prepareToolPkgAssetCache(
@@ -2839,11 +3042,14 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         ensureInitialized()
         val normalizedPackageName = normalizePackageName(packageName)
 
+        if (isManagedToolPkgPackage(normalizedPackageName)) {
+            return "Package '$normalizedPackageName' is managed by Plugin Center"
+        }
         if (!availablePackages.containsKey(normalizedPackageName)) {
             return "Package not found in available packages: $normalizedPackageName"
         }
 
-        val enabledPackageNames = LinkedHashSet(getEnabledPackageNames())
+        val enabledPackageNames = LinkedHashSet(getEnabledPackageNamesInternal())
         val subpackageStates = getToolPkgSubpackageStatesInternal().toMutableMap()
 
         val containerRuntime = toolPkgContainers[normalizedPackageName]
@@ -3278,11 +3484,19 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      */
     fun getEnabledPackageNames(): List<String> {
         ensureInitialized()
-        if (runtimeCachesReady) {
-            return enabledPackageNamesCache
-        }
-        return getEnabledPackageNamesInternal()
+        return getEffectiveEnabledPackageNamesInternal()
     }
+
+    private fun getEffectiveEnabledPackageNamesInternal(): List<String> {
+        val effective = LinkedHashSet(getEnabledPackageNamesInternal())
+        managedToolPkgMounts.values
+            .sortedBy { it.pluginId }
+            .forEach { mount -> effective.addAll(mount.activePackageNames) }
+        return effective.toList()
+    }
+
+    internal fun getLegacyEnabledPackageNamesForMutation(): List<String> =
+        getEnabledPackageNamesInternal()
 
     private fun getEnabledPackageNamesInternal(): List<String> {
         if (runtimeCachesReady) {
@@ -3462,8 +3676,11 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     fun disablePackage(packageName: String): String {
         ensureInitialized()
         val normalizedPackageName = normalizePackageName(packageName)
+        if (isManagedToolPkgPackage(normalizedPackageName)) {
+            return "Package '$normalizedPackageName' is managed by Plugin Center"
+        }
 
-        val currentPackages = LinkedHashSet(getEnabledPackageNames())
+        val currentPackages = LinkedHashSet(getEnabledPackageNamesInternal())
         val subpackageStates = getToolPkgSubpackageStatesInternal().toMutableMap()
         var packageWasRemoved = false
 
@@ -3619,6 +3836,10 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         val normalizedPackageName = normalizePackageName(packageName)
         AppLogger.d(TAG, "Attempting to delete package: $normalizedPackageName")
         ensureInitialized()
+        if (isManagedToolPkgPackage(normalizedPackageName)) {
+            AppLogger.w(TAG, "Refused legacy delete for Plugin Center managed ToolPkg: $normalizedPackageName")
+            return false
+        }
 
         if (toolPkgSubpackageByPackageName.containsKey(normalizedPackageName)) {
             // Subpackage is part of a toolpkg archive; only remove enable state.

@@ -139,7 +139,7 @@ class AiLimbsCapabilityResolver(
                     includeAlternateLanguageMetadata = true
                 )
             }
-        val catalog = AiLimbsCoreCapabilityRegistry.mergeInto(runtimeCatalog)
+        val catalog = AiLimbsCapabilityRegistry.mergeInto(runtimeCatalog)
 
         return catalog
             .distinctBy { catalogIdentity(it) }
@@ -190,14 +190,23 @@ class AiLimbsCapabilityResolver(
         val invokeId = entry.targetToolName
         val provider = providerFor(entry)
         val generatedId = generatedCapabilityId(provider, invokeId, entry.displayName)
-        val coreRegistration = AiLimbsCoreCapabilityRegistry.registrationForInvokeName(invokeId)
+        val managedRegistration = AiLimbsCapabilityRegistry.registrationForInvokeName(invokeId)
+        val coreRegistration =
+            (managedRegistration as? AiLimbsCapabilityRegistration.Core)?.registration
+        val pluginRegistration =
+            (managedRegistration as? AiLimbsCapabilityRegistration.Plugin)?.registration
         val semantic = semanticMetadata(invokeId)
-        val capabilityId = coreRegistration?.capabilityId ?: semantic?.capabilityId ?: generatedId
+        val capabilityId =
+            pluginRegistration?.catalogEntry?.targetToolName
+                ?: coreRegistration?.capabilityId
+                ?: semantic?.capabilityId
+                ?: generatedId
         val aliases =
             buildList {
                 add(generatedId)
                 coreRegistration?.invokeAliases?.let(::addAll)
                 coreRegistration?.capabilityAliases?.let(::addAll)
+                pluginRegistration?.invokeAliases?.let(::addAll)
                 semantic?.aliases?.let(::addAll)
                 add(invokeId)
             }.filter { it != capabilityId }.distinct()
@@ -347,12 +356,16 @@ class AiLimbsCapabilityResolver(
         .put("invoke_id", definition.invokeId)
 
     private fun providerFor(entry: ToolCatalogEntry): String {
-        AiLimbsCoreCapabilityRegistry.registrationForInvokeName(entry.targetToolName)?.let { registration ->
-            return when (registration.provider) {
-                AiLimbsCoreProvider.CORE -> PROVIDER_CORE
-                AiLimbsCoreProvider.BRIDGE -> PROVIDER_BRIDGE
-                AiLimbsCoreProvider.UBUNTU -> PROVIDER_UBUNTU
-            }
+        when (val registration = AiLimbsCapabilityRegistry.registrationForInvokeName(entry.targetToolName)) {
+            is AiLimbsCapabilityRegistration.Core ->
+                return when (registration.registration.provider) {
+                    AiLimbsCoreProvider.CORE -> PROVIDER_CORE
+                    AiLimbsCoreProvider.BRIDGE -> PROVIDER_BRIDGE
+                    AiLimbsCoreProvider.UBUNTU -> PROVIDER_UBUNTU
+                }
+            is AiLimbsCapabilityRegistration.Plugin ->
+                return "plugin:${registration.registration.ownerPluginId}"
+            null -> Unit
         }
         return when {
             isUbuntuBackedTool(entry.targetToolName) -> PROVIDER_UBUNTU
@@ -364,7 +377,7 @@ class AiLimbsCapabilityResolver(
     }
 
     private fun sourceLocator(definition: AiLimbsCapabilityDefinition): String = when {
-        AiLimbsCoreCapabilityRegistry.isRegisteredInvokeName(definition.invokeId) ->
+        AiLimbsCapabilityRegistry.isRegisteredInvokeName(definition.invokeId) ->
             definition.catalogEntry.sourceLocator ?: "registry://${definition.invokeId}"
         definition.invokeId.startsWith(AUTOMATIC_UI_BASE_PREFIX) ->
             "assets://packages/automatic_ui_base.js#${definition.invokeId.substringAfter(':')}"

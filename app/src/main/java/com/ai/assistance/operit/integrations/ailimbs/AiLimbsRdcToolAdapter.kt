@@ -203,7 +203,7 @@ class AiLimbsRdcToolAdapter(
             if (name.isBlank()) return mcpError("shell=operit requires a tool name")
             val parameters = request.optJSONObject("parameters") ?: JSONObject()
             val result =
-                if (isAiLimbsCoreTool(name)) {
+                if (shouldEnterAiLimbsDispatcher(name)) {
                     remoteExecutor.execute(name, parameters)
                 } else {
                     executeHostTool(name, parameters)
@@ -248,7 +248,7 @@ class AiLimbsRdcToolAdapter(
         toolName: String,
         args: JSONObject
     ): JSONObject {
-        if (isAiLimbsCoreTool(toolName)) {
+        if (shouldEnterAiLimbsDispatcher(toolName)) {
             return mcpResult(remoteExecutor.execute(toolName, args))
         }
         handler.registerDefaultTools()
@@ -294,8 +294,9 @@ class AiLimbsRdcToolAdapter(
     private fun isDirectImagePath(path: String): Boolean =
         path.substringAfterLast('/').substringAfterLast('.', "").lowercase() in DIRECT_IMAGE_EXTENSIONS
 
-    private fun isAiLimbsCoreTool(name: String): Boolean =
-        AiLimbsCoreCapabilityRegistry.isRegisteredInvokeName(name)
+    private fun shouldEnterAiLimbsDispatcher(name: String): Boolean =
+        AiLimbsCapabilityRegistry.isRegisteredInvokeName(name) ||
+            AiLimbsPluginCapabilityRegistry.isReservedInvokeName(name)
 
     private fun managedDocumentTool(path: String, write: Boolean): String? {
         val candidate = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
