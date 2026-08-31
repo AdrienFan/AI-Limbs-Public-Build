@@ -217,7 +217,9 @@ private class ExtensionHubServiceImpl(
     }
 
     private suspend fun reconcilePoint(point: String) {
-        records.values.filter { it.enabled && it.manifest.target.point == point }.forEach(::tryActivate)
+        for (record in records.values.filter { it.enabled && it.manifest.target.point == point }) {
+            tryActivate(record)
+        }
         publishSnapshots()
     }
 
