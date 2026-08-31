@@ -1,11 +1,11 @@
 package com.ai.assistance.operit.core.tools.packTool
 
+import com.ai.assistance.operit.plugins.runtime.logRuntimeTiming
+import com.ai.assistance.operit.plugins.runtime.runtimeTimingNow
 import android.content.Context
-import com.ai.assistance.operit.core.chat.logMessageTiming
-import com.ai.assistance.operit.core.chat.messageTimingNow
 import com.ai.assistance.operit.data.model.Workflow
 import com.ai.assistance.operit.data.repository.WorkflowRepository
-import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceConfigReader
+import com.ai.assistance.operit.core.tools.packTool.WorkspaceConfigReader
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import java.nio.charset.StandardCharsets
@@ -901,7 +901,7 @@ internal class PackageManagerToolPkgFacade(
         val normalizedPluginId = pluginId?.trim().orEmpty().ifBlank { null }
         val resolvedEventName = eventName?.trim().orEmpty().ifBlank { event }
         val shouldLogTiming = event.equals(TOOLPKG_EVENT_MESSAGE_PROCESSING, ignoreCase = true)
-        val totalStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+        val totalStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
 
         return runCatching {
             val normalizedContainerPackageName = packageManager.normalizePackageName(containerPackageName)
@@ -909,22 +909,22 @@ internal class PackageManagerToolPkgFacade(
                 packageManager.toolPkgContainersInternal[normalizedContainerPackageName]
                     ?: throw IllegalArgumentException("ToolPkg container not found: $containerPackageName")
 
-            val getMainScriptStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+            val getMainScriptStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
             val script =
                 packageManager.getToolPkgMainScriptInternal(runtime.packageName)
                     ?: throw IllegalStateException("ToolPkg main script is unavailable: ${runtime.packageName}")
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.runMainHook.getMainScript",
                     startTimeMs = getMainScriptStartTime,
                     details = "container=${runtime.packageName}, plugin=${normalizedPluginId ?: "none"}, scriptLength=${script.length}"
                 )
             }
 
-            val resolveFunctionSourceStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+            val resolveFunctionSourceStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
             val functionSource = inlineFunctionSource?.trim().orEmpty().ifBlank { null }
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.runMainHook.resolveFunctionSource",
                     startTimeMs = resolveFunctionSourceStartTime,
                     details = "container=${runtime.packageName}, function=$functionName, hasInline=${!functionSource.isNullOrBlank()}"
@@ -971,7 +971,7 @@ internal class PackageManagerToolPkgFacade(
                     params["__operit_toolpkg_runtime_kind"] = kind
                 }
 
-            val getExecutionEngineStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+            val getExecutionEngineStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
             val resolvedExecutionContextKey = resolveToolPkgExecutionContextKey(runtime.packageName, params)
             val executionEngine =
                 packageManager.getToolPkgExecutionEngine(
@@ -979,14 +979,14 @@ internal class PackageManagerToolPkgFacade(
                     containerPackageName = runtime.packageName
                 )
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.runMainHook.getExecutionEngine",
                     startTimeMs = getExecutionEngineStartTime,
                     details = "container=${runtime.packageName}, plugin=${normalizedPluginId ?: "none"}, contextKey=$resolvedExecutionContextKey"
                 )
             }
 
-            val executeScriptFunctionStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+            val executeScriptFunctionStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
             val executionResult = executionEngine.executeScriptFunction(
                 script = script,
                 functionName = functionName,
@@ -996,12 +996,12 @@ internal class PackageManagerToolPkgFacade(
                 timeoutMillis = timeoutMillis
             )
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.runMainHook.executeScriptFunction",
                     startTimeMs = executeScriptFunctionStartTime,
                     details = "container=${runtime.packageName}, plugin=${normalizedPluginId ?: "none"}, function=$functionName, resultType=${executionResult?.javaClass?.simpleName ?: "null"}"
                 )
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.runMainHook.total",
                     startTimeMs = totalStartTime,
                     details = "container=${runtime.packageName}, plugin=${normalizedPluginId ?: "none"}, function=$functionName, success=true"
@@ -1010,7 +1010,7 @@ internal class PackageManagerToolPkgFacade(
             executionResult
         }.onFailure { error ->
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.runMainHook.total",
                     startTimeMs = totalStartTime,
                     details = "container=$containerPackageName, plugin=${normalizedPluginId ?: "none"}, function=$functionName, success=false, reason=${error.message ?: error.javaClass.simpleName}"

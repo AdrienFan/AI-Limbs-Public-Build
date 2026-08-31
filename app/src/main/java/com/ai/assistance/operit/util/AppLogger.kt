@@ -2,7 +2,6 @@ package com.ai.assistance.operit.util
 
 import android.content.Context
 import android.util.Log
-import com.ai.assistance.operit.core.application.OperitApplication
 import java.io.File
 import java.io.FileWriter
 import java.io.IOException
@@ -41,6 +40,7 @@ object AppLogger {
     // Simple date formatter for log lines
     private val dateFormat = SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.US)
     private val startupFileDateFormat = SimpleDateFormat("yyyyMMdd_HHmmss_SSS", Locale.US)
+    private val processStartupTimeMs = System.currentTimeMillis()
     private val packageLogFileNamePattern = Pattern.compile("\\d{8}_\\d{6}_\\d{3}\\.log")
     private val packageIdRegexes = listOf(
         Pattern.compile("""\btoolPkgId=([A-Za-z0-9._:-]+)\b"""),
@@ -99,11 +99,7 @@ object AppLogger {
         if (existing != null) return existing
 
         return try {
-            val appContext: Context = try {
-                OperitApplication.instance.applicationContext
-            } catch (_: Throwable) {
-                boundContext ?: return null
-            }
+            val appContext: Context = boundContext ?: return null
             val dir = File(appContext.filesDir, LOG_DIR_NAME)
             if (!dir.exists()) {
                 dir.mkdirs()
@@ -121,16 +117,12 @@ object AppLogger {
         if (existing != null) return existing
 
         return try {
-            val appContext: Context = try {
-                OperitApplication.instance.applicationContext
-            } catch (_: Throwable) {
-                boundContext ?: return null
-            }
+            val appContext: Context = boundContext ?: return null
             val dir = File(OperitPaths.operitRootDir(), PACKAGE_LOG_DIR_NAME)
             if (!dir.exists()) {
                 dir.mkdirs()
             }
-            val startupMs = OperitApplication.appStartupTimeMs.takeIf { it > 0L } ?: System.currentTimeMillis()
+            val startupMs = processStartupTimeMs
             val fileName = startupFileDateFormat.format(Date(startupMs)) + ".log"
             File(dir, fileName).also { file ->
                 // Prune before the first write so the new startup file fits within the cap.
@@ -271,7 +263,7 @@ object AppLogger {
     @JvmStatic
     fun resetLogFile() {
         try {
-            val appContext: Context = OperitApplication.instance.applicationContext
+            val appContext: Context = boundContext ?: return
             val dir = File(appContext.filesDir, LOG_DIR_NAME)
             val file = File(dir, LOG_FILE_NAME)
             if (file.exists()) {

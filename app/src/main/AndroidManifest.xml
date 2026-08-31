@@ -12,7 +12,7 @@
         tools:ignore="ScopedStorage" />
 
     <application
-        android:name=".core.application.OperitApplication"
+        android:name=".ui.pluginlab.PluginLabApplication"
         android:allowBackup="false"
         android:icon="@mipmap/ic_launcher_simple"
         android:label="@string/app_name"
@@ -48,13 +48,6 @@
             </intent-filter>
         </activity>
 
-        <!-- Internal diagnostic fallback only; not exposed as a Lab feature. -->
-        <activity
-            android:name=".ui.error.CrashReportActivity"
-            android:exported="false"
-            android:label="@string/title_activity_crash_report"
-            android:process=":crash"
-            android:theme="@style/Theme.Operit" />
 
     </application>
 </manifest>
