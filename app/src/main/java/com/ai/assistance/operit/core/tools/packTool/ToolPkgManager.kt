@@ -4,7 +4,6 @@ import android.content.Context
 import com.ai.assistance.operit.core.tools.ToolPackage
 import com.ai.assistance.operit.core.tools.javascript.JsEngine
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.atomic.AtomicBoolean
 
 internal class ToolPkgManager(
@@ -15,8 +14,6 @@ internal class ToolPkgManager(
     internal val subpackageByPackageNameInternal =
         ConcurrentHashMap<String, ToolPkgSubpackageRuntime>()
 
-    private val runtimeChangeListeners =
-        CopyOnWriteArrayList<PackageManager.ToolPkgRuntimeChangeListener>()
     private data class ExecutionEngineEntry(
         val containerPackageName: String,
         val engine: JsEngine,
@@ -79,6 +76,16 @@ internal class ToolPkgManager(
         return loadResult.subpackagePackages
     }
 
+    fun unregisterToolPkg(containerPackageName: String): ToolPkgContainerRuntime? {
+        val normalized = containerPackageName.trim()
+        if (normalized.isBlank()) return null
+        val runtime = containersInternal.remove(normalized) ?: return null
+        runtime.subpackages.forEach { subpackage ->
+            subpackageByPackageNameInternal.remove(subpackage.packageName)
+        }
+        return runtime
+    }
+
     fun getEnabledToolPkgContainerRuntimes(
         enabledPackageNames: List<String>
     ): List<ToolPkgContainerRuntime> {
@@ -93,26 +100,6 @@ internal class ToolPkgManager(
             }
             .sortedBy(ToolPkgContainerRuntime::packageName)
             .toList()
-    }
-
-    fun addToolPkgRuntimeChangeListener(
-        listener: PackageManager.ToolPkgRuntimeChangeListener,
-        activeContainers: List<ToolPkgContainerRuntime>
-    ) {
-        if (!runtimeChangeListeners.contains(listener)) {
-            runtimeChangeListeners.add(listener)
-        }
-        listener.onToolPkgRuntimeChanged(activeContainers)
-    }
-
-    fun removeToolPkgRuntimeChangeListener(listener: PackageManager.ToolPkgRuntimeChangeListener) {
-        runtimeChangeListeners.remove(listener)
-    }
-
-    fun notifyToolPkgRuntimeChangeListeners(activeContainers: List<ToolPkgContainerRuntime>) {
-        runtimeChangeListeners.forEach { listener ->
-            listener.onToolPkgRuntimeChanged(activeContainers)
-        }
     }
 
     fun getToolPkgExecutionEngine(

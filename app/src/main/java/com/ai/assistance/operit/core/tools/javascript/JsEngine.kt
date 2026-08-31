@@ -5,17 +5,19 @@ import android.graphics.Bitmap
 import android.os.Looper
 import android.webkit.JavascriptInterface
 import androidx.annotation.Keep
+import com.ai.assistance.operit.plugins.runtime.PluginRouteDiscoveryGateway
+import com.ai.assistance.operit.plugins.runtime.PluginRouteEntrySource
+import com.ai.assistance.operit.plugins.runtime.PluginRouteRuntime
+import com.ai.assistance.operit.plugins.runtime.PluginRouterGateway
+import com.ai.assistance.operit.plugins.runtime.PluginRuntimeActivityTracker
+import com.ai.assistance.operit.plugins.runtime.logRuntimeTiming
+import com.ai.assistance.operit.plugins.runtime.runtimeTimingNow
 import androidx.core.content.ContextCompat
-import com.ai.assistance.operit.core.application.ActivityLifecycleManager
-import com.ai.assistance.operit.core.chat.logMessageTiming
-import com.ai.assistance.operit.core.chat.messageTimingNow
 import com.ai.assistance.operit.core.tools.AIToolHandler
+import com.ai.assistance.operit.plugins.runtime.PluginLabToolHost
+import com.ai.assistance.operit.plugins.runtime.PluginToolHost
 import com.ai.assistance.operit.core.tools.packTool.PackageManager
 import com.ai.assistance.operit.core.tools.packTool.TOOLPKG_EVENT_MESSAGE_PROCESSING
-import com.ai.assistance.operit.ui.main.navigation.AppRouteDiscoveryGateway
-import com.ai.assistance.operit.ui.main.navigation.AppRouterGateway
-import com.ai.assistance.operit.ui.main.navigation.RouteEntrySource
-import com.ai.assistance.operit.ui.main.navigation.RouteRuntime
 import com.ai.assistance.operit.ui.common.composedsl.ComposeDslFilePickerHostRegistry
 import com.ai.assistance.operit.ui.common.composedsl.ComposeDslWebViewHostRegistry
 import com.ai.assistance.operit.util.AppLogger
@@ -56,8 +58,9 @@ class JsEngine(private val context: Context) {
     private val javaObjectRegistry = ConcurrentHashMap<String, Any>()
     private val externalJavaCodeLoader = JsExternalJavaCodeLoader(context)
 
-    private val toolHandler = AIToolHandler.getInstance(context)
-    private val packageManager by lazy { PackageManager.getInstance(context, toolHandler) }
+    private val toolHandler: PluginToolHost = PluginLabToolHost.getInstance(context)
+    private val packageManagerToolHandler = AIToolHandler.getInstance(context)
+    private val packageManager by lazy { PackageManager.getInstance(context, packageManagerToolHandler) }
     private val toolCallInterface = JsToolCallInterface()
 
     @Volatile
@@ -739,16 +742,16 @@ class JsEngine(private val context: Context) {
                 }
                 .ifBlank { "none" }
         val shouldLogTiming = timingEvent.equals(TOOLPKG_EVENT_MESSAGE_PROCESSING, ignoreCase = true)
-        val totalStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+        val totalStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
 
-        val initQuickJsStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+        val initQuickJsStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
         val dispatch = synchronized(executionStartLock) {
             if (destroyed.get()) {
                 return buildJsExecutionErrorPayload("JsEngine already destroyed")
             }
             ensureQuickJs()
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.jsEngine.initQuickJs",
                     startTimeMs = initQuickJsStartTime,
                     details = "function=$functionName, plugin=$timingPluginId"
@@ -756,10 +759,10 @@ class JsEngine(private val context: Context) {
             }
 
             if (!jsEnvironmentInitialized) {
-                val initJavaScriptEnvironmentStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+                val initJavaScriptEnvironmentStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
                 initJavaScriptEnvironment()
                 if (shouldLogTiming) {
-                    logMessageTiming(
+                    logRuntimeTiming(
                         stage = "toolpkg.jsEngine.initJavaScriptEnvironment",
                         startTimeMs = initJavaScriptEnvironmentStartTime,
                         details = "function=$functionName, plugin=$timingPluginId"
@@ -768,7 +771,7 @@ class JsEngine(private val context: Context) {
                 if (!jsEnvironmentInitialized) {
                     val failureReason = "QuickJS runtime initialization failed"
                     if (shouldLogTiming) {
-                        logMessageTiming(
+                        logRuntimeTiming(
                             stage = "toolpkg.jsEngine.total",
                             startTimeMs = totalStartTime,
                             details = "function=$functionName, plugin=$timingPluginId, success=false, reason=$failureReason"
@@ -792,7 +795,7 @@ class JsEngine(private val context: Context) {
                 )
             activeExecutionSessions[callId] = session
 
-            val buildExecutionScriptStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+            val buildExecutionScriptStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
             val paramsObject = JSONObject(effectiveParams)
             val paramsJson = paramsObject.toString()
             val safeTimeoutMillis = timeoutMillis?.let { if (it <= 0L) 1L else it }
@@ -820,7 +823,7 @@ class JsEngine(private val context: Context) {
                     .put(preTimeoutMs ?: JSONObject.NULL)
                     .toString()
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.jsEngine.buildExecutionScript",
                     startTimeMs = buildExecutionScriptStartTime,
                     details = "function=$functionName, plugin=$timingPluginId, scriptLength=${script.length}, paramsLength=${paramsJson.length}, argsLength=${executionArgsJson.length}, directInvoke=true"
@@ -856,7 +859,7 @@ class JsEngine(private val context: Context) {
         val safeTimeoutMillis = dispatch.timeoutMillis
         val callId = session.callId
 
-        val waitResultStartTime = if (shouldLogTiming) messageTimingNow() else 0L
+        val waitResultStartTime = if (shouldLogTiming) runtimeTimingNow() else 0L
         return try {
             val result =
                 if (safeTimeoutMillis != null) {
@@ -868,12 +871,12 @@ class JsEngine(private val context: Context) {
                 }
             removeExecutionSession(callId)
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.jsEngine.waitResult",
                     startTimeMs = waitResultStartTime,
                     details = "function=$functionName, plugin=$timingPluginId, callId=$callId, success=true, resultType=${result?.javaClass?.simpleName ?: "null"}"
                 )
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.jsEngine.total",
                     startTimeMs = totalStartTime,
                     details = "function=$functionName, plugin=$timingPluginId, callId=$callId, success=true"
@@ -911,12 +914,12 @@ class JsEngine(private val context: Context) {
             cancelExecutionSessionInJs(callId, failureReason)
             session.executionListener?.onFailed(callId, failureReason)
             if (shouldLogTiming) {
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.jsEngine.waitResult",
                     startTimeMs = waitResultStartTime,
                     details = "function=$functionName, plugin=$timingPluginId, callId=$callId, success=false, reason=$failureReason"
                 )
-                logMessageTiming(
+                logRuntimeTiming(
                     stage = "toolpkg.jsEngine.total",
                     startTimeMs = totalStartTime,
                     details = "function=$functionName, plugin=$timingPluginId, callId=$callId, success=false, reason=$failureReason"
@@ -1683,10 +1686,10 @@ class JsEngine(private val context: Context) {
             if (normalizedRouteId.isBlank()) {
                 return
             }
-            AppRouterGateway.navigate(
+            PluginRouterGateway.navigate(
                 routeId = normalizedRouteId,
                 args = parseJsonObjectToMap(argsJson),
-                source = RouteEntrySource.SCRIPT
+                source = PluginRouteEntrySource.SCRIPT
             )
         }
 
@@ -1758,12 +1761,12 @@ class JsEngine(private val context: Context) {
         }
 
         private fun buildRoutesJson(includeOnlyNative: Boolean): String {
-            val routes = AppRouteDiscoveryGateway.listRoutes()
+            val routes = PluginRouteDiscoveryGateway.listRoutes()
             val result = JSONArray()
             routes
                 .asSequence()
                 .filter { route ->
-                    !includeOnlyNative || route.runtime == RouteRuntime.NATIVE
+                    !includeOnlyNative || route.runtime == PluginRouteRuntime.NATIVE
                 }
                 .sortedBy { it.routeId }
                 .forEach { route ->
@@ -2044,7 +2047,7 @@ class JsEngine(private val context: Context) {
 
         @JavascriptInterface
         fun javaGetCurrentActivity(): String {
-            val activity = ActivityLifecycleManager.getCurrentActivity()
+            val activity = PluginRuntimeActivityTracker.getCurrentActivity()
                 ?: return JSONObject()
                     .put("success", false)
                     .put("message", "current activity is null")

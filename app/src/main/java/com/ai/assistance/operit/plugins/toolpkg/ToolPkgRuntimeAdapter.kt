@@ -1,7 +1,6 @@
 package com.ai.assistance.operit.plugins.toolpkg
 
-import com.ai.assistance.operit.core.tools.AIToolHandler
-import com.ai.assistance.operit.core.tools.packTool.PackageManager
+import com.ai.assistance.operit.core.tools.packTool.ManagedToolPkgHost
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapterContext
@@ -16,11 +15,7 @@ internal object ToolPkgRuntimeAdapter : PluginRuntimeAdapter {
 
     override suspend fun mount(context: PluginRuntimeAdapterContext): PluginRuntimeHandle {
         val managedFile = resolveManagedEntry(context.contentDir, context.manifest.runtime.entry)
-        val packageManager =
-            PackageManager.getInstance(
-                context.appContext,
-                AIToolHandler.getInstance(context.appContext)
-            )
+        val packageManager = ManagedToolPkgHost.getInstance(context.appContext)
 
         val mounted = try {
             withContext(Dispatchers.IO) {

@@ -10,7 +10,7 @@ import android.text.StaticLayout
 import android.text.TextPaint
 import android.text.TextUtils
 import android.util.Base64
-import com.ai.assistance.operit.core.tools.AIToolHandler
+import com.ai.assistance.operit.plugins.runtime.PluginToolHost
 import com.ai.assistance.operit.core.tools.BinaryResultData
 import com.ai.assistance.operit.core.tools.BooleanResultData
 import com.ai.assistance.operit.core.tools.IntResultData
@@ -672,7 +672,7 @@ internal object JsNativeInterfaceDelegates {
     }
 
     fun callToolSync(
-        toolHandler: AIToolHandler,
+        toolHandler: PluginToolHost,
         toolType: String,
         toolName: String,
         paramsJson: String,
@@ -705,7 +705,7 @@ internal object JsNativeInterfaceDelegates {
     }
 
     fun callToolAsync(
-        toolHandler: AIToolHandler,
+        toolHandler: PluginToolHost,
         callbackId: String,
         toolType: String,
         toolName: String,
@@ -756,7 +756,7 @@ internal object JsNativeInterfaceDelegates {
     }
 
     fun callToolAsyncStreaming(
-        toolHandler: AIToolHandler,
+        toolHandler: PluginToolHost,
         callbackId: String,
         intermediateCallbackId: String,
         toolType: String,

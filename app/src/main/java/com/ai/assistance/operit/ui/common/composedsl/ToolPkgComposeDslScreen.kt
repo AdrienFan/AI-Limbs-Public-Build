@@ -172,15 +172,6 @@ import com.ai.assistance.operit.ui.common.displays.MarkdownTextComposable
 import com.ai.assistance.operit.ui.common.markdown.DefaultXmlRenderer
 import com.ai.assistance.operit.ui.common.markdown.StreamMarkdownRenderer
 import com.ai.assistance.operit.ui.components.CustomScaffold
-import com.ai.assistance.operit.ui.features.chat.screens.AIChatScreen
-import com.ai.assistance.operit.ui.main.LocalTopBarTitleContent
-import com.ai.assistance.operit.ui.main.TopBarTitleContent
-import com.ai.assistance.operit.ui.main.components.LocalIsCurrentScreen
-import com.ai.assistance.operit.ui.main.components.LocalSetScreenSoftInputMode
-import com.ai.assistance.operit.ui.main.components.LocalSetUseScreenImePadding
-import com.ai.assistance.operit.ui.features.token.webview.WebViewConfig
-import com.ai.assistance.operit.ui.theme.getSystemFontFamily
-import com.ai.assistance.operit.ui.theme.loadCustomFontFamily
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.OperitPaths
 import com.ai.assistance.operit.util.stream.Stream
@@ -1813,7 +1804,7 @@ private fun renderAiChatNode(
     modifierResolver: ComposeDslModifierResolver
 ) {
     Box(modifier = applyScopedCommonModifier(Modifier, node.props, modifierResolver)) {
-        AIChatScreen(embedded = true)
+        androidx.compose.material3.Text("AIChat node is unavailable in Plugin Lab")
     }
 }
 

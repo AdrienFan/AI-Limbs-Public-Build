@@ -1,9 +1,9 @@
 package com.ai.assistance.operit.core.tools.packTool
 
+import com.ai.assistance.operit.plugins.runtime.logRuntimeTiming
+import com.ai.assistance.operit.plugins.runtime.runtimeTimingNow
 import android.content.Context
 import android.os.Looper
-import com.ai.assistance.operit.core.chat.logMessageTiming
-import com.ai.assistance.operit.core.chat.messageTimingNow
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.StringResultData
@@ -30,7 +30,7 @@ import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
 import com.ai.assistance.operit.data.model.PackageToolPromptCategory
 import com.ai.assistance.operit.data.model.ToolPrompt
 import com.ai.assistance.operit.data.model.ToolResult
-import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceConfig
+import com.ai.assistance.operit.core.tools.packTool.WorkspaceConfig
 import com.ai.assistance.operit.widget.ToolPkgDesktopWidgetHost
 import com.ai.assistance.operit.util.OperitPaths
 import com.ai.assistance.operit.util.ToolPkgWasmRuntime
@@ -1579,7 +1579,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     }
 
     private fun getToolPkgMainScript(containerPackageName: String): String? {
-        val totalStartTime = messageTimingNow()
+        val totalStartTime = runtimeTimingNow()
         ensureInitialized()
         val normalizedContainerPackageName = normalizePackageName(containerPackageName)
         val runtime = toolPkgContainers[normalizedContainerPackageName] ?: return null
@@ -1592,15 +1592,15 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         }
 
         return try {
-            val readBytesStartTime = messageTimingNow()
+            val readBytesStartTime = runtimeTimingNow()
             val bytes = readToolPkgResourceBytes(runtime, runtime.mainEntry) ?: return null
-            logMessageTiming(
+            logRuntimeTiming(
                 stage = "toolpkg.getMainScript.readBytes",
                 startTimeMs = readBytesStartTime,
                 details = "container=${runtime.packageName}, sourceType=${runtime.sourceType}, entry=${runtime.mainEntry}, bytes=${bytes.size}"
             )
             val script = bytes.toString(StandardCharsets.UTF_8)
-            logMessageTiming(
+            logRuntimeTiming(
                 stage = "toolpkg.getMainScript.total",
                 startTimeMs = totalStartTime,
                 details = "container=${runtime.packageName}, entry=${runtime.mainEntry}, scriptLength=${script.length}"
