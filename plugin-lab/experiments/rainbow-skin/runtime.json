@@ -1,0 +1,35 @@
+{
+  "schema": 1,
+  "capabilities": [],
+  "extensions": [
+    {
+      "point": "ai_limbs.ui.theme",
+      "id": "plugin.lab.skin.rainbow.theme",
+      "payload": {
+        "mode": "light",
+        "pure_black": false,
+        "background_gradient": [
+          "#F44336", "#FF9800", "#FFEB3B", "#4CAF50",
+          "#00BCD4", "#2196F3", "#9C27B0"
+        ],
+        "colors": {
+          "primary": "#D81B60",
+          "on_primary": "#FFFFFF",
+          "secondary": "#FB8C00",
+          "on_secondary": "#1A1A1A",
+          "tertiary": "#7B1FA2",
+          "on_tertiary": "#FFFFFF",
+          "background": "#00000000",
+          "on_background": "#1B1030",
+          "surface": "#00000000",
+          "on_surface": "#1B1030",
+          "surface_variant": "#DFFFFFFF",
+          "on_surface_variant": "#3B185F",
+          "outline": "#7E57C2",
+          "error": "#C62828",
+          "on_error": "#FFFFFF"
+        }
+      }
+    }
+  ]
+}

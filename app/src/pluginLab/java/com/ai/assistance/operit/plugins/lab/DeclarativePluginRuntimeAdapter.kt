@@ -228,11 +228,55 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
                 "Theme mode must be light or dark"
             )
         }
+        val colors = linkedMapOf<String, String>()
+        payload.optJSONObject("colors")?.let { colorObject ->
+            val keys = colorObject.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                if (key !in THEME_COLOR_KEYS) {
+                    throw PluginInstallException(
+                        "DECLARATIVE_THEME_COLOR_KEY_INVALID",
+                        "Unsupported theme color key: $key"
+                    )
+                }
+                val value = colorObject.optString(key).trim()
+                if (!THEME_COLOR_HEX.matches(value)) {
+                    throw PluginInstallException(
+                        "DECLARATIVE_THEME_COLOR_INVALID",
+                        "Theme color $key must be #RRGGBB or #AARRGGBB"
+                    )
+                }
+                colors[key] = value
+            }
+        }
+        val backgroundGradient = buildList {
+            val array = payload.optJSONArray("background_gradient")
+            if (array != null) {
+                if (array.length() !in 2..12) {
+                    throw PluginInstallException(
+                        "DECLARATIVE_THEME_GRADIENT_INVALID",
+                        "background_gradient must contain 2-12 colors"
+                    )
+                }
+                for (index in 0 until array.length()) {
+                    val value = array.optString(index).trim()
+                    if (!THEME_COLOR_HEX.matches(value)) {
+                        throw PluginInstallException(
+                            "DECLARATIVE_THEME_COLOR_INVALID",
+                            "Gradient color $index must be #RRGGBB or #AARRGGBB"
+                        )
+                    }
+                    add(value)
+                }
+            }
+        }
         return PluginThemeSpec(
             ownerPluginId = context.manifest.pluginId,
             id = id,
             mode = mode,
-            pureBlack = payload.optBoolean("pure_black", false)
+            pureBlack = payload.optBoolean("pure_black", false),
+            colors = colors,
+            backgroundGradient = backgroundGradient
         )
     }
 
@@ -305,5 +349,13 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
         }
     }
 
+    private val THEME_COLOR_HEX = Regex("^#(?:[0-9A-Fa-f]{6}|[0-9A-Fa-f]{8})$")
+    private val THEME_COLOR_KEYS = setOf(
+        "primary", "on_primary", "primary_container", "on_primary_container",
+        "secondary", "on_secondary", "secondary_container", "on_secondary_container",
+        "tertiary", "on_tertiary", "tertiary_container", "on_tertiary_container",
+        "background", "on_background", "surface", "on_surface",
+        "surface_variant", "on_surface_variant", "outline", "error", "on_error"
+    )
     private const val MAX_RUNTIME_BYTES = 512L * 1024L
 }

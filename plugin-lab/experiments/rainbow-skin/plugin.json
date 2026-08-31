@@ -1,0 +1,24 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.lab.skin.rainbow",
+  "version": "1.0.0",
+  "api": { "target": 1, "min": 1 },
+  "display": {
+    "name": "Rainbow Skin",
+    "description": "七彩皮肤验证插件：用七色渐变与半透明卡片实时接管 Plugin Lab 主题。"
+  },
+  "roles": ["skin"],
+  "activation": { "mode": "hot" },
+  "runtime": { "kind": "declarative", "entry": "runtime.json" },
+  "dependencies": { "plugins": [], "services": [] },
+  "permissions": { "requested_scopes": [] },
+  "provides": {
+    "capabilities": [],
+    "services": [],
+    "providers": [],
+    "extensions": [
+      { "point": "ai_limbs.ui.theme", "id": "plugin.lab.skin.rainbow.theme", "api": 1 }
+    ]
+  }
+}

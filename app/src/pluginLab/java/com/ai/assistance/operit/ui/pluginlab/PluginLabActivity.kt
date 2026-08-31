@@ -1,9 +1,11 @@
 package com.ai.assistance.operit.ui.pluginlab
 
 import android.os.Bundle
+import android.graphics.Color as AndroidColor
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -24,6 +26,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -45,6 +48,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
@@ -71,7 +75,7 @@ class PluginLabActivity : ComponentActivity() {
 @Composable
 private fun PluginLabThemeHost() {
     val pluginTheme by PluginCenterKernel.uiRegistry.activeTheme.collectAsState()
-    val colors = when (pluginTheme?.mode) {
+    val baseColors = when (pluginTheme?.mode) {
         PluginThemeMode.DARK -> {
             if (pluginTheme?.pureBlack == true) {
                 darkColorScheme(background = Color.Black, surface = Color.Black)
@@ -81,8 +85,51 @@ private fun PluginLabThemeHost() {
         }
         PluginThemeMode.LIGHT, null -> lightColorScheme()
     }
-    MaterialTheme(colorScheme = colors) { PluginLabRoot() }
+    val colors = applyThemeColors(baseColors, pluginTheme?.colors.orEmpty())
+    val gradient = pluginTheme?.backgroundGradient.orEmpty().map(::parseThemeColor)
+    MaterialTheme(colorScheme = colors) {
+        if (gradient.size >= 2) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(Brush.linearGradient(gradient))
+            ) {
+                PluginLabRoot()
+            }
+        } else {
+            PluginLabRoot()
+        }
+    }
 }
+
+private fun applyThemeColors(base: ColorScheme, values: Map<String, String>): ColorScheme {
+    fun value(key: String, fallback: Color): Color = values[key]?.let(::parseThemeColor) ?: fallback
+    return base.copy(
+        primary = value("primary", base.primary),
+        onPrimary = value("on_primary", base.onPrimary),
+        primaryContainer = value("primary_container", base.primaryContainer),
+        onPrimaryContainer = value("on_primary_container", base.onPrimaryContainer),
+        secondary = value("secondary", base.secondary),
+        onSecondary = value("on_secondary", base.onSecondary),
+        secondaryContainer = value("secondary_container", base.secondaryContainer),
+        onSecondaryContainer = value("on_secondary_container", base.onSecondaryContainer),
+        tertiary = value("tertiary", base.tertiary),
+        onTertiary = value("on_tertiary", base.onTertiary),
+        tertiaryContainer = value("tertiary_container", base.tertiaryContainer),
+        onTertiaryContainer = value("on_tertiary_container", base.onTertiaryContainer),
+        background = value("background", base.background),
+        onBackground = value("on_background", base.onBackground),
+        surface = value("surface", base.surface),
+        onSurface = value("on_surface", base.onSurface),
+        surfaceVariant = value("surface_variant", base.surfaceVariant),
+        onSurfaceVariant = value("on_surface_variant", base.onSurfaceVariant),
+        outline = value("outline", base.outline),
+        error = value("error", base.error),
+        onError = value("on_error", base.onError)
+    )
+}
+
+private fun parseThemeColor(raw: String): Color = Color(AndroidColor.parseColor(raw))
 
 private sealed class LabPage {
     object Home : LabPage()
@@ -161,7 +208,8 @@ private fun PluginLabHome(
 private fun LabToolCard(tool: LabTool) {
     Card(
         onClick = tool.onClick,
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
     ) {
         Column(
             modifier = Modifier.padding(16.dp),

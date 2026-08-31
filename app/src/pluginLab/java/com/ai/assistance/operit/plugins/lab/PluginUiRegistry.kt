@@ -40,7 +40,9 @@ data class PluginThemeSpec(
     val ownerPluginId: String,
     val id: String,
     val mode: PluginThemeMode,
-    val pureBlack: Boolean
+    val pureBlack: Boolean,
+    val colors: Map<String, String> = emptyMap(),
+    val backgroundGradient: List<String> = emptyList()
 )
 
 internal class PluginUiRegistry {

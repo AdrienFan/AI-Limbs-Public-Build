@@ -21,6 +21,7 @@ A mounted plugin may contribute:
 - home tiles through `ai_limbs.ui.home_tile@1`;
 - screens through `ai_limbs.ui.screen@1`;
 - one hot-swappable application theme through `ai_limbs.ui.theme@1`.
+  Theme v1 keeps `mode`/`pure_black` compatible and optionally accepts a Material color map plus `background_gradient`.
 
 Disabling, upgrading, rolling back, or uninstalling the owner revokes all of those contributions
 as one lifecycle transaction.

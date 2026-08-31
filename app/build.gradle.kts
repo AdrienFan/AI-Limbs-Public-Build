@@ -28,11 +28,11 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "com.ai.assistance.operit.ailimbs.pluginlab.alt.v02"
+        applicationId = "com.ai.assistance.operit.ailimbs.pluginlab.alt.v03"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1003
-        versionName = "plugin-lab-alt-0.2"
+        versionCode = 1004
+        versionName = "plugin-lab-alt-0.3"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -47,7 +47,7 @@ android {
             )
         }
         debug {
-            versionNameSuffix = "-theme1"
+            versionNameSuffix = "-rainbow1"
         }
     }
 
