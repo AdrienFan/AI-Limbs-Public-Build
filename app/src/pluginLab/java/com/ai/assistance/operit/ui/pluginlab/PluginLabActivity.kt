@@ -29,6 +29,8 @@ import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
@@ -43,6 +45,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
@@ -50,6 +53,7 @@ import com.ai.assistance.operit.plugins.center.PluginCenterKernel
 import com.ai.assistance.operit.plugins.lab.PluginHomeTileSpec
 import com.ai.assistance.operit.plugins.lab.PluginScreenBlock
 import com.ai.assistance.operit.plugins.lab.PluginScreenSpec
+import com.ai.assistance.operit.plugins.lab.PluginThemeMode
 import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.PluginCenterScreen
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -60,8 +64,24 @@ class PluginLabActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         PluginCenterKernel.initialize(applicationContext)
         lifecycleScope.launch(Dispatchers.IO) { PluginCenterKernel.start() }
-        setContent { MaterialTheme { PluginLabRoot() } }
+        setContent { PluginLabThemeHost() }
     }
+}
+
+@Composable
+private fun PluginLabThemeHost() {
+    val pluginTheme by PluginCenterKernel.uiRegistry.activeTheme.collectAsState()
+    val colors = when (pluginTheme?.mode) {
+        PluginThemeMode.DARK -> {
+            if (pluginTheme?.pureBlack == true) {
+                darkColorScheme(background = Color.Black, surface = Color.Black)
+            } else {
+                darkColorScheme()
+            }
+        }
+        PluginThemeMode.LIGHT, null -> lightColorScheme()
+    }
+    MaterialTheme(colorScheme = colors) { PluginLabRoot() }
 }
 
 private sealed class LabPage {

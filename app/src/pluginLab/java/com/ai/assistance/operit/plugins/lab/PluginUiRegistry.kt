@@ -34,6 +34,15 @@ data class PluginScreenSpec(
     val blocks: List<PluginScreenBlock>
 )
 
+enum class PluginThemeMode { LIGHT, DARK }
+
+data class PluginThemeSpec(
+    val ownerPluginId: String,
+    val id: String,
+    val mode: PluginThemeMode,
+    val pureBlack: Boolean
+)
+
 internal class PluginUiRegistry {
     private data class Owned<T>(val token: String, val ownerPluginId: String, val value: T)
 
@@ -41,9 +50,13 @@ internal class PluginUiRegistry {
     private val screens = ConcurrentHashMap<String, Owned<PluginScreenSpec>>()
     private val mutableHomeTiles = MutableStateFlow<List<PluginHomeTileSpec>>(emptyList())
     private val mutableScreens = MutableStateFlow<List<PluginScreenSpec>>(emptyList())
+    private val themeLock = Any()
+    private var activeThemeOwned: Owned<PluginThemeSpec>? = null
+    private val mutableActiveTheme = MutableStateFlow<PluginThemeSpec?>(null)
 
     val homeTiles: StateFlow<List<PluginHomeTileSpec>> = mutableHomeTiles.asStateFlow()
     val activeScreens: StateFlow<List<PluginScreenSpec>> = mutableScreens.asStateFlow()
+    val activeTheme: StateFlow<PluginThemeSpec?> = mutableActiveTheme.asStateFlow()
 
     fun registerHomeTile(ownerPluginId: String, spec: PluginHomeTileSpec): AutoCloseable {
         requireOwner(ownerPluginId, spec.ownerPluginId)
@@ -80,6 +93,30 @@ internal class PluginUiRegistry {
     }
 
     fun screen(id: String): PluginScreenSpec? = screens[id]?.value
+
+    fun registerTheme(ownerPluginId: String, spec: PluginThemeSpec): AutoCloseable {
+        requireOwner(ownerPluginId, spec.ownerPluginId)
+        val token = UUID.randomUUID().toString()
+        synchronized(themeLock) {
+            val existing = activeThemeOwned
+            if (existing != null) {
+                throw PluginInstallException(
+                    "UI_THEME_CONFLICT",
+                    "Only one UI theme may be active; current owner=${existing.ownerPluginId}"
+                )
+            }
+            activeThemeOwned = Owned(token, ownerPluginId, spec)
+            mutableActiveTheme.value = spec
+        }
+        return AutoCloseable {
+            synchronized(themeLock) {
+                if (activeThemeOwned?.token == token) {
+                    activeThemeOwned = null
+                    mutableActiveTheme.value = null
+                }
+            }
+        }
+    }
 
     private fun publishTiles() {
         mutableHomeTiles.value = tiles.values.map { it.value }.sortedBy { it.title.lowercase() }

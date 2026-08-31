@@ -19,7 +19,8 @@ A mounted plugin may contribute:
 
 - headless capabilities under the `plugin.*` namespace;
 - home tiles through `ai_limbs.ui.home_tile@1`;
-- screens through `ai_limbs.ui.screen@1`.
+- screens through `ai_limbs.ui.screen@1`;
+- one hot-swappable application theme through `ai_limbs.ui.theme@1`.
 
 Disabling, upgrading, rolling back, or uninstalling the owner revokes all of those contributions
 as one lifecycle transaction.

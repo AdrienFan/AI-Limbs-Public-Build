@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "capabilities": [],
+  "extensions": [
+    {
+      "point": "ai_limbs.ui.theme",
+      "id": "plugin.lab.skin.black.theme",
+      "payload": {
+        "mode": "dark",
+        "pure_black": true
+      }
+    }
+  ]
+}

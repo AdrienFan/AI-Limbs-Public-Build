@@ -204,6 +204,7 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
                     )
                 }
                 PluginExtensionPoints.UI_SCREEN -> screen(context, id, payload)
+                PluginExtensionPoints.UI_THEME -> theme(context, id, payload)
                 else -> throw PluginInstallException(
                     "DECLARATIVE_EXTENSION_POINT_UNSUPPORTED",
                     "Declarative runtime cannot bind extension point: $point"
@@ -212,6 +213,27 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
             context.payloadContext.registrar.registerExtension(point, id, typedPayload)
         }
         return registered
+    }
+
+    private fun theme(
+        context: PluginRuntimeAdapterContext,
+        id: String,
+        payload: JSONObject
+    ): PluginThemeSpec {
+        val mode = when (payload.requiredString("mode").lowercase()) {
+            "light" -> PluginThemeMode.LIGHT
+            "dark" -> PluginThemeMode.DARK
+            else -> throw PluginInstallException(
+                "DECLARATIVE_THEME_MODE_INVALID",
+                "Theme mode must be light or dark"
+            )
+        }
+        return PluginThemeSpec(
+            ownerPluginId = context.manifest.pluginId,
+            id = id,
+            mode = mode,
+            pureBlack = payload.optBoolean("pure_black", false)
+        )
     }
 
     private fun screen(

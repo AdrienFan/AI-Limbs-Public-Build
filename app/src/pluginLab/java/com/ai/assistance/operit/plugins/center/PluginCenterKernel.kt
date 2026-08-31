@@ -5,6 +5,7 @@ import com.ai.assistance.operit.plugins.lab.DeclarativePluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.lab.LabCapabilityRegistry
 import com.ai.assistance.operit.plugins.lab.PluginHomeTileSpec
 import com.ai.assistance.operit.plugins.lab.PluginScreenSpec
+import com.ai.assistance.operit.plugins.lab.PluginThemeSpec
 import com.ai.assistance.operit.plugins.lab.PluginUiRegistry
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.CancellationException
@@ -89,6 +90,20 @@ object PluginCenterKernel {
                                     "Screen payload has the wrong type"
                                 )
                             uiRegistry.registerScreen(record.ownerPluginId, screen)
+                        }
+                    )
+                )
+                register(
+                    ExtensionPointDefinition(
+                        point = PluginExtensionPoints.UI_THEME,
+                        apiVersion = 1,
+                        binder = { record ->
+                            val theme = record.payload as? PluginThemeSpec
+                                ?: throw PluginInstallException(
+                                    "UI_EXTENSION_PAYLOAD_INVALID",
+                                    "Theme payload has the wrong type"
+                                )
+                            uiRegistry.registerTheme(record.ownerPluginId, theme)
                         }
                     )
                 )

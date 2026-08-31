@@ -6,6 +6,7 @@ import java.util.concurrent.ConcurrentHashMap
 object PluginExtensionPoints {
     const val UI_HOME_TILE = "ai_limbs.ui.home_tile"
     const val UI_SCREEN = "ai_limbs.ui.screen"
+    const val UI_THEME = "ai_limbs.ui.theme"
 }
 
 data class ExtensionPointDefinition(
