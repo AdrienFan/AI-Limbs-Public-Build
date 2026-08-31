@@ -17,6 +17,9 @@ android {
             assets.setSrcDirs(listOf("src/pluginLab/assets"))
             jniLibs.setSrcDirs(emptyList<String>())
         }
+        getByName("debug") {
+            res.setSrcDirs(emptyList<String>())
+        }
         getByName("test") {
             java.setSrcDirs(listOf("src/pluginLabTest/java"))
         }
