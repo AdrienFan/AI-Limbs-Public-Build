@@ -22,7 +22,8 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Operit"
         android:usesCleartextTraffic="true"
-        android:enableOnBackInvokedCallback="true">
+        android:enableOnBackInvokedCallback="true"
+        tools:replace="android:allowBackup,android:icon,android:roundIcon,android:theme">
 
         <!-- Keep WorkManager dormant: Plugin Lab does not run workflow/background scheduling. -->
         <provider
