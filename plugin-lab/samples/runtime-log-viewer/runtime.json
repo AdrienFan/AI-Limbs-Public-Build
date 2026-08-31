@@ -1,0 +1,52 @@
+{
+  "schema": 1,
+  "capabilities": [
+    {
+      "id": "plugin.runtime.logs.read",
+      "display_name": "Read Plugin Lab Logs",
+      "description": "通过已授权的底座日志代理读取运行日志。",
+      "operation": "host_capability",
+      "target": "core.logs.read",
+      "parameters": [
+        {
+          "name": "max_chars",
+          "type": "integer",
+          "description": "最多返回的字符数",
+          "required": false,
+          "default": "60000"
+        }
+      ]
+    }
+  ],
+  "extensions": [
+    {
+      "point": "ai_limbs.ui.home_tile",
+      "id": "plugin.runtime.logviewer.tile",
+      "payload": {
+        "title": "日志查看器",
+        "description": "完全由插件安装的图形界面",
+        "screen_id": "plugin.runtime.logviewer.screen"
+      }
+    },
+    {
+      "point": "ai_limbs.ui.screen",
+      "id": "plugin.runtime.logviewer.screen",
+      "payload": {
+        "title": "Runtime Log Viewer",
+        "description": "这个页面、首页入口和读取能力都来自已安装插件。",
+        "blocks": [
+          {
+            "type": "text",
+            "text": "点击下方按钮，通过 host.logs.read 授权边界读取底座日志。"
+          },
+          {
+            "type": "capability_button",
+            "label": "刷新日志",
+            "capability_id": "plugin.runtime.logs.read",
+            "parameters": { "max_chars": 60000 }
+          }
+        ]
+      }
+    }
+  ]
+}

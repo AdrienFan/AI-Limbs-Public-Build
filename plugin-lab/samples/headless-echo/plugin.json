@@ -1,0 +1,22 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.lab.headless.echo",
+  "version": "1.0.0",
+  "api": { "target": 1, "min": 1 },
+  "display": {
+    "name": "Headless Echo",
+    "description": "无界面验证插件：热插拔注册一个独立能力。"
+  },
+  "roles": ["skill"],
+  "activation": { "mode": "hot" },
+  "runtime": { "kind": "declarative", "entry": "runtime.json" },
+  "dependencies": { "plugins": [], "services": [] },
+  "permissions": { "requested_scopes": [] },
+  "provides": {
+    "capabilities": ["plugin.lab.headless.echo"],
+    "services": [],
+    "providers": [],
+    "extensions": []
+  }
+}

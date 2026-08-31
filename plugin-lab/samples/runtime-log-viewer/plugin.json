@@ -1,0 +1,25 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.runtime.logviewer",
+  "version": "1.0.0",
+  "api": { "target": 1, "min": 1 },
+  "display": {
+    "name": "Runtime Log Viewer",
+    "description": "有界面验证插件：安装后向首页添加日志查看器。"
+  },
+  "roles": ["system_plugin"],
+  "activation": { "mode": "hot" },
+  "runtime": { "kind": "declarative", "entry": "runtime.json" },
+  "dependencies": { "plugins": [], "services": [] },
+  "permissions": { "requested_scopes": ["host.logs.read"] },
+  "provides": {
+    "capabilities": ["plugin.runtime.logs.read"],
+    "services": [],
+    "providers": [],
+    "extensions": [
+      { "point": "ai_limbs.ui.home_tile", "id": "plugin.runtime.logviewer.tile", "api": 1 },
+      { "point": "ai_limbs.ui.screen", "id": "plugin.runtime.logviewer.screen", "api": 1 }
+    ]
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "schema": 1,
+  "capabilities": [
+    {
+      "id": "plugin.lab.headless.echo",
+      "display_name": "Headless Echo",
+      "description": "返回调用参数，用于验证无界面插件能力的动态挂载。",
+      "operation": "echo",
+      "invoke_aliases": ["echo"],
+      "keywords": ["plugin", "headless", "test"]
+    }
+  ],
+  "extensions": []
+}
