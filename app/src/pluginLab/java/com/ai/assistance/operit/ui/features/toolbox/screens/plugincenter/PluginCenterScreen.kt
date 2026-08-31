@@ -735,7 +735,7 @@ private fun StatusDot(snapshot: PluginControlSnapshot) {
 
 private fun isSystemPlugin(snapshot: PluginControlSnapshot): Boolean {
     val roles = snapshot.plugin.activeManifest?.roles.orEmpty()
-    return roles.any { it == "system" || it == "system_plugin" || it == "system_service" }
+    return roles.any { it == "system" || it == "system_plugin" || it == "system_service" || it == "system_extension_hub" || it == "system_bridge" }
 }
 
 @Composable

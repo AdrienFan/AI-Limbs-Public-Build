@@ -5,10 +5,13 @@ import android.graphics.Color as AndroidColor
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -29,6 +32,8 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -51,14 +56,21 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.ai.assistance.operit.plugins.center.PluginCenterKernel
+import com.ai.assistance.operit.plugins.center.PluginContributionKind
 import com.ai.assistance.operit.plugins.lab.PluginHomeTileSpec
 import com.ai.assistance.operit.plugins.lab.PluginScreenBlock
 import com.ai.assistance.operit.plugins.lab.PluginScreenSpec
 import com.ai.assistance.operit.plugins.lab.PluginThemeMode
 import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.PluginCenterScreen
+import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
+import com.ai.limbs.plugin.runtime.ExtensionHubService
+import com.ai.limbs.plugin.runtime.InProcessSystemIds
+import java.io.File
+import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -308,6 +320,164 @@ private fun PluginScreenContent(screen: PluginScreenSpec, modifier: Modifier = M
                             )
                         }
                     }
+                }
+                is PluginScreenBlock.ChildExtensionInstaller -> ChildExtensionInstallerBlock(
+                    block = block,
+                    onResult = { results[index] = it }
+                )
+                is PluginScreenBlock.ChildExtensionList -> ChildExtensionListBlock(
+                    point = block.point,
+                    onResult = { results[index] = it }
+                )
+                is PluginScreenBlock.ChildExtensionSelector -> ChildExtensionSelectorBlock(
+                    block = block,
+                    onResult = { results[index] = it }
+                )
+            }
+        }
+    }
+}
+
+private fun activeExtensionHub(): ExtensionHubService? =
+    PluginCenterKernel.contributions
+        .find(PluginContributionKind.PROVIDER, InProcessSystemIds.EXTENSION_HUB_PROVIDER)
+        ?.payload as? ExtensionHubService
+
+@Composable
+private fun ChildExtensionInstallerBlock(
+    block: PluginScreenBlock.ChildExtensionInstaller,
+    onResult: (String) -> Unit
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    val hub = activeExtensionHub()
+    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri != null) {
+            if (hub == null) {
+                onResult("Plugin Extension Hub 未启用")
+            } else {
+                scope.launch {
+                    val temporary = File(context.cacheDir, "extension-import-${UUID.randomUUID()}.ailx")
+                    try {
+                        withContext(Dispatchers.IO) {
+                            context.contentResolver.openInputStream(uri).use { input ->
+                                requireNotNull(input) { "无法读取选择的子插件" }
+                                temporary.outputStream().use(input::copyTo)
+                            }
+                        }
+                        val snapshot = withContext(Dispatchers.IO) {
+                            hub.install(temporary, block.ownerPluginId, block.point)
+                        }
+                        onResult("已安装 ${snapshot.displayName} ${snapshot.version} · ${snapshot.lifecycle}")
+                    } catch (error: Throwable) {
+                        onResult("子插件安装失败：${error.message ?: "未知错误"}")
+                    } finally {
+                        temporary.delete()
+                    }
+                }
+            }
+        }
+    }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Button(
+            enabled = hub != null,
+            onClick = { launcher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }
+        ) { Text(block.label) }
+        Text(
+            if (hub == null) "Plugin Extension Hub 未启用" else "仅接受 AIL_EXTENSION_V1 / .ailx",
+            style = MaterialTheme.typography.bodySmall
+        )
+    }
+}
+
+@Composable
+private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
+    val hub = activeExtensionHub()
+    if (hub == null) {
+        Text("Plugin Extension Hub 未启用")
+        return
+    }
+    val snapshots by hub.snapshotsForPoint(point).collectAsState()
+    val scope = rememberCoroutineScope()
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text("已安装子插件（${snapshots.size}）", style = MaterialTheme.typography.titleSmall)
+        if (snapshots.isEmpty()) {
+            Text("尚未安装 Bridge Provider", style = MaterialTheme.typography.bodySmall)
+        }
+        snapshots.forEach { snapshot ->
+            Card(modifier = Modifier.fillMaxWidth()) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Text("${snapshot.displayName} · ${snapshot.version}", style = MaterialTheme.typography.titleSmall)
+                    Text("${snapshot.extensionId} · ${snapshot.lifecycle}", style = MaterialTheme.typography.bodySmall)
+                    snapshot.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(onClick = {
+                            scope.launch {
+                                runCatching { hub.setEnabled(snapshot.extensionId, !snapshot.enabled) }
+                                    .onSuccess { onResult("${it.displayName} → ${it.lifecycle}") }
+                                    .onFailure { onResult("操作失败：${it.message}") }
+                            }
+                        }) { Text(if (snapshot.enabled) "禁用" else "启用") }
+                        Button(onClick = {
+                            scope.launch {
+                                runCatching { hub.uninstall(snapshot.extensionId) }
+                                    .onSuccess { onResult(if (it) "已卸载 ${snapshot.displayName}" else "子插件不存在") }
+                                    .onFailure { onResult("卸载失败：${it.message}") }
+                            }
+                        }) { Text("卸载") }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChildExtensionSelectorBlock(
+    block: PluginScreenBlock.ChildExtensionSelector,
+    onResult: (String) -> Unit
+) {
+    val hub = activeExtensionHub()
+    if (hub == null) {
+        Text("Plugin Extension Hub 未启用")
+        return
+    }
+    val snapshots by hub.snapshotsForPoint(block.point).collectAsState()
+    val active = snapshots.filter { it.lifecycle == ChildExtensionLifecycle.ACTIVE }
+    val scope = rememberCoroutineScope()
+    var expanded by remember(block.point) { mutableStateOf(false) }
+    var selectedName by remember(block.point) { mutableStateOf<String?>(null) }
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(block.label, style = MaterialTheme.typography.titleSmall)
+        Box {
+            Button(enabled = active.isNotEmpty(), onClick = { expanded = true }) {
+                Text(selectedName ?: active.firstOrNull()?.displayName ?: "暂无 Provider")
+            }
+            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
+                active.forEach { snapshot ->
+                    DropdownMenuItem(
+                        text = { Text(snapshot.displayName) },
+                        onClick = {
+                            expanded = false
+                            scope.launch {
+                                try {
+                                    val value = withContext(Dispatchers.IO) {
+                                        PluginCenterKernel.capabilities.invokePlugin(
+                                            block.selectCapabilityId,
+                                            org.json.JSONObject().put("extension_id", snapshot.extensionId)
+                                        )
+                                    }
+                                    selectedName = snapshot.displayName
+                                    onResult(value.optString("content").ifBlank { value.toString(2) })
+                                } catch (error: Throwable) {
+                                    onResult("选择失败：${error.message ?: "未知错误"}")
+                                }
+                            }
+                        }
+                    )
                 }
             }
         }

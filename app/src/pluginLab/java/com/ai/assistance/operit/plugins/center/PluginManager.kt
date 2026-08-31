@@ -565,7 +565,7 @@ internal class PluginManager(
     }
 
     private fun isSystemRolePlugin(manifest: PluginManifest): Boolean =
-        manifest.roles.any { it == "system" || it == "system_plugin" || it == "system_service" }
+        manifest.roles.any { it == "system" || it == "system_plugin" || it == "system_service" || it == "system_extension_hub" || it == "system_bridge" }
 
     private fun isAutoDisableExempt(pluginId: String, manifest: PluginManifest): Boolean {
         if (isSystemRolePlugin(manifest)) return true
@@ -662,6 +662,8 @@ internal class PluginManager(
                             manifest = manifest,
                             versionDir = versionDir,
                             contentDir = store.contentIn(versionDir),
+                            dataDir = dataDir,
+                            cacheDir = cacheDir,
                             payloadContext = payloadContext
                         ),
                     scope = mountScope

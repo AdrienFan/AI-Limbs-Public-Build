@@ -28,11 +28,11 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "com.ai.assistance.operit.ailimbs.pluginlab.alt.v041"
+        applicationId = "com.ai.assistance.operit.ailimbs.pluginlab.alt.v05"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1006
-        versionName = "plugin-lab-alt-0.4.1"
+        versionCode = 1007
+        versionName = "plugin-lab-alt-0.5"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -47,7 +47,7 @@ android {
             )
         }
         debug {
-            versionNameSuffix = "-control2"
+            versionNameSuffix = "-childext"
         }
     }
 
@@ -78,6 +78,8 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":plugin-inprocess-api"))
+    implementation(project(":bridge-contract"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.lifecycle.runtime.ktx)

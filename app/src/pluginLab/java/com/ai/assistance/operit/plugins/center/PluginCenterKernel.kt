@@ -2,6 +2,7 @@ package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
 import com.ai.assistance.operit.plugins.lab.DeclarativePluginRuntimeAdapter
+import com.ai.assistance.operit.plugins.lab.AndroidInProcessPluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.lab.LabCapabilityRegistry
 import com.ai.assistance.operit.plugins.lab.PluginHomeTileSpec
 import com.ai.assistance.operit.plugins.lab.PluginScreenSpec
@@ -85,11 +86,12 @@ object PluginCenterKernel {
             val inactivityPolicy = PluginInactivityPolicyStore(appContext)
             val uiRegistry = PluginUiRegistry()
             val capabilityRegistry = LabCapabilityRegistry(surfacePolicy, usageStore)
+            val contributions = PluginContributionRegistry()
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
                 register(DeclarativePluginRuntimeAdapter)
+                register(AndroidInProcessPluginRuntimeAdapter(contributions))
             }
-            val contributions = PluginContributionRegistry()
             listOf(
                 Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 Plugin Lab 首页添加入口"),
                 Triple(PluginExtensionPoints.UI_SCREEN, "插件页面", "允许插件提供可打开的界面页面"),

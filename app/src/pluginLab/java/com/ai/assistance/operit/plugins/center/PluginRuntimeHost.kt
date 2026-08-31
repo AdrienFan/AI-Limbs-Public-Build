@@ -38,6 +38,8 @@ internal data class PluginRuntimeAdapterContext(
     val manifest: PluginManifest,
     val versionDir: File,
     val contentDir: File,
+    val dataDir: File,
+    val cacheDir: File,
     val payloadContext: PluginContext
 )
 

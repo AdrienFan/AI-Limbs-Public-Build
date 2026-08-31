@@ -1,0 +1,63 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.system.bridge",
+  "version": "1.0.0",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
+  "display": {
+    "name": "Bridge",
+    "description": "从 AI Limbs V0.6.4.7.8 拆出的 Bridge Core；Bridge Provider 通过 .ailx 子插件动态接入。"
+  },
+  "roles": [
+    "system_bridge"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.bridge.BridgePluginEntry"
+    }
+  },
+  "dependencies": {
+    "plugins": [
+      {
+        "id": "plugin.system.extension_hub",
+        "min_version": "1.0.0"
+      }
+    ],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": []
+  },
+  "provides": {
+    "capabilities": [
+      "plugin.bridge.select_provider",
+      "plugin.bridge.connect",
+      "plugin.bridge.stop",
+      "plugin.bridge.reconnect",
+      "plugin.bridge.refresh",
+      "plugin.bridge.status"
+    ],
+    "services": [],
+    "providers": [],
+    "extensions": [
+      {
+        "point": "ai_limbs.ui.home_tile",
+        "id": "plugin.system.bridge.tile",
+        "api": 1
+      },
+      {
+        "point": "ai_limbs.ui.screen",
+        "id": "plugin.system.bridge.screen",
+        "api": 1
+      }
+    ]
+  }
+}

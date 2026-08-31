@@ -45,7 +45,8 @@ internal class LabCapabilityRegistry(
                 .put("plugin_api", 1)
                 .put("runtime", "declarative-v1")
         },
-        "core.logs.read" to HostCapability("host.logs.read", ::readLogs)
+        "core.logs.read" to HostCapability("host.logs.read", ::readLogs),
+        "core.bridge.remote.invoke" to HostCapability(null, ::bridgeRemoteInvoke)
     )
 
     init {
@@ -146,6 +147,21 @@ internal class LabCapabilityRegistry(
             capability.execute(JSONObject(parameters.toString()))
         }
 
+
+    private suspend fun bridgeRemoteInvoke(parameters: JSONObject): JSONObject {
+        val tool = parameters.optString("tool").trim()
+        val transport = parameters.optString("transport").trim()
+        val args = parameters.optJSONObject("args") ?: JSONObject()
+        return when (tool.lowercase()) {
+            "ping" -> JSONObject().put("success", true).put("content", "Pong").put("transport", transport)
+            "core.runtime.info" -> JSONObject().put("success", true).put("kernel", "AI Limbs Plugin Lab").put("transport", transport)
+            else -> JSONObject()
+                .put("success", false)
+                .put("error", "Plugin Lab does not expose the formal AI Limbs dispatcher for '$tool' yet")
+                .put("transport", transport)
+                .put("args", args)
+        }
+    }
     private suspend fun readLogs(parameters: JSONObject): JSONObject {
         val maximum = parameters.optInt("max_chars", 60_000).coerceIn(1_000, 120_000)
         val logFile = AppLogger.getLogFile()

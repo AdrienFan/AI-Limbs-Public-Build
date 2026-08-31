@@ -1,0 +1,42 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.system.extension_hub",
+  "version": "1.0.0",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
+  "display": {
+    "name": "Plugin Extension Hub",
+    "description": "系统级二级插件管理器：验证、安装、挂载与管理 AIL_EXTENSION_V1 / .ailx 子插件。"
+  },
+  "roles": [
+    "system_extension_hub"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.extensionhub.ExtensionHubEntry"
+    }
+  },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": []
+  },
+  "provides": {
+    "capabilities": [],
+    "services": [],
+    "providers": [
+      "system.extension.hub"
+    ],
+    "extensions": []
+  }
+}

@@ -45,6 +45,7 @@ class PluginPackageVerifier(
         var entryCount = 0
         var totalBytes = 0L
         var manifestRaw: String? = null
+        val executableEntries = linkedSetOf<String>()
         val seen = HashSet<String>()
         ZipFile(managedPackage).use { archive ->
             val entries = archive.entries()
@@ -60,10 +61,7 @@ class PluginPackageVerifier(
                 }
                 val lowerName = normalized.lowercase()
                 if (FORBIDDEN_EXECUTABLE_SUFFIXES.any(lowerName::endsWith)) {
-                    throw PluginInstallException(
-                        "PACKAGE_EXECUTABLE_FORBIDDEN",
-                        "Plugin Lab packages cannot contain executable payloads: $normalized"
-                    )
+                    executableEntries += normalized
                 }
                 val declaredSize = entry.size
                 if (declaredSize > limits.maxSingleEntryBytes) throw PluginInstallException("PACKAGE_ENTRY_TOO_LARGE", "Entry too large: $normalized")
@@ -92,9 +90,13 @@ class PluginPackageVerifier(
         }
         val raw = manifestRaw ?: throw PluginInstallException("MANIFEST_MISSING", "Root plugin.json is required")
         val manifest = PluginManifestParser.parse(raw)
+        validateExecutablePayloads(manifest, executableEntries)
         manifest.runtime.entry?.let { entry ->
             val runtimeFile = safeOutputFile(contentDir, entry)
             if (!runtimeFile.isFile) throw PluginInstallException("RUNTIME_ENTRY_MISSING", "Runtime entry does not exist: $entry")
+            if (manifest.runtime.kind == "android_inprocess" && !runtimeFile.setReadOnly()) {
+                throw PluginInstallException("RUNTIME_ENTRY_READONLY_FAILED", "Could not make dynamic runtime APK read-only: $entry")
+            }
         }
         manifest.display.iconEntry?.let { icon ->
             if (!safeOutputFile(contentDir, icon).isFile) throw PluginInstallException("ICON_ENTRY_MISSING", "Display icon does not exist: $icon")
@@ -105,6 +107,22 @@ class PluginPackageVerifier(
         return VerifiedPluginPackage(manifest, digest, totalBytes, entryCount)
     }
 
+
+    private fun validateExecutablePayloads(manifest: PluginManifest, entries: Set<String>) {
+        if (entries.isEmpty()) return
+        val requiredRole = PRIVILEGED_INPROCESS_PLUGIN_IDS[manifest.pluginId]
+        val entry = manifest.runtime.entry
+        val valid = manifest.runtime.kind == "android_inprocess" &&
+            requiredRole != null && requiredRole in manifest.roles &&
+            entry != null && entry.lowercase().endsWith(".apk") &&
+            entries == setOf(entry)
+        if (!valid) {
+            throw PluginInstallException(
+                "PACKAGE_EXECUTABLE_FORBIDDEN",
+                "Executable payloads are restricted to the declared APK of approved system plugins"
+            )
+        }
+    }
     private fun safeOutputFile(root: File, relative: String): File {
         val normalized = PluginPackagePaths.requireSafeRelativePath(relative)
         val candidate = File(root, normalized).canonicalFile
@@ -119,6 +137,10 @@ class PluginPackageVerifier(
     companion object {
         private val FORBIDDEN_EXECUTABLE_SUFFIXES =
             setOf(".apk", ".class", ".dex", ".jar", ".so")
+        private val PRIVILEGED_INPROCESS_PLUGIN_IDS = mapOf(
+            "plugin.system.extension_hub" to "system_extension_hub",
+            "plugin.system.bridge" to "system_bridge"
+        )
 
         fun sha256(file: File): String {
             val digest = MessageDigest.getInstance("SHA-256")

@@ -24,6 +24,17 @@ sealed class PluginScreenBlock {
         val capabilityId: String,
         val parameters: JSONObject = JSONObject()
     ) : PluginScreenBlock()
+    data class ChildExtensionInstaller(
+        val label: String,
+        val ownerPluginId: String,
+        val point: String
+    ) : PluginScreenBlock()
+    data class ChildExtensionList(val point: String) : PluginScreenBlock()
+    data class ChildExtensionSelector(
+        val label: String,
+        val point: String,
+        val selectCapabilityId: String
+    ) : PluginScreenBlock()
 }
 
 data class PluginScreenSpec(
