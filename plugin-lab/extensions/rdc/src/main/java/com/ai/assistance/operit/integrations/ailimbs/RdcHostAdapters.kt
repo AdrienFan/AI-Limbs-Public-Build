@@ -6,6 +6,10 @@ import java.util.UUID
 import kotlinx.coroutines.CoroutineScope
 import org.json.JSONObject
 
+object AiLimbsExecutionPolicyDescriptor {
+    const val policyVersion: String = "host-managed"
+}
+
 internal object RdcPluginHostBridge {
     @Volatile var host: ChildExtensionHost? = null
     suspend fun invoke(tool: String, args: JSONObject): JSONObject {
