@@ -26,6 +26,7 @@ data class PluginSnapshot(
     val versions: List<String>,
     val persistentState: PluginPersistentState?,
     val activeManifest: PluginManifest?,
+    val usage: PluginUsageStats,
     val mountedVersion: String?,
     val contributions: List<PluginContributionRecord>
 )
@@ -42,6 +43,9 @@ internal class PluginManager(
     val contributions: PluginContributionRegistry,
     private val extensionRouter: ExtensionRouter,
     private val capabilityBinder: PluginCapabilityBinder,
+    private val surfacePolicy: HostSurfacePolicy,
+    private val usageStore: PluginUsageStore,
+    private val inactivityPolicy: PluginInactivityPolicyStore,
     private val runtimeHost: PluginRuntimeHost,
     private val pluginContextFactory: PluginContextFactory,
     private val packageVerifier: PluginPackageVerifier = PluginPackageVerifier()
@@ -64,7 +68,21 @@ internal class PluginManager(
     suspend fun enable(pluginId: String): PluginPersistentState = locked {
         enableLocked(pluginId)
     }
-    suspend fun disable(pluginId: String): PluginPersistentState = locked {
+    suspend fun disable(
+        pluginId: String,
+        adminAuthorized: Boolean = false
+    ): PluginPersistentState = locked {
+        val state = requireState(pluginId)
+        val version = state.activeVersion
+        if (version != null) {
+            val manifest = stateRepository.readInstalledManifest(pluginId, version)
+            if (isSystemRolePlugin(manifest) && !adminAuthorized) {
+                throw PluginInstallException(
+                    "ADMIN_AUTH_REQUIRED",
+                    "Disabling a system plugin requires administrator authorization"
+                )
+            }
+        }
         disableLocked(pluginId)
     }
 
@@ -93,6 +111,14 @@ internal class PluginManager(
 
     suspend fun restoreEnabledPlugins() = locked {
         restoreEnabledPluginsLocked()
+    }
+
+    suspend fun reconcileHostSurfacePolicy() = locked {
+        reconcileHostSurfacePolicyLocked()
+    }
+
+    suspend fun reconcileInactivityPolicy() = locked {
+        reconcileInactivityPolicyLocked()
     }
 
     suspend fun shutdown() = locked {
@@ -218,6 +244,7 @@ internal class PluginManager(
 
     private suspend fun enableLocked(pluginId: String): PluginPersistentState {
         val state = requireState(pluginId)
+        if (!state.enabled) usageStore.markEnabled(pluginId)
         val version = state.activeVersion
             ?: throw PluginInstallException("ACTIVE_VERSION_MISSING", "No active version is selected for $pluginId")
         val manifest = stateRepository.readInstalledManifest(pluginId, version)
@@ -230,6 +257,16 @@ internal class PluginManager(
             )
         }
         if (state.enabled && manifest.activationMode != PluginActivationMode.HOT) return state
+        val surfaceBlock = surfacePolicy.blockingReason(manifest)
+        if (surfaceBlock != null) {
+            return writeState(
+                state.copy(
+                    enabled = true,
+                    lastState = PluginLifecycleState.BLOCKED,
+                    lastError = surfaceBlock
+                )
+            )
+        }
         val enabling = state.copy(
             enabled = true,
             lastState = if (manifest.activationMode == PluginActivationMode.HOT) {
@@ -294,6 +331,19 @@ internal class PluginManager(
                     previousVersion = previousVersion,
                     lastState = PluginLifecycleState.INSTALLED,
                     lastError = null
+                )
+            )
+        }
+        val surfaceBlock = surfacePolicy.blockingReason(candidateManifest)
+        if (surfaceBlock != null) {
+            requireCleanRuntimeStop(pluginId, unmountLocked(pluginId))
+            return writeState(
+                current.copy(
+                    activeVersion = version,
+                    previousVersion = previousVersion,
+                    enabled = true,
+                    lastState = PluginLifecycleState.BLOCKED,
+                    lastError = surfaceBlock
                 )
             )
         }
@@ -405,6 +455,20 @@ internal class PluginManager(
                     madeProgress = true
                     continue
                 }
+                val surfaceBlock = surfacePolicy.blockingReason(manifest)
+                if (surfaceBlock != null) {
+                    stateRepository.write(
+                        state.copy(
+                            enabled = true,
+                            lastState = PluginLifecycleState.BLOCKED,
+                            lastError = surfaceBlock,
+                            updatedAtEpochMs = System.currentTimeMillis()
+                        )
+                    )
+                    pending.remove(pluginId)
+                    madeProgress = true
+                    continue
+                }
                 val dependencyFailure = dependencyError(pluginId, version)
                 if (dependencyFailure != null) continue
                 try {
@@ -422,13 +486,79 @@ internal class PluginManager(
             val version = state.activeVersion
             val reason = version?.let { dependencyError(pluginId, it) }
                 ?: "Plugin dependencies could not be resolved"
+            val blockedByDependency = version?.let { blockedDependencyReason(pluginId, it) }
             stateRepository.write(
                 state.copy(
-                    lastState = PluginLifecycleState.FAILED,
-                    lastError = reason,
+                    lastState = if (blockedByDependency != null) PluginLifecycleState.BLOCKED else PluginLifecycleState.FAILED,
+                    lastError = blockedByDependency ?: reason,
                     updatedAtEpochMs = System.currentTimeMillis()
                 )
             )
+        }
+    }
+
+    private suspend fun reconcileHostSurfacePolicyLocked() {
+        var changed: Boolean
+        do {
+            changed = false
+            activeMounts.keys.toList().sorted().forEach { pluginId ->
+                val state = stateRepository.read(pluginId) ?: return@forEach
+                val version = state.activeVersion ?: return@forEach
+                val manifest = runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull()
+                    ?: return@forEach
+                val surfaceReason = surfacePolicy.blockingReason(manifest)
+                val dependencyReason = if (surfaceReason == null) blockedDependencyReason(pluginId, version) else null
+                val reason = surfaceReason ?: dependencyReason ?: return@forEach
+                requireCleanRuntimeStop(pluginId, unmountLocked(pluginId))
+                stateRepository.write(
+                    state.copy(
+                        enabled = true,
+                        lastState = PluginLifecycleState.BLOCKED,
+                        lastError = reason,
+                        updatedAtEpochMs = System.currentTimeMillis()
+                    )
+                )
+                changed = true
+            }
+        } while (changed)
+        restoreEnabledPluginsLocked()
+    }
+
+    private suspend fun reconcileInactivityPolicyLocked() {
+        val policy = inactivityPolicy.snapshot()
+        if (!policy.enabled) return
+        val now = System.currentTimeMillis()
+        store.listPluginIds().sorted().forEach { pluginId ->
+            val state = stateRepository.read(pluginId) ?: return@forEach
+            if (!state.enabled || state.lastState != PluginLifecycleState.ACTIVE) return@forEach
+            val version = state.activeVersion ?: return@forEach
+            val manifest = runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull()
+                ?: return@forEach
+            if (isAutoDisableExempt(pluginId, manifest)) return@forEach
+            val usage = usageStore.snapshot(pluginId)
+            val baseline = maxOf(
+                usage.lastUsedAtEpochMs ?: 0L,
+                usageStore.enabledSince(pluginId) ?: 0L,
+                policy.enabledAtEpochMs
+            )
+            if (baseline <= 0L || now - baseline < policy.thresholdMillis) return@forEach
+            try {
+                disableLocked(pluginId)
+                AppLogger.i(TAG, "Auto-disabled inactive plugin: $pluginId")
+            } catch (error: Throwable) {
+                if (error is CancellationException) throw error
+                AppLogger.w(TAG, "Skipped auto-disable for $pluginId: ${error.message}")
+            }
+        }
+    }
+
+    private fun isSystemRolePlugin(manifest: PluginManifest): Boolean =
+        manifest.roles.any { it == "system" || it == "system_plugin" || it == "system_service" }
+
+    private fun isAutoDisableExempt(pluginId: String, manifest: PluginManifest): Boolean {
+        if (isSystemRolePlugin(manifest)) return true
+        return extensionRouter.listBindingsByOwner(pluginId).any { binding ->
+            binding.point == PluginExtensionPoints.UI_THEME
         }
     }
 
@@ -473,6 +603,7 @@ internal class PluginManager(
             throw PluginInstallException("DEPENDENCY_UNSATISFIED", reason)
         }
         val manifest = stateRepository.readInstalledManifest(pluginId, version)
+        surfacePolicy.requireManifestAllowed(manifest)
         val adapter = runtimeAdapters.resolve(manifest.runtime.kind)
             ?: throw PluginInstallException(
                 "RUNTIME_ADAPTER_MISSING",
@@ -498,7 +629,7 @@ internal class PluginManager(
                 "Stored scope approval does not match the active manifest"
             )
         }
-        val mountScope = PluginMountScope(manifest, contributions, extensionRouter, capabilityBinder)
+        val mountScope = PluginMountScope(manifest, contributions, extensionRouter, capabilityBinder, surfacePolicy)
         try {
             val dataDir = store.dataDir(pluginId).apply { mkdirs() }
             val cacheDir = store.cacheDir(pluginId).apply { mkdirs() }
@@ -585,6 +716,17 @@ internal class PluginManager(
             result.errorCode ?: "RUNTIME_STOP_FAILED",
             result.message ?: "Plugin runtime did not stop cleanly: $pluginId"
         )
+    }
+
+    private fun blockedDependencyReason(pluginId: String, version: String): String? {
+        val manifest = stateRepository.readInstalledManifest(pluginId, version)
+        for (dependency in manifest.dependencies.plugins) {
+            val dependencyState = stateRepository.read(dependency.pluginId) ?: continue
+            if (dependencyState.enabled && dependencyState.lastState == PluginLifecycleState.BLOCKED) {
+                return "依赖插件被宿主策略阻断：${dependency.pluginId}"
+            }
+        }
+        return null
     }
 
     private fun dependencyError(pluginId: String, version: String): String? {
@@ -689,11 +831,13 @@ internal class PluginManager(
         val manifest = state?.activeVersion?.let { version ->
             runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull()
         }
+        val versions = store.listVersions(pluginId)
         return PluginSnapshot(
             pluginId = pluginId,
-            versions = store.listVersions(pluginId),
+            versions = versions,
             persistentState = state,
             activeManifest = manifest,
+            usage = usageStore.snapshot(pluginId),
             mountedVersion = activeMounts[pluginId]?.version,
             contributions = contributions.listByOwner(pluginId)
         )

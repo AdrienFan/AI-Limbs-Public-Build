@@ -5,6 +5,11 @@ import com.ai.assistance.operit.plugins.center.PluginCapabilityInvoker
 import com.ai.assistance.operit.plugins.center.PluginCapabilityInvokerFactory
 import com.ai.assistance.operit.plugins.center.PluginCapabilitySpec
 import com.ai.assistance.operit.plugins.center.PluginInstallException
+import com.ai.assistance.operit.plugins.center.HostSurfaceDefinition
+import com.ai.assistance.operit.plugins.center.HostSurfaceKind
+import com.ai.assistance.operit.plugins.center.HostSurfacePolicy
+import com.ai.assistance.operit.plugins.center.PluginSurfaceIds
+import com.ai.assistance.operit.plugins.center.PluginUsageStore
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -14,7 +19,13 @@ import org.json.JSONObject
  * Kernel-owned dispatch table. Plugins may publish only plugin.* capabilities and may call only
  * explicitly exposed core.* capabilities after the requested scopes were approved at install time.
  */
-internal class LabCapabilityRegistry : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
+internal class LabCapabilityRegistry(
+    private val surfacePolicy: HostSurfacePolicy?,
+    private val usageStore: PluginUsageStore? = null
+) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
+    /** JVM unit-test constructor. Production wiring always supplies HostSurfacePolicy. */
+    internal constructor() : this(null, null)
+
     private data class OwnedCapability(
         val token: String,
         val ownerPluginId: String,
@@ -37,11 +48,51 @@ internal class LabCapabilityRegistry : PluginCapabilityBinder, PluginCapabilityI
         "core.logs.read" to HostCapability("host.logs.read", ::readLogs)
     )
 
+    init {
+        surfacePolicy?.register(
+            HostSurfaceDefinition(
+                PluginSurfaceIds.PUBLISH_CAPABILITY,
+                "plugin.* capability 发布总线",
+                "允许插件注册自己的无界面能力",
+                HostSurfaceKind.PLUGIN_CAPABILITY_BUS
+            )
+        )
+        surfacePolicy?.register(
+            HostSurfaceDefinition(
+                PluginSurfaceIds.PUBLISH_SERVICE,
+                "Plugin Service 发布总线",
+                "允许插件向宿主发布 service",
+                HostSurfaceKind.PLUGIN_SERVICE_BUS
+            )
+        )
+        surfacePolicy?.register(
+            HostSurfaceDefinition(
+                PluginSurfaceIds.PUBLISH_PROVIDER,
+                "Plugin Provider 发布总线",
+                "允许插件向宿主发布 provider",
+                HostSurfaceKind.PLUGIN_PROVIDER_BUS
+            )
+        )
+        hostCapabilities.forEach { (id, capability) ->
+            surfacePolicy?.register(
+                HostSurfaceDefinition(
+                    id = PluginSurfaceIds.hostCapability(id),
+                    title = id,
+                    detail = capability.requiredScope?.let { "宿主能力 · scope: $it · 可在 mount 前预判" }
+                        ?: "宿主能力 · 无预声明 scope · 每次调用时强制检查策略",
+                    kind = HostSurfaceKind.HOST_CAPABILITY,
+                    requiredScope = capability.requiredScope
+                )
+            )
+        }
+    }
+
     override fun register(
         ownerPluginId: String,
         capabilityId: String,
         capability: PluginCapabilitySpec
     ): AutoCloseable {
+        surfacePolicy?.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
         val normalized = capabilityId.trim().lowercase()
         if (!normalized.startsWith("plugin.") || !CAPABILITY_ID.matches(normalized)) {
             throw PluginInstallException(
@@ -69,7 +120,9 @@ internal class LabCapabilityRegistry : PluginCapabilityBinder, PluginCapabilityI
         val normalized = capabilityId.trim().lowercase()
         val capability = capabilities[normalized]
             ?: throw PluginInstallException("CAPABILITY_NOT_ACTIVE", "Capability is not active: $normalized")
-        return capability.spec.executor.execute(JSONObject(parameters.toString()))
+        val result = capability.spec.executor.execute(JSONObject(parameters.toString()))
+        usageStore?.recordUse(capability.ownerPluginId)
+        return result
     }
 
     fun activeIds(): Set<String> = capabilities.keys.toSortedSet()
@@ -82,6 +135,7 @@ internal class LabCapabilityRegistry : PluginCapabilityBinder, PluginCapabilityI
                     "HOST_CAPABILITY_NOT_EXPOSED",
                     "Host capability is not exposed to plugins: $normalized"
                 )
+            surfacePolicy?.requireAllowed(PluginSurfaceIds.hostCapability(normalized))
             val scope = capability.requiredScope
             if (scope != null && scope !in grantedScopes) {
                 throw PluginInstallException(

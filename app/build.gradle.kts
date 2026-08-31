@@ -14,7 +14,7 @@ android {
         getByName("main") {
             java.setSrcDirs(listOf("src/pluginLab/java"))
             res.setSrcDirs(listOf("src/pluginLab/res"))
-            assets.setSrcDirs(listOf("src/pluginLab/assets"))
+            assets.setSrcDirs(emptyList<String>())
             jniLibs.setSrcDirs(emptyList<String>())
         }
         getByName("debug") {
@@ -28,11 +28,11 @@ android {
         }
     }
     defaultConfig {
-        applicationId = "com.ai.assistance.operit.ailimbs.pluginlab.alt.v03"
+        applicationId = "com.ai.assistance.operit.ailimbs.pluginlab.alt.v04"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1004
-        versionName = "plugin-lab-alt-0.3"
+        versionCode = 1005
+        versionName = "plugin-lab-alt-0.4"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -47,7 +47,7 @@ android {
             )
         }
         debug {
-            versionNameSuffix = "-rainbow1"
+            versionNameSuffix = "-control1"
         }
     }
 

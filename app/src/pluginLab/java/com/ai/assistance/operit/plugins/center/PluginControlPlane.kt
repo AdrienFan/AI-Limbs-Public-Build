@@ -17,7 +17,10 @@ data class PluginControlSnapshot(
 class PluginControlPlane internal constructor(
     private val manager: PluginManager,
     private val extensionPoints: ExtensionPointRegistry,
-    private val extensionRouter: ExtensionRouter
+    private val extensionRouter: ExtensionRouter,
+    private val surfacePolicy: HostSurfacePolicy,
+    private val inactivityPolicy: PluginInactivityPolicyStore,
+    private val onInactivityPolicyChanged: () -> Unit = {}
 ) {
     fun inspectPackage(sourcePackage: File): PluginManifest =
         PluginPackageInspector.inspect(sourcePackage)
@@ -29,8 +32,11 @@ class PluginControlPlane internal constructor(
 
     suspend fun enable(pluginId: String): PluginPersistentState =
         manager.enable(pluginId)
-    suspend fun disable(pluginId: String): PluginPersistentState =
-        manager.disable(pluginId)
+    suspend fun disable(
+        pluginId: String,
+        adminAuthorized: Boolean = false
+    ): PluginPersistentState =
+        manager.disable(pluginId, adminAuthorized)
 
     suspend fun activateVersion(pluginId: String, version: String): PluginPersistentState =
         manager.activateVersion(pluginId, version)
@@ -44,6 +50,36 @@ class PluginControlPlane internal constructor(
 
     suspend fun restoreEnabledPlugins() {
         manager.restoreEnabledPlugins()
+    }
+
+    fun developerModeEnabled(): Boolean = surfacePolicy.developerMode
+
+    fun hostSurfaceSnapshots(): List<HostSurfaceSnapshot> = surfacePolicy.snapshots()
+
+    suspend fun setDeveloperMode(enabled: Boolean) {
+        surfacePolicy.setDeveloperMode(enabled)
+    }
+
+    suspend fun setHostSurfaceAllowed(surfaceId: String, allowed: Boolean) {
+        surfacePolicy.setAllowed(surfaceId, allowed)
+        manager.reconcileHostSurfacePolicy()
+    }
+
+    fun inactivityPolicySnapshot(): PluginInactivityPolicySnapshot = inactivityPolicy.snapshot()
+
+    suspend fun configureInactivityPolicy(
+        enabled: Boolean,
+        mode: InactivityThresholdMode,
+        days: Int,
+        testSeconds: Int
+    ) {
+        inactivityPolicy.configure(enabled, mode, days, testSeconds)
+        manager.reconcileInactivityPolicy()
+        onInactivityPolicyChanged()
+    }
+
+    suspend fun runInactivityCheck() {
+        manager.reconcileInactivityPolicy()
     }
 
     suspend fun shutdown() {
@@ -71,7 +107,8 @@ class PluginControlPlane internal constructor(
             PluginLifecycleState.QUARANTINED -> PluginHealthState.FAILED
             PluginLifecycleState.MOUNTING,
             PluginLifecycleState.UNMOUNTING,
-            PluginLifecycleState.PENDING_RESTART -> PluginHealthState.ATTENTION
+            PluginLifecycleState.PENDING_RESTART,
+            PluginLifecycleState.BLOCKED -> PluginHealthState.ATTENTION
             else -> PluginHealthState.OK
         }
         return PluginControlSnapshot(

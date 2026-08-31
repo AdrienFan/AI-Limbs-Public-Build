@@ -34,11 +34,6 @@ jobs:
           persist-credentials: false
           submodules: false
 
-      - name: Set up Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.12'
-
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
@@ -57,13 +52,6 @@ jobs:
             "platforms;android-34" \
             "platforms;android-36" \
             "build-tools;35.0.0"
-
-      - name: Build and validate Plugin Lab samples
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 tools/plugin_lab/build_samples.py
-          python3 tools/plugin_lab/validate_samples.py
 
       - name: Configure Android SDK
         shell: bash

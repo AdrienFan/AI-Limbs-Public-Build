@@ -23,6 +23,7 @@ enum class PluginLifecycleState {
     INSTALLED,
     MOUNTING,
     ACTIVE,
+    BLOCKED,
     UNMOUNTING,
     DISABLED,
     PENDING_RESTART,

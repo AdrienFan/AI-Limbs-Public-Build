@@ -146,7 +146,7 @@ private fun PluginLabRoot() {
             onOpenCenter = { page = LabPage.PluginCenter },
             onOpenPlugin = { page = LabPage.PluginScreen(it) }
         )
-        LabPage.PluginCenter -> PluginCenterScreen()
+        LabPage.PluginCenter -> PluginCenterScreen(onBack = { page = LabPage.Home })
         is LabPage.PluginScreen -> PluginSurface(current.screenId) { page = LabPage.Home }
     }
 }
@@ -234,6 +234,10 @@ private fun PluginSurface(screenId: String, onBack: () -> Unit) {
             CircularProgressIndicator()
         }
         return
+    }
+
+    LaunchedEffect(screen.id, screen.ownerPluginId) {
+        withContext(Dispatchers.IO) { PluginCenterKernel.recordPluginUse(screen.ownerPluginId) }
     }
 
     Scaffold(

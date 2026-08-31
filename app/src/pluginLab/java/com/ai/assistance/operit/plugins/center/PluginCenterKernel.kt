@@ -9,6 +9,13 @@ import com.ai.assistance.operit.plugins.lab.PluginThemeSpec
 import com.ai.assistance.operit.plugins.lab.PluginUiRegistry
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
 
 /**
  * Plugin Lab micro-kernel. The base owns lifecycle, trust, permissions and routing only.
@@ -29,6 +36,12 @@ object PluginCenterKernel {
     private lateinit var controlPlaneInstance: PluginControlPlane
     private lateinit var uiRegistryInstance: PluginUiRegistry
     private lateinit var capabilityRegistryInstance: LabCapabilityRegistry
+    private lateinit var surfacePolicyInstance: HostSurfacePolicy
+    private lateinit var adminSecurityInstance: AdminSecurityManager
+    private lateinit var usageStoreInstance: PluginUsageStore
+    private lateinit var inactivityPolicyInstance: PluginInactivityPolicyStore
+    private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Volatile private var inactivityMonitorJob: Job? = null
 
     val isInitialized: Boolean get() = initialized
     val isStarted: Boolean get() = started
@@ -49,6 +62,15 @@ object PluginCenterKernel {
         get() = requireInitialized().let { uiRegistryInstance }
     internal val capabilities: LabCapabilityRegistry
         get() = requireInitialized().let { capabilityRegistryInstance }
+    val hostSurfacePolicy: HostSurfacePolicy
+        get() = requireInitialized().let { surfacePolicyInstance }
+    val adminSecurity: AdminSecurityManager
+        get() = requireInitialized().let { adminSecurityInstance }
+
+    fun recordPluginUse(pluginId: String) {
+        requireInitialized()
+        usageStoreInstance.recordUse(pluginId)
+    }
 
     fun initialize(
         context: Context,
@@ -57,13 +79,31 @@ object PluginCenterKernel {
         synchronized(lifecycleLock) {
             if (initialized) return
             val appContext = context.applicationContext
+            val surfacePolicy = HostSurfacePolicy(appContext)
+            val adminSecurity = AdminSecurityManager(appContext)
+            val usageStore = PluginUsageStore(appContext)
+            val inactivityPolicy = PluginInactivityPolicyStore(appContext)
             val uiRegistry = PluginUiRegistry()
-            val capabilityRegistry = LabCapabilityRegistry()
+            val capabilityRegistry = LabCapabilityRegistry(surfacePolicy, usageStore)
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
                 register(DeclarativePluginRuntimeAdapter)
             }
             val contributions = PluginContributionRegistry()
+            listOf(
+                Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 Plugin Lab 首页添加入口"),
+                Triple(PluginExtensionPoints.UI_SCREEN, "插件页面", "允许插件提供可打开的界面页面"),
+                Triple(PluginExtensionPoints.UI_THEME, "全局主题 / 皮肤", "允许插件实时接管宿主主题与配色")
+            ).forEach { (point, title, detail) ->
+                surfacePolicy.register(
+                    HostSurfaceDefinition(
+                        id = PluginSurfaceIds.extension(point),
+                        title = "$title · $point@1",
+                        detail = detail,
+                        kind = HostSurfaceKind.EXTENSION_POINT
+                    )
+                )
+            }
             val extensionPoints = ExtensionPointRegistry().apply {
                 register(
                     ExtensionPointDefinition(
@@ -108,7 +148,7 @@ object PluginCenterKernel {
                     )
                 )
             }
-            val extensionRouter = ExtensionRouter(extensionPoints)
+            val extensionRouter = ExtensionRouter(extensionPoints, surfacePolicy)
             val pluginContextFactory = PluginContextFactory(
                 contributions = contributions,
                 eventBusHost = PluginEventBusHost(),
@@ -123,10 +163,20 @@ object PluginCenterKernel {
                 contributions = contributions,
                 extensionRouter = extensionRouter,
                 capabilityBinder = capabilityRegistry,
+                surfacePolicy = surfacePolicy,
+                usageStore = usageStore,
+                inactivityPolicy = inactivityPolicy,
                 runtimeHost = PluginRuntimeHost(),
                 pluginContextFactory = pluginContextFactory
             )
-            val controlPlane = PluginControlPlane(manager, extensionPoints, extensionRouter)
+            val controlPlane = PluginControlPlane(
+                manager,
+                extensionPoints,
+                extensionRouter,
+                surfacePolicy,
+                inactivityPolicy,
+                onInactivityPolicyChanged = { startInactivityMonitor() }
+            )
 
             manager.initialize()
             managerInstance = manager
@@ -137,6 +187,10 @@ object PluginCenterKernel {
             controlPlaneInstance = controlPlane
             uiRegistryInstance = uiRegistry
             capabilityRegistryInstance = capabilityRegistry
+            surfacePolicyInstance = surfacePolicy
+            adminSecurityInstance = adminSecurity
+            usageStoreInstance = usageStore
+            inactivityPolicyInstance = inactivityPolicy
             initialized = true
             AppLogger.i(TAG, "Plugin Lab kernel initialized: ${manager.store.rootDir.absolutePath}")
         }
@@ -149,6 +203,7 @@ object PluginCenterKernel {
         }
         try {
             controlPlaneInstance.restoreEnabledPlugins()
+            controlPlaneInstance.runInactivityCheck()
             AppLogger.i(TAG, "Plugin Lab restored enabled plugins")
         } catch (error: CancellationException) {
             throw error
@@ -158,6 +213,26 @@ object PluginCenterKernel {
         synchronized(lifecycleLock) {
             started = true
         }
+        startInactivityMonitor()
+    }
+
+    private fun startInactivityMonitor() {
+        inactivityMonitorJob?.cancel()
+        inactivityMonitorJob = monitorScope.launch {
+            while (isActive) {
+                val policy = inactivityPolicyInstance.snapshot()
+                val interval = if (policy.enabled && policy.mode == InactivityThresholdMode.TEST_SECONDS) 1_000L else 60_000L
+                delay(interval)
+                if (!started) continue
+                try {
+                    managerInstance.reconcileInactivityPolicy()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    AppLogger.w(TAG, "Inactivity policy check failed", error)
+                }
+            }
+        }
     }
 
     suspend fun shutdown() {
@@ -165,6 +240,8 @@ object PluginCenterKernel {
         synchronized(lifecycleLock) {
             started = false
         }
+        inactivityMonitorJob?.cancel()
+        inactivityMonitorJob = null
         try {
             controlPlaneInstance.shutdown()
             AppLogger.i(TAG, "Plugin Lab kernel shut down")

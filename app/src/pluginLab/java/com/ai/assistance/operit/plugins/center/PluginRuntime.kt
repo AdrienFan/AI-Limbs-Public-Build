@@ -89,6 +89,7 @@ class PluginRegistrar internal constructor(
     private val registry: PluginContributionRegistry,
     private val extensionRouter: ExtensionRouter,
     private val capabilityBinder: PluginCapabilityBinder,
+    private val surfacePolicy: HostSurfacePolicy,
     private val track: (AutoCloseable) -> Unit
 ) {
     fun registerCapability(
@@ -96,6 +97,7 @@ class PluginRegistrar internal constructor(
         capability: PluginCapabilitySpec,
         metadata: Map<String, String> = emptyMap()
     ) {
+        surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
         requireDeclared(PluginContributionKind.CAPABILITY, id)
         val registration =
             registry.register(
@@ -123,6 +125,7 @@ class PluginRegistrar internal constructor(
         payload: Any,
         metadata: Map<String, String> = emptyMap()
     ) {
+        surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_SERVICE)
         if (apiVersion <= 0) {
             throw PluginInstallException("SERVICE_API_INVALID", "Service API version must be positive")
         }
@@ -146,6 +149,7 @@ class PluginRegistrar internal constructor(
         payload: Any,
         metadata: Map<String, String> = emptyMap()
     ) {
+        surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_PROVIDER)
         requireDeclared(PluginContributionKind.PROVIDER, id)
         track(
             registry.register(
@@ -168,6 +172,7 @@ class PluginRegistrar internal constructor(
         metadata: Map<String, String> = emptyMap()
     ) {
         val normalizedPoint = point.trim().lowercase()
+        surfacePolicy.requireAllowed(PluginSurfaceIds.extension(normalizedPoint))
         val declaration = manifest.provides.extensions.firstOrNull {
             it.point == normalizedPoint && it.id == id
         } ?: throw PluginInstallException(
@@ -213,12 +218,13 @@ class PluginMountScope internal constructor(
     manifest: PluginManifest,
     registry: PluginContributionRegistry,
     extensionRouter: ExtensionRouter,
-    capabilityBinder: PluginCapabilityBinder
+    capabilityBinder: PluginCapabilityBinder,
+    surfacePolicy: HostSurfacePolicy
 ) {
     private val handles = ArrayDeque<AutoCloseable>()
     private var acceptingRegistrations = true
 
-    val registrar = PluginRegistrar(manifest, registry, extensionRouter, capabilityBinder) { handle ->
+    val registrar = PluginRegistrar(manifest, registry, extensionRouter, capabilityBinder, surfacePolicy) { handle ->
         synchronized(this) {
             if (!acceptingRegistrations) {
                 handle.close()

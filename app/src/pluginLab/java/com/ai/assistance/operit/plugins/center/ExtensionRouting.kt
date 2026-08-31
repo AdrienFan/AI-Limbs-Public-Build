@@ -89,7 +89,8 @@ class ExtensionPointRegistry {
 }
 
 class ExtensionRouter(
-    private val points: ExtensionPointRegistry
+    private val points: ExtensionPointRegistry,
+    private val surfacePolicy: HostSurfacePolicy
 ) {
     private data class ActiveBinding(
         val token: String,
@@ -110,6 +111,7 @@ class ExtensionRouter(
             ?: throw PluginInstallException("EXTENSION_POINT_MISSING", "Extension point is missing")
         val definition = points.resolve(point)
             ?: throw PluginInstallException("EXTENSION_POINT_UNSUPPORTED", "Unsupported extension point: $point")
+        surfacePolicy.requireAllowed(PluginSurfaceIds.extension(point))
         val apiVersion = record.apiVersion
             ?: throw PluginInstallException("EXTENSION_API_MISSING", "Extension API version is missing")
         if (apiVersion != definition.apiVersion) {

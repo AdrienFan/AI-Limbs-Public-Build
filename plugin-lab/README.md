@@ -1,13 +1,21 @@
 # AI Limbs Plugin Lab
 
-This branch keeps only lifecycle, package verification, permission brokering, capability routing,
-extension routing, storage isolation, and the Plugin Center in the installed base.
+Plugin Lab is the reference host used to develop and validate AI Limbs plugin contracts before they
+move into the production application. The installed base keeps lifecycle, trust, permission
+brokering, capability/extension routing, storage isolation, admin security, and Plugin Center.
 
-Optional behavior is delivered as deterministic `.ailp` packages:
+Optional behavior is delivered as external `.ailp` packages. Validation fixtures such as
+`headless-echo` and `runtime-log-viewer` remain in the repository for development, but they are no
+longer bundled into the APK and there is no built-in sample installer in Plugin Center.
 
-- `headless-echo`: registers a headless `plugin.*` capability.
-- `runtime-log-viewer`: requests `host.logs.read`, registers a proxied capability, and installs
-  both a home tile and a declarative screen.
+Plugin Center supports multi-file import, a pending-install queue, per-item removal, batch approval,
+and batch installation. Uninstall and developer controls are protected by the administrator gate.
 
-Run `python3 tools/plugin_lab/build_samples.py` after changing a sample. This packages JSON and
-resources only; it does not compile the Android project.
+Administrator setup creates a password credential plus a one-time recovery key. The recovery key can
+reset a forgotten administrator password without the old password. There is no universal bypass.
+
+Developer mode exposes Host Surface Policy. Versioned extension points, host capabilities, and plugin
+publication buses can be allowed or blocked. Manifest-known requirements are enforced before mount;
+a running owner is revoked and becomes `BLOCKED` when a required surface is disabled, then is retried
+automatically when the surface is restored. Invocation-only host capabilities are also checked at the
+moment of every call.
