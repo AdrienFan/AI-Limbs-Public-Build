@@ -44,8 +44,12 @@ class PluginControlPlane internal constructor(
     suspend fun rollback(pluginId: String): PluginPersistentState =
         manager.rollback(pluginId)
 
-    suspend fun uninstall(pluginId: String, removeData: Boolean = false) {
-        manager.uninstall(pluginId, removeData)
+    suspend fun uninstall(
+        pluginId: String,
+        removeData: Boolean = false,
+        adminAuthorized: Boolean = false
+    ) {
+        manager.uninstall(pluginId, removeData, adminAuthorized)
     }
 
     suspend fun restoreEnabledPlugins() {

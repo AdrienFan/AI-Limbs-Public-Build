@@ -9,9 +9,16 @@ import javax.crypto.spec.GCMParameterSpec
 import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
+enum class AdminAuthFrequency {
+    EVERY_ACTION,
+    ONCE_PER_APP_SESSION,
+    NEVER
+}
+
 data class AdminSecuritySnapshot(
     val configured: Boolean,
-    val recoveryConfigured: Boolean
+    val recoveryConfigured: Boolean,
+    val authFrequency: AdminAuthFrequency
 )
 
 data class AdminSetupResult(val recoveryKey: String)
@@ -19,11 +26,26 @@ data class AdminSetupResult(val recoveryKey: String)
 class AdminSecurityManager(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val random = SecureRandom()
+    @Volatile private var sessionAuthorized = false
 
     fun snapshot(): AdminSecuritySnapshot = AdminSecuritySnapshot(
         configured = hasBundle(PASSWORD_PREFIX),
-        recoveryConfigured = hasBundle(RECOVERY_PREFIX)
+        recoveryConfigured = hasBundle(RECOVERY_PREFIX),
+        authFrequency = authFrequency()
     )
+
+    fun authFrequency(): AdminAuthFrequency =
+        runCatching {
+            AdminAuthFrequency.valueOf(
+                prefs.getString(KEY_AUTH_FREQUENCY, null) ?: AdminAuthFrequency.EVERY_ACTION.name
+            )
+        }.getOrDefault(AdminAuthFrequency.EVERY_ACTION)
+
+    fun authorizationRequired(): Boolean = when (authFrequency()) {
+        AdminAuthFrequency.EVERY_ACTION -> true
+        AdminAuthFrequency.ONCE_PER_APP_SESSION -> !sessionAuthorized
+        AdminAuthFrequency.NEVER -> false
+    }
 
     fun setup(password: String): AdminSetupResult {
         requirePassword(password)
@@ -36,12 +58,14 @@ class AdminSecurityManager(context: Context) {
             .putBundle(RECOVERY_PREFIX, wrap(master, normalizeRecoveryKey(recoveryKey)))
             .apply()
         master.fill(0)
+        sessionAuthorized = true
         return AdminSetupResult(recoveryKey)
     }
 
     fun verifyPassword(password: String): Boolean {
         val master = unwrap(PASSWORD_PREFIX, password) ?: return false
         master.fill(0)
+        sessionAuthorized = true
         return true
     }
 
@@ -50,6 +74,7 @@ class AdminSecurityManager(context: Context) {
         val master = unwrap(PASSWORD_PREFIX, currentPassword) ?: return false
         prefs.edit().putBundle(PASSWORD_PREFIX, wrap(master, newPassword)).apply()
         master.fill(0)
+        sessionAuthorized = true
         return true
     }
 
@@ -59,6 +84,7 @@ class AdminSecurityManager(context: Context) {
         val master = unwrap(RECOVERY_PREFIX, normalized) ?: return false
         prefs.edit().putBundle(PASSWORD_PREFIX, wrap(master, newPassword)).apply()
         master.fill(0)
+        sessionAuthorized = true
         return true
     }
 
@@ -69,7 +95,16 @@ class AdminSecurityManager(context: Context) {
             .putBundle(RECOVERY_PREFIX, wrap(master, normalizeRecoveryKey(recoveryKey)))
             .apply()
         master.fill(0)
+        sessionAuthorized = true
         return recoveryKey
+    }
+
+    fun changeAuthFrequency(currentPassword: String, frequency: AdminAuthFrequency): Boolean {
+        val master = unwrap(PASSWORD_PREFIX, currentPassword) ?: return false
+        master.fill(0)
+        prefs.edit().putString(KEY_AUTH_FREQUENCY, frequency.name).apply()
+        sessionAuthorized = frequency != AdminAuthFrequency.EVERY_ACTION
+        return true
     }
 
     private fun wrap(master: ByteArray, credential: String): CryptoBundle {
@@ -140,6 +175,7 @@ class AdminSecurityManager(context: Context) {
         const val MIN_PASSWORD_LENGTH = 8
         private const val PREFS = "plugin_lab_admin_security"
         private const val KEY_VERSION = "version"
+        private const val KEY_AUTH_FREQUENCY = "auth_frequency"
         private const val PASSWORD_PREFIX = "password"
         private const val RECOVERY_PREFIX = "recovery"
         private const val FORMAT_VERSION = 1

@@ -102,8 +102,20 @@ internal class PluginManager(
 
     suspend fun uninstall(
         pluginId: String,
-        removeData: Boolean = false
+        removeData: Boolean = false,
+        adminAuthorized: Boolean = false
     ) = locked {
+        val state = requireState(pluginId)
+        val version = state.activeVersion
+        if (version != null) {
+            val manifest = stateRepository.readInstalledManifest(pluginId, version)
+            if (isSystemRolePlugin(manifest) && !adminAuthorized) {
+                throw PluginInstallException(
+                    "ADMIN_AUTH_REQUIRED",
+                    "Uninstalling a system plugin requires administrator authorization"
+                )
+            }
+        }
         ensureNoEnabledDependents(pluginId)
         requireCleanRuntimeStop(pluginId, unmountLocked(pluginId))
         store.deletePlugin(pluginId, removeData)

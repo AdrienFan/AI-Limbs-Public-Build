@@ -118,12 +118,25 @@ fun PluginCenterScreen(onBack: () -> Unit) {
         }
     }
 
+    fun actionRequiresFreshPassword(action: AdminAction): Boolean = when (action) {
+        AdminAction.OpenSettings -> true
+        is AdminAction.DisableSystem -> true
+        is AdminAction.Uninstall -> {
+            val target = snapshots.firstOrNull { it.plugin.pluginId == action.pluginId }
+            target == null || isSystemPlugin(target)
+        }
+    }
+
     fun requestAdmin(action: AdminAction) {
-        pendingAdminAction = action
-        if (adminSecurity.snapshot().configured) {
+        val security = adminSecurity.snapshot()
+        if (!security.configured) {
+            pendingAdminAction = action
+            showAdminSetup = true
+        } else if (actionRequiresFreshPassword(action) || adminSecurity.authorizationRequired()) {
+            pendingAdminAction = action
             showAdminPassword = true
         } else {
-            showAdminSetup = true
+            completeAdminAction(action)
         }
     }
 
@@ -331,7 +344,15 @@ fun PluginCenterScreen(onBack: () -> Unit) {
                 TextButton(onClick = {
                     uninstallTargetId = null
                     if (selectedPluginId == pluginId) selectedPluginId = null
-                    runMutation { controlPlane.uninstall(pluginId, removeData = false) }
+                    val systemPlugin = snapshots.firstOrNull { it.plugin.pluginId == pluginId }
+                        ?.let(::isSystemPlugin) == true
+                    runMutation {
+                        controlPlane.uninstall(
+                            pluginId,
+                            removeData = false,
+                            adminAuthorized = systemPlugin
+                        )
+                    }
                 }) { Text("卸载") }
             },
             dismissButton = { TextButton(onClick = { uninstallTargetId = null }) { Text("取消") } }

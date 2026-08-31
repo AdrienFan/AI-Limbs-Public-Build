@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
@@ -15,6 +16,8 @@ import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Checkbox
 import androidx.compose.material3.Divider
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -32,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.ai.assistance.operit.plugins.center.AdminAuthFrequency
 import com.ai.assistance.operit.plugins.center.AdminSecurityManager
 import com.ai.assistance.operit.plugins.center.HostSurfaceKind
 import com.ai.assistance.operit.plugins.center.HostSurfaceSnapshot
@@ -210,7 +214,12 @@ internal fun PluginAdminSettingsScreen(
     var busy by remember { mutableStateOf(false) }
     var showChangePassword by remember { mutableStateOf(false) }
     var showRegenerateRecovery by remember { mutableStateOf(false) }
+    var authFrequency by remember { mutableStateOf(adminSecurity.authFrequency()) }
+    var authFrequencyExpanded by remember { mutableStateOf(false) }
+    var pendingAuthFrequency by remember { mutableStateOf<AdminAuthFrequency?>(null) }
+    var surfaceQuery by remember { mutableStateOf("") }
     var newRecoveryKey by remember { mutableStateOf<String?>(null) }
+    val scrollState = rememberScrollState()
     val scope = rememberCoroutineScope()
 
     fun runAdminMutation(block: suspend () -> Unit) {
@@ -227,8 +236,30 @@ internal fun PluginAdminSettingsScreen(
         }
     }
 
+    val normalizedSurfaceQuery = surfaceQuery.trim().lowercase()
+    val filteredSurfaces = remember(surfaces, normalizedSurfaceQuery) {
+        if (normalizedSurfaceQuery.isBlank()) {
+            surfaces
+        } else {
+            surfaces.filter { item ->
+                val definition = item.definition
+                listOf(
+                    definition.title,
+                    definition.id,
+                    definition.detail,
+                    definition.kind.name,
+                    definition.requiredScope.orEmpty()
+                ).any { it.lowercase().contains(normalizedSurfaceQuery) }
+            }
+        }
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
     Column(
-        modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .verticalScroll(scrollState)
+            .padding(start = 16.dp, top = 16.dp, end = 22.dp, bottom = 16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -240,6 +271,33 @@ internal fun PluginAdminSettingsScreen(
                 Text("管理员凭据", fontWeight = FontWeight.Bold)
                 Text("管理员密码：已设置")
                 Text("恢复密钥：${if (adminSecurity.snapshot().recoveryConfigured) "已配置" else "未配置"}")
+                Text("普通插件验证频率", fontWeight = FontWeight.Medium)
+                Box {
+                    OutlinedButton(
+                        onClick = { authFrequencyExpanded = true },
+                        enabled = !busy
+                    ) {
+                        Text(adminAuthFrequencyLabel(authFrequency))
+                    }
+                    DropdownMenu(
+                        expanded = authFrequencyExpanded,
+                        onDismissRequest = { authFrequencyExpanded = false }
+                    ) {
+                        AdminAuthFrequency.entries.forEach { frequency ->
+                            DropdownMenuItem(
+                                text = { Text(adminAuthFrequencyLabel(frequency)) },
+                                onClick = {
+                                    authFrequencyExpanded = false
+                                    if (frequency != authFrequency) pendingAuthFrequency = frequency
+                                }
+                            )
+                        }
+                    }
+                }
+                Text(
+                    "仅影响普通插件卸载。系统插件禁用/卸载始终每次验证；管理员安全设置也不会被豁免。",
+                    style = MaterialTheme.typography.bodySmall
+                )
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                     OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy) { Text("修改密码") }
                     OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy) { Text("重新生成恢复密钥") }
@@ -330,10 +388,40 @@ internal fun PluginAdminSettingsScreen(
             }
             Text("Host Surface Policy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
             Text("只有允许的宿主扩展面才能被插件使用。关闭接口后，相关已启用插件会转为 BLOCKED 并立即撤销运行；重新开放后会自动尝试恢复。", style = MaterialTheme.typography.bodySmall)
-            SurfaceGroups(surfaces, busy) { item, allowed ->
-                runAdminMutation { controlPlane.setHostSurfaceAllowed(item.definition.id, allowed) }
+            OutlinedTextField(
+                value = surfaceQuery,
+                onValueChange = { surfaceQuery = it },
+                label = { Text("搜索 Host Surface") },
+                placeholder = { Text("名称、接口 ID、说明、类型或 scope") },
+                modifier = Modifier.fillMaxWidth(),
+                singleLine = true
+            )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    "显示 ${filteredSurfaces.size} / ${surfaces.size}",
+                    modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.bodySmall
+                )
+                if (surfaceQuery.isNotBlank()) {
+                    TextButton(onClick = { surfaceQuery = "" }) { Text("清除搜索") }
+                }
+            }
+            if (filteredSurfaces.isEmpty()) {
+                Text("没有匹配的宿主接口", style = MaterialTheme.typography.bodySmall)
+            } else {
+                SurfaceGroups(filteredSurfaces, busy) { item, allowed ->
+                    runAdminMutation { controlPlane.setHostSurfaceAllowed(item.definition.id, allowed) }
+                }
             }
         }
+    }
+        ScrollStateScrollIndicator(
+            state = scrollState,
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
     }
 
     if (showChangePassword) {
@@ -350,6 +438,17 @@ internal fun PluginAdminSettingsScreen(
             onGenerated = {
                 showRegenerateRecovery = false
                 newRecoveryKey = it
+            }
+        )
+    }
+    pendingAuthFrequency?.let { targetFrequency ->
+        ChangeAuthFrequencyDialog(
+            adminSecurity = adminSecurity,
+            targetFrequency = targetFrequency,
+            onDismiss = { pendingAuthFrequency = null },
+            onChanged = {
+                authFrequency = targetFrequency
+                pendingAuthFrequency = null
             }
         )
     }
@@ -395,6 +494,12 @@ private fun surfaceKindTitle(kind: HostSurfaceKind): String = when (kind) {
     HostSurfaceKind.PLUGIN_CAPABILITY_BUS -> "Plugin Capability Bus"
     HostSurfaceKind.PLUGIN_SERVICE_BUS -> "Plugin Service Bus"
     HostSurfaceKind.PLUGIN_PROVIDER_BUS -> "Plugin Provider Bus"
+}
+
+private fun adminAuthFrequencyLabel(frequency: AdminAuthFrequency): String = when (frequency) {
+    AdminAuthFrequency.EVERY_ACTION -> "每次都询问"
+    AdminAuthFrequency.ONCE_PER_APP_SESSION -> "每次启动验证一次"
+    AdminAuthFrequency.NEVER -> "普通插件不再询问"
 }
 
 @Composable
@@ -470,6 +575,47 @@ private fun RegenerateRecoveryDialog(
                     if (key != null) onGenerated(key) else error = "管理员密码不正确"
                 }
             }) { Text(if (busy) "处理中…" else "重新生成") }
+        },
+        dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
+    )
+}
+
+@Composable
+private fun ChangeAuthFrequencyDialog(
+    adminSecurity: AdminSecurityManager,
+    targetFrequency: AdminAuthFrequency,
+    onDismiss: () -> Unit,
+    onChanged: () -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    val scope = rememberCoroutineScope()
+    AlertDialog(
+        onDismissRequest = { if (!busy) onDismiss() },
+        title = { Text("修改普通插件验证频率") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("将普通插件卸载验证改为：${adminAuthFrequencyLabel(targetFrequency)}")
+                Text(
+                    "系统插件禁用/卸载始终保持每次验证，不受此设置影响。",
+                    style = MaterialTheme.typography.bodySmall
+                )
+                PasswordField("当前管理员密码", password) { password = it }
+                error?.let { Text(it, color = MaterialTheme.colorScheme.error) }
+            }
+        },
+        confirmButton = {
+            TextButton(enabled = !busy, onClick = {
+                scope.launch {
+                    busy = true
+                    val ok = withContext(Dispatchers.Default) {
+                        adminSecurity.changeAuthFrequency(password, targetFrequency)
+                    }
+                    busy = false
+                    if (ok) onChanged() else error = "管理员密码不正确"
+                }
+            }) { Text(if (busy) "验证中…" else "确认修改") }
         },
         dismissButton = { TextButton(enabled = !busy, onClick = onDismiss) { Text("取消") } }
     )
