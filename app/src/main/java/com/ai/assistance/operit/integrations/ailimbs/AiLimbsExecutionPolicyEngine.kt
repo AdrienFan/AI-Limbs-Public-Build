@@ -67,7 +67,7 @@ class AiLimbsExecutionPolicyEngine(
                         if (coreRoute.operation == AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE) {
                             targetName = args.optString("name").trim()
                             require(targetName.isNotBlank()) { "Missing host tool name" }
-                            require(!AiLimbsPluginCapabilityRegistry.isReservedInvokeName(targetName)) {
+                            require(!isReservedPluginCapabilityName(targetName)) {
                                 "Host tool target uses reserved plugin capability namespace: $targetName"
                             }
                             parameters = args.optJSONObject("parameters") ?: JSONObject()
@@ -87,15 +87,6 @@ class AiLimbsExecutionPolicyEngine(
                         spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(coreRoute)
                     }
                 }
-            }
-            is AiLimbsCapabilityRegistration.Plugin -> {
-                val plugin = registration.registration
-                canonicalName = plugin.catalogEntry.targetToolName
-                targetName = canonicalName
-                parameters = args
-                route = AiLimbsCapabilityRoute.Plugin(plugin)
-                sourceEnabled = plugin.catalogEntry.sourceEnabled
-                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
             }
         }
 
@@ -138,10 +129,6 @@ class AiLimbsExecutionPolicyEngine(
                     route = AiLimbsCapabilityRoute.Core(core)
                     spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(core.route)
                 }
-            }
-            is AiLimbsCapabilityRegistration.Plugin -> {
-                route = AiLimbsCapabilityRoute.Plugin(registration.registration)
-                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
             }
             null -> {
                 route = AiLimbsCapabilityRoute.HostTool(targetName)
@@ -370,15 +357,6 @@ class AiLimbsExecutionPolicyEngine(
         }
 
         val coreRegistration = (route as? AiLimbsCapabilityRoute.Core)?.registration
-        val pluginRegistration = (route as? AiLimbsCapabilityRoute.Plugin)?.registration
-        if (pluginRegistration != null && !AiLimbsPluginCapabilityRegistry.isCurrent(pluginRegistration)) {
-            return AiLimbsAvailabilityResult(
-                available = false,
-                reasonCode = "PLUGIN_CAPABILITY_UNAVAILABLE",
-                reason = "The plugin capability is no longer mounted."
-            )
-        }
-
         if (spec.hostPermissionEnforced) {
             handler.registerDefaultTools()
             if (targetName !in handler.getAllToolNames()) {

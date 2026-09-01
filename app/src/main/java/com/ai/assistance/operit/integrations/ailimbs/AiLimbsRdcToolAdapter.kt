@@ -296,7 +296,7 @@ class AiLimbsRdcToolAdapter(
 
     private fun shouldEnterAiLimbsDispatcher(name: String): Boolean =
         AiLimbsCapabilityRegistry.isRegisteredInvokeName(name) ||
-            AiLimbsPluginCapabilityRegistry.isReservedInvokeName(name)
+            isReservedPluginCapabilityName(name)
 
     private fun managedDocumentTool(path: String, write: Boolean): String? {
         val candidate = runCatching { File(path).canonicalFile }.getOrNull() ?: return null

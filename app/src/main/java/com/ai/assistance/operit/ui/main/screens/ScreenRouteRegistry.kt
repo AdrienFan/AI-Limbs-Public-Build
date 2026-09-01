@@ -183,15 +183,6 @@ object ScreenRouteRegistry {
                 order = 30
             ),
             hostEntryDefinition(
-                entryId = "toolbox.plugin_center",
-                screen = Screen.PluginCenter,
-                surface = NavigationSurface.TOOLBOX,
-                titleResId = R.string.plugin_center_title,
-                descriptionResId = R.string.plugin_center_description,
-                icon = Icons.Default.Extension,
-                order = 10
-            ),
-            hostEntryDefinition(
                 entryId = "hidden.toolbox",
                 screen = Screen.Toolbox,
                 launchNavItem = NavItem.Toolbox

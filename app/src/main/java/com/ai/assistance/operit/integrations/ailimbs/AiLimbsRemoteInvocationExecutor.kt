@@ -17,7 +17,7 @@ internal fun routeRemoteInvocation(
 ): AiLimbsDispatcherInvocation =
     if (
         !isManagedCapability &&
-            !AiLimbsPluginCapabilityRegistry.isReservedInvokeName(requestedTool) &&
+            !isReservedPluginCapabilityName(requestedTool) &&
             isResolvedHostCapability
     ) {
         AiLimbsDispatcherInvocation(
@@ -58,7 +58,7 @@ class AiLimbsRemoteInvocationExecutor(
         val isResolvedHostCapability =
             if (
                 isManagedCapability ||
-                    AiLimbsPluginCapabilityRegistry.isReservedInvokeName(requestedTool) ||
+                    isReservedPluginCapabilityName(requestedTool) ||
                     requestedTool.isBlank()
             ) {
                 false

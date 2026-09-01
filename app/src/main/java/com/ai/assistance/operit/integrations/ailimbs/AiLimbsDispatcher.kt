@@ -18,7 +18,6 @@ import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
-import kotlinx.coroutines.CancellationException
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -68,28 +67,7 @@ class AiLimbsDispatcher(
                         .put("name", route.targetName)
                         .put("parameters", invocation.parameters)
                 )
-            is AiLimbsCapabilityRoute.Plugin ->
-                executePluginCapability(route.registration, invocation.parameters)
         }
-
-    private suspend fun executePluginCapability(
-        registration: AiLimbsPluginCapabilityRegistration,
-        parameters: JSONObject
-    ): JSONObject {
-        if (!AiLimbsPluginCapabilityRegistry.isCurrent(registration)) {
-            return error("Plugin capability is no longer active: ${registration.catalogEntry.targetToolName}")
-                .put("error_code", "PLUGIN_CAPABILITY_UNAVAILABLE")
-        }
-        return try {
-            val result = registration.capability.executor.execute(JSONObject(parameters.toString()))
-            if (!result.has("success")) result.put("success", true) else result
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            error(error.message ?: error::class.java.simpleName)
-                .put("error_code", "PLUGIN_CAPABILITY_EXECUTION_FAILED")
-        }
-    }
 
     private suspend fun executeCoreRoute(
         registration: AiLimbsCoreCapabilityRegistration,
@@ -240,7 +218,7 @@ class AiLimbsDispatcher(
     private suspend fun executeHostTool(args: JSONObject): JSONObject {
         val name = args.optString("name").trim()
         if (name.isBlank()) return error("Missing host tool name")
-        if (AiLimbsPluginCapabilityRegistry.isReservedInvokeName(name)) {
+        if (isReservedPluginCapabilityName(name)) {
             return error("Host tools cannot use the reserved plugin capability namespace: $name")
                 .put("error_code", "PLUGIN_CAPABILITY_NAMESPACE_RESERVED")
         }
@@ -354,7 +332,7 @@ class AiLimbsDispatcher(
             .put("module", "AI Limbs Tool Dispatcher")
             .put(
                 "route",
-                "Transport -> AiLimbsExecutionPolicyEngine -> AiLimbsDispatcher -> Core | HostTool | Plugin"
+                "Transport -> AiLimbsExecutionPolicyEngine -> AiLimbsDispatcher -> Core | HostTool"
             )
             .put("permission_enforcement", "Unified ALLOW / ASK / FORBID policy")
             .put("policy_version", AiLimbsExecutionPolicyDescriptor.policyVersion)

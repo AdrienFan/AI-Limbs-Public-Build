@@ -26,7 +26,6 @@ import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.ActivePromptManager
 import com.ai.assistance.operit.data.model.ActivePrompt
 import com.ai.assistance.operit.data.model.ChatMessageTimestampAllocator
-import com.ai.assistance.operit.plugins.toolpkg.ToolPkgChatMessageHookBridge
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 
@@ -1444,14 +1443,12 @@ class ChatHistoryDelegate(
                     "当前会话正在切换，跳过内存刷新但继续持久化消息: timestamp=${message.timestamp}"
                 )
                 chatHistoryManager.updateMessage(targetChatId, message)
-                ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
                 return@withLock
             }
 
             if (!isCurrentChat) {
                     // 非当前会话：使用“更新或插入”语义，避免每个chunk都插入新消息
                 chatHistoryManager.updateMessage(targetChatId, message)
-                ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
                 return@withLock
             }
 
@@ -1462,7 +1459,6 @@ class ChatHistoryDelegate(
 
             if (didUpdateVisibleMessage) {
                 chatHistoryManager.updateMessage(targetChatId, message)
-                ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
             } else {
                 AppLogger.d(
                     TAG,
@@ -1470,12 +1466,10 @@ class ChatHistoryDelegate(
                 )
                 if (isVisibleNewMessage) {
                     chatHistoryManager.addMessage(targetChatId, message)
-                    ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
-                    refreshCurrentChatDisplayFlags(targetChatId)
+                        refreshCurrentChatDisplayFlags(targetChatId)
                 } else {
                     chatHistoryManager.updateMessage(targetChatId, message)
-                    ToolPkgChatMessageHookBridge.dispatchMessagePersisted(targetChatId, message)
-                }
+                    }
             }
         }
     }

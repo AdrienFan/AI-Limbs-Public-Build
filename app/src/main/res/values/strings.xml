@@ -8358,6 +8358,4 @@
     <string name="ai_limbs_triggercmd_clear_binding">清除绑定</string>
     <string name="ai_limbs_triggercmd_saved_connecting">配置已保存，正在连接 TRIGGERcmd…</string>
     <string name="ai_limbs_triggercmd_binding_cleared">TRIGGERcmd 绑定已清除</string>
-    <string name="plugin_center_title">Plugin Center</string>
-    <string name="plugin_center_description">AI Limbs 插件安装与管理中心</string>
 </resources>
