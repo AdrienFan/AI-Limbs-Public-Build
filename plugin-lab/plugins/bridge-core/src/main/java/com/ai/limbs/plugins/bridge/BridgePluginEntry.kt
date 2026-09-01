@@ -1,7 +1,10 @@
 package com.ai.limbs.plugins.bridge
 
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeProviderCatalog
+import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderControl
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelFieldKind
@@ -33,9 +36,12 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.json.JSONObject
 
@@ -53,7 +59,18 @@ private class BridgeRuntime(
     private val host: InProcessPluginHost,
     private val hub: ExtensionHubService
 ) {
+    private data class BridgePresentationState(
+        val revision: Long = 0L,
+        val selectedExtensionId: String? = null,
+        val panel: InProcessPanelState? = null,
+        val notification: InProcessNotificationState? = null
+    )
+
     private val contributions = ConcurrentHashMap<String, BridgeProviderContribution>()
+    private val presentationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mutablePresentation = MutableStateFlow(BridgePresentationState())
+    private val presentation = mutablePresentation.asStateFlow()
+    private var presentationRevision = 0L
     private val panelProvider = BridgeDynamicPanelProvider()
     private val notificationProvider = BridgeNotificationPublisher()
     private var notificationHandle: AutoCloseable? = null
@@ -125,7 +142,7 @@ private class BridgeRuntime(
             pointHandle = null
             notificationHandle?.close()
             notificationHandle = null
-            notificationProvider.clear()
+            clearPresentation()
             throw error
         }
     }
@@ -142,8 +159,8 @@ private class BridgeRuntime(
             managerScope = null
             AiLimbsBridgeProviderCatalog.replaceFactories(emptyList())
             contributions.clear()
-            panelProvider.clear()
-            notificationProvider.clear()
+            clearPresentation()
+            presentationScope.cancel()
         }
     }
 
@@ -156,22 +173,19 @@ private class BridgeRuntime(
         val values = contributions.values.toList()
         AiLimbsBridgeProviderCatalog.replaceFactories(values.map { it.factory })
         if (values.isEmpty()) {
-            panelProvider.clear()
-            notificationProvider.clear()
+            clearPresentation()
             return
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         val nextManager = AiLimbsBridgeManager(host.applicationContext, scope)
         managerScope = scope
         manager = nextManager
+        publishPresentation(nextManager, nextManager.state.value)
         scope.launch {
-            nextManager.state.collect {
-                panelProvider.refresh()
-                notificationProvider.refresh()
+            nextManager.state.collect { bridgeState ->
+                publishPresentation(nextManager, bridgeState)
             }
         }
-        panelProvider.refresh()
-        notificationProvider.refresh()
     }
     private fun registerCapabilities() {
         host.registerCapability(
@@ -183,10 +197,10 @@ private class BridgeRuntime(
                     ?: error("Bridge extension is not active: $extensionId")
                 val profile = contribution.factory.profiles.firstOrNull()
                     ?: error("Bridge extension has no profile")
-                requireManager().selectProvider(profile.id)
+                val currentManager = requireManager()
+                currentManager.selectProvider(profile.id)
                 recordUseCompat(extensionId)
-                panelProvider.refresh()
-                notificationProvider.refresh()
+                publishPresentation(currentManager, currentManager.state.value)
                 JSONObject()
                     .put("success", true)
                     .put("content", "已切换至 ${profile.label}")
@@ -197,8 +211,8 @@ private class BridgeRuntime(
         )
     }
 
-    private fun selectedEntry(): Map.Entry<String, BridgeProviderContribution>? {
-        val profileId = manager?.activeProfile?.id ?: return null
+    private fun selectedEntry(currentManager: AiLimbsBridgeManager): Map.Entry<String, BridgeProviderContribution>? {
+        val profileId = currentManager.activeProfile.id
         return contributions.entries.firstOrNull { (_, contribution) ->
             contribution.factory.profiles.any { it.id == profileId }
         }
@@ -215,64 +229,87 @@ private class BridgeRuntime(
         }
     }
 
-    private fun controlFor(current: AiLimbsBridgeManager): BridgeProviderControl =
+    private fun liveControlFor(current: AiLimbsBridgeManager): BridgeProviderControl =
         object : BridgeProviderControl {
-            override val profile
+            override val profile: BridgeProfile
                 get() = current.activeProfile
-            override val state
+            override val state: AiLimbsBridgeState
                 get() = current.state.value
-            override val availableActions
+            override val availableActions: List<BridgeAction>
                 get() = current.availableActions()
 
-            override fun perform(action: com.ai.assistance.operit.integrations.ailimbs.BridgeAction): Boolean =
-                current.perform(action)
-
+            override fun perform(action: BridgeAction): Boolean = current.perform(action)
             override fun statusSummary(): String = current.statusSummary()
         }
 
+    private fun snapshotControlFor(
+        current: AiLimbsBridgeManager,
+        bridgeState: AiLimbsBridgeState
+    ): BridgeProviderControl {
+        val capturedProfile = current.activeProfile
+        val capturedActions = current.availableActions(bridgeState)
+        val capturedSummary = current.statusSummary()
+        return object : BridgeProviderControl {
+            override val profile: BridgeProfile = capturedProfile
+            override val state: AiLimbsBridgeState = bridgeState
+            override val availableActions: List<BridgeAction> = capturedActions
+
+            override fun perform(action: BridgeAction): Boolean = current.perform(action)
+            override fun statusSummary(): String = capturedSummary
+        }
+    }
+
+    @Synchronized
+    private fun clearPresentation() {
+        mutablePresentation.value = BridgePresentationState(revision = ++presentationRevision)
+    }
+
+    @Synchronized
+    private fun publishPresentation(
+        currentManager: AiLimbsBridgeManager,
+        bridgeState: AiLimbsBridgeState
+    ) {
+        if (manager !== currentManager) return
+        val selected = selectedEntry(currentManager) ?: run {
+            clearPresentation()
+            return
+        }
+        val control = snapshotControlFor(currentManager, bridgeState)
+        val panel = selected.value.panel.snapshot(host.applicationContext, control).toInProcessState()
+        val notification = selected.value.notification
+            ?.snapshot(host.applicationContext, control)
+            ?.toInProcessState()
+        mutablePresentation.value = BridgePresentationState(
+            revision = ++presentationRevision,
+            selectedExtensionId = selected.key,
+            panel = panel,
+            notification = notification
+        )
+    }
+
     private inner class BridgeDynamicPanelProvider : InProcessDynamicPanelProvider, InProcessSelectionProvider {
-        private val mutableState = MutableStateFlow<InProcessPanelState?>(null)
-        private val mutableSelectedId = MutableStateFlow<String?>(null)
-        override val state: StateFlow<InProcessPanelState?> = mutableState.asStateFlow()
-        override val selectedId: StateFlow<String?> = mutableSelectedId.asStateFlow()
-
-        fun clear() {
-            mutableState.value = null
-            mutableSelectedId.value = null
-        }
-
-        fun refresh() {
-            val currentManager = manager ?: run {
-                clear()
-                return
-            }
-            val selected = selectedEntry() ?: run {
-                clear()
-                return
-            }
-            mutableSelectedId.value = selected.key
-            val panel = selected.value.panel.snapshot(
-                host.applicationContext,
-                controlFor(currentManager)
-            )
-            mutableState.value = panel.toInProcessState()
-        }
+        override val state: StateFlow<InProcessPanelState?> = presentation
+            .map { it.panel }
+            .stateIn(presentationScope, SharingStarted.Eagerly, presentation.value.panel)
+        override val selectedId: StateFlow<String?> = presentation
+            .map { it.selectedExtensionId }
+            .stateIn(presentationScope, SharingStarted.Eagerly, presentation.value.selectedExtensionId)
 
         override suspend fun perform(
             actionId: String,
             fieldValues: Map<String, String>
         ): InProcessPanelResult {
             val currentManager = requireManager()
-            val selected = selectedEntry()
+            val selected = selectedEntry(currentManager)
                 ?: error("Selected Bridge Provider contribution is missing")
             recordUseCompat(selected.key)
             val result = selected.value.panel.perform(
                 host.applicationContext,
                 actionId,
                 fieldValues,
-                controlFor(currentManager)
+                liveControlFor(currentManager)
             )
-            refresh()
+            publishPresentation(currentManager, currentManager.state.value)
             return InProcessPanelResult(
                 message = result.message,
                 fieldValues = result.fieldValues
@@ -281,26 +318,13 @@ private class BridgeRuntime(
     }
 
     private inner class BridgeNotificationPublisher {
-        private val mutableState = MutableStateFlow<InProcessNotificationState?>(null)
-        val state: StateFlow<InProcessNotificationState?> = mutableState.asStateFlow()
-
-        fun clear() {
-            mutableState.value = null
-        }
-
-        fun refresh() {
-            val currentManager = manager ?: run { clear(); return }
-            val selected = selectedEntry() ?: run { clear(); return }
-            val notification = selected.value.notification ?: run { clear(); return }
-            mutableState.value = notification.snapshot(
-                host.applicationContext,
-                controlFor(currentManager)
-            ).toInProcessState()
-        }
+        val state: StateFlow<InProcessNotificationState?> = presentation
+            .map { it.notification }
+            .stateIn(presentationScope, SharingStarted.Eagerly, presentation.value.notification)
 
         suspend fun perform(actionId: String) {
             val currentManager = requireManager()
-            val selected = selectedEntry()
+            val selected = selectedEntry(currentManager)
                 ?: error("Selected Bridge Provider contribution is missing")
             val notification = selected.value.notification
                 ?: error("Selected Bridge Provider has no notification contribution")
@@ -308,10 +332,9 @@ private class BridgeRuntime(
             notification.perform(
                 host.applicationContext,
                 actionId,
-                controlFor(currentManager)
+                liveControlFor(currentManager)
             )
-            panelProvider.refresh()
-            refresh()
+            publishPresentation(currentManager, currentManager.state.value)
         }
     }
 
