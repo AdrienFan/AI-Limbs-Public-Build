@@ -2,7 +2,7 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatQueueChangedEvent
-import com.ai.assistance.operit.util.AppLogger
+import com.ai.limbs.extensions.rdc.RdcLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.concurrent.ConcurrentHashMap
@@ -194,7 +194,7 @@ internal class AiLimbsRdcRealtimeTransport(
 
         override fun onMessage(webSocket: WebSocket, text: String) {
             val message = runCatching { JSONObject(text) }.getOrElse { error ->
-                AppLogger.w(TAG, "Ignoring invalid RDC Realtime frame", error)
+                RdcLogger.w(TAG, "Ignoring invalid RDC Realtime frame", error)
                 return
             }
             val event = message.optString("event")
@@ -205,7 +205,7 @@ internal class AiLimbsRdcRealtimeTransport(
                 "phx_reply" -> handleReply(ref, payload)
                 "broadcast" -> handleBroadcast(payload)
                 "postgres_changes" -> {
-                    AppLogger.d(
+                    RdcLogger.d(
                         TAG,
                         "RDC ingress frame source=postgres_changes topic=$topicName keys=${payload.names()?.toString() ?: "[]"}"
                     )
@@ -214,7 +214,7 @@ internal class AiLimbsRdcRealtimeTransport(
                 "phx_error" -> {
                     if (topicName == legacyTopic) {
                         legacyReadyState = false
-                        AppLogger.w(TAG, "RDC legacy Postgres Changes channel reported phx_error; primary doorbell remains active")
+                        RdcLogger.w(TAG, "RDC legacy Postgres Changes channel reported phx_error; primary doorbell remains active")
                     } else {
                         fail(IllegalStateException("RDC Realtime channel reported phx_error"))
                     }
@@ -222,7 +222,7 @@ internal class AiLimbsRdcRealtimeTransport(
                 "phx_close" -> if (!closing) {
                     if (topicName == legacyTopic) {
                         legacyReadyState = false
-                        AppLogger.w(TAG, "RDC legacy Postgres Changes channel closed; primary doorbell remains active")
+                        RdcLogger.w(TAG, "RDC legacy Postgres Changes channel closed; primary doorbell remains active")
                     } else {
                         fail(IllegalStateException("RDC Realtime channel closed unexpectedly"))
                     }
@@ -258,7 +258,7 @@ internal class AiLimbsRdcRealtimeTransport(
                 }
                 readyState = true
                 ready.complete(Unit)
-                AppLogger.i(TAG, "RDC Realtime private channel and Presence are ready")
+                RdcLogger.i(TAG, "RDC Realtime private channel and Presence are ready")
             }
             legacyJoinRef -> {
                 legacyReadyState = ok
@@ -267,12 +267,12 @@ internal class AiLimbsRdcRealtimeTransport(
                         .optJSONObject("response")
                         ?.optJSONArray("postgres_changes")
                         ?.length() ?: -1
-                    AppLogger.i(
+                    RdcLogger.i(
                         TAG,
                         "RDC legacy Postgres Changes safety net is ready: registered=$registered"
                     )
                 } else {
-                    AppLogger.w(TAG, "RDC legacy Postgres Changes join was rejected; primary doorbell remains active: $payload")
+                    RdcLogger.w(TAG, "RDC legacy Postgres Changes join was rejected; primary doorbell remains active: $payload")
                 }
             }
             else -> pendingAcks.remove(ref)?.complete(ok)
@@ -321,7 +321,7 @@ internal class AiLimbsRdcRealtimeTransport(
         if (!sendFrame(legacyTopic, "phx_join", payload, newLegacyJoinRef, newLegacyJoinRef)) {
             legacyJoinRef = null
             legacyReadyState = false
-            AppLogger.w(TAG, "Unable to send RDC legacy Postgres Changes phx_join; primary doorbell remains active")
+            RdcLogger.w(TAG, "Unable to send RDC legacy Postgres Changes phx_join; primary doorbell remains active")
         }
     }
 
@@ -329,7 +329,7 @@ internal class AiLimbsRdcRealtimeTransport(
         if (topicName != legacyTopic) return
         val data = payload.optJSONObject("data")
         if (data == null) {
-            AppLogger.w(TAG, "RDC postgres_changes frame missing data object")
+            RdcLogger.w(TAG, "RDC postgres_changes frame missing data object")
             return
         }
         if (data.optString("type") != "INSERT") return
@@ -337,17 +337,17 @@ internal class AiLimbsRdcRealtimeTransport(
         if (data.optString("table") != "mcp_remote_calls") return
         val record = data.optJSONObject("record")
         if (record == null) {
-            AppLogger.w(TAG, "RDC postgres_changes INSERT missing record object")
+            RdcLogger.w(TAG, "RDC postgres_changes INSERT missing record object")
             return
         }
         val callId = record.optString("id")
         val targetDeviceId = record.optString("device_id")
         if (callId.isBlank()) {
-            AppLogger.w(TAG, "RDC postgres_changes INSERT missing call id")
+            RdcLogger.w(TAG, "RDC postgres_changes INSERT missing call id")
             return
         }
         if (targetDeviceId.isNotBlank() && targetDeviceId != deviceId) return
-        AppLogger.i(
+        RdcLogger.i(
             TAG,
             "RDC ingress observed source=postgres_changes call=…${callId.takeLast(10)} " +
                 "tool=${record.optString("tool_name").ifBlank { "unknown" }} " +
@@ -363,7 +363,7 @@ internal class AiLimbsRdcRealtimeTransport(
         val targetDeviceId = doorbell.optString("device_id")
         if (callId.isBlank()) return
         if (targetDeviceId.isNotBlank() && targetDeviceId != deviceId) return
-        AppLogger.i(
+        RdcLogger.i(
             TAG,
             "RDC ingress observed source=broadcast call=…${callId.takeLast(10)} " +
                 "target=${if (targetDeviceId.isBlank()) "unspecified" else "…${targetDeviceId.takeLast(12)}"}"
@@ -396,7 +396,7 @@ internal class AiLimbsRdcRealtimeTransport(
         if (!ready.isCompleted) ready.completeExceptionally(error)
         pendingAcks.values.forEach { it.complete(false) }
         pendingAcks.clear()
-        AppLogger.e(TAG, "RDC Realtime transport failed", error)
+        RdcLogger.e(TAG, "RDC Realtime transport failed", error)
     }
 
     private fun ref(): String = nextRef.incrementAndGet().toString()

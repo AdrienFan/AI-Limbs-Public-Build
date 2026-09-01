@@ -2,7 +2,7 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.triggercmd",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "roles": [
     "system_extension"
   ],

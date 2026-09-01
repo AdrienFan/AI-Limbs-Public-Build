@@ -14,7 +14,7 @@ import com.ai.limbs.extensions.rdc.BuildConfig
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatQueueChangedEvent
 import com.ai.assistance.operit.integrations.ailimbs.chat.requiresWorkAttention
-import com.ai.assistance.operit.util.AppLogger
+import com.ai.limbs.extensions.rdc.RdcLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -124,15 +124,15 @@ class AiLimbsRdcClient(
     fun start() {
         if (!ENABLED) return
         if (recoveryInProgress.get()) {
-            AppLogger.d(TAG, "RDC start ignored: recovery transaction is active")
+            RdcLogger.d(TAG, "RDC start ignored: recovery transaction is active")
             return
         }
         if (runJob?.isActive == true) {
-            AppLogger.d(TAG, "RDC start ignored: worker already active")
+            RdcLogger.d(TAG, "RDC start ignored: worker already active")
             return
         }
         updateState(AiLimbsBridgePhase.STARTING, "正在启动 Android 端 RDC 设备")
-        AppLogger.i(TAG, "RDC worker start requested")
+        RdcLogger.i(TAG, "RDC worker start requested")
         launchWorker()
     }
 
@@ -141,7 +141,7 @@ class AiLimbsRdcClient(
             scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 val currentJob = currentCoroutineContext()[Job]
                 isRunning = true
-                AppLogger.i(
+                RdcLogger.i(
                     TAG,
                     if (recoveryDeadlineAtMs == null) "RDC worker started" else "RDC recovery worker started"
                 )
@@ -167,7 +167,7 @@ class AiLimbsRdcClient(
                             )
                         }
                     }
-                    AppLogger.i(TAG, "RDC worker stopped")
+                    RdcLogger.i(TAG, "RDC worker stopped")
                 }
             }
         runJob = worker
@@ -179,7 +179,7 @@ class AiLimbsRdcClient(
             scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 val currentJob = currentCoroutineContext()[Job]
                 isRunning = true
-                AppLogger.i(TAG, "RDC pairing worker started")
+                RdcLogger.i(TAG, "RDC pairing worker started")
                 try {
                     var loggedWaiting = false
                     while (currentCoroutineContext().isActive && isNetworkUnavailable()) {
@@ -198,7 +198,7 @@ class AiLimbsRdcClient(
 
                     val info = fetchMcpInfo()
                     pairDevice(existingDeviceId = null)
-                    AppLogger.i(
+                    RdcLogger.i(
                         TAG,
                         "RDC re-pair authorization completed; entering normal connection flow"
                     )
@@ -209,7 +209,7 @@ class AiLimbsRdcClient(
                 } catch (e: Exception) {
                     activeAuthorization = null
                     reconnectAttempt = 0
-                    AppLogger.e(TAG, "RDC re-pair transaction failed", e)
+                    RdcLogger.e(TAG, "RDC re-pair transaction failed", e)
                     updateState(
                         AiLimbsBridgePhase.ERROR,
                         "重新配对失败：${e.message ?: e.javaClass.simpleName}；请重试",
@@ -222,7 +222,7 @@ class AiLimbsRdcClient(
                         runJob = null
                         isRunning = false
                     }
-                    AppLogger.i(TAG, "RDC pairing worker stopped")
+                    RdcLogger.i(TAG, "RDC pairing worker stopped")
                 }
             }
         runJob = worker
@@ -230,7 +230,7 @@ class AiLimbsRdcClient(
     }
 
     fun stopByUser() {
-        AppLogger.i(TAG, "RDC connection stop requested by user")
+        RdcLogger.i(TAG, "RDC connection stop requested by user")
         housekeepingScope.launch {
             reportOfflineBestEffort()
         }
@@ -238,7 +238,7 @@ class AiLimbsRdcClient(
     }
 
     fun stopRuntime() {
-        AppLogger.i(TAG, "RDC runtime stop requested")
+        RdcLogger.i(TAG, "RDC runtime stop requested")
         stopWorker("Android 端 RDC 运行时已停止")
     }
 
@@ -253,7 +253,7 @@ class AiLimbsRdcClient(
             current.phase == AiLimbsBridgePhase.ONLINE &&
             (heartbeatAge == null || heartbeatAge > ONLINE_STALE_AFTER_MS)
         ) {
-            AppLogger.w(TAG, "RDC heartbeat is stale; restarting worker to verify the live session")
+            RdcLogger.w(TAG, "RDC heartbeat is stale; restarting worker to verify the live session")
             restartWorkerFast("stale_heartbeat", "最后心跳已过期，正在重新建立连接")
         }
     }
@@ -284,7 +284,7 @@ class AiLimbsRdcClient(
                 val previous = networkState
                 networkState = signal.state
                 networkTransport = signal.transport
-                AppLogger.i(
+                RdcLogger.i(
                     TAG,
                     "RDC host network: $previous -> ${signal.state}, transport=${signal.transport}"
                 )
@@ -292,7 +292,7 @@ class AiLimbsRdcClient(
                     signal.state == AiLimbsBridgeNetworkState.VALIDATED &&
                     previous != AiLimbsBridgeNetworkState.VALIDATED
                 ) {
-                    AppLogger.i(TAG, "RDC network validated; pending retry waits may resume immediately")
+                    RdcLogger.i(TAG, "RDC network validated; pending retry waits may resume immediately")
                     if (stateFlow.value.phase == AiLimbsBridgePhase.ONLINE) {
                         restartWorkerFast(
                             "network_restored",
@@ -313,7 +313,7 @@ class AiLimbsRdcClient(
         val heartbeatAgeMs = current.lastHeartbeatAtMs?.let {
             (System.currentTimeMillis() - it).coerceAtLeast(0L)
         }
-        AppLogger.i(
+        RdcLogger.i(
             TAG,
             "RDC host health: reason=$reason, network=$networkState/$networkTransport, " +
                 "phase=${current.phase}, running=$isRunning, reconnectAttempt=$reconnectAttempt, " +
@@ -323,10 +323,10 @@ class AiLimbsRdcClient(
 
     private fun restartWorkerFast(reason: String, detail: String) {
         if (recoveryInProgress.get()) {
-            AppLogger.d(TAG, "RDC fast restart ignored during recovery: reason=$reason")
+            RdcLogger.d(TAG, "RDC fast restart ignored during recovery: reason=$reason")
             return
         }
-        AppLogger.w(TAG, "RDC fast restart: reason=$reason, network=$networkState/$networkTransport")
+        RdcLogger.w(TAG, "RDC fast restart: reason=$reason, network=$networkState/$networkTransport")
         val previousHeartbeat = stateFlow.value.lastHeartbeatAtMs
         runJob?.cancel()
         runJob = null
@@ -349,7 +349,7 @@ class AiLimbsRdcClient(
         var loggedWaiting = false
         while (currentCoroutineContext().isActive && isNetworkUnavailable()) {
             if (!loggedWaiting) {
-                AppLogger.w(TAG, "RDC waiting for validated network: state=$networkState, transport=$networkTransport")
+                RdcLogger.w(TAG, "RDC waiting for validated network: state=$networkState, transport=$networkTransport")
                 updateState(
                     if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
                     "等待可用网络后继续 RDC 连接"
@@ -363,7 +363,7 @@ class AiLimbsRdcClient(
             delay(NETWORK_STATE_POLL_MS)
         }
         if (loggedWaiting) {
-            AppLogger.i(TAG, "RDC network wait finished: state=$networkState, transport=$networkTransport")
+            RdcLogger.i(TAG, "RDC network wait finished: state=$networkState, transport=$networkTransport")
         }
         return currentCoroutineContext().isActive
     }
@@ -410,7 +410,7 @@ class AiLimbsRdcClient(
     }
 
     fun reconnect() {
-        AppLogger.i(TAG, "RDC manual reconnect requested")
+        RdcLogger.i(TAG, "RDC manual reconnect requested")
         runJob?.cancel()
         runJob = null
         closeRealtimeTransport()
@@ -423,13 +423,13 @@ class AiLimbsRdcClient(
     fun recover() {
         if (!ENABLED) return
         if (!recoveryInProgress.compareAndSet(false, true)) {
-            AppLogger.d(TAG, "RDC recovery ignored: recovery transaction is already active")
+            RdcLogger.d(TAG, "RDC recovery ignored: recovery transaction is already active")
             return
         }
 
         // Recovery is intentionally a single lifecycle transaction. Without this guard, a second
         // connect/re-pair can race the old channel teardown and recreate the fake-online state.
-        AppLogger.w(TAG, "RDC manual recovery requested")
+        RdcLogger.w(TAG, "RDC manual recovery requested")
         runJob?.cancel()
         runJob = null
         closeRealtimeTransport(force = true)
@@ -444,7 +444,7 @@ class AiLimbsRdcClient(
     }
 
     fun rePair() {
-        AppLogger.i(TAG, "RDC manual re-pair requested")
+        RdcLogger.i(TAG, "RDC manual re-pair requested")
         runJob?.cancel()
         runJob = null
         closeRealtimeTransport()
@@ -469,10 +469,10 @@ class AiLimbsRdcClient(
             appContext.startActivity(
                 Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             )
-            AppLogger.i(TAG, "RDC authorization page opened from connection console")
+            RdcLogger.i(TAG, "RDC authorization page opened from connection console")
             true
         }.getOrElse { error ->
-            AppLogger.e(TAG, "Unable to open RDC authorization page", error)
+            RdcLogger.e(TAG, "Unable to open RDC authorization page", error)
             false
         }
     }
@@ -532,12 +532,12 @@ class AiLimbsRdcClient(
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: UnauthorizedException) {
-                                    AppLogger.w(
+                                    RdcLogger.w(
                                         TAG,
                                         "RDC doorbell call lost authorization: call=${shortCallId(callId)}"
                                     )
                                 } catch (e: Exception) {
-                                    AppLogger.e(
+                                    RdcLogger.e(
                                         TAG,
                                         "RDC doorbell call failed: source=$ingressSource call=${shortCallId(callId)}",
                                         e
@@ -561,7 +561,7 @@ class AiLimbsRdcClient(
                 if (recoveryMode) {
                     recoveryMode = false
                     recoveryInProgress.set(false)
-                    AppLogger.i(TAG, "RDC recovery verified by Realtime heartbeat acknowledgement")
+                    RdcLogger.i(TAG, "RDC recovery verified by Realtime heartbeat acknowledgement")
                 }
                 updateState(
                     AiLimbsBridgePhase.ONLINE,
@@ -578,15 +578,15 @@ class AiLimbsRdcClient(
                         try {
                             val pendingCount = probePendingCalls(info, session)
                             if (pendingCount == 0 && probeIteration % PENDING_CALL_PROBE_HEALTH_EVERY == 0L) {
-                                AppLogger.d(TAG, "RDC pending REST probe healthy: pending=0")
+                                RdcLogger.d(TAG, "RDC pending REST probe healthy: pending=0")
                             }
                         } catch (e: CancellationException) {
                             throw e
                         } catch (e: UnauthorizedException) {
-                            AppLogger.w(TAG, "RDC pending REST probe lost authorization")
+                            RdcLogger.w(TAG, "RDC pending REST probe lost authorization")
                             return@launch
                         } catch (e: Exception) {
-                            AppLogger.e(TAG, "RDC pending REST probe failed", e)
+                            RdcLogger.e(TAG, "RDC pending REST probe failed", e)
                         }
                         probeIteration += 1
                         delay(PENDING_CALL_PROBE_INTERVAL_MS)
@@ -638,7 +638,7 @@ class AiLimbsRdcClient(
             } catch (e: SuspendResumeException) {
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt = 0
-                AppLogger.w(
+                RdcLogger.w(
                     TAG,
                     "RDC resumed from system suspend: elapsed=${e.elapsedDeltaMs}ms, " +
                         "uptime=${e.uptimeDeltaMs}ms, suspend=${e.suspendDeltaMs}ms, " +
@@ -653,7 +653,7 @@ class AiLimbsRdcClient(
             } catch (e: SchedulerGapException) {
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
-                AppLogger.w(
+                RdcLogger.w(
                     TAG,
                     "RDC scheduler starvation detected: elapsed=${e.elapsedDeltaMs}ms, " +
                         "uptime=${e.uptimeDeltaMs}ms, suspend=${e.suspendDeltaMs}ms; rebuilding Realtime transport"
@@ -666,7 +666,7 @@ class AiLimbsRdcClient(
             } catch (e: UnauthorizedException) {
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
-                AppLogger.w(TAG, "RDC session expired; attempting token refresh")
+                RdcLogger.w(TAG, "RDC session expired; attempting token refresh")
                 clearAccessTokenOnly()
                 val retryDelay = reconnectDelayMs(reconnectAttempt)
                 updateState(
@@ -682,7 +682,7 @@ class AiLimbsRdcClient(
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
                 val retryDelay = reconnectDelayMs(reconnectAttempt)
-                AppLogger.e(
+                RdcLogger.e(
                     TAG,
                     "AI Limbs RDC loop failed; reconnectAttempt=$reconnectAttempt, " +
                         "network=$networkState/$networkTransport",
@@ -706,7 +706,7 @@ class AiLimbsRdcClient(
     private fun finishRecoveryFailure(detail: String) {
         recoveryInProgress.set(false)
         updateState(AiLimbsBridgePhase.RECOVERY_FAILED, detail)
-        AppLogger.w(TAG, "RDC recovery failed: $detail")
+        RdcLogger.w(TAG, "RDC recovery failed: $detail")
     }
 
     private fun reconnectDelayMs(attempt: Int): Long {
@@ -759,7 +759,7 @@ class AiLimbsRdcClient(
         )
         stateFlow.value = next
         if (previous.phase != next.phase || previous.detail != next.detail) {
-            AppLogger.i(TAG, "RDC state ${previous.phase} -> ${next.phase}: ${next.detail}")
+            RdcLogger.i(TAG, "RDC state ${previous.phase} -> ${next.phase}: ${next.detail}")
         }
     }
 
@@ -791,22 +791,22 @@ class AiLimbsRdcClient(
             val expiresAtMs = accessTokenExpiryMs(accessToken)
             val remainingMs = expiresAtMs?.minus(System.currentTimeMillis())
             if (remainingMs != null && remainingMs <= ACCESS_TOKEN_REFRESH_MARGIN_MS && refreshToken.isNotBlank()) {
-                AppLogger.i(TAG, "RDC access token near expiry (${remainingMs}ms remaining); proactively refreshing device=${shortDeviceId(deviceId)}")
+                RdcLogger.i(TAG, "RDC access token near expiry (${remainingMs}ms remaining); proactively refreshing device=${shortDeviceId(deviceId)}")
                 refreshSession(info, deviceId, refreshToken)?.let { return it }
-                AppLogger.w(TAG, "RDC proactive token refresh failed; continuing with saved access token for retry")
+                RdcLogger.w(TAG, "RDC proactive token refresh failed; continuing with saved access token for retry")
             }
-            AppLogger.i(TAG, "RDC saved session restored for device=${shortDeviceId(deviceId)}")
+            RdcLogger.i(TAG, "RDC saved session restored for device=${shortDeviceId(deviceId)}")
             return Session(deviceId, accessToken, refreshToken)
         }
         if (deviceId.isNotBlank() && refreshToken.isNotBlank()) {
-            AppLogger.i(TAG, "RDC access token missing; refreshing saved session for device=${shortDeviceId(deviceId)}")
+            RdcLogger.i(TAG, "RDC access token missing; refreshing saved session for device=${shortDeviceId(deviceId)}")
             refreshSession(info, deviceId, refreshToken)?.let { return it }
-            AppLogger.w(TAG, "RDC saved refresh token could not restore the session; new pairing required")
+            RdcLogger.w(TAG, "RDC saved refresh token could not restore the session; new pairing required")
             if (!allowPairing) {
                 throw RecoveryRequiresPairingException("保存的 RDC 授权已失效，请重新配对")
             }
         } else {
-            AppLogger.i(TAG, "RDC has no reusable session; new pairing required")
+            RdcLogger.i(TAG, "RDC has no reusable session; new pairing required")
             if (!allowPairing) {
                 throw RecoveryRequiresPairingException("没有可恢复的 RDC 授权，请重新配对")
             }
@@ -830,23 +830,23 @@ class AiLimbsRdcClient(
                 .build()
         )
         if (response.code !in 200..299) {
-            AppLogger.w(TAG, "RDC token refresh failed: HTTP ${response.code}")
+            RdcLogger.w(TAG, "RDC token refresh failed: HTTP ${response.code}")
             return null
         }
         val json = JSONObject(response.body)
         val access = json.optString("access_token")
         val refresh = json.optString("refresh_token").ifBlank { refreshToken }
         if (access.isBlank()) {
-            AppLogger.w(TAG, "RDC token refresh response contained no access token")
+            RdcLogger.w(TAG, "RDC token refresh response contained no access token")
             return null
         }
-        AppLogger.i(TAG, "RDC token refresh succeeded for device=${shortDeviceId(deviceId)}")
+        RdcLogger.i(TAG, "RDC token refresh succeeded for device=${shortDeviceId(deviceId)}")
         return Session(deviceId, access, refresh).also(::saveSession)
     }
 
     private suspend fun pairDevice(existingDeviceId: String?): Session {
         updateState(AiLimbsBridgePhase.CONNECTING, "正在向 RDC 申请新的授权码")
-        AppLogger.i(TAG, "RDC device authorization flow started")
+        RdcLogger.i(TAG, "RDC device authorization flow started")
         val verifier = randomUrlSafe(48)
         val challenge = sha256UrlSafe(verifier)
         val startBody = JSONObject()
@@ -883,7 +883,7 @@ class AiLimbsRdcClient(
             deviceId = existingDeviceId,
             lastHeartbeatAtMs = null
         )
-        AppLogger.i(TAG, "RDC pairing code received; waiting for browser authorization")
+        RdcLogger.i(TAG, "RDC pairing code received; waiting for browser authorization")
         return pollDeviceAuthorization(auth)
     }
 
@@ -906,7 +906,7 @@ class AiLimbsRdcClient(
                 val refreshToken = json.optString("refresh_token")
                 if (deviceId.isNotBlank() && accessToken.isNotBlank()) {
                     activeAuthorization = null
-                    AppLogger.i(TAG, "RDC device authorization succeeded for device=${shortDeviceId(deviceId)}")
+                    RdcLogger.i(TAG, "RDC device authorization succeeded for device=${shortDeviceId(deviceId)}")
                     updateState(
                         AiLimbsBridgePhase.CONNECTING,
                         "授权成功，正在建立设备心跳",
@@ -927,7 +927,7 @@ class AiLimbsRdcClient(
         }
         activeAuthorization = null
         updateState(AiLimbsBridgePhase.ERROR, "RDC 授权已过期或被拒绝")
-        AppLogger.w(TAG, "RDC device authorization expired or was denied")
+        RdcLogger.w(TAG, "RDC device authorization expired or was denied")
         throw IllegalStateException("RDC device authorization expired or was denied")
     }
     private suspend fun reportOfflineBestEffort() {
@@ -950,12 +950,12 @@ class AiLimbsRdcClient(
                 prefer = "return=minimal"
             )
             if (response.code !in 200..299) {
-                AppLogger.w(TAG, "RDC offline status update failed: HTTP ${response.code}")
+                RdcLogger.w(TAG, "RDC offline status update failed: HTTP ${response.code}")
             } else {
-                AppLogger.i(TAG, "RDC device marked offline after user stop")
+                RdcLogger.i(TAG, "RDC device marked offline after user stop")
             }
         }.onFailure { error ->
-            AppLogger.w(TAG, "Unable to mark RDC device offline during stop: ${error.message}", error)
+            RdcLogger.w(TAG, "Unable to mark RDC device offline during stop: ${error.message}", error)
         }
     }
 
@@ -1027,12 +1027,12 @@ class AiLimbsRdcClient(
         val rows = JSONArray(response.body)
         if (rows.length() == 0) return 0
 
-        AppLogger.w(TAG, "RDC pending REST probe found ${rows.length()} pending call(s)")
+        RdcLogger.w(TAG, "RDC pending REST probe found ${rows.length()} pending call(s)")
         for (index in 0 until rows.length()) {
             val row = rows.optJSONObject(index) ?: continue
             val callId = row.optString("id")
             if (callId.isBlank()) continue
-            AppLogger.w(
+            RdcLogger.w(
                 TAG,
                 "RDC ingress observed source=rest_probe call=${shortCallId(callId)} " +
                     "tool=${row.optString("tool_name").ifBlank { "unknown" }} status=pending"
@@ -1048,7 +1048,7 @@ class AiLimbsRdcClient(
         callId: String,
         ingressSource: String
     ) {
-        AppLogger.i(TAG, "RDC ingress dispatch source=$ingressSource call=${shortCallId(callId)}")
+        RdcLogger.i(TAG, "RDC ingress dispatch source=$ingressSource call=${shortCallId(callId)}")
         val response = authorizedRequest(
             info,
             session,
@@ -1061,29 +1061,29 @@ class AiLimbsRdcClient(
         }
         val call = JSONArray(response.body).optJSONObject(0)
         if (call == null) {
-            AppLogger.w(TAG, "RDC ingress fetch empty source=$ingressSource call=${shortCallId(callId)}")
+            RdcLogger.w(TAG, "RDC ingress fetch empty source=$ingressSource call=${shortCallId(callId)}")
             return
         }
         val status = call.optString("status")
         val toolName = call.optString("tool_name").ifBlank { "unknown" }
         if (status != "pending") {
-            AppLogger.d(
+            RdcLogger.d(
                 TAG,
                 "RDC ingress ignored source=$ingressSource call=${shortCallId(callId)} " +
                     "tool=$toolName status=${status.ifBlank { "unknown" }}"
             )
             return
         }
-        AppLogger.i(
+        RdcLogger.i(
             TAG,
             "RDC claim attempt source=$ingressSource call=${shortCallId(callId)} tool=$toolName " +
                 "createdAt=${call.optString("created_at").ifBlank { "unknown" }}"
         )
         if (!claimCall(info, session, callId)) {
-            AppLogger.d(TAG, "RDC claim lost source=$ingressSource call=${shortCallId(callId)} tool=$toolName")
+            RdcLogger.d(TAG, "RDC claim lost source=$ingressSource call=${shortCallId(callId)} tool=$toolName")
             return
         }
-        AppLogger.i(TAG, "RDC claim won source=$ingressSource call=${shortCallId(callId)} tool=$toolName")
+        RdcLogger.i(TAG, "RDC claim won source=$ingressSource call=${shortCallId(callId)} tool=$toolName")
         launchClaimedCall(info, session, call)
     }
 
@@ -1091,21 +1091,21 @@ class AiLimbsRdcClient(
         val callId = call.optString("id")
         val toolName = call.optString("tool_name")
         val job = scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
-            AppLogger.i(TAG, "RDC tool worker started: tool=$toolName call=${shortCallId(callId)}")
+            RdcLogger.i(TAG, "RDC tool worker started: tool=$toolName call=${shortCallId(callId)}")
             try {
                 remoteCallSemaphore.withPermit { handleClaimedCall(info, session, call) }
             } catch (e: CancellationException) {
                 throw e
             } catch (e: UnauthorizedException) {
-                AppLogger.w(TAG, "RDC tool worker lost authorization: tool=$toolName call=${shortCallId(callId)}")
+                RdcLogger.w(TAG, "RDC tool worker lost authorization: tool=$toolName call=${shortCallId(callId)}")
             } catch (e: Exception) {
-                AppLogger.e(TAG, "RDC tool worker crashed: tool=$toolName call=${shortCallId(callId)}", e)
+                RdcLogger.e(TAG, "RDC tool worker crashed: tool=$toolName call=${shortCallId(callId)}", e)
             }
         }
         activeCallJobs[callId] = job
         job.invokeOnCompletion {
             activeCallJobs.remove(callId, job)
-            AppLogger.i(TAG, "RDC tool worker finished: tool=$toolName call=${shortCallId(callId)} active=${activeCallJobs.size}")
+            RdcLogger.i(TAG, "RDC tool worker finished: tool=$toolName call=${shortCallId(callId)} active=${activeCallJobs.size}")
         }
         job.start()
     }
@@ -1113,7 +1113,7 @@ class AiLimbsRdcClient(
     private fun cancelActiveCalls(reason: String) {
         val jobs = activeCallJobs.values.toList()
         if (jobs.isNotEmpty()) {
-            AppLogger.i(TAG, "Cancelling ${jobs.size} RDC tool worker(s): $reason")
+            RdcLogger.i(TAG, "Cancelling ${jobs.size} RDC tool worker(s): $reason")
             jobs.forEach { it.cancel() }
         }
         activeCallJobs.clear()
@@ -1134,12 +1134,12 @@ class AiLimbsRdcClient(
         )
         ensureAuthorized(response)
         if (response.code !in 200..299) {
-            AppLogger.w(TAG, "RDC claim HTTP failure: call=${shortCallId(callId)} code=${response.code}")
+            RdcLogger.w(TAG, "RDC claim HTTP failure: call=${shortCallId(callId)} code=${response.code}")
             return false
         }
         val claimed = runCatching { JSONArray(response.body).length() > 0 }.getOrDefault(false)
         if (!claimed) {
-            AppLogger.d(TAG, "RDC claim returned no row: call=${shortCallId(callId)}")
+            RdcLogger.d(TAG, "RDC claim returned no row: call=${shortCallId(callId)}")
         }
         return claimed
     }
@@ -1176,7 +1176,7 @@ class AiLimbsRdcClient(
         } catch (e: UnauthorizedException) {
             throw e
         } catch (e: Exception) {
-            AppLogger.e(TAG, "RDC tool call failed: $toolName", e)
+            RdcLogger.e(TAG, "RDC tool call failed: $toolName", e)
             updateCall(
                 info,
                 session,
@@ -1200,7 +1200,7 @@ class AiLimbsRdcClient(
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
-            AppLogger.w(
+            RdcLogger.w(
                 TAG,
                 "Laner Chat queue doorbell send failed: reason=${event.reason}, event=${event.eventId}",
                 e
@@ -1208,12 +1208,12 @@ class AiLimbsRdcClient(
             false
         }
         if (notified) {
-            AppLogger.d(
+            RdcLogger.d(
                 TAG,
                 "Laner Chat queue doorbell acknowledged: reason=${event.reason}, latestSeq=${event.latestSeq}"
             )
         } else {
-            AppLogger.w(
+            RdcLogger.w(
                 TAG,
                 "Laner Chat queue doorbell was not acknowledged: reason=${event.reason}, latestSeq=${event.latestSeq}"
             )
@@ -1224,10 +1224,10 @@ class AiLimbsRdcClient(
         val notified = try {
             realtimeTransport?.notifyResult(callId) == true
         } catch (e: CancellationException) {
-            AppLogger.d(TAG, "RDC result doorbell cancelled after terminal write: call=${shortCallId(callId)}")
+            RdcLogger.d(TAG, "RDC result doorbell cancelled after terminal write: call=${shortCallId(callId)}")
             false
         } catch (e: Exception) {
-            AppLogger.w(
+            RdcLogger.w(
                 TAG,
                 "RDC result doorbell send failed after terminal result write: call=${shortCallId(callId)}",
                 e
@@ -1235,11 +1235,11 @@ class AiLimbsRdcClient(
             false
         }
         if (notified) {
-            AppLogger.d(TAG, "RDC result doorbell acknowledged: call=${shortCallId(callId)}")
+            RdcLogger.d(TAG, "RDC result doorbell acknowledged: call=${shortCallId(callId)}")
         } else {
             // The database row is already terminal here. Notification transport failure must not
             // rewrite a completed tool result as failed; the result bytes remain unchanged in RDC.
-            AppLogger.w(TAG, "RDC result doorbell was not acknowledged: call=${shortCallId(callId)}")
+            RdcLogger.w(TAG, "RDC result doorbell was not acknowledged: call=${shortCallId(callId)}")
         }
     }
 
@@ -1260,7 +1260,7 @@ class AiLimbsRdcClient(
             }
         }
         // Intentionally log metadata only. The Base64 payload itself must never enter logs.
-        AppLogger.i(
+        RdcLogger.i(
             TAG,
             "RDC outbound result call=${shortCallId(callId)} tool=$toolName $summary"
         )
@@ -1270,7 +1270,7 @@ class AiLimbsRdcClient(
         val notification = try {
             lanerChat.workNotificationSnapshot()
         } catch (e: Exception) {
-            AppLogger.w(TAG, "Unable to build Laner Chat work notification", e)
+            RdcLogger.w(TAG, "Unable to build Laner Chat work notification", e)
             return result
         }
         if (!notification.requiresWorkAttention()) return result
@@ -1298,7 +1298,7 @@ class AiLimbsRdcClient(
             append(metadata.toString())
             append("\nLaner Chat message bodies are not included in this notification.")
         }
-        AppLogger.d(
+        RdcLogger.d(
             TAG,
             "Laner Chat work notification attached: unresolved=${notification.pendingReplyCount} " +
                 "unread=${notification.unreadCount} priority=${notification.highestPriority?.name ?: "NONE"} " +
@@ -1407,7 +1407,7 @@ class AiLimbsRdcClient(
             .remove(KEY_ACCESS_TOKEN)
             .remove(KEY_REFRESH_TOKEN)
             .apply()
-        AppLogger.i(TAG, "RDC saved session cleared")
+        RdcLogger.i(TAG, "RDC saved session cleared")
     }
 
     private fun createPreferences(): SharedPreferences {
@@ -1423,7 +1423,7 @@ class AiLimbsRdcClient(
                 EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
             )
         } catch (e: Exception) {
-            AppLogger.w(TAG, "Encrypted RDC preferences unavailable; using app-private storage", e)
+            RdcLogger.w(TAG, "Encrypted RDC preferences unavailable; using app-private storage", e)
             appContext.getSharedPreferences("${PREF_FILE}_fallback", Context.MODE_PRIVATE)
         }
     }

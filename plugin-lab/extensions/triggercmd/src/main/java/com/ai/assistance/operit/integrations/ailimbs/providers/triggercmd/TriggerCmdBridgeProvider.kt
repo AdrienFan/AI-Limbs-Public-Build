@@ -11,7 +11,7 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory
 import com.ai.assistance.operit.integrations.ailimbs.NativeBridgeProfile
-import com.ai.assistance.operit.util.AppLogger
+import com.ai.limbs.extensions.triggercmd.TriggerCmdLogger
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -136,7 +136,7 @@ internal class TriggerCmdBridgeProvider private constructor(
     }
 
     override fun onComputerId(computerId: String) {
-        AppLogger.i(TAG, "TRIGGERcmd Computer ready: ${shortId(computerId)}")
+        TriggerCmdLogger.i(TAG, "TRIGGERcmd Computer ready: ${shortId(computerId)}")
     }
 
     override fun onSocketState(state: String) {
@@ -158,7 +158,7 @@ internal class TriggerCmdBridgeProvider private constructor(
 
     override fun onCommand(params: String, respond: (String) -> Unit) {
         stateFlow.value = state.value.copy(lastHeartbeatAtMs = System.currentTimeMillis())
-        AppLogger.i(TAG, "TRIGGERcmd bridge request received (${params.length} chars)")
+        TriggerCmdLogger.i(TAG, "TRIGGERcmd bridge request received (${params.length} chars)")
         if (params.trim().equals("ping", ignoreCase = true)) {
             respond("Pong")
             return
@@ -170,11 +170,11 @@ internal class TriggerCmdBridgeProvider private constructor(
 
     override fun onResult(result: String) {
         stateFlow.value = state.value.copy(lastHeartbeatAtMs = System.currentTimeMillis())
-        AppLogger.i(TAG, "TRIGGERcmd bridge result delivered (${result.length} chars)")
+        TriggerCmdLogger.i(TAG, "TRIGGERcmd bridge result delivered (${result.length} chars)")
     }
 
     override fun onLog(message: String) {
-        AppLogger.d(TAG, message)
+        TriggerCmdLogger.d(TAG, message)
     }
 
     private fun stop(detail: String) {
