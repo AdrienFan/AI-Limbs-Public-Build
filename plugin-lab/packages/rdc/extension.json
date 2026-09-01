@@ -2,8 +2,10 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.rdc",
-  "version": "1.1.0",
-  "roles": ["system_extension"],
+  "version": "1.2.0",
+  "roles": [
+    "system_extension"
+  ],
   "display": {
     "name": "RDC",
     "description": "AI Limbs V0.6.4.7.8 Remote Desktop Commander Bridge Provider。"
@@ -11,7 +13,7 @@
   "target": {
     "plugin_id": "plugin.system.bridge",
     "extension_point": "ai_limbs.bridge.provider",
-    "api": 2
+    "api": 3
   },
   "runtime": {
     "kind": "android_child",

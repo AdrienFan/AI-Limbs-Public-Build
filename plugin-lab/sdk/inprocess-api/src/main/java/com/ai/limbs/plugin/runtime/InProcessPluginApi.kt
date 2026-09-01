@@ -94,6 +94,31 @@ interface InProcessSelectionProvider {
     val selectedId: StateFlow<String?>
 }
 
+data class InProcessNotificationAction(
+    val id: String,
+    val label: String,
+    val priority: Int = 0,
+    val enabled: Boolean = true
+)
+
+data class InProcessNotificationState(
+    val title: String,
+    val summary: String = "",
+    val statusLines: List<String> = emptyList(),
+    val actions: List<InProcessNotificationAction> = emptyList()
+)
+
+fun interface InProcessNotificationActionHandler {
+    suspend fun perform(actionId: String)
+}
+
+interface InProcessNotificationHost {
+    fun publish(
+        state: StateFlow<InProcessNotificationState?>,
+        actionHandler: InProcessNotificationActionHandler
+    ): AutoCloseable
+}
+
 data class InProcessHomeTile(
     val id: String,
     val title: String,
@@ -248,4 +273,5 @@ object InProcessSystemIds {
     const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
     const val BRIDGE_PLUGIN_ID = "plugin.system.bridge"
     const val BRIDGE_PROVIDER_POINT = "ai_limbs.bridge.provider"
+    const val NOTIFICATION_HOST_PROVIDER = "system.notification.host"
 }

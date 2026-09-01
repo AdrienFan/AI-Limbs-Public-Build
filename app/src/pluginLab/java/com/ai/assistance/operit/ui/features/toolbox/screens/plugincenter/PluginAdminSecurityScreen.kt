@@ -867,6 +867,7 @@ private fun formatBackupTime(epochMs: Long): String =
 private fun surfaceKindTitle(kind: HostSurfaceKind): String = when (kind) {
     HostSurfaceKind.EXTENSION_POINT -> "Extension Points"
     HostSurfaceKind.HOST_CAPABILITY -> "Host Capabilities"
+    HostSurfaceKind.HOST_PROVIDER -> "Host Providers"
     HostSurfaceKind.PLUGIN_CAPABILITY_BUS -> "Plugin Capability Bus"
     HostSurfaceKind.PLUGIN_SERVICE_BUS -> "Plugin Service Bus"
     HostSurfaceKind.PLUGIN_PROVIDER_BUS -> "Plugin Provider Bus"

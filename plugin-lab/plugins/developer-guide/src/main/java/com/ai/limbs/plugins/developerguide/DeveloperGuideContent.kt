@@ -53,7 +53,7 @@ internal object DeveloperGuideContent {
                 "permissions.host_capabilities 必须先由父插件 Extension Point 明确 delegated；子插件不能越权直接向宿主索要额外 core.* 能力。",
                 "父插件通过 ExtensionHubService.publishPoint() 发布 point/api/allowedHostCapabilities/binder；父插件停用后子插件进入 BLOCKED。",
                 "API 不匹配时必须 BLOCKED，而不是勉强加载；破坏性 payload/Contract 变化必须提升 target.api。",
-                "Bridge 当前范例：ai_limbs.bridge.provider@2，子插件发布 BridgeProviderContribution(factory + panel)，Provider 专属 UI 由子插件负责。",
+                "Bridge 当前范例：ai_limbs.bridge.provider@3，子插件发布 BridgeProviderContribution(factory + panel + optional notification)，Provider 专属 UI 由子插件负责。",
                 "子插件同样遵守安装≠备份：安装只保留解压后的扩展内容，不长期保存原始 .ailx；备份时由 Extension Hub 从已安装内容重新打包 package.ailx。",
                 "父插件被卸载或 Extension Point 暂时不可用时，子插件备份仍应保留；恢复时重新校验父插件 ID、Extension Point、API 与备份 SHA，不能静默跨 Contract 恢复。"
             )
@@ -67,6 +67,8 @@ internal object DeveloperGuideContent {
                 "需要动态控制面板时使用 InProcessDynamicPanelProvider + InProcessPanelState；字段、动作和状态由 Provider 自己描述。",
                 "密码输入使用 SECRET field；动作可声明 requiredFieldIds，宿主负责在必填字段为空时禁用按钮。",
                 "Provider 选择状态可通过 InProcessSelectionProvider 同步，避免下拉框显示与真实 Manager 当前 Provider 不一致。",
+                "通知栏遵守内容与渲染分离：子 Provider 通过 BridgeProviderNotification 声明状态、actionId、label、priority；Bridge 只转发当前 Provider，禁止写死 RDC/TRIGGERcmd 分支。",
+                "真正 Android 通知由 ai_limbs.notification.surface@1 统一渲染；插件不得创建 PendingIntent/NotificationManager。通知 Host 通过既有 providers.resolve(system.notification.host) 获取，不向 InProcessPluginHost 新增抽象方法，避免破坏旧插件 ABI。",
                 "所有可能增长的插件集合栏统一采用：折叠 + 数量 + 搜索；输入搜索词时可自动展开。",
                 "长页面统一纵向滚动，并在右侧显示滚动条；开发说明本身也遵循这一规则。",
                 "当前 Provider 控制区应放在已安装子插件列表之前，避免列表过长时把日常操作挤到页面底部。"
@@ -79,7 +81,7 @@ internal object DeveloperGuideContent {
             lines = listOf(
                 "Kernel Invariant：Trust/签名、管理员安全、Host Surface Policy、Extension Router、贡献注册约束、生命周期、崩溃隔离、回滚核心。",
                 "禁止把 PluginCenter 内部 Repository、DAO、Policy Engine、Trust verifier、Secret store、SharedPreferences 或 registry mutation 当成插件 API。",
-                "Host Capability、Extension Point、Provider/Service/Capability Bus 都必须是显式、版本化、可撤销 Contract。",
+                "Host Capability、Host Provider、Extension Point、Provider/Service/Capability Bus 都必须是显式、版本化、可撤销 Contract。",
                 "系统插件属于高权限组件，禁用/卸载必须走管理员验证；普通插件验证频率设置不得豁免系统插件。",
                 "android_inprocess 当前会给批准的系统插件 applicationContext，但这不是面向第三方的通用授权，不应据此扩散裸 Context 依赖。",
                 "敏感 Secret 必须经批准的 secret broker / scope 流程提供，不得把 API key、恢复密钥或私有签名材料写入插件包。",

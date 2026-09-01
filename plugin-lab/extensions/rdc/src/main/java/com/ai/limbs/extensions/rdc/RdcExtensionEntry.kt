@@ -13,7 +13,8 @@ class RdcExtensionEntry : ChildExtensionEntry {
         host.publish(
             BridgeProviderContribution(
                 factory = RdcBridgeProvider.Factory(),
-                panel = RdcBridgeProviderPanel
+                panel = RdcBridgeProviderPanel,
+                notification = RdcBridgeProviderNotification
             ),
             mapOf("provider_id" to RdcBridgeProvider.PROFILE_ID, "provider_type" to RdcBridgeProvider.PROFILE_TYPE, "source" to "AI-Limbs-V0.6.4.7.8")
         )

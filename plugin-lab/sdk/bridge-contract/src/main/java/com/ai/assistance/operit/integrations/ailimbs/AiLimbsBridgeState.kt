@@ -4,9 +4,9 @@ package com.ai.assistance.operit.integrations.ailimbs
 /**
  * Provider-neutral bridge state consumed by the Android service layer.
  *
- * Transport implementations publish state only. Android notification ownership
- * stays in AIForegroundService so a bridge can never leave its own ongoing
- * notification behind after the service is stopped.
+ * Transport implementations publish state only. Notification ownership stays
+ * in the host Notification Surface; Bridge providers contribute display/action
+ * models but never own Android NotificationManager or PendingIntent objects.
  */
 enum class AiLimbsBridgePhase {
     STOPPED,

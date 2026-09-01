@@ -4,6 +4,7 @@
     <!-- Base-level network plumbing may later be exposed only through scoped host brokers. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
         android:name=".ui.pluginlab.PluginLabApplication"
@@ -15,6 +16,10 @@
         android:supportsRtl="true"
         android:theme="@android:style/Theme.Material.Light.NoActionBar"
         android:usesCleartextTraffic="false">
+
+        <receiver
+            android:name=".plugins.center.PluginNotificationActionReceiver"
+            android:exported="false" />
 
         <activity
             android:name=".ui.pluginlab.PluginLabActivity"

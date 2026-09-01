@@ -1,5 +1,9 @@
 package com.ai.assistance.operit.ui.pluginlab
 
+import android.Manifest
+import android.content.pm.PackageManager
+import android.os.Build
+
 import android.os.Bundle
 import android.graphics.Color as AndroidColor
 import androidx.activity.ComponentActivity
@@ -89,7 +93,21 @@ class PluginLabActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         PluginCenterKernel.initialize(applicationContext)
         lifecycleScope.launch(Dispatchers.IO) { PluginCenterKernel.start() }
+        if (Build.VERSION.SDK_INT >= 33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS), REQUEST_NOTIFICATIONS)
+        } else {
+            PluginCenterKernel.refreshNotifications()
+        }
         setContent { PluginLabThemeHost() }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+        if (requestCode == REQUEST_NOTIFICATIONS) PluginCenterKernel.refreshNotifications()
+    }
+
+    companion object {
+        private const val REQUEST_NOTIFICATIONS = 7053
     }
 }
 

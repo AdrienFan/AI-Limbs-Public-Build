@@ -35,6 +35,7 @@ object PluginCenterKernel {
     private lateinit var usageStoreInstance: PluginUsageStore
     private lateinit var inactivityPolicyInstance: PluginInactivityPolicyStore
     private lateinit var backupPolicyInstance: PluginBackupPolicyStore
+    private lateinit var notificationHostInstance: PluginNotificationHost
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var inactivityMonitorJob: Job? = null
 
@@ -62,6 +63,16 @@ object PluginCenterKernel {
     val adminSecurity: AdminSecurityManager
         get() = requireInitialized().let { adminSecurityInstance }
 
+    fun dispatchNotificationAction(bindingId: String, actionId: String): Boolean {
+        requireInitialized()
+        return notificationHostInstance.dispatch(bindingId, actionId)
+    }
+
+    fun refreshNotifications() {
+        requireInitialized()
+        notificationHostInstance.refreshAll()
+    }
+
     fun recordPluginUse(pluginId: String) {
         requireInitialized()
         val count = usageStoreInstance.recordUse(pluginId)
@@ -88,10 +99,27 @@ object PluginCenterKernel {
             val uiRegistry = PluginUiRegistry()
             val capabilityRegistry = PluginHostCapabilityRegistry(surfacePolicy, usageStore)
             val contributions = PluginContributionRegistry()
+            surfacePolicy.register(
+                HostSurfaceDefinition(
+                    id = PluginSurfaceIds.HOST_NOTIFICATION,
+                    title = "通知宿主 · ai_limbs.notification.surface@1",
+                    detail = "允许插件发布受宿主管控的通知状态与最多两个快捷动作",
+                    requiredScope = PluginNotificationHost.NOTIFICATION_SCOPE,
+                    kind = HostSurfaceKind.HOST_PROVIDER,
+                    publicContracts = listOf(
+                        "InProcessNotificationHost",
+                        "InProcessNotificationState",
+                        "InProcessNotificationAction",
+                        "InProcessNotificationActionHandler",
+                        "InProcessSystemIds.NOTIFICATION_HOST_PROVIDER"
+                    )
+                )
+            )
+            val notificationHost = PluginNotificationHost(appContext, surfacePolicy)
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
                 register(DeclarativePluginRuntimeAdapter)
-                register(AndroidInProcessPluginRuntimeAdapter(contributions))
+                register(AndroidInProcessPluginRuntimeAdapter(contributions, notificationHost))
             }
             listOf(
                 Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 AI Limbs 首页添加入口"),
@@ -219,6 +247,7 @@ object PluginCenterKernel {
             usageStoreInstance = usageStore
             inactivityPolicyInstance = inactivityPolicy
             backupPolicyInstance = backupPolicy
+            notificationHostInstance = notificationHost
             initialized = true
             AppLogger.i(TAG, "AI Limbs Plugin Center kernel initialized: ${manager.store.rootDir.absolutePath}")
         }
@@ -273,6 +302,7 @@ object PluginCenterKernel {
         inactivityMonitorJob = null
         try {
             controlPlaneInstance.shutdown()
+            notificationHostInstance.clear()
             AppLogger.i(TAG, "AI Limbs Plugin Center kernel shut down")
         } catch (error: CancellationException) {
             throw error

@@ -17,7 +17,8 @@ import kotlinx.coroutines.cancel
 import org.json.JSONObject
 
 internal class AndroidInProcessPluginRuntimeAdapter(
-    private val contributions: PluginContributionRegistry
+    private val contributions: PluginContributionRegistry,
+    private val notificationHost: PluginNotificationHost
 ) : PluginRuntimeAdapter {
     override val kind: String = "android_inprocess"
 
@@ -53,7 +54,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         }
 
-        val host = Host(context, runtimeScope, contributions)
+        val host = Host(context, runtimeScope, contributions, notificationHost)
         val handle = try {
             entry.mount(host)
         } catch (error: Throwable) {
@@ -111,7 +112,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
     private class Host(
         private val context: PluginRuntimeAdapterContext,
         override val scope: CoroutineScope,
-        private val contributions: PluginContributionRegistry
+        private val contributions: PluginContributionRegistry,
+        private val notificationHost: PluginNotificationHost
     ) : InProcessPluginHost {
         override val applicationContext = context.appContext
         override val pluginId: String = context.manifest.pluginId
@@ -119,13 +121,21 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
         override val providers: InProcessProviderDirectory = object : InProcessProviderDirectory {
-            override fun resolve(id: String): InProcessProviderBinding? =
-                contributions.find(PluginContributionKind.PROVIDER, id)?.let(::providerBinding)
+            override fun resolve(id: String): InProcessProviderBinding? {
+                if (id == com.ai.limbs.plugin.runtime.InProcessSystemIds.NOTIFICATION_HOST_PROVIDER) {
+                    return notificationHost.bindingFor(pluginId, context.payloadContext.permissions.grantedScopes)
+                }
+                return contributions.find(PluginContributionKind.PROVIDER, id)?.let(::providerBinding)
+            }
 
-            override fun snapshot(): List<InProcessProviderBinding> =
-                contributions.listAll()
-                    .filter { it.kind == PluginContributionKind.PROVIDER }
-                    .map(::providerBinding)
+            override fun snapshot(): List<InProcessProviderBinding> = buildList {
+                notificationHost.bindingFor(pluginId, context.payloadContext.permissions.grantedScopes)?.let(::add)
+                addAll(
+                    contributions.listAll()
+                        .filter { it.kind == PluginContributionKind.PROVIDER }
+                        .map(::providerBinding)
+                )
+            }
         }
 
         override fun registerProvider(id: String, payload: Any, metadata: Map<String, String>) {

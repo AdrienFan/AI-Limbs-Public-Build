@@ -2,14 +2,21 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.developer_guide",
-  "version": "1.0.0",
-  "api": { "target": 1, "min": 1 },
+  "version": "1.0.1",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
   "display": {
     "name": "开发说明",
     "description": "AI Limbs 只读开发与维护手册；Host Surface 清单与管理员开发模式联动。"
   },
-  "roles": ["system_plugin"],
-  "activation": { "mode": "hot" },
+  "roles": [
+    "system_plugin"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
   "runtime": {
     "kind": "android_inprocess",
     "entry": "payload/plugin.apk",
@@ -17,8 +24,13 @@
       "entry_class": "com.ai.limbs.plugins.developerguide.DeveloperGuideEntry"
     }
   },
-  "dependencies": { "plugins": [], "services": [] },
-  "permissions": { "requested_scopes": [] },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": []
+  },
   "provides": {
     "capabilities": [],
     "services": [],

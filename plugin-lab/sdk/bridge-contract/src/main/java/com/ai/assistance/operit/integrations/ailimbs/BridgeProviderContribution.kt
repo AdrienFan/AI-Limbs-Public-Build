@@ -33,6 +33,20 @@ data class BridgeProviderPanelResult(
     val fieldValues: Map<String, String> = emptyMap()
 )
 
+data class BridgeProviderNotificationAction(
+    val id: String,
+    val label: String,
+    val priority: Int = 0,
+    val enabled: Boolean = true
+)
+
+data class BridgeProviderNotificationState(
+    val title: String,
+    val summary: String = "",
+    val statusLines: List<String> = emptyList(),
+    val actions: List<BridgeProviderNotificationAction> = emptyList()
+)
+
 interface BridgeProviderControl {
     val profile: BridgeProfile
     val state: AiLimbsBridgeState
@@ -56,7 +70,21 @@ interface BridgeProviderPanel {
     ): BridgeProviderPanelResult
 }
 
+interface BridgeProviderNotification {
+    fun snapshot(
+        context: Context,
+        control: BridgeProviderControl
+    ): BridgeProviderNotificationState
+
+    suspend fun perform(
+        context: Context,
+        actionId: String,
+        control: BridgeProviderControl
+    )
+}
+
 data class BridgeProviderContribution(
     val factory: BridgeProviderFactory,
-    val panel: BridgeProviderPanel
+    val panel: BridgeProviderPanel,
+    val notification: BridgeProviderNotification? = null
 )

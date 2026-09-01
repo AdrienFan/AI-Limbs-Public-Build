@@ -13,7 +13,8 @@ class TriggerCmdExtensionEntry : ChildExtensionEntry {
         host.publish(
             BridgeProviderContribution(
                 factory = TriggerCmdBridgeProvider.Factory(),
-                panel = TriggerCmdBridgeProviderPanel
+                panel = TriggerCmdBridgeProviderPanel,
+                notification = TriggerCmdBridgeProviderNotification
             ),
             mapOf("provider_id" to TriggerCmdBridgeProvider.PROFILE_ID, "provider_type" to TriggerCmdBridgeProvider.PROFILE_TYPE, "source" to "AI-Limbs-V0.6.4.7.8")
         )

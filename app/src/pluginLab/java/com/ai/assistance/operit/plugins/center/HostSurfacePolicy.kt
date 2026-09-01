@@ -8,7 +8,8 @@ enum class HostSurfaceKind {
     HOST_CAPABILITY,
     PLUGIN_CAPABILITY_BUS,
     PLUGIN_SERVICE_BUS,
-    PLUGIN_PROVIDER_BUS
+    PLUGIN_PROVIDER_BUS,
+    HOST_PROVIDER
 }
 
 data class HostSurfaceDefinition(
@@ -29,6 +30,7 @@ object PluginSurfaceIds {
     const val PUBLISH_CAPABILITY = "bus:plugin.capability"
     const val PUBLISH_SERVICE = "bus:plugin.service"
     const val PUBLISH_PROVIDER = "bus:plugin.provider"
+    const val HOST_NOTIFICATION = "host:notification.surface"
     fun extension(point: String) = "extension:${point.trim().lowercase()}"
     fun hostCapability(id: String) = "host:${id.trim().lowercase()}"
 }
@@ -108,8 +110,7 @@ class HostSurfacePolicy(context: Context) {
         if (manifest.provides.providers.isNotEmpty()) add(PluginSurfaceIds.PUBLISH_PROVIDER)
         manifest.provides.extensions.forEach { add(PluginSurfaceIds.extension(it.point)) }
         definitions.values.forEach { surface ->
-            if (surface.kind == HostSurfaceKind.HOST_CAPABILITY &&
-                surface.requiredScope != null &&
+            if (surface.requiredScope != null &&
                 surface.requiredScope in manifest.permissions.requestedScopes
             ) add(surface.id)
         }
