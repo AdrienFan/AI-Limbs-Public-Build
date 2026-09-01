@@ -3,18 +3,16 @@ package com.ai.assistance.operit.plugins.center
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import org.json.JSONArray
 import org.json.JSONObject
 
 /**
- * Kernel-owned dispatch table. Plugins may publish only plugin.* capabilities and may call only
- * explicitly exposed core.* capabilities after the requested scopes were approved at install time.
+ * Kernel-owned capability bridge.
+ * Plugin-owned capabilities live in plugin.*; Host calls use the versioned AI Limbs Host Primitive IDs.
  */
 internal class PluginHostCapabilityRegistry(
     private val surfacePolicy: HostSurfacePolicy?,
     private val usageStore: PluginUsageStore? = null
 ) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
-    /** JVM unit-test constructor. Production wiring always supplies HostSurfacePolicy. */
     internal constructor() : this(null, null)
 
     private data class OwnedCapability(
@@ -24,68 +22,69 @@ internal class PluginHostCapabilityRegistry(
     )
 
     private data class HostCapability(
-        val requiredScope: String?,
+        val requiredScope: String,
         val execute: suspend (JSONObject) -> JSONObject
     )
 
     private val capabilities = ConcurrentHashMap<String, OwnedCapability>()
+
+    // Phase 1: only Structured Logging has a real v2 Host Primitive adapter.
+    // The complete 39-item catalog is exposed separately by AiLimbsHostPrimitiveCatalog.
     private val hostCapabilities = mapOf(
-        "core.runtime.info" to HostCapability(null) {
-            JSONObject()
-                .put("kernel", "AI Limbs Plugin Center")
-                .put("plugin_api", 1)
-                .put("runtime", "declarative-v1")
-        },
-        "core.logs.read" to HostCapability("host.logs.read", ::readLogs),
-        "core.bridge.remote.invoke" to HostCapability(null, ::bridgeRemoteInvoke),
-        "core.host_surface.snapshot" to HostCapability(null, ::hostSurfaceSnapshot)
+        "host.logging@1" to HostCapability("host.logging@1", ::invokeLogging)
     )
 
     init {
         surfacePolicy?.register(
             HostSurfaceDefinition(
-                PluginSurfaceIds.PUBLISH_CAPABILITY,
-                "plugin.* capability 发布总线",
-                "允许插件注册自己的无界面能力",
-                HostSurfaceKind.PLUGIN_CAPABILITY_BUS,
+                id = PluginSurfaceIds.PUBLISH_CAPABILITY,
+                title = "Plugin Capability Bus",
+                detail = "允许插件注册 plugin.* 能力",
+                kind = HostSurfaceKind.PLUGIN_CAPABILITY_BUS,
                 publicContracts = listOf(
-                    "InProcessPluginHost.registerCapability",
-                    "InProcessCapabilityExecutor"
+                    "PluginRegistrar.registerCapability",
+                    "PluginCapabilitySpec",
+                    "PluginCapabilityExecutor"
                 )
             )
         )
         surfacePolicy?.register(
             HostSurfaceDefinition(
-                PluginSurfaceIds.PUBLISH_SERVICE,
-                "Plugin Service 发布总线",
-                "允许插件向宿主发布 service",
-                HostSurfaceKind.PLUGIN_SERVICE_BUS,
-                publicContracts = emptyList()
+                id = PluginSurfaceIds.PUBLISH_SERVICE,
+                title = "Plugin Service Bus",
+                detail = "允许插件发布声明过 API 版本的 service",
+                kind = HostSurfaceKind.PLUGIN_SERVICE_BUS,
+                publicContracts = listOf(
+                    "PluginRegistrar.registerService",
+                    "PluginServiceEndpoint",
+                    "PluginServiceResolver"
+                )
             )
         )
         surfacePolicy?.register(
             HostSurfaceDefinition(
-                PluginSurfaceIds.PUBLISH_PROVIDER,
-                "Plugin Provider 发布总线",
-                "允许插件向宿主发布 provider",
-                HostSurfaceKind.PLUGIN_PROVIDER_BUS,
+                id = PluginSurfaceIds.PUBLISH_PROVIDER,
+                title = "Plugin Provider Bus",
+                detail = "允许插件向受控 Provider Directory 发布 provider",
+                kind = HostSurfaceKind.PLUGIN_PROVIDER_BUS,
                 publicContracts = listOf(
-                    "InProcessPluginHost.registerProvider",
-                    "InProcessProviderDirectory",
-                    "InProcessProviderBinding"
+                    "PluginRegistrar.registerProvider",
+                    "PluginContributionRecord"
                 )
             )
         )
         hostCapabilities.forEach { (id, capability) ->
+            val primitive = requireNotNull(AiLimbsHostPrimitiveCatalog.find(id)) {
+                "Bound Host Primitive is missing from catalog: $id"
+            }
             surfacePolicy?.register(
                 HostSurfaceDefinition(
-                    id = PluginSurfaceIds.hostCapability(id),
-                    title = id,
-                    detail = capability.requiredScope?.let { "宿主能力 · scope: $it · 可在 mount 前预判" }
-                        ?: "宿主能力 · 无预声明 scope · 每次调用时强制检查策略",
+                    id = PluginSurfaceIds.hostPrimitive(id),
+                    title = "${primitive.title} · ${primitive.id}",
+                    detail = "BOUND · scope: ${capability.requiredScope}",
                     kind = HostSurfaceKind.HOST_CAPABILITY,
                     requiredScope = capability.requiredScope,
-                    publicContracts = HOST_CAPABILITY_CONTRACTS
+                    publicContracts = HOST_PRIMITIVE_INVOKE_CONTRACTS
                 )
             )
         }
@@ -98,7 +97,7 @@ internal class PluginHostCapabilityRegistry(
     ): AutoCloseable {
         surfacePolicy?.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
         val normalized = capabilityId.trim().lowercase()
-        if (!normalized.startsWith("plugin.") || !CAPABILITY_ID.matches(normalized)) {
+        if (!normalized.startsWith("plugin.") || !PLUGIN_CAPABILITY_ID.matches(normalized)) {
             throw PluginInstallException(
                 "CAPABILITY_NAMESPACE_FORBIDDEN",
                 "Plugin capabilities must use the plugin.* namespace: $capabilityId"
@@ -134,58 +133,43 @@ internal class PluginHostCapabilityRegistry(
     override fun create(ownerPluginId: String, grantedScopes: Set<String>): PluginCapabilityInvoker =
         PluginCapabilityInvoker { capabilityId, parameters ->
             val normalized = capabilityId.trim().lowercase()
-            val capability = hostCapabilities[normalized]
+            val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
                 ?: throw PluginInstallException(
-                    "HOST_CAPABILITY_NOT_EXPOSED",
-                    "Host capability is not exposed to plugins: $normalized"
+                    "HOST_PRIMITIVE_UNKNOWN",
+                    "Unknown AI Limbs Host Primitive: $normalized"
                 )
-            surfacePolicy?.requireAllowed(PluginSurfaceIds.hostCapability(normalized))
-            val scope = capability.requiredScope
-            if (scope != null && scope !in grantedScopes) {
+            if (!primitive.requestableScope || primitive.exposure != HostPrimitiveExposure.BOUND) {
+                throw PluginInstallException(
+                    "HOST_PRIMITIVE_NOT_AVAILABLE",
+                    "Host Primitive is not callable in this kernel build: ${primitive.id} (${primitive.exposure})"
+                )
+            }
+            val capability = hostCapabilities[primitive.id]
+                ?: throw PluginInstallException(
+                    "HOST_PRIMITIVE_NOT_BOUND",
+                    "Host Primitive has no runtime adapter: ${primitive.id}"
+                )
+            surfacePolicy?.requireAllowed(PluginSurfaceIds.hostPrimitive(primitive.id))
+            if (capability.requiredScope !in grantedScopes) {
                 throw PluginInstallException(
                     "PLUGIN_SCOPE_DENIED",
-                    "$ownerPluginId was not granted required scope: $scope"
+                    "$ownerPluginId was not granted required scope: ${capability.requiredScope}"
                 )
             }
             capability.execute(JSONObject(parameters.toString()))
         }
 
-
-    private suspend fun hostSurfaceSnapshot(parameters: JSONObject): JSONObject {
-        val policy = surfacePolicy
-        val surfaces = policy?.snapshots().orEmpty()
-        return JSONObject()
-            .put("developer_mode", policy?.developerMode ?: false)
-            .put("source", "PluginCenter HostSurfacePolicy")
-            .put("surfaces", JSONArray().apply {
-                surfaces.forEach { item ->
-                    put(JSONObject()
-                        .put("id", item.definition.id)
-                        .put("title", item.definition.title)
-                        .put("detail", item.definition.detail)
-                        .put("kind", item.definition.kind.name)
-                        .put("required_scope", item.definition.requiredScope)
-                        .put("allowed", item.allowed)
-                        .put("public_contracts", JSONArray(item.definition.publicContracts)))
-                }
-            })
-    }
-
-    private suspend fun bridgeRemoteInvoke(parameters: JSONObject): JSONObject {
-        val tool = parameters.optString("tool").trim()
-        val transport = parameters.optString("transport").trim()
-        val args = parameters.optJSONObject("args") ?: JSONObject()
-        return when (tool.lowercase()) {
-            "ping" -> JSONObject().put("success", true).put("content", "Pong").put("transport", transport)
-            "core.runtime.info" -> JSONObject().put("success", true).put("kernel", "AI Limbs Plugin Center").put("transport", transport)
-            else -> JSONObject()
-                .put("success", false)
-                .put("error", "AI Limbs Plugin Center does not expose the formal dispatcher for '$tool' yet")
-                .put("transport", transport)
-                .put("args", args)
+    private suspend fun invokeLogging(parameters: JSONObject): JSONObject {
+        return when (parameters.optString("operation", "read").trim().lowercase()) {
+            "read" -> readLogs(parameters)
+            else -> throw PluginInstallException(
+                "HOST_OPERATION_UNSUPPORTED",
+                "host.logging@1 supports operation=read in Phase 1"
+            )
         }
     }
-    private suspend fun readLogs(parameters: JSONObject): JSONObject {
+
+    private fun readLogs(parameters: JSONObject): JSONObject {
         val maximum = parameters.optInt("max_chars", 60_000).coerceIn(1_000, 120_000)
         val logFile = AppLogger.getLogFile()
         val full = if (logFile?.isFile == true) logFile.readText() else ""
@@ -197,10 +181,10 @@ internal class PluginHostCapabilityRegistry(
     }
 
     private companion object {
-        val CAPABILITY_ID = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
-        val HOST_CAPABILITY_CONTRACTS = listOf(
-            "InProcessPluginHost.invokeHostCapability",
-            "ChildExtensionHost.invokeHostCapability"
+        val PLUGIN_CAPABILITY_ID = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+        val HOST_PRIMITIVE_INVOKE_CONTRACTS = listOf(
+            "PluginContext.capabilityInvoker",
+            "PluginCapabilityInvoker.invoke"
         )
     }
 }

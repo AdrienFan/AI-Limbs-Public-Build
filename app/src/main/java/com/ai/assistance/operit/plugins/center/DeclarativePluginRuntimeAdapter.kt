@@ -109,10 +109,10 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
             }
             "host_capability" -> {
                 val target = descriptor.requiredString("target").lowercase()
-                if (!target.startsWith("core.")) {
+                if (!target.startsWith("host.")) {
                     throw PluginInstallException(
                         "DECLARATIVE_HOST_TARGET_INVALID",
-                        "Host target must use the core.* namespace"
+                        "Host target must use a versioned AI Limbs host.*@N primitive ID"
                     )
                 }
                 PluginCapabilityExecutor { parameters ->

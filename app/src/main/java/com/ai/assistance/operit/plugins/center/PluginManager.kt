@@ -208,6 +208,7 @@ internal class PluginManager(
                 )
             }
             val requestedScopes = verified.manifest.permissions.requestedScopes
+            AiLimbsHostPrimitiveCatalog.requireInstallableScopes(requestedScopes)
             if (options.approvedScopes != requestedScopes) {
                 throw PluginInstallException(
                     "PLUGIN_SCOPE_APPROVAL_REQUIRED",

@@ -33,6 +33,7 @@ object PluginSurfaceIds {
     const val HOST_NOTIFICATION = "host:notification.surface"
     fun extension(point: String) = "extension:${point.trim().lowercase()}"
     fun hostCapability(id: String) = "host:${id.trim().lowercase()}"
+    fun hostPrimitive(id: String) = "primitive:${id.trim().lowercase()}"
 }
 
 class HostSurfacePolicy(context: Context) {
