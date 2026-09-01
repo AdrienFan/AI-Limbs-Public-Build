@@ -212,6 +212,7 @@ internal fun PluginAdminSecurityScreen(
 ) {
     var developerMode by remember { mutableStateOf(controlPlane.developerModeEnabled()) }
     var surfaces by remember { mutableStateOf(controlPlane.hostSurfaceSnapshots()) }
+    var surfacesExpanded by remember { mutableStateOf(false) }
     val initialInactivity = remember { controlPlane.inactivityPolicySnapshot() }
     val initialBackupPolicy = remember { controlPlane.backupPolicySnapshot() }
     var inactivityEnabled by remember { mutableStateOf(initialInactivity.enabled) }
@@ -493,56 +494,59 @@ internal fun PluginAdminSecurityScreen(
                 }
             }
 
-            Text("Host Surface Policy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text(
-                "只有允许的宿主扩展面才能被插件使用。关闭接口后，相关已启用插件会转为 BLOCKED 并立即撤销运行；重新开放后会自动尝试恢复。",
-                style = MaterialTheme.typography.bodySmall
-            )
-            OutlinedTextField(
-                value = surfaceQuery,
-                onValueChange = { surfaceQuery = it },
-                label = { Text("搜索 Host Surface") },
-                placeholder = { Text("名称、接口 ID、说明、类型、scope 或 Public Contract") },
-                modifier = Modifier.fillMaxWidth(),
-                singleLine = true
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            PluginCollectionSection(
+                title = "内接口",
+                totalCount = surfaces.size,
+                matchedCount = filteredSurfaces.size,
+                query = surfaceQuery,
+                onQueryChange = { surfaceQuery = it },
+                expanded = surfacesExpanded,
+                onExpandedChange = { surfacesExpanded = it },
+                searchPlaceholder = "搜索 Host Surface"
             ) {
+                Text("Host Surface Policy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
                 Text(
-                    "显示 ${filteredSurfaces.size} / ${surfaces.size}",
-                    modifier = Modifier.weight(1f),
+                    "只有允许的宿主扩展面才能被插件使用。关闭接口后，相关已启用插件会转为 BLOCKED 并立即撤销运行；重新开放后会自动尝试恢复。",
                     style = MaterialTheme.typography.bodySmall
                 )
-                OutlinedButton(
-                    enabled = !busy && filteredSurfaces.isNotEmpty(),
-                    onClick = {
-                        val targetIds = filteredSurfaces.map { it.definition.id }
-                        runAdminMutation {
-                            controlPlane.setHostSurfacesAllowed(targetIds, !allFilteredSurfacesAllowed)
-                        }
-                    }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     Text(
-                        when {
-                            normalizedSurfaceQuery.isBlank() && allFilteredSurfacesAllowed -> "取消全选"
-                            normalizedSurfaceQuery.isBlank() -> "全选"
-                            allFilteredSurfacesAllowed -> "取消选择结果"
-                            else -> "全选结果"
-                        }
+                        "显示 ${filteredSurfaces.size} / ${surfaces.size}",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall
                     )
+                    OutlinedButton(
+                        enabled = !busy && filteredSurfaces.isNotEmpty(),
+                        onClick = {
+                            val targetIds = filteredSurfaces.map { it.definition.id }
+                            runAdminMutation {
+                                controlPlane.setHostSurfacesAllowed(targetIds, !allFilteredSurfacesAllowed)
+                            }
+                        }
+                    ) {
+                        Text(
+                            when {
+                                normalizedSurfaceQuery.isBlank() && allFilteredSurfacesAllowed -> "取消全选"
+                                normalizedSurfaceQuery.isBlank() -> "全选"
+                                allFilteredSurfacesAllowed -> "取消选择结果"
+                                else -> "全选结果"
+                            }
+                        )
+                    }
+                    if (surfaceQuery.isNotBlank()) {
+                        TextButton(onClick = { surfaceQuery = "" }) { Text("清除搜索") }
+                    }
                 }
-                if (surfaceQuery.isNotBlank()) {
-                    TextButton(onClick = { surfaceQuery = "" }) { Text("清除搜索") }
-                }
-            }
-            if (filteredSurfaces.isEmpty()) {
-                Text("没有匹配的宿主接口", style = MaterialTheme.typography.bodySmall)
-            } else {
-                SurfaceGroups(filteredSurfaces, busy) { item, allowed ->
-                    runAdminMutation { controlPlane.setHostSurfaceAllowed(item.definition.id, allowed) }
+                if (filteredSurfaces.isEmpty()) {
+                    Text("没有匹配的宿主接口", style = MaterialTheme.typography.bodySmall)
+                } else {
+                    SurfaceGroups(filteredSurfaces, busy) { item, allowed ->
+                        runAdminMutation { controlPlane.setHostSurfaceAllowed(item.definition.id, allowed) }
+                    }
                 }
             }
 

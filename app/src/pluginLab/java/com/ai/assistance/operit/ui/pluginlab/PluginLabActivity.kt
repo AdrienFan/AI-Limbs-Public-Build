@@ -62,6 +62,8 @@ import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.ai.assistance.operit.plugins.center.PluginCenterKernel
+import com.ai.assistance.operit.plugins.center.compatBackup
+import com.ai.assistance.operit.plugins.center.compatBackupSnapshots
 import com.ai.assistance.operit.plugins.center.PluginContributionKind
 import com.ai.assistance.operit.plugins.center.PluginHomeTileSpec
 import com.ai.assistance.operit.plugins.center.PluginScreenBlock
@@ -415,7 +417,8 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
         return
     }
     val snapshots by hub.snapshotsForPoint(point).collectAsState()
-    val backups by hub.backupSnapshots().collectAsState()
+    val backupFlow = remember(hub) { hub.compatBackupSnapshots() }
+    val backups by backupFlow.collectAsState()
     val scope = rememberCoroutineScope()
     var expanded by remember(point) { mutableStateOf(false) }
     var query by remember(point) { mutableStateOf("") }
@@ -475,7 +478,7 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
                             enabled = canBackup,
                             onClick = {
                                 scope.launch {
-                                    runCatching { hub.backup(snapshot.extensionId) }
+                                    runCatching { hub.compatBackup(snapshot.extensionId) }
                                         .onSuccess { onResult("已备份 ${it.displayName} ${it.version}") }
                                         .onFailure { onResult("备份失败：${it.message}") }
                                 }

@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Build 1 - Plugin Lab v0.5.2
+      - name: Build 1 - Plugin Lab v0.5.3
         shell: bash
         run: |
           set -euo pipefail
@@ -112,7 +112,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: plugin-lab-alt-v052-${{ github.run_number }}
+          name: plugin-lab-alt-v053-${{ github.run_number }}
           path: |
             app/build/outputs/apk/debug/*.apk
             dist/plugin-extension-hub.ailp

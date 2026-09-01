@@ -153,7 +153,7 @@ private class BridgeRuntime(
                 val profile = contribution.factory.profiles.firstOrNull()
                     ?: error("Bridge extension has no profile")
                 requireManager().selectProvider(profile.id)
-                hub.recordUse(extensionId)
+                recordUseCompat(extensionId)
                 panelProvider.refresh()
                 JSONObject()
                     .put("success", true)
@@ -174,6 +174,14 @@ private class BridgeRuntime(
 
     private fun requireManager(): AiLimbsBridgeManager =
         manager ?: error("No Bridge Provider is active")
+
+    private fun recordUseCompat(extensionId: String) {
+        try {
+            hub.recordUse(extensionId)
+        } catch (_: LinkageError) {
+            // Usage accounting is optional when an older Extension Hub is still installed.
+        }
+    }
 
     private fun controlFor(current: AiLimbsBridgeManager): BridgeProviderControl =
         object : BridgeProviderControl {
@@ -225,7 +233,7 @@ private class BridgeRuntime(
             val currentManager = requireManager()
             val selected = selectedEntry()
                 ?: error("Selected Bridge Provider contribution is missing")
-            hub.recordUse(selected.key)
+            recordUseCompat(selected.key)
             val result = selected.value.panel.perform(
                 host.applicationContext,
                 actionId,

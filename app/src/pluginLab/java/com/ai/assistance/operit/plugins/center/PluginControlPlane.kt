@@ -101,7 +101,7 @@ class PluginControlPlane internal constructor(
     suspend fun configureBackupPolicy(enabled: Boolean) {
         backupPolicy.configure(enabled)
         manager.reconcileBackupPolicy()
-        extensionHub()?.setAutoBackupPolicy(enabled, PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT)
+        extensionHub()?.compatSetAutoBackupPolicy(enabled, PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT)
     }
 
     suspend fun backup(pluginId: String): PluginBackupSnapshot = manager.backup(pluginId)
@@ -116,21 +116,21 @@ class PluginControlPlane internal constructor(
 
     suspend fun runBackupCheck() {
         manager.reconcileBackupPolicy()
-        extensionHub()?.setAutoBackupPolicy(
+        extensionHub()?.compatSetAutoBackupPolicy(
             backupPolicy.snapshot().enabled,
             PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT
         )
     }
 
     fun childBackupSnapshots(): List<ChildExtensionBackupSnapshot> =
-        extensionHub()?.backupSnapshots()?.value.orEmpty()
+        extensionHub()?.compatBackupSnapshots()?.value.orEmpty()
 
     suspend fun restoreChildBackup(extensionId: String) =
-        extensionHub()?.restoreBackup(extensionId)
+        extensionHub()?.compatRestoreBackup(extensionId)
             ?: throw PluginInstallException("EXTENSION_HUB_UNAVAILABLE", "Plugin Extension Hub is not active")
 
     suspend fun deleteChildBackup(extensionId: String): Boolean =
-        extensionHub()?.deleteBackup(extensionId)
+        extensionHub()?.compatDeleteBackup(extensionId)
             ?: throw PluginInstallException("EXTENSION_HUB_UNAVAILABLE", "Plugin Extension Hub is not active")
 
     suspend fun shutdown() {
