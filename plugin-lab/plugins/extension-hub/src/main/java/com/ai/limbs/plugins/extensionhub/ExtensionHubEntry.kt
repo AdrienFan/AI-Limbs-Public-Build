@@ -238,7 +238,7 @@ private class ExtensionHubServiceImpl(
     }
 
     override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot {
-        check(extensionId !in records) { "Child extension is already installed: $extensionId" }
+        check(!records.containsKey(extensionId)) { "Child extension is already installed: $extensionId" }
         val backup = readBackup(extensionId) ?: error("Child extension backup does not exist: $extensionId")
         val packageFile = backupPackage(extensionId)
         check(sha256(packageFile) == backup.packageSha256) { "Child extension backup digest mismatch: $extensionId" }
