@@ -2,22 +2,36 @@ package com.ai.limbs.plugins.bridge
 
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeProviderCatalog
-import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderControl
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelFieldKind
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
 import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessDynamicPanelProvider
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
+import com.ai.limbs.plugin.runtime.InProcessPanelAction
+import com.ai.limbs.plugin.runtime.InProcessPanelField
+import com.ai.limbs.plugin.runtime.InProcessPanelFieldKind
+import com.ai.limbs.plugin.runtime.InProcessPanelResult
+import com.ai.limbs.plugin.runtime.InProcessPanelState
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
 import com.ai.limbs.plugin.runtime.InProcessScreenBlock
+import com.ai.limbs.plugin.runtime.InProcessSelectionProvider
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 class BridgePluginEntry : InProcessPluginEntry {
@@ -34,61 +48,76 @@ private class BridgeRuntime(
     private val host: InProcessPluginHost,
     private val hub: ExtensionHubService
 ) {
-    private val factories = ConcurrentHashMap<String, BridgeProviderFactory>()
+    private val contributions = ConcurrentHashMap<String, BridgeProviderContribution>()
+    private val panelProvider = BridgeDynamicPanelProvider()
     private var manager: AiLimbsBridgeManager? = null
     private var managerScope: CoroutineScope? = null
     private var pointHandle: AutoCloseable? = null
-
     fun mount() {
         pointHandle = hub.publishPoint(
             ownerPluginId = host.pluginId,
             point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
-            apiVersion = 1,
+            apiVersion = 2,
             title = "Bridge Provider",
             description = "AI Limbs remote Bridge provider contract",
             allowedHostCapabilities = setOf("core.bridge.remote.invoke"),
             binder = ChildExtensionBinder { binding ->
-                val factory = binding.payload as? BridgeProviderFactory
-                    ?: error("Bridge child extension did not publish BridgeProviderFactory")
-                require(factory.profiles.isNotEmpty()) { "Bridge provider has no profiles" }
-                check(factories.putIfAbsent(binding.extensionId, factory) == null) {
+                val contribution = binding.payload as? BridgeProviderContribution
+                    ?: error("Bridge child extension did not publish BridgeProviderContribution")
+                require(contribution.factory.profiles.isNotEmpty()) { "Bridge provider has no profiles" }
+                check(contributions.putIfAbsent(binding.extensionId, contribution) == null) {
                     "Bridge child extension already bound: ${binding.extensionId}"
                 }
                 rebuildManager()
                 AutoCloseable {
-                    factories.remove(binding.extensionId, factory)
+                    contributions.remove(binding.extensionId, contribution)
                     rebuildManager()
                 }
             }
         )
         registerCapabilities()
+        host.registerProvider(
+            PANEL_PROVIDER_ID,
+            panelProvider,
+            mapOf("kind" to "dynamic_control_panel")
+        )
         host.registerScreen(
             InProcessScreen(
                 id = SCREEN_ID,
                 title = "Bridge",
                 description = "V0.6.4.7.8 Bridge Core · Provider 由 .ailx 子插件动态接入",
                 blocks = listOf(
-                    InProcessScreenBlock.ChildExtensionInstaller("添加 Bridge Provider", InProcessSystemIds.BRIDGE_PROVIDER_POINT),
-                    InProcessScreenBlock.ChildExtensionSelector("当前 Bridge Provider", InProcessSystemIds.BRIDGE_PROVIDER_POINT, SELECT_CAPABILITY),
-                    InProcessScreenBlock.ChildExtensionList(InProcessSystemIds.BRIDGE_PROVIDER_POINT),
-                    InProcessScreenBlock.CapabilityButton("连接", CONNECT_CAPABILITY),
-                    InProcessScreenBlock.CapabilityButton("停止", STOP_CAPABILITY),
-                    InProcessScreenBlock.CapabilityButton("重连", RECONNECT_CAPABILITY),
-                    InProcessScreenBlock.CapabilityButton("刷新 / Liveness", REFRESH_CAPABILITY),
-                    InProcessScreenBlock.CapabilityButton("查看 Bridge 状态", STATUS_CAPABILITY)
+                    InProcessScreenBlock.ChildExtensionInstaller(
+                        "添加 Bridge Provider",
+                        InProcessSystemIds.BRIDGE_PROVIDER_POINT
+                    ),
+                    InProcessScreenBlock.ChildExtensionSelector(
+                        "当前 Bridge Provider",
+                        InProcessSystemIds.BRIDGE_PROVIDER_POINT,
+                        SELECT_CAPABILITY,
+                        PANEL_PROVIDER_ID
+                    ),
+                    InProcessScreenBlock.DynamicPanel(PANEL_PROVIDER_ID),
+                    InProcessScreenBlock.ChildExtensionList(InProcessSystemIds.BRIDGE_PROVIDER_POINT)
                 )
             )
         )
-        host.registerHomeTile(InProcessHomeTile(TILE_ID, "Bridge", "可插拔 Bridge Provider", SCREEN_ID))
+        host.registerHomeTile(
+            InProcessHomeTile(TILE_ID, "Bridge", "可插拔 Bridge Provider", SCREEN_ID)
+        )
     }
 
     suspend fun stop() {
-        pointHandle?.close(); pointHandle = null
+        pointHandle?.close()
+        pointHandle = null
         synchronized(this) {
-            manager?.stopRuntime(); manager = null
-            managerScope?.cancel(); managerScope = null
+            manager?.stopRuntime()
+            manager = null
+            managerScope?.cancel()
+            managerScope = null
             AiLimbsBridgeProviderCatalog.replaceFactories(emptyList())
-            factories.clear()
+            contributions.clear()
+            panelProvider.clear()
         }
     }
 
@@ -96,53 +125,152 @@ private class BridgeRuntime(
     private fun rebuildManager() {
         manager?.stopRuntime()
         managerScope?.cancel()
-        manager = null; managerScope = null
-        val values = factories.values.toList()
-        AiLimbsBridgeProviderCatalog.replaceFactories(values)
-        if (values.isEmpty()) return
+        manager = null
+        managerScope = null
+        val values = contributions.values.toList()
+        AiLimbsBridgeProviderCatalog.replaceFactories(values.map { it.factory })
+        if (values.isEmpty()) {
+            panelProvider.clear()
+            return
+        }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val nextManager = AiLimbsBridgeManager(host.applicationContext, scope)
         managerScope = scope
-        manager = AiLimbsBridgeManager(host.applicationContext, scope)
+        manager = nextManager
+        scope.launch {
+            nextManager.state.collect { panelProvider.refresh() }
+        }
+        panelProvider.refresh()
     }
-
     private fun registerCapabilities() {
-        host.registerCapability(SELECT_CAPABILITY, "选择 Bridge Provider", executor = InProcessCapabilityExecutor { raw ->
-            val extensionId = JSONObject(raw).getString("extension_id")
-            val factory = factories[extensionId] ?: error("Bridge extension is not active: $extensionId")
-            val profile = factory.profiles.firstOrNull() ?: error("Bridge extension has no profile")
-            requireManager().selectProvider(profile.id)
-            JSONObject().put("success", true).put("provider_id", profile.id).put("label", profile.label).toString()
-        })
-        host.registerCapability(CONNECT_CAPABILITY, "连接 Bridge", executor = simple { it.connect(); "connect requested" })
-        host.registerCapability(STOP_CAPABILITY, "停止 Bridge", executor = simple { it.stopByUser(); "stop requested" })
-        host.registerCapability(RECONNECT_CAPABILITY, "重连 Bridge", executor = simple { it.reconnect(); "reconnect requested" })
-        host.registerCapability(REFRESH_CAPABILITY, "刷新 Bridge", executor = simple { it.verifyLiveness(); "liveness checked" })
-        host.registerCapability(STATUS_CAPABILITY, "Bridge 状态", executor = InProcessCapabilityExecutor {
-            val current = synchronized(this) { manager }
-            if (current == null) {
-                JSONObject().put("content", "尚未安装或启用任何 Bridge Provider").toString()
-            } else {
-                JSONObject().put("content", current.statusSummary())
-                    .put("active_profile", current.activeProfile.id)
-                    .put("active_label", current.activeProfile.label).toString()
+        host.registerCapability(
+            SELECT_CAPABILITY,
+            "选择 Bridge Provider",
+            executor = InProcessCapabilityExecutor { raw ->
+                val extensionId = JSONObject(raw).getString("extension_id")
+                val contribution = contributions[extensionId]
+                    ?: error("Bridge extension is not active: $extensionId")
+                val profile = contribution.factory.profiles.firstOrNull()
+                    ?: error("Bridge extension has no profile")
+                requireManager().selectProvider(profile.id)
+                panelProvider.refresh()
+                JSONObject()
+                    .put("success", true)
+                    .put("content", "已切换至 ${profile.label}")
+                    .put("provider_id", profile.id)
+                    .put("label", profile.label)
+                    .toString()
             }
-        })
+        )
     }
 
-    private fun simple(action: (AiLimbsBridgeManager) -> String) = InProcessCapabilityExecutor {
-        val manager = requireManager()
-        JSONObject().put("success", true).put("content", action(manager)).toString()
+    private fun selectedEntry(): Map.Entry<String, BridgeProviderContribution>? {
+        val profileId = manager?.activeProfile?.id ?: return null
+        return contributions.entries.firstOrNull { (_, contribution) ->
+            contribution.factory.profiles.any { it.id == profileId }
+        }
     }
-    private fun requireManager(): AiLimbsBridgeManager = synchronized(this) { manager } ?: error("No Bridge Provider is active")
+
+    private fun requireManager(): AiLimbsBridgeManager =
+        manager ?: error("No Bridge Provider is active")
+
+    private fun controlFor(current: AiLimbsBridgeManager): BridgeProviderControl =
+        object : BridgeProviderControl {
+            override val profile
+                get() = current.activeProfile
+            override val state
+                get() = current.state.value
+            override val availableActions
+                get() = current.availableActions()
+
+            override fun perform(action: com.ai.assistance.operit.integrations.ailimbs.BridgeAction): Boolean =
+                current.perform(action)
+
+            override fun statusSummary(): String = current.statusSummary()
+        }
+
+    private inner class BridgeDynamicPanelProvider : InProcessDynamicPanelProvider, InProcessSelectionProvider {
+        private val mutableState = MutableStateFlow<InProcessPanelState?>(null)
+        private val mutableSelectedId = MutableStateFlow<String?>(null)
+        override val state: StateFlow<InProcessPanelState?> = mutableState.asStateFlow()
+        override val selectedId: StateFlow<String?> = mutableSelectedId.asStateFlow()
+
+        fun clear() {
+            mutableState.value = null
+            mutableSelectedId.value = null
+        }
+
+        fun refresh() {
+            val currentManager = manager ?: run {
+                clear()
+                return
+            }
+            val selected = selectedEntry() ?: run {
+                clear()
+                return
+            }
+            mutableSelectedId.value = selected.key
+            val panel = selected.value.panel.snapshot(
+                host.applicationContext,
+                controlFor(currentManager)
+            )
+            mutableState.value = panel.toInProcessState()
+        }
+
+        override suspend fun perform(
+            actionId: String,
+            fieldValues: Map<String, String>
+        ): InProcessPanelResult {
+            val currentManager = requireManager()
+            val selected = selectedEntry()
+                ?: error("Selected Bridge Provider contribution is missing")
+            val result = selected.value.panel.perform(
+                host.applicationContext,
+                actionId,
+                fieldValues,
+                controlFor(currentManager)
+            )
+            refresh()
+            return InProcessPanelResult(
+                message = result.message,
+                fieldValues = result.fieldValues
+            )
+        }
+    }
+
+    private fun com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelState.toInProcessState() =
+        InProcessPanelState(
+            title = title,
+            description = description,
+            statusLines = statusLines,
+            fields = fields.map { field ->
+                InProcessPanelField(
+                    id = field.id,
+                    label = field.label,
+                    kind = if (field.kind == BridgeProviderPanelFieldKind.SECRET) {
+                        InProcessPanelFieldKind.SECRET
+                    } else {
+                        InProcessPanelFieldKind.TEXT
+                    },
+                    value = field.value,
+                    placeholder = field.placeholder,
+                    enabled = field.enabled
+                )
+            },
+            actions = actions.map { action ->
+                InProcessPanelAction(
+                    id = action.id,
+                    label = action.label,
+                    enabled = action.enabled,
+                    requiredFieldIds = action.requiredFieldIds
+                )
+            }
+        )
 
     companion object {
         private const val SCREEN_ID = "plugin.system.bridge.screen"
         private const val TILE_ID = "plugin.system.bridge.tile"
         private const val SELECT_CAPABILITY = "plugin.bridge.select_provider"
-        private const val CONNECT_CAPABILITY = "plugin.bridge.connect"
-        private const val STOP_CAPABILITY = "plugin.bridge.stop"
-        private const val RECONNECT_CAPABILITY = "plugin.bridge.reconnect"
-        private const val REFRESH_CAPABILITY = "plugin.bridge.refresh"
-        private const val STATUS_CAPABILITY = "plugin.bridge.status"
+        private const val PANEL_PROVIDER_ID = "plugin.bridge.control_panel"
     }
 }

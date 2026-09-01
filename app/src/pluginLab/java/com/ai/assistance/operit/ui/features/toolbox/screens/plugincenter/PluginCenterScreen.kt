@@ -222,7 +222,7 @@ fun PluginCenterScreen(onBack: () -> Unit) {
         Box(modifier = Modifier.fillMaxSize().padding(padding)) {
             val selected = snapshots.firstOrNull { it.plugin.pluginId == selectedPluginId }
             if (showAdminSettings) {
-                PluginAdminSettingsScreen(
+                PluginAdminSecurityScreen(
                     controlPlane = controlPlane,
                     adminSecurity = adminSecurity,
                     onBack = {

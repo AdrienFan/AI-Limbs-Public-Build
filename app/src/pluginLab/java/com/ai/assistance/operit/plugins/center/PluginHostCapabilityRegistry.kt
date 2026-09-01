@@ -1,15 +1,5 @@
-package com.ai.assistance.operit.plugins.lab
+package com.ai.assistance.operit.plugins.center
 
-import com.ai.assistance.operit.plugins.center.PluginCapabilityBinder
-import com.ai.assistance.operit.plugins.center.PluginCapabilityInvoker
-import com.ai.assistance.operit.plugins.center.PluginCapabilityInvokerFactory
-import com.ai.assistance.operit.plugins.center.PluginCapabilitySpec
-import com.ai.assistance.operit.plugins.center.PluginInstallException
-import com.ai.assistance.operit.plugins.center.HostSurfaceDefinition
-import com.ai.assistance.operit.plugins.center.HostSurfaceKind
-import com.ai.assistance.operit.plugins.center.HostSurfacePolicy
-import com.ai.assistance.operit.plugins.center.PluginSurfaceIds
-import com.ai.assistance.operit.plugins.center.PluginUsageStore
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -19,7 +9,7 @@ import org.json.JSONObject
  * Kernel-owned dispatch table. Plugins may publish only plugin.* capabilities and may call only
  * explicitly exposed core.* capabilities after the requested scopes were approved at install time.
  */
-internal class LabCapabilityRegistry(
+internal class PluginHostCapabilityRegistry(
     private val surfacePolicy: HostSurfacePolicy?,
     private val usageStore: PluginUsageStore? = null
 ) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
@@ -41,7 +31,7 @@ internal class LabCapabilityRegistry(
     private val hostCapabilities = mapOf(
         "core.runtime.info" to HostCapability(null) {
             JSONObject()
-                .put("kernel", "AI Limbs Plugin Lab")
+                .put("kernel", "AI Limbs Plugin Center")
                 .put("plugin_api", 1)
                 .put("runtime", "declarative-v1")
         },
@@ -154,10 +144,10 @@ internal class LabCapabilityRegistry(
         val args = parameters.optJSONObject("args") ?: JSONObject()
         return when (tool.lowercase()) {
             "ping" -> JSONObject().put("success", true).put("content", "Pong").put("transport", transport)
-            "core.runtime.info" -> JSONObject().put("success", true).put("kernel", "AI Limbs Plugin Lab").put("transport", transport)
+            "core.runtime.info" -> JSONObject().put("success", true).put("kernel", "AI Limbs Plugin Center").put("transport", transport)
             else -> JSONObject()
                 .put("success", false)
-                .put("error", "Plugin Lab does not expose the formal AI Limbs dispatcher for '$tool' yet")
+                .put("error", "AI Limbs Plugin Center does not expose the formal dispatcher for '$tool' yet")
                 .put("transport", transport)
                 .put("args", args)
         }

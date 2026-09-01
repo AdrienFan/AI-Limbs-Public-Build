@@ -33,7 +33,7 @@ object PluginSurfaceIds {
 }
 
 class HostSurfacePolicy(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val prefs = pluginCenterPreferences(context, PREFS, LEGACY_PREFS)
     private val definitions = ConcurrentHashMap<String, HostSurfaceDefinition>()
 
     val developerMode: Boolean
@@ -108,7 +108,8 @@ class HostSurfacePolicy(context: Context) {
     private fun allowedKey(id: String) = "allowed:$id"
 
     companion object {
-        private const val PREFS = "plugin_lab_host_surface_policy"
+        private const val PREFS = "plugin_center_host_surface_policy"
+        private const val LEGACY_PREFS = "plugin_lab_host_surface_policy"
         private const val KEY_DEVELOPER_MODE = "developer_mode"
     }
 }

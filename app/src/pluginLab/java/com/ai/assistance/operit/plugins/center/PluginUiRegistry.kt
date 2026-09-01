@@ -1,7 +1,5 @@
-package com.ai.assistance.operit.plugins.lab
+package com.ai.assistance.operit.plugins.center
 
-import com.ai.assistance.operit.plugins.center.PluginInstallException
-import com.ai.assistance.operit.plugins.center.PluginExtensionPoints
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -33,8 +31,10 @@ sealed class PluginScreenBlock {
     data class ChildExtensionSelector(
         val label: String,
         val point: String,
-        val selectCapabilityId: String
+        val selectCapabilityId: String,
+        val selectionProviderId: String? = null
     ) : PluginScreenBlock()
+    data class DynamicPanel(val providerId: String) : PluginScreenBlock()
 }
 
 data class PluginScreenSpec(

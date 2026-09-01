@@ -1,14 +1,5 @@
-package com.ai.assistance.operit.plugins.lab
+package com.ai.assistance.operit.plugins.center
 
-import com.ai.assistance.operit.plugins.center.PluginCapabilityExecutor
-import com.ai.assistance.operit.plugins.center.PluginCapabilitySpec
-import com.ai.assistance.operit.plugins.center.PluginContributionKind
-import com.ai.assistance.operit.plugins.center.PluginContributionRegistry
-import com.ai.assistance.operit.plugins.center.PluginExtensionPoints
-import com.ai.assistance.operit.plugins.center.PluginInstallException
-import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapter
-import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapterContext
-import com.ai.assistance.operit.plugins.center.PluginRuntimeHandle
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
@@ -206,7 +197,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             is InProcessScreenBlock.ChildExtensionSelector -> PluginScreenBlock.ChildExtensionSelector(
                 label = block.label,
                 point = block.point,
-                selectCapabilityId = block.selectCapabilityId
+                selectCapabilityId = block.selectCapabilityId,
+                selectionProviderId = block.selectionProviderId
             )
             is InProcessScreenBlock.ChildExtensionInstaller -> PluginScreenBlock.ChildExtensionInstaller(
                 label = block.label,
@@ -214,9 +206,10 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 point = block.point
             )
             is InProcessScreenBlock.ChildExtensionList -> PluginScreenBlock.ChildExtensionList(block.point)
+            is InProcessScreenBlock.DynamicPanel -> PluginScreenBlock.DynamicPanel(block.providerId)
         }
 
-        private fun providerBinding(record: com.ai.assistance.operit.plugins.center.PluginContributionRecord) =
+        private fun providerBinding(record: PluginContributionRecord) =
             InProcessProviderBinding(
                 ownerPluginId = record.ownerPluginId,
                 id = record.id,

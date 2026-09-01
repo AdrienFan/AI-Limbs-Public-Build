@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.bridge",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "api": {
     "target": 1,
     "min": 1
@@ -38,15 +38,12 @@
   },
   "provides": {
     "capabilities": [
-      "plugin.bridge.select_provider",
-      "plugin.bridge.connect",
-      "plugin.bridge.stop",
-      "plugin.bridge.reconnect",
-      "plugin.bridge.refresh",
-      "plugin.bridge.status"
+      "plugin.bridge.select_provider"
     ],
     "services": [],
-    "providers": [],
+    "providers": [
+      "plugin.bridge.control_panel"
+    ],
     "extensions": [
       {
         "point": "ai_limbs.ui.home_tile",

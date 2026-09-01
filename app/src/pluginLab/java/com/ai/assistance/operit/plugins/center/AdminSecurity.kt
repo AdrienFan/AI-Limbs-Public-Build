@@ -24,7 +24,7 @@ data class AdminSecuritySnapshot(
 data class AdminSetupResult(val recoveryKey: String)
 
 class AdminSecurityManager(context: Context) {
-    private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+    private val prefs = pluginCenterPreferences(context, PREFS, LEGACY_PREFS)
     private val random = SecureRandom()
     @Volatile private var sessionAuthorized = false
 
@@ -173,7 +173,8 @@ class AdminSecurityManager(context: Context) {
 
     companion object {
         const val MIN_PASSWORD_LENGTH = 8
-        private const val PREFS = "plugin_lab_admin_security"
+        private const val PREFS = "plugin_center_admin_security"
+        private const val LEGACY_PREFS = "plugin_lab_admin_security"
         private const val KEY_VERSION = "version"
         private const val KEY_AUTH_FREQUENCY = "auth_frequency"
         private const val PASSWORD_PREFIX = "password"

@@ -39,7 +39,8 @@ sealed interface InProcessScreenBlock {
     data class ChildExtensionSelector(
         val label: String,
         val point: String,
-        val selectCapabilityId: String
+        val selectCapabilityId: String,
+        val selectionProviderId: String? = null
     ) : InProcessScreenBlock
     data class ChildExtensionInstaller(
         val label: String,
@@ -48,6 +49,49 @@ sealed interface InProcessScreenBlock {
     data class ChildExtensionList(
         val point: String
     ) : InProcessScreenBlock
+    data class DynamicPanel(
+        val providerId: String
+    ) : InProcessScreenBlock
+}
+
+enum class InProcessPanelFieldKind { TEXT, SECRET }
+
+data class InProcessPanelField(
+    val id: String,
+    val label: String,
+    val kind: InProcessPanelFieldKind = InProcessPanelFieldKind.TEXT,
+    val value: String = "",
+    val placeholder: String = "",
+    val enabled: Boolean = true
+)
+
+data class InProcessPanelAction(
+    val id: String,
+    val label: String,
+    val enabled: Boolean = true,
+    val requiredFieldIds: Set<String> = emptySet()
+)
+
+data class InProcessPanelState(
+    val title: String,
+    val description: String = "",
+    val statusLines: List<String> = emptyList(),
+    val fields: List<InProcessPanelField> = emptyList(),
+    val actions: List<InProcessPanelAction> = emptyList()
+)
+
+data class InProcessPanelResult(
+    val message: String = "",
+    val fieldValues: Map<String, String> = emptyMap()
+)
+
+interface InProcessDynamicPanelProvider {
+    val state: StateFlow<InProcessPanelState?>
+    suspend fun perform(actionId: String, fieldValues: Map<String, String>): InProcessPanelResult
+}
+
+interface InProcessSelectionProvider {
+    val selectedId: StateFlow<String?>
 }
 
 data class InProcessHomeTile(

@@ -2,7 +2,7 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.triggercmd",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "display": {
     "name": "TRIGGERcmd",
     "description": "AI Limbs V0.6.4.7.8 TRIGGERcmd Bridge Provider。"
@@ -10,7 +10,7 @@
   "target": {
     "plugin_id": "plugin.system.bridge",
     "extension_point": "ai_limbs.bridge.provider",
-    "api": 1
+    "api": 2
   },
   "runtime": {
     "kind": "android_child",

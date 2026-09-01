@@ -37,6 +37,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.material3.lightColorScheme
 import androidx.compose.material3.Scaffold
@@ -57,17 +58,23 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.lifecycleScope
 import com.ai.assistance.operit.plugins.center.PluginCenterKernel
 import com.ai.assistance.operit.plugins.center.PluginContributionKind
-import com.ai.assistance.operit.plugins.lab.PluginHomeTileSpec
-import com.ai.assistance.operit.plugins.lab.PluginScreenBlock
-import com.ai.assistance.operit.plugins.lab.PluginScreenSpec
-import com.ai.assistance.operit.plugins.lab.PluginThemeMode
+import com.ai.assistance.operit.plugins.center.PluginHomeTileSpec
+import com.ai.assistance.operit.plugins.center.PluginScreenBlock
+import com.ai.assistance.operit.plugins.center.PluginScreenSpec
+import com.ai.assistance.operit.plugins.center.PluginThemeMode
 import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.PluginCenterScreen
+import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.PluginCollectionSection
+import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.ScrollStateScrollIndicator
 import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
 import com.ai.limbs.plugin.runtime.ExtensionHubService
+import com.ai.limbs.plugin.runtime.InProcessDynamicPanelProvider
+import com.ai.limbs.plugin.runtime.InProcessPanelFieldKind
+import com.ai.limbs.plugin.runtime.InProcessSelectionProvider
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import java.io.File
 import java.util.UUID
@@ -273,68 +280,78 @@ private fun PluginScreenContent(screen: PluginScreenSpec, modifier: Modifier = M
     val scope = rememberCoroutineScope()
     val results = remember(screen.id) { mutableStateMapOf<Int, String>() }
     val busy = remember(screen.id) { mutableStateMapOf<Int, Boolean>() }
+    val scrollState = rememberScrollState()
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        screen.description?.let {
-            Text(it, style = MaterialTheme.typography.bodyMedium)
-        }
-        screen.blocks.forEachIndexed { index, block ->
-            when (block) {
-                is PluginScreenBlock.Text -> Text(block.text)
-                is PluginScreenBlock.CapabilityButton -> {
-                    Button(
-                        enabled = busy[index] != true,
-                        onClick = {
-                            scope.launch {
-                                busy[index] = true
-                                results[index] = try {
-                                    val value = withContext(Dispatchers.IO) {
-                                        PluginCenterKernel.capabilities.invokePlugin(
-                                            block.capabilityId,
-                                            block.parameters
-                                        )
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(scrollState)
+                .padding(start = 16.dp, top = 16.dp, end = 22.dp, bottom = 16.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            screen.description?.let {
+                Text(it, style = MaterialTheme.typography.bodyMedium)
+            }
+            screen.blocks.forEachIndexed { index, block ->
+                when (block) {
+                    is PluginScreenBlock.Text -> Text(block.text)
+                    is PluginScreenBlock.CapabilityButton -> {
+                        Button(
+                            enabled = busy[index] != true,
+                            onClick = {
+                                scope.launch {
+                                    busy[index] = true
+                                    results[index] = try {
+                                        val value = withContext(Dispatchers.IO) {
+                                            PluginCenterKernel.capabilities.invokePlugin(
+                                                block.capabilityId,
+                                                block.parameters
+                                            )
+                                        }
+                                        value.optString("content").ifBlank { value.toString(2) }
+                                    } catch (error: Throwable) {
+                                        "执行失败：" + (error.message ?: "未知错误")
+                                    } finally {
+                                        busy[index] = false
                                     }
-                                    value.optString("content").ifBlank { value.toString(2) }
-                                } catch (error: Throwable) {
-                                    "执行失败：" + (error.message ?: "未知错误")
-                                } finally {
-                                    busy[index] = false
                                 }
                             }
+                        ) {
+                            Text(if (busy[index] == true) "执行中…" else block.label)
                         }
-                    ) {
-                        Text(if (busy[index] == true) "执行中…" else block.label)
-                    }
-                    results[index]?.let { result ->
-                        SelectionContainer {
-                            Text(
-                                result,
-                                modifier = Modifier.fillMaxWidth(),
-                                style = MaterialTheme.typography.bodySmall
-                            )
+                        results[index]?.let { result ->
+                            SelectionContainer {
+                                Text(
+                                    result,
+                                    modifier = Modifier.fillMaxWidth(),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
                         }
                     }
+                    is PluginScreenBlock.ChildExtensionInstaller -> ChildExtensionInstallerBlock(
+                        block = block,
+                        onResult = { results[index] = it }
+                    )
+                    is PluginScreenBlock.ChildExtensionList -> ChildExtensionListBlock(
+                        point = block.point,
+                        onResult = { results[index] = it }
+                    )
+                    is PluginScreenBlock.ChildExtensionSelector -> ChildExtensionSelectorBlock(
+                        block = block,
+                        onResult = { results[index] = it }
+                    )
+                    is PluginScreenBlock.DynamicPanel -> DynamicPanelBlock(
+                        providerId = block.providerId
+                    )
                 }
-                is PluginScreenBlock.ChildExtensionInstaller -> ChildExtensionInstallerBlock(
-                    block = block,
-                    onResult = { results[index] = it }
-                )
-                is PluginScreenBlock.ChildExtensionList -> ChildExtensionListBlock(
-                    point = block.point,
-                    onResult = { results[index] = it }
-                )
-                is PluginScreenBlock.ChildExtensionSelector -> ChildExtensionSelectorBlock(
-                    block = block,
-                    onResult = { results[index] = it }
-                )
             }
         }
+        ScrollStateScrollIndicator(
+            state = scrollState,
+            modifier = Modifier.align(Alignment.CenterEnd)
+        )
     }
 }
 
@@ -399,12 +416,34 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
     }
     val snapshots by hub.snapshotsForPoint(point).collectAsState()
     val scope = rememberCoroutineScope()
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("已安装子插件（${snapshots.size}）", style = MaterialTheme.typography.titleSmall)
-        if (snapshots.isEmpty()) {
-            Text("尚未安装 Bridge Provider", style = MaterialTheme.typography.bodySmall)
+    var expanded by remember(point) { mutableStateOf(false) }
+    var query by remember(point) { mutableStateOf("") }
+    val normalized = query.trim().lowercase()
+    val filtered = remember(snapshots, normalized) {
+        if (normalized.isBlank()) snapshots else snapshots.filter { snapshot ->
+            listOf(
+                snapshot.displayName, snapshot.extensionId, snapshot.description.orEmpty(),
+                snapshot.lifecycle.name, snapshot.target.point
+            ).any { it.lowercase().contains(normalized) }
         }
-        snapshots.forEach { snapshot ->
+    }
+    PluginCollectionSection(
+        title = "已安装子插件",
+        totalCount = snapshots.size,
+        matchedCount = filtered.size,
+        query = query,
+        onQueryChange = { query = it },
+        expanded = expanded,
+        onExpandedChange = { expanded = it },
+        searchPlaceholder = "搜索子插件"
+    ) {
+        if (filtered.isEmpty()) {
+            Text(
+                if (snapshots.isEmpty()) "尚未安装子插件" else "没有匹配的子插件",
+                style = MaterialTheme.typography.bodySmall
+            )
+        }
+        filtered.forEach { snapshot ->
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -436,6 +475,104 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
 }
 
 @Composable
+private fun DynamicPanelBlock(providerId: String) {
+    val provider = PluginCenterKernel.contributions
+        .find(PluginContributionKind.PROVIDER, providerId)
+        ?.payload as? InProcessDynamicPanelProvider
+    if (provider == null) {
+        Text("当前 Provider 控制面板不可用", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    val panel by provider.state.collectAsState()
+    val current = panel
+    if (current == null) {
+        Text("尚未选择可用的 Provider", style = MaterialTheme.typography.bodySmall)
+        return
+    }
+    val scope = rememberCoroutineScope()
+    val values = remember(providerId) { mutableStateMapOf<String, String>() }
+    val initialValues = remember(providerId) { mutableStateMapOf<String, String>() }
+    var feedback by remember(providerId) { mutableStateOf<String?>(null) }
+    var busyAction by remember(providerId) { mutableStateOf<String?>(null) }
+
+    LaunchedEffect(current) {
+        val activeIds = current.fields.map { it.id }.toSet()
+        values.keys.filter { it !in activeIds }.toList().forEach(values::remove)
+        initialValues.keys.filter { it !in activeIds }.toList().forEach(initialValues::remove)
+        current.fields.forEach { field ->
+            val previousInitial = initialValues[field.id]
+            if (field.id !in values || values[field.id] == previousInitial) {
+                values[field.id] = field.value
+            }
+            initialValues[field.id] = field.value
+        }
+    }
+
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(current.title, style = MaterialTheme.typography.titleMedium)
+            current.description.takeIf { it.isNotBlank() }?.let {
+                Text(it, style = MaterialTheme.typography.bodySmall)
+            }
+            current.statusLines.forEach { line ->
+                Text(line, style = MaterialTheme.typography.bodySmall)
+            }
+            current.fields.forEach { field ->
+                val fieldValue = values[field.id] ?: field.value
+                if (field.kind == InProcessPanelFieldKind.SECRET) {
+                    OutlinedTextField(
+                        value = fieldValue,
+                        onValueChange = { values[field.id] = it },
+                        label = { Text(field.label) },
+                        placeholder = { Text(field.placeholder) },
+                        enabled = field.enabled,
+                        visualTransformation = PasswordVisualTransformation(),
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                } else {
+                    OutlinedTextField(
+                        value = fieldValue,
+                        onValueChange = { values[field.id] = it },
+                        label = { Text(field.label) },
+                        placeholder = { Text(field.placeholder) },
+                        enabled = field.enabled,
+                        modifier = Modifier.fillMaxWidth(),
+                        singleLine = true
+                    )
+                }
+            }
+            current.actions.forEach { action ->
+                val requiredFieldsReady = action.requiredFieldIds.all { fieldId ->
+                    values[fieldId].orEmpty().isNotBlank()
+                }
+                Button(
+                    enabled = action.enabled && requiredFieldsReady && busyAction == null,
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = {
+                        scope.launch {
+                            busyAction = action.id
+                            try {
+                                val result = provider.perform(action.id, values.toMap())
+                                result.fieldValues.forEach { (key, value) -> values[key] = value }
+                                feedback = result.message.takeIf { it.isNotBlank() }
+                            } catch (error: Throwable) {
+                                feedback = "操作失败：${error.message ?: "未知错误"}"
+                            } finally {
+                                busyAction = null
+                            }
+                        }
+                    }
+                ) {
+                    Text(if (busyAction == action.id) "处理中…" else action.label)
+                }
+            }
+            feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        }
+    }
+}
+
+@Composable
 private fun ChildExtensionSelectorBlock(
     block: PluginScreenBlock.ChildExtensionSelector,
     onResult: (String) -> Unit
@@ -447,14 +584,26 @@ private fun ChildExtensionSelectorBlock(
     }
     val snapshots by hub.snapshotsForPoint(block.point).collectAsState()
     val active = snapshots.filter { it.lifecycle == ChildExtensionLifecycle.ACTIVE }
+    val selectionProvider = block.selectionProviderId?.let { providerId ->
+        PluginCenterKernel.contributions
+            .find(PluginContributionKind.PROVIDER, providerId)
+            ?.payload as? InProcessSelectionProvider
+    }
+    val selectedExtensionId = selectionProvider?.selectedId?.collectAsState()?.value
+    val selectedSnapshot = active.firstOrNull { it.extensionId == selectedExtensionId }
     val scope = rememberCoroutineScope()
     var expanded by remember(block.point) { mutableStateOf(false) }
-    var selectedName by remember(block.point) { mutableStateOf<String?>(null) }
+    var localSelectedName by remember(block.point) { mutableStateOf<String?>(null) }
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Text(block.label, style = MaterialTheme.typography.titleSmall)
         Box {
             Button(enabled = active.isNotEmpty(), onClick = { expanded = true }) {
-                Text(selectedName ?: active.firstOrNull()?.displayName ?: "暂无 Provider")
+                Text(
+                    selectedSnapshot?.displayName
+                        ?: localSelectedName
+                        ?: active.firstOrNull()?.displayName
+                        ?: "暂无 Provider"
+                )
             }
             DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
                 active.forEach { snapshot ->
@@ -470,7 +619,7 @@ private fun ChildExtensionSelectorBlock(
                                             org.json.JSONObject().put("extension_id", snapshot.extensionId)
                                         )
                                     }
-                                    selectedName = snapshot.displayName
+                                    localSelectedName = snapshot.displayName
                                     onResult(value.optString("content").ifBlank { value.toString(2) })
                                 } catch (error: Throwable) {
                                     onResult("选择失败：${error.message ?: "未知错误"}")

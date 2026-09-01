@@ -197,7 +197,7 @@ internal fun RecoveryKeyDialog(recoveryKey: String, onDismiss: () -> Unit) {
 }
 
 @Composable
-internal fun PluginAdminSettingsScreen(
+internal fun PluginAdminSecurityScreen(
     controlPlane: PluginControlPlane,
     adminSecurity: AdminSecurityManager,
     onBack: () -> Unit,
@@ -268,40 +268,56 @@ internal fun PluginAdminSettingsScreen(
         Text("管理员安全中心", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
             Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("管理员凭据", fontWeight = FontWeight.Bold)
-                Text("管理员密码：已设置")
-                Text("恢复密钥：${if (adminSecurity.snapshot().recoveryConfigured) "已配置" else "未配置"}")
-                Text("普通插件验证频率", fontWeight = FontWeight.Medium)
-                Box {
-                    OutlinedButton(
-                        onClick = { authFrequencyExpanded = true },
-                        enabled = !busy
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(18.dp),
+                    verticalAlignment = Alignment.Top
+                ) {
+                    Column(
+                        modifier = Modifier.weight(1.15f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text(adminAuthFrequencyLabel(authFrequency))
+                        Text("管理员凭据", fontWeight = FontWeight.Bold)
+                        Text("管理员密码：已设置")
+                        Text("恢复密钥：${if (adminSecurity.snapshot().recoveryConfigured) "已配置" else "未配置"}")
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy) { Text("修改密码") }
+                            OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy) { Text("重新生成恢复密钥") }
+                        }
                     }
-                    DropdownMenu(
-                        expanded = authFrequencyExpanded,
-                        onDismissRequest = { authFrequencyExpanded = false }
+                    Column(
+                        modifier = Modifier.weight(0.85f),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        AdminAuthFrequency.entries.forEach { frequency ->
-                            DropdownMenuItem(
-                                text = { Text(adminAuthFrequencyLabel(frequency)) },
-                                onClick = {
-                                    authFrequencyExpanded = false
-                                    if (frequency != authFrequency) pendingAuthFrequency = frequency
+                        Text("普通插件验证频率", fontWeight = FontWeight.Medium)
+                        Box {
+                            OutlinedButton(
+                                onClick = { authFrequencyExpanded = true },
+                                enabled = !busy
+                            ) {
+                                Text(adminAuthFrequencyLabel(authFrequency))
+                            }
+                            DropdownMenu(
+                                expanded = authFrequencyExpanded,
+                                onDismissRequest = { authFrequencyExpanded = false }
+                            ) {
+                                AdminAuthFrequency.entries.forEach { frequency ->
+                                    DropdownMenuItem(
+                                        text = { Text(adminAuthFrequencyLabel(frequency)) },
+                                        onClick = {
+                                            authFrequencyExpanded = false
+                                            if (frequency != authFrequency) pendingAuthFrequency = frequency
+                                        }
+                                    )
                                 }
-                            )
+                            }
                         }
                     }
                 }
                 Text(
-                    "仅影响普通插件卸载。系统插件禁用/卸载始终每次验证；管理员安全设置也不会被豁免。",
+                    "验证频率仅影响普通插件卸载。系统插件禁用/卸载始终每次验证；管理员安全设置也不会被豁免。",
                     style = MaterialTheme.typography.bodySmall
                 )
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedButton(onClick = { showChangePassword = true }, enabled = !busy) { Text("修改密码") }
-                    OutlinedButton(onClick = { showRegenerateRecovery = true }, enabled = !busy) { Text("重新生成恢复密钥") }
-                }
             }
         }
         Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
@@ -338,7 +354,7 @@ internal fun PluginAdminSettingsScreen(
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) {
                             Text("秒级测试模式")
-                            Text("仅用于 Plugin Lab 验证，最低 ${PluginInactivityPolicyStore.MIN_TEST_SECONDS} 秒", style = MaterialTheme.typography.bodySmall)
+                            Text("仅用于开发验证，最低 ${PluginInactivityPolicyStore.MIN_TEST_SECONDS} 秒", style = MaterialTheme.typography.bodySmall)
                         }
                         Switch(
                             checked = inactivityTestMode,

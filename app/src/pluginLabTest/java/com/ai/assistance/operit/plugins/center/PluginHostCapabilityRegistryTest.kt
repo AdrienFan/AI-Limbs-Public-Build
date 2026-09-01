@@ -1,18 +1,15 @@
-package com.ai.assistance.operit.plugins.lab
+package com.ai.assistance.operit.plugins.center
 
-import com.ai.assistance.operit.plugins.center.PluginCapabilityExecutor
-import com.ai.assistance.operit.plugins.center.PluginCapabilitySpec
-import com.ai.assistance.operit.plugins.center.PluginInstallException
 import kotlinx.coroutines.test.runTest
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.fail
 import org.junit.Test
 
-class LabCapabilityRegistryTest {
+class PluginHostCapabilityRegistryTest {
     @Test
     fun registeredCapabilityIsRevokedWithItsHandle() = runTest {
-        val registry = LabCapabilityRegistry()
+        val registry = PluginHostCapabilityRegistry()
         val handle = registry.register(
             ownerPluginId = "plugin.test",
             capabilityId = "plugin.test.echo",
@@ -41,10 +38,10 @@ class LabCapabilityRegistryTest {
 
     @Test
     fun hostCapabilityRequiresApprovedScope() = runTest {
-        val registry = LabCapabilityRegistry()
+        val registry = PluginHostCapabilityRegistry()
         val invoker = registry.create("plugin.test", emptySet())
 
-        assertEquals("AI Limbs Plugin Lab", invoker.invoke(
+        assertEquals("AI Limbs Plugin Center", invoker.invoke(
             "core.runtime.info",
             JSONObject()
         ).getString("kernel"))

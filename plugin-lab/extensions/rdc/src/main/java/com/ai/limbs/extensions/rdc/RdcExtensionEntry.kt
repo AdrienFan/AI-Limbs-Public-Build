@@ -1,5 +1,6 @@
 package com.ai.limbs.extensions.rdc
 
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
 import com.ai.assistance.operit.integrations.ailimbs.RdcBridgeProvider
 import com.ai.assistance.operit.integrations.ailimbs.RdcPluginHostBridge
 import com.ai.limbs.plugin.runtime.ChildExtensionEntry
@@ -10,7 +11,10 @@ class RdcExtensionEntry : ChildExtensionEntry {
     override suspend fun mount(host: ChildExtensionHost): ChildExtensionHandle {
         RdcPluginHostBridge.host = host
         host.publish(
-            RdcBridgeProvider.Factory(),
+            BridgeProviderContribution(
+                factory = RdcBridgeProvider.Factory(),
+                panel = RdcBridgeProviderPanel
+            ),
             mapOf("provider_id" to RdcBridgeProvider.PROFILE_ID, "provider_type" to RdcBridgeProvider.PROFILE_TYPE, "source" to "AI-Limbs-V0.6.4.7.8")
         )
         return ChildExtensionHandle { if (RdcPluginHostBridge.host === host) RdcPluginHostBridge.host = null }

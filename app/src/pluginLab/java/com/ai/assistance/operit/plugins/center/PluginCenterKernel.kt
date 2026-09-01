@@ -1,13 +1,6 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
-import com.ai.assistance.operit.plugins.lab.DeclarativePluginRuntimeAdapter
-import com.ai.assistance.operit.plugins.lab.AndroidInProcessPluginRuntimeAdapter
-import com.ai.assistance.operit.plugins.lab.LabCapabilityRegistry
-import com.ai.assistance.operit.plugins.lab.PluginHomeTileSpec
-import com.ai.assistance.operit.plugins.lab.PluginScreenSpec
-import com.ai.assistance.operit.plugins.lab.PluginThemeSpec
-import com.ai.assistance.operit.plugins.lab.PluginUiRegistry
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -19,7 +12,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 
 /**
- * Plugin Lab micro-kernel. The base owns lifecycle, trust, permissions and routing only.
+ * AI Limbs Plugin Center micro-kernel. The base owns lifecycle, trust, permissions and routing only.
  * Every optional capability or screen must arrive through a mounted plugin contribution.
  */
 object PluginCenterKernel {
@@ -36,7 +29,7 @@ object PluginCenterKernel {
     private lateinit var extensionRouterInstance: ExtensionRouter
     private lateinit var controlPlaneInstance: PluginControlPlane
     private lateinit var uiRegistryInstance: PluginUiRegistry
-    private lateinit var capabilityRegistryInstance: LabCapabilityRegistry
+    private lateinit var capabilityRegistryInstance: PluginHostCapabilityRegistry
     private lateinit var surfacePolicyInstance: HostSurfacePolicy
     private lateinit var adminSecurityInstance: AdminSecurityManager
     private lateinit var usageStoreInstance: PluginUsageStore
@@ -61,7 +54,7 @@ object PluginCenterKernel {
         get() = requireInitialized().let { extensionRouterInstance }
     internal val uiRegistry: PluginUiRegistry
         get() = requireInitialized().let { uiRegistryInstance }
-    internal val capabilities: LabCapabilityRegistry
+    internal val capabilities: PluginHostCapabilityRegistry
         get() = requireInitialized().let { capabilityRegistryInstance }
     val hostSurfacePolicy: HostSurfacePolicy
         get() = requireInitialized().let { surfacePolicyInstance }
@@ -85,7 +78,7 @@ object PluginCenterKernel {
             val usageStore = PluginUsageStore(appContext)
             val inactivityPolicy = PluginInactivityPolicyStore(appContext)
             val uiRegistry = PluginUiRegistry()
-            val capabilityRegistry = LabCapabilityRegistry(surfacePolicy, usageStore)
+            val capabilityRegistry = PluginHostCapabilityRegistry(surfacePolicy, usageStore)
             val contributions = PluginContributionRegistry()
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
@@ -93,7 +86,7 @@ object PluginCenterKernel {
                 register(AndroidInProcessPluginRuntimeAdapter(contributions))
             }
             listOf(
-                Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 Plugin Lab 首页添加入口"),
+                Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 AI Limbs 首页添加入口"),
                 Triple(PluginExtensionPoints.UI_SCREEN, "插件页面", "允许插件提供可打开的界面页面"),
                 Triple(PluginExtensionPoints.UI_THEME, "全局主题 / 皮肤", "允许插件实时接管宿主主题与配色")
             ).forEach { (point, title, detail) ->
@@ -194,7 +187,7 @@ object PluginCenterKernel {
             usageStoreInstance = usageStore
             inactivityPolicyInstance = inactivityPolicy
             initialized = true
-            AppLogger.i(TAG, "Plugin Lab kernel initialized: ${manager.store.rootDir.absolutePath}")
+            AppLogger.i(TAG, "AI Limbs Plugin Center kernel initialized: ${manager.store.rootDir.absolutePath}")
         }
     }
 
@@ -206,7 +199,7 @@ object PluginCenterKernel {
         try {
             controlPlaneInstance.restoreEnabledPlugins()
             controlPlaneInstance.runInactivityCheck()
-            AppLogger.i(TAG, "Plugin Lab restored enabled plugins")
+            AppLogger.i(TAG, "AI Limbs Plugin Center restored enabled plugins")
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -246,7 +239,7 @@ object PluginCenterKernel {
         inactivityMonitorJob = null
         try {
             controlPlaneInstance.shutdown()
-            AppLogger.i(TAG, "Plugin Lab kernel shut down")
+            AppLogger.i(TAG, "AI Limbs Plugin Center kernel shut down")
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -255,6 +248,6 @@ object PluginCenterKernel {
     }
 
     private fun requireInitialized() {
-        check(initialized) { "Plugin Lab kernel is not initialized" }
+        check(initialized) { "AI Limbs Plugin Center kernel is not initialized" }
     }
 }

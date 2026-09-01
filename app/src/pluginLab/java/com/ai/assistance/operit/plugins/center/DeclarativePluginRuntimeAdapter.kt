@@ -1,13 +1,5 @@
-package com.ai.assistance.operit.plugins.lab
+package com.ai.assistance.operit.plugins.center
 
-import com.ai.assistance.operit.plugins.center.PluginCapabilityExecutor
-import com.ai.assistance.operit.plugins.center.PluginCapabilityParameterSpec
-import com.ai.assistance.operit.plugins.center.PluginCapabilitySpec
-import com.ai.assistance.operit.plugins.center.PluginInstallException
-import com.ai.assistance.operit.plugins.center.PluginExtensionPoints
-import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapter
-import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapterContext
-import com.ai.assistance.operit.plugins.center.PluginRuntimeHandle
 import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
