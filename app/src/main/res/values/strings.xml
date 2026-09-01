@@ -8358,4 +8358,6 @@
     <string name="ai_limbs_triggercmd_clear_binding">清除绑定</string>
     <string name="ai_limbs_triggercmd_saved_connecting">配置已保存，正在连接 TRIGGERcmd…</string>
     <string name="ai_limbs_triggercmd_binding_cleared">TRIGGERcmd 绑定已清除</string>
+    <string name="plugin_center_bootstrap_title">安装 Plugin Center</string>
+    <string name="plugin_center_bootstrap_description">选择并验证 .ailpsys 系统插件</string>
 </resources>

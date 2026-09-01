@@ -3,6 +3,7 @@ package com.ai.assistance.operit.ui.main.screens
 import android.content.Context
 import androidx.annotation.StringRes
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoMode
 import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Code
@@ -181,6 +182,15 @@ object ScreenRouteRegistry {
                 launchNavItem = NavItem.About,
                 icon = NavItem.About.icon,
                 order = 30
+            ),
+            hostEntryDefinition(
+                entryId = "toolbox.plugin_center_bootstrap",
+                screen = Screen.PluginBootstrap,
+                surface = NavigationSurface.TOOLBOX,
+                titleResId = R.string.plugin_center_bootstrap_title,
+                descriptionResId = R.string.plugin_center_bootstrap_description,
+                icon = Icons.Default.Add,
+                order = 0
             ),
             hostEntryDefinition(
                 entryId = "hidden.toolbox",

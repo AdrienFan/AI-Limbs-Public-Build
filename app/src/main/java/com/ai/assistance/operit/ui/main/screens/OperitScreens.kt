@@ -68,6 +68,7 @@ import com.ai.assistance.operit.ui.features.settings.screens.UserPreferencesSett
 import com.ai.assistance.operit.ui.features.tokenstats.TokenUsageStatisticsScreen
 import com.ai.assistance.operit.ui.features.token.TokenConfigWebViewScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.ToolboxScreen
+import com.ai.assistance.operit.ui.features.toolbox.screens.pluginbootstrap.PluginBootstrapScreen
 import com.ai.assistance.operit.ui.common.composedsl.ToolPkgComposeDslToolScreen
 import com.ai.assistance.operit.ui.features.update.screens.UpdateScreen
 import com.ai.assistance.operit.ui.features.workflow.screens.WorkflowListScreen
@@ -521,6 +522,24 @@ sealed class Screen(
         @Composable
         override fun getTitle(): String {
             return stringResource(R.string.market_publish_new_version)
+        }
+    }
+
+    data object PluginBootstrap : Screen(
+        navItem = NavItem.Toolbox,
+        titleRes = R.string.plugin_center_bootstrap_title
+    ) {
+        @Composable
+        override fun Content(
+                navController: NavController,
+                navigateTo: ScreenNavigationHandler,
+                onGoBack: () -> Unit,
+                hasBackgroundImage: Boolean,
+                onLoading: (Boolean) -> Unit,
+                onError: (String) -> Unit,
+                onGestureConsumed: (Boolean) -> Unit
+        ) {
+            PluginBootstrapScreen()
         }
     }
 

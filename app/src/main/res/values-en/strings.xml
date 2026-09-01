@@ -8322,4 +8322,6 @@
     <string name="laner_work_manual_saved">Work manual saved</string>
     <string name="laner_document_unchanged">Content is unchanged</string>
     <string name="laner_document_restored">Backup restored</string>
+    <string name="plugin_center_bootstrap_title">Install Plugin Center</string>
+    <string name="plugin_center_bootstrap_description">Select and validate a .ailpsys system plugin</string>
 </resources>

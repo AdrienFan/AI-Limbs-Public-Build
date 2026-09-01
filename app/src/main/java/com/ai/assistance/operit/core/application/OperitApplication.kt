@@ -25,7 +25,6 @@ import com.ai.assistance.operit.R
 import com.ai.assistance.operit.core.chat.AIMessageManager
 import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.api.chat.library.MemoryAutoSaveScheduler
-import com.ai.assistance.operit.plugins.center.PluginCenterKernel
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleEvent
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookParams
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookPluginRegistry
@@ -192,9 +191,6 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         // Initialize AIMessageManager
         AIMessageManager.initialize(this)
         AppLogger.d(TAG, "【启动计时】AIMessageManager初始化完成 - ${System.currentTimeMillis() - startTime}ms")
-        PluginCenterKernel.initialize(applicationContext)
-        runBlocking(Dispatchers.IO) { PluginCenterKernel.start() }
-        AppLogger.d(TAG, "【启动计时】Plugin Center v2 Safe Kernel初始化并恢复完成 - ${System.currentTimeMillis() - startTime}ms")
         AppLifecycleHookPluginRegistry.dispatchAsync(
             event = AppLifecycleEvent.APPLICATION_CREATE,
             params =
@@ -650,12 +646,6 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
             AppLogger.e(TAG, "终止时关闭 ShowerController 失败: ${e.message}", e)
         }
 
-        try {
-            runBlocking(Dispatchers.IO) { PluginCenterKernel.shutdown() }
-            AppLogger.d(TAG, "应用终止，Plugin Center v2 Safe Kernel 已释放所有运行时")
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "终止 Plugin Center Kernel 失败: ${e.message}", e)
-        }
     }
 
     override fun onLowMemory() {
