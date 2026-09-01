@@ -158,7 +158,23 @@ data class ChildExtensionSnapshot(
     val target: ChildExtensionTarget,
     val lifecycle: ChildExtensionLifecycle,
     val enabled: Boolean,
+    val roles: Set<String> = emptySet(),
+    val useCount: Long = 0L,
     val lastError: String? = null
+)
+
+data class ChildExtensionBackupSnapshot(
+    val extensionId: String,
+    val version: String,
+    val displayName: String,
+    val description: String?,
+    val target: ChildExtensionTarget,
+    val roles: Set<String>,
+    val packageSha256: String,
+    val backedUpAtEpochMs: Long,
+    val wasEnabled: Boolean,
+    val installed: Boolean,
+    val installedVersion: String? = null
 )
 
 data class ChildExtensionBinding(
@@ -192,8 +208,14 @@ interface ExtensionHubService {
     ): ChildExtensionSnapshot
     suspend fun uninstall(extensionId: String): Boolean
     suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot
+    suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot
+    suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot
+    suspend fun deleteBackup(extensionId: String): Boolean
+    suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long = 10L)
+    fun recordUse(extensionId: String)
     fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
     fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>>
+    fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>>
 }
 
 interface ChildExtensionEntry {

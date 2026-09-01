@@ -31,8 +31,8 @@ android {
         applicationId = "com.ai.assistance.operit.ailimbs.pluginlab.alt.v05"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1008
-        versionName = "plugin-lab-alt-0.5.1"
+        versionCode = 1009
+        versionName = "plugin-lab-alt-0.5.2"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         vectorDrawables.useSupportLibrary = true
     }
@@ -47,7 +47,7 @@ android {
             )
         }
         debug {
-            versionNameSuffix = "-dynamic-panel"
+            versionNameSuffix = "-developer-guide"
         }
     }
 

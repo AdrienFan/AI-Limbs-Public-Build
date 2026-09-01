@@ -1,5 +1,6 @@
 package com.ai.limbs.plugins.extensionhub
 
+import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
 import com.ai.limbs.plugin.runtime.ChildExtensionBinding
 import com.ai.limbs.plugin.runtime.ChildExtensionEntry
@@ -19,7 +20,9 @@ import java.io.FileOutputStream
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -57,6 +60,7 @@ private data class ExtensionManifest(
     val entry: String,
     val entryClass: String,
     val requestedCapabilities: Set<String>,
+    val roles: Set<String>,
     val rawJson: String
 )
 
@@ -90,16 +94,28 @@ private class ExtensionHubServiceImpl(
     private val staging = File(root, "staging")
     private val extensionsRoot = File(root, "extensions")
     private val dataRoot = File(root, "data")
+    private val backupsRoot = File(root, "backups")
+    private val usageFile = File(root, "usage.json")
+    private val backupPolicyFile = File(root, "backup_policy.json")
     private val points = ConcurrentHashMap<String, PointRegistration>()
     private val records = ConcurrentHashMap<String, StoredExtension>()
     private val active = ConcurrentHashMap<String, ActiveChild>()
     private val mutableSnapshots = MutableStateFlow<List<ChildExtensionSnapshot>>(emptyList())
+    private val mutableBackupSnapshots = MutableStateFlow<List<ChildExtensionBackupSnapshot>>(emptyList())
     private val pointFlows = ConcurrentHashMap<String, MutableStateFlow<List<ChildExtensionSnapshot>>>()
+    private val usageCounts = ConcurrentHashMap<String, Long>()
+    @Volatile private var autoBackupEnabled = false
+    @Volatile private var highFrequencyUseCount = 10L
 
     suspend fun start() {
-        root.mkdirs(); staging.mkdirs(); extensionsRoot.mkdirs(); dataRoot.mkdirs()
+        root.mkdirs(); staging.mkdirs(); extensionsRoot.mkdirs(); dataRoot.mkdirs(); backupsRoot.mkdirs()
+        staging.listFiles()?.forEach { it.deleteRecursively() }
+        loadUsage()
+        loadBackupPolicy()
         restoreInstalled()
         publishSnapshots()
+        publishBackupSnapshots()
+        reconcileAutoBackup()
     }
 
     suspend fun stop() {
@@ -164,7 +180,9 @@ private class ExtensionHubServiceImpl(
             records[manifest.extensionId] = record
             persistState(record)
             tryActivate(record)
+            autoBackupIfEligible(record)
             publishSnapshots()
+            publishBackupSnapshots()
             return snapshot(record)
         } finally {
             if (stage.exists()) stage.deleteRecursively()
@@ -177,6 +195,7 @@ private class ExtensionHubServiceImpl(
         extensionDir(extensionId).deleteRecursively()
         File(dataRoot, extensionId).deleteRecursively()
         publishSnapshots()
+        publishBackupSnapshots()
         return record.manifest.extensionId == extensionId
     }
 
@@ -195,10 +214,78 @@ private class ExtensionHubServiceImpl(
         return snapshot(record)
     }
 
+    override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot {
+        val record = records[extensionId] ?: error("Child extension is not installed: $extensionId")
+        readBackup(extensionId)?.takeIf { it.version == record.manifest.version }?.let { return it }
+        val temp = File(backupsRoot, ".tmp-${UUID.randomUUID()}")
+        require(temp.mkdirs()) { "Could not create child backup staging directory" }
+        try {
+            val packageFile = File(temp, "package${ExtensionPackage.SUFFIX}")
+            packInstalledExtension(record, packageFile)
+            val metadata = JSONObject()
+                .put("extension_id", extensionId)
+                .put("version", record.manifest.version)
+                .put("package_sha256", sha256(packageFile))
+                .put("backed_up_at", System.currentTimeMillis())
+                .put("was_enabled", record.enabled)
+            File(temp, "backup.json").writeText(metadata.toString(2))
+            replaceBackup(extensionId, temp)
+        } finally {
+            if (temp.exists()) temp.deleteRecursively()
+        }
+        publishBackupSnapshots()
+        return readBackup(extensionId) ?: error("Child extension backup could not be read after write")
+    }
+
+    override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot {
+        check(extensionId !in records) { "Child extension is already installed: $extensionId" }
+        val backup = readBackup(extensionId) ?: error("Child extension backup does not exist: $extensionId")
+        val packageFile = backupPackage(extensionId)
+        check(sha256(packageFile) == backup.packageSha256) { "Child extension backup digest mismatch: $extensionId" }
+        val point = points[backup.target.point] ?: error("Parent extension point is not active: ${backup.target.point}")
+        check(point.ownerPluginId == backup.target.parentPluginId && point.apiVersion == backup.target.apiVersion) {
+            "Parent/point/API contract mismatch for backup $extensionId"
+        }
+        var restored = install(packageFile, backup.target.parentPluginId, backup.target.point)
+        if (!backup.wasEnabled) restored = setEnabled(extensionId, false)
+        publishBackupSnapshots()
+        return restored
+    }
+
+    override suspend fun deleteBackup(extensionId: String): Boolean {
+        val dir = backupDir(extensionId)
+        val existed = dir.exists()
+        if (existed) dir.deleteRecursively()
+        publishBackupSnapshots()
+        return existed
+    }
+
+    override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) {
+        require(highFrequencyUseCount > 0L)
+        autoBackupEnabled = enabled
+        this.highFrequencyUseCount = highFrequencyUseCount
+        persistBackupPolicy()
+        if (enabled) reconcileAutoBackup()
+    }
+
+    override fun recordUse(extensionId: String) {
+        val record = records[extensionId] ?: return
+        val count = (usageCounts[extensionId] ?: 0L) + 1L
+        usageCounts[extensionId] = count
+        persistUsage()
+        publishSnapshots()
+        if (autoBackupEnabled && count >= highFrequencyUseCount) {
+            host.scope.launch { runCatching { autoBackupIfEligible(record) } }
+        }
+    }
+
     override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> = mutableSnapshots.asStateFlow()
 
     override fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>> =
         pointFlows.computeIfAbsent(point) { MutableStateFlow(filterPoint(point)) }.asStateFlow()
+
+    override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> =
+        mutableBackupSnapshots.asStateFlow()
 
     private suspend fun restoreInstalled() {
         extensionsRoot.listFiles()?.filter(File::isDirectory)?.forEach { dir ->
@@ -272,6 +359,7 @@ private class ExtensionHubServiceImpl(
                 }
                 override suspend fun invokeHostCapability(id: String, parametersJson: String): String {
                     check(id in record.manifest.requestedCapabilities) { "Child extension did not declare host capability: $id" }
+                    recordUse(record.manifest.extensionId)
                     return host.invokeHostCapability(id, parametersJson)
                 }
             }
@@ -353,7 +441,130 @@ private class ExtensionHubServiceImpl(
         val entryClass = runtime.getJSONObject("config").getString("entry_class").trim(); require(CLASS_PATTERN.matches(entryClass)) { "Invalid entry_class" }
         val requested = root.optJSONObject("permissions")?.optJSONArray("host_capabilities")?.strings() ?: emptySet()
         requested.forEach { require(ID_PATTERN.matches(it)) { "Invalid host capability id: $it" } }
-        return ExtensionManifest(id, version, name, description, ChildExtensionTarget(parent, point, api), entry, entryClass, requested, raw)
+        val roles = root.optJSONArray("roles")?.strings() ?: emptySet()
+        roles.forEach { require(ID_PATTERN.matches(it)) { "Invalid extension role: $it" } }
+        return ExtensionManifest(
+            id, version, name, description, ChildExtensionTarget(parent, point, api),
+            entry, entryClass, requested, roles, raw
+        )
+    }
+
+    private fun backupDir(extensionId: String) = File(backupsRoot, extensionId)
+    private fun backupPackage(extensionId: String) = File(backupDir(extensionId), "package${ExtensionPackage.SUFFIX}")
+
+    private fun readBackup(extensionId: String): ChildExtensionBackupSnapshot? {
+        val dir = backupDir(extensionId)
+        val packageFile = backupPackage(extensionId)
+        val metadataFile = File(dir, "backup.json")
+        if (!packageFile.isFile || !metadataFile.isFile) return null
+        return runCatching {
+            val metadata = JSONObject(metadataFile.readText())
+            val manifest = inspectBackupManifest(packageFile)
+            require(metadata.getString("extension_id") == manifest.extensionId)
+            require(metadata.getString("version") == manifest.version)
+            val installed = records[manifest.extensionId]
+            ChildExtensionBackupSnapshot(
+                extensionId = manifest.extensionId,
+                version = manifest.version,
+                displayName = manifest.displayName,
+                description = manifest.description,
+                target = manifest.target,
+                roles = manifest.roles,
+                packageSha256 = metadata.getString("package_sha256"),
+                backedUpAtEpochMs = metadata.getLong("backed_up_at"),
+                wasEnabled = metadata.optBoolean("was_enabled", false),
+                installed = installed != null,
+                installedVersion = installed?.manifest?.version
+            )
+        }.getOrNull()
+    }
+
+    private fun inspectBackupManifest(packageFile: File): ExtensionManifest =
+        ZipFile(packageFile).use { zip ->
+            val entry = zip.getEntry(ExtensionPackage.MANIFEST)
+                ?: error("Backup is missing ${ExtensionPackage.MANIFEST}")
+            val raw = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+            parseManifest(raw)
+        }
+
+    private fun packInstalledExtension(record: StoredExtension, output: File) {
+        val rootDir = extensionDir(record.manifest.extensionId)
+        val excluded = setOf("state.json", "package.sha256")
+        val files = rootDir.walkTopDown()
+            .filter(File::isFile)
+            .map { file -> file to file.relativeTo(rootDir).invariantSeparatorsPath }
+            .filter { (_, path) -> path !in excluded }
+            .sortedBy { it.second }
+            .toList()
+        require(files.any { it.second == ExtensionPackage.MANIFEST }) { "Installed extension manifest is missing" }
+        ZipOutputStream(output.outputStream().buffered()).use { zip ->
+            files.forEach { (file, relative) ->
+                val entry = ZipEntry(safePath(relative)).apply { time = 0L }
+                zip.putNextEntry(entry)
+                file.inputStream().buffered().use { it.copyTo(zip) }
+                zip.closeEntry()
+            }
+        }
+    }
+
+    private fun replaceBackup(extensionId: String, staged: File) {
+        val target = backupDir(extensionId)
+        val previous = File(backupsRoot, ".old-${UUID.randomUUID()}")
+        if (target.exists()) require(target.renameTo(previous)) { "Could not move previous child backup aside" }
+        if (!staged.renameTo(target)) {
+            if (previous.exists()) previous.renameTo(target)
+            error("Could not commit child extension backup")
+        }
+        if (previous.exists()) previous.deleteRecursively()
+    }
+
+    private fun publishBackupSnapshots() {
+        mutableBackupSnapshots.value = backupsRoot.listFiles()
+            ?.filter { it.isDirectory && !it.name.startsWith(".") }
+            ?.mapNotNull { readBackup(it.name) }
+            ?.sortedWith(compareBy({ it.displayName.lowercase() }, { it.extensionId }))
+            .orEmpty()
+    }
+
+    private fun loadUsage() {
+        usageCounts.clear()
+        val root = runCatching { JSONObject(usageFile.readText()) }.getOrNull() ?: return
+        root.keys().forEach { key -> usageCounts[key] = root.optLong(key, 0L).coerceAtLeast(0L) }
+    }
+
+    private fun persistUsage() {
+        val root = JSONObject()
+        usageCounts.toSortedMap().forEach { (id, count) -> root.put(id, count) }
+        usageFile.writeText(root.toString(2))
+    }
+
+    private fun loadBackupPolicy() {
+        val root = runCatching { JSONObject(backupPolicyFile.readText()) }.getOrNull() ?: return
+        autoBackupEnabled = root.optBoolean("enabled", false)
+        highFrequencyUseCount = root.optLong("high_frequency_use_count", 10L).coerceAtLeast(1L)
+    }
+
+    private fun persistBackupPolicy() {
+        backupPolicyFile.writeText(
+            JSONObject()
+                .put("enabled", autoBackupEnabled)
+                .put("high_frequency_use_count", highFrequencyUseCount)
+                .toString(2)
+        )
+    }
+
+    private suspend fun reconcileAutoBackup() {
+        if (!autoBackupEnabled) return
+        for (record in records.values) autoBackupIfEligible(record)
+    }
+
+    private suspend fun autoBackupIfEligible(record: StoredExtension) {
+        if (!autoBackupEnabled) return
+        val systemExtension = record.manifest.roles.any { it in SYSTEM_EXTENSION_ROLES }
+        val highFrequency = (usageCounts[record.manifest.extensionId] ?: 0L) >= highFrequencyUseCount
+        if (!systemExtension && !highFrequency) return
+        if (readBackup(record.manifest.extensionId)?.version == record.manifest.version) return
+        backup(record.manifest.extensionId)
     }
 
     private fun requireAllowedCapabilities(manifest: ExtensionManifest, point: PointRegistration) {
@@ -383,13 +594,25 @@ private class ExtensionHubServiceImpl(
     }
 
     private fun filterPoint(point: String) = mutableSnapshots.value.filter { it.target.point == point }
-    private fun snapshot(record: StoredExtension) = ChildExtensionSnapshot(record.manifest.extensionId, record.manifest.version, record.manifest.displayName, record.manifest.description, record.manifest.target, record.lifecycle, record.enabled, record.lastError)
+    private fun snapshot(record: StoredExtension) = ChildExtensionSnapshot(
+        extensionId = record.manifest.extensionId,
+        version = record.manifest.version,
+        displayName = record.manifest.displayName,
+        description = record.manifest.description,
+        target = record.manifest.target,
+        lifecycle = record.lifecycle,
+        enabled = record.enabled,
+        roles = record.manifest.roles,
+        useCount = usageCounts[record.manifest.extensionId] ?: 0L,
+        lastError = record.lastError
+    )
     private fun extensionDir(id: String) = File(extensionsRoot, id)
     private fun safePath(raw: String): String { val v=raw.trim(); require(v.isNotBlank() && !v.startsWith("/") && !v.contains('\\')); val p=v.split('/'); require(p.none { it.isBlank() || it=="." || it==".." || it.contains(':') }); return p.joinToString("/") }
     private fun safeFile(root: File, relative: String): File { val r=root.canonicalFile; val f=File(r,safePath(relative)).canonicalFile; require(f.path.startsWith(r.path+File.separator)); return f }
     private fun sha256(file: File): String { val d=MessageDigest.getInstance("SHA-256"); file.inputStream().use { input -> val b=ByteArray(8192); while(true){val n=input.read(b); if(n<0)break; d.update(b,0,n)} }; return d.digest().joinToString(""){"%02x".format(it)} }
 
     companion object {
+        private val SYSTEM_EXTENSION_ROLES = setOf("system", "system_extension", "system_provider")
         private val ID_PATTERN = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
         private val SEMVER = Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$")
         private val CLASS_PATTERN = Regex("^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)+$")

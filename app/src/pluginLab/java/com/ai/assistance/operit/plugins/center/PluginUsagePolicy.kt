@@ -30,15 +30,17 @@ class PluginUsageStore(context: Context) {
     private val prefs = context.getSharedPreferences("plugin_usage_stats_v1", Context.MODE_PRIVATE)
     private val lock = Any()
 
-    fun recordUse(pluginId: String, atEpochMs: Long = System.currentTimeMillis()) {
+    fun recordUse(pluginId: String, atEpochMs: Long = System.currentTimeMillis()): Long {
         val id = pluginId.trim()
-        if (id.isEmpty()) return
-        synchronized(lock) {
+        if (id.isEmpty()) return 0L
+        return synchronized(lock) {
             val countKey = "count:$id"
+            val count = prefs.getLong(countKey, 0L) + 1L
             prefs.edit()
-                .putLong(countKey, prefs.getLong(countKey, 0L) + 1L)
+                .putLong(countKey, count)
                 .putLong("last:$id", atEpochMs)
                 .apply()
+            count
         }
     }
 

@@ -27,6 +27,7 @@ data class PluginSnapshot(
     val persistentState: PluginPersistentState?,
     val activeManifest: PluginManifest?,
     val usage: PluginUsageStats,
+    val backup: PluginBackupSnapshot?,
     val mountedVersion: String?,
     val contributions: List<PluginContributionRecord>
 )
@@ -46,6 +47,8 @@ internal class PluginManager(
     private val surfacePolicy: HostSurfacePolicy,
     private val usageStore: PluginUsageStore,
     private val inactivityPolicy: PluginInactivityPolicyStore,
+    private val backupStore: PluginBackupStore,
+    private val backupPolicy: PluginBackupPolicyStore,
     private val runtimeHost: PluginRuntimeHost,
     private val pluginContextFactory: PluginContextFactory,
     private val packageVerifier: PluginPackageVerifier = PluginPackageVerifier()
@@ -56,17 +59,22 @@ internal class PluginManager(
 
     fun initialize() {
         store.initialize()
+        backupStore.initialize()
     }
 
     suspend fun install(
         sourcePackage: File,
         options: PluginInstallOptions = PluginInstallOptions()
     ): PluginInstallResult = locked {
-        installLocked(sourcePackage, options)
+        val result = installLocked(sourcePackage, options)
+        autoBackupIfEligibleLocked(result.pluginId)
+        result
     }
 
     suspend fun enable(pluginId: String): PluginPersistentState = locked {
-        enableLocked(pluginId)
+        val state = enableLocked(pluginId)
+        autoBackupIfEligibleLocked(pluginId)
+        state
     }
     suspend fun disable(
         pluginId: String,
@@ -90,7 +98,9 @@ internal class PluginManager(
         pluginId: String,
         version: String
     ): PluginPersistentState = locked {
-        activateVersionLocked(pluginId, version)
+        val state = activateVersionLocked(pluginId, version)
+        autoBackupIfEligibleLocked(pluginId)
+        state
     }
 
     suspend fun rollback(pluginId: String): PluginPersistentState = locked {
@@ -131,6 +141,32 @@ internal class PluginManager(
 
     suspend fun reconcileInactivityPolicy() = locked {
         reconcileInactivityPolicyLocked()
+    }
+
+    suspend fun backup(pluginId: String): PluginBackupSnapshot = locked {
+        backupLocked(pluginId)
+    }
+
+    suspend fun restoreBackup(pluginId: String): PluginPersistentState = locked {
+        restoreBackupLocked(pluginId)
+    }
+
+    suspend fun deleteBackup(pluginId: String) = locked {
+        backupStore.delete(pluginId)
+    }
+
+    suspend fun backupSnapshots(): List<PluginBackupSnapshot> = locked {
+        backupStore.snapshots().map { backup ->
+            val state = stateRepository.read(backup.pluginId)
+            backup.copy(
+                installed = state != null,
+                installedVersion = state?.activeVersion
+            )
+        }
+    }
+
+    suspend fun reconcileBackupPolicy() = locked {
+        reconcileBackupPolicyLocked()
     }
 
     suspend fun shutdown() = locked {
@@ -235,6 +271,7 @@ internal class PluginManager(
                 grantedScopes = manifest.permissions.requestedScopes
             )
         )
+        store.discardManagedPackage(transaction)
         store.commitVersion(transaction, manifest.pluginId, manifest.version)
         val previousState = stateRepository.read(manifest.pluginId)
         val state = if (previousState == null) {
@@ -818,6 +855,56 @@ internal class PluginManager(
                 ?.any { it.pluginId == pluginId } == true
         }.sorted()
 
+    private fun backupLocked(pluginId: String): PluginBackupSnapshot {
+        val state = requireState(pluginId)
+        val version = state.activeVersion
+            ?: throw PluginInstallException("ACTIVE_VERSION_MISSING", "No active version is selected for $pluginId")
+        return backupStore.backup(pluginId, version, state.enabled)
+    }
+
+    private suspend fun restoreBackupLocked(pluginId: String): PluginPersistentState {
+        if (stateRepository.read(pluginId) != null || store.pluginDir(pluginId).exists()) {
+            throw PluginInstallException("BACKUP_TARGET_ALREADY_INSTALLED", "Plugin is already installed: $pluginId")
+        }
+        val backup = backupStore.snapshot(pluginId)
+            ?: throw PluginInstallException("BACKUP_NOT_FOUND", "No plugin backup exists for $pluginId")
+        val actualDigest = PluginPackageVerifier.sha256(backup.packageFile)
+        if (actualDigest != backup.packageSha256) {
+            throw PluginInstallException("BACKUP_DIGEST_MISMATCH", "Plugin backup is corrupted: $pluginId")
+        }
+        installLocked(
+            backup.packageFile,
+            PluginInstallOptions(
+                allowUntrustedForDevelopment = surfacePolicy.developerMode,
+                enableAfterInstall = backup.wasEnabled,
+                approvedScopes = backup.manifest.permissions.requestedScopes
+            )
+        )
+        var state = requireState(pluginId)
+        if (state.activeVersion != backup.version) {
+            state = activateVersionLocked(pluginId, backup.version)
+        }
+        return state
+    }
+
+    private fun reconcileBackupPolicyLocked() {
+        if (!backupPolicy.snapshot().enabled) return
+        store.listPluginIds().forEach(::autoBackupIfEligibleLocked)
+    }
+
+    private fun autoBackupIfEligibleLocked(pluginId: String) {
+        if (!backupPolicy.snapshot().enabled) return
+        val state = stateRepository.read(pluginId) ?: return
+        val version = state.activeVersion ?: return
+        val manifest = runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull() ?: return
+        val highFrequency = usageStore.snapshot(pluginId).useCount >= PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT
+        if (!isSystemRolePlugin(manifest) && !highFrequency) return
+        val existing = backupStore.snapshot(pluginId)
+        if (existing?.version == version) return
+        runCatching { backupStore.backup(pluginId, version, state.enabled) }
+            .onFailure { AppLogger.w(TAG, "Automatic backup failed for $pluginId", it) }
+    }
+
     private fun defaultState(pluginId: String, version: String): PluginPersistentState =
         PluginPersistentState(
             pluginId = pluginId,
@@ -852,6 +939,7 @@ internal class PluginManager(
             persistentState = state,
             activeManifest = manifest,
             usage = usageStore.snapshot(pluginId),
+            backup = backupStore.snapshot(pluginId),
             mountedVersion = activeMounts[pluginId]?.version,
             contributions = contributions.listByOwner(pluginId)
         )

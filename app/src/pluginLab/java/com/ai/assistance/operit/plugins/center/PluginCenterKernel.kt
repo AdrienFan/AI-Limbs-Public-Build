@@ -34,6 +34,7 @@ object PluginCenterKernel {
     private lateinit var adminSecurityInstance: AdminSecurityManager
     private lateinit var usageStoreInstance: PluginUsageStore
     private lateinit var inactivityPolicyInstance: PluginInactivityPolicyStore
+    private lateinit var backupPolicyInstance: PluginBackupPolicyStore
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var inactivityMonitorJob: Job? = null
 
@@ -63,7 +64,13 @@ object PluginCenterKernel {
 
     fun recordPluginUse(pluginId: String) {
         requireInitialized()
-        usageStoreInstance.recordUse(pluginId)
+        val count = usageStoreInstance.recordUse(pluginId)
+        if (backupPolicyInstance.snapshot().enabled && count == PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT) {
+            monitorScope.launch {
+                runCatching { managerInstance.reconcileBackupPolicy() }
+                    .onFailure { AppLogger.w(TAG, "High-frequency plugin backup check failed", it) }
+            }
+        }
     }
 
     fun initialize(
@@ -77,6 +84,7 @@ object PluginCenterKernel {
             val adminSecurity = AdminSecurityManager(appContext)
             val usageStore = PluginUsageStore(appContext)
             val inactivityPolicy = PluginInactivityPolicyStore(appContext)
+            val backupPolicy = PluginBackupPolicyStore(appContext)
             val uiRegistry = PluginUiRegistry()
             val capabilityRegistry = PluginHostCapabilityRegistry(surfacePolicy, usageStore)
             val contributions = PluginContributionRegistry()
@@ -90,12 +98,30 @@ object PluginCenterKernel {
                 Triple(PluginExtensionPoints.UI_SCREEN, "插件页面", "允许插件提供可打开的界面页面"),
                 Triple(PluginExtensionPoints.UI_THEME, "全局主题 / 皮肤", "允许插件实时接管宿主主题与配色")
             ).forEach { (point, title, detail) ->
+                val contracts = when (point) {
+                    PluginExtensionPoints.UI_HOME_TILE -> listOf(
+                        "InProcessHomeTile",
+                        "InProcessPluginHost.registerHomeTile"
+                    )
+                    PluginExtensionPoints.UI_SCREEN -> listOf(
+                        "InProcessScreen",
+                        "InProcessScreenBlock",
+                        "InProcessDynamicPanelProvider",
+                        "InProcessPanelState",
+                        "InProcessPanelField",
+                        "InProcessPanelAction",
+                        "InProcessSelectionProvider",
+                        "InProcessPluginHost.registerScreen"
+                    )
+                    else -> emptyList()
+                }
                 surfacePolicy.register(
                     HostSurfaceDefinition(
                         id = PluginSurfaceIds.extension(point),
                         title = "$title · $point@1",
                         detail = detail,
-                        kind = HostSurfaceKind.EXTENSION_POINT
+                        kind = HostSurfaceKind.EXTENSION_POINT,
+                        publicContracts = contracts
                     )
                 )
             }
@@ -150,9 +176,11 @@ object PluginCenterKernel {
                 capabilityInvokerFactory = capabilityRegistry,
                 secretBroker = secretBroker
             )
+            val pluginStore = PluginStore.fromContext(appContext)
+            val backupStore = PluginBackupStore(pluginStore)
             val manager = PluginManager(
                 appContext = appContext,
-                store = PluginStore.fromContext(appContext),
+                store = pluginStore,
                 trustVerifier = StrictPluginTrustVerifier,
                 runtimeAdapters = runtimeAdapters,
                 contributions = contributions,
@@ -161,6 +189,8 @@ object PluginCenterKernel {
                 surfacePolicy = surfacePolicy,
                 usageStore = usageStore,
                 inactivityPolicy = inactivityPolicy,
+                backupStore = backupStore,
+                backupPolicy = backupPolicy,
                 runtimeHost = PluginRuntimeHost(),
                 pluginContextFactory = pluginContextFactory
             )
@@ -168,8 +198,10 @@ object PluginCenterKernel {
                 manager,
                 extensionPoints,
                 extensionRouter,
+                contributions,
                 surfacePolicy,
                 inactivityPolicy,
+                backupPolicy,
                 onInactivityPolicyChanged = { startInactivityMonitor() }
             )
 
@@ -186,6 +218,7 @@ object PluginCenterKernel {
             adminSecurityInstance = adminSecurity
             usageStoreInstance = usageStore
             inactivityPolicyInstance = inactivityPolicy
+            backupPolicyInstance = backupPolicy
             initialized = true
             AppLogger.i(TAG, "AI Limbs Plugin Center kernel initialized: ${manager.store.rootDir.absolutePath}")
         }
@@ -199,6 +232,7 @@ object PluginCenterKernel {
         try {
             controlPlaneInstance.restoreEnabledPlugins()
             controlPlaneInstance.runInactivityCheck()
+            controlPlaneInstance.runBackupCheck()
             AppLogger.i(TAG, "AI Limbs Plugin Center restored enabled plugins")
         } catch (error: CancellationException) {
             throw error

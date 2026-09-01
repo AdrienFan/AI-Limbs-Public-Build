@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins.center
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -36,7 +37,8 @@ internal class PluginHostCapabilityRegistry(
                 .put("runtime", "declarative-v1")
         },
         "core.logs.read" to HostCapability("host.logs.read", ::readLogs),
-        "core.bridge.remote.invoke" to HostCapability(null, ::bridgeRemoteInvoke)
+        "core.bridge.remote.invoke" to HostCapability(null, ::bridgeRemoteInvoke),
+        "core.host_surface.snapshot" to HostCapability(null, ::hostSurfaceSnapshot)
     )
 
     init {
@@ -45,7 +47,11 @@ internal class PluginHostCapabilityRegistry(
                 PluginSurfaceIds.PUBLISH_CAPABILITY,
                 "plugin.* capability 发布总线",
                 "允许插件注册自己的无界面能力",
-                HostSurfaceKind.PLUGIN_CAPABILITY_BUS
+                HostSurfaceKind.PLUGIN_CAPABILITY_BUS,
+                publicContracts = listOf(
+                    "InProcessPluginHost.registerCapability",
+                    "InProcessCapabilityExecutor"
+                )
             )
         )
         surfacePolicy?.register(
@@ -53,7 +59,8 @@ internal class PluginHostCapabilityRegistry(
                 PluginSurfaceIds.PUBLISH_SERVICE,
                 "Plugin Service 发布总线",
                 "允许插件向宿主发布 service",
-                HostSurfaceKind.PLUGIN_SERVICE_BUS
+                HostSurfaceKind.PLUGIN_SERVICE_BUS,
+                publicContracts = emptyList()
             )
         )
         surfacePolicy?.register(
@@ -61,7 +68,12 @@ internal class PluginHostCapabilityRegistry(
                 PluginSurfaceIds.PUBLISH_PROVIDER,
                 "Plugin Provider 发布总线",
                 "允许插件向宿主发布 provider",
-                HostSurfaceKind.PLUGIN_PROVIDER_BUS
+                HostSurfaceKind.PLUGIN_PROVIDER_BUS,
+                publicContracts = listOf(
+                    "InProcessPluginHost.registerProvider",
+                    "InProcessProviderDirectory",
+                    "InProcessProviderBinding"
+                )
             )
         )
         hostCapabilities.forEach { (id, capability) ->
@@ -72,7 +84,8 @@ internal class PluginHostCapabilityRegistry(
                     detail = capability.requiredScope?.let { "宿主能力 · scope: $it · 可在 mount 前预判" }
                         ?: "宿主能力 · 无预声明 scope · 每次调用时强制检查策略",
                     kind = HostSurfaceKind.HOST_CAPABILITY,
-                    requiredScope = capability.requiredScope
+                    requiredScope = capability.requiredScope,
+                    publicContracts = HOST_CAPABILITY_CONTRACTS
                 )
             )
         }
@@ -138,6 +151,26 @@ internal class PluginHostCapabilityRegistry(
         }
 
 
+    private suspend fun hostSurfaceSnapshot(parameters: JSONObject): JSONObject {
+        val policy = surfacePolicy
+        val surfaces = policy?.snapshots().orEmpty()
+        return JSONObject()
+            .put("developer_mode", policy?.developerMode ?: false)
+            .put("source", "PluginCenter HostSurfacePolicy")
+            .put("surfaces", JSONArray().apply {
+                surfaces.forEach { item ->
+                    put(JSONObject()
+                        .put("id", item.definition.id)
+                        .put("title", item.definition.title)
+                        .put("detail", item.definition.detail)
+                        .put("kind", item.definition.kind.name)
+                        .put("required_scope", item.definition.requiredScope)
+                        .put("allowed", item.allowed)
+                        .put("public_contracts", JSONArray(item.definition.publicContracts)))
+                }
+            })
+    }
+
     private suspend fun bridgeRemoteInvoke(parameters: JSONObject): JSONObject {
         val tool = parameters.optString("tool").trim()
         val transport = parameters.optString("transport").trim()
@@ -165,5 +198,9 @@ internal class PluginHostCapabilityRegistry(
 
     private companion object {
         val CAPABILITY_ID = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+        val HOST_CAPABILITY_CONTRACTS = listOf(
+            "InProcessPluginHost.invokeHostCapability",
+            "ChildExtensionHost.invokeHostCapability"
+        )
     }
 }

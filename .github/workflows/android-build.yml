@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    name: Build Plugin Lab Alt + Four Plugins
+    name: Build Plugin Lab Alt + Five Plugins
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -49,7 +49,7 @@ jobs:
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Build 1 - Plugin Lab v0.5.1
+      - name: Build 1 - Plugin Lab v0.5.2
         shell: bash
         run: |
           set -euo pipefail
@@ -80,15 +80,22 @@ jobs:
           set -euo pipefail
           ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
 
-      - name: Package four plugin artifacts
+      - name: Build 6 - developer-guide.ailp payload
         shell: bash
         run: |
           set -euo pipefail
-          python3 tools/plugin_lab/package_four.py
+          ./gradlew :developer-guide-plugin:assembleDebug --stacktrace --no-daemon
+
+      - name: Package five plugin artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/plugin_lab/package_plugins.py
           unzip -l dist/plugin-extension-hub.ailp
           unzip -l dist/bridge-core.ailp
           unzip -l dist/rdc-provider.ailx
           unzip -l dist/triggercmd-provider.ailx
+          unzip -l dist/developer-guide.ailp
 
       - name: Upload Android reports
         if: always()
@@ -101,16 +108,17 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Plugin Lab and four plugins
+      - name: Upload Plugin Lab and five plugins
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: plugin-lab-alt-v051-${{ github.run_number }}
+          name: plugin-lab-alt-v052-${{ github.run_number }}
           path: |
             app/build/outputs/apk/debug/*.apk
             dist/plugin-extension-hub.ailp
             dist/bridge-core.ailp
             dist/rdc-provider.ailx
             dist/triggercmd-provider.ailx
+            dist/developer-guide.ailp
           if-no-files-found: error
           retention-days: 14

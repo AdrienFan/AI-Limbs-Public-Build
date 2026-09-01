@@ -14,14 +14,16 @@ class PluginStore(
     val pluginDataRoot = File(rootDir, "data")
     val pluginCacheRoot = File(rootDir, "cache")
     val quarantineRoot = File(rootDir, "quarantine")
+    val backupsRoot = File(rootDir, "backups")
 
     fun initialize() {
-        listOf(rootDir, stagingRoot, pluginsRoot, pluginDataRoot, pluginCacheRoot, quarantineRoot).forEach { dir ->
+        listOf(rootDir, stagingRoot, pluginsRoot, pluginDataRoot, pluginCacheRoot, quarantineRoot, backupsRoot).forEach { dir ->
             if (!dir.exists() && !dir.mkdirs()) {
                 throw PluginInstallException("STORE_INIT_FAILED", "Could not create plugin store directory: ${dir.path}")
             }
         }
         cleanupStaging()
+        cleanupLegacyInstalledPackages()
     }
 
     fun createStagingTransaction(): File {
@@ -33,7 +35,6 @@ class PluginStore(
     fun managedPackageIn(transactionDir: File): File = File(transactionDir, "package${PluginAbi.PACKAGE_EXTENSION}")
     fun contentIn(versionDir: File): File = File(versionDir, "content")
     fun installMetadataIn(versionDir: File): File = File(versionDir, "install.json")
-    fun packageIn(versionDir: File): File = File(versionDir, "package${PluginAbi.PACKAGE_EXTENSION}")
 
     fun pluginDir(pluginId: String): File = File(pluginsRoot, safeSegment(pluginId))
     fun versionsDir(pluginId: String): File = File(pluginDir(pluginId), "versions")
@@ -41,6 +42,9 @@ class PluginStore(
     fun stateFile(pluginId: String): File = File(pluginDir(pluginId), "state.json")
     fun dataDir(pluginId: String): File = File(pluginDataRoot, safeSegment(pluginId))
     fun cacheDir(pluginId: String): File = File(pluginCacheRoot, safeSegment(pluginId))
+    fun backupDir(pluginId: String): File = File(backupsRoot, safeSegment(pluginId))
+    fun backupPackageIn(backupDir: File): File = File(backupDir, "package${PluginAbi.PACKAGE_EXTENSION}")
+    fun backupMetadataIn(backupDir: File): File = File(backupDir, "backup.json")
 
     fun copyIntoManagedStaging(source: File, target: File) {
         if (!source.isFile) throw PluginInstallException("SOURCE_MISSING", "Plugin source file does not exist")
@@ -50,6 +54,13 @@ class PluginStore(
                 input.copyTo(output)
                 output.fd.sync()
             }
+        }
+    }
+
+    fun discardManagedPackage(transactionDir: File) {
+        val managed = managedPackageIn(transactionDir)
+        if (managed.exists() && !managed.delete()) {
+            throw PluginInstallException("STORE_PACKAGE_DISCARD_FAILED", "Could not discard staged plugin package before commit")
         }
     }
 
@@ -91,6 +102,14 @@ class PluginStore(
 
     fun cleanupStaging() {
         stagingRoot.listFiles()?.forEach { it.deleteRecursively() }
+    }
+
+    private fun cleanupLegacyInstalledPackages() {
+        pluginsRoot.listFiles()?.filter(File::isDirectory)?.forEach { plugin ->
+            File(plugin, "versions").listFiles()?.filter(File::isDirectory)?.forEach { version ->
+                File(version, "package${PluginAbi.PACKAGE_EXTENSION}").delete()
+            }
+        }
     }
 
     private fun safeSegment(value: String): String {

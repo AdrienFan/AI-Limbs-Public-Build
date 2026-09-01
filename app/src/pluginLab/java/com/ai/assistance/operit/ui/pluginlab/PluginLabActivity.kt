@@ -415,6 +415,7 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
         return
     }
     val snapshots by hub.snapshotsForPoint(point).collectAsState()
+    val backups by hub.backupSnapshots().collectAsState()
     val scope = rememberCoroutineScope()
     var expanded by remember(point) { mutableStateOf(false) }
     var query by remember(point) { mutableStateOf("") }
@@ -444,6 +445,8 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
             )
         }
         filtered.forEach { snapshot ->
+            val backupVersion = backups.firstOrNull { it.extensionId == snapshot.extensionId }?.version
+            val canBackup = backupVersion != snapshot.version
             Card(modifier = Modifier.fillMaxWidth()) {
                 Column(
                     modifier = Modifier.padding(12.dp),
@@ -451,6 +454,7 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
                 ) {
                     Text("${snapshot.displayName} · ${snapshot.version}", style = MaterialTheme.typography.titleSmall)
                     Text("${snapshot.extensionId} · ${snapshot.lifecycle}", style = MaterialTheme.typography.bodySmall)
+                    Text("使用 ${snapshot.useCount} 次 · 备份：${backupVersion ?: "未备份"}", style = MaterialTheme.typography.bodySmall)
                     snapshot.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Button(onClick = {
@@ -467,6 +471,16 @@ private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
                                     .onFailure { onResult("卸载失败：${it.message}") }
                             }
                         }) { Text("卸载") }
+                        Button(
+                            enabled = canBackup,
+                            onClick = {
+                                scope.launch {
+                                    runCatching { hub.backup(snapshot.extensionId) }
+                                        .onSuccess { onResult("已备份 ${it.displayName} ${it.version}") }
+                                        .onFailure { onResult("备份失败：${it.message}") }
+                                }
+                            }
+                        ) { Text("备份") }
                     }
                 }
             }

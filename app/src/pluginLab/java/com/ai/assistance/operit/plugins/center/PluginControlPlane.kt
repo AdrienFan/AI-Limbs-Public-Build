@@ -1,5 +1,8 @@
 package com.ai.assistance.operit.plugins.center
 
+import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
+import com.ai.limbs.plugin.runtime.ExtensionHubService
+import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import java.io.File
 
 enum class PluginHealthState {
@@ -18,8 +21,10 @@ class PluginControlPlane internal constructor(
     private val manager: PluginManager,
     private val extensionPoints: ExtensionPointRegistry,
     private val extensionRouter: ExtensionRouter,
+    private val contributions: PluginContributionRegistry,
     private val surfacePolicy: HostSurfacePolicy,
     private val inactivityPolicy: PluginInactivityPolicyStore,
+    private val backupPolicy: PluginBackupPolicyStore,
     private val onInactivityPolicyChanged: () -> Unit = {}
 ) {
     fun inspectPackage(sourcePackage: File): PluginManifest =
@@ -69,6 +74,11 @@ class PluginControlPlane internal constructor(
         manager.reconcileHostSurfacePolicy()
     }
 
+    suspend fun setHostSurfacesAllowed(surfaceIds: Collection<String>, allowed: Boolean) {
+        surfacePolicy.setAllowed(surfaceIds, allowed)
+        manager.reconcileHostSurfacePolicy()
+    }
+
     fun inactivityPolicySnapshot(): PluginInactivityPolicySnapshot = inactivityPolicy.snapshot()
 
     suspend fun configureInactivityPolicy(
@@ -85,6 +95,43 @@ class PluginControlPlane internal constructor(
     suspend fun runInactivityCheck() {
         manager.reconcileInactivityPolicy()
     }
+
+    fun backupPolicySnapshot(): PluginBackupPolicySnapshot = backupPolicy.snapshot()
+
+    suspend fun configureBackupPolicy(enabled: Boolean) {
+        backupPolicy.configure(enabled)
+        manager.reconcileBackupPolicy()
+        extensionHub()?.setAutoBackupPolicy(enabled, PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT)
+    }
+
+    suspend fun backup(pluginId: String): PluginBackupSnapshot = manager.backup(pluginId)
+
+    suspend fun restoreBackup(pluginId: String): PluginPersistentState = manager.restoreBackup(pluginId)
+
+    suspend fun deleteBackup(pluginId: String) {
+        manager.deleteBackup(pluginId)
+    }
+
+    suspend fun backupSnapshots(): List<PluginBackupSnapshot> = manager.backupSnapshots()
+
+    suspend fun runBackupCheck() {
+        manager.reconcileBackupPolicy()
+        extensionHub()?.setAutoBackupPolicy(
+            backupPolicy.snapshot().enabled,
+            PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT
+        )
+    }
+
+    fun childBackupSnapshots(): List<ChildExtensionBackupSnapshot> =
+        extensionHub()?.backupSnapshots()?.value.orEmpty()
+
+    suspend fun restoreChildBackup(extensionId: String) =
+        extensionHub()?.restoreBackup(extensionId)
+            ?: throw PluginInstallException("EXTENSION_HUB_UNAVAILABLE", "Plugin Extension Hub is not active")
+
+    suspend fun deleteChildBackup(extensionId: String): Boolean =
+        extensionHub()?.deleteBackup(extensionId)
+            ?: throw PluginInstallException("EXTENSION_HUB_UNAVAILABLE", "Plugin Extension Hub is not active")
 
     suspend fun shutdown() {
         manager.shutdown()
@@ -103,6 +150,10 @@ class PluginControlPlane internal constructor(
 
     fun extensionBindings(pluginId: String): List<ExtensionBindingSnapshot> =
         extensionRouter.listBindingsByOwner(pluginId)
+
+    private fun extensionHub(): ExtensionHubService? =
+        contributions.find(PluginContributionKind.PROVIDER, InProcessSystemIds.EXTENSION_HUB_PROVIDER)
+            ?.payload as? ExtensionHubService
 
     private fun toControlSnapshot(plugin: PluginSnapshot): PluginControlSnapshot {
         val lifecycle = plugin.persistentState?.lastState

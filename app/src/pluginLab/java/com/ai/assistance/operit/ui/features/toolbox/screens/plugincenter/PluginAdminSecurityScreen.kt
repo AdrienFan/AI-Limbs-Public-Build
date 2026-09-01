@@ -25,6 +25,7 @@ import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -40,8 +41,13 @@ import com.ai.assistance.operit.plugins.center.AdminSecurityManager
 import com.ai.assistance.operit.plugins.center.HostSurfaceKind
 import com.ai.assistance.operit.plugins.center.HostSurfaceSnapshot
 import com.ai.assistance.operit.plugins.center.InactivityThresholdMode
+import com.ai.assistance.operit.plugins.center.PluginBackupPolicyStore
+import com.ai.assistance.operit.plugins.center.PluginBackupSnapshot
 import com.ai.assistance.operit.plugins.center.PluginControlPlane
 import com.ai.assistance.operit.plugins.center.PluginInactivityPolicyStore
+import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
+import java.text.DateFormat
+import java.util.Date
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -207,10 +213,20 @@ internal fun PluginAdminSecurityScreen(
     var developerMode by remember { mutableStateOf(controlPlane.developerModeEnabled()) }
     var surfaces by remember { mutableStateOf(controlPlane.hostSurfaceSnapshots()) }
     val initialInactivity = remember { controlPlane.inactivityPolicySnapshot() }
+    val initialBackupPolicy = remember { controlPlane.backupPolicySnapshot() }
     var inactivityEnabled by remember { mutableStateOf(initialInactivity.enabled) }
     var inactivityTestMode by remember { mutableStateOf(initialInactivity.mode == InactivityThresholdMode.TEST_SECONDS) }
     var inactivityDays by remember { mutableStateOf(initialInactivity.days.toString()) }
     var inactivitySeconds by remember { mutableStateOf(initialInactivity.testSeconds.toString()) }
+    var backupAutoEnabled by remember { mutableStateOf(initialBackupPolicy.enabled) }
+    var backups by remember { mutableStateOf<List<PluginBackupSnapshot>>(emptyList()) }
+    var backupsExpanded by remember { mutableStateOf(false) }
+    var backupQuery by remember { mutableStateOf("") }
+    var selectedBackupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var childBackups by remember { mutableStateOf<List<ChildExtensionBackupSnapshot>>(emptyList()) }
+    var childBackupsExpanded by remember { mutableStateOf(false) }
+    var childBackupQuery by remember { mutableStateOf("") }
+    var selectedChildBackupIds by remember { mutableStateOf<Set<String>>(emptySet()) }
     var busy by remember { mutableStateOf(false) }
     var showChangePassword by remember { mutableStateOf(false) }
     var showRegenerateRecovery by remember { mutableStateOf(false) }
@@ -225,15 +241,31 @@ internal fun PluginAdminSecurityScreen(
     fun runAdminMutation(block: suspend () -> Unit) {
         scope.launch {
             busy = true
-            runCatching { withContext(Dispatchers.IO) { block() } }
-                .onSuccess {
-                    developerMode = controlPlane.developerModeEnabled()
-                    surfaces = controlPlane.hostSurfaceSnapshots()
-                    onPolicyChanged()
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    block()
+                    controlPlane.backupSnapshots() to controlPlane.childBackupSnapshots()
                 }
-                .onFailure(onError)
+            }.onSuccess { (refreshedBackups, refreshedChildBackups) ->
+                developerMode = controlPlane.developerModeEnabled()
+                surfaces = controlPlane.hostSurfaceSnapshots()
+                backupAutoEnabled = controlPlane.backupPolicySnapshot().enabled
+                backups = refreshedBackups
+                childBackups = refreshedChildBackups
+                selectedBackupIds = selectedBackupIds.intersect(refreshedBackups.mapTo(mutableSetOf()) { it.pluginId })
+                selectedChildBackupIds = selectedChildBackupIds.intersect(refreshedChildBackups.mapTo(mutableSetOf()) { it.extensionId })
+                onPolicyChanged()
+            }.onFailure(onError)
             busy = false
         }
+    }
+
+    LaunchedEffect(Unit) {
+        val initial = withContext(Dispatchers.IO) {
+            controlPlane.backupSnapshots() to controlPlane.childBackupSnapshots()
+        }
+        backups = initial.first
+        childBackups = initial.second
     }
 
     val normalizedSurfaceQuery = surfaceQuery.trim().lowercase()
@@ -248,11 +280,48 @@ internal fun PluginAdminSecurityScreen(
                     definition.id,
                     definition.detail,
                     definition.kind.name,
-                    definition.requiredScope.orEmpty()
+                    definition.requiredScope.orEmpty(),
+                    definition.publicContracts.joinToString(" ")
                 ).any { it.lowercase().contains(normalizedSurfaceQuery) }
             }
         }
     }
+    val allFilteredSurfacesAllowed = filteredSurfaces.isNotEmpty() && filteredSurfaces.all { it.allowed }
+
+    val normalizedBackupQuery = backupQuery.trim().lowercase()
+    val filteredBackups = remember(backups, normalizedBackupQuery) {
+        backups.filter { backup ->
+            val manifest = backup.manifest
+            val queryMatch = normalizedBackupQuery.isBlank() || listOf(
+                manifest.display.name, manifest.display.description.orEmpty(),
+                backup.pluginId, backup.version, manifest.runtime.kind, manifest.roles.joinToString(" ")
+            ).any { it.lowercase().contains(normalizedBackupQuery) }
+            queryMatch
+        }
+    }
+    val filteredBackupIds = filteredBackups.mapTo(linkedSetOf()) { it.pluginId }
+    val selectedRestorableBackupIds = filteredBackups
+        .filter { !it.installed && it.pluginId in selectedBackupIds }
+        .map { it.pluginId }
+    val allFilteredBackupsSelected =
+        filteredBackups.isNotEmpty() && filteredBackups.all { it.pluginId in selectedBackupIds }
+
+    val normalizedChildBackupQuery = childBackupQuery.trim().lowercase()
+    val filteredChildBackups = remember(childBackups, normalizedChildBackupQuery) {
+        childBackups.filter { backup ->
+            val queryMatch = normalizedChildBackupQuery.isBlank() || listOf(
+                backup.displayName, backup.description.orEmpty(), backup.extensionId, backup.version,
+                backup.target.parentPluginId, backup.target.point, backup.roles.joinToString(" ")
+            ).any { it.lowercase().contains(normalizedChildBackupQuery) }
+            queryMatch
+        }
+    }
+    val filteredChildBackupIds = filteredChildBackups.mapTo(linkedSetOf()) { it.extensionId }
+    val selectedRestorableChildBackupIds = filteredChildBackups
+        .filter { !it.installed && it.extensionId in selectedChildBackupIds }
+        .map { it.extensionId }
+    val allFilteredChildBackupsSelected =
+        filteredChildBackups.isNotEmpty() && filteredChildBackups.all { it.extensionId in selectedChildBackupIds }
 
     Box(modifier = Modifier.fillMaxSize()) {
     Column(
@@ -402,25 +471,69 @@ internal fun PluginAdminSecurityScreen(
                     }
                 }
             }
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth().padding(14.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("自动备份高频和系统插件", fontWeight = FontWeight.Bold)
+                        Text(
+                            "系统插件始终属于自动备份对象；普通插件累计使用达到 ${PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT} 次后视为高频。只在当前版本尚未备份时创建备份；更新后会自动备份新版本。配置后即使关闭开发模式也会继续生效。",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                    Switch(
+                        checked = backupAutoEnabled,
+                        enabled = !busy,
+                        onCheckedChange = { enabled ->
+                            runAdminMutation { controlPlane.configureBackupPolicy(enabled) }
+                        }
+                    )
+                }
+            }
+
             Text("Host Surface Policy", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-            Text("只有允许的宿主扩展面才能被插件使用。关闭接口后，相关已启用插件会转为 BLOCKED 并立即撤销运行；重新开放后会自动尝试恢复。", style = MaterialTheme.typography.bodySmall)
+            Text(
+                "只有允许的宿主扩展面才能被插件使用。关闭接口后，相关已启用插件会转为 BLOCKED 并立即撤销运行；重新开放后会自动尝试恢复。",
+                style = MaterialTheme.typography.bodySmall
+            )
             OutlinedTextField(
                 value = surfaceQuery,
                 onValueChange = { surfaceQuery = it },
                 label = { Text("搜索 Host Surface") },
-                placeholder = { Text("名称、接口 ID、说明、类型或 scope") },
+                placeholder = { Text("名称、接口 ID、说明、类型、scope 或 Public Contract") },
                 modifier = Modifier.fillMaxWidth(),
                 singleLine = true
             )
             Row(
                 modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
             ) {
                 Text(
                     "显示 ${filteredSurfaces.size} / ${surfaces.size}",
                     modifier = Modifier.weight(1f),
                     style = MaterialTheme.typography.bodySmall
                 )
+                OutlinedButton(
+                    enabled = !busy && filteredSurfaces.isNotEmpty(),
+                    onClick = {
+                        val targetIds = filteredSurfaces.map { it.definition.id }
+                        runAdminMutation {
+                            controlPlane.setHostSurfacesAllowed(targetIds, !allFilteredSurfacesAllowed)
+                        }
+                    }
+                ) {
+                    Text(
+                        when {
+                            normalizedSurfaceQuery.isBlank() && allFilteredSurfacesAllowed -> "取消全选"
+                            normalizedSurfaceQuery.isBlank() -> "全选"
+                            allFilteredSurfacesAllowed -> "取消选择结果"
+                            else -> "全选结果"
+                        }
+                    )
+                }
                 if (surfaceQuery.isNotBlank()) {
                     TextButton(onClick = { surfaceQuery = "" }) { Text("清除搜索") }
                 }
@@ -430,6 +543,170 @@ internal fun PluginAdminSecurityScreen(
             } else {
                 SurfaceGroups(filteredSurfaces, busy) { item, allowed ->
                     runAdminMutation { controlPlane.setHostSurfaceAllowed(item.definition.id, allowed) }
+                }
+            }
+
+            Divider()
+            PluginCollectionSection(
+                title = "已备份插件",
+                totalCount = backups.size,
+                matchedCount = filteredBackups.size,
+                query = backupQuery,
+                onQueryChange = { backupQuery = it },
+                expanded = backupsExpanded,
+                onExpandedChange = { backupsExpanded = it },
+                searchPlaceholder = "搜索备份插件"
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "已选择 ${selectedBackupIds.size} 个",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(
+                        enabled = !busy && filteredBackups.isNotEmpty(),
+                        onClick = {
+                            selectedBackupIds = if (allFilteredBackupsSelected) {
+                                selectedBackupIds - filteredBackupIds
+                            } else {
+                                selectedBackupIds + filteredBackupIds
+                            }
+                        }
+                    ) {
+                        Text(
+                            when {
+                                normalizedBackupQuery.isBlank() && allFilteredBackupsSelected -> "取消全选"
+                                normalizedBackupQuery.isBlank() -> "全选"
+                                allFilteredBackupsSelected -> "取消选择结果"
+                                else -> "全选结果"
+                            }
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        enabled = !busy && selectedRestorableBackupIds.isNotEmpty(),
+                        onClick = {
+                            val ids = selectedRestorableBackupIds.toList()
+                            runAdminMutation { ids.forEach { controlPlane.restoreBackup(it) } }
+                        }
+                    ) { Text("恢复所选") }
+                    OutlinedButton(
+                        enabled = !busy && selectedBackupIds.isNotEmpty(),
+                        onClick = {
+                            val ids = selectedBackupIds.toList()
+                            runAdminMutation { ids.forEach { controlPlane.deleteBackup(it) } }
+                        }
+                    ) { Text("删除所选") }
+                }
+                if (filteredBackups.isEmpty()) {
+                    Text(
+                        if (backupQuery.isBlank()) "当前没有已备份插件" else "没有匹配的备份插件",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    filteredBackups.forEach { backup ->
+                        BackupPluginCard(
+                            backup = backup,
+                            selected = backup.pluginId in selectedBackupIds,
+                            busy = busy,
+                            onSelectedChange = { selected ->
+                                selectedBackupIds = if (selected) {
+                                    selectedBackupIds + backup.pluginId
+                                } else {
+                                    selectedBackupIds - backup.pluginId
+                                }
+                            },
+                            onRestore = { runAdminMutation { controlPlane.restoreBackup(backup.pluginId) } },
+                            onDelete = { runAdminMutation { controlPlane.deleteBackup(backup.pluginId) } }
+                        )
+                    }
+                }
+            }
+
+            Divider()
+            PluginCollectionSection(
+                title = "已备份子插件",
+                totalCount = childBackups.size,
+                matchedCount = filteredChildBackups.size,
+                query = childBackupQuery,
+                onQueryChange = { childBackupQuery = it },
+                expanded = childBackupsExpanded,
+                onExpandedChange = { childBackupsExpanded = it },
+                searchPlaceholder = "搜索备份子插件"
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                        "已选择 ${selectedChildBackupIds.size} 个",
+                        modifier = Modifier.weight(1f),
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    OutlinedButton(
+                        enabled = !busy && filteredChildBackups.isNotEmpty(),
+                        onClick = {
+                            selectedChildBackupIds = if (allFilteredChildBackupsSelected) {
+                                selectedChildBackupIds - filteredChildBackupIds
+                            } else {
+                                selectedChildBackupIds + filteredChildBackupIds
+                            }
+                        }
+                    ) {
+                        Text(
+                            when {
+                                normalizedChildBackupQuery.isBlank() && allFilteredChildBackupsSelected -> "取消全选"
+                                normalizedChildBackupQuery.isBlank() -> "全选"
+                                allFilteredChildBackupsSelected -> "取消选择结果"
+                                else -> "全选结果"
+                            }
+                        )
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Button(
+                        enabled = !busy && selectedRestorableChildBackupIds.isNotEmpty(),
+                        onClick = {
+                            val ids = selectedRestorableChildBackupIds.toList()
+                            runAdminMutation { ids.forEach { controlPlane.restoreChildBackup(it) } }
+                        }
+                    ) { Text("恢复所选") }
+                    OutlinedButton(
+                        enabled = !busy && selectedChildBackupIds.isNotEmpty(),
+                        onClick = {
+                            val ids = selectedChildBackupIds.toList()
+                            runAdminMutation { ids.forEach { controlPlane.deleteChildBackup(it) } }
+                        }
+                    ) { Text("删除所选") }
+                }
+                if (filteredChildBackups.isEmpty()) {
+                    Text(
+                        if (childBackupQuery.isBlank()) "当前没有已备份子插件" else "没有匹配的备份子插件",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                } else {
+                    filteredChildBackups.forEach { backup ->
+                        BackupChildExtensionCard(
+                            backup = backup,
+                            selected = backup.extensionId in selectedChildBackupIds,
+                            busy = busy,
+                            onSelectedChange = { selected ->
+                                selectedChildBackupIds = if (selected) {
+                                    selectedChildBackupIds + backup.extensionId
+                                } else {
+                                    selectedChildBackupIds - backup.extensionId
+                                }
+                            },
+                            onRestore = { runAdminMutation { controlPlane.restoreChildBackup(backup.extensionId) } },
+                            onDelete = { runAdminMutation { controlPlane.deleteChildBackup(backup.extensionId) } }
+                        )
+                    }
                 }
             }
         }
@@ -496,6 +773,12 @@ private fun SurfaceGroups(
                         Text(item.definition.title, fontWeight = FontWeight.Medium)
                         Text(item.definition.id, style = MaterialTheme.typography.bodySmall)
                         Text(item.definition.detail, style = MaterialTheme.typography.bodySmall)
+                        if (item.definition.publicContracts.isNotEmpty()) {
+                            Text(
+                                "Public Contract：" + item.definition.publicContracts.joinToString(),
+                                style = MaterialTheme.typography.bodySmall
+                            )
+                        }
                     }
                 }
             }
@@ -503,6 +786,79 @@ private fun SurfaceGroups(
         Divider()
     }
 }
+
+@Composable
+private fun BackupPluginCard(
+    backup: PluginBackupSnapshot,
+    selected: Boolean,
+    busy: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
+    onRestore: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
+                Column(Modifier.weight(1f)) {
+                    Text(backup.manifest.display.name, fontWeight = FontWeight.Bold)
+                    Text(backup.pluginId, style = MaterialTheme.typography.bodySmall)
+                    Text("v${backup.version} · ${backup.manifest.runtime.kind}", style = MaterialTheme.typography.bodySmall)
+                    Text("备份时间：${formatBackupTime(backup.backedUpAtEpochMs)}", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        if (backup.installed) "当前已安装：v${backup.installedVersion ?: "未知"}" else "当前未安装，可从备份恢复",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onRestore, enabled = !busy && !backup.installed) { Text("恢复") }
+                OutlinedButton(onClick = onDelete, enabled = !busy) { Text("删除") }
+            }
+        }
+    }
+}
+
+@Composable
+private fun BackupChildExtensionCard(
+    backup: ChildExtensionBackupSnapshot,
+    selected: Boolean,
+    busy: Boolean,
+    onSelectedChange: (Boolean) -> Unit,
+    onRestore: () -> Unit,
+    onDelete: () -> Unit
+) {
+    Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Checkbox(checked = selected, enabled = !busy, onCheckedChange = onSelectedChange)
+                Column(Modifier.weight(1f)) {
+                    Text(backup.displayName, fontWeight = FontWeight.Bold)
+                    Text("${backup.extensionId} · 子插件 · .ailx", style = MaterialTheme.typography.bodySmall)
+                    Text("v${backup.version}", style = MaterialTheme.typography.bodySmall)
+                    Text("父插件：${backup.target.parentPluginId}", style = MaterialTheme.typography.bodySmall)
+                    Text(
+                        "Extension Point：${backup.target.point}@${backup.target.apiVersion}",
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                    Text("备份时间：${formatBackupTime(backup.backedUpAtEpochMs)}", style = MaterialTheme.typography.bodySmall)
+                    if (backup.installed) {
+                        Text("当前已安装：v${backup.installedVersion ?: "未知"}", style = MaterialTheme.typography.bodySmall)
+                    } else {
+                        Text("当前未安装；恢复时会重新校验父插件与 Extension Point", style = MaterialTheme.typography.bodySmall)
+                    }
+                }
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Button(onClick = onRestore, enabled = !busy && !backup.installed) { Text("恢复") }
+                OutlinedButton(onClick = onDelete, enabled = !busy) { Text("删除") }
+            }
+        }
+    }
+}
+
+private fun formatBackupTime(epochMs: Long): String =
+    DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.SHORT).format(Date(epochMs))
 
 private fun surfaceKindTitle(kind: HostSurfaceKind): String = when (kind) {
     HostSurfaceKind.EXTENSION_POINT -> "Extension Points"

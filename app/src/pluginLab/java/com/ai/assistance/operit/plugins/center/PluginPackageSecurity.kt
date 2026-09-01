@@ -139,7 +139,8 @@ class PluginPackageVerifier(
             setOf(".apk", ".class", ".dex", ".jar", ".so")
         private val PRIVILEGED_INPROCESS_PLUGIN_IDS = mapOf(
             "plugin.system.extension_hub" to "system_extension_hub",
-            "plugin.system.bridge" to "system_bridge"
+            "plugin.system.bridge" to "system_bridge",
+            "plugin.system.developer_guide" to "system_plugin"
         )
 
         fun sha256(file: File): String {

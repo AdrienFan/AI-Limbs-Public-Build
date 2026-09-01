@@ -153,6 +153,7 @@ private class BridgeRuntime(
                 val profile = contribution.factory.profiles.firstOrNull()
                     ?: error("Bridge extension has no profile")
                 requireManager().selectProvider(profile.id)
+                hub.recordUse(extensionId)
                 panelProvider.refresh()
                 JSONObject()
                     .put("success", true)
@@ -224,6 +225,7 @@ private class BridgeRuntime(
             val currentManager = requireManager()
             val selected = selectedEntry()
                 ?: error("Selected Bridge Provider contribution is missing")
+            hub.recordUse(selected.key)
             val result = selected.value.panel.perform(
                 host.applicationContext,
                 actionId,

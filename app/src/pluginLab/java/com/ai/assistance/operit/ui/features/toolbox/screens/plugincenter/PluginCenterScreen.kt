@@ -247,6 +247,7 @@ fun PluginCenterScreen(onBack: () -> Unit) {
                     },
                     onUpdate = { choosePlugin(selected.plugin.pluginId) },
                     onUninstall = { requestAdmin(AdminAction.Uninstall(selected.plugin.pluginId)) },
+                    onBackup = { runMutation { controlPlane.backup(selected.plugin.pluginId) } },
                     onRollback = { runMutation { controlPlane.rollback(selected.plugin.pluginId) } }
                 )
             } else {
@@ -304,7 +305,8 @@ fun PluginCenterScreen(onBack: () -> Unit) {
                         }
                     },
                     onUpdate = { snapshot -> choosePlugin(snapshot.plugin.pluginId) },
-                    onUninstall = { snapshot -> requestAdmin(AdminAction.Uninstall(snapshot.plugin.pluginId)) }
+                    onUninstall = { snapshot -> requestAdmin(AdminAction.Uninstall(snapshot.plugin.pluginId)) },
+                    onBackup = { snapshot -> runMutation { controlPlane.backup(snapshot.plugin.pluginId) } }
                 )
             }
             if (busy) {
@@ -436,7 +438,8 @@ private fun PluginCenterHome(
     onEnable: (PluginControlSnapshot) -> Unit,
     onDisable: (PluginControlSnapshot) -> Unit,
     onUpdate: (PluginControlSnapshot) -> Unit,
-    onUninstall: (PluginControlSnapshot) -> Unit
+    onUninstall: (PluginControlSnapshot) -> Unit,
+    onBackup: (PluginControlSnapshot) -> Unit
 ) {
     var searchInput by remember { mutableStateOf("") }
     var appliedQuery by remember { mutableStateOf("") }
@@ -525,7 +528,8 @@ private fun PluginCenterHome(
                             onEnable = { onEnable(snapshot) },
                             onDisable = { onDisable(snapshot) },
                             onUpdate = { onUpdate(snapshot) },
-                            onUninstall = { onUninstall(snapshot) }
+                            onUninstall = { onUninstall(snapshot) },
+                            onBackup = { onBackup(snapshot) }
                         )
                     }
                 }
@@ -553,7 +557,8 @@ private fun PluginCenterHome(
                             onEnable = { onEnable(snapshot) },
                             onDisable = { onDisable(snapshot) },
                             onUpdate = { onUpdate(snapshot) },
-                            onUninstall = { onUninstall(snapshot) }
+                            onUninstall = { onUninstall(snapshot) },
+                            onBackup = { onBackup(snapshot) }
                         )
                     }
                 }
@@ -664,10 +669,14 @@ private fun PluginCard(
     onEnable: () -> Unit,
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
-    onUninstall: () -> Unit
+    onUninstall: () -> Unit,
+    onBackup: () -> Unit
 ) {
     val manifest = snapshot.plugin.activeManifest
     val state = snapshot.plugin.persistentState
+    val currentVersion = state?.activeVersion
+    val backupVersion = snapshot.plugin.backup?.version
+    val canBackup = currentVersion != null && backupVersion != currentVersion
     Card(
         modifier = Modifier.fillMaxWidth().clickable(onClick = onOpen),
         shape = RoundedCornerShape(12.dp),
@@ -716,6 +725,7 @@ private fun PluginCard(
                 }
                 TextButton(onClick = onUpdate) { Text("更新") }
                 TextButton(onClick = onUninstall) { Text("卸载") }
+                TextButton(onClick = onBackup, enabled = canBackup) { Text("备份") }
             }
         }
     }
@@ -747,10 +757,12 @@ private fun PluginDetail(
     onDisable: () -> Unit,
     onUpdate: () -> Unit,
     onUninstall: () -> Unit,
+    onBackup: () -> Unit,
     onRollback: () -> Unit
 ) {
     val manifest = snapshot.plugin.activeManifest
     val state = snapshot.plugin.persistentState
+    val canBackup = state?.activeVersion != null && snapshot.plugin.backup?.version != state.activeVersion
     Column(
         modifier = Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(12.dp)
@@ -772,6 +784,7 @@ private fun PluginDetail(
         DetailLine("已挂载版本", snapshot.plugin.mountedVersion ?: "未挂载")
         DetailLine("使用次数", snapshot.plugin.usage.useCount.toString())
         DetailLine("最近使用", usageSummary(snapshot).substringAfter("最近使用："))
+        DetailLine("备份版本", snapshot.plugin.backup?.version ?: "未备份")
         Divider()
         Text("权限", fontWeight = FontWeight.Bold)
         val scopes = manifest?.permissions?.requestedScopes.orEmpty()
@@ -800,6 +813,7 @@ private fun PluginDetail(
             }
             OutlinedButton(onClick = onUpdate, enabled = !busy) { Text("更新") }
             OutlinedButton(onClick = onUninstall, enabled = !busy) { Text("卸载") }
+            OutlinedButton(onClick = onBackup, enabled = !busy && canBackup) { Text("备份") }
         }
         Text("版本管理", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
         DetailLine("当前版本", state?.activeVersion ?: "-")

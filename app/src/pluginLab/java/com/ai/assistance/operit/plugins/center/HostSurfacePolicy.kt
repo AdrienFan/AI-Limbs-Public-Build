@@ -16,7 +16,8 @@ data class HostSurfaceDefinition(
     val title: String,
     val detail: String,
     val kind: HostSurfaceKind,
-    val requiredScope: String? = null
+    val requiredScope: String? = null,
+    val publicContracts: List<String> = emptyList()
 )
 
 data class HostSurfaceSnapshot(
@@ -64,6 +65,15 @@ class HostSurfacePolicy(context: Context) {
         val id = surfaceId.trim().lowercase()
         require(definitions.containsKey(id)) { "未知宿主接口：$surfaceId" }
         prefs.edit().putBoolean(allowedKey(id), allowed).apply()
+    }
+
+    fun setAllowed(surfaceIds: Collection<String>, allowed: Boolean) {
+        check(developerMode) { "请先开启开发模式再修改宿主接口" }
+        val ids = surfaceIds.map { it.trim().lowercase() }.distinct()
+        ids.forEach { id -> require(definitions.containsKey(id)) { "未知宿主接口：$id" } }
+        prefs.edit().apply {
+            ids.forEach { id -> putBoolean(allowedKey(id), allowed) }
+        }.apply()
     }
 
     fun requireAllowed(surfaceId: String) {

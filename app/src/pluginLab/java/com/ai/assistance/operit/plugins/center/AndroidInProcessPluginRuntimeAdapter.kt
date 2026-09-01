@@ -75,6 +75,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         val requiredRole = when (context.manifest.pluginId) {
             "plugin.system.extension_hub" -> "system_extension_hub"
             "plugin.system.bridge" -> "system_bridge"
+            "plugin.system.developer_guide" -> "system_plugin"
             else -> null
         }
         if (requiredRole == null || requiredRole !in context.manifest.roles) {
