@@ -24,6 +24,7 @@ items=[
  ('rdc-provider.ailx', ROOT/'plugin-lab/packages/rdc/extension.json', find_apk('plugin-lab/extensions/rdc/build/outputs/apk/debug'), 'payload/extension.apk'),
  ('triggercmd-provider.ailx', ROOT/'plugin-lab/packages/triggercmd/extension.json', find_apk('plugin-lab/extensions/triggercmd/build/outputs/apk/debug'), 'payload/extension.apk'),
  ('developer-guide.ailp', ROOT/'plugin-lab/packages/developer-guide/plugin.json', find_apk('plugin-lab/plugins/developer-guide/build/outputs/apk/debug'), 'payload/plugin.apk'),
+ ('ai-limbs-packager.ailp', ROOT/'plugin-lab/packages/packager/plugin.json', find_apk('plugin-lab/plugins/packager/build/outputs/apk/debug'), 'payload/plugin.apk'),
 ]
 for out_name, manifest, apk, entry in items:
     json.loads(manifest.read_text())
