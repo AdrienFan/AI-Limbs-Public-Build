@@ -16,6 +16,7 @@ import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
 object AppRouteCatalog {
     private const val DYNAMIC_ROUTE_PREFIX = "dynamic.navigation."
     private const val SYSTEM_PLUGIN_ROUTE_PREFIX = "system.plugin.page."
+    private const val PLUGIN_DECLARATIVE_ROUTE_PREFIX = "plugin.declarative.page."
 
     fun build(context: Context): AppNavigationModel {
         val packageManager = PackageManager.getInstance(context, AIToolHandler.getInstance(context))
@@ -76,6 +77,33 @@ object AppRouteCatalog {
             )
         }
 
+        val pluginHomeTiles = runCatching { PluginPlatformKernel.uiRegistry.homeTiles.value }
+            .getOrDefault(emptyList())
+            .filter { tile -> PluginPlatformKernel.uiRegistry.screen(tile.screenId) != null }
+        val pluginRoutes = pluginHomeTiles
+            .distinctBy { it.screenId }
+            .map { tile ->
+                RouteSpec(
+                    routeId = pluginDeclarativeRouteId(tile.screenId),
+                    runtime = RouteRuntime.NATIVE,
+                    title = PluginPlatformKernel.uiRegistry.screen(tile.screenId)?.title ?: tile.title,
+                    icon = Icons.Default.Extension
+                )
+            }
+        val pluginToolboxEntries = pluginHomeTiles.mapIndexed { index, tile ->
+            NavigationEntrySpec(
+                entryId = "plugin:${tile.ownerPluginId}:${tile.id}",
+                routeId = pluginDeclarativeRouteId(tile.screenId),
+                surface = NavigationSurface.TOOLBOX,
+                title = tile.title,
+                description = tile.description,
+                icon = Icons.Default.Extension,
+                order = 100 + index,
+                routeArgs = mapOf("screenId" to tile.screenId),
+                kind = NavigationEntryKind.PLUGIN
+            )
+        }
+
         val systemUiEntries = runCatching { PluginPlatformKernel.systemUiRegistry.toolboxEntries.value }
             .getOrDefault(emptyList())
         val systemRoutes = systemUiEntries.map { entry ->
@@ -109,12 +137,13 @@ object AppRouteCatalog {
         }
 
         return AppNavigationModel(
-            routes = ScreenRouteRegistry.hostRouteSpecs(context) + toolPkgRoutes + dynamicRoutes + systemRoutes,
+            routes = ScreenRouteRegistry.hostRouteSpecs(context) + toolPkgRoutes + dynamicRoutes + pluginRoutes + systemRoutes,
             navigationEntries = (
                 ScreenRouteRegistry.mainSidebarEntries(context) +
                     hostToolboxEntries +
                     toolPkgNavigationEntries +
                     dynamicEntries +
+                    pluginToolboxEntries +
                     systemToolboxEntries
                 ).sortedWith(compareBy<NavigationEntrySpec>({ it.surface.ordinal }, { it.order }, { it.title }))
         )
@@ -125,6 +154,11 @@ object AppRouteCatalog {
             val surfaceId = (entry.args["surfaceId"] as? String)
                 ?: entry.routeId.removePrefix(DYNAMIC_ROUTE_PREFIX)
             return Screen.DynamicNavigationPage(surfaceId)
+        }
+        if (entry.routeId.startsWith(PLUGIN_DECLARATIVE_ROUTE_PREFIX)) {
+            val screenId = (entry.args["screenId"] as? String)
+                ?: entry.routeId.removePrefix(PLUGIN_DECLARATIVE_ROUTE_PREFIX)
+            return Screen.PluginDeclarativePage(screenId)
         }
         if (entry.routeId.startsWith(SYSTEM_PLUGIN_ROUTE_PREFIX)) {
             val entryId = (entry.args["entryId"] as? String)
@@ -154,4 +188,5 @@ object AppRouteCatalog {
 
     private fun dynamicRouteId(surfaceId: String): String = DYNAMIC_ROUTE_PREFIX + surfaceId
     private fun systemPluginRouteId(entryId: String): String = SYSTEM_PLUGIN_ROUTE_PREFIX + entryId
+    private fun pluginDeclarativeRouteId(screenId: String): String = PLUGIN_DECLARATIVE_ROUTE_PREFIX + screenId
 }

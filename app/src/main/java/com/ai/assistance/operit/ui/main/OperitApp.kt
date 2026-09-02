@@ -109,10 +109,12 @@ fun OperitApp(
     var navigationRevision by remember { mutableStateOf(0) }
     val configuration = LocalConfiguration.current
     val dynamicSurfaces by PluginPlatformKernel.dynamicNavigationRegistry.surfaces.collectAsState()
+    val pluginHomeTiles by PluginPlatformKernel.uiRegistry.homeTiles.collectAsState()
+    val pluginScreens by PluginPlatformKernel.uiRegistry.activeScreens.collectAsState()
     val systemToolboxEntries by PluginPlatformKernel.systemUiRegistry.toolboxEntries.collectAsState()
     val canCreateDynamicPage = systemToolboxEntries.any { it.id == "plugin_center.main" }
     val navigationModel = remember(
-        context, configuration, navigationRevision, dynamicSurfaces, systemToolboxEntries
+        context, configuration, navigationRevision, dynamicSurfaces, pluginHomeTiles, pluginScreens, systemToolboxEntries
     ) { AppRouteCatalog.build(context) }
 
     val routerState = remember {
