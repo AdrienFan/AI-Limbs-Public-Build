@@ -363,7 +363,7 @@ private class ExtensionHubServiceImpl(
                     return host.invokeHostCapability(id, parametersJson)
                 }
             }
-            val apk = File(extensionDir(record.manifest.extensionId), record.manifest.entry)
+            val apk = prepareRuntimeApk(record)
             val loader = DexClassLoader(apk.absolutePath, childHost.cacheDir.absolutePath, null, host.applicationContext.classLoader)
             val instance = loader.loadClass(record.manifest.entryClass).getDeclaredConstructor().newInstance()
             val entry = instance as? ChildExtensionEntry ?: error("${record.manifest.entryClass} does not implement ChildExtensionEntry")
@@ -379,6 +379,19 @@ private class ExtensionHubServiceImpl(
             record.lastError = error.message ?: error::class.java.simpleName
         }
         persistState(record)
+    }
+
+    private fun prepareRuntimeApk(record: StoredExtension): File {
+        val rootDir = extensionDir(record.manifest.extensionId).canonicalFile
+        val apk = File(rootDir, record.manifest.entry).canonicalFile
+        require(apk.isFile && apk.path.startsWith(rootDir.path + File.separator)) {
+            "Child runtime APK is missing or escapes extension root: ${record.manifest.entry}"
+        }
+        if (apk.canWrite()) {
+            require(apk.setReadOnly()) { "Could not make child runtime APK read-only" }
+        }
+        require(!apk.canWrite()) { "Child runtime APK remains writable" }
+        return apk
     }
 
     private suspend fun stopChild(extensionId: String) {

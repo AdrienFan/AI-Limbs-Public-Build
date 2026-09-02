@@ -11,96 +11,109 @@ internal object DeveloperGuideContent {
     val sections = listOf(
         GuideSection(
             providerId = "plugin.developer_guide.mechanism",
-            title = "1. AI Limbs 插件机制",
-            description = "Stable Kernel + Plugin Center + 可撤销插件贡献。",
+            title = "1. 当前插件架构与选型",
+            description = "AI Limbs V0.7.2：Stable Kernel + Host Gateway + 多层插件协议。",
             lines = listOf(
-                "核心原则：业务能力默认做成插件；基座只承载通用 Contract、安全与稳定性基础设施。",
-                "Kernel 负责生命周期、信任、权限、Host Surface Policy、Extension Router、贡献注册、隔离与回滚；插件不得改写这些 Kernel Invariant。",
-                "顶层插件使用 .ailp；父插件拥有的子扩展使用 .ailx。安装、授权、启用、ACTIVE 是不同状态，不得混为一谈。",
-                "插件 mount 时通过受控 Host Contract 注册 capability / provider / extension；disable、uninstall 或策略阻断时必须 revoke。",
-                "Host Surface 被管理员关闭后，依赖该 Surface 的已启用插件应转为 BLOCKED 并撤销运行；重新开放后自动尝试恢复。",
-                "热插拔的本质是 Kernel 管理可注册、可撤销、可停止的运行参与，不是要求代码从不进入内存。",
-                "android_inprocess 只用于批准的高信任系统插件；普通第三方插件不应获得任意宿主内部类、Activity、Repository 或 Kernel 对象。"
+                "AI Limbs 本体只保留稳定 Kernel、Host Gateway、Runtime、Policy、Dispatcher、基础服务与恢复能力；可升级业务能力优先外置为插件。",
+                "开发前先选包类型：普通顶层能力使用 .ailp；宿主级系统控制面使用 .ailpsys；父插件专属二级扩展使用 .ailx。三者不是同一种权限等级。",
+                ".ailp 由 Plugin Platform 管理，强调声明、权限、可撤销贡献和可停止 Runtime；普通第三方插件不得依赖宿主内部实现类。",
+                ".ailpsys 使用独立 System Plugin Protocol 与 System Host ABI，面向 Plugin Center、恢复、Host Adapter 等高信任系统角色。",
+                ".ailx 不是独立顶层插件，只能挂到某个父插件发布的版本化 Extension Point，由 Plugin Extension Hub 管理。",
+                "安装、授权、启用、mount、ACTIVE 是不同阶段；任何阶段失败都必须可回滚并撤销已注册贡献。",
+                "业务需求能由现有 Contract 表达时只升级插件；只有缺少通用 Host Primitive、Runtime 或 Kernel 安全/兼容能力时才修改 AI Limbs 本体。"
             )
         ),
         GuideSection(
             providerId = "plugin.developer_guide.ailp",
-            title = "2. 顶层插件 .ailp 开发规范",
-            description = "AIL_PLUGIN_V1：统一安装包、声明式权限、运行时与贡献清单。",
+            title = "2. 普通顶层插件 .ailp",
+            description = "AIL_PLUGIN_V1：默认开发入口，按声明获得能力并发布可撤销贡献。",
             lines = listOf(
-                "根清单必须是 plugin.json，format=AIL_PLUGIN_V1，schema_version=1；plugin_id 使用稳定命名空间，version 使用 SemVer。",
-                "display.name 与 display.description 必填；api.target / api.min 明确宿主插件 API 兼容范围。",
-                "runtime.kind 当前包含 none、declarative、android_inprocess；android_inprocess 仅批准的系统插件可用，并且只能携带清单声明的 APK。",
-                "provides.capabilities / services / providers / extensions 必须先在 manifest 声明，运行时注册不得超出声明。",
-                "插件 capability 必须使用 plugin.* 命名空间；宿主 core.* capability 只能通过 invokeHostCapability 调用，不能抢占注册。",
-                "permissions.requested_scopes 只申请真正需要的 Host scope；未授权 scope 不得在运行时绕过。",
-                "扩展点必须写 point、id、api；宿主 Extension Router 只接受已登记且 API 匹配的 Contract。",
-                "包结构原则：plugin.json + payload；安装经过容器校验、Manifest/ABI/语义、Trust、权限与 Runtime Preflight 后才可 INSTALLABLE。",
-                "安装≠备份：安装完成后 Plugin Store 运行区只保留 content/ + install.json，不长期保留原始 package.ailp；只有用户或自动策略触发备份时，才从已安装 content/ 重新打包 .ailp。",
-                "备份是独立可删除资产；当前版本已存在备份时不重复生成，插件升级后新版本可重新备份。恢复必须先校验备份完整性，再重新走正常 Plugin Center install pipeline。"
+                "根清单必须是 plugin.json，format=AIL_PLUGIN_V1，schema_version=1；plugin_id 必须稳定，version 使用 SemVer。",
+                "display.name 与 display.description 必填；api.min / api.target 描述宿主插件 API 兼容范围。",
+                "runtime.kind 只能使用当前宿主已经注册的 Runtime。V0.7.2 当前主线注册 none、declarative，以及受限 android_inprocess。",
+                "android_inprocess 不是普通第三方 Runtime。当前仅批准的官方身份 plugin.system.extension_hub、plugin.system.bridge、plugin.system.developer_guide 可使用，并且必须匹配对应系统角色。",
+                "provides.capabilities / services / providers / extensions 必须先在 manifest 声明；运行时注册不得超出声明。",
+                "插件可执行 capability 必须位于 plugin.* 命名空间；宿主能力使用版本化 host.*@N Primitive，通过 Host Gateway 调用，插件不得抢占宿主命名空间。",
+                "permissions.requested_scopes 只能申请当前 Kernel 标记为 BOUND 且 requestable 的 Host Primitive；目录中存在但尚未绑定的 Primitive 不能当作可用 API。",
+                "当前普通插件 Host capability 绑定以实际 Kernel 为准；例如 host.logging@1 已接入正式调用链，其他 Primitive 必须先确认 exposure 与 runtime adapter。",
+                "扩展声明必须包含 point、id、api；当前正式 UI 扩展点包括 ai_limbs.ui.home_tile、ai_limbs.ui.screen、ai_limbs.ui.theme。",
+                "安装包只用于安装输入。安装完成后运行区保留已安装 content 与 metadata，不把原始 .ailp 永久复制为备份。"
+            )
+        ),
+        GuideSection(
+            providerId = "plugin.developer_guide.ailpsys",
+            title = "3. 系统插件 .ailpsys",
+            description = "AIL_SYSTEM_PLUGIN_V1：高信任、独立签名、版本化 System Host ABI。",
+            lines = listOf(
+                "根清单必须是 system-plugin.json，format=AIL_SYSTEM_PLUGIN_V1，schema_version=1，包扩展名为 .ailpsys。",
+                "必须声明 plugin_id、version、display、system.role、host_abi.min/max、runtime、requested_scopes、signature 与完整 payload integrity map。",
+                "V1 签名算法固定为 Ed25519；签名与 payload 完整性校验属于安装前硬门槛，系统插件不得依赖开发模式绕过信任。",
+                "System Plugin Runtime 当前协议支持 declarative 与 android_inprocess；android_inprocess 的 APK 在 DexClassLoader 加载前必须冻结为只读。",
+                "入口类通过 SystemPluginEntryV1 挂载，只能使用版本化 SystemPluginHostV1 / Host Gateway，不得把 PluginManager、Context、SharedPreferences、Trust verifier 等内部对象当成 ABI。",
+                "协议定义的 system role 包括 plugin_center、extension_hub、host_adapter、recovery、system_service；是否可实际安装仍取决于当前 Host 是否提供对应系统槽位。",
+                "V0.7.2 当前 Bootstrap 安装槽正式服务于 system.role=plugin_center；其他 role 不应因为出现在协议枚举里就假定已经开放通用安装。",
+                "Plugin Center 属于 .ailpsys，并通过独立维护生命周期执行本地升级、修复当前、回滚上一版；不得在旧 ClassLoader / UI Session 上热替换。"
             )
         ),
         GuideSection(
             providerId = "plugin.developer_guide.ailx",
-            title = "3. 子插件 .ailx 开发规范",
-            description = "AIL_EXTENSION_V1：只能挂到一个父插件拥有的 Extension Point。",
+            title = "4. 二级扩展 .ailx",
+            description = "AIL_EXTENSION_V1：父插件拥有 Extension Point，Hub 负责子插件生命周期。",
             lines = listOf(
-                "根清单必须是 extension.json，format=AIL_EXTENSION_V1，schema_version=1，extension_id/version/display 必填。",
-                "target.plugin_id 指向唯一父插件；target.extension_point 指向父插件发布的点；target.api 必须与父插件当前 API 完全匹配。",
-                "当前子插件 runtime.kind=android_child，entry 必须是唯一 APK；入口类实现 ChildExtensionEntry。",
-                "ChildExtensionHost 只提供 extensionId/version/target/scope/dataDir/cacheDir、单次 publish() 与受控 invokeHostCapability()。",
-                "子插件 mount 后必须 publish 一个且仅一个 binding；没有 publish、重复 publish 或 payload 类型错误都会失败。",
-                "permissions.host_capabilities 必须先由父插件 Extension Point 明确 delegated；子插件不能越权直接向宿主索要额外 core.* 能力。",
-                "父插件通过 ExtensionHubService.publishPoint() 发布 point/api/allowedHostCapabilities/binder；父插件停用后子插件进入 BLOCKED。",
-                "API 不匹配时必须 BLOCKED，而不是勉强加载；破坏性 payload/Contract 变化必须提升 target.api。",
-                "Bridge 当前范例：ai_limbs.bridge.provider@3，子插件发布 BridgeProviderContribution(factory + panel + optional notification)，Provider 专属 UI 由子插件负责。",
-                "子插件同样遵守安装≠备份：安装只保留解压后的扩展内容，不长期保存原始 .ailx；备份时由 Extension Hub 从已安装内容重新打包 package.ailx。",
-                "父插件被卸载或 Extension Point 暂时不可用时，子插件备份仍应保留；恢复时重新校验父插件 ID、Extension Point、API 与备份 SHA，不能静默跨 Contract 恢复。"
+                "根清单必须是 extension.json，format=AIL_EXTENSION_V1，schema_version=1；extension_id、version、display 与 target 必填。",
+                "target.plugin_id 必须指向唯一父插件，target.extension_point 必须是父插件已发布的点，target.api 必须与当前 Point API 匹配。",
+                "当前子插件 Runtime 为 android_child，entry 是唯一声明的 APK，入口实现 ChildExtensionEntry；APK 在加载前必须保持只读。",
+                "ChildExtensionHost 只暴露 extensionId、version、target、scope、dataDir、cacheDir、单次 publish() 与受控 Host capability 调用。",
+                "子插件 mount 后必须 publish 一个且仅一个 binding；未发布、重复发布、payload 类型不匹配都必须失败并撤销已创建资源。",
+                "父插件通过 ExtensionHubService.publishPoint() 声明 point、api、allowedHostCapabilities 与 binder；父插件停用或 Point 消失时子插件必须 BLOCKED/停止。",
+                "permissions.host_capabilities 只能使用父 Point 明确 delegated 的能力；.ailx 不能越过父插件直接扩大宿主权限。",
+                "Bridge Provider 正式示例为 ai_limbs.bridge.provider@3；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。"
             )
         ),
         GuideSection(
             providerId = "plugin.developer_guide.ui",
-            title = "4. UI / Provider 设计规范",
-            description = "父插件提供容器；具体 Provider/子插件拥有自己的业务控制面板。",
+            title = "5. Contract、UI 与导航",
+            description = "插件只通过显式、版本化、可撤销 Contract 进入宿主。",
             lines = listOf(
-                "不要在父插件中用 if(RDC)/if(TRIGGERcmd) 写死子插件特殊按钮；父插件只能依赖版本化 Contribution Contract。",
-                "需要动态控制面板时使用 InProcessDynamicPanelProvider + InProcessPanelState；字段、动作和状态由 Provider 自己描述。",
-                "密码输入使用 SECRET field；动作可声明 requiredFieldIds，宿主负责在必填字段为空时禁用按钮。",
-                "Provider 选择状态可通过 InProcessSelectionProvider 同步，避免下拉框显示与真实 Manager 当前 Provider 不一致。",
-                "通知栏遵守内容与渲染分离：子 Provider 通过 BridgeProviderNotification 声明状态、actionId、label、priority；Bridge 只转发当前 Provider，禁止写死 RDC/TRIGGERcmd 分支。",
-                "真正 Android 通知由 ai_limbs.notification.surface@1 统一渲染；插件不得创建 PendingIntent/NotificationManager。通知 Host 通过既有 providers.resolve(system.notification.host) 获取，不向 InProcessPluginHost 新增抽象方法，避免破坏旧插件 ABI。",
-                "所有可能增长的插件集合栏统一采用：折叠 + 数量 + 搜索；输入搜索词时可自动展开。",
-                "长页面统一纵向滚动，并在右侧显示滚动条；开发说明本身也遵循这一规则。",
-                "当前 Provider 控制区应放在已安装子插件列表之前，避免列表过长时把日常操作挤到页面底部。"
+                "四类主要插件贡献为 capability、service、provider、extension；每一项都必须有明确 owner，并在 disable / uninstall / mount failure 时撤销。",
+                "Capability 用于可执行动作，插件 capability 使用 plugin.*；Service 用于版本化依赖/RPC；Provider 用于受控对象目录；Extension 用于 Typed Extension Point 绑定。",
+                "不要通过反射、全局单例或直接访问宿主 Repository 绕过 Contribution Registry；能被插件依赖的能力必须先成为稳定 Contract。",
+                "UI 入口使用 ai_limbs.ui.home_tile；页面使用 ai_limbs.ui.screen；主题使用 ai_limbs.ui.theme。扩展 ID 必须稳定，不能拿显示标题当身份。",
+                "动态一级导航页面使用永久 surfaceId（user.navigation.<UUID>）；页面标题可以改，surfaceId 不变，插件 UI 绑定因此不会随重命名失效。",
+                "动态页面只绑定插件已发布的 UI contribution；非空页面禁止直接删除，必须先解绑/迁移其中贡献。",
+                "Provider 特有控制面应由 Provider 自己描述状态、字段和动作，父插件只提供通用容器，禁止 if(RDC)/if(TRIGGERcmd) 之类硬编码分支。",
+                "通知内容与 Android 渲染分离；批准插件通过 host.notification@1 的受控 Notification Host 发布状态与动作，不直接持有 NotificationManager/PendingIntent 作为插件 ABI。"
             )
         ),
         GuideSection(
             providerId = "plugin.developer_guide.security",
-            title = "5. 安全边界",
-            description = "插件可扩展 AI Limbs，但不能改写 Kernel 的安全与治理边界。",
+            title = "6. 安全与生命周期",
+            description = "扩展能力不能突破 Kernel Invariant。",
             lines = listOf(
-                "Kernel Invariant：Trust/签名、管理员安全、Host Surface Policy、Extension Router、贡献注册约束、生命周期、崩溃隔离、回滚核心。",
-                "禁止把 PluginCenter 内部 Repository、DAO、Policy Engine、Trust verifier、Secret store、SharedPreferences 或 registry mutation 当成插件 API。",
-                "Host Capability、Host Provider、Extension Point、Provider/Service/Capability Bus 都必须是显式、版本化、可撤销 Contract。",
-                "系统插件属于高权限组件，禁用/卸载必须走管理员验证；普通插件验证频率设置不得豁免系统插件。",
-                "android_inprocess 当前会给批准的系统插件 applicationContext，但这不是面向第三方的通用授权，不应据此扩散裸 Context 依赖。",
-                "敏感 Secret 必须经批准的 secret broker / scope 流程提供，不得把 API key、恢复密钥或私有签名材料写入插件包。",
-                "开发说明插件自身只读：不修改 Host Surface、不写配置、不执行 shell；它只读取受控 Host Surface snapshot。"
+                "Kernel Invariant 包括 Trust/签名、管理员安全、Host Surface Policy、Extension Router、Capability/Provider/Service 注册约束、生命周期、回滚与恢复。",
+                "普通插件不得获得裸 Android Context、PluginManager、Policy Engine、Trust verifier、SharedPreferences、私有文件路径或可直接 mutation 的 Registry。",
+                "少数官方 android_inprocess 插件获得更高信任边界，但仍受固定 plugin_id + role 白名单、唯一 APK、只读 Dex 与声明式贡献约束；不能把该特例推广成第三方标准。",
+                "Host Primitive 目录包含 CONFIRMED/CANDIDATE、DECLARED/PARTIAL/BOUND/KERNEL_GATE 等状态；只有明确 BOUND 且授权可请求的能力才能作为插件依赖。",
+                "敏感凭据必须通过受控 Secret/Credential Broker 或插件自己的受保护存储策略获取；禁止把 API key、恢复密钥、签名私钥写入分发包。",
+                "Runtime stop 前先 revokeAll()；停止超时、崩溃或策略阻断不能留下仍可调用的 contribution。",
+                "动态 Dex/APK 在加载前必须只读；任何恢复、回滚或旧版本重新 mount 都必须重新检查，而不是只在首次安装时检查。"
             )
         ),
         GuideSection(
             providerId = "plugin.developer_guide.maintenance",
-            title = "6. 升级与维护交接",
-            description = "用于新窗口、上下文丢失或后续维护者快速恢复正确开发方式。",
+            title = "7. 版本、备份与发布",
+            description = "版本变化必须可追踪，备份与安装严格分离。",
             lines = listOf(
-                "判断原则：业务变化默认只升级 .ailp/.ailx；只有现有 Contract 无法表达通用能力，或 Kernel 安全/稳定/Android 兼容需要修复时才升级基座。",
-                "新增 Host Surface 时必须在 HostSurfacePolicy 注册 title/detail/kind/publicContracts；管理员开发模式与本说明的动态接口章节会读取同一数据源。",
-                "Contract payload 或语义发生破坏性变化时必须提升 API；不要让旧插件看似兼容后在运行时崩溃。",
-                "先在 Plugin Lab 用真实安装包验证 install → enable → invoke/open → disable → re-enable → uninstall → reinstall → restart restore，再迁正式 AI Limbs。",
-                "稳定基线 V0.6.4.7.8 只读保护：dev/v0.6.4.7.8 与 baseline/v0.6.4.7.8-pre-plugin-center 不得覆盖或直接开发。",
-                "当前实验主线：dev/plugin-lab-alt-v0.1；实验基座用于逼出并验证稳定 Contract，不把具体业务逻辑塞回基座。",
-                "构建优先 GitHub 云端；普通开发不依赖本地 Gradle。修改前先静态检查、git diff --check、Manifest/API 对账，再提交推送。",
-                "如果未来打开新窗口，先读本说明，再读管理员开发模式 Host Surface；不要凭记忆猜接口，也不要为了一个插件需求直接暴露内部类。"
+                "版本使用 SemVer；Contract payload、调用语义或兼容边界发生破坏性变化时必须提升对应 API/ABI，而不是只改实现。",
+                "安装≠备份：安装完成后不要把原始安装包再复制一份留在运行区；需要备份时从当前已安装内容重新打包。",
+                "普通 .ailp 与 .ailx 都应把备份作为独立资产管理；恢复时重新校验 manifest、完整性、权限、依赖和当前 Contract，不做静默跨版本恢复。",
+                "Plugin Center 自身只保留 Current Backup 与 Previous Backup 两个维护槽；修复使用 Current，不旋转；成功回滚后 Previous 被消费。",
+                "Plugin Center 升级/修复/回滚由 Bootstrap 接管：停止旧 Runtime、撤销旧 UI、切换版本、health check，再重新创建新 Runtime/UI Session。",
+                "正式开发以当前 AI Limbs Host ABI、Manifest Parser、Host Primitive Catalog 与 Extension Point Registry 为事实来源；不要把历史分支、实验 App 或旧截图当成规范。",
+                "上下文丢失或新维护者接手时，先通过 capability.search 搜索 Developer Guide / Recovery Handbook / 维护手册，再调用 plugin.developer_guide.handbook；需要节省上下文时用 plugin.developer_guide.section 分段读取。",
+                "任何 Plugin Protocol、Host ABI、Runtime、安全边界或维护生命周期变化，都必须在同一发布批次同步更新 Developer Guide 并提升手册插件版本；禁止让恢复手册落后于实际宿主。",
+                "提交前至少做 JSON/Kotlin 静态检查、manifest 与注册项对账、git diff --check；构建优先使用 GitHub 云端，不因方便把本地实验依赖塞回基座。",
+                "实机验收应覆盖 install → enable → mount/open/invoke → disable → re-enable → backup/restore → restart restore；有卸载能力的插件再覆盖 uninstall/reinstall。"
             )
         )
     )

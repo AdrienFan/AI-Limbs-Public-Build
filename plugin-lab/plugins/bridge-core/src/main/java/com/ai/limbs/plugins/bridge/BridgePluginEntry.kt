@@ -117,7 +117,7 @@ private class BridgeRuntime(
                 InProcessScreen(
                     id = SCREEN_ID,
                     title = "Bridge",
-                    description = "V0.6.4.7.8 Bridge Core · Provider 由 .ailx 子插件动态接入",
+                    description = "AI Limbs Bridge Core · Provider 由 .ailx 子插件动态接入",
                     blocks = listOf(
                         InProcessScreenBlock.ChildExtensionInstaller(
                             "添加 Bridge Provider",

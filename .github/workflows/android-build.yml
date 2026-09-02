@@ -1,33 +1,40 @@
-name: AI Limbs Bridge Plugin Build
+name: AI Limbs Plugin Lab Alt Build
+
 on:
   workflow_dispatch:
+
 concurrency:
-  group: plugin-lab-bridge-${{ github.ref }}
+  group: plugin-lab-alt-${{ github.ref }}
   cancel-in-progress: true
+
 permissions:
   contents: read
+
 env:
   JAVA_VERSION: '21'
+
 jobs:
   build:
-    name: Build Bridge 1.2.1 Only
+    name: Build Plugin Lab Alt + Five Plugins
     runs-on: ubuntu-24.04
-    timeout-minutes: 30
+    timeout-minutes: 60
     steps:
       - name: Checkout source
-        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:
           fetch-depth: 1
           persist-credentials: false
           submodules: false
       - name: Set up JDK
-        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
           distribution: temurin
           java-version: ${{ env.JAVA_VERSION }}
           cache: gradle
+
       - name: Set up Android SDK
-        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
       - name: Install Android SDK
         shell: bash
         run: |
@@ -37,40 +44,81 @@ jobs:
             "platforms;android-34" \
             "platforms;android-36" \
             "build-tools;35.0.0"
+
       - name: Configure Android SDK
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
-      - name: Build Bridge 1.2.1 payload only
+
+      - name: Build 1 - Plugin Lab v0.5.3
         shell: bash
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew :bridge-core-plugin:assembleDebug --stacktrace --no-daemon
-      - name: Package Bridge 1.2.1
+          ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon
+
+      - name: Build 2 - plugin-extension-hub.ailp payload
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import hashlib, json, zipfile
-          root=Path('.')
-          manifest=root/'plugin-lab/packages/bridge-core/plugin.json'
-          data=json.loads(manifest.read_text())
-          assert data['version']=='1.2.1', data['version']
-          apks=sorted((root/'plugin-lab/plugins/bridge-core/build/outputs/apk/debug').glob('*.apk'))
-          assert len(apks)==1, apks
-          out=root/'dist/bridge-core.ailp'
-          out.parent.mkdir(exist_ok=True)
-          with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
-              z.writestr('plugin.json', manifest.read_bytes())
-              z.write(apks[0], 'payload/plugin.apk')
-          print(out, out.stat().st_size, hashlib.sha256(out.read_bytes()).hexdigest())
-          PY
+          ./gradlew :plugin-extension-hub:assembleDebug --stacktrace --no-daemon
+
+      - name: Build 3 - bridge-core.ailp payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :bridge-core-plugin:assembleDebug --stacktrace --no-daemon
+
+      - name: Build 4 - rdc-provider.ailx payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :rdc-extension:assembleDebug --stacktrace --no-daemon
+
+      - name: Build 5 - triggercmd-provider.ailx payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
+
+      - name: Build 6 - developer-guide.ailp payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :developer-guide-plugin:assembleDebug --stacktrace --no-daemon
+
+      - name: Package five plugin artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 tools/plugin_lab/package_plugins.py
+          unzip -l dist/plugin-extension-hub.ailp
           unzip -l dist/bridge-core.ailp
-      - name: Upload Bridge 1.2.1
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+          unzip -l dist/rdc-provider.ailx
+          unzip -l dist/triggercmd-provider.ailx
+          unzip -l dist/developer-guide.ailp
+
+      - name: Upload Android reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: bridge-core-v121-${{ github.run_number }}
-          path: dist/bridge-core.ailp
+          name: plugin-lab-alt-reports-${{ github.run_number }}
+          path: |
+            app/build/reports/**
+            build/reports/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload Plugin Lab and five plugins
+        if: success()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: plugin-lab-alt-v053-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            dist/plugin-extension-hub.ailp
+            dist/bridge-core.ailp
+            dist/rdc-provider.ailx
+            dist/triggercmd-provider.ailx
+            dist/developer-guide.ailp
           if-no-files-found: error
           retention-days: 14

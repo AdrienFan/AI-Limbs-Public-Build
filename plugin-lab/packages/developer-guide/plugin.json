@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.developer_guide",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "开发说明",
-    "description": "AI Limbs 只读开发与维护手册；Host Surface 清单与管理员开发模式联动。"
+    "description": "AI Limbs 当前插件开发、升级、安全与维护恢复手册；同时提供 AI 可调用只读接口。"
   },
   "roles": [
     "system_plugin"
@@ -32,16 +32,19 @@
     "requested_scopes": []
   },
   "provides": {
-    "capabilities": [],
+    "capabilities": [
+      "plugin.developer_guide.handbook",
+      "plugin.developer_guide.section"
+    ],
     "services": [],
     "providers": [
       "plugin.developer_guide.mechanism",
       "plugin.developer_guide.ailp",
+      "plugin.developer_guide.ailpsys",
       "plugin.developer_guide.ailx",
       "plugin.developer_guide.ui",
       "plugin.developer_guide.security",
-      "plugin.developer_guide.maintenance",
-      "plugin.developer_guide.host_surfaces"
+      "plugin.developer_guide.maintenance"
     ],
     "extensions": [
       {
