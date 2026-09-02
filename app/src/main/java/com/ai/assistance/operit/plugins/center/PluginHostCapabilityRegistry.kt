@@ -130,6 +130,30 @@ internal class PluginHostCapabilityRegistry(
 
     fun activeIds(): Set<String> = capabilities.keys.toSortedSet()
 
+    internal fun isHostCallable(capabilityId: String): Boolean =
+        capabilityId.trim().lowercase() in hostCapabilities
+
+    internal suspend fun invokeSystemHost(
+        ownerPluginId: String,
+        capabilityId: String,
+        parameters: JSONObject = JSONObject()
+    ): JSONObject {
+        val normalized = capabilityId.trim().lowercase()
+        val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
+            ?: throw PluginInstallException(
+                "HOST_PRIMITIVE_UNKNOWN",
+                "Unknown AI Limbs Host Primitive: $normalized"
+            )
+        val capability = hostCapabilities[primitive.id]
+            ?: throw PluginInstallException(
+                "HOST_PRIMITIVE_NOT_BOUND",
+                "Host Primitive has no runtime adapter: ${primitive.id}"
+            )
+        surfacePolicy?.requireAllowed(PluginSurfaceIds.hostPrimitive(primitive.id))
+        AppLogger.d("PluginHostCapability", "System host invoke: $ownerPluginId -> ${primitive.id}")
+        return capability.execute(JSONObject(parameters.toString()))
+    }
+
     override fun create(ownerPluginId: String, grantedScopes: Set<String>): PluginCapabilityInvoker =
         PluginCapabilityInvoker { capabilityId, parameters ->
             val normalized = capabilityId.trim().lowercase()

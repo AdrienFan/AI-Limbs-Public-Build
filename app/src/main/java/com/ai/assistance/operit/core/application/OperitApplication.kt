@@ -25,6 +25,7 @@ import com.ai.assistance.operit.R
 import com.ai.assistance.operit.core.chat.AIMessageManager
 import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.api.chat.library.MemoryAutoSaveScheduler
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleEvent
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookParams
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookPluginRegistry
@@ -193,6 +194,9 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         AIMessageManager.initialize(this)
         LanerChatPlugin.register()
         AppLogger.d(TAG, "【启动计时】AIMessageManager初始化完成 - ${System.currentTimeMillis() - startTime}ms")
+        PluginPlatformKernel.initialize(applicationContext)
+        runBlocking(Dispatchers.IO) { PluginPlatformKernel.start() }
+        AppLogger.d(TAG, "【启动计时】Plugin Platform Kernel初始化并恢复完成 - ${System.currentTimeMillis() - startTime}ms")
         AppLifecycleHookPluginRegistry.dispatchAsync(
             event = AppLifecycleEvent.APPLICATION_CREATE,
             params =
@@ -646,6 +650,13 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
             ShowerController.shutdown()
         } catch (e: Exception) {
             AppLogger.e(TAG, "终止时关闭 ShowerController 失败: ${e.message}", e)
+        }
+
+        try {
+            runBlocking(Dispatchers.IO) { PluginPlatformKernel.shutdown() }
+            AppLogger.d(TAG, "应用终止，Plugin Platform Kernel 已释放所有运行时")
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "终止 Plugin Platform Kernel 失败: ${e.message}", e)
         }
 
     }

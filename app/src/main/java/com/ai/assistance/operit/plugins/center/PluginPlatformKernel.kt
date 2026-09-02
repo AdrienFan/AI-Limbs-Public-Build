@@ -1,0 +1,299 @@
+package com.ai.assistance.operit.plugins.center
+
+import android.content.Context
+import com.ai.assistance.operit.plugins.system.KernelPluginPlatformControlV1
+import com.ai.assistance.operit.plugins.system.KernelSystemHostGatewayV1
+import com.ai.assistance.operit.plugins.system.KernelSystemPluginHostV1
+import com.ai.assistance.operit.plugins.system.SystemPluginHostV1
+import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
+import com.ai.assistance.operit.util.AppLogger
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
+import kotlinx.coroutines.launch
+
+/**
+ * Stable host-side plugin platform kernel. It owns plugin runtime, policy, storage and registries.
+ * Plugin Center UI is intentionally not part of this object; system plugins consume versioned host contracts.
+ */
+internal object PluginPlatformKernel {
+    private const val TAG = "PluginPlatformKernel"
+    private val lifecycleLock = Any()
+
+    @Volatile private var initialized = false
+    @Volatile private var started = false
+
+    private lateinit var managerInstance: PluginManager
+    private lateinit var runtimeAdaptersInstance: PluginRuntimeAdapterRegistry
+    private lateinit var contributionsInstance: PluginContributionRegistry
+    private lateinit var extensionPointsInstance: ExtensionPointRegistry
+    private lateinit var extensionRouterInstance: ExtensionRouter
+    private lateinit var uiRegistryInstance: PluginUiRegistry
+    private lateinit var capabilityRegistryInstance: PluginHostCapabilityRegistry
+    private lateinit var surfacePolicyInstance: HostSurfacePolicy
+    private lateinit var adminSecurityInstance: AdminSecurityManager
+    private lateinit var usageStoreInstance: PluginUsageStore
+    private lateinit var inactivityPolicyInstance: PluginInactivityPolicyStore
+    private lateinit var backupPolicyInstance: PluginBackupPolicyStore
+    private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    @Volatile private var inactivityMonitorJob: Job? = null
+
+    val isInitialized: Boolean get() = initialized
+    val isStarted: Boolean get() = started
+    internal val manager: PluginManager
+        get() = requireInitialized().let { managerInstance }
+    internal val runtimeAdapters: PluginRuntimeAdapterRegistry
+        get() = requireInitialized().let { runtimeAdaptersInstance }
+    internal val contributions: PluginContributionRegistry
+        get() = requireInitialized().let { contributionsInstance }
+    internal val extensionPoints: ExtensionPointRegistry
+        get() = requireInitialized().let { extensionPointsInstance }
+    internal val extensionRouter: ExtensionRouter
+        get() = requireInitialized().let { extensionRouterInstance }
+    internal val uiRegistry: PluginUiRegistry
+        get() = requireInitialized().let { uiRegistryInstance }
+    internal val capabilities: PluginHostCapabilityRegistry
+        get() = requireInitialized().let { capabilityRegistryInstance }
+    val hostSurfacePolicy: HostSurfacePolicy
+        get() = requireInitialized().let { surfacePolicyInstance }
+    val adminSecurity: AdminSecurityManager
+        get() = requireInitialized().let { adminSecurityInstance }
+
+    /**
+     * Runtime hand-off for an already admitted system plugin. Trust/signature admission must happen
+     * before this internal boundary is called. Only the plugin_center role receives this control plane.
+     */
+    internal fun createAdmittedSystemHost(
+        ownerPluginId: String,
+        admittedRole: String
+    ): SystemPluginHostV1 {
+        requireInitialized()
+        val gateway = KernelSystemHostGatewayV1(
+            ownerPluginId = ownerPluginId,
+            admittedRole = admittedRole,
+            capabilityRegistry = capabilityRegistryInstance,
+            surfacePolicy = surfacePolicyInstance
+        )
+        val control = KernelPluginPlatformControlV1(
+            admittedRole = admittedRole,
+            manager = managerInstance,
+            capabilityRegistry = capabilityRegistryInstance,
+            surfacePolicy = surfacePolicyInstance
+        )
+        return KernelSystemPluginHostV1(SystemPluginProtocolV1.HOST_ABI, gateway, control)
+    }
+
+
+    fun recordPluginUse(pluginId: String) {
+        requireInitialized()
+        val count = usageStoreInstance.recordUse(pluginId)
+        if (backupPolicyInstance.snapshot().enabled && count == PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT) {
+            monitorScope.launch {
+                runCatching { managerInstance.reconcileBackupPolicy() }
+                    .onFailure { AppLogger.w(TAG, "High-frequency plugin backup check failed", it) }
+            }
+        }
+    }
+
+    fun initialize(
+        context: Context,
+        secretBroker: PluginSecretBroker = NoApprovedPluginSecretBroker
+    ) {
+        synchronized(lifecycleLock) {
+            if (initialized) return
+            val appContext = context.applicationContext
+            val surfacePolicy = HostSurfacePolicy(appContext)
+            val adminSecurity = AdminSecurityManager(appContext)
+            val usageStore = PluginUsageStore(appContext)
+            val inactivityPolicy = PluginInactivityPolicyStore(appContext)
+            val backupPolicy = PluginBackupPolicyStore(appContext)
+            val uiRegistry = PluginUiRegistry()
+            val capabilityRegistry = PluginHostCapabilityRegistry(surfacePolicy, usageStore)
+            val contributions = PluginContributionRegistry()
+            val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
+                register(NoopPluginRuntimeAdapter)
+                register(DeclarativePluginRuntimeAdapter)
+            }
+            listOf(
+                Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 AI Limbs 首页添加入口"),
+                Triple(PluginExtensionPoints.UI_SCREEN, "插件页面", "允许插件提供可打开的界面页面"),
+                Triple(PluginExtensionPoints.UI_THEME, "全局主题 / 皮肤", "允许插件实时接管宿主主题与配色")
+            ).forEach { (point, title, detail) ->
+                val contracts = when (point) {
+                    PluginExtensionPoints.UI_HOME_TILE -> listOf(
+                        "PluginRegistrar.registerExtension",
+                        "PluginHomeTileSpec"
+                    )
+                    PluginExtensionPoints.UI_SCREEN -> listOf(
+                        "PluginRegistrar.registerExtension",
+                        "PluginScreenSpec",
+                        "PluginScreenBlock"
+                    )
+                    PluginExtensionPoints.UI_THEME -> listOf(
+                        "PluginRegistrar.registerExtension",
+                        "PluginThemeSpec"
+                    )
+                    else -> emptyList()
+                }
+                surfacePolicy.register(
+                    HostSurfaceDefinition(
+                        id = PluginSurfaceIds.extension(point),
+                        title = "$title · $point@1",
+                        detail = detail,
+                        kind = HostSurfaceKind.EXTENSION_POINT,
+                        publicContracts = contracts
+                    )
+                )
+            }
+            val extensionPoints = ExtensionPointRegistry().apply {
+                register(
+                    ExtensionPointDefinition(
+                        point = PluginExtensionPoints.UI_HOME_TILE,
+                        apiVersion = 1,
+                        binder = { record ->
+                            val tile = record.payload as? PluginHomeTileSpec
+                                ?: throw PluginInstallException(
+                                    "UI_EXTENSION_PAYLOAD_INVALID",
+                                    "Home tile payload has the wrong type"
+                                )
+                            uiRegistry.registerHomeTile(record.ownerPluginId, tile)
+                        }
+                    )
+                )
+                register(
+                    ExtensionPointDefinition(
+                        point = PluginExtensionPoints.UI_SCREEN,
+                        apiVersion = 1,
+                        binder = { record ->
+                            val screen = record.payload as? PluginScreenSpec
+                                ?: throw PluginInstallException(
+                                    "UI_EXTENSION_PAYLOAD_INVALID",
+                                    "Screen payload has the wrong type"
+                                )
+                            uiRegistry.registerScreen(record.ownerPluginId, screen)
+                        }
+                    )
+                )
+                register(
+                    ExtensionPointDefinition(
+                        point = PluginExtensionPoints.UI_THEME,
+                        apiVersion = 1,
+                        binder = { record ->
+                            val theme = record.payload as? PluginThemeSpec
+                                ?: throw PluginInstallException(
+                                    "UI_EXTENSION_PAYLOAD_INVALID",
+                                    "Theme payload has the wrong type"
+                                )
+                            uiRegistry.registerTheme(record.ownerPluginId, theme)
+                        }
+                    )
+                )
+            }
+            val extensionRouter = ExtensionRouter(extensionPoints, surfacePolicy)
+            val pluginContextFactory = PluginContextFactory(
+                contributions = contributions,
+                eventBusHost = PluginEventBusHost(),
+                capabilityInvokerFactory = capabilityRegistry,
+                secretBroker = secretBroker
+            )
+            val pluginStore = PluginStore.fromContext(appContext)
+            val backupStore = PluginBackupStore(pluginStore)
+            val manager = PluginManager(
+                appContext = appContext,
+                store = pluginStore,
+                trustVerifier = StrictPluginTrustVerifier,
+                runtimeAdapters = runtimeAdapters,
+                contributions = contributions,
+                extensionRouter = extensionRouter,
+                capabilityBinder = capabilityRegistry,
+                surfacePolicy = surfacePolicy,
+                usageStore = usageStore,
+                inactivityPolicy = inactivityPolicy,
+                backupStore = backupStore,
+                backupPolicy = backupPolicy,
+                runtimeHost = PluginRuntimeHost(),
+                pluginContextFactory = pluginContextFactory
+            )
+            manager.initialize()
+            managerInstance = manager
+            runtimeAdaptersInstance = runtimeAdapters
+            contributionsInstance = contributions
+            extensionPointsInstance = extensionPoints
+            extensionRouterInstance = extensionRouter
+            uiRegistryInstance = uiRegistry
+            capabilityRegistryInstance = capabilityRegistry
+            surfacePolicyInstance = surfacePolicy
+            adminSecurityInstance = adminSecurity
+            usageStoreInstance = usageStore
+            inactivityPolicyInstance = inactivityPolicy
+            backupPolicyInstance = backupPolicy
+            initialized = true
+            AppLogger.i(TAG, "AI Limbs Plugin Platform kernel initialized: ${manager.store.rootDir.absolutePath}")
+        }
+    }
+
+    suspend fun start() {
+        requireInitialized()
+        synchronized(lifecycleLock) {
+            if (started) return
+        }
+        try {
+            managerInstance.restoreEnabledPlugins()
+            managerInstance.reconcileInactivityPolicy()
+            managerInstance.reconcileBackupPolicy()
+            AppLogger.i(TAG, "AI Limbs Plugin Platform restored enabled plugins")
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            AppLogger.e(TAG, "Plugin restore encountered an error", error)
+        }
+        synchronized(lifecycleLock) {
+            started = true
+        }
+        startInactivityMonitor()
+    }
+
+    private fun startInactivityMonitor() {
+        inactivityMonitorJob?.cancel()
+        inactivityMonitorJob = monitorScope.launch {
+            while (isActive) {
+                val policy = inactivityPolicyInstance.snapshot()
+                val interval = if (policy.enabled && policy.mode == InactivityThresholdMode.TEST_SECONDS) 1_000L else 60_000L
+                delay(interval)
+                if (!started) continue
+                try {
+                    managerInstance.reconcileInactivityPolicy()
+                } catch (error: CancellationException) {
+                    throw error
+                } catch (error: Throwable) {
+                    AppLogger.w(TAG, "Inactivity policy check failed", error)
+                }
+            }
+        }
+    }
+
+    suspend fun shutdown() {
+        if (!initialized) return
+        synchronized(lifecycleLock) {
+            started = false
+        }
+        inactivityMonitorJob?.cancel()
+        inactivityMonitorJob = null
+        try {
+            managerInstance.shutdown()
+            AppLogger.i(TAG, "AI Limbs Plugin Platform kernel shut down")
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Throwable) {
+            AppLogger.e(TAG, "Plugin shutdown encountered an error", error)
+        }
+    }
+
+    private fun requireInitialized() {
+        check(initialized) { "AI Limbs Plugin Platform kernel is not initialized" }
+    }
+}
