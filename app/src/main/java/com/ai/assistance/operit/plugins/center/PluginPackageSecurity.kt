@@ -140,7 +140,8 @@ class PluginPackageVerifier(
         private val PRIVILEGED_INPROCESS_PLUGIN_IDS = mapOf(
             "plugin.system.extension_hub" to "system_extension_hub",
             "plugin.system.bridge" to "system_bridge",
-            "plugin.system.developer_guide" to "system_plugin"
+            "plugin.system.developer_guide" to "system_plugin",
+            "plugin.system.packager" to "system_packager"
         )
 
         fun sha256(file: File): String {

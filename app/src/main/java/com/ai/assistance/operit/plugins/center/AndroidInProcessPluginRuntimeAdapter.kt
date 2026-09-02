@@ -78,6 +78,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             "plugin.system.extension_hub" -> "system_extension_hub"
             "plugin.system.bridge" -> "system_bridge"
             "plugin.system.developer_guide" -> "system_plugin"
+            "plugin.system.packager" -> "system_packager"
             else -> null
         }
         if (requiredRole == null || requiredRole !in context.manifest.roles) {
@@ -210,6 +211,12 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override suspend fun invokeHostCapability(id: String, parametersJson: String): String {
             val parameters = runCatching { JSONObject(parametersJson) }.getOrElse {
                 throw PluginInstallException("INPROCESS_PARAMETERS_INVALID", "Host capability parameters must be JSON")
+            }
+            if (id == PluginSigningHostService.CAPABILITY_ID) {
+                if (pluginId != PluginSigningHostService.PACKAGER_PLUGIN_ID) {
+                    throw PluginInstallException("PRIVATE_HOST_CAPABILITY_FORBIDDEN", "Private signing host is reserved for the official Packager plugin")
+                }
+                return PluginSigningHostService(applicationContext).execute(parameters).toString()
             }
             return context.payloadContext.capabilityInvoker.invoke(id, parameters).toString()
         }
