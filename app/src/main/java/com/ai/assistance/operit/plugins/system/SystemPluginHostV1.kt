@@ -25,10 +25,23 @@ data class SystemHostPrimitiveDescriptor(
     val callable: Boolean
 )
 
+data class SystemHostPrimitiveAvailability(
+    val id: String,
+    val operation: String?,
+    val known: Boolean,
+    val callable: Boolean,
+    val available: Boolean,
+    val reasonCode: String? = null,
+    val reason: String? = null
+)
+
 interface SystemHostGatewayV1 {
     fun listHostPrimitives(): List<SystemHostPrimitiveDescriptor>
     fun describeHostPrimitive(id: String): SystemHostPrimitiveDescriptor?
+    fun listHostPrimitiveOperations(id: String): List<String>
+    fun availabilityHostPrimitive(id: String, operation: String? = null): SystemHostPrimitiveAvailability
     suspend fun invokeHostPrimitive(id: String, parameters: JSONObject = JSONObject()): JSONObject
+    suspend fun invokeHostPrimitive(id: String, operation: String, parameters: JSONObject = JSONObject()): JSONObject
 }
 
 interface PluginPlatformControlV1 {
@@ -94,9 +107,24 @@ internal class KernelSystemHostGatewayV1(
     override fun describeHostPrimitive(id: String): SystemHostPrimitiveDescriptor? =
         AiLimbsHostPrimitiveCatalog.find(id)?.let(::descriptor)
 
+    override fun listHostPrimitiveOperations(id: String): List<String> {
+        requirePluginCenterRole(admittedRole)
+        return capabilityRegistry.systemHostOperations(id)
+    }
+
+    override fun availabilityHostPrimitive(id: String, operation: String?): SystemHostPrimitiveAvailability {
+        requirePluginCenterRole(admittedRole)
+        return capabilityRegistry.systemHostAvailability(id, operation)
+    }
+
     override suspend fun invokeHostPrimitive(id: String, parameters: JSONObject): JSONObject {
         requirePluginCenterRole(admittedRole)
         return capabilityRegistry.invokeSystemHost(ownerPluginId, id, parameters)
+    }
+
+    override suspend fun invokeHostPrimitive(id: String, operation: String, parameters: JSONObject): JSONObject {
+        requirePluginCenterRole(admittedRole)
+        return capabilityRegistry.invokeSystemHost(ownerPluginId, id, operation, parameters)
     }
 
     private fun descriptor(definition: HostPrimitiveDefinition): SystemHostPrimitiveDescriptor {

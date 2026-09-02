@@ -158,7 +158,7 @@ internal object PluginPlatformKernel {
             val uiRegistry = PluginUiRegistry()
             val systemUiRegistry = SystemPluginUiRegistry()
             val dynamicNavigationRegistry = DynamicNavigationSurfaceRegistry(appContext)
-            val capabilityRegistry = PluginHostCapabilityRegistry(surfacePolicy, usageStore)
+            val capabilityRegistry = PluginHostCapabilityRegistry(appContext, surfacePolicy, usageStore)
             val contributions = PluginContributionRegistry()
             surfacePolicy.register(
                 HostSurfaceDefinition(

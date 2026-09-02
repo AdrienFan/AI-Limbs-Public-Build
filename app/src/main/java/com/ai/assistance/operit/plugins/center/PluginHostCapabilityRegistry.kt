@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 
+import android.content.Context
+import com.ai.assistance.operit.plugins.system.SystemHostPrimitiveAvailability
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -10,10 +12,12 @@ import org.json.JSONObject
  * Plugin-owned capabilities live in plugin.*; Host calls use the versioned AI Limbs Host Primitive IDs.
  */
 internal class PluginHostCapabilityRegistry(
+    context: Context?,
     private val surfacePolicy: HostSurfacePolicy?,
     private val usageStore: PluginUsageStore? = null
 ) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
-    internal constructor() : this(null, null)
+    internal constructor() : this(null, null, null)
+    private val systemExecutor = context?.let(::SystemHostPrimitiveExecutor)
 
     private data class OwnedCapability(
         val token: String,
@@ -28,8 +32,8 @@ internal class PluginHostCapabilityRegistry(
 
     private val capabilities = ConcurrentHashMap<String, OwnedCapability>()
 
-    // Phase 1: only Structured Logging has a real v2 Host Primitive adapter.
-    // The complete 39-item catalog is exposed separately by AiLimbsHostPrimitiveCatalog.
+    // Ordinary plugin scope adapters remain intentionally narrow here.
+    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 39-item Gateway catalog.
     private val hostCapabilities = mapOf(
         "host.logging@1" to HostCapability("host.logging@1", ::invokeLogging)
     )
@@ -131,27 +135,49 @@ internal class PluginHostCapabilityRegistry(
     fun activeIds(): Set<String> = capabilities.keys.toSortedSet()
 
     internal fun isHostCallable(capabilityId: String): Boolean =
-        capabilityId.trim().lowercase() in hostCapabilities
+        systemExecutor?.isCallable(capabilityId) ?: (capabilityId.trim().lowercase() in hostCapabilities)
+
+    internal fun systemHostOperations(capabilityId: String): List<String> =
+        systemExecutor?.operationNames(capabilityId).orEmpty()
+
+    internal fun systemHostAvailability(capabilityId: String, operation: String? = null): SystemHostPrimitiveAvailability {
+        val normalized = capabilityId.trim().lowercase()
+        val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
+            ?: return SystemHostPrimitiveAvailability(normalized, operation, false, false, false, "HOST_PRIMITIVE_UNKNOWN", "Unknown AI Limbs Host Primitive")
+        val executor = systemExecutor
+            ?: return SystemHostPrimitiveAvailability(primitive.id, operation, true, false, false, "HOST_GATEWAY_NOT_READY", "System Host Gateway executor is not initialized")
+        val requested = operation?.trim()?.lowercase()?.takeIf { it.isNotBlank() }
+        val callable = executor.isCallable(primitive.id)
+        if (requested == null) {
+            return SystemHostPrimitiveAvailability(primitive.id, null, true, callable, callable, if (callable) null else "HOST_PRIMITIVE_NOT_BOUND", if (callable) null else "No runtime-bound operation is available")
+        }
+        val knownOperation = requested in executor.operationNames(primitive.id)
+        if (!knownOperation) return SystemHostPrimitiveAvailability(primitive.id, requested, true, callable, false, "HOST_OPERATION_UNKNOWN", "Unknown Host Primitive operation")
+        val available = executor.isOperationAvailable(primitive.id, requested)
+        return SystemHostPrimitiveAvailability(primitive.id, requested, true, callable, available, if (available) null else "HOST_PRIMITIVE_OPERATION_NOT_BOUND", if (available) null else "Operation is declared but has no stable runtime adapter in this kernel build")
+    }
 
     internal suspend fun invokeSystemHost(
         ownerPluginId: String,
         capabilityId: String,
+        operation: String,
         parameters: JSONObject = JSONObject()
     ): JSONObject {
         val normalized = capabilityId.trim().lowercase()
         val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
-            ?: throw PluginInstallException(
-                "HOST_PRIMITIVE_UNKNOWN",
-                "Unknown AI Limbs Host Primitive: $normalized"
-            )
-        val capability = hostCapabilities[primitive.id]
-            ?: throw PluginInstallException(
-                "HOST_PRIMITIVE_NOT_BOUND",
-                "Host Primitive has no runtime adapter: ${primitive.id}"
-            )
-        surfacePolicy?.requireAllowed(PluginSurfaceIds.hostPrimitive(primitive.id))
-        AppLogger.d("PluginHostCapability", "System host invoke: $ownerPluginId -> ${primitive.id}")
-        return capability.execute(JSONObject(parameters.toString()))
+            ?: throw PluginInstallException("HOST_PRIMITIVE_UNKNOWN", "Unknown AI Limbs Host Primitive: $normalized")
+        val executor = systemExecutor
+            ?: throw PluginInstallException("HOST_GATEWAY_NOT_READY", "System Host Gateway executor is not initialized")
+        return executor.invoke(ownerPluginId, primitive.id, operation, JSONObject(parameters.toString()))
+    }
+
+    internal suspend fun invokeSystemHost(ownerPluginId: String, capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject {
+        val copy = JSONObject(parameters.toString())
+        val operation = copy.optString("operation").trim().ifBlank {
+            throw PluginInstallException("HOST_OPERATION_REQUIRED", "Host Gateway invoke requires an operation")
+        }
+        copy.remove("operation")
+        return invokeSystemHost(ownerPluginId, capabilityId, operation, copy)
     }
 
     override fun create(ownerPluginId: String, grantedScopes: Set<String>): PluginCapabilityInvoker =
