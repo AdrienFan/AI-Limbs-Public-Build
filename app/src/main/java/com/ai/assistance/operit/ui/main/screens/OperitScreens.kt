@@ -591,12 +591,7 @@ sealed class Screen(
         ) {
             DynamicNavigationScreen(
                 surfaceId = surfaceId,
-                onOpenPluginScreen = { screenId -> navigateTo(PluginDeclarativePage(screenId)) },
-                onOpenPluginCenter = {
-                    PluginPlatformKernel.systemUiRegistry.toolboxEntries.value.firstOrNull()?.let { entry ->
-                        navigateTo(SystemPluginPage(entry.id))
-                    }
-                }
+                onOpenPluginScreen = { screenId -> navigateTo(PluginDeclarativePage(screenId)) }
             )
         }
 

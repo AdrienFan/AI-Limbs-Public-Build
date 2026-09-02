@@ -110,6 +110,7 @@ fun OperitApp(
     val configuration = LocalConfiguration.current
     val dynamicSurfaces by PluginPlatformKernel.dynamicNavigationRegistry.surfaces.collectAsState()
     val systemToolboxEntries by PluginPlatformKernel.systemUiRegistry.toolboxEntries.collectAsState()
+    val canCreateDynamicPage = systemToolboxEntries.any { it.id == "plugin_center.main" }
     val navigationModel = remember(
         context, configuration, navigationRevision, dynamicSurfaces, systemToolboxEntries
     ) { AppRouteCatalog.build(context) }
@@ -534,7 +535,10 @@ fun OperitApp(
                         navigateTo(screen, fromDrawer = true)
                     },
                     onNavigationEntrySelected = ::navigateToNavigationEntry,
-                    onCreateDynamicPage = { PluginPlatformKernel.dynamicNavigationRegistry.create() },
+                    canCreateDynamicPage = canCreateDynamicPage,
+                    onCreateDynamicPage = {
+                        if (canCreateDynamicPage) PluginPlatformKernel.dynamicNavigationRegistry.create()
+                    },
                     onToggleSidebar = {
                         isTabletSidebarExpanded = !isTabletSidebarExpanded
                     },
@@ -570,7 +574,10 @@ fun OperitApp(
                         navigateTo(screen, fromDrawer = true)
                     },
                     onNavigationEntrySelected = ::navigateToNavigationEntry,
-                    onCreateDynamicPage = { PluginPlatformKernel.dynamicNavigationRegistry.create() },
+                    canCreateDynamicPage = canCreateDynamicPage,
+                    onCreateDynamicPage = {
+                        if (canCreateDynamicPage) PluginPlatformKernel.dynamicNavigationRegistry.create()
+                    },
                     navigateToTokenConfig = ::navigateToTokenConfig,
                     canGoBack = canGoBack,
                     onGoBack = ::requestGoBack,

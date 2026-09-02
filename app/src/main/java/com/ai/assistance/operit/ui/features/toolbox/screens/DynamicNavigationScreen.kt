@@ -11,12 +11,10 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -34,8 +32,7 @@ import kotlinx.coroutines.launch
 @Composable
 fun DynamicNavigationScreen(
     surfaceId: String,
-    onOpenPluginScreen: (String) -> Unit,
-    onOpenPluginCenter: () -> Unit
+    onOpenPluginScreen: (String) -> Unit
 ) {
     val surfaces by PluginPlatformKernel.dynamicNavigationRegistry.surfaces.collectAsState()
     val bindings by PluginPlatformKernel.dynamicNavigationRegistry.bindings.collectAsState()
@@ -46,20 +43,11 @@ fun DynamicNavigationScreen(
     }
 
     Column(Modifier.fillMaxSize().padding(20.dp)) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Text(
-                text = surface?.title ?: "动态页面",
-                style = MaterialTheme.typography.headlineSmall,
-                fontWeight = FontWeight.SemiBold
-            )
-            IconButton(onClick = onOpenPluginCenter) {
-                Icon(Icons.Default.MoreVert, contentDescription = "页面管理")
-            }
-        }
+        Text(
+            text = surface?.title ?: "动态页面",
+            style = MaterialTheme.typography.headlineSmall,
+            fontWeight = FontWeight.SemiBold
+        )
 
         if (boundTiles.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {

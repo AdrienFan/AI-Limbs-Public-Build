@@ -58,6 +58,7 @@ fun TabletLayout(
         onScreenChange: (Screen) -> Unit,
         onDrawerItemSelected: (Screen) -> Unit,
         onNavigationEntrySelected: (NavigationEntrySpec) -> Unit,
+        canCreateDynamicPage: Boolean,
         onCreateDynamicPage: () -> Unit,
         onToggleSidebar: () -> Unit,
         navigateToTokenConfig: () -> Unit,
@@ -154,6 +155,7 @@ fun TabletLayout(
                                                 drawerState = drawerState,
                                                 onScreenSelected = onDrawerItemSelected,
                                                 onNavigationEntrySelected = onNavigationEntrySelected,
+                                                canCreateDynamicPage = canCreateDynamicPage,
                                                 onCreateDynamicPage = onCreateDynamicPage
                                         )
                                 } else {
@@ -166,6 +168,7 @@ fun TabletLayout(
                                                 appearance = drawerAppearance,
                                                 onScreenSelected = onDrawerItemSelected,
                                                 onNavigationEntrySelected = onNavigationEntrySelected,
+                                                canCreateDynamicPage = canCreateDynamicPage,
                                                 onCreateDynamicPage = onCreateDynamicPage
                                         )
                                 }

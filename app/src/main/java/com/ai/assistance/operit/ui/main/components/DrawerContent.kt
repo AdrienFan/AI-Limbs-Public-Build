@@ -134,6 +134,7 @@ fun DrawerContent(
         drawerState: androidx.compose.material3.DrawerState,
         onScreenSelected: (Screen) -> Unit,
         onNavigationEntrySelected: (NavigationEntrySpec) -> Unit,
+        canCreateDynamicPage: Boolean,
         onCreateDynamicPage: () -> Unit
 ) {
         val context = LocalContext.current
@@ -281,6 +282,7 @@ fun DrawerContent(
                         selectedItem = selectedItem,
                         appearance = appearance,
                         onNavItemClick = handleNavItemClick,
+                        canCreateDynamicPage = canCreateDynamicPage,
                         onCreateDynamicPage = onCreateDynamicPage
                 )
         }
@@ -297,13 +299,20 @@ fun CollapsedDrawerContent(
         appearance: NavigationDrawerAppearance,
         onScreenSelected: (Screen) -> Unit,
         onNavigationEntrySelected: (NavigationEntrySpec) -> Unit,
+        canCreateDynamicPage: Boolean,
         onCreateDynamicPage: () -> Unit
 ) {
+        val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
+        val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
+        val systemNavItems = remember(navItems) { navItems.filterNot { it == NavItem.Settings } }
+
         Column(
-                modifier = Modifier.fillMaxHeight().fillMaxWidth().padding(vertical = 16.dp),
+                modifier =
+                        Modifier.fillMaxHeight()
+                                .fillMaxWidth()
+                                .padding(top = topInset + 8.dp, bottom = bottomInset + 8.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
         ) {
-                Spacer(modifier = Modifier.height(8.dp))
                 Surface(
                         modifier = Modifier.size(44.dp).clip(CircleShape),
                         color = appearance.buttonContainerColor,
@@ -322,11 +331,8 @@ fun CollapsedDrawerContent(
                 HorizontalDivider(modifier = Modifier.fillMaxWidth(0.6f), color = appearance.dividerColor)
                 Spacer(modifier = Modifier.height(8.dp))
 
-                Column(
-                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
-                        horizontalAlignment = Alignment.CenterHorizontally
-                ) {
-                        navItems.filterNot { it == NavItem.Settings }.forEach { item ->
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        systemNavItems.forEach { item ->
                                 CollapsedRailButton(
                                         icon = item.icon,
                                         contentDescription = stringResource(id = item.titleResId),
@@ -335,19 +341,24 @@ fun CollapsedDrawerContent(
                                         onClick = { onScreenSelected(ScreenRouteRegistry.defaultScreenForNavItem(item)) }
                                 )
                         }
-                        if (pluginEntries.isNotEmpty()) {
-                                Spacer(modifier = Modifier.height(8.dp))
-                                HorizontalDivider(modifier = Modifier.fillMaxWidth(0.45f), color = appearance.dividerColor)
-                                Spacer(modifier = Modifier.height(8.dp))
-                                pluginEntries.forEach { entry ->
-                                        CollapsedRailButton(
-                                                icon = entry.icon,
-                                                contentDescription = entry.title,
-                                                selected = selectedRouteId == entry.routeId,
-                                                appearance = appearance,
-                                                onClick = { onNavigationEntrySelected(entry) }
-                                        )
-                                }
+                }
+
+                Spacer(modifier = Modifier.height(8.dp))
+                HorizontalDivider(modifier = Modifier.fillMaxWidth(0.45f), color = appearance.dividerColor)
+                Spacer(modifier = Modifier.height(8.dp))
+
+                Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                        pluginEntries.forEach { entry ->
+                                CollapsedRailButton(
+                                        icon = entry.icon,
+                                        contentDescription = entry.title,
+                                        selected = selectedRouteId == entry.routeId,
+                                        appearance = appearance,
+                                        onClick = { onNavigationEntrySelected(entry) }
+                                )
                         }
                         Spacer(modifier = Modifier.height(8.dp))
                 }
@@ -356,6 +367,7 @@ fun CollapsedDrawerContent(
                 Spacer(modifier = Modifier.height(8.dp))
                 CollapsedCreatePageButton(
                         appearance = appearance,
+                        enabled = canCreateDynamicPage,
                         onClick = onCreateDynamicPage
                 )
                 CollapsedRailButton(
@@ -371,18 +383,20 @@ fun CollapsedDrawerContent(
 @Composable
 private fun CollapsedCreatePageButton(
         appearance: NavigationDrawerAppearance,
+        enabled: Boolean,
         onClick: () -> Unit
 ) {
+        val disabledAlpha = if (enabled) 1f else 0.38f
         Surface(
                 modifier = Modifier.padding(vertical = 5.dp).size(44.dp),
-                color = appearance.buttonContainerColor,
+                color = appearance.buttonContainerColor.copy(alpha = disabledAlpha),
                 shape = CircleShape
         ) {
-                IconButton(onClick = onClick) {
+                IconButton(enabled = enabled, onClick = onClick) {
                         Text(
                                 text = "⊕",
                                 style = MaterialTheme.typography.headlineSmall,
-                                color = appearance.itemColor
+                                color = appearance.itemColor.copy(alpha = disabledAlpha)
                         )
                 }
         }
@@ -697,6 +711,7 @@ private fun DrawerBottomShortcutRow(
         selectedItem: NavItem?,
         appearance: NavigationDrawerAppearance,
         onNavItemClick: (NavItem) -> Unit,
+        canCreateDynamicPage: Boolean,
         onCreateDynamicPage: () -> Unit
 ) {
         Row(
@@ -707,6 +722,7 @@ private fun DrawerBottomShortcutRow(
                 BottomCreatePageDrawerItem(
                         modifier = Modifier.weight(1f),
                         appearance = appearance,
+                        enabled = canCreateDynamicPage,
                         onClick = onCreateDynamicPage
                 )
                 BottomShortcutDrawerItem(
@@ -723,14 +739,16 @@ private fun DrawerBottomShortcutRow(
 private fun BottomCreatePageDrawerItem(
         modifier: Modifier = Modifier,
         appearance: NavigationDrawerAppearance,
+        enabled: Boolean,
         onClick: () -> Unit
 ) {
         val shape = RoundedCornerShape(14.dp)
+        val disabledAlpha = if (enabled) 1f else 0.38f
         Surface(
                 modifier = modifier.height(68.dp),
-                onClick = onClick,
+                onClick = { if (enabled) onClick() },
                 shape = shape,
-                color = appearance.buttonContainerColor
+                color = appearance.buttonContainerColor.copy(alpha = disabledAlpha)
         ) {
                 Column(
                         modifier = Modifier.fillMaxSize(),
@@ -740,10 +758,14 @@ private fun BottomCreatePageDrawerItem(
                         Text(
                                 text = "⊕",
                                 style = MaterialTheme.typography.headlineMedium,
-                                color = appearance.itemColor
+                                color = appearance.itemColor.copy(alpha = disabledAlpha)
                         )
                         Spacer(modifier = Modifier.height(4.dp))
-                        Text("新建页面", style = MaterialTheme.typography.labelSmall, color = appearance.itemColor)
+                        Text(
+                                "新建页面",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = appearance.itemColor.copy(alpha = disabledAlpha)
+                        )
                 }
         }
 }
