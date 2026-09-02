@@ -39,11 +39,52 @@ object StrictPluginTrustVerifier : PluginTrustVerifier {
                 verdict = PluginTrustVerdict.UNSIGNED,
                 reason = "No publisher signature is declared"
             )
-        return PluginTrustDecision(
-            verdict = PluginTrustVerdict.UNKNOWN_SIGNER,
-            signerId = signature.signerId,
-            reason = "No trusted publisher keyring is configured yet"
-        )
+        if (signature.algorithm != "Ed25519") {
+            return PluginTrustDecision(
+                verdict = PluginTrustVerdict.UNSUPPORTED_SIGNATURE,
+                signerId = signature.signerId,
+                reason = "Plugin V1 requires Ed25519 publisher signatures"
+            )
+        }
+        val manifestFile = File(contentDir, PluginAbi.MANIFEST_ENTRY)
+        val signatureFile = File(contentDir, signature.signatureEntry)
+        if (!manifestFile.isFile || !signatureFile.isFile) {
+            return PluginTrustDecision(
+                verdict = PluginTrustVerdict.INVALID_SIGNATURE,
+                signerId = signature.signerId,
+                reason = "Publisher signature material is incomplete"
+            )
+        }
+        return runCatching {
+            PluginTrustKeyringV1.requireSigner(
+                signature.signerId,
+                PluginTrustKeyringV1.PURPOSE_PARENT_PLUGIN
+            )
+            if (!PluginTrustKeyringV1.verifyDetached(
+                    signerId = signature.signerId,
+                    purpose = PluginTrustKeyringV1.PURPOSE_PARENT_PLUGIN,
+                    payload = manifestFile.readBytes(),
+                    signatureBytes = signatureFile.readBytes()
+                )) {
+                PluginTrustDecision(
+                    verdict = PluginTrustVerdict.INVALID_SIGNATURE,
+                    signerId = signature.signerId,
+                    reason = "Plugin Ed25519 publisher signature verification failed"
+                )
+            } else {
+                PluginTrustDecision(
+                    verdict = PluginTrustVerdict.TRUSTED,
+                    signerId = signature.signerId
+                )
+            }
+        }.getOrElse { error ->
+            val unknown = error is PluginInstallException && error.code == "TRUST_SIGNER_UNKNOWN"
+            PluginTrustDecision(
+                verdict = if (unknown) PluginTrustVerdict.UNKNOWN_SIGNER else PluginTrustVerdict.INVALID_SIGNATURE,
+                signerId = signature.signerId,
+                reason = error.message ?: "Plugin publisher signature verification failed"
+            )
+        }
     }
 }
 

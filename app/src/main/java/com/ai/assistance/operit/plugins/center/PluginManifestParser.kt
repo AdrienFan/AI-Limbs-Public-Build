@@ -12,6 +12,7 @@ object PluginManifestParser {
     private val PLUGIN_ID = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
     private val EXTENSION_POINT = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
     private val SYMBOLIC_ID = Regex("^[A-Za-z0-9]+(?:[._:/-][A-Za-z0-9]+)*$")
+    private val SHA256 = Regex("^[0-9a-fA-F]{64}$")
 
     fun parse(rawJson: String): PluginManifest {
         val root = runCatching { JSONObject(rawJson) }
@@ -60,7 +61,11 @@ object PluginManifestParser {
             providers = providesObject?.optJSONArray("providers").stringSet("provides.providers", true),
             extensions = parseExtensions(providesObject?.optJSONArray("extensions"))
         )
+        val integrity = root.optJSONObject("integrity")?.let(::parseIntegrity)
         val signature = root.optJSONObject("signature")?.let(::parseSignature)
+        if (signature != null && integrity == null) {
+            throw PluginManifestException("INTEGRITY_MISSING", "Signed plugins must declare integrity")
+        }
         return PluginManifest(
             format = format,
             schemaVersion = schemaVersion,
@@ -76,6 +81,7 @@ object PluginManifestParser {
             permissions = permissions,
             provides = provides,
             uiRawJson = root.optJSONObject("ui")?.toString(),
+            integrity = integrity,
             signature = signature
         )
     }
@@ -113,6 +119,31 @@ object PluginManifestParser {
             PluginServiceDependencySpec(id, minApi)
         }
         return PluginDependencies(pluginDeps, serviceDeps)
+    }
+
+    private fun parseIntegrity(value: JSONObject): PluginIntegritySpec {
+        val algorithm = value.requiredString("algorithm")
+        if (algorithm != "SHA-256") {
+            throw PluginManifestException("INTEGRITY_ALGORITHM_UNSUPPORTED", "Plugin V1 requires SHA-256 integrity")
+        }
+        val entries = value.requiredObject("entries")
+        val result = linkedMapOf<String, String>()
+        val keys = entries.keys()
+        while (keys.hasNext()) {
+            val rawPath = keys.next()
+            val path = PluginPackagePaths.requireSafeRelativePath(rawPath)
+            val hash = entries.optString(rawPath).trim()
+            if (!SHA256.matches(hash)) {
+                throw PluginManifestException("INTEGRITY_HASH_INVALID", "Invalid SHA-256 for $path")
+            }
+            if (result.put(path, hash.lowercase()) != null) {
+                throw PluginManifestException("INTEGRITY_DUPLICATE_PATH", "Duplicate integrity path: $path")
+            }
+        }
+        if (result.isEmpty()) {
+            throw PluginManifestException("INTEGRITY_EMPTY", "integrity.entries must not be empty")
+        }
+        return PluginIntegritySpec(algorithm, result)
     }
 
     private fun parseSignature(value: JSONObject): PluginSignatureSpec {

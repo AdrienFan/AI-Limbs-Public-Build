@@ -193,9 +193,12 @@ class AiLimbsCapabilityResolver(
         val managedRegistration = AiLimbsCapabilityRegistry.registrationForInvokeName(invokeId)
         val coreRegistration =
             (managedRegistration as? AiLimbsCapabilityRegistration.Core)?.registration
+        val pluginRegistration =
+            (managedRegistration as? AiLimbsCapabilityRegistration.Plugin)?.registration
         val semantic = semanticMetadata(invokeId)
         val capabilityId =
             coreRegistration?.capabilityId
+                ?: pluginRegistration?.capabilityId
                 ?: semantic?.capabilityId
                 ?: generatedId
         val aliases =
@@ -203,6 +206,7 @@ class AiLimbsCapabilityResolver(
                 add(generatedId)
                 coreRegistration?.invokeAliases?.let(::addAll)
                 coreRegistration?.capabilityAliases?.let(::addAll)
+                pluginRegistration?.invokeAliases?.let(::addAll)
                 semantic?.aliases?.let(::addAll)
                 add(invokeId)
             }.filter { it != capabilityId }.distinct()
@@ -359,6 +363,8 @@ class AiLimbsCapabilityResolver(
                     AiLimbsCoreProvider.BRIDGE -> PROVIDER_BRIDGE
                     AiLimbsCoreProvider.UBUNTU -> PROVIDER_UBUNTU
                 }
+            is AiLimbsCapabilityRegistration.Plugin ->
+                return "plugin:${registration.registration.ownerPluginId}"
             null -> Unit
         }
         return when {

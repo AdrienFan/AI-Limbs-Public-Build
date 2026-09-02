@@ -46,6 +46,7 @@ class PluginPackageVerifier(
         var totalBytes = 0L
         var manifestRaw: String? = null
         val executableEntries = linkedSetOf<String>()
+        val fileEntries = linkedSetOf<String>()
         val seen = HashSet<String>()
         ZipFile(managedPackage).use { archive ->
             val entries = archive.entries()
@@ -59,6 +60,7 @@ class PluginPackageVerifier(
                     safeOutputFile(contentDir, normalized).mkdirs()
                     continue
                 }
+                fileEntries += normalized
                 val lowerName = normalized.lowercase()
                 if (FORBIDDEN_EXECUTABLE_SUFFIXES.any(lowerName::endsWith)) {
                     executableEntries += normalized
@@ -90,6 +92,7 @@ class PluginPackageVerifier(
         }
         val raw = manifestRaw ?: throw PluginInstallException("MANIFEST_MISSING", "Root plugin.json is required")
         val manifest = PluginManifestParser.parse(raw)
+        validateIntegrity(manifest, contentDir, fileEntries)
         validateExecutablePayloads(manifest, executableEntries)
         manifest.runtime.entry?.let { entry ->
             val runtimeFile = safeOutputFile(contentDir, entry)
@@ -107,6 +110,45 @@ class PluginPackageVerifier(
         return VerifiedPluginPackage(manifest, digest, totalBytes, entryCount)
     }
 
+
+    private fun validateIntegrity(
+        manifest: PluginManifest,
+        contentDir: File,
+        fileEntries: Set<String>
+    ) {
+        val integrity = manifest.integrity ?: return
+        val signatureEntry = manifest.signature?.signatureEntry
+        val payloadEntries =
+            fileEntries
+                .filterNot { it == PluginAbi.MANIFEST_ENTRY || it == signatureEntry }
+                .toSet()
+        if (integrity.entries.keys != payloadEntries) {
+            val missing = payloadEntries - integrity.entries.keys
+            val extra = integrity.entries.keys - payloadEntries
+            throw PluginInstallException(
+                "INTEGRITY_COVERAGE_INVALID",
+                "Integrity map must cover every payload entry exactly; missing=$missing extra=$extra"
+            )
+        }
+        integrity.entries.forEach { (path, expected) ->
+            val file = safeOutputFile(contentDir, path)
+            if (!file.isFile) {
+                throw PluginInstallException("INTEGRITY_ENTRY_MISSING", "Missing payload entry: $path")
+            }
+            val actual = sha256(file)
+            if (!actual.equals(expected, ignoreCase = true)) {
+                throw PluginInstallException("INTEGRITY_HASH_MISMATCH", "SHA-256 mismatch: $path")
+            }
+        }
+        manifest.runtime.entry?.let { runtimeEntry ->
+            if (runtimeEntry !in integrity.entries) {
+                throw PluginInstallException(
+                    "RUNTIME_NOT_IN_INTEGRITY_MAP",
+                    "Runtime entry must be integrity-protected"
+                )
+            }
+        }
+    }
 
     private fun validateExecutablePayloads(manifest: PluginManifest, entries: Set<String>) {
         if (entries.isEmpty()) return

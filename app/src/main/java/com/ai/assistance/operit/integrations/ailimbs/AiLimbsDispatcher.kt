@@ -62,6 +62,8 @@ class AiLimbsDispatcher(
         when (val route = invocation.route) {
             is AiLimbsCapabilityRoute.Core ->
                 executeCoreRoute(route.registration, invocation.parameters)
+            is AiLimbsCapabilityRoute.Plugin ->
+                route.registration.executor.execute(JSONObject(invocation.parameters.toString()))
             is AiLimbsCapabilityRoute.HostTool ->
                 executeHostTool(
                     JSONObject()

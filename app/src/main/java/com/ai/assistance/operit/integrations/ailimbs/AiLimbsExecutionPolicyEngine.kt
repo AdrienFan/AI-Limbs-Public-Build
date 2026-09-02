@@ -88,6 +88,15 @@ class AiLimbsExecutionPolicyEngine(
                     }
                 }
             }
+            is AiLimbsCapabilityRegistration.Plugin -> {
+                val plugin = registration.registration
+                canonicalName = plugin.catalogEntry.targetToolName
+                targetName = canonicalName
+                parameters = args
+                route = AiLimbsCapabilityRoute.Plugin(plugin)
+                sourceEnabled = plugin.catalogEntry.sourceEnabled
+                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
+            }
         }
 
         return AiLimbsNormalizedInvocation(
@@ -129,6 +138,10 @@ class AiLimbsExecutionPolicyEngine(
                     route = AiLimbsCapabilityRoute.Core(core)
                     spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(core.route)
                 }
+            }
+            is AiLimbsCapabilityRegistration.Plugin -> {
+                route = AiLimbsCapabilityRoute.Plugin(registration.registration)
+                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
             }
             null -> {
                 route = AiLimbsCapabilityRoute.HostTool(targetName)

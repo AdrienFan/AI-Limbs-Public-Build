@@ -10,7 +10,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRegistry
 import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONObject
 
-internal enum class HostGatewayRouteKind { HOST_TOOL, CORE_CAPABILITY, LOGGING, UNBOUND }
+internal enum class HostGatewayRouteKind { HOST_TOOL, CORE_CAPABILITY, LOGGING, KERNEL, UNBOUND }
 
 internal data class HostGatewayOperationBinding(
     val operation: String,
@@ -22,6 +22,7 @@ internal object HostPrimitiveGatewayBindings {
     private fun tool(operation: String, target: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.HOST_TOOL, target)
     private fun core(operation: String, target: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.CORE_CAPABILITY, target)
     private fun logging(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.LOGGING)
+    private fun kernel(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.KERNEL)
     private fun pending(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.UNBOUND)
     private fun ops(vararg items: HostGatewayOperationBinding) = items.associateBy { it.operation }
 
@@ -41,7 +42,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.clipboard@1" to ops(pending("read"), pending("write"), pending("clear"), pending("observe")),
         "host.permission@1" to ops(pending("check"), pending("request")),
         "host.audio.capture@1" to ops(pending("start"), pending("read"), pending("stop")),
-        "host.audio.playback@1" to ops(pending("play"), pending("pause"), pending("resume"), pending("stop"), pending("seek"), pending("volume")),
+        "host.audio.playback@1" to ops(tool("play", "music_play"), tool("pause", "music_pause"), tool("resume", "music_resume"), tool("stop", "music_stop"), tool("seek", "music_seek"), tool("volume", "music_set_volume")),
         "host.android.component@1" to ops(tool("invoke", "execute_intent"), tool("broadcast", "send_broadcast")),
         "host.event@1" to ops(pending("snapshot"), pending("subscribe"), pending("unsubscribe")),
         "host.device.state@1" to ops(tool("snapshot", "device_info")),
@@ -50,19 +51,19 @@ internal object HostPrimitiveGatewayBindings {
         "host.chat@1" to ops(tool("create", "create_new_chat"), tool("list", "list_chats"), tool("find", "find_chat"), tool("switch", "switch_chat"), tool("title", "update_chat_title"), tool("delete", "delete_chat"), tool("messages", "get_chat_messages"), tool("messages_range", "get_chat_messages_range"), tool("send", "send_message_to_ai"), tool("stream", "send_message_to_ai_streaming")),
         "host.logging@1" to ops(logging("read")),
         "host.secrets@1" to ops(pending("read"), pending("revoke"), pending("rotate")),
-        "host.ui.surface@1" to ops(pending("list"), pending("register"), pending("open"), pending("remove")),
+        "host.ui.surface@1" to ops(kernel("list"), kernel("register"), kernel("open"), kernel("remove")),
         "host.window.overlay@1" to ops(pending("create"), pending("update"), pending("remove"), pending("list")),
-        "host.capability@1" to ops(core("search", "capability.search"), core("describe", "capability.describe"), pending("invoke")),
-        "host.plugin.service@1" to ops(pending("list"), pending("describe"), pending("call")),
-        "host.extension.routing@1" to ops(pending("list_points"), pending("list_bindings"), pending("bind"), pending("unbind")),
-        "host.plugin.runtime@1" to ops(pending("list"), pending("status"), pending("mount"), pending("stop")),
+        "host.capability@1" to ops(core("search", "capability.search"), core("describe", "capability.describe"), kernel("invoke")),
+        "host.plugin.service@1" to ops(kernel("list"), kernel("describe"), kernel("call")),
+        "host.extension.routing@1" to ops(kernel("list_points"), kernel("list_bindings"), kernel("bind"), kernel("unbind")),
+        "host.plugin.runtime@1" to ops(kernel("list"), kernel("status"), kernel("mount"), kernel("stop")),
         "host.pipeline.hook@1" to ops(pending("list"), pending("register"), pending("unregister")),
         "host.android.usage@1" to ops(tool("query", "get_app_usage_time")),
         "host.content@1" to ops(pending("pick"), pending("open"), pending("read"), pending("write"), pending("share")),
         "host.web.runtime@1" to ops(tool("visit", "visit_web"), tool("navigate", "browser_navigate"), tool("back", "browser_navigate_back"), tool("snapshot", "browser_snapshot"), tool("screenshot", "browser_take_screenshot"), tool("click", "browser_click"), tool("type", "browser_type"), tool("fill", "browser_fill_form"), tool("evaluate", "browser_evaluate"), tool("run_code", "browser_run_code"), tool("tabs", "browser_tabs"), tool("close", "browser_close"), tool("close_all", "browser_close_all"), tool("network", "browser_network_requests")),
         "host.ingress@1" to ops(pending("list"), pending("register"), pending("unregister"), pending("status")),
-        "host.authorization@1" to ops(core("describe", "ai_limbs.policy.describe"), pending("evaluate")),
-        "kernel.plugin.trust@1" to ops(pending("status"), pending("verify_package")),
+        "host.authorization@1" to ops(core("describe", "ai_limbs.policy.describe"), kernel("evaluate")),
+        "kernel.plugin.trust@1" to ops(kernel("status"), kernel("verify_package"), kernel("verify_detached"), kernel("install_keyring")),
         "host.ui.widget@1" to ops(pending("list"), pending("register"), pending("update"), pending("remove")),
         "host.camera.capture@1" to ops(pending("capture")),
     )
@@ -79,6 +80,7 @@ internal object HostPrimitiveGatewayBindings {
 internal class SystemHostPrimitiveExecutor(context: Context) {
     private val appContext = context.applicationContext
     private val toolHandler = AIToolHandler.getInstance(appContext)
+    private val kernelAdapter = KernelHostPrimitiveAdapter(appContext)
 
     init {
         toolHandler.registerDefaultTools()
@@ -94,6 +96,7 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
             HostGatewayRouteKind.HOST_TOOL -> binding.target in toolHandler.getAllToolNames()
             HostGatewayRouteKind.CORE_CAPABILITY -> binding.target?.let(AiLimbsCapabilityRegistry::isRegisteredInvokeName) == true
             HostGatewayRouteKind.LOGGING -> true
+            HostGatewayRouteKind.KERNEL -> kernelAdapter.isAvailable(primitiveId, binding.operation)
             HostGatewayRouteKind.UNBOUND -> false
         }
     }
@@ -111,6 +114,7 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
             HostGatewayRouteKind.HOST_TOOL -> invokeHostTool(ownerPluginId, requireNotNull(binding.target), parameters)
             HostGatewayRouteKind.CORE_CAPABILITY -> dispatcher(ownerPluginId).execute(requireNotNull(binding.target), JSONObject(parameters.toString()))
             HostGatewayRouteKind.LOGGING -> readLogs(parameters)
+            HostGatewayRouteKind.KERNEL -> kernelAdapter.invoke(ownerPluginId, normalizedId, normalizedOperation, JSONObject(parameters.toString()))
             HostGatewayRouteKind.UNBOUND -> error("unreachable")
         }
     }

@@ -23,6 +23,10 @@ data class DynamicNavigationBinding(
     val screenId: String
 )
 
+internal const val DYNAMIC_NAVIGATION_ROUTE_PREFIX = "dynamic.navigation."
+internal fun dynamicNavigationRouteId(surfaceId: String): String =
+    DYNAMIC_NAVIGATION_ROUTE_PREFIX + surfaceId.trim()
+
 internal class DynamicNavigationSurfaceRegistry(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
     private val lock = Any()

@@ -75,6 +75,11 @@ data class PluginProvidesSpec(
     val extensions: List<PluginExtensionSpec> = emptyList()
 )
 
+data class PluginIntegritySpec(
+    val algorithm: String,
+    val entries: Map<String, String>
+)
+
 data class PluginSignatureSpec(
     val algorithm: String,
     val signerId: String,
@@ -96,6 +101,7 @@ data class PluginManifest(
     val permissions: PluginPermissionSpec,
     val provides: PluginProvidesSpec,
     val uiRawJson: String?,
+    val integrity: PluginIntegritySpec?,
     val signature: PluginSignatureSpec?
 )
 

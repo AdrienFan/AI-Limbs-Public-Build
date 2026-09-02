@@ -1,6 +1,15 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
+import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
+import com.ai.assistance.operit.core.tools.catalog.ToolCatalogSourceKind
+import com.ai.assistance.operit.data.model.ToolParameterSchema
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRegistry
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsPluginCapabilityExecutor
 import com.ai.assistance.operit.plugins.system.SystemHostPrimitiveAvailability
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
@@ -17,6 +26,7 @@ internal class PluginHostCapabilityRegistry(
     private val usageStore: PluginUsageStore? = null
 ) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
     internal constructor() : this(null, null, null)
+    private val appContext = context?.applicationContext
     private val systemExecutor = context?.let(::SystemHostPrimitiveExecutor)
 
     private data class OwnedCapability(
@@ -102,34 +112,65 @@ internal class PluginHostCapabilityRegistry(
         surfacePolicy?.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
         val normalized = capabilityId.trim().lowercase()
         if (!normalized.startsWith("plugin.") || !PLUGIN_CAPABILITY_ID.matches(normalized)) {
-            throw PluginInstallException(
-                "CAPABILITY_NAMESPACE_FORBIDDEN",
-                "Plugin capabilities must use the plugin.* namespace: $capabilityId"
-            )
+            throw PluginInstallException("CAPABILITY_NAMESPACE_FORBIDDEN", "Plugin capabilities must use the plugin.* namespace: $capabilityId")
+        }
+        val aliases = capability.invokeAliases.map { it.trim().lowercase() }.filter { it.isNotBlank() }.distinct()
+        if (aliases.any { !it.startsWith("plugin.") || !PLUGIN_CAPABILITY_ID.matches(it) }) {
+            throw PluginInstallException("CAPABILITY_ALIAS_NAMESPACE_FORBIDDEN", "Plugin capability aliases must use plugin.* namespace")
         }
         val token = UUID.randomUUID().toString()
         val candidate = OwnedCapability(token, ownerPluginId, capability)
         val existing = capabilities.putIfAbsent(normalized, candidate)
-        if (existing != null) {
-            throw PluginInstallException(
-                "CAPABILITY_CONFLICT",
-                "$normalized is already owned by ${existing.ownerPluginId}"
+        if (existing != null) throw PluginInstallException("CAPABILITY_CONFLICT", "$normalized is already owned by ${existing.ownerPluginId}")
+        val catalogEntry = pluginCatalogEntry(ownerPluginId, normalized, capability)
+        val dynamicHandle = try {
+            AiLimbsCapabilityRegistry.registerPluginCapability(
+                ownerPluginId, normalized, aliases, catalogEntry,
+                AiLimbsPluginCapabilityExecutor { args -> executePluginDirect(normalized, args) }
             )
+        } catch (error: Throwable) {
+            capabilities.remove(normalized, candidate)
+            throw PluginInstallException("CAPABILITY_REGISTRY_CONFLICT", error.message ?: "Could not register plugin capability", error)
         }
         return AutoCloseable {
-            capabilities.computeIfPresent(normalized) { _, current ->
-                if (current.token == token) null else current
-            }
+            dynamicHandle.close()
+            capabilities.computeIfPresent(normalized) { _, current -> if (current.token == token) null else current }
         }
     }
 
     suspend fun invokePlugin(capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject {
         val normalized = capabilityId.trim().lowercase()
-        val capability = capabilities[normalized]
-            ?: throw PluginInstallException("CAPABILITY_NOT_ACTIVE", "Capability is not active: $normalized")
+        val context = appContext ?: return executePluginDirect(normalized, parameters)
+        val session = AiLimbsExecutionSession(AiLimbsExecutionTransport.PLUGIN_RUNTIME, "plugin-ui:$normalized")
+        return AiLimbsDispatcher(context, AiLimbsExecutionPolicyEngine(context, session))
+            .execute(normalized, JSONObject(parameters.toString()))
+    }
+
+    private suspend fun executePluginDirect(capabilityId: String, parameters: JSONObject): JSONObject {
+        val capability = capabilities[capabilityId]
+            ?: throw PluginInstallException("CAPABILITY_NOT_ACTIVE", "Capability is not active: $capabilityId")
         val result = capability.spec.executor.execute(JSONObject(parameters.toString()))
         usageStore?.recordUse(capability.ownerPluginId)
         return result
+    }
+
+    private fun pluginCatalogEntry(ownerPluginId: String, capabilityId: String, spec: PluginCapabilitySpec): ToolCatalogEntry {
+        val parameters = spec.parameters.map { ToolParameterSchema(it.name, it.type, it.description, it.required, it.default) }
+        return ToolCatalogEntry(
+            targetToolName = capabilityId,
+            displayName = spec.displayName,
+            description = spec.description,
+            parameterHints = parameters.map { "${it.name} [${it.type}, ${if (it.required) "required" else "optional"}]: ${it.description}" },
+            sourceKind = ToolCatalogSourceKind.PACKAGE,
+            keywords = spec.keywords,
+            suggestedParamsJson = spec.suggestedParamsJson,
+            parameters = parameters,
+            sourceName = "plugin:$ownerPluginId",
+            sourceLocator = "ai-limbs://plugin/$ownerPluginId/$capabilityId",
+            sourceEnabled = true,
+            inputSchema = spec.inputSchema,
+            searchMetadata = (spec.invokeAliases + capabilityId + ownerPluginId).distinct()
+        )
     }
 
     fun activeIds(): Set<String> = capabilities.keys.toSortedSet()

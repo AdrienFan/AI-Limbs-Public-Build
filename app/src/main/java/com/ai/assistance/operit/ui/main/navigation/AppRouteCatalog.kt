@@ -7,14 +7,15 @@ import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.packTool.PackageManager
 import com.ai.assistance.operit.core.tools.packTool.TOOLPKG_NAV_SURFACE_MAIN_SIDEBAR_PLUGINS
 import com.ai.assistance.operit.core.tools.packTool.TOOLPKG_NAV_SURFACE_TOOLBOX
+import com.ai.assistance.operit.plugins.center.DYNAMIC_NAVIGATION_ROUTE_PREFIX
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.center.dynamicNavigationRouteId
 import com.ai.assistance.operit.ui.common.NavItem
 import com.ai.assistance.operit.ui.common.icons.MaterialIconNameResolver
 import com.ai.assistance.operit.ui.main.screens.Screen
 import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
 
 object AppRouteCatalog {
-    private const val DYNAMIC_ROUTE_PREFIX = "dynamic.navigation."
     private const val SYSTEM_PLUGIN_ROUTE_PREFIX = "system.plugin.page."
     private const val PLUGIN_DECLARATIVE_ROUTE_PREFIX = "plugin.declarative.page."
 
@@ -58,7 +59,7 @@ object AppRouteCatalog {
             .getOrDefault(emptyList())
         val dynamicRoutes = dynamicSurfaces.map { surface ->
             RouteSpec(
-                routeId = dynamicRouteId(surface.id),
+                routeId = dynamicNavigationRouteId(surface.id),
                 runtime = RouteRuntime.NATIVE,
                 title = surface.title,
                 icon = MaterialIconNameResolver.resolveOrDefault(surface.iconKey, Icons.Default.Extension)
@@ -67,7 +68,7 @@ object AppRouteCatalog {
         val dynamicEntries = dynamicSurfaces.map { surface ->
             NavigationEntrySpec(
                 entryId = "dynamic:${surface.id}",
-                routeId = dynamicRouteId(surface.id),
+                routeId = dynamicNavigationRouteId(surface.id),
                 surface = NavigationSurface.MAIN_SIDEBAR_DYNAMIC,
                 title = surface.title,
                 description = "动态页面",
@@ -150,9 +151,9 @@ object AppRouteCatalog {
     }
 
     fun resolveScreen(model: AppNavigationModel, entry: RouteEntry): Screen? {
-        if (entry.routeId.startsWith(DYNAMIC_ROUTE_PREFIX)) {
+        if (entry.routeId.startsWith(DYNAMIC_NAVIGATION_ROUTE_PREFIX)) {
             val surfaceId = (entry.args["surfaceId"] as? String)
-                ?: entry.routeId.removePrefix(DYNAMIC_ROUTE_PREFIX)
+                ?: entry.routeId.removePrefix(DYNAMIC_NAVIGATION_ROUTE_PREFIX)
             return Screen.DynamicNavigationPage(surfaceId)
         }
         if (entry.routeId.startsWith(PLUGIN_DECLARATIVE_ROUTE_PREFIX)) {
@@ -186,7 +187,6 @@ object AppRouteCatalog {
         source: RouteEntrySource = RouteEntrySource.DEFAULT
     ): RouteEntry = ScreenRouteRegistry.toEntry(screen = screen, source = source)
 
-    private fun dynamicRouteId(surfaceId: String): String = DYNAMIC_ROUTE_PREFIX + surfaceId
     private fun systemPluginRouteId(entryId: String): String = SYSTEM_PLUGIN_ROUTE_PREFIX + entryId
     private fun pluginDeclarativeRouteId(screenId: String): String = PLUGIN_DECLARATIVE_ROUTE_PREFIX + screenId
 }
