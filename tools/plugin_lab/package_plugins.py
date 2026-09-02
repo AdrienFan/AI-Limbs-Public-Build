@@ -1,32 +1,132 @@
 #!/usr/bin/env python3
+import hashlib
+import json
+import os
+import subprocess
+import tempfile
+import zipfile
 from pathlib import Path
-import hashlib, json, shutil, sys, zipfile
-ROOT=Path(__file__).resolve().parents[2]
-DIST=ROOT/'dist'; DIST.mkdir(exist_ok=True)
 
-def find_apk(rel):
-    files=sorted((ROOT/rel).glob('*.apk'))
-    if len(files)!=1:
-        raise SystemExit(f'Expected exactly one APK under {rel}, got {files}')
+ROOT = Path(__file__).resolve().parents[2]
+DIST = ROOT / "dist"
+DIST.mkdir(exist_ok=True)
+PARENT_SIGNER_ID = "ai-limbs-parent-plugin-dev-v1"
+PARENT_PUBLIC_FINGERPRINT = "f9864bbfa24e7eb1324a47dc41c0fad57119a4d9ab3f516af891c6ab413c0aca"
+SIGNATURE_ENTRY = "META-INF/AILIMBS.SIG"
+
+
+def find_apk(rel: str) -> Path:
+    files = sorted((ROOT / rel).glob("*.apk"))
+    if len(files) != 1:
+        raise SystemExit(f"Expected exactly one APK under {rel}, got {files}")
     return files[0]
 
-def pack(out_name, manifest, apk, apk_entry):
-    out=DIST/out_name
-    if out.exists(): out.unlink()
-    with zipfile.ZipFile(out,'w',compression=zipfile.ZIP_DEFLATED,compresslevel=9) as z:
-        z.writestr(manifest.name, manifest.read_bytes())
-        z.write(apk, apk_entry)
+
+def sha256_file(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def canonical_json_bytes(value: dict) -> bytes:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+
+
+def prepare_parent_key(temp_dir: Path) -> Path:
+    source_value = os.environ.get("AILIMBS_PARENT_PLUGIN_PRIVATE_PEM_PATH", "").strip()
+    if not source_value:
+        raise SystemExit("AILIMBS_PARENT_PLUGIN_PRIVATE_PEM_PATH is required to package official parent plugins")
+    source = Path(source_value).expanduser()
+    if not source.is_file():
+        raise SystemExit(f"Parent signing key file is missing: {source}")
+    key_path = temp_dir / "parent-private.pem"
+    key_path.write_bytes(source.read_bytes())
+    key_path.chmod(0o600)
+    public_der = temp_dir / "parent-public.der"
+    subprocess.run(
+        ["openssl", "pkey", "-in", str(key_path), "-pubout", "-outform", "DER", "-out", str(public_der)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    actual = sha256_file(public_der)
+    if actual != PARENT_PUBLIC_FINGERPRINT:
+        raise SystemExit(f"Parent signing key fingerprint mismatch: {actual}")
+    return key_path
+
+
+def sign_bytes(data: bytes, key_path: Path, temp_dir: Path, stem: str) -> bytes:
+    data_path = temp_dir / f"{stem}.manifest"
+    sig_path = temp_dir / f"{stem}.sig"
+    data_path.write_bytes(data)
+    subprocess.run(
+        ["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(key_path), "-in", str(data_path), "-out", str(sig_path)],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return sig_path.read_bytes()
+
+
+def pack_parent(out_name: str, manifest_path: Path, apk: Path, apk_entry: str, key_path: Path, temp_dir: Path) -> Path:
+    root = json.loads(manifest_path.read_text(encoding="utf-8"))
+    root.pop("integrity", None)
+    root.pop("signature", None)
+    root["integrity"] = {
+        "algorithm": "SHA-256",
+        "entries": {apk_entry: sha256_file(apk)},
+    }
+    root["signature"] = {
+        "algorithm": "Ed25519",
+        "signer_id": PARENT_SIGNER_ID,
+        "entry": SIGNATURE_ENTRY,
+    }
+    manifest_bytes = canonical_json_bytes(root)
+    signature = sign_bytes(manifest_bytes, key_path, temp_dir, out_name.replace(".", "-"))
+    out = DIST / out_name
+    if out.exists():
+        out.unlink()
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        archive.writestr("plugin.json", manifest_bytes)
+        archive.write(apk, apk_entry)
+        archive.writestr(SIGNATURE_ENTRY, signature)
     return out
 
-items=[
- ('plugin-extension-hub.ailp', ROOT/'plugin-lab/packages/extension-hub/plugin.json', find_apk('plugin-lab/plugins/extension-hub/build/outputs/apk/debug'), 'payload/plugin.apk'),
- ('bridge-core.ailp', ROOT/'plugin-lab/packages/bridge-core/plugin.json', find_apk('plugin-lab/plugins/bridge-core/build/outputs/apk/debug'), 'payload/plugin.apk'),
- ('rdc-provider.ailx', ROOT/'plugin-lab/packages/rdc/extension.json', find_apk('plugin-lab/extensions/rdc/build/outputs/apk/debug'), 'payload/extension.apk'),
- ('triggercmd-provider.ailx', ROOT/'plugin-lab/packages/triggercmd/extension.json', find_apk('plugin-lab/extensions/triggercmd/build/outputs/apk/debug'), 'payload/extension.apk'),
- ('developer-guide.ailp', ROOT/'plugin-lab/packages/developer-guide/plugin.json', find_apk('plugin-lab/plugins/developer-guide/build/outputs/apk/debug'), 'payload/plugin.apk'),
- ('ai-limbs-packager.ailp', ROOT/'plugin-lab/packages/packager/plugin.json', find_apk('plugin-lab/plugins/packager/build/outputs/apk/debug'), 'payload/plugin.apk'),
+
+def pack_child(out_name: str, manifest: Path, apk: Path, apk_entry: str) -> Path:
+    json.loads(manifest.read_text(encoding="utf-8"))
+    out = DIST / out_name
+    if out.exists():
+        out.unlink()
+    with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+        archive.writestr(manifest.name, manifest.read_bytes())
+        archive.write(apk, apk_entry)
+    return out
+
+
+PARENTS = [
+    ("plugin-extension-hub.ailp", ROOT / "plugin-lab/packages/extension-hub/plugin.json", find_apk("plugin-lab/plugins/extension-hub/build/outputs/apk/debug"), "payload/plugin.apk"),
+    ("bridge-core.ailp", ROOT / "plugin-lab/packages/bridge-core/plugin.json", find_apk("plugin-lab/plugins/bridge-core/build/outputs/apk/debug"), "payload/plugin.apk"),
+    ("developer-guide.ailp", ROOT / "plugin-lab/packages/developer-guide/plugin.json", find_apk("plugin-lab/plugins/developer-guide/build/outputs/apk/debug"), "payload/plugin.apk"),
+    ("ai-limbs-packager.ailp", ROOT / "plugin-lab/packages/packager/plugin.json", find_apk("plugin-lab/plugins/packager/build/outputs/apk/debug"), "payload/plugin.apk"),
 ]
-for out_name, manifest, apk, entry in items:
-    json.loads(manifest.read_text())
-    out=pack(out_name,manifest,apk,entry)
-    print(f'{out.name}\t{out.stat().st_size}\t{hashlib.sha256(out.read_bytes()).hexdigest()}')
+CHILDREN = [
+    ("rdc-provider.ailx", ROOT / "plugin-lab/packages/rdc/extension.json", find_apk("plugin-lab/extensions/rdc/build/outputs/apk/debug"), "payload/extension.apk"),
+    ("triggercmd-provider.ailx", ROOT / "plugin-lab/packages/triggercmd/extension.json", find_apk("plugin-lab/extensions/triggercmd/build/outputs/apk/debug"), "payload/extension.apk"),
+]
+
+
+def print_artifact(out: Path) -> None:
+    print(f"{out.name}\t{out.stat().st_size}\t{sha256_file(out)}")
+
+
+def main() -> None:
+    with tempfile.TemporaryDirectory(prefix="ailimbs-parent-sign-") as raw_temp:
+        temp_dir = Path(raw_temp)
+        key_path = prepare_parent_key(temp_dir)
+        for out_name, manifest, apk, entry in PARENTS:
+            print_artifact(pack_parent(out_name, manifest, apk, entry, key_path, temp_dir))
+    for out_name, manifest, apk, entry in CHILDREN:
+        print_artifact(pack_child(out_name, manifest, apk, entry))
+
+
+if __name__ == "__main__":
+    main()

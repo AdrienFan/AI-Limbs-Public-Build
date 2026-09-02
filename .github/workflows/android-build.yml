@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    name: Build Plugin Lab Alt + Six Plugins
+    name: Build Plugin Lab Alt + Four Parent Plugins
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -68,42 +68,18 @@ jobs:
           set -euo pipefail
           ./gradlew :bridge-core-plugin:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 4 - rdc-provider.ailx payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :rdc-extension:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 5 - triggercmd-provider.ailx payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 6 - developer-guide.ailp payload
+      - name: Build 4 - developer-guide.ailp payload
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :developer-guide-plugin:assembleDebug --stacktrace --no-daemon
-      - name: Build 7 - AI Limbs Packager payload
+      - name: Build 5 - AI Limbs Packager payload
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :packager-plugin:assembleDebug --stacktrace --no-daemon
-
-      - name: Package six plugin artifacts
-        shell: bash
-        run: |
-          set -euo pipefail
-          python3 tools/plugin_lab/package_plugins.py
-          unzip -l dist/plugin-extension-hub.ailp
-          unzip -l dist/bridge-core.ailp
-          unzip -l dist/rdc-provider.ailx
-          unzip -l dist/triggercmd-provider.ailx
-          unzip -l dist/developer-guide.ailp
-          unzip -l dist/ai-limbs-packager.ailp
-          python3 tools/plugin_lab/package_suite.py
-          unzip -l dist/AI-Limbs-Official-Plugins-for-v0.7.2.zip
 
       - name: Upload Android reports
         if: always()
@@ -116,11 +92,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload Plugin Lab and six plugins
+      - name: Upload four parent plugin payload APKs
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ai-limbs-official-plugins-v072-${{ github.run_number }}
-          path: dist/AI-Limbs-Official-Plugins-for-v0.7.2.zip
+          name: ai-limbs-parent-plugin-payloads-v072-${{ github.run_number }}
+          path: |
+            plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
+            plugin-lab/plugins/bridge-core/build/outputs/apk/debug/*.apk
+            plugin-lab/plugins/developer-guide/build/outputs/apk/debug/*.apk
+            plugin-lab/plugins/packager/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
