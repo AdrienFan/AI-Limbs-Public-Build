@@ -35,6 +35,7 @@ class AiLimbsDispatcher(
     private val accessContext = AiLimbsAccessContextService(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
     private val capabilityResolver = AiLimbsCapabilityResolver(appContext, policyEngine)
+    private val developerCatalog = AiLimbsDeveloperCatalogService()
     private val storageIndex = AiLimbsStorageIndex(appContext)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val gson = Gson()
@@ -105,6 +106,7 @@ class AiLimbsDispatcher(
                         .ifBlank { args.optString("id") }
                         .ifBlank { args.optString("invoke_id") }
                 )
+            AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ -> developerCatalog.read(args)
             AiLimbsCoreLocalOperation.CORE_STATUS -> coreStatus()
             AiLimbsCoreLocalOperation.DISPATCHER_STATUS -> dispatcherStatus()
             AiLimbsCoreLocalOperation.SHARED_UBUNTU_STATUS -> sharedUbuntuStatus()

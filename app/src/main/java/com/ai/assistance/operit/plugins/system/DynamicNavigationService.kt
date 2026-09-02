@@ -50,9 +50,12 @@ internal class KernelDynamicNavigationJsonServiceV1(
     }
 
     private fun renameSurface(parameters: JSONObject): JSONObject {
+        if (!parameters.has("title")) {
+            throw PluginInstallException("DYNAMIC_NAV_FIELD_REQUIRED", "title is required")
+        }
         val surface = registry.rename(
             surfaceId = required(parameters, "surface_id"),
-            title = required(parameters, "title"),
+            title = parameters.optString("title"),
             iconKey = parameters.optString("icon_key").trim().ifBlank { null }
         )
         return JSONObject().put("surface", surfaceJson(surface))

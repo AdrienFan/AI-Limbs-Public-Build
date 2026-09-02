@@ -50,7 +50,8 @@ internal interface PluginRuntimeHandle {
 /**
  * Trusted kernel SPI for constrained runtimes such as Declarative, ToolPkg and WASM.
  * Adapters may use Android Context, but must expose only payloadContext to plugin payloads.
- * Arbitrary in-process Dex/Jar loading is not a supported plugin runtime boundary.
+ * Arbitrary in-process Dex/Jar loading is not a supported general plugin runtime boundary.
+ * A finite allowlist of privileged AI Limbs plugins may use the hardened android_inprocess adapter.
  * Adapter mount/stop implementations must cooperate with coroutine cancellation and must not leak
  * runtime work outside the handle owned by this host.
  */

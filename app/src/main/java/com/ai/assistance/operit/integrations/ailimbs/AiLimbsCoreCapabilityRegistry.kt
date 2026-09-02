@@ -44,6 +44,21 @@ object AiLimbsCoreCapabilityRegistry {
                     )
         ),
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ),
+            capabilityId = "ai_limbs.developer.catalog.read",
+            capabilityAliases = listOf("developer.catalog", "developer.catalog.read"),
+            catalogEntry =
+                entry(
+                    name = "ai_limbs.developer.catalog.read",
+                    displayName = "AI Limbs 开发接口目录",
+                    description = "Read the current Host Primitive and extension\/plugin-bus development catalog when the Plugin Center eye switch is open.",
+                    parameters = listOf(
+                        ToolParameterSchema("query", "string", "Optional filter such as filesystem, Extension Point, 通知 or bridge", false)
+                    ),
+                    keywords = listOf("开发接口", "Host Primitive", "Extension Point", "Plugin Bus", "接口目录", "developer catalog")
+                )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.CORE_STATUS),
             capabilityId = "ai_limbs.core.status",
             capabilityAliases = listOf("core.status"),

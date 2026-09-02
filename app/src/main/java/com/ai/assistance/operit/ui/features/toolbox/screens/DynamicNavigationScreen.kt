@@ -105,10 +105,10 @@ fun PluginDeclarativeScreen(screenId: String) {
                         }
                     }
                 ) { Text(block.label) }
-                is PluginScreenBlock.ChildExtensionInstaller -> Text("子扩展安装器：${block.point}")
-                is PluginScreenBlock.ChildExtensionList -> Text("子扩展列表：${block.point}")
-                is PluginScreenBlock.ChildExtensionSelector -> Text("子扩展选择器：${block.point}")
-                is PluginScreenBlock.DynamicPanel -> Text("动态面板：${block.providerId}")
+                is PluginScreenBlock.ChildExtensionInstaller -> ChildExtensionInstallerBlock(block)
+                is PluginScreenBlock.ChildExtensionList -> ChildExtensionListBlock(block.point)
+                is PluginScreenBlock.ChildExtensionSelector -> ChildExtensionSelectorBlock(block)
+                is PluginScreenBlock.DynamicPanel -> DynamicPanelBlock(block.providerId)
             }
         }
     }

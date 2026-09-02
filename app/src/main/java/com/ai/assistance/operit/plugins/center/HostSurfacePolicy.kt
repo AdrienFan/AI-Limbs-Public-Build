@@ -43,8 +43,18 @@ class HostSurfacePolicy(context: Context) {
     val developerMode: Boolean
         get() = prefs.getBoolean(KEY_DEVELOPER_MODE, false)
 
+    val developerDiscoveryEnabled: Boolean
+        get() = developerMode && prefs.getBoolean(KEY_DEVELOPER_DISCOVERY, false)
+
     fun setDeveloperMode(enabled: Boolean) {
-        prefs.edit().putBoolean(KEY_DEVELOPER_MODE, enabled).apply()
+        val editor = prefs.edit().putBoolean(KEY_DEVELOPER_MODE, enabled)
+        if (!enabled) editor.putBoolean(KEY_DEVELOPER_DISCOVERY, false)
+        editor.apply()
+    }
+
+    fun setDeveloperDiscoveryEnabled(enabled: Boolean) {
+        check(!enabled || developerMode) { "请先开启开发模式再开放开发接口发现" }
+        prefs.edit().putBoolean(KEY_DEVELOPER_DISCOVERY, enabled).apply()
     }
 
     fun register(definition: HostSurfaceDefinition) {
@@ -123,5 +133,6 @@ class HostSurfacePolicy(context: Context) {
         private const val PREFS = "plugin_center_host_surface_policy"
         private const val LEGACY_PREFS = "plugin_lab_host_surface_policy"
         private const val KEY_DEVELOPER_MODE = "developer_mode"
+        private const val KEY_DEVELOPER_DISCOVERY = "developer_discovery_enabled"
     }
 }

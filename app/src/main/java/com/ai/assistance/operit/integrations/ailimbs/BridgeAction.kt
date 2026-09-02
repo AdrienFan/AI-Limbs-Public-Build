@@ -10,7 +10,7 @@ enum class BridgeAction {
     REFRESH;
 
     companion object {
-        internal fun availableFor(
+        fun availableFor(
             state: AiLimbsBridgeState,
             supportedActions: Set<BridgeAction>
         ): List<BridgeAction> {

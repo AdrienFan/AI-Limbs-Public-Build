@@ -55,7 +55,6 @@ internal class DynamicNavigationSurfaceRegistry(context: Context) {
     fun rename(surfaceId: String, title: String, iconKey: String? = null): DynamicNavigationSurfaceSpec = synchronized(lock) {
         val id = surfaceId.trim()
         val newTitle = title.trim()
-        require(newTitle.isNotEmpty()) { "页面名称不能为空" }
         val current = mutableSurfaces.value
         val existing = current.firstOrNull { it.id == id }
             ?: throw PluginInstallException("DYNAMIC_SURFACE_NOT_FOUND", "动态页面不存在：$id")

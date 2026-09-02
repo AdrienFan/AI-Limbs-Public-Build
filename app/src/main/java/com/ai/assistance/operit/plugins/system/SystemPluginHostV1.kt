@@ -16,6 +16,8 @@ data class SystemHostPrimitiveDescriptor(
     val number: Int,
     val id: String,
     val title: String,
+    val description: String,
+    val boundary: String,
     val maturity: String,
     val exposure: String,
     val requestableScope: Boolean,
@@ -31,8 +33,10 @@ interface SystemHostGatewayV1 {
 
 interface PluginPlatformControlV1 {
     fun developerModeEnabled(): Boolean
+    fun developerDiscoveryEnabled(): Boolean
     fun hostPrimitiveSnapshots(): List<SystemHostPrimitiveDescriptor>
     suspend fun setDeveloperMode(enabled: Boolean)
+    suspend fun setDeveloperDiscoveryEnabled(enabled: Boolean)
     suspend fun setHostPrimitiveAllowed(primitiveId: String, allowed: Boolean)
 }
 
@@ -101,6 +105,7 @@ internal class KernelSystemHostGatewayV1(
         } else null
         return SystemHostPrimitiveDescriptor(
             definition.number, definition.id, definition.title,
+            definition.description, definition.boundary,
             definition.maturity.name, definition.exposure.name,
             definition.requestableScope, policyAllowed,
             capabilityRegistry.isHostCallable(definition.id)
@@ -116,6 +121,7 @@ internal class KernelPluginPlatformControlV1(
 ) : PluginPlatformControlV1 {
     init { requirePluginCenterRole(admittedRole) }
     override fun developerModeEnabled(): Boolean = surfacePolicy.developerMode
+    override fun developerDiscoveryEnabled(): Boolean = surfacePolicy.developerDiscoveryEnabled
     override fun hostPrimitiveSnapshots(): List<SystemHostPrimitiveDescriptor> =
         AiLimbsHostPrimitiveCatalog.all.map { definition ->
             val allowed = if (definition.requestableScope && definition.exposure == HostPrimitiveExposure.BOUND) {
@@ -123,6 +129,7 @@ internal class KernelPluginPlatformControlV1(
             } else null
             SystemHostPrimitiveDescriptor(
                 definition.number, definition.id, definition.title,
+                definition.description, definition.boundary,
                 definition.maturity.name, definition.exposure.name,
                 definition.requestableScope, allowed,
                 capabilityRegistry.isHostCallable(definition.id)
@@ -131,6 +138,10 @@ internal class KernelPluginPlatformControlV1(
     override suspend fun setDeveloperMode(enabled: Boolean) {
         requirePluginCenterRole(admittedRole)
         surfacePolicy.setDeveloperMode(enabled)
+    }
+    override suspend fun setDeveloperDiscoveryEnabled(enabled: Boolean) {
+        requirePluginCenterRole(admittedRole)
+        surfacePolicy.setDeveloperDiscoveryEnabled(enabled)
     }
     override suspend fun setHostPrimitiveAllowed(primitiveId: String, allowed: Boolean) {
         requirePluginCenterRole(admittedRole)

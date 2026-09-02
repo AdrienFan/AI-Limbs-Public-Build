@@ -4,14 +4,14 @@ import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
-internal enum class AiLimbsBridgeNetworkState {
+enum class AiLimbsBridgeNetworkState {
     UNKNOWN,
     AVAILABLE_UNVALIDATED,
     VALIDATED,
     LOST
 }
 
-internal enum class AiLimbsBridgeNetworkTransport {
+enum class AiLimbsBridgeNetworkTransport {
     NONE,
     WIFI,
     CELLULAR,
@@ -20,7 +20,7 @@ internal enum class AiLimbsBridgeNetworkTransport {
     OTHER
 }
 
-internal sealed interface AiLimbsBridgeHostSignal {
+sealed interface AiLimbsBridgeHostSignal {
     data object ScreenOff : AiLimbsBridgeHostSignal
     data object ScreenOn : AiLimbsBridgeHostSignal
     data class DeviceIdleChanged(val isIdle: Boolean) : AiLimbsBridgeHostSignal
@@ -30,7 +30,7 @@ internal sealed interface AiLimbsBridgeHostSignal {
     ) : AiLimbsBridgeHostSignal
 }
 
-internal interface AiLimbsBridgeProvider {
+interface AiLimbsBridgeProvider {
     val id: String
     val enabled: Boolean
     val isRunning: Boolean
@@ -52,7 +52,7 @@ internal interface AiLimbsBridgeProvider {
     fun onHostSignal(signal: AiLimbsBridgeHostSignal) = Unit
 }
 
-internal interface BridgeProviderFactory {
+interface BridgeProviderFactory {
     val type: String
     val profiles: List<BridgeProfile>
     val supportedActions: Set<BridgeAction>

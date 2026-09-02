@@ -3,7 +3,7 @@ package com.ai.assistance.operit.integrations.ailimbs
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 
-internal class BridgeProviderRegistry {
+class BridgeProviderRegistry {
     private val factoriesByType = linkedMapOf<String, BridgeProviderFactory>()
     private val profilesById = linkedMapOf<String, BridgeProfile>()
 

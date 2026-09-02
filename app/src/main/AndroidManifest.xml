@@ -96,6 +96,10 @@
         tools:targetApi="31"
         tools:replace="android:theme,android:icon,android:roundIcon">
 
+        <receiver
+            android:name=".plugins.center.PluginNotificationActionReceiver"
+            android:exported="false" />
+
         <!-- OpenCL 库权限声明 (Android 10+ 命名空间隔离解决方案) -->
         <uses-native-library 
             android:name="libOpenCL.so"
