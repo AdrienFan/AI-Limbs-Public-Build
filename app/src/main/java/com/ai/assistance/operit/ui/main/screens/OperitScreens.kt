@@ -25,11 +25,9 @@ import androidx.compose.ui.unit.dp
 import androidx.navigation.NavController
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.ui.common.NavItem
-import com.ai.assistance.operit.ui.features.about.screens.AboutScreen
 import com.ai.assistance.operit.ui.features.assistant.screens.AssistantConfigScreen
 import com.ai.assistance.operit.ui.features.chat.screens.AIChatScreen
 import com.ai.assistance.operit.ui.features.demo.screens.ShizukuDemoScreen
-import com.ai.assistance.operit.ui.features.help.screens.HelpScreen
 import com.ai.assistance.operit.ui.features.memory.screens.MemoryScreen
 import com.ai.assistance.operit.ui.features.packages.screens.MarketHomeTab
 import com.ai.assistance.operit.ui.features.packages.screens.PackageManagerScreen
@@ -69,8 +67,9 @@ import com.ai.assistance.operit.ui.features.tokenstats.TokenUsageStatisticsScree
 import com.ai.assistance.operit.ui.features.token.TokenConfigWebViewScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.ToolboxScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.pluginbootstrap.PluginBootstrapScreen
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
 import com.ai.assistance.operit.ui.common.composedsl.ToolPkgComposeDslToolScreen
-import com.ai.assistance.operit.ui.features.update.screens.UpdateScreen
 import com.ai.assistance.operit.ui.features.workflow.screens.WorkflowListScreen
 import com.ai.assistance.operit.ui.features.workflow.screens.WorkflowDetailScreen
 import com.ai.assistance.operit.ui.main.PendingChatDraftHandler
@@ -539,8 +538,88 @@ sealed class Screen(
                 onError: (String) -> Unit,
                 onGestureConsumed: (Boolean) -> Unit
         ) {
-            PluginBootstrapScreen()
+            PluginBootstrapScreen(onInstalled = { navigateTo(Toolbox) })
         }
+    }
+
+    data class SystemPluginPage(val entryId: String) : Screen(navItem = NavItem.Toolbox) {
+        @Composable
+        override fun Content(
+                navController: NavController,
+                navigateTo: ScreenNavigationHandler,
+                onGoBack: () -> Unit,
+                hasBackgroundImage: Boolean,
+                onLoading: (Boolean) -> Unit,
+                onError: (String) -> Unit,
+                onGestureConsumed: (Boolean) -> Unit
+        ) {
+            val entry = PluginPlatformKernel.systemUiRegistry.entry(entryId)
+            if (entry == null) {
+                Text("System Plugin 页面已卸载，请返回工具箱")
+                return
+            }
+            entry.page.Content(
+                object : SystemUiNavigatorV1 {
+                    override fun backToToolbox(message: String?) {
+                        AppRouterGateway.resetTo(
+                            routeId = ScreenRouteRegistry.routeIdOf(Toolbox),
+                            args = emptyMap(),
+                            source = com.ai.assistance.operit.ui.main.navigation.RouteEntrySource.DEFAULT
+                        )
+                    }
+                }
+            )
+        }
+
+        @Composable
+        override fun getTitle(): String =
+            PluginPlatformKernel.systemUiRegistry.entry(entryId)?.title ?: "System Plugin"
+    }
+
+    data class DynamicNavigationPage(val surfaceId: String) : Screen() {
+        @Composable
+        override fun Content(
+            navController: NavController,
+            navigateTo: ScreenNavigationHandler,
+            onGoBack: () -> Unit,
+            hasBackgroundImage: Boolean,
+            onLoading: (Boolean) -> Unit,
+            onError: (String) -> Unit,
+            onGestureConsumed: (Boolean) -> Unit
+        ) {
+            DynamicNavigationScreen(
+                surfaceId = surfaceId,
+                onOpenPluginScreen = { screenId -> navigateTo(PluginDeclarativePage(screenId)) },
+                onOpenPluginCenter = {
+                    PluginPlatformKernel.systemUiRegistry.toolboxEntries.value.firstOrNull()?.let { entry ->
+                        navigateTo(SystemPluginPage(entry.id))
+                    }
+                }
+            )
+        }
+
+        @Composable
+        override fun getTitle(): String =
+            PluginPlatformKernel.dynamicNavigationRegistry.find(surfaceId)?.title ?: "动态页面"
+    }
+
+    data class PluginDeclarativePage(val screenId: String) : Screen() {
+        @Composable
+        override fun Content(
+            navController: NavController,
+            navigateTo: ScreenNavigationHandler,
+            onGoBack: () -> Unit,
+            hasBackgroundImage: Boolean,
+            onLoading: (Boolean) -> Unit,
+            onError: (String) -> Unit,
+            onGestureConsumed: (Boolean) -> Unit
+        ) {
+            PluginDeclarativeScreen(screenId)
+        }
+
+        @Composable
+        override fun getTitle(): String =
+            PluginPlatformKernel.uiRegistry.screen(screenId)?.title ?: "插件页面"
     }
 
     data object Toolbox : Screen(navItem = NavItem.Toolbox) {
@@ -636,40 +715,6 @@ sealed class Screen(
         }
     }
 
-    data object Help : Screen(navItem = NavItem.Help) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            HelpScreen(onBackPressed = onGoBack)
-        }
-    }
-
-    data object About : Screen(navItem = NavItem.About) {
-        @Composable
-        override fun Content(
-                navController: NavController,
-                navigateTo: ScreenNavigationHandler,
-                onGoBack: () -> Unit,
-                hasBackgroundImage: Boolean,
-                onLoading: (Boolean) -> Unit,
-                onError: (String) -> Unit,
-                onGestureConsumed: (Boolean) -> Unit
-        ) {
-            AboutScreen(
-                navigateToUpdateHistory = {
-                    navigateTo(UpdateHistory)
-                }
-            )
-        }
-    }
-
     data object Agreement : Screen(navItem = NavItem.Agreement) {
         @Composable
         override fun Content(
@@ -684,25 +729,6 @@ sealed class Screen(
             com.ai.assistance.operit.ui.features.agreement.screens.AgreementScreen(
                     onAgreementAccepted = onGoBack
             )
-        }
-    }
-
-    data object UpdateHistory :
-            Screen(
-                    navItem = NavItem.About,
-                    titleRes = R.string.update_history
-            ) {
-        @Composable
-        override fun Content(
-            navController: NavController,
-            navigateTo: ScreenNavigationHandler,
-            onGoBack: () -> Unit,
-            hasBackgroundImage: Boolean,
-            onLoading: (Boolean) -> Unit,
-            onError: (String) -> Unit,
-            onGestureConsumed: (Boolean) -> Unit
-        ) {
-            UpdateScreen(onNavigateToThemeSettings = { navigateTo(ThemeSettings) })
         }
     }
 

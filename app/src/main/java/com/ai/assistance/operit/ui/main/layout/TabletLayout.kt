@@ -58,6 +58,7 @@ fun TabletLayout(
         onScreenChange: (Screen) -> Unit,
         onDrawerItemSelected: (Screen) -> Unit,
         onNavigationEntrySelected: (NavigationEntrySpec) -> Unit,
+        onCreateDynamicPage: () -> Unit,
         onToggleSidebar: () -> Unit,
         navigateToTokenConfig: () -> Unit,
         canGoBack: Boolean,
@@ -152,7 +153,8 @@ fun TabletLayout(
                                                 scope = scope,
                                                 drawerState = drawerState,
                                                 onScreenSelected = onDrawerItemSelected,
-                                                onNavigationEntrySelected = onNavigationEntrySelected
+                                                onNavigationEntrySelected = onNavigationEntrySelected,
+                                                onCreateDynamicPage = onCreateDynamicPage
                                         )
                                 } else {
                                         CollapsedDrawerContent(
@@ -163,7 +165,8 @@ fun TabletLayout(
                                                 isNetworkAvailable = isNetworkAvailable,
                                                 appearance = drawerAppearance,
                                                 onScreenSelected = onDrawerItemSelected,
-                                                onNavigationEntrySelected = onNavigationEntrySelected
+                                                onNavigationEntrySelected = onNavigationEntrySelected,
+                                                onCreateDynamicPage = onCreateDynamicPage
                                         )
                                 }
                         }

@@ -27,18 +27,22 @@ internal object PluginPlatformKernel {
     @Volatile private var initialized = false
     @Volatile private var started = false
 
+    private lateinit var appContextInstance: Context
     private lateinit var managerInstance: PluginManager
     private lateinit var runtimeAdaptersInstance: PluginRuntimeAdapterRegistry
     private lateinit var contributionsInstance: PluginContributionRegistry
     private lateinit var extensionPointsInstance: ExtensionPointRegistry
     private lateinit var extensionRouterInstance: ExtensionRouter
     private lateinit var uiRegistryInstance: PluginUiRegistry
+    private lateinit var systemUiRegistryInstance: SystemPluginUiRegistry
+    private lateinit var dynamicNavigationRegistryInstance: DynamicNavigationSurfaceRegistry
     private lateinit var capabilityRegistryInstance: PluginHostCapabilityRegistry
     private lateinit var surfacePolicyInstance: HostSurfacePolicy
     private lateinit var adminSecurityInstance: AdminSecurityManager
     private lateinit var usageStoreInstance: PluginUsageStore
     private lateinit var inactivityPolicyInstance: PluginInactivityPolicyStore
     private lateinit var backupPolicyInstance: PluginBackupPolicyStore
+    private lateinit var systemPluginControllerInstance: com.ai.assistance.operit.plugins.system.SystemPluginController
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var inactivityMonitorJob: Job? = null
 
@@ -56,6 +60,12 @@ internal object PluginPlatformKernel {
         get() = requireInitialized().let { extensionRouterInstance }
     internal val uiRegistry: PluginUiRegistry
         get() = requireInitialized().let { uiRegistryInstance }
+    internal val systemUiRegistry: SystemPluginUiRegistry
+        get() = requireInitialized().let { systemUiRegistryInstance }
+    internal val dynamicNavigationRegistry: DynamicNavigationSurfaceRegistry
+        get() = requireInitialized().let { dynamicNavigationRegistryInstance }
+    internal val systemPlugins: com.ai.assistance.operit.plugins.system.SystemPluginController
+        get() = requireInitialized().let { systemPluginControllerInstance }
     internal val capabilities: PluginHostCapabilityRegistry
         get() = requireInitialized().let { capabilityRegistryInstance }
     val hostSurfacePolicy: HostSurfacePolicy
@@ -84,7 +94,35 @@ internal object PluginPlatformKernel {
             capabilityRegistry = capabilityRegistryInstance,
             surfacePolicy = surfacePolicyInstance
         )
-        return KernelSystemPluginHostV1(SystemPluginProtocolV1.HOST_ABI, gateway, control)
+        val systemUi = com.ai.assistance.operit.plugins.system.KernelSystemUiHostV1(
+            ownerPluginId = ownerPluginId,
+            admittedRole = admittedRole,
+            registry = systemUiRegistryInstance
+        )
+        val pluginAdmin = com.ai.assistance.operit.plugins.system.KernelPluginAdminJsonServiceV1(
+            context = appContextInstance,
+            manager = managerInstance,
+            surfacePolicy = surfacePolicyInstance,
+            inactivityPolicy = inactivityPolicyInstance,
+            backupPolicy = backupPolicyInstance
+        )
+        val adminSecurity = com.ai.assistance.operit.plugins.system.KernelAdminSecurityJsonServiceV1(adminSecurityInstance)
+        val selfMaintenance = com.ai.assistance.operit.plugins.system.KernelSelfMaintenanceJsonServiceV1(systemPluginControllerInstance)
+        val navigation = com.ai.assistance.operit.plugins.system.KernelDynamicNavigationJsonServiceV1(
+            registry = dynamicNavigationRegistryInstance,
+            uiRegistry = uiRegistryInstance,
+            adminSecurity = adminSecurityInstance
+        )
+        return KernelSystemPluginHostV1(
+            SystemPluginProtocolV1.HOST_ABI,
+            gateway,
+            control,
+            pluginAdmin,
+            adminSecurity,
+            selfMaintenance,
+            navigation,
+            systemUi
+        )
     }
 
 
@@ -112,6 +150,8 @@ internal object PluginPlatformKernel {
             val inactivityPolicy = PluginInactivityPolicyStore(appContext)
             val backupPolicy = PluginBackupPolicyStore(appContext)
             val uiRegistry = PluginUiRegistry()
+            val systemUiRegistry = SystemPluginUiRegistry()
+            val dynamicNavigationRegistry = DynamicNavigationSurfaceRegistry(appContext)
             val capabilityRegistry = PluginHostCapabilityRegistry(surfacePolicy, usageStore)
             val contributions = PluginContributionRegistry()
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
@@ -219,18 +259,28 @@ internal object PluginPlatformKernel {
                 pluginContextFactory = pluginContextFactory
             )
             manager.initialize()
+            appContextInstance = appContext
             managerInstance = manager
             runtimeAdaptersInstance = runtimeAdapters
             contributionsInstance = contributions
             extensionPointsInstance = extensionPoints
             extensionRouterInstance = extensionRouter
             uiRegistryInstance = uiRegistry
+            systemUiRegistryInstance = systemUiRegistry
+            dynamicNavigationRegistryInstance = dynamicNavigationRegistry
             capabilityRegistryInstance = capabilityRegistry
             surfacePolicyInstance = surfacePolicy
             adminSecurityInstance = adminSecurity
             usageStoreInstance = usageStore
             inactivityPolicyInstance = inactivityPolicy
             backupPolicyInstance = backupPolicy
+            val systemPluginController = com.ai.assistance.operit.plugins.system.SystemPluginController(
+                context = appContext,
+                uiRegistry = systemUiRegistry,
+                hostFactory = { pluginId, role -> createAdmittedSystemHost(pluginId, role) }
+            )
+            systemPluginController.initialize()
+            systemPluginControllerInstance = systemPluginController
             initialized = true
             AppLogger.i(TAG, "AI Limbs Plugin Platform kernel initialized: ${manager.store.rootDir.absolutePath}")
         }
@@ -245,7 +295,8 @@ internal object PluginPlatformKernel {
             managerInstance.restoreEnabledPlugins()
             managerInstance.reconcileInactivityPolicy()
             managerInstance.reconcileBackupPolicy()
-            AppLogger.i(TAG, "AI Limbs Plugin Platform restored enabled plugins")
+            systemPluginControllerInstance.restore()
+            AppLogger.i(TAG, "AI Limbs Plugin Platform restored enabled plugins and system Plugin Center")
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -284,6 +335,7 @@ internal object PluginPlatformKernel {
         inactivityMonitorJob?.cancel()
         inactivityMonitorJob = null
         try {
+            systemPluginControllerInstance.shutdown()
             managerInstance.shutdown()
             AppLogger.i(TAG, "AI Limbs Plugin Platform kernel shut down")
         } catch (error: CancellationException) {

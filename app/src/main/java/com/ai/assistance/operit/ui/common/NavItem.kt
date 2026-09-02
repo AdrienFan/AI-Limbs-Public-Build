@@ -7,9 +7,7 @@ import androidx.compose.material.icons.filled.Build
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material.icons.automirrored.filled.Help
 import androidx.compose.material.icons.filled.History
-import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.Settings
@@ -40,10 +38,8 @@ sealed class NavItem(val route: String, val titleResId: Int, val icon: ImageVect
                 NavItem("memory_base", R.string.nav_memory_base, Icons.Default.History)
         object Terminal : NavItem("terminal", R.string.terminal, Icons.Default.Terminal)
         object Toolbox : NavItem("toolbox", R.string.toolbox, Icons.Default.Apps)
-        object About : NavItem("about", R.string.nav_about, Icons.Default.Info)
         object Agreement :
                 NavItem("agreement", R.string.nav_item_agreement, Icons.Default.Description)
-        object Help : NavItem("help", R.string.nav_help, Icons.AutoMirrored.Filled.Help)
         object TokenConfig : NavItem("token_config", R.string.token_config, Icons.Default.Token)
         object Workflow : NavItem("workflow", R.string.nav_workflow, Icons.Default.AccountTree)
 }

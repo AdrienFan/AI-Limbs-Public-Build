@@ -18,6 +18,7 @@ object SystemPluginPackageValidator {
     private const val MAX_ENTRIES = 4096
     private val SHA256_PATTERN = Regex("^[0-9a-fA-F]{64}$")
     private val PLUGIN_ID_PATTERN = Regex("^[a-z0-9][a-z0-9._-]{2,127}$")
+    private val SYSTEM_ENTRY_CLASS = Regex("^[A-Za-z_][A-Za-z0-9_]*(\\.[A-Za-z_][A-Za-z0-9_]*)+$")
 
     fun validateForPluginCenterBootstrap(
         sourcePackage: File,
@@ -126,6 +127,14 @@ object SystemPluginPackageValidator {
         }
         val runtimeEntry = safeRelativePath(requireString(runtimeJson, "entry"))
         if (!files.containsKey(runtimeEntry)) fail("RUNTIME_ENTRY_MISSING", "Runtime entry is missing: $runtimeEntry")
+        val runtimeEntryClass = runtimeJson.optString("entry_class").trim().ifBlank { null }
+        if (runtimeKind == "android_inprocess") {
+            val className = runtimeEntryClass
+                ?: fail("RUNTIME_ENTRY_CLASS_MISSING", "android_inprocess requires runtime.entry_class")
+            if (!SYSTEM_ENTRY_CLASS.matches(className)) {
+                fail("RUNTIME_ENTRY_CLASS_INVALID", "Invalid runtime.entry_class: $className")
+            }
+        }
 
         val requestedScopes = parseRequestedScopes(root.optJSONObject("permissions"))
 
@@ -169,15 +178,22 @@ object SystemPluginPackageValidator {
             display = SystemPluginDisplaySpec(displayName, displayDescription),
             role = role,
             hostAbi = SystemPluginHostAbiSpec(abiMin, abiMax),
-            runtime = SystemPluginRuntimeSpec(runtimeKind, runtimeEntry),
+            runtime = SystemPluginRuntimeSpec(runtimeKind, runtimeEntry, runtimeEntryClass),
             requestedScopes = requestedScopes,
             signature = SystemPluginSignatureSpec(signatureAlgorithm, signerId, signatureEntryName)
+        )
+        val trustStatus = SystemPluginTrustV1.verify(
+            signerId = signerId,
+            role = role,
+            manifestBytes = manifestBytes,
+            signatureBytes = signatureBytes
         )
         return SystemPluginValidationResult(
             manifest = manifest,
             packageSha256 = PluginPackageVerifier.sha256(sourcePackage),
             entryCount = entryCount,
-            verifiedPayloadEntries = expectedHashes.size
+            verifiedPayloadEntries = expectedHashes.size,
+            trustStatus = trustStatus
         )
     }
 

@@ -40,6 +40,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -132,7 +133,8 @@ fun DrawerContent(
         scope: CoroutineScope,
         drawerState: androidx.compose.material3.DrawerState,
         onScreenSelected: (Screen) -> Unit,
-        onNavigationEntrySelected: (NavigationEntrySpec) -> Unit
+        onNavigationEntrySelected: (NavigationEntrySpec) -> Unit,
+        onCreateDynamicPage: () -> Unit
 ) {
         val context = LocalContext.current
         val userPreferencesManager = remember(context) { UserPreferencesManager.getInstance(context) }
@@ -154,7 +156,7 @@ fun DrawerContent(
                 topContentPadding ?:
                 WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val fixedBottomItems = remember {
-                setOf(NavItem.Settings, NavItem.Help, NavItem.About)
+                setOf(NavItem.Settings)
         }
         val quickActionItems = remember {
                 setOf(NavItem.Packages, NavItem.Workflow)
@@ -238,6 +240,18 @@ fun DrawerContent(
                                         bottom = bottomInset
                                 )
         ) {
+                SidebarInfoCard(
+                        brandName = drawerBrandName,
+                        isNetworkAvailable = isNetworkAvailable,
+                        networkType = networkType,
+                        appearance = appearance
+                )
+                Spacer(modifier = Modifier.height(10.dp))
+                HorizontalDivider(
+                        modifier = Modifier.padding(horizontal = 20.dp),
+                        thickness = 0.5.dp,
+                        color = appearance.dividerColor.copy(alpha = 0.5f)
+                )
                 Column(
                         modifier = Modifier.weight(1f).verticalScroll(rememberScrollState())
                 ) {
@@ -245,9 +259,6 @@ fun DrawerContent(
                                 selectedItem = selectedItem,
                                 pluginEntries = pluginEntries,
                                 selectedRouteId = selectedRouteId,
-                                brandName = drawerBrandName,
-                                isNetworkAvailable = isNetworkAvailable,
-                                networkType = networkType,
                                 appearance = appearance,
                                 navItems = primaryNavItems,
                                 activePackageCount = activePackageCount,
@@ -269,7 +280,8 @@ fun DrawerContent(
                 DrawerBottomShortcutRow(
                         selectedItem = selectedItem,
                         appearance = appearance,
-                        onNavItemClick = handleNavItemClick
+                        onNavItemClick = handleNavItemClick,
+                        onCreateDynamicPage = onCreateDynamicPage
                 )
         }
 }
@@ -284,164 +296,120 @@ fun CollapsedDrawerContent(
         isNetworkAvailable: Boolean,
         appearance: NavigationDrawerAppearance,
         onScreenSelected: (Screen) -> Unit,
-        onNavigationEntrySelected: (NavigationEntrySpec) -> Unit
+        onNavigationEntrySelected: (NavigationEntrySpec) -> Unit,
+        onCreateDynamicPage: () -> Unit
 ) {
         Column(
-                modifier =
-                        Modifier.fillMaxHeight()
-                                .fillMaxWidth()
-                                .verticalScroll(rememberScrollState())
-                                .padding(vertical = 16.dp),
+                modifier = Modifier.fillMaxHeight().fillMaxWidth().padding(vertical = 16.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
         ) {
                 Spacer(modifier = Modifier.height(8.dp))
-
                 Surface(
-                        modifier =
-                                Modifier.size(44.dp)
-                                        .liquidGlass(
-                                                enabled = appearance.buttonLiquidGlassEnabled,
-                                                shape = CircleShape,
-                                                containerColor = appearance.buttonContainerColor,
-                                                shadowElevation = 5.dp,
-                                                borderWidth = 0.5.dp,
-                                                blurRadius = 14.dp,
-                                                overlayAlphaBoost = 0.05f,
-                                                enableLens = false
-                                        )
-                                        .clip(CircleShape),
-                        color = Color.Transparent,
+                        modifier = Modifier.size(44.dp).clip(CircleShape),
+                        color = appearance.buttonContainerColor,
                         shape = CircleShape
                 ) {
-                        IconButton(onClick = { }) {
+                        IconButton(onClick = {}) {
                                 Icon(
-                                        imageVector =
-                                                if (isNetworkAvailable) Icons.Default.Wifi
-                                                else Icons.Default.WifiOff,
+                                        imageVector = if (isNetworkAvailable) Icons.Default.Wifi else Icons.Default.WifiOff,
                                         contentDescription = stringResource(id = R.string.network_status_label),
                                         tint = appearance.statusAvailableColor,
                                         modifier = Modifier.size(24.dp)
                                 )
                         }
                 }
+                Spacer(modifier = Modifier.height(14.dp))
+                HorizontalDivider(modifier = Modifier.fillMaxWidth(0.6f), color = appearance.dividerColor)
+                Spacer(modifier = Modifier.height(8.dp))
 
-                Spacer(modifier = Modifier.height(16.dp))
-                HorizontalDivider(
-                        modifier = Modifier.fillMaxWidth(0.6f),
-                        color = appearance.dividerColor
-                )
-                Spacer(modifier = Modifier.height(16.dp))
-
-                for (item in navItems) {
-                        val selectedGlassOverlayColor =
-                                if (selectedItem == item) {
-                                        appearance.selectedContainerColor.copy(alpha = 0.18f)
-                                } else {
-                                        Color.Transparent
-                                }
-                        Surface(
-                                modifier =
-                                        Modifier.padding(vertical = 8.dp)
-                                                .size(44.dp)
-                                                .liquidGlass(
-                                                        enabled = appearance.buttonLiquidGlassEnabled,
-                                                        shape = CircleShape,
-                                                        containerColor =
-                                                                appearance.buttonContainerColor,
-                                                        shadowElevation =
-                                                                if (selectedItem == item) 6.dp else 5.dp,
-                                                        borderWidth = 0.5.dp,
-                                                        blurRadius = 14.dp,
-                                                        overlayAlphaBoost = 0.05f,
-                                                        enableLens = false
-                                                )
-                                                .clip(CircleShape)
-                                                .background(selectedGlassOverlayColor),
-                                color = Color.Transparent,
-                                shape = CircleShape
-                        ) {
-                                IconButton(
-                                        onClick = {
-                                                onScreenSelected(
-                                                        ScreenRouteRegistry.defaultScreenForNavItem(item)
-                                                )
-                                        }
-                                ) {
-                                        Icon(
-                                                imageVector = item.icon,
-                                                contentDescription = stringResource(id = item.titleResId),
-                                                tint =
-                                                        if (selectedItem == item) {
-                                                                if (appearance.buttonLiquidGlassEnabled) {
-                                                                        appearance.selectedContentColor
-                                                                } else {
-                                                                        appearance.titleColor
-                                                                }
-                                                        } else {
-                                                                appearance.itemColor
-                                                        },
-                                                modifier = Modifier.size(24.dp)
+                Column(
+                        modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
+                        horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                        navItems.filterNot { it == NavItem.Settings }.forEach { item ->
+                                CollapsedRailButton(
+                                        icon = item.icon,
+                                        contentDescription = stringResource(id = item.titleResId),
+                                        selected = selectedItem == item,
+                                        appearance = appearance,
+                                        onClick = { onScreenSelected(ScreenRouteRegistry.defaultScreenForNavItem(item)) }
+                                )
+                        }
+                        if (pluginEntries.isNotEmpty()) {
+                                Spacer(modifier = Modifier.height(8.dp))
+                                HorizontalDivider(modifier = Modifier.fillMaxWidth(0.45f), color = appearance.dividerColor)
+                                Spacer(modifier = Modifier.height(8.dp))
+                                pluginEntries.forEach { entry ->
+                                        CollapsedRailButton(
+                                                icon = entry.icon,
+                                                contentDescription = entry.title,
+                                                selected = selectedRouteId == entry.routeId,
+                                                appearance = appearance,
+                                                onClick = { onNavigationEntrySelected(entry) }
                                         )
                                 }
                         }
+                        Spacer(modifier = Modifier.height(8.dp))
                 }
 
-                if (pluginEntries.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        HorizontalDivider(
-                                modifier = Modifier.fillMaxWidth(0.45f),
-                                color = appearance.dividerColor
+                HorizontalDivider(modifier = Modifier.fillMaxWidth(0.6f), color = appearance.dividerColor)
+                Spacer(modifier = Modifier.height(8.dp))
+                CollapsedCreatePageButton(
+                        appearance = appearance,
+                        onClick = onCreateDynamicPage
+                )
+                CollapsedRailButton(
+                        icon = NavItem.Settings.icon,
+                        contentDescription = stringResource(id = NavItem.Settings.titleResId),
+                        selected = selectedItem == NavItem.Settings,
+                        appearance = appearance,
+                        onClick = { onScreenSelected(ScreenRouteRegistry.defaultScreenForNavItem(NavItem.Settings)) }
+                )
+        }
+}
+
+@Composable
+private fun CollapsedCreatePageButton(
+        appearance: NavigationDrawerAppearance,
+        onClick: () -> Unit
+) {
+        Surface(
+                modifier = Modifier.padding(vertical = 5.dp).size(44.dp),
+                color = appearance.buttonContainerColor,
+                shape = CircleShape
+        ) {
+                IconButton(onClick = onClick) {
+                        Text(
+                                text = "⊕",
+                                style = MaterialTheme.typography.headlineSmall,
+                                color = appearance.itemColor
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        pluginEntries.forEach { entry ->
-                                val selectedGlassOverlayColor =
-                                        if (selectedRouteId == entry.routeId) {
-                                                appearance.selectedContainerColor.copy(alpha = 0.18f)
-                                        } else {
-                                                Color.Transparent
-                                        }
-                                Surface(
-                                        modifier =
-                                                Modifier.padding(vertical = 8.dp)
-                                                        .size(44.dp)
-                                                        .liquidGlass(
-                                                                enabled = appearance.buttonLiquidGlassEnabled,
-                                                                shape = CircleShape,
-                                                                containerColor = appearance.buttonContainerColor,
-                                                                shadowElevation =
-                                                                        if (selectedRouteId == entry.routeId) 6.dp else 5.dp,
-                                                                borderWidth = 0.5.dp,
-                                                                blurRadius = 14.dp,
-                                                                overlayAlphaBoost = 0.05f,
-                                                                enableLens = false
-                                                        )
-                                                        .clip(CircleShape)
-                                                        .background(selectedGlassOverlayColor),
-                                        color = Color.Transparent,
-                                        shape = CircleShape
-                                ) {
-                                        IconButton(onClick = { onNavigationEntrySelected(entry) }) {
-                                                Icon(
-                                                        imageVector = entry.icon,
-                                                        contentDescription = entry.title,
-                                                        tint =
-                                                                if (selectedRouteId == entry.routeId) {
-                                                                        if (appearance.buttonLiquidGlassEnabled) {
-                                                                                appearance.selectedContentColor
-                                                                        } else {
-                                                                                appearance.titleColor
-                                                                        }
-                                                                } else {
-                                                                        appearance.itemColor
-                                                                },
-                                                        modifier = Modifier.size(24.dp)
-                                                )
-                                        }
-                                }
-                        }
                 }
+        }
+}
 
-                Spacer(modifier = Modifier.height(16.dp))
+@Composable
+private fun CollapsedRailButton(
+        icon: ImageVector,
+        contentDescription: String,
+        selected: Boolean,
+        appearance: NavigationDrawerAppearance,
+        onClick: () -> Unit
+) {
+        val overlay = if (selected) appearance.selectedContainerColor.copy(alpha = 0.18f) else Color.Transparent
+        Surface(
+                modifier = Modifier.padding(vertical = 5.dp).size(44.dp).clip(CircleShape).background(overlay),
+                color = appearance.buttonContainerColor,
+                shape = CircleShape
+        ) {
+                IconButton(onClick = onClick) {
+                        Icon(
+                                imageVector = icon,
+                                contentDescription = contentDescription,
+                                tint = if (selected) appearance.selectedContentColor else appearance.itemColor,
+                                modifier = Modifier.size(24.dp)
+                        )
+                }
         }
 }
 
@@ -450,9 +418,6 @@ private fun NewSidebarTopContent(
         selectedItem: NavItem?,
         pluginEntries: List<NavigationEntrySpec>,
         selectedRouteId: String,
-        brandName: String,
-        isNetworkAvailable: Boolean,
-        networkType: String,
         appearance: NavigationDrawerAppearance,
         navItems: List<NavItem>,
         activePackageCount: Int,
@@ -461,15 +426,6 @@ private fun NewSidebarTopContent(
         onNavItemClick: (NavItem) -> Unit,
         onNavigationEntryClick: (NavigationEntrySpec) -> Unit
 ) {
-        Spacer(modifier = Modifier.height(24.dp))
-
-        SidebarInfoCard(
-                brandName = brandName,
-                isNetworkAvailable = isNetworkAvailable,
-                networkType = networkType,
-                appearance = appearance
-        )
-
         Spacer(modifier = Modifier.height(14.dp))
 
         Row(
@@ -740,26 +696,18 @@ private fun SidebarQuickActionBadge(
 private fun DrawerBottomShortcutRow(
         selectedItem: NavItem?,
         appearance: NavigationDrawerAppearance,
-        onNavItemClick: (NavItem) -> Unit
+        onNavItemClick: (NavItem) -> Unit,
+        onCreateDynamicPage: () -> Unit
 ) {
         Row(
                 modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 8.dp),
                 horizontalArrangement = Arrangement.spacedBy(8.dp),
                 verticalAlignment = Alignment.CenterVertically
         ) {
-                BottomShortcutDrawerItem(
+                BottomCreatePageDrawerItem(
                         modifier = Modifier.weight(1f),
-                        item = NavItem.About,
-                        selected = selectedItem == NavItem.About,
                         appearance = appearance,
-                        onClick = { onNavItemClick(NavItem.About) }
-                )
-                BottomShortcutDrawerItem(
-                        modifier = Modifier.weight(1f),
-                        item = NavItem.Help,
-                        selected = selectedItem == NavItem.Help,
-                        appearance = appearance,
-                        onClick = { onNavItemClick(NavItem.Help) }
+                        onClick = onCreateDynamicPage
                 )
                 BottomShortcutDrawerItem(
                         modifier = Modifier.weight(1f),
@@ -768,6 +716,35 @@ private fun DrawerBottomShortcutRow(
                         appearance = appearance,
                         onClick = { onNavItemClick(NavItem.Settings) }
                 )
+        }
+}
+
+@Composable
+private fun BottomCreatePageDrawerItem(
+        modifier: Modifier = Modifier,
+        appearance: NavigationDrawerAppearance,
+        onClick: () -> Unit
+) {
+        val shape = RoundedCornerShape(14.dp)
+        Surface(
+                modifier = modifier.height(68.dp),
+                onClick = onClick,
+                shape = shape,
+                color = appearance.buttonContainerColor
+        ) {
+                Column(
+                        modifier = Modifier.fillMaxSize(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                ) {
+                        Text(
+                                text = "⊕",
+                                style = MaterialTheme.typography.headlineMedium,
+                                color = appearance.itemColor
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text("新建页面", style = MaterialTheme.typography.labelSmall, color = appearance.itemColor)
+                }
         }
 }
 

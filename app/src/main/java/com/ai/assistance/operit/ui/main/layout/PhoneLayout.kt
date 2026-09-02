@@ -73,6 +73,7 @@ fun PhoneLayout(
         onScreenChange: (Screen) -> Unit,
         onDrawerItemSelected: (Screen) -> Unit,
         onNavigationEntrySelected: (NavigationEntrySpec) -> Unit,
+        onCreateDynamicPage: () -> Unit,
         navigateToTokenConfig: () -> Unit,
         canGoBack: Boolean,
         onGoBack: () -> Unit,
@@ -301,7 +302,8 @@ fun PhoneLayout(
                                 scope = scope,
                                 drawerState = drawerState,
                                 onScreenSelected = onDrawerItemSelected,
-                                onNavigationEntrySelected = onNavigationEntrySelected
+                                onNavigationEntrySelected = onNavigationEntrySelected,
+                                onCreateDynamicPage = onCreateDynamicPage
                         )
                 }
 

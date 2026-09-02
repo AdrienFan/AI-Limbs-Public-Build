@@ -23,6 +23,7 @@ import androidx.compose.ui.res.stringResource
 import androidx.navigation.compose.rememberNavController
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.packTool.PackageManager
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.data.announcement.RemoteAnnouncementDisplay
 import com.ai.assistance.operit.data.announcement.RemoteAnnouncementRepository
 import com.ai.assistance.operit.data.mcp.MCPRepository
@@ -58,7 +59,6 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import com.ai.assistance.operit.R
-import com.ai.assistance.operit.ui.features.update.screens.UpdateScreen
 import com.ai.assistance.operit.util.AppLogger
 
 // 为TopAppBar的actions提供CompositionLocal
@@ -108,7 +108,11 @@ fun OperitApp(
     val pluginDenylistRepository = remember { PluginDenylistRepository(appContext) }
     var navigationRevision by remember { mutableStateOf(0) }
     val configuration = LocalConfiguration.current
-    val navigationModel = remember(context, configuration, navigationRevision) { AppRouteCatalog.build(context) }
+    val dynamicSurfaces by PluginPlatformKernel.dynamicNavigationRegistry.surfaces.collectAsState()
+    val systemToolboxEntries by PluginPlatformKernel.systemUiRegistry.toolboxEntries.collectAsState()
+    val navigationModel = remember(
+        context, configuration, navigationRevision, dynamicSurfaces, systemToolboxEntries
+    ) { AppRouteCatalog.build(context) }
 
     val routerState = remember {
         AppRouterState(AppRouteCatalog.initialEntry(initialNavItem))
@@ -126,7 +130,8 @@ fun OperitApp(
     val pluginSidebarEntries =
         remember(navigationModel) {
             navigationModel.navigationEntries.filter {
-                it.surface == NavigationSurface.MAIN_SIDEBAR_PLUGINS
+                it.surface == NavigationSurface.MAIN_SIDEBAR_PLUGINS ||
+                    it.surface == NavigationSurface.MAIN_SIDEBAR_DYNAMIC
             }
         }
 
@@ -372,9 +377,7 @@ fun OperitApp(
         NavItem.Toolbox,
         NavItem.ShizukuCommands,
         NavItem.Workflow,
-        NavItem.Settings,
-        NavItem.Help,
-        NavItem.About
+        NavItem.Settings
     )
 
     // Network state monitoring
@@ -531,6 +534,7 @@ fun OperitApp(
                         navigateTo(screen, fromDrawer = true)
                     },
                     onNavigationEntrySelected = ::navigateToNavigationEntry,
+                    onCreateDynamicPage = { PluginPlatformKernel.dynamicNavigationRegistry.create() },
                     onToggleSidebar = {
                         isTabletSidebarExpanded = !isTabletSidebarExpanded
                     },
@@ -566,6 +570,7 @@ fun OperitApp(
                         navigateTo(screen, fromDrawer = true)
                     },
                     onNavigationEntrySelected = ::navigateToNavigationEntry,
+                    onCreateDynamicPage = { PluginPlatformKernel.dynamicNavigationRegistry.create() },
                     navigateToTokenConfig = ::navigateToTokenConfig,
                     canGoBack = canGoBack,
                     onGoBack = ::requestGoBack,

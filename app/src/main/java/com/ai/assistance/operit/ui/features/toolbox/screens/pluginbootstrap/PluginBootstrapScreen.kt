@@ -33,6 +33,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.system.SystemPluginPackageValidator
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolException
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
@@ -45,11 +46,12 @@ import kotlinx.coroutines.withContext
 private const val MAX_BOOTSTRAP_COPY_BYTES = 512L * 1024L * 1024L
 
 @Composable
-fun PluginBootstrapScreen() {
+fun PluginBootstrapScreen(onInstalled: () -> Unit = {}) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var busy by remember { mutableStateOf(false) }
     var selectedName by remember { mutableStateOf<String?>(null) }
+    var selectedUri by remember { mutableStateOf<Uri?>(null) }
     var result by remember { mutableStateOf<SystemPluginValidationResult?>(null) }
     var errorCode by remember { mutableStateOf<String?>(null) }
     var errorMessage by remember { mutableStateOf<String?>(null) }
@@ -57,6 +59,7 @@ fun PluginBootstrapScreen() {
     val picker = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         if (uri == null) return@rememberLauncherForActivityResult
         busy = true
+        selectedUri = uri
         result = null
         errorCode = null
         errorMessage = null
@@ -95,7 +98,7 @@ fun PluginBootstrapScreen() {
     ) {
         Text("Plugin Center Bootstrap", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
         Text(
-            "这里是 AI Limbs 基座永久保留的系统插件入口。当前阶段只验证 Plugin Center 的 .ailpsys V1 协议，不安装、不执行插件。",
+            "这里是 AI Limbs 基座永久保留的系统插件入口。只有通过角色、Host ABI、SHA-256 完整性和 Ed25519 可信发布者验签的 Plugin Center 才能安装。",
             style = MaterialTheme.typography.bodyMedium
         )
 
@@ -135,14 +138,40 @@ fun PluginBootstrapScreen() {
                     Text("ID：${manifest.pluginId}")
                     Text("Role：${manifest.role}")
                     Text("Runtime：${manifest.runtime.kind} · ${manifest.runtime.entry}")
+                    manifest.runtime.entryClass?.let { Text("Entry Class：$it", style = MaterialTheme.typography.bodySmall) }
                     Text("Host ABI：${manifest.hostAbi.min}..${manifest.hostAbi.max}")
                     Text("Signer：${manifest.signature.signerId} · ${manifest.signature.algorithm}")
+                    Text("可信状态：${validation.trustStatus}")
                     Text("完整性条目：${validation.verifiedPayloadEntries}")
                     Text("Package SHA-256：${validation.packageSha256}", style = MaterialTheme.typography.bodySmall)
                     Text(
-                        "注意：当前只完成协议、角色、ABI、路径与 SHA-256 完整性验证，并确认签名信封存在。可信发布者密钥验证尚未执行，因此这里不会安装插件。",
+                        "可信验证已完成：manifest 原始字节已通过 Ed25519 验签，signer_id 已进入受信任 keyring，并且该 signer 被允许承担 plugin_center 角色。",
                         style = MaterialTheme.typography.bodySmall
                     )
+                    Button(
+                        enabled = !busy && selectedUri != null,
+                        onClick = {
+                            val uri = selectedUri ?: return@Button
+                            val name = selectedName ?: return@Button
+                            busy = true
+                            scope.launch {
+                                try {
+                                    withContext(Dispatchers.IO) {
+                                        PluginPlatformKernel.systemPlugins.installFirstTrustedFromUri(uri.toString(), name)
+                                    }
+                                    onInstalled()
+                                } catch (error: SystemPluginProtocolException) {
+                                    errorCode = error.code
+                                    errorMessage = error.message
+                                } catch (error: Throwable) {
+                                    errorCode = "BOOTSTRAP_INSTALL_FAILED"
+                                    errorMessage = error.message ?: error::class.java.simpleName
+                                } finally {
+                                    busy = false
+                                }
+                            }
+                        }
+                    ) { Text("安装 Plugin Center") }
                 }
             }
         }

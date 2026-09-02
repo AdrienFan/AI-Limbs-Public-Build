@@ -107,6 +107,10 @@ internal class PluginUiRegistry {
 
     fun screen(id: String): PluginScreenSpec? = screens[id]?.value
 
+    fun homeTile(id: String): PluginHomeTileSpec? = tiles[id]?.value
+
+    fun homeTileSnapshots(): List<PluginHomeTileSpec> = homeTiles.value
+
     fun registerTheme(ownerPluginId: String, spec: PluginThemeSpec): AutoCloseable {
         requireOwner(ownerPluginId, spec.ownerPluginId)
         val token = UUID.randomUUID().toString()

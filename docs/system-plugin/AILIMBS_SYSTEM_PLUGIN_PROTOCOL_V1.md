@@ -45,7 +45,8 @@ PluginCenter.ailpsys
   },
   "runtime": {
     "kind": "android_inprocess",
-    "entry": "payload/plugin-center.apk"
+    "entry": "payload/plugin-center.apk",
+    "entry_class": "com.ai.limbs.plugincenter.PluginCenterEntry"
   },
   "permissions": {
     "requested_scopes": []
@@ -58,7 +59,7 @@ PluginCenter.ailpsys
   },
   "signature": {
     "algorithm": "Ed25519",
-    "signer_id": "ai_limbs.official",
+    "signer_id": "ai-limbs-plugin-center-dev-v1",
     "entry": "META-INF/AILIMBS.SIG"
   }
 }
@@ -88,13 +89,13 @@ The detached signature is intended to authenticate the exact manifest bytes. Bec
 
 V1 requires an `Ed25519` signature envelope and a non-empty detached signature file. The `.ailpsys` suffix and `signer_id` string never establish trust by themselves.
 
-V0.7.2 Bootstrap validation currently verifies package structure, role, Host ABI, integrity hashes, and signature-envelope presence. Cryptographic signer trust is intentionally reported as `NOT_EVALUATED` until the trusted system keyring is connected. Therefore Bootstrap validation success is not installation authorization.
+V0.7.2 Bootstrap validation verifies package structure, role, Host ABI, integrity hashes, then verifies the detached Ed25519 signature over the exact `system-plugin.json` bytes against the built-in trusted system keyring. Unknown signers, role/signature mismatches, and invalid signatures are rejected. A successful result reports `TRUSTED`.
 
 ## 9. Bootstrap behavior
 
-The permanent AI Limbs Toolbox Bootstrap Slot is `order=0`. Before a Plugin Center system plugin is installed and bound, it displays a `+` entry. Selecting a candidate performs validation only in V0.7.2 phase 1.
+The permanent AI Limbs Toolbox Bootstrap Slot is `order=0`. Before a Plugin Center system plugin is installed and bound, it displays a `+` entry. Selecting a candidate performs full protocol, integrity, role and trusted-signer validation before installation is offered.
 
-A future install flow must re-run validation, perform trusted signer verification, commit transactionally, bind `system.role.plugin_center`, and only then replace the `+` slot with the Plugin Center-contributed entry.
+Installation re-runs the same trusted validation, stages the candidate transactionally, mounts it, requires a healthy Plugin Center UI contribution, commits the active version, and only then replaces the Bootstrap slot with the Plugin Center-contributed entry.
 
 ## 10. Security invariants
 
@@ -105,3 +106,19 @@ A future install flow must re-run validation, perform trusted signer verificatio
 - Runtime execution is separate from protocol validation.
 - Signer trust is separate from integrity validation.
 - System plugin lifecycle authority remains Host-controlled.
+
+## 11. Dynamic Navigation Surface service
+
+`PluginCenter.ailpsys` receives a Host-owned `navigation` JSON service through `SystemPluginHostV1`. Dynamic pages are identified by stable `surface_id` values; changing a page title does not change its identity.
+
+V1 operations:
+
+- `list_surfaces` / `describe_surface`
+- `create_surface` / `rename_surface`
+- `delete_surface`
+- `list_contributions`
+- `bind_contribution` / `unbind_contribution`
+
+Ordinary plugins keep using the existing `PluginHomeTileSpec` and `PluginScreenSpec` contribution model. Plugin Center chooses which dynamic surface receives each active contribution; the page does not hard-code plugin IDs.
+
+`delete_surface` is deliberately non-cascading. It requires an explicit administrator password on every call, and the Kernel rejects deletion while any binding remains. This prevents deleting a navigation page from deleting or silently detaching its contained applications.

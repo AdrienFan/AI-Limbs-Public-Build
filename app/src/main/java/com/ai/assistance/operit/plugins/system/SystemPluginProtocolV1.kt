@@ -36,7 +36,8 @@ data class SystemPluginHostAbiSpec(
 
 data class SystemPluginRuntimeSpec(
     val kind: String,
-    val entry: String
+    val entry: String,
+    val entryClass: String?
 )
 
 data class SystemPluginSignatureSpec(
@@ -57,7 +58,7 @@ data class SystemPluginManifestV1(
 )
 
 enum class SystemPluginTrustStatus {
-    NOT_EVALUATED
+    TRUSTED
 }
 
 data class SystemPluginValidationResult(
@@ -65,7 +66,7 @@ data class SystemPluginValidationResult(
     val packageSha256: String,
     val entryCount: Int,
     val verifiedPayloadEntries: Int,
-    val trustStatus: SystemPluginTrustStatus = SystemPluginTrustStatus.NOT_EVALUATED
+    val trustStatus: SystemPluginTrustStatus = SystemPluginTrustStatus.TRUSTED
 )
 
 class SystemPluginProtocolException(
