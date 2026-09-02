@@ -15,6 +15,7 @@ internal object DeveloperGuideContent {
             description = "AI Limbs V0.7.2：Stable Kernel + Host Gateway + 多层插件协议。",
             lines = listOf(
                 "AI Limbs 本体只保留稳定 Kernel、Host Gateway、Runtime、Policy、Dispatcher、基础服务与恢复能力；可升级业务能力优先外置为插件。",
+                "Host Gateway V1 是稳定总线入口：通过 list / describe / operations / availability / invoke 访问版本化 Host Primitive；当前 39 条 Primitive 均可发现，BOUND / KERNEL_GATE 必须真实可执行，DECLARED / PARTIAL 可以诚实返回不可用而不扩张 ABI。",
                 "开发前先选包类型：普通顶层能力使用 .ailp；宿主级系统控制面使用 .ailpsys；父插件专属二级扩展使用 .ailx。三者不是同一种权限等级。",
                 ".ailp 由 Plugin Platform 管理，强调声明、权限、可撤销贡献和可停止 Runtime；普通第三方插件不得依赖宿主内部实现类。",
                 ".ailpsys 使用独立 System Plugin Protocol 与 System Host ABI，面向 Plugin Center、恢复、Host Adapter 等高信任系统角色。",
@@ -30,8 +31,11 @@ internal object DeveloperGuideContent {
             lines = listOf(
                 "根清单必须是 plugin.json，format=AIL_PLUGIN_V1，schema_version=1；plugin_id 必须稳定，version 使用 SemVer。",
                 "display.name 与 display.description 必填；api.min / api.target 描述宿主插件 API 兼容范围。",
+                "正式 .ailp 发布必须声明 integrity 与 signature：V1 integrity 使用 SHA-256，signature 使用 Ed25519；signer_id 必须存在于当前 Trust Keyring 且具备 parent_plugin purpose。",
+                "integrity.entries 必须精确覆盖除 plugin.json 与签名条目外的全部 payload，runtime.entry 必须受 integrity 保护；官方包使用 META-INF/AILIMBS.SIG 保存 detached signature，并对最终 plugin.json 原始字节验签。",
+                "UNSIGNED、UNKNOWN_SIGNER、摘要不匹配或 Ed25519 验签失败都不能作为正式发布安装；Development Preview 只能用于明确的开发测试，不能替代正式信任链。",
                 "runtime.kind 只能使用当前宿主已经注册的 Runtime。V0.7.2 当前主线注册 none、declarative，以及受限 android_inprocess。",
-                "android_inprocess 不是普通第三方 Runtime。当前仅批准的官方身份 plugin.system.extension_hub、plugin.system.bridge、plugin.system.developer_guide 可使用，并且必须匹配对应系统角色。",
+                "android_inprocess 不是普通第三方 Runtime。当前仅批准的官方身份 plugin.system.extension_hub、plugin.system.bridge、plugin.system.developer_guide、plugin.system.packager 可使用，并且必须匹配对应系统角色。",
                 "provides.capabilities / services / providers / extensions 必须先在 manifest 声明；运行时注册不得超出声明。",
                 "插件可执行 capability 必须位于 plugin.* 命名空间；宿主能力使用版本化 host.*@N Primitive，通过 Host Gateway 调用，插件不得抢占宿主命名空间。",
                 "permissions.requested_scopes 只能申请当前 Kernel 标记为 BOUND 且 requestable 的 Host Primitive；目录中存在但尚未绑定的 Primitive 不能当作可用 API。",
@@ -48,6 +52,8 @@ internal object DeveloperGuideContent {
                 "根清单必须是 system-plugin.json，format=AIL_SYSTEM_PLUGIN_V1，schema_version=1，包扩展名为 .ailpsys。",
                 "必须声明 plugin_id、version、display、system.role、host_abi.min/max、runtime、requested_scopes、signature 与完整 payload integrity map。",
                 "V1 签名算法固定为 Ed25519；签名与 payload 完整性校验属于安装前硬门槛，系统插件不得依赖开发模式绕过信任。",
+                "Host 只固定 Root Trust 公钥，不把业务发布者公钥永久写死为不可变 ABI；Root Trust 对版本化 Trust Keyring 签名，Keyring 再按 purpose / role 授权 system_plugin、parent_plugin、child_extension 发布者。",
+                "Trust Keyring 更新必须通过 Root Ed25519 签名验证；低版本回滚被拒绝，同版本但内容不同也被拒绝。发布者密钥轮换应通过更高版本 Keyring 完成，而不是为了换 signer 重编 AI Limbs。",
                 "System Plugin Runtime 当前协议支持 declarative 与 android_inprocess；android_inprocess 的 APK 在 DexClassLoader 加载前必须冻结为只读。",
                 "入口类通过 SystemPluginEntryV1 挂载，只能使用版本化 SystemPluginHostV1 / Host Gateway，不得把 PluginManager、Context、SharedPreferences、Trust verifier 等内部对象当成 ABI。",
                 "协议定义的 system role 包括 plugin_center、extension_hub、host_adapter、recovery、system_service；是否可实际安装仍取决于当前 Host 是否提供对应系统槽位。",
@@ -67,7 +73,8 @@ internal object DeveloperGuideContent {
                 "子插件 mount 后必须 publish 一个且仅一个 binding；未发布、重复发布、payload 类型不匹配都必须失败并撤销已创建资源。",
                 "父插件通过 ExtensionHubService.publishPoint() 声明 point、api、allowedHostCapabilities 与 binder；父插件停用或 Point 消失时子插件必须 BLOCKED/停止。",
                 "permissions.host_capabilities 只能使用父 Point 明确 delegated 的能力；.ailx 不能越过父插件直接扩大宿主权限。",
-                "Bridge Provider 正式示例为 ai_limbs.bridge.provider@3；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。"
+                "Bridge Provider 正式示例为 ai_limbs.bridge.provider@3；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。",
+                "当前 Root Trust Keyring 已为 child_extension 预留发布者身份，但 Plugin Extension Hub 尚未实现 .ailx 包级 SHA-256 integrity + Ed25519 enforcement；因此当前不能把 .ailx 宣称为与 .ailp / .ailpsys 同等级的正式 Trust 闭环。"
             )
         ),
         GuideSection(
@@ -95,6 +102,7 @@ internal object DeveloperGuideContent {
                 "少数官方 android_inprocess 插件获得更高信任边界，但仍受固定 plugin_id + role 白名单、唯一 APK、只读 Dex 与声明式贡献约束；不能把该特例推广成第三方标准。",
                 "Host Primitive 目录包含 CONFIRMED/CANDIDATE、DECLARED/PARTIAL/BOUND/KERNEL_GATE 等状态；只有明确 BOUND 且授权可请求的能力才能作为插件依赖。",
                 "敏感凭据必须通过受控 Secret/Credential Broker 或插件自己的受保护存储策略获取；禁止把 API key、恢复密钥、签名私钥写入分发包。",
+                "Root Trust 私钥与各发布者私钥不得进入 Git 仓库、GitHub Actions、APK、.ailpsys / .ailp / .ailx 分发包或日志；云端构建只产出 payload，最终发布签名在受控安全环境完成。",
                 "Runtime stop 前先 revokeAll()；停止超时、崩溃或策略阻断不能留下仍可调用的 contribution。",
                 "动态 Dex/APK 在加载前必须只读；任何恢复、回滚或旧版本重新 mount 都必须重新检查，而不是只在首次安装时检查。"
             )
@@ -109,6 +117,8 @@ internal object DeveloperGuideContent {
                 "普通 .ailp 与 .ailx 都应把备份作为独立资产管理；恢复时重新校验 manifest、完整性、权限、依赖和当前 Contract，不做静默跨版本恢复。",
                 "Plugin Center 自身只保留 Current Backup 与 Previous Backup 两个维护槽；修复使用 Current，不旋转；成功回滚后 Previous 被消费。",
                 "Plugin Center 升级/修复/回滚由 Bootstrap 接管：停止旧 Runtime、撤销旧 UI、切换版本、health check，再重新创建新 Runtime/UI Session。",
+                "正式父插件发布流程为：GitHub 云端编译 payload APK → 安全 Ubuntu 核对 package/version → 计算真实 SHA-256 → 生成最终 integrity/signature manifest → Ed25519 签名最终 manifest 原始字节 → 封装 .ailp → 重新打开成品并独立复验摘要与签名。",
+                "发布者密钥轮换先发布更高版本、Root 签名的 Trust Keyring，再发布由新 signer 签名的插件；不要把私钥上传 CI，也不要通过修改 Host 硬编码新业务公钥来完成轮换。",
                 "正式开发以当前 AI Limbs Host ABI、Manifest Parser、Host Primitive Catalog 与 Extension Point Registry 为事实来源；不要把历史分支、实验 App 或旧截图当成规范。",
                 "上下文丢失或新维护者接手时，先通过 capability.search 搜索 Developer Guide / Recovery Handbook / 维护手册，再调用 plugin.developer_guide.handbook；需要节省上下文时用 plugin.developer_guide.section 分段读取。",
                 "任何 Plugin Protocol、Host ABI、Runtime、安全边界或维护生命周期变化，都必须在同一发布批次同步更新 Developer Guide 并提升手册插件版本；禁止让恢复手册落后于实际宿主。",
