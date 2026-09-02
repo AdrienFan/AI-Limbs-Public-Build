@@ -51,7 +51,7 @@ object AiLimbsCoreCapabilityRegistry {
                 entry(
                     name = "ai_limbs.developer.catalog.read",
                     displayName = "AI Limbs 开发接口目录",
-                    description = "Read the current Host Primitive and extension\/plugin-bus development catalog when the Plugin Center eye switch is open.",
+                    description = "Read the current Host Primitive and extension/plugin-bus development catalog when the Plugin Center eye switch is open.",
                     parameters = listOf(
                         ToolParameterSchema("query", "string", "Optional filter such as filesystem, Extension Point, 通知 or bridge", false)
                     ),

@@ -181,6 +181,7 @@ object AiLimbsExecutionPolicyDescriptor {
                     AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ,
                     AiLimbsCoreLocalOperation.CAPABILITY_SEARCH,
                     AiLimbsCoreLocalOperation.CAPABILITY_DESCRIBE,
+                    AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ,
                     AiLimbsCoreLocalOperation.CORE_STATUS,
                     AiLimbsCoreLocalOperation.DISPATCHER_STATUS,
                     AiLimbsCoreLocalOperation.SHARED_UBUNTU_STATUS,
