@@ -5,14 +5,12 @@ import com.ai.assistance.operit.core.chat.plugins.MessageProcessingExecution
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingHookParams
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingPlugin
 import com.ai.assistance.operit.core.chat.plugins.MessageProcessingPluginRegistry
-import com.ai.assistance.operit.plugins.OperitPlugin
 import com.ai.assistance.operit.util.stream.stream
 import kotlinx.coroutines.CancellationException
 
-object LanerChatPlugin : OperitPlugin {
-    override val id: String = "builtin.ai-limbs.laner-chat"
+object LanerChatPlugin {
 
-    override fun register() {
+    fun register() {
         MessageProcessingPluginRegistry.register(LanerChatMessageProcessingPlugin)
     }
 }
