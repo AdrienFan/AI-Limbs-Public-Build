@@ -46,6 +46,16 @@ jobs:
           persist-credentials: false
           submodules: false
 
+      - name: Checkout official plugin suite source
+        if: github.ref == 'refs/heads/dev/v0.7.2'
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          ref: dev/plugin-lab-alt-v0.5.3
+          path: plugin-suite
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
       - name: Set up Python
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
         with:
@@ -183,6 +193,56 @@ jobs:
           chmod +x ./gradlew
           ./gradlew "$gradle_task" --stacktrace --no-daemon
 
+      - name: Build official V0.7.2 plugin suite
+        if: success() && github.ref == 'refs/heads/dev/v0.7.2'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd plugin-suite
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+          chmod +x ./gradlew
+          ./gradlew \
+            :plugin-extension-hub:assembleDebug \
+            :bridge-core-plugin:assembleDebug \
+            :developer-guide-plugin:assembleDebug \
+            :packager-plugin:assembleDebug \
+            :rdc-extension:assembleDebug \
+            :triggercmd-extension:assembleDebug \
+            --stacktrace --no-daemon
+          python3 tools/plugin_lab/package_plugins.py
+          python3 tools/plugin_lab/package_suite.py
+          unzip -l dist/AI-Limbs-Official-Plugins-for-v0.7.2.zip
+
+      - name: Assemble one V0.7.2 test suite package
+        if: success() && github.ref == 'refs/heads/dev/v0.7.2'
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf suite-root suite-output
+          mkdir -p suite-root suite-output
+          mapfile -t host_apks < <(find app/build/outputs/apk -type f -name '*.apk' -print | sort)
+          if [ "${#host_apks[@]}" -ne 1 ]; then
+            printf 'Expected exactly one Host APK, got %s\n' "${#host_apks[@]}" >&2
+            printf '%s\n' "${host_apks[@]}" >&2
+            exit 1
+          fi
+          cp "${host_apks[0]}" suite-root/AI-Limbs-v0.7.2-debug.apk
+          unzip -q plugin-suite/dist/AI-Limbs-Official-Plugins-for-v0.7.2.zip -d suite-root
+          printf 'Host ref: %s\nPlugin ref: dev/plugin-lab-alt-v0.5.3\nRun: %s\n' \
+            "$GITHUB_SHA" "$GITHUB_RUN_ID" > suite-root/BUILD-INFO.txt
+          python3 - <<'PY_SUITE'
+          from pathlib import Path
+          import zipfile
+          source = Path('suite-root')
+          output = Path('suite-output/AI-Limbs-V0.7.2-Test-Suite.zip')
+          with zipfile.ZipFile(output, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
+              for item in sorted(source.rglob('*')):
+                  if item.is_file():
+                      archive.write(item, item.relative_to(source))
+          print(output)
+          PY_SUITE
+          unzip -l suite-output/AI-Limbs-V0.7.2-Test-Suite.zip
+
       - name: Upload Android reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -195,12 +255,21 @@ jobs:
           retention-days: 14
 
       - name: Upload successful Android outputs
-        if: success()
+        if: success() && github.ref != 'refs/heads/dev/v0.7.2'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: ai-limbs-android-${{ github.run_number }}
           path: |
             app/build/outputs/apk/**/*.apk
             app/build/outputs/bundle/**/*.aab
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload unified V0.7.2 test suite
+        if: success() && github.ref == 'refs/heads/dev/v0.7.2'
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: AI-Limbs-V0.7.2-Test-Suite-${{ github.run_number }}
+          path: suite-output/AI-Limbs-V0.7.2-Test-Suite.zip
           if-no-files-found: error
           retention-days: 14
