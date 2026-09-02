@@ -66,6 +66,8 @@ import com.ai.assistance.operit.ui.features.settings.screens.UserPreferencesSett
 import com.ai.assistance.operit.ui.features.tokenstats.TokenUsageStatisticsScreen
 import com.ai.assistance.operit.ui.features.token.TokenConfigWebViewScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.ToolboxScreen
+import com.ai.assistance.operit.ui.features.toolbox.screens.DynamicNavigationScreen
+import com.ai.assistance.operit.ui.features.toolbox.screens.PluginDeclarativeScreen
 import com.ai.assistance.operit.ui.features.toolbox.screens.pluginbootstrap.PluginBootstrapScreen
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.system.SystemUiNavigatorV1
