@@ -222,6 +222,7 @@ internal class SystemPluginController(
         val storedPackage = File(dir, "PluginCenter${SystemPluginProtocolV1.PACKAGE_EXTENSION}")
         copyAtomically(source, storedPackage)
         extractValidatedPackage(storedPackage, content)
+        prepareRuntimeApk(content, validation.manifest)
         return storedPackage
     }
 
@@ -233,11 +234,7 @@ internal class SystemPluginController(
             ?: throw PluginInstallException("RUNTIME_ENTRY_CLASS_MISSING", "Plugin Center runtime entry class is missing")
         val content = File(versionDir(manifest.version), "content")
         if (!content.isDirectory) extractValidatedPackage(packageFile, content)
-        val apk = File(content, manifest.runtime.entry).canonicalFile
-        val canonicalContent = content.canonicalFile
-        if (!apk.isFile || !apk.path.startsWith(canonicalContent.path + File.separator)) {
-            throw PluginInstallException("RUNTIME_ENTRY_MISSING", "Plugin Center runtime APK is missing")
-        }
+        val apk = prepareRuntimeApk(content, manifest)
         val optimized = File(appContext.codeCacheDir, "system_plugins/${manifest.pluginId}/${manifest.version}").apply { mkdirs() }
         val loader = DexClassLoader(apk.absolutePath, optimized.absolutePath, null, appContext.classLoader)
         val entry = loader.loadClass(entryClass).getDeclaredConstructor().newInstance() as? SystemPluginEntryV1
@@ -250,6 +247,27 @@ internal class SystemPluginController(
         }
         activeSession = ActiveSession(manifest, handle, loader)
         AppLogger.i(TAG, "Plugin Center mounted: ${manifest.pluginId}@${manifest.version}")
+    }
+
+    private fun prepareRuntimeApk(content: File, manifest: SystemPluginManifestV1): File {
+        val canonicalContent = content.canonicalFile
+        val apk = File(canonicalContent, manifest.runtime.entry).canonicalFile
+        if (!apk.isFile || !apk.path.startsWith(canonicalContent.path + File.separator)) {
+            throw PluginInstallException("RUNTIME_ENTRY_MISSING", "Plugin Center runtime APK is missing")
+        }
+        if (apk.canWrite() && !apk.setReadOnly()) {
+            throw PluginInstallException(
+                "RUNTIME_ENTRY_READONLY_FAILED",
+                "Could not make Plugin Center runtime APK read-only"
+            )
+        }
+        if (apk.canWrite()) {
+            throw PluginInstallException(
+                "RUNTIME_ENTRY_WRITABLE",
+                "Plugin Center runtime APK remains writable and cannot be dynamically loaded"
+            )
+        }
+        return apk
     }
 
     private fun stopActive() {
