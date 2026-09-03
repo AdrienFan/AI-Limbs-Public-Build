@@ -2,6 +2,10 @@ package com.ai.assistance.operit.plugins.center
 
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.update
 
 enum class PluginContributionKind {
     CAPABILITY,
@@ -43,6 +47,9 @@ class PluginContributionRegistry {
     )
 
     private val records = ConcurrentHashMap<String, OwnedRecord>()
+    private val revisionFlow = MutableStateFlow(0L)
+
+    val revision: StateFlow<Long> = revisionFlow.asStateFlow()
 
     fun register(record: PluginContributionRecord): PluginRegistrationHandle {
         val key = key(record.kind, record.id, record.extensionPoint)
@@ -55,10 +62,18 @@ class PluginContributionRegistry {
                 "${record.kind}:${record.id} is already owned by ${existing.record.ownerPluginId}"
             )
         }
+        revisionFlow.update { it + 1L }
         return PluginRegistrationHandle {
+            var removed = false
             records.computeIfPresent(key) { _, current ->
-                if (current.token == token) null else current
+                if (current.token == token) {
+                    removed = true
+                    null
+                } else {
+                    current
+                }
             }
+            if (removed) revisionFlow.update { it + 1L }
         }
     }
 

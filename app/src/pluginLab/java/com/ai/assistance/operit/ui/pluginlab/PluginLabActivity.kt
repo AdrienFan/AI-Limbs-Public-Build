@@ -70,7 +70,6 @@ import com.ai.assistance.operit.plugins.center.compatBackup
 import com.ai.assistance.operit.plugins.center.compatBackupSnapshots
 import com.ai.assistance.operit.plugins.center.PluginContributionKind
 import com.ai.assistance.operit.plugins.center.PluginHomeTileSpec
-import com.ai.assistance.operit.plugins.center.PluginScreenBlock
 import com.ai.assistance.operit.plugins.center.PluginScreenSpec
 import com.ai.assistance.operit.plugins.center.PluginThemeMode
 import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.PluginCenterScreen
@@ -78,9 +77,6 @@ import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.PluginC
 import com.ai.assistance.operit.ui.features.toolbox.screens.plugincenter.ScrollStateScrollIndicator
 import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
 import com.ai.limbs.plugin.runtime.ExtensionHubService
-import com.ai.limbs.plugin.runtime.InProcessDynamicPanelProvider
-import com.ai.limbs.plugin.runtime.InProcessPanelFieldKind
-import com.ai.limbs.plugin.runtime.InProcessSelectionProvider
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import java.io.File
 import java.util.UUID
@@ -297,11 +293,7 @@ private fun PluginSurface(screenId: String, onBack: () -> Unit) {
 
 @Composable
 private fun PluginScreenContent(screen: PluginScreenSpec, modifier: Modifier = Modifier) {
-    val scope = rememberCoroutineScope()
-    val results = remember(screen.id) { mutableStateMapOf<Int, String>() }
-    val busy = remember(screen.id) { mutableStateMapOf<Int, Boolean>() }
     val scrollState = rememberScrollState()
-
     Box(modifier = modifier.fillMaxSize()) {
         Column(
             modifier = Modifier
@@ -310,360 +302,26 @@ private fun PluginScreenContent(screen: PluginScreenSpec, modifier: Modifier = M
                 .padding(start = 16.dp, top = 16.dp, end = 22.dp, bottom = 16.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            screen.description?.let {
-                Text(it, style = MaterialTheme.typography.bodyMedium)
-            }
-            screen.blocks.forEachIndexed { index, block ->
-                when (block) {
-                    is PluginScreenBlock.Text -> Text(block.text)
-                    is PluginScreenBlock.CapabilityButton -> {
-                        Button(
-                            enabled = busy[index] != true,
-                            onClick = {
-                                scope.launch {
-                                    busy[index] = true
-                                    results[index] = try {
-                                        val value = withContext(Dispatchers.IO) {
-                                            PluginCenterKernel.capabilities.invokePlugin(
-                                                block.capabilityId,
-                                                block.parameters
-                                            )
-                                        }
-                                        value.optString("content").ifBlank { value.toString(2) }
-                                    } catch (error: Throwable) {
-                                        "执行失败：" + (error.message ?: "未知错误")
-                                    } finally {
-                                        busy[index] = false
-                                    }
-                                }
-                            }
-                        ) {
-                            Text(if (busy[index] == true) "执行中…" else block.label)
-                        }
-                        results[index]?.let { result ->
-                            SelectionContainer {
-                                Text(
-                                    result,
-                                    modifier = Modifier.fillMaxWidth(),
-                                    style = MaterialTheme.typography.bodySmall
-                                )
-                            }
-                        }
-                    }
-                    is PluginScreenBlock.ChildExtensionInstaller -> ChildExtensionInstallerBlock(
-                        block = block,
-                        onResult = { results[index] = it }
-                    )
-                    is PluginScreenBlock.ChildExtensionList -> ChildExtensionListBlock(
-                        point = block.point,
-                        onResult = { results[index] = it }
-                    )
-                    is PluginScreenBlock.ChildExtensionSelector -> ChildExtensionSelectorBlock(
-                        block = block,
-                        onResult = { results[index] = it }
-                    )
-                    is PluginScreenBlock.DynamicPanel -> DynamicPanelBlock(
-                        providerId = block.providerId
-                    )
-                }
+            screen.description?.let { Text(it, style = MaterialTheme.typography.bodyMedium) }
+            Text(
+                "Schema: ${screen.schemaId}",
+                style = MaterialTheme.typography.titleSmall
+            )
+            Text(
+                "此实验壳只保存与路由 opaque UI document；组件语义与交互由 Plugin Center 自己的 renderer 负责。",
+                style = MaterialTheme.typography.bodySmall
+            )
+            SelectionContainer {
+                Text(
+                    screen.documentJson,
+                    modifier = Modifier.fillMaxWidth(),
+                    style = MaterialTheme.typography.bodySmall
+                )
             }
         }
         ScrollStateScrollIndicator(
             state = scrollState,
             modifier = Modifier.align(Alignment.CenterEnd)
         )
-    }
-}
-
-private fun activeExtensionHub(): ExtensionHubService? =
-    PluginCenterKernel.contributions
-        .find(PluginContributionKind.PROVIDER, InProcessSystemIds.EXTENSION_HUB_PROVIDER)
-        ?.payload as? ExtensionHubService
-
-@Composable
-private fun ChildExtensionInstallerBlock(
-    block: PluginScreenBlock.ChildExtensionInstaller,
-    onResult: (String) -> Unit
-) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    val hub = activeExtensionHub()
-    val launcher = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
-        if (uri != null) {
-            if (hub == null) {
-                onResult("Plugin Extension Hub 未启用")
-            } else {
-                scope.launch {
-                    val temporary = File(context.cacheDir, "extension-import-${UUID.randomUUID()}.ailx")
-                    try {
-                        withContext(Dispatchers.IO) {
-                            context.contentResolver.openInputStream(uri).use { input ->
-                                requireNotNull(input) { "无法读取选择的子插件" }
-                                temporary.outputStream().use(input::copyTo)
-                            }
-                        }
-                        val snapshot = withContext(Dispatchers.IO) {
-                            hub.install(temporary, block.ownerPluginId, block.point)
-                        }
-                        onResult("已安装 ${snapshot.displayName} ${snapshot.version} · ${snapshot.lifecycle}")
-                    } catch (error: Throwable) {
-                        onResult("子插件安装失败：${error.message ?: "未知错误"}")
-                    } finally {
-                        temporary.delete()
-                    }
-                }
-            }
-        }
-    }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Button(
-            enabled = hub != null,
-            onClick = { launcher.launch(arrayOf("application/zip", "application/octet-stream", "*/*")) }
-        ) { Text(block.label) }
-        Text(
-            if (hub == null) "Plugin Extension Hub 未启用" else "仅接受 AIL_EXTENSION_V1 / .ailx",
-            style = MaterialTheme.typography.bodySmall
-        )
-    }
-}
-
-@Composable
-private fun ChildExtensionListBlock(point: String, onResult: (String) -> Unit) {
-    val hub = activeExtensionHub()
-    if (hub == null) {
-        Text("Plugin Extension Hub 未启用")
-        return
-    }
-    val snapshots by hub.snapshotsForPoint(point).collectAsState()
-    val backupFlow = remember(hub) { hub.compatBackupSnapshots() }
-    val backups by backupFlow.collectAsState()
-    val scope = rememberCoroutineScope()
-    var expanded by remember(point) { mutableStateOf(false) }
-    var query by remember(point) { mutableStateOf("") }
-    val normalized = query.trim().lowercase()
-    val filtered = remember(snapshots, normalized) {
-        if (normalized.isBlank()) snapshots else snapshots.filter { snapshot ->
-            listOf(
-                snapshot.displayName, snapshot.extensionId, snapshot.description.orEmpty(),
-                snapshot.lifecycle.name, snapshot.target.point
-            ).any { it.lowercase().contains(normalized) }
-        }
-    }
-    PluginCollectionSection(
-        title = "已安装子插件",
-        totalCount = snapshots.size,
-        matchedCount = filtered.size,
-        query = query,
-        onQueryChange = { query = it },
-        expanded = expanded,
-        onExpandedChange = { expanded = it },
-        searchPlaceholder = "搜索子插件"
-    ) {
-        if (filtered.isEmpty()) {
-            Text(
-                if (snapshots.isEmpty()) "尚未安装子插件" else "没有匹配的子插件",
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        filtered.forEach { snapshot ->
-            val backupVersion = backups.firstOrNull { it.extensionId == snapshot.extensionId }?.version
-            val canBackup = backupVersion != snapshot.version
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    modifier = Modifier.padding(12.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("${snapshot.displayName} · ${snapshot.version}", style = MaterialTheme.typography.titleSmall)
-                    Text("${snapshot.extensionId} · ${snapshot.lifecycle}", style = MaterialTheme.typography.bodySmall)
-                    Text("使用 ${snapshot.useCount} 次 · 备份：${backupVersion ?: "未备份"}", style = MaterialTheme.typography.bodySmall)
-                    snapshot.lastError?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Button(onClick = {
-                            scope.launch {
-                                runCatching { hub.setEnabled(snapshot.extensionId, !snapshot.enabled) }
-                                    .onSuccess { onResult("${it.displayName} → ${it.lifecycle}") }
-                                    .onFailure { onResult("操作失败：${it.message}") }
-                            }
-                        }) { Text(if (snapshot.enabled) "禁用" else "启用") }
-                        Button(onClick = {
-                            scope.launch {
-                                runCatching { hub.uninstall(snapshot.extensionId) }
-                                    .onSuccess { onResult(if (it) "已卸载 ${snapshot.displayName}" else "子插件不存在") }
-                                    .onFailure { onResult("卸载失败：${it.message}") }
-                            }
-                        }) { Text("卸载") }
-                        Button(
-                            enabled = canBackup,
-                            onClick = {
-                                scope.launch {
-                                    runCatching { hub.compatBackup(snapshot.extensionId) }
-                                        .onSuccess { onResult("已备份 ${it.displayName} ${it.version}") }
-                                        .onFailure { onResult("备份失败：${it.message}") }
-                                }
-                            }
-                        ) { Text("备份") }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun DynamicPanelBlock(providerId: String) {
-    val provider = PluginCenterKernel.contributions
-        .find(PluginContributionKind.PROVIDER, providerId)
-        ?.payload as? InProcessDynamicPanelProvider
-    if (provider == null) {
-        Text("当前 Provider 控制面板不可用", style = MaterialTheme.typography.bodySmall)
-        return
-    }
-    val panel by provider.state.collectAsState()
-    val current = panel
-    if (current == null) {
-        Text("尚未选择可用的 Provider", style = MaterialTheme.typography.bodySmall)
-        return
-    }
-    val scope = rememberCoroutineScope()
-    val values = remember(providerId) { mutableStateMapOf<String, String>() }
-    val initialValues = remember(providerId) { mutableStateMapOf<String, String>() }
-    var feedback by remember(providerId) { mutableStateOf<String?>(null) }
-    var busyAction by remember(providerId) { mutableStateOf<String?>(null) }
-
-    LaunchedEffect(current) {
-        val activeIds = current.fields.map { it.id }.toSet()
-        values.keys.filter { it !in activeIds }.toList().forEach(values::remove)
-        initialValues.keys.filter { it !in activeIds }.toList().forEach(initialValues::remove)
-        current.fields.forEach { field ->
-            val previousInitial = initialValues[field.id]
-            if (field.id !in values || values[field.id] == previousInitial) {
-                values[field.id] = field.value
-            }
-            initialValues[field.id] = field.value
-        }
-    }
-
-    Card(modifier = Modifier.fillMaxWidth()) {
-        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text(current.title, style = MaterialTheme.typography.titleMedium)
-            current.description.takeIf { it.isNotBlank() }?.let {
-                Text(it, style = MaterialTheme.typography.bodySmall)
-            }
-            current.statusLines.forEach { line ->
-                Text(line, style = MaterialTheme.typography.bodySmall)
-            }
-            current.fields.forEach { field ->
-                val fieldValue = values[field.id] ?: field.value
-                if (field.kind == InProcessPanelFieldKind.SECRET) {
-                    OutlinedTextField(
-                        value = fieldValue,
-                        onValueChange = { values[field.id] = it },
-                        label = { Text(field.label) },
-                        placeholder = { Text(field.placeholder) },
-                        enabled = field.enabled,
-                        visualTransformation = PasswordVisualTransformation(),
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                } else {
-                    OutlinedTextField(
-                        value = fieldValue,
-                        onValueChange = { values[field.id] = it },
-                        label = { Text(field.label) },
-                        placeholder = { Text(field.placeholder) },
-                        enabled = field.enabled,
-                        modifier = Modifier.fillMaxWidth(),
-                        singleLine = true
-                    )
-                }
-            }
-            current.actions.forEach { action ->
-                val requiredFieldsReady = action.requiredFieldIds.all { fieldId ->
-                    values[fieldId].orEmpty().isNotBlank()
-                }
-                Button(
-                    enabled = action.enabled && requiredFieldsReady && busyAction == null,
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = {
-                        scope.launch {
-                            busyAction = action.id
-                            try {
-                                val result = provider.perform(action.id, values.toMap())
-                                result.fieldValues.forEach { (key, value) -> values[key] = value }
-                                feedback = result.message.takeIf { it.isNotBlank() }
-                            } catch (error: Throwable) {
-                                feedback = "操作失败：${error.message ?: "未知错误"}"
-                            } finally {
-                                busyAction = null
-                            }
-                        }
-                    }
-                ) {
-                    Text(if (busyAction == action.id) "处理中…" else action.label)
-                }
-            }
-            feedback?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        }
-    }
-}
-
-@Composable
-private fun ChildExtensionSelectorBlock(
-    block: PluginScreenBlock.ChildExtensionSelector,
-    onResult: (String) -> Unit
-) {
-    val hub = activeExtensionHub()
-    if (hub == null) {
-        Text("Plugin Extension Hub 未启用")
-        return
-    }
-    val snapshots by hub.snapshotsForPoint(block.point).collectAsState()
-    val active = snapshots.filter { it.lifecycle == ChildExtensionLifecycle.ACTIVE }
-    val selectionProvider = block.selectionProviderId?.let { providerId ->
-        PluginCenterKernel.contributions
-            .find(PluginContributionKind.PROVIDER, providerId)
-            ?.payload as? InProcessSelectionProvider
-    }
-    val selectedExtensionId = selectionProvider?.selectedId?.collectAsState()?.value
-    val selectedSnapshot = active.firstOrNull { it.extensionId == selectedExtensionId }
-    val scope = rememberCoroutineScope()
-    var expanded by remember(block.point) { mutableStateOf(false) }
-    var localSelectedName by remember(block.point) { mutableStateOf<String?>(null) }
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Text(block.label, style = MaterialTheme.typography.titleSmall)
-        Box {
-            Button(enabled = active.isNotEmpty(), onClick = { expanded = true }) {
-                Text(
-                    selectedSnapshot?.displayName
-                        ?: localSelectedName
-                        ?: active.firstOrNull()?.displayName
-                        ?: "暂无 Provider"
-                )
-            }
-            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                active.forEach { snapshot ->
-                    DropdownMenuItem(
-                        text = { Text(snapshot.displayName) },
-                        onClick = {
-                            expanded = false
-                            scope.launch {
-                                try {
-                                    val value = withContext(Dispatchers.IO) {
-                                        PluginCenterKernel.capabilities.invokePlugin(
-                                            block.selectCapabilityId,
-                                            org.json.JSONObject().put("extension_id", snapshot.extensionId)
-                                        )
-                                    }
-                                    localSelectedName = snapshot.displayName
-                                    onResult(value.optString("content").ifBlank { value.toString(2) })
-                                } catch (error: Throwable) {
-                                    onResult("选择失败：${error.message ?: "未知错误"}")
-                                }
-                            }
-                        }
-                    )
-                }
-            }
-        }
     }
 }

@@ -93,6 +93,7 @@ fun interface PluginServiceEndpoint {
 }
 
 data class PluginResolvedService internal constructor(
+    val ownerPluginId: String,
     val serviceId: String,
     val apiVersion: Int,
     val metadata: Map<String, String>,
@@ -126,6 +127,7 @@ internal class ScopedPluginServiceResolver(
                 "Service $serviceId does not expose the controlled PluginServiceEndpoint contract"
             )
         return PluginResolvedService(
+            ownerPluginId = record.ownerPluginId,
             serviceId = serviceId,
             apiVersion = actualApi,
             metadata = record.metadata.toMap(),

@@ -133,12 +133,8 @@ object PluginCenterKernel {
                     )
                     PluginExtensionPoints.UI_SCREEN -> listOf(
                         "InProcessScreen",
-                        "InProcessScreenBlock",
-                        "InProcessDynamicPanelProvider",
-                        "InProcessPanelState",
-                        "InProcessPanelField",
-                        "InProcessPanelAction",
-                        "InProcessSelectionProvider",
+                        "InProcessUiStateProvider",
+                        "InProcessUiContributionProvider",
                         "InProcessPluginHost.registerScreen"
                     )
                     else -> emptyList()
