@@ -26,6 +26,7 @@ data class PluginSnapshot(
     val versions: List<String>,
     val persistentState: PluginPersistentState?,
     val activeManifest: PluginManifest?,
+    val installMetadata: PluginInstallMetadata?,
     val usage: PluginUsageStats,
     val backup: PluginBackupSnapshot?,
     val mountedVersion: String?,
@@ -34,6 +35,13 @@ data class PluginSnapshot(
 private data class ActivePluginMount(
     val version: String,
     val runtime: HostedPluginRuntime
+)
+
+internal data class PluginActiveAuthorization(
+    val pluginId: String,
+    val version: String,
+    val roles: Set<String>,
+    val grantedScopes: Set<String>
 )
 
 internal class PluginManager(
@@ -82,14 +90,15 @@ internal class PluginManager(
     ): PluginPersistentState = locked {
         val state = requireState(pluginId)
         val version = state.activeVersion
-        if (version != null) {
-            val manifest = stateRepository.readInstalledManifest(pluginId, version)
-            if (isSystemRolePlugin(manifest) && !adminAuthorized) {
-                throw PluginInstallException(
-                    "ADMIN_AUTH_REQUIRED",
-                    "Disabling a system plugin requires administrator authorization"
-                )
-            }
+        if (
+            version != null &&
+            isTrustedOfficialSystemPlugin(pluginId, version) &&
+            !adminAuthorized
+        ) {
+            throw PluginInstallException(
+                "ADMIN_AUTH_REQUIRED",
+                "Disabling a system plugin requires administrator authorization"
+            )
         }
         disableLocked(pluginId)
     }
@@ -117,14 +126,15 @@ internal class PluginManager(
     ) = locked {
         val state = requireState(pluginId)
         val version = state.activeVersion
-        if (version != null) {
-            val manifest = stateRepository.readInstalledManifest(pluginId, version)
-            if (isSystemRolePlugin(manifest) && !adminAuthorized) {
-                throw PluginInstallException(
-                    "ADMIN_AUTH_REQUIRED",
-                    "Uninstalling a system plugin requires administrator authorization"
-                )
-            }
+        if (
+            version != null &&
+            isTrustedOfficialSystemPlugin(pluginId, version) &&
+            !adminAuthorized
+        ) {
+            throw PluginInstallException(
+                "ADMIN_AUTH_REQUIRED",
+                "Uninstalling a system plugin requires administrator authorization"
+            )
         }
         ensureNoEnabledDependents(pluginId)
         requireCleanRuntimeStop(pluginId, unmountLocked(pluginId))
@@ -180,6 +190,40 @@ internal class PluginManager(
     suspend fun snapshot(pluginId: String): PluginSnapshot = locked {
         snapshotLocked(pluginId)
     }
+
+    internal suspend fun activeAuthorization(pluginId: String): PluginActiveAuthorization = locked {
+        val state = requireState(pluginId)
+        val version = state.activeVersion ?: throw PluginInstallException(
+            "PLUGIN_ACTIVE_VERSION_MISSING",
+            "Plugin has no active version: $pluginId"
+        )
+        val mount = activeMounts[pluginId]
+        if (!state.enabled || state.lastState != PluginLifecycleState.ACTIVE || mount?.version != version) {
+            throw PluginInstallException(
+                "PLUGIN_NOT_ACTIVE",
+                "Plugin is not mounted as its active version: $pluginId"
+            )
+        }
+        val manifest = stateRepository.readInstalledManifest(pluginId, version)
+        val metadata = stateRepository.readInstallMetadata(pluginId, version)
+            ?: throw PluginInstallException(
+                "VERSION_STORE_CORRUPT",
+                "Active version has no install metadata: $pluginId $version"
+            )
+        if (metadata.grantedScopes != manifest.permissions.requestedScopes) {
+            throw PluginInstallException(
+                "PLUGIN_SCOPE_STATE_INVALID",
+                "Stored scope approval does not match the active manifest"
+            )
+        }
+        PluginActiveAuthorization(
+            pluginId = pluginId,
+            version = version,
+            roles = manifest.roles.toSet(),
+            grantedScopes = metadata.grantedScopes.toSet()
+        )
+    }
+
     private suspend fun installLocked(
         sourcePackage: File,
         options: PluginInstallOptions
@@ -582,9 +626,7 @@ internal class PluginManager(
             val state = stateRepository.read(pluginId) ?: return@forEach
             if (!state.enabled || state.lastState != PluginLifecycleState.ACTIVE) return@forEach
             val version = state.activeVersion ?: return@forEach
-            val manifest = runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull()
-                ?: return@forEach
-            if (isAutoDisableExempt(pluginId, manifest)) return@forEach
+            if (isAutoDisableExempt(pluginId, version)) return@forEach
             val usage = usageStore.snapshot(pluginId)
             val baseline = maxOf(
                 usage.lastUsedAtEpochMs ?: 0L,
@@ -602,11 +644,13 @@ internal class PluginManager(
         }
     }
 
-    private fun isSystemRolePlugin(manifest: PluginManifest): Boolean =
-        manifest.roles.any { it == "system" || it == "system_plugin" || it == "system_service" || it == "system_extension_hub" || it == "system_bridge" }
+    private fun isTrustedOfficialSystemPlugin(pluginId: String, version: String): Boolean {
+        val metadata = stateRepository.readInstallMetadata(pluginId, version) ?: return false
+        return OfficialParentPluginIdentity.isTrusted(pluginId, metadata)
+    }
 
-    private fun isAutoDisableExempt(pluginId: String, manifest: PluginManifest): Boolean {
-        if (isSystemRolePlugin(manifest)) return true
+    private fun isAutoDisableExempt(pluginId: String, version: String): Boolean {
+        if (isTrustedOfficialSystemPlugin(pluginId, version)) return true
         return extensionRouter.listBindingsByOwner(pluginId).any { binding ->
             binding.point == PluginExtensionPoints.UI_THEME
         }
@@ -702,6 +746,7 @@ internal class PluginManager(
                             contentDir = store.contentIn(versionDir),
                             dataDir = dataDir,
                             cacheDir = cacheDir,
+                            installMetadata = installMetadata,
                             payloadContext = payloadContext
                         ),
                     scope = mountScope
@@ -897,9 +942,8 @@ internal class PluginManager(
         if (!backupPolicy.snapshot().enabled) return
         val state = stateRepository.read(pluginId) ?: return
         val version = state.activeVersion ?: return
-        val manifest = runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull() ?: return
         val highFrequency = usageStore.snapshot(pluginId).useCount >= PluginBackupPolicyStore.HIGH_FREQUENCY_USE_COUNT
-        if (!isSystemRolePlugin(manifest) && !highFrequency) return
+        if (!isTrustedOfficialSystemPlugin(pluginId, version) && !highFrequency) return
         val existing = backupStore.snapshot(pluginId)
         if (existing?.version == version) return
         runCatching { backupStore.backup(pluginId, version, state.enabled) }
@@ -934,11 +978,15 @@ internal class PluginManager(
             runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull()
         }
         val versions = store.listVersions(pluginId)
+        val installMetadata = state?.activeVersion?.let { version ->
+            stateRepository.readInstallMetadata(pluginId, version)
+        }
         return PluginSnapshot(
             pluginId = pluginId,
             versions = versions,
             persistentState = state,
             activeManifest = manifest,
+            installMetadata = installMetadata,
             usage = usageStore.snapshot(pluginId),
             backup = backupStore.snapshot(pluginId),
             mountedVersion = activeMounts[pluginId]?.version,

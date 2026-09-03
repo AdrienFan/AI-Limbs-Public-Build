@@ -277,44 +277,16 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
         id: String,
         payload: JSONObject
     ): PluginScreenSpec {
-        val array = payload.optJSONArray("blocks") ?: JSONArray()
-        val blocks = buildList {
-            for (index in 0 until array.length()) {
-                val block = array.optJSONObject(index)
-                    ?: throw PluginInstallException("DECLARATIVE_UI_BLOCK_INVALID", "UI block $index must be an object")
-                when (block.requiredString("type").lowercase()) {
-                    "text" -> add(PluginScreenBlock.Text(block.requiredString("text")))
-                    "capability_button" -> {
-                        val capabilityId = block.requiredString("capability_id")
-                        if (capabilityId !in context.manifest.provides.capabilities) {
-                            throw PluginInstallException(
-                                "DECLARATIVE_UI_CAPABILITY_NOT_DECLARED",
-                                "UI block references an undeclared capability: $capabilityId"
-                            )
-                        }
-                        add(
-                            PluginScreenBlock.CapabilityButton(
-                                label = block.requiredString("label"),
-                                capabilityId = capabilityId,
-                                parameters = block.optJSONObject("parameters")?.let {
-                                    JSONObject(it.toString())
-                                } ?: JSONObject()
-                            )
-                        )
-                    }
-                    else -> throw PluginInstallException(
-                        "DECLARATIVE_UI_BLOCK_UNSUPPORTED",
-                        "Only text and capability_button UI blocks are supported"
-                    )
-                }
-            }
-        }
+        val schemaId = payload.optString("schema_id").trim().ifBlank { DEFAULT_UI_SCHEMA_ID }
+        // The Host validates only screen envelope metadata.  The full payload stays opaque so Plugin
+        // Center can evolve component types independently of Stable Kernel and this runtime adapter.
         return PluginScreenSpec(
             ownerPluginId = context.manifest.pluginId,
             id = id,
             title = payload.requiredString("title"),
             description = payload.optString("description").takeIf { it.isNotBlank() },
-            blocks = blocks
+            schemaId = schemaId,
+            documentJson = payload.toString()
         )
     }
 
@@ -349,5 +321,7 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
         "background", "on_background", "surface", "on_surface",
         "surface_variant", "on_surface_variant", "outline", "error", "on_error"
     )
+    // Existing declarative UI documents migrate to the first Plugin Center-owned component schema.
+    private const val DEFAULT_UI_SCHEMA_ID = "ai_limbs.plugin_center.ui.v1"
     private const val MAX_RUNTIME_BYTES = 512L * 1024L
 }

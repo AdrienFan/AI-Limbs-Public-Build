@@ -11,7 +11,6 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Extension
-import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
@@ -20,14 +19,13 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
-import com.ai.assistance.operit.plugins.center.PluginScreenBlock
-import kotlinx.coroutines.launch
+import com.ai.assistance.operit.plugins.system.SystemPluginUiActionsV2
+import com.ai.assistance.operit.plugins.system.SystemPluginUiSurfaceV2
 
 @Composable
 fun DynamicNavigationScreen(
@@ -75,41 +73,55 @@ fun DynamicNavigationScreen(
     }
 }
 
+/**
+ * Stable Host shell for an ordinary plugin screen.
+ *
+ * Notice that this function contains no component switch and no widget-specific code.  Its only
+ * job is to resolve the registered screen, attach trusted owner metadata, and hand the opaque UI
+ * document to the renderer currently supplied by Plugin Center.  This is the architectural seam
+ * that keeps future composite controls out of Stable Kernel.
+ */
 @Composable
 fun PluginDeclarativeScreen(screenId: String) {
     val screen = PluginPlatformKernel.uiRegistry.screen(screenId)
-    val scope = rememberCoroutineScope()
+    val renderer by PluginPlatformKernel.systemUiRegistry.pluginSurfaceRenderer.collectAsState()
     if (screen == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
             Text("插件页面当前不可用")
         }
         return
     }
-
-    LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(20.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        item {
-            Text(screen.title, style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.SemiBold)
+    val activeRenderer = renderer
+    if (activeRenderer == null) {
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+            Text("Plugin Center UI Runtime 当前不可用")
         }
-        items(screen.blocks) { block ->
-            when (block) {
-                is PluginScreenBlock.Text -> Text(block.text)
-                is PluginScreenBlock.CapabilityButton -> Button(
-                    onClick = {
-                        scope.launch {
-                            runCatching {
-                                PluginPlatformKernel.capabilities.invokePlugin(block.capabilityId, block.parameters)
-                            }
-                        }
-                    }
-                ) { Text(block.label) }
-                is PluginScreenBlock.ChildExtensionInstaller -> ChildExtensionInstallerBlock(block)
-                is PluginScreenBlock.ChildExtensionList -> ChildExtensionListBlock(block.point)
-                is PluginScreenBlock.ChildExtensionSelector -> ChildExtensionSelectorBlock(block)
-                is PluginScreenBlock.DynamicPanel -> DynamicPanelBlock(block.providerId)
-            }
-        }
+        return
     }
+
+    activeRenderer.Render(
+        SystemPluginUiSurfaceV2(
+            ownerPluginId = screen.ownerPluginId,
+            screenId = screen.id,
+            title = screen.title,
+            description = screen.description,
+            schemaId = screen.schemaId,
+            documentJson = screen.documentJson,
+            actions = SystemPluginUiActionsV2 { capabilityId, parameters ->
+                // Bind capability execution to the Host-trusted screen owner. Plugin Center receives
+                // no arbitrary plugin-id parameter, so a component cannot impersonate another plugin.
+                PluginPlatformKernel.capabilities.requireOwnedCapability(
+                    screen.ownerPluginId,
+                    capabilityId
+                )
+                val authorization = PluginPlatformKernel.manager.activeAuthorization(screen.ownerPluginId)
+                PluginPlatformKernel.capabilities.invokeDelegated(
+                    ownerPluginId = authorization.pluginId,
+                    grantedScopes = authorization.grantedScopes,
+                    capabilityId = capabilityId,
+                    parameters = org.json.JSONObject(parameters.toString())
+                )
+            }
+        )
+    )
 }

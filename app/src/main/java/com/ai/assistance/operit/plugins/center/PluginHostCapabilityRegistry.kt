@@ -138,10 +138,66 @@ internal class PluginHostCapabilityRegistry(
         }
     }
 
+    /**
+     * Ensures an opaque UI document can invoke only a capability owned by its Host-attested plugin.
+     *
+     * Plugin Center controls component semantics, but it must not gain cross-plugin execution merely
+     * because a JSON document names another plugin's capability id or alias.
+     */
+    internal fun requireOwnedCapability(ownerPluginId: String, capabilityId: String) {
+        val normalized = capabilityId.trim().lowercase()
+        val owned = capabilities[normalized] ?: capabilities.values.firstOrNull { candidate ->
+            candidate.spec.invokeAliases.any { it.trim().lowercase() == normalized }
+        }
+        if (owned == null || owned.ownerPluginId != ownerPluginId) {
+            throw PluginInstallException(
+                "UI_CAPABILITY_OWNER_MISMATCH",
+                "UI capability is not owned by $ownerPluginId: $capabilityId"
+            )
+        }
+    }
+
     suspend fun invokePlugin(capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject {
         val normalized = capabilityId.trim().lowercase()
         val context = appContext ?: return executePluginDirect(normalized, parameters)
         val session = AiLimbsExecutionSession(AiLimbsExecutionTransport.PLUGIN_RUNTIME, "plugin-ui:$normalized")
+        return AiLimbsDispatcher(context, AiLimbsExecutionPolicyEngine(context, session))
+            .execute(normalized, JSONObject(parameters.toString()))
+    }
+
+    internal suspend fun invokeDelegated(
+        ownerPluginId: String,
+        grantedScopes: Set<String>,
+        capabilityId: String,
+        parameters: JSONObject = JSONObject()
+    ): JSONObject {
+        val normalized = capabilityId.trim().lowercase()
+        if (normalized.isBlank()) {
+            throw PluginInstallException("CAPABILITY_ID_REQUIRED", "Delegated capability ID is required")
+        }
+        val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
+        if (primitive != null) {
+            return create(ownerPluginId, grantedScopes)
+                .invoke(primitive.id, JSONObject(parameters.toString()))
+        }
+        if (normalized.startsWith("host.") || normalized.startsWith("kernel.")) {
+            throw PluginInstallException(
+                "HOST_PRIMITIVE_UNKNOWN",
+                "Unknown or unavailable AI Limbs Host Primitive: $normalized"
+            )
+        }
+        if (normalized.startsWith("plugin.")) {
+            surfacePolicy?.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
+        }
+        val context = appContext
+            ?: throw PluginInstallException(
+                "HOST_RUNTIME_UNAVAILABLE",
+                "Delegated capability dispatch requires the Android Host runtime"
+            )
+        val session = AiLimbsExecutionSession(
+            AiLimbsExecutionTransport.PLUGIN_RUNTIME,
+            "plugin:$ownerPluginId"
+        )
         return AiLimbsDispatcher(context, AiLimbsExecutionPolicyEngine(context, session))
             .execute(normalized, JSONObject(parameters.toString()))
     }

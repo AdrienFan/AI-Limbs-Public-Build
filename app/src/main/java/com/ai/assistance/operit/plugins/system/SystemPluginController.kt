@@ -245,6 +245,16 @@ internal class SystemPluginController(
             runCatching { handle.close() }
             throw PluginInstallException("SYSTEM_UI_HEALTH_FAILED", "Plugin Center mounted without a Toolbox UI entry")
         }
+        // Plugin Center now owns ordinary-plugin UI semantics.  Treat the renderer as a required
+        // health contract, not an optional feature, otherwise a partially mounted upgrade could
+        // leave every .ailp screen present in routing but impossible to render.
+        if (!uiRegistry.hasPluginSurfaceRendererForOwner(manifest.pluginId)) {
+            runCatching { handle.close() }
+            throw PluginInstallException(
+                "SYSTEM_UI_RENDERER_HEALTH_FAILED",
+                "Plugin Center mounted without the ordinary-plugin UI renderer"
+            )
+        }
         activeSession = ActiveSession(manifest, handle, loader)
         AppLogger.i(TAG, "Plugin Center mounted: ${manifest.pluginId}@${manifest.version}")
     }

@@ -3,7 +3,7 @@ package com.ai.assistance.operit.plugins.system
 object SystemPluginProtocolV1 {
     const val FORMAT = "AIL_SYSTEM_PLUGIN_V1"
     const val SCHEMA_VERSION = 1
-    const val HOST_ABI = 1
+    const val HOST_ABI = 2
     const val PACKAGE_EXTENSION = ".ailpsys"
     const val MANIFEST_ENTRY = "system-plugin.json"
 

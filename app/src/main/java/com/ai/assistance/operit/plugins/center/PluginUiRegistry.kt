@@ -5,7 +5,6 @@ import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import org.json.JSONObject
 
 data class PluginHomeTileSpec(
     val ownerPluginId: String,
@@ -15,34 +14,21 @@ data class PluginHomeTileSpec(
     val screenId: String
 )
 
-sealed class PluginScreenBlock {
-    data class Text(val text: String) : PluginScreenBlock()
-    data class CapabilityButton(
-        val label: String,
-        val capabilityId: String,
-        val parameters: JSONObject = JSONObject()
-    ) : PluginScreenBlock()
-    data class ChildExtensionInstaller(
-        val label: String,
-        val ownerPluginId: String,
-        val point: String
-    ) : PluginScreenBlock()
-    data class ChildExtensionList(val point: String) : PluginScreenBlock()
-    data class ChildExtensionSelector(
-        val label: String,
-        val point: String,
-        val selectCapabilityId: String,
-        val selectionProviderId: String? = null
-    ) : PluginScreenBlock()
-    data class DynamicPanel(val providerId: String) : PluginScreenBlock()
-}
-
+/**
+ * Host-owned metadata for a plugin screen.
+ *
+ * [documentJson] is intentionally opaque to Stable Kernel code.  The matching system UI renderer
+ * is registered by Plugin Center and owns the component schema, rendering rules and interaction
+ * semantics.  Keeping the document opaque prevents every new composite control from becoming a
+ * Host ABI change.
+ */
 data class PluginScreenSpec(
     val ownerPluginId: String,
     val id: String,
     val title: String,
     val description: String?,
-    val blocks: List<PluginScreenBlock>
+    val schemaId: String,
+    val documentJson: String
 )
 
 enum class PluginThemeMode { LIGHT, DARK }
@@ -90,8 +76,19 @@ internal class PluginUiRegistry {
 
     fun registerScreen(ownerPluginId: String, spec: PluginScreenSpec): AutoCloseable {
         requireOwner(ownerPluginId, spec.ownerPluginId)
+        val schemaId = spec.schemaId.trim()
+        if (schemaId.isEmpty()) {
+            throw PluginInstallException("UI_SCREEN_SCHEMA_EMPTY", "UI screen schema id is empty: ${spec.id}")
+        }
+        if (spec.documentJson.isBlank()) {
+            throw PluginInstallException("UI_SCREEN_DOCUMENT_EMPTY", "UI screen document is empty: ${spec.id}")
+        }
+        if (spec.documentJson.toByteArray().size > MAX_SCREEN_DOCUMENT_BYTES) {
+            throw PluginInstallException("UI_SCREEN_DOCUMENT_TOO_LARGE", "UI screen document exceeds 512 KiB: ${spec.id}")
+        }
+        val normalized = spec.copy(schemaId = schemaId)
         val token = UUID.randomUUID().toString()
-        val candidate = Owned(token, ownerPluginId, spec)
+        val candidate = Owned(token, ownerPluginId, normalized)
         val existing = screens.putIfAbsent(spec.id, candidate)
         if (existing != null) {
             throw PluginInstallException("UI_SCREEN_CONFLICT", "UI screen is already registered: ${spec.id}")
@@ -147,5 +144,10 @@ internal class PluginUiRegistry {
         if (expected != actual) {
             throw PluginInstallException("UI_EXTENSION_OWNER_INVALID", "UI extension owner mismatch")
         }
+    }
+
+    private companion object {
+        // A generic safety bound only.  The Host does not inspect or validate component semantics.
+        const val MAX_SCREEN_DOCUMENT_BYTES = 512 * 1024
     }
 }

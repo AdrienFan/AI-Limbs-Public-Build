@@ -118,6 +118,7 @@ class HostSurfacePolicy(context: Context) {
     private fun requiredSurfaceIds(manifest: PluginManifest): Set<String> = buildSet {
         if (manifest.provides.capabilities.isNotEmpty()) add(PluginSurfaceIds.PUBLISH_CAPABILITY)
         if (manifest.provides.services.isNotEmpty()) add(PluginSurfaceIds.PUBLISH_SERVICE)
+        if (manifest.dependencies.services.isNotEmpty()) add(PluginSurfaceIds.PUBLISH_SERVICE)
         if (manifest.provides.providers.isNotEmpty()) add(PluginSurfaceIds.PUBLISH_PROVIDER)
         manifest.provides.extensions.forEach { add(PluginSurfaceIds.extension(it.point)) }
         definitions.values.forEach { surface ->
