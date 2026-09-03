@@ -7,13 +7,18 @@ import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
 import com.ai.limbs.plugin.runtime.InProcessProviderDirectory
 import com.ai.limbs.plugin.runtime.InProcessScreen
-import com.ai.limbs.plugin.runtime.InProcessScreenBlock
+import com.ai.limbs.plugin.runtime.InProcessServiceBinding
+import com.ai.limbs.plugin.runtime.InProcessServiceDirectory
 import dalvik.system.DexClassLoader
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
 import org.json.JSONObject
 
 internal class AndroidInProcessPluginRuntimeAdapter(
@@ -74,14 +79,16 @@ internal class AndroidInProcessPluginRuntimeAdapter(
     }
 
     private fun requireSystemPlugin(context: PluginRuntimeAdapterContext) {
-        val requiredRole = when (context.manifest.pluginId) {
-            "plugin.system.extension_hub" -> "system_extension_hub"
-            "plugin.system.bridge" -> "system_bridge"
-            "plugin.system.developer_guide" -> "system_plugin"
-            "plugin.system.packager" -> "system_packager"
-            else -> null
-        }
-        if (requiredRole == null || requiredRole !in context.manifest.roles) {
+        val requiredRole = OfficialParentPluginIdentity.requiredRole(context.manifest.pluginId)
+            ?: throw PluginInstallException(
+                "INPROCESS_SYSTEM_IDENTITY_REQUIRED",
+                "android_inprocess is reserved for approved system plugin identities"
+            )
+        // The role grants the requested function; the persisted signature decision establishes identity.
+        if (
+            requiredRole !in context.manifest.roles ||
+            !OfficialParentPluginIdentity.isTrusted(context.manifest.pluginId, context.installMetadata)
+        ) {
             throw PluginInstallException(
                 "INPROCESS_SYSTEM_IDENTITY_REQUIRED",
                 "android_inprocess is reserved for approved system plugin identities"
@@ -137,6 +144,27 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val version: String = context.manifest.version
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
+        override val services: InProcessServiceDirectory = object : InProcessServiceDirectory {
+            override fun resolve(id: String, minApi: Int?): InProcessServiceBinding? {
+                val resolved = context.payloadContext.serviceResolver.resolve(id, minApi)
+                    ?: return null
+                return InProcessServiceBinding(
+                    resolved.ownerPluginId,
+                    resolved.serviceId,
+                    resolved.apiVersion,
+                    resolved.metadata.toMap()
+                ) { operation, parametersJson ->
+                    val parameters = runCatching { JSONObject(parametersJson) }.getOrElse {
+                        throw PluginInstallException(
+                            "INPROCESS_PARAMETERS_INVALID",
+                            "Plugin service parameters must be JSON"
+                        )
+                    }
+                    resolved.invoke(operation, parameters).toString()
+                }
+            }
+        }
+
         override val providers: InProcessProviderDirectory = object : InProcessProviderDirectory {
             override fun resolve(id: String): InProcessProviderBinding? {
                 if (id == com.ai.limbs.plugin.runtime.InProcessSystemIds.NOTIFICATION_HOST_PROVIDER) {
@@ -153,6 +181,11 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                         .map(::providerBinding)
                 )
             }
+
+            override fun observe(id: String): StateFlow<InProcessProviderBinding?> =
+                contributions.revision
+                    .map { resolve(id) }
+                    .stateIn(scope, SharingStarted.Eagerly, resolve(id))
         }
 
         override fun registerProvider(id: String, payload: Any, metadata: Map<String, String>) {
@@ -195,6 +228,9 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerScreen(screen: InProcessScreen) {
+            // Do not parse component JSON here.  android_inprocess plugins and declarative plugins
+            // must cross the same opaque ui.screen@2 boundary so future component types never create
+            // another Host runtime dependency.
             context.payloadContext.registrar.registerExtension(
                 PluginExtensionPoints.UI_SCREEN,
                 screen.id,
@@ -203,7 +239,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                     id = screen.id,
                     title = screen.title,
                     description = screen.description,
-                    blocks = screen.blocks.map(::translateBlock)
+                    schemaId = screen.schemaId,
+                    documentJson = screen.documentJson
                 )
             )
         }
@@ -219,28 +256,6 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 return PluginSigningHostService(applicationContext).execute(parameters).toString()
             }
             return context.payloadContext.capabilityInvoker.invoke(id, parameters).toString()
-        }
-
-        private fun translateBlock(block: InProcessScreenBlock): PluginScreenBlock = when (block) {
-            is InProcessScreenBlock.Text -> PluginScreenBlock.Text(block.text)
-            is InProcessScreenBlock.CapabilityButton -> PluginScreenBlock.CapabilityButton(
-                label = block.label,
-                capabilityId = block.capabilityId,
-                parameters = runCatching { JSONObject(block.parametersJson) }.getOrDefault(JSONObject())
-            )
-            is InProcessScreenBlock.ChildExtensionSelector -> PluginScreenBlock.ChildExtensionSelector(
-                label = block.label,
-                point = block.point,
-                selectCapabilityId = block.selectCapabilityId,
-                selectionProviderId = block.selectionProviderId
-            )
-            is InProcessScreenBlock.ChildExtensionInstaller -> PluginScreenBlock.ChildExtensionInstaller(
-                label = block.label,
-                ownerPluginId = pluginId,
-                point = block.point
-            )
-            is InProcessScreenBlock.ChildExtensionList -> PluginScreenBlock.ChildExtensionList(block.point)
-            is InProcessScreenBlock.DynamicPanel -> PluginScreenBlock.DynamicPanel(block.providerId)
         }
 
         private fun providerBinding(record: PluginContributionRecord) =

@@ -92,14 +92,29 @@ fun interface PluginServiceEndpoint {
     suspend fun invoke(operation: String, parameters: JSONObject): JSONObject
 }
 
+internal data class PluginServiceCaller(
+    val pluginId: String,
+    val roles: Set<String>,
+    val grantedScopes: Set<String>
+)
+
+internal fun interface CallerAwarePluginServiceEndpoint {
+    suspend fun invoke(
+        caller: PluginServiceCaller,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject
+}
+
 data class PluginResolvedService internal constructor(
+    val ownerPluginId: String,
     val serviceId: String,
     val apiVersion: Int,
     val metadata: Map<String, String>,
-    private val endpoint: PluginServiceEndpoint
+    private val invokeOperation: suspend (String, JSONObject) -> JSONObject
 ) {
     suspend fun invoke(operation: String, parameters: JSONObject = JSONObject()): JSONObject =
-        endpoint.invoke(operation, JSONObject(parameters.toString()))
+        invokeOperation(operation, JSONObject(parameters.toString()))
 }
 
 interface PluginServiceResolver {
@@ -108,29 +123,79 @@ interface PluginServiceResolver {
 
 internal class ScopedPluginServiceResolver(
     private val manifest: PluginManifest,
-    private val contributions: PluginContributionRegistry
+    grantedScopes: Set<String>,
+    private val contributions: PluginContributionRegistry,
+    private val surfacePolicy: HostSurfacePolicy,
+    private val callerLease: PluginCallerLease
 ) : PluginServiceResolver {
+    private val caller = PluginServiceCaller(
+        pluginId = manifest.pluginId,
+        roles = manifest.roles.toSet(),
+        grantedScopes = grantedScopes.toSet()
+    )
+
     override fun resolve(serviceId: String, minApi: Int?): PluginResolvedService? {
-        val dependency = manifest.dependencies.services.firstOrNull { it.serviceId == serviceId }
-            ?: throw PluginInstallException(
-                "SERVICE_ACCESS_NOT_DECLARED",
-                "${manifest.pluginId} did not declare service dependency: $serviceId"
-            )
-        val record = contributions.find(PluginContributionKind.SERVICE, serviceId) ?: return null
+        val normalizedServiceId = serviceId.trim()
+        val dependency = manifest.dependencies.services.firstOrNull {
+            it.serviceId == normalizedServiceId
+        } ?: throw PluginInstallException(
+            "SERVICE_ACCESS_NOT_DECLARED",
+            "${manifest.pluginId} did not declare service dependency: $normalizedServiceId"
+        )
+        val record = contributions.find(PluginContributionKind.SERVICE, normalizedServiceId)
+            ?: return null
         val actualApi = record.apiVersion ?: 0
         val requiredApi = maxOf(minApi ?: 0, dependency.minApi ?: 0)
         if (actualApi < requiredApi) return null
-        val endpoint = record.payload as? PluginServiceEndpoint
-            ?: throw PluginInstallException(
-                "SERVICE_NOT_CALLABLE",
-                "Service $serviceId does not expose the controlled PluginServiceEndpoint contract"
-            )
+        requireCallable(normalizedServiceId, record.payload)
+        val ownerPluginId = record.ownerPluginId
         return PluginResolvedService(
-            serviceId = serviceId,
+            ownerPluginId = ownerPluginId,
+            serviceId = normalizedServiceId,
             apiVersion = actualApi,
             metadata = record.metadata.toMap(),
-            endpoint = endpoint
+            invokeOperation = { operation, parameters ->
+                callerLease.requireActive(manifest.pluginId)
+                surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_SERVICE)
+                val current = contributions.find(
+                    PluginContributionKind.SERVICE,
+                    normalizedServiceId
+                ) ?: throw PluginInstallException(
+                    "SERVICE_UNAVAILABLE",
+                    "Service is no longer available: $normalizedServiceId"
+                )
+                if (current.ownerPluginId != ownerPluginId) {
+                    throw PluginInstallException(
+                        "SERVICE_OWNER_CHANGED",
+                        "Service owner changed for $normalizedServiceId"
+                    )
+                }
+                val currentApi = current.apiVersion ?: 0
+                if (currentApi < requiredApi) {
+                    throw PluginInstallException(
+                        "SERVICE_API_TOO_OLD",
+                        "Service $normalizedServiceId no longer satisfies API $requiredApi"
+                    )
+                }
+                requireCallable(normalizedServiceId, current.payload)
+                val copy = JSONObject(parameters.toString())
+                when (val endpoint = current.payload) {
+                    is CallerAwarePluginServiceEndpoint ->
+                        endpoint.invoke(caller, operation, copy)
+                    is PluginServiceEndpoint -> endpoint.invoke(operation, copy)
+                    else -> error("unreachable")
+                }
+            }
         )
+    }
+
+    private fun requireCallable(serviceId: String, payload: Any?) {
+        if (payload !is CallerAwarePluginServiceEndpoint && payload !is PluginServiceEndpoint) {
+            throw PluginInstallException(
+                "SERVICE_NOT_CALLABLE",
+                "Service $serviceId does not expose a controlled endpoint contract"
+            )
+        }
     }
 }
 
@@ -278,7 +343,8 @@ internal class PluginContextFactory(
     private val contributions: PluginContributionRegistry,
     private val eventBusHost: PluginEventBusHost,
     private val capabilityInvokerFactory: PluginCapabilityInvokerFactory,
-    private val secretBroker: PluginSecretBroker
+    private val secretBroker: PluginSecretBroker,
+    private val surfacePolicy: HostSurfacePolicy
 ) {
     fun create(
         manifest: PluginManifest,
@@ -291,7 +357,13 @@ internal class PluginContextFactory(
             pluginId = manifest.pluginId,
             version = manifest.version,
             registrar = mountScope.registrar,
-            serviceResolver = ScopedPluginServiceResolver(manifest, contributions),
+            serviceResolver = ScopedPluginServiceResolver(
+                manifest = manifest,
+                grantedScopes = grantedScopes,
+                contributions = contributions,
+                surfacePolicy = surfacePolicy,
+                callerLease = mountScope.callerLease
+            ),
             capabilityInvoker = capabilityInvokerFactory.create(manifest.pluginId, grantedScopes),
             eventBus = ScopedPluginEventBus(manifest.pluginId, eventBusHost, mountScope::trackOwned),
             dataDir = FilePluginSandboxDirectory(dataDir),

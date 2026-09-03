@@ -9,6 +9,7 @@ import com.ai.assistance.operit.plugins.center.PluginBackupPolicyStore
 import com.ai.assistance.operit.plugins.center.PluginBackupSnapshot
 import com.ai.assistance.operit.plugins.center.PluginInactivityPolicyStore
 import com.ai.assistance.operit.plugins.center.PluginInstallException
+import com.ai.assistance.operit.plugins.center.PluginInstallMetadata
 import com.ai.assistance.operit.plugins.center.PluginInstallOptions
 import com.ai.assistance.operit.plugins.center.PluginLifecycleState
 import com.ai.assistance.operit.plugins.center.PluginManager
@@ -245,6 +246,7 @@ internal class KernelPluginAdminJsonServiceV1(
             .put("versions", JSONArray(snapshot.versions))
             .put("state", state?.let(::stateJson) ?: JSONObject.NULL)
             .put("manifest", snapshot.activeManifest?.let(::manifestJson) ?: JSONObject.NULL)
+            .put("install_identity", snapshot.installMetadata?.let(::installIdentityJson) ?: JSONObject.NULL)
             .put("health", health)
             .put(
                 "usage",
@@ -255,6 +257,14 @@ internal class KernelPluginAdminJsonServiceV1(
             .put("backup", snapshot.backup?.let(::backupJson) ?: JSONObject.NULL)
             .put("mounted_version", snapshot.mountedVersion ?: JSONObject.NULL)
     }
+    private fun installIdentityJson(metadata: PluginInstallMetadata): JSONObject = JSONObject()
+        .put("plugin_id", metadata.pluginId)
+        .put("version", metadata.version)
+        .put("package_sha256", metadata.packageSha256)
+        .put("trust_verdict", metadata.trustVerdict.name)
+        .put("signer_id", metadata.signerId ?: JSONObject.NULL)
+        .put("installed_at", metadata.installedAtEpochMs)
+
     private fun stateJson(state: PluginPersistentState): JSONObject = JSONObject()
         .put("plugin_id", state.pluginId)
         .put("active_version", state.activeVersion ?: JSONObject.NULL)

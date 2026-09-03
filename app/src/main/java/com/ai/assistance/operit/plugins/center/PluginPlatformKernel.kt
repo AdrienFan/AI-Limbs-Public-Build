@@ -3,8 +3,11 @@ package com.ai.assistance.operit.plugins.center
 import android.content.Context
 import com.ai.assistance.operit.plugins.system.KernelPluginPlatformControlV1
 import com.ai.assistance.operit.plugins.system.KernelSystemHostGatewayV1
-import com.ai.assistance.operit.plugins.system.KernelSystemPluginHostV1
-import com.ai.assistance.operit.plugins.system.SystemPluginHostV1
+import com.ai.assistance.operit.plugins.system.KernelSystemPluginDelegatedCapabilityInvokerV2
+import com.ai.assistance.operit.plugins.system.KernelSystemPluginProviderDirectoryV2
+import com.ai.assistance.operit.plugins.system.KernelSystemPluginHostV2
+import com.ai.assistance.operit.plugins.system.KernelSystemPluginServicePublisherV2
+import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.CancellationException
@@ -81,7 +84,7 @@ internal object PluginPlatformKernel {
     internal fun createAdmittedSystemHost(
         ownerPluginId: String,
         admittedRole: String
-    ): SystemPluginHostV1 {
+    ): SystemPluginHostV2 {
         requireInitialized()
         val gateway = KernelSystemHostGatewayV1(
             ownerPluginId = ownerPluginId,
@@ -100,6 +103,23 @@ internal object PluginPlatformKernel {
             admittedRole = admittedRole,
             registry = systemUiRegistryInstance
         )
+        val services = KernelSystemPluginServicePublisherV2(
+            ownerPluginId = ownerPluginId,
+            admittedRole = admittedRole,
+            contributions = contributionsInstance
+        )
+        val delegatedCapabilities = KernelSystemPluginDelegatedCapabilityInvokerV2(
+            admittedRole = admittedRole,
+            manager = managerInstance,
+            capabilityRegistry = capabilityRegistryInstance
+        )
+        // Read-only provider discovery is needed by Plugin Center's generic UI renderer.  It does
+        // not expose provider registration, so moving UI semantics out of Host does not transfer
+        // provider ownership to the system plugin.
+        val providers = KernelSystemPluginProviderDirectoryV2(
+            admittedRole = admittedRole,
+            contributions = contributionsInstance
+        )
         val pluginAdmin = com.ai.assistance.operit.plugins.system.KernelPluginAdminJsonServiceV1(
             context = appContextInstance,
             manager = managerInstance,
@@ -114,7 +134,7 @@ internal object PluginPlatformKernel {
             uiRegistry = uiRegistryInstance,
             adminSecurity = adminSecurityInstance
         )
-        return KernelSystemPluginHostV1(
+        return KernelSystemPluginHostV2(
             SystemPluginProtocolV1.HOST_ABI,
             gateway,
             control,
@@ -122,7 +142,10 @@ internal object PluginPlatformKernel {
             adminSecurity,
             selfMaintenance,
             navigation,
-            systemUi
+            systemUi,
+            services,
+            delegatedCapabilities,
+            providers
         )
     }
 
@@ -185,6 +208,9 @@ internal object PluginPlatformKernel {
                 Triple(PluginExtensionPoints.UI_SCREEN, "插件页面", "允许插件提供可打开的界面页面"),
                 Triple(PluginExtensionPoints.UI_THEME, "全局主题 / 皮肤", "允许插件实时接管宿主主题与配色")
             ).forEach { (point, title, detail) ->
+                // UI screen v2 is a permanent opaque-document boundary.  Component evolution belongs
+                // to Plugin Center's schema, not this extension point.  Home tile/theme stay on v1.
+                val pointApi = if (point == PluginExtensionPoints.UI_SCREEN) 2 else 1
                 val contracts = when (point) {
                     PluginExtensionPoints.UI_HOME_TILE -> listOf(
                         "PluginRegistrar.registerExtension",
@@ -192,8 +218,7 @@ internal object PluginPlatformKernel {
                     )
                     PluginExtensionPoints.UI_SCREEN -> listOf(
                         "PluginRegistrar.registerExtension",
-                        "PluginScreenSpec",
-                        "PluginScreenBlock"
+                        "PluginScreenSpec(schemaId, opaque documentJson)"
                     )
                     PluginExtensionPoints.UI_THEME -> listOf(
                         "PluginRegistrar.registerExtension",
@@ -204,7 +229,7 @@ internal object PluginPlatformKernel {
                 surfacePolicy.register(
                     HostSurfaceDefinition(
                         id = PluginSurfaceIds.extension(point),
-                        title = "$title · $point@1",
+                        title = "$title · $point@$pointApi",
                         detail = detail,
                         kind = HostSurfaceKind.EXTENSION_POINT,
                         publicContracts = contracts
@@ -229,7 +254,7 @@ internal object PluginPlatformKernel {
                 register(
                     ExtensionPointDefinition(
                         point = PluginExtensionPoints.UI_SCREEN,
-                        apiVersion = 1,
+                        apiVersion = 2,
                         binder = { record ->
                             val screen = record.payload as? PluginScreenSpec
                                 ?: throw PluginInstallException(
@@ -260,7 +285,8 @@ internal object PluginPlatformKernel {
                 contributions = contributions,
                 eventBusHost = PluginEventBusHost(),
                 capabilityInvokerFactory = capabilityRegistry,
-                secretBroker = secretBroker
+                secretBroker = secretBroker,
+                surfacePolicy = surfacePolicy
             )
             val pluginStore = PluginStore.fromContext(appContext)
             val backupStore = PluginBackupStore(pluginStore)
@@ -315,11 +341,11 @@ internal object PluginPlatformKernel {
             if (started) return
         }
         try {
+            systemPluginControllerInstance.restore()
             managerInstance.restoreEnabledPlugins()
             managerInstance.reconcileInactivityPolicy()
             managerInstance.reconcileBackupPolicy()
-            systemPluginControllerInstance.restore()
-            AppLogger.i(TAG, "AI Limbs Plugin Platform restored enabled plugins and system Plugin Center")
+            AppLogger.i(TAG, "AI Limbs Plugin Platform restored system Plugin Center before enabled plugins")
         } catch (error: CancellationException) {
             throw error
         } catch (error: Throwable) {
@@ -358,8 +384,8 @@ internal object PluginPlatformKernel {
         inactivityMonitorJob?.cancel()
         inactivityMonitorJob = null
         try {
-            systemPluginControllerInstance.shutdown()
             managerInstance.shutdown()
+            systemPluginControllerInstance.shutdown()
             notificationHostInstance.clear()
             AppLogger.i(TAG, "AI Limbs Plugin Platform kernel shut down")
         } catch (error: CancellationException) {

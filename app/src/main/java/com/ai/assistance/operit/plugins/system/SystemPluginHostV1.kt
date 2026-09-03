@@ -2,14 +2,20 @@ package com.ai.assistance.operit.plugins.system
 
 import androidx.compose.runtime.Composable
 import com.ai.assistance.operit.plugins.center.AiLimbsHostPrimitiveCatalog
+import com.ai.assistance.operit.plugins.center.CallerAwarePluginServiceEndpoint
 import com.ai.assistance.operit.plugins.center.HostPrimitiveDefinition
 import com.ai.assistance.operit.plugins.center.HostPrimitiveExposure
 import com.ai.assistance.operit.plugins.center.HostSurfacePolicy
+import com.ai.assistance.operit.plugins.center.PluginContributionKind
+import com.ai.assistance.operit.plugins.center.PluginContributionRecord
+import com.ai.assistance.operit.plugins.center.PluginContributionRegistry
 import com.ai.assistance.operit.plugins.center.PluginHostCapabilityRegistry
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginManager
 import com.ai.assistance.operit.plugins.center.PluginSurfaceIds
 import com.ai.assistance.operit.plugins.center.SystemPluginUiRegistry
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 
 data class SystemHostPrimitiveDescriptor(
@@ -78,6 +84,83 @@ interface SystemUiHostV1 {
     fun registerToolboxEntry(entry: SystemToolboxEntryV1): AutoCloseable
 }
 
+/**
+ * Opaque ordinary-plugin UI surface passed from the Host shell to Plugin Center.
+ *
+ * Stable Kernel owns identity, routing and lifecycle only.  [documentJson] is intentionally opaque:
+ * the Host must not inspect component `type` values or attach component-specific behavior.  The
+ * [schemaId] names the Plugin Center contract that interprets the document.
+ */
+fun interface SystemPluginUiActionsV2 {
+    /**
+     * Invoke a capability as the Host-attested owner of the current screen.
+     *
+     * The renderer never receives a free-form pluginId here. This prevents a generic UI component
+     * from turning into an impersonation primitive while still letting buttons call their owner.
+     */
+    suspend fun invokeCapability(capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject
+}
+
+data class SystemPluginUiSurfaceV2(
+    val ownerPluginId: String,
+    val screenId: String,
+    val title: String,
+    val description: String?,
+    val schemaId: String,
+    val documentJson: String,
+    val actions: SystemPluginUiActionsV2
+)
+
+/**
+ * Renderer supplied by Plugin Center for all ordinary-plugin UI documents.
+ *
+ * This is deliberately one generic renderer instead of one Host interface per widget.  Adding a
+ * searchable queue, file picker, child-extension panel or any future composite control therefore
+ * updates Plugin Center only; Stable Kernel changes only if this generic surface contract changes.
+ */
+interface SystemPluginUiRendererV2 {
+    @Composable
+    fun Render(surface: SystemPluginUiSurfaceV2)
+}
+
+interface SystemUiHostV2 : SystemUiHostV1 {
+    /**
+     * Registers the single semantic owner of ordinary-plugin UI documents.
+     *
+     * This is Plugin Center-private control-plane infrastructure. It is intentionally NOT a Host
+     * Primitive, requested scope, user-toggleable surface, or published Plugin Center service.
+     * Ordinary .ailp/.ailx packages may consume the UI language through ai_limbs.ui.screen@2, but
+     * they can never register/replace the renderer or extend component semantics through this ABI.
+     * The admitted Plugin Center is the only system plugin that receives this Host contract.
+     */
+    fun registerPluginSurfaceRenderer(renderer: SystemPluginUiRendererV2): AutoCloseable
+}
+
+/**
+ * Read-only view of a provider contribution exposed to Plugin Center's UI runtime.
+ *
+ * [payload] keeps the already-versioned public provider contract object.  This directory does not
+ * let Plugin Center publish, replace or mutate providers; provider ownership remains with the
+ * ordinary plugin that registered the contribution.
+ */
+data class SystemPluginProviderBindingV2(
+    val ownerPluginId: String,
+    val id: String,
+    val metadata: Map<String, String>,
+    val payload: Any?
+)
+
+interface SystemPluginProviderDirectoryV2 {
+    fun resolve(id: String): SystemPluginProviderBindingV2?
+    fun snapshot(): List<SystemPluginProviderBindingV2>
+
+    /**
+     * Cold observation stream for provider appearance/disappearance.
+     * A cold Flow avoids giving this read-only directory its own lifecycle or background scope.
+     */
+    fun observe(id: String): Flow<SystemPluginProviderBindingV2?>
+}
+
 interface SystemPluginHostV1 {
     val hostAbi: Int
     val hostGateway: SystemHostGatewayV1
@@ -87,6 +170,49 @@ interface SystemPluginHostV1 {
     val selfMaintenance: SystemJsonServiceV1
     val navigation: SystemJsonServiceV1
     val ui: SystemUiHostV1
+}
+
+data class SystemPluginServiceCallerV2(
+    val pluginId: String,
+    val roles: Set<String>,
+    val grantedScopes: Set<String>
+)
+
+fun interface SystemPluginServiceEndpointV2 {
+    suspend fun invoke(
+        caller: SystemPluginServiceCallerV2,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject
+}
+
+interface SystemPluginServicePublisherV2 {
+    fun publish(
+        id: String,
+        apiVersion: Int,
+        endpoint: SystemPluginServiceEndpointV2,
+        metadata: Map<String, String> = emptyMap()
+    ): AutoCloseable
+}
+
+interface SystemPluginDelegatedCapabilityInvokerV2 {
+    suspend fun invokeAsActivePlugin(
+        pluginId: String,
+        capabilityId: String,
+        parameters: JSONObject = JSONObject()
+    ): JSONObject
+}
+
+interface SystemPluginHostV2 : SystemPluginHostV1 {
+    override val ui: SystemUiHostV2
+    val services: SystemPluginServicePublisherV2
+    val delegatedCapabilities: SystemPluginDelegatedCapabilityInvokerV2
+
+    /**
+     * Read-only provider discovery used by Plugin Center's generic UI components.  For example,
+     * DynamicPanel resolves its state provider and ChildExtensionList resolves Extension Hub here.
+     */
+    val providers: SystemPluginProviderDirectoryV2
 }
 
 interface SystemPluginEntryV1 {
@@ -190,15 +316,135 @@ internal class KernelSystemUiHostV1(
     private val ownerPluginId: String,
     private val admittedRole: String,
     private val registry: SystemPluginUiRegistry
-) : SystemUiHostV1 {
+) : SystemUiHostV2 {
     init { requirePluginCenterRole(admittedRole) }
+
     override fun registerToolboxEntry(entry: SystemToolboxEntryV1): AutoCloseable {
         requirePluginCenterRole(admittedRole)
         return registry.registerToolboxEntry(ownerPluginId, entry)
     }
+
+    override fun registerPluginSurfaceRenderer(renderer: SystemPluginUiRendererV2): AutoCloseable {
+        requirePluginCenterRole(admittedRole)
+        return registry.registerPluginSurfaceRenderer(ownerPluginId, renderer)
+    }
 }
 
-internal class KernelSystemPluginHostV1(
+/**
+ * Kernel adapter for Plugin Center's read-only provider directory.
+ *
+ * Provider data is copied into a neutral binding, while the payload object remains the public
+ * provider contract.  No registration API is exposed here, so moving UI rendering to Plugin Center
+ * does not accidentally grant it ownership over ordinary-plugin providers.
+ */
+internal class KernelSystemPluginProviderDirectoryV2(
+    private val admittedRole: String,
+    private val contributions: PluginContributionRegistry
+) : SystemPluginProviderDirectoryV2 {
+    init { requirePluginCenterRole(admittedRole) }
+
+    override fun resolve(id: String): SystemPluginProviderBindingV2? {
+        requirePluginCenterRole(admittedRole)
+        return contributions.find(PluginContributionKind.PROVIDER, id)?.let(::binding)
+    }
+
+    override fun snapshot(): List<SystemPluginProviderBindingV2> {
+        requirePluginCenterRole(admittedRole)
+        return contributions.listAll()
+            .filter { it.kind == PluginContributionKind.PROVIDER }
+            .map(::binding)
+            .sortedBy { it.id }
+    }
+
+    override fun observe(id: String): Flow<SystemPluginProviderBindingV2?> {
+        requirePluginCenterRole(admittedRole)
+        return contributions.revision.map { resolve(id) }
+    }
+
+    private fun binding(record: PluginContributionRecord) = SystemPluginProviderBindingV2(
+        ownerPluginId = record.ownerPluginId,
+        id = record.id,
+        metadata = record.metadata.toMap(),
+        payload = record.payload
+    )
+}
+
+internal class KernelSystemPluginServicePublisherV2(
+    private val ownerPluginId: String,
+    private val admittedRole: String,
+    private val contributions: PluginContributionRegistry
+) : SystemPluginServicePublisherV2 {
+    init { requirePluginCenterRole(admittedRole) }
+
+    override fun publish(
+        id: String,
+        apiVersion: Int,
+        endpoint: SystemPluginServiceEndpointV2,
+        metadata: Map<String, String>
+    ): AutoCloseable {
+        requirePluginCenterRole(admittedRole)
+        val normalized = id.trim().lowercase()
+        if (!normalized.startsWith(SERVICE_NAMESPACE) || normalized.length == SERVICE_NAMESPACE.length) {
+            throw PluginInstallException(
+                "SYSTEM_SERVICE_NAMESPACE_FORBIDDEN",
+                "Plugin Center services must use the $SERVICE_NAMESPACE namespace"
+            )
+        }
+        if (apiVersion <= 0) {
+            throw PluginInstallException("SERVICE_API_INVALID", "Service API version must be positive")
+        }
+        val payload = CallerAwarePluginServiceEndpoint { caller, operation, parameters ->
+            endpoint.invoke(
+                SystemPluginServiceCallerV2(
+                    pluginId = caller.pluginId,
+                    roles = caller.roles.toSet(),
+                    grantedScopes = caller.grantedScopes.toSet()
+                ),
+                operation,
+                JSONObject(parameters.toString())
+            )
+        }
+        return contributions.register(
+            PluginContributionRecord(
+                ownerPluginId = ownerPluginId,
+                kind = PluginContributionKind.SERVICE,
+                id = normalized,
+                apiVersion = apiVersion,
+                metadata = metadata.toMap(),
+                payload = payload
+            )
+        )
+    }
+
+    private companion object {
+        const val SERVICE_NAMESPACE = "system.plugin_center."
+    }
+}
+
+internal class KernelSystemPluginDelegatedCapabilityInvokerV2(
+    private val admittedRole: String,
+    private val manager: PluginManager,
+    private val capabilityRegistry: PluginHostCapabilityRegistry
+) : SystemPluginDelegatedCapabilityInvokerV2 {
+    init { requirePluginCenterRole(admittedRole) }
+
+    override suspend fun invokeAsActivePlugin(
+        pluginId: String,
+        capabilityId: String,
+        parameters: JSONObject
+    ): JSONObject {
+        requirePluginCenterRole(admittedRole)
+        val authorization = manager.activeAuthorization(pluginId.trim())
+        return capabilityRegistry.invokeDelegated(
+            ownerPluginId = authorization.pluginId,
+            grantedScopes = authorization.grantedScopes,
+            capabilityId = capabilityId,
+            parameters = JSONObject(parameters.toString())
+        )
+    }
+}
+
+internal class KernelSystemPluginHostV2(
     override val hostAbi: Int,
     override val hostGateway: SystemHostGatewayV1,
     override val pluginPlatform: PluginPlatformControlV1,
@@ -206,8 +452,11 @@ internal class KernelSystemPluginHostV1(
     override val adminSecurity: SystemJsonServiceV1,
     override val selfMaintenance: SystemJsonServiceV1,
     override val navigation: SystemJsonServiceV1,
-    override val ui: SystemUiHostV1
-) : SystemPluginHostV1
+    override val ui: SystemUiHostV2,
+    override val services: SystemPluginServicePublisherV2,
+    override val delegatedCapabilities: SystemPluginDelegatedCapabilityInvokerV2,
+    override val providers: SystemPluginProviderDirectoryV2
+) : SystemPluginHostV2
 
 internal class UnsupportedSystemJsonServiceV1(private val serviceName: String) : SystemJsonServiceV1 {
     override suspend fun call(operation: String, parameters: JSONObject): JSONObject {
