@@ -43,9 +43,13 @@
             "type": "capability_button",
             "label": "刷新日志",
             "capability_id": "plugin.runtime.logs.read",
-            "parameters": { "max_chars": 60000 }
+            "parameters": {
+              "max_chars": 60000
+            }
           }
-        ]
+        ],
+        "schema_id": "ai_limbs.plugin_center.ui.v1",
+        "schema": 1
       }
     }
   ]

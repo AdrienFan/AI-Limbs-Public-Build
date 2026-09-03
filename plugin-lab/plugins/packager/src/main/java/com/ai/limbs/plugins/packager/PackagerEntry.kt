@@ -1,20 +1,16 @@
 package com.ai.limbs.plugins.packager
 
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
-import com.ai.limbs.plugin.runtime.InProcessDynamicPanelProvider
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
-import com.ai.limbs.plugin.runtime.InProcessPanelAction
-import com.ai.limbs.plugin.runtime.InProcessPanelField
-import com.ai.limbs.plugin.runtime.InProcessPanelResult
-import com.ai.limbs.plugin.runtime.InProcessPanelState
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
-import com.ai.limbs.plugin.runtime.InProcessScreenBlock
+import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
 import org.json.JSONObject
 
 class PackagerEntry : InProcessPluginEntry {
@@ -39,10 +35,14 @@ class PackagerEntry : InProcessPluginEntry {
                 id = SCREEN_ID,
                 title = "AI Limbs 打包中心",
                 description = "APK → 读取版本 → 生成 manifest/integrity → Ed25519 签名 → 复验 → 最终分发包。",
-                blocks = listOf(
-                    InProcessScreenBlock.Text("支持系统插件、父级插件与 .ailx 子级扩展。已知官方 payload 可自动识别；第三方包可提供同目录 Manifest 模板。"),
-                    InProcessScreenBlock.DynamicPanel(PANEL_ID)
-                )
+                // Only the UI declaration migrates here; PackagerEngine and panel business logic stay unchanged.
+                schemaId = PLUGIN_CENTER_UI_SCHEMA,
+                documentJson = JSONObject()
+                    .put("schema", 1)
+                    .put("blocks", JSONArray()
+                        .put(JSONObject().put("type", "text").put("text", "支持系统插件、父级插件与 .ailx 子级扩展。已知官方 payload 可自动识别；第三方包可提供同目录 Manifest 模板。"))
+                        .put(JSONObject().put("type", "dynamic_panel").put("provider_id", PANEL_ID)))
+                    .toString()
             )
         )
         host.registerHomeTile(
@@ -83,10 +83,11 @@ class PackagerEntry : InProcessPluginEntry {
         const val TILE_ID = "plugin.system.packager.tile"
         const val INSPECT_CAPABILITY = "plugin.packager.inspect"
         const val PACKAGE_CAPABILITY = "plugin.packager.package"
+        const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
     }
 }
 
-private class PackagerPanel(private val engine: PackagerEngine) : InProcessDynamicPanelProvider {
+private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiStateProvider {
     private var inputPath = ""
     private var manifestPath = ""
     private var outputDirectory = ""
@@ -94,25 +95,30 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessDynam
         "输入 APK 后先点“识别”；已知官方 payload 会自动判断包类型。",
         "最终文件名固定为：<Display Name> v<APK versionName>.<ext>"
     )
-    private val mutableState = MutableStateFlow(buildState())
-    override val state: StateFlow<InProcessPanelState?> = mutableState.asStateFlow()
 
-    override suspend fun perform(
-        actionId: String,
-        fieldValues: Map<String, String>
-    ): InProcessPanelResult {
-        inputPath = fieldValues[FIELD_INPUT]?.trim().orEmpty()
-        manifestPath = fieldValues[FIELD_MANIFEST]?.trim().orEmpty()
-        outputDirectory = fieldValues[FIELD_OUTPUT]?.trim().orEmpty()
-        return when (actionId) {
+    /**
+     * The Packager publishes only opaque Plugin Center schema JSON across the shared UI boundary.
+     * PackagerEngine remains the business source of truth; changing visual fields/actions no longer
+     * requires adding data classes or enums to Stable Kernel.
+     */
+    private val mutableState = MutableStateFlow<String?>(buildStateJson())
+    override val stateJson: StateFlow<String?> = mutableState.asStateFlow()
+
+    override suspend fun perform(eventId: String, payloadJson: String): String {
+        val fieldValues = JSONObject(payloadJson).optJSONObject("field_values")
+        inputPath = fieldValues?.optString(FIELD_INPUT)?.trim().orEmpty()
+        manifestPath = fieldValues?.optString(FIELD_MANIFEST)?.trim().orEmpty()
+        outputDirectory = fieldValues?.optString(FIELD_OUTPUT)?.trim().orEmpty()
+        return when (eventId) {
             ACTION_SCAN -> scan()
             ACTION_INSPECT -> inspect()
             ACTION_KEYS -> keys()
             ACTION_PACKAGE -> packageArtifact()
-            else -> result("未知操作：$actionId")
+            else -> result("未知操作：$eventId")
         }
     }
-    private fun scan(): InProcessPanelResult = runCatching {
+
+    private fun scan(): String = runCatching {
         val files = engine.scanDownloads()
         if (files.isEmpty()) {
             statusLines = listOf("Download 下没有找到 APK。")
@@ -127,7 +133,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessDynam
         result("已选择最近下载的 APK")
     }.getOrElse { failure("扫描失败", it) }
 
-    private fun inspect(): InProcessPanelResult = runCatching {
+    private fun inspect(): String = runCatching {
         val info = engine.inspectJson(inputPath, manifestPath.ifBlank { null })
         statusLines = listOf(
             "名称：${info.optString("display_name")}",
@@ -140,7 +146,8 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessDynam
         )
         result("识别完成")
     }.getOrElse { failure("识别失败", it) }
-    private suspend fun keys(): InProcessPanelResult = runCatching {
+
+    private suspend fun keys(): String = runCatching {
         val root = engine.signingStatus(import = true)
         require(root.optString("status") == "OK") { root.optString("message") }
         val items = root.optJSONArray("profiles")
@@ -156,7 +163,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessDynam
         result("签名密钥已导入/检查")
     }.getOrElse { failure("密钥检查失败", it) }
 
-    private suspend fun packageArtifact(): InProcessPanelResult = runCatching {
+    private suspend fun packageArtifact(): String = runCatching {
         val output = engine.packageAndVerify(
             inputPath = inputPath,
             manifestPath = manifestPath.ifBlank { null },
@@ -174,50 +181,64 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessDynam
         )
         result("打包和验证全部通过")
     }.getOrElse { failure("打包失败", it) }
-    private fun buildState(): InProcessPanelState = InProcessPanelState(
-        title = "插件打包",
-        description = "版本号从 APK 自动读取；输出名自动包含 Display Name 与版本号。",
-        statusLines = statusLines,
-        fields = listOf(
-            InProcessPanelField(
-                id = FIELD_INPUT,
-                label = "输入 APK 路径",
-                value = inputPath,
-                placeholder = "/storage/emulated/0/Download/.../plugin-debug.apk"
-            ),
-            InProcessPanelField(
-                id = FIELD_MANIFEST,
-                label = "Manifest 模板（第三方包可选）",
-                value = manifestPath,
-                placeholder = "留空则自动识别官方 payload 或同目录 JSON"
-            ),
-            InProcessPanelField(
-                id = FIELD_OUTPUT,
-                label = "输出目录",
-                value = outputDirectory,
-                placeholder = "留空 = 与输入 APK 同目录"
-            )
-        ),
-        actions = listOf(
-            InProcessPanelAction(ACTION_SCAN, "扫描 Download"),
-            InProcessPanelAction(ACTION_INSPECT, "识别", requiredFieldIds = setOf(FIELD_INPUT)),
-            InProcessPanelAction(ACTION_KEYS, "导入/检查密钥"),
-            InProcessPanelAction(ACTION_PACKAGE, "打包并验证", requiredFieldIds = setOf(FIELD_INPUT))
-        )
-    )
-    private fun result(message: String): InProcessPanelResult {
-        mutableState.value = buildState()
-        return InProcessPanelResult(
-            message = message,
-            fieldValues = mapOf(
-                FIELD_INPUT to inputPath,
-                FIELD_MANIFEST to manifestPath,
-                FIELD_OUTPUT to outputDirectory
-            )
-        )
+
+    private fun buildStateJson(): String = JSONObject()
+        .put("schema", 1)
+        .put("title", "插件打包")
+        .put("description", "版本号从 APK 自动读取；输出名自动包含 Display Name 与版本号。")
+        .put("status_lines", JSONArray(statusLines))
+        .put("fields", JSONArray()
+            .put(textField(
+                FIELD_INPUT,
+                "输入 APK 路径",
+                inputPath,
+                "/storage/emulated/0/Download/.../plugin-debug.apk"
+            ))
+            .put(textField(
+                FIELD_MANIFEST,
+                "Manifest 模板（第三方包可选）",
+                manifestPath,
+                "留空则自动识别官方 payload 或同目录 JSON"
+            ))
+            .put(textField(
+                FIELD_OUTPUT,
+                "输出目录",
+                outputDirectory,
+                "留空 = 与输入 APK 同目录"
+            )))
+        .put("actions", JSONArray()
+            .put(action(ACTION_SCAN, "扫描 Download"))
+            .put(action(ACTION_INSPECT, "识别", listOf(FIELD_INPUT)))
+            .put(action(ACTION_KEYS, "导入/检查密钥"))
+            .put(action(ACTION_PACKAGE, "打包并验证", listOf(FIELD_INPUT))))
+        .toString()
+
+    private fun textField(id: String, label: String, value: String, placeholder: String) = JSONObject()
+        .put("id", id)
+        .put("label", label)
+        .put("kind", "text")
+        .put("value", value)
+        .put("placeholder", placeholder)
+        .put("enabled", true)
+
+    private fun action(id: String, label: String, requiredFieldIds: List<String> = emptyList()) = JSONObject()
+        .put("id", id)
+        .put("label", label)
+        .put("enabled", true)
+        .put("required_field_ids", JSONArray(requiredFieldIds))
+
+    private fun result(message: String): String {
+        mutableState.value = buildStateJson()
+        return JSONObject()
+            .put("message", message)
+            .put("field_values", JSONObject()
+                .put(FIELD_INPUT, inputPath)
+                .put(FIELD_MANIFEST, manifestPath)
+                .put(FIELD_OUTPUT, outputDirectory))
+            .toString()
     }
 
-    private fun failure(prefix: String, error: Throwable): InProcessPanelResult {
+    private fun failure(prefix: String, error: Throwable): String {
         val message = error.message ?: error::class.java.simpleName
         statusLines = listOf("❌ $prefix", message)
         return result("$prefix：$message")

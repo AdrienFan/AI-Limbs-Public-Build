@@ -8,6 +8,10 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelResult
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelState
 
+/**
+ * Supplies Bridge-owned presentation state only. The parent Bridge plugin adapts this state to the
+ * Plugin Center component schema, so this .ailx never owns or bypasses the Host UI renderer.
+ */
 internal object RdcBridgeProviderPanel : BridgeProviderPanel {
     override fun snapshot(
         context: Context,

@@ -21,16 +21,28 @@ object OfficialPackageProfiles {
         .put("plugin_id", "ai_limbs.system.plugin_center")
         .put("version", version)
         .put("display", display("Plugin Center", "AI Limbs 插件与系统接口管理中心"))
-        .put("system", JSONObject().put("role", "plugin_center").put("host_abi", JSONObject().put("min", 1).put("max", 1)))
+        .put("system", JSONObject().put("role", "plugin_center").put("host_abi", JSONObject().put("min", 2).put("max", 2)))
         .put("runtime", systemRuntime("payload/plugin-center.apk", "com.ai.limbs.plugincenter.PluginCenterEntry"))
         .put("permissions", JSONObject().put("requested_scopes", JSONArray()))
     private fun extensionHub(version: String): JSONObject = parentBase(
         pluginId = "plugin.system.extension_hub",
         version = version,
         name = "Plugin Extension Hub",
-        description = "AI Limbs 二级扩展管理器：验证、安装、挂载、备份与管理 AIL_EXTENSION_V1 / .ailx 子插件。",
+        description = "AI Limbs 二级扩展管理器：对 AIL_EXTENSION_V1 / .ailx 执行完整性、发布者信任、安装、挂载、备份与生命周期管理。",
         role = "system_extension_hub",
         entryClass = "com.ai.limbs.plugins.extensionhub.ExtensionHubEntry"
+    ).put(
+        "dependencies",
+        JSONObject()
+            .put("plugins", JSONArray())
+            .put(
+                "services",
+                JSONArray().put(
+                    JSONObject()
+                        .put("id", "system.plugin_center.delegated_gateway")
+                        .put("min_api", 1)
+                )
+            )
     ).put(
         "provides",
         provides(providers = listOf("system.extension.hub"))
@@ -48,7 +60,7 @@ object OfficialPackageProfiles {
         root.put(
             "dependencies",
             JSONObject()
-                .put("plugins", JSONArray().put(JSONObject().put("id", "plugin.system.extension_hub").put("min_version", "1.2.0")))
+                .put("plugins", JSONArray())
                 .put("services", JSONArray())
         )
         root.put("permissions", JSONObject().put("requested_scopes", JSONArray().put("host.notification@1")))
@@ -59,7 +71,7 @@ object OfficialPackageProfiles {
                 providers = listOf("plugin.bridge.control_panel"),
                 extensions = listOf(
                     extension("ai_limbs.ui.home_tile", "plugin.system.bridge.tile"),
-                    extension("ai_limbs.ui.screen", "plugin.system.bridge.screen")
+                    extension("ai_limbs.ui.screen", "plugin.system.bridge.screen", api = 2)
                 )
             )
         )
@@ -84,7 +96,7 @@ object OfficialPackageProfiles {
             ),
             extensions = listOf(
                 extension("ai_limbs.ui.home_tile", "plugin.system.developer_guide.tile"),
-                extension("ai_limbs.ui.screen", "plugin.system.developer_guide.screen")
+                extension("ai_limbs.ui.screen", "plugin.system.developer_guide.screen", api = 2)
             )
         )
     )
@@ -102,7 +114,7 @@ object OfficialPackageProfiles {
             providers = listOf("plugin.packager.control_panel"),
             extensions = listOf(
                 extension("ai_limbs.ui.home_tile", "plugin.system.packager.tile"),
-                extension("ai_limbs.ui.screen", "plugin.system.packager.screen")
+                extension("ai_limbs.ui.screen", "plugin.system.packager.screen", api = 2)
             )
         )
     )
@@ -184,10 +196,15 @@ object OfficialPackageProfiles {
         .put("entry", entry)
         .put("entry_class", entryClass)
 
-    private fun extension(point: String, id: String): JSONObject = JSONObject()
+    /**
+     * Declares a Host extension contract in generated manifests.
+     * ui.screen uses API 2 because screen contents are now opaque Plugin Center documents; other
+     * existing Host extension points remain on API 1.
+     */
+    private fun extension(point: String, id: String, api: Int = 1): JSONObject = JSONObject()
         .put("point", point)
         .put("id", id)
-        .put("api", 1)
+        .put("api", api)
     private fun provides(
         capabilities: List<String> = emptyList(),
         providers: List<String> = emptyList(),

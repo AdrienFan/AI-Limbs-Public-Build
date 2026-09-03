@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.extension_hub",
-  "version": "1.2.0",
+  "version": "1.4.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "Plugin Extension Hub",
-    "description": "AI Limbs 二级扩展管理器：验证、安装、挂载、备份与管理 AIL_EXTENSION_V1 / .ailx 子插件。"
+    "description": "AI Limbs 二级扩展管理器：对 AIL_EXTENSION_V1 / .ailx 执行完整性、发布者信任、安装、挂载、备份与生命周期管理。"
   },
   "roles": [
     "system_extension_hub"
@@ -26,7 +26,12 @@
   },
   "dependencies": {
     "plugins": [],
-    "services": []
+    "services": [
+      {
+        "id": "system.plugin_center.delegated_gateway",
+        "min_api": 1
+      }
+    ]
   },
   "permissions": {
     "requested_scopes": []

@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.developer_guide",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "api": {
     "target": 1,
     "min": 1
@@ -55,7 +55,7 @@
       {
         "point": "ai_limbs.ui.screen",
         "id": "plugin.system.developer_guide.screen",
-        "api": 1
+        "api": 2
       }
     ]
   }

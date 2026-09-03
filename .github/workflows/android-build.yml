@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    name: Build Plugin Lab Alt + Four Parent Plugins
+    name: Build Plugin Lab Alt + Six Plugins
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -81,6 +81,20 @@ jobs:
           set -euo pipefail
           ./gradlew :packager-plugin:assembleDebug --stacktrace --no-daemon
 
+      # Child extensions share the same Plugin Lab SDK/Bridge contract as their parent plugins.
+      # They are compiled here as payload APKs only; final .ailx signing remains in the secure local release step.
+      - name: Build 6 - RDC child extension payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :rdc-extension:assembleDebug --stacktrace --no-daemon
+
+      - name: Build 7 - TRIGGERcmd child extension payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
+
       - name: Upload Android reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -92,15 +106,17 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload four parent plugin payload APKs
+      - name: Upload six plugin payload APKs
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ai-limbs-parent-plugin-payloads-v072-${{ github.run_number }}
+          name: ai-limbs-plugin-payloads-v073-${{ github.run_number }}
           path: |
             plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
             plugin-lab/plugins/bridge-core/build/outputs/apk/debug/*.apk
             plugin-lab/plugins/developer-guide/build/outputs/apk/debug/*.apk
             plugin-lab/plugins/packager/build/outputs/apk/debug/*.apk
+            plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
+            plugin-lab/extensions/triggercmd/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14

@@ -12,6 +12,8 @@ DIST = ROOT / "dist"
 DIST.mkdir(exist_ok=True)
 PARENT_SIGNER_ID = "ai-limbs-parent-plugin-dev-v1"
 PARENT_PUBLIC_FINGERPRINT = "f9864bbfa24e7eb1324a47dc41c0fad57119a4d9ab3f516af891c6ab413c0aca"
+CHILD_SIGNER_ID = "ai-limbs-child-extension-dev-v1"
+CHILD_PUBLIC_FINGERPRINT = "8b11ff0b92a3aa485c8aa755588f51e8e587bfa4bd120681aba9bc1da9c369ff"
 SIGNATURE_ENTRY = "META-INF/AILIMBS.SIG"
 
 
@@ -30,17 +32,17 @@ def canonical_json_bytes(value: dict) -> bytes:
     return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
 
 
-def prepare_parent_key(temp_dir: Path) -> Path:
-    source_value = os.environ.get("AILIMBS_PARENT_PLUGIN_PRIVATE_PEM_PATH", "").strip()
+def prepare_signing_key(temp_dir: Path, env_name: str, expected_fingerprint: str, stem: str) -> Path:
+    source_value = os.environ.get(env_name, "").strip()
     if not source_value:
-        raise SystemExit("AILIMBS_PARENT_PLUGIN_PRIVATE_PEM_PATH is required to package official parent plugins")
+        raise SystemExit(f"{env_name} is required")
     source = Path(source_value).expanduser()
     if not source.is_file():
-        raise SystemExit(f"Parent signing key file is missing: {source}")
-    key_path = temp_dir / "parent-private.pem"
+        raise SystemExit(f"Signing key file is missing: {source}")
+    key_path = temp_dir / f"{stem}-private.pem"
     key_path.write_bytes(source.read_bytes())
     key_path.chmod(0o600)
-    public_der = temp_dir / "parent-public.der"
+    public_der = temp_dir / f"{stem}-public.der"
     subprocess.run(
         ["openssl", "pkey", "-in", str(key_path), "-pubout", "-outform", "DER", "-out", str(public_der)],
         check=True,
@@ -48,9 +50,27 @@ def prepare_parent_key(temp_dir: Path) -> Path:
         stderr=subprocess.DEVNULL,
     )
     actual = sha256_file(public_der)
-    if actual != PARENT_PUBLIC_FINGERPRINT:
-        raise SystemExit(f"Parent signing key fingerprint mismatch: {actual}")
+    if actual != expected_fingerprint:
+        raise SystemExit(f"{stem} signing key fingerprint mismatch: {actual}")
     return key_path
+
+
+def prepare_parent_key(temp_dir: Path) -> Path:
+    return prepare_signing_key(
+        temp_dir,
+        "AILIMBS_PARENT_PLUGIN_PRIVATE_PEM_PATH",
+        PARENT_PUBLIC_FINGERPRINT,
+        "parent",
+    )
+
+
+def prepare_child_key(temp_dir: Path) -> Path:
+    return prepare_signing_key(
+        temp_dir,
+        "AILIMBS_CHILD_EXTENSION_PRIVATE_PEM_PATH",
+        CHILD_PUBLIC_FINGERPRINT,
+        "child",
+    )
 
 
 def sign_bytes(data: bytes, key_path: Path, temp_dir: Path, stem: str) -> bytes:
@@ -91,14 +111,35 @@ def pack_parent(out_name: str, manifest_path: Path, apk: Path, apk_entry: str, k
     return out
 
 
-def pack_child(out_name: str, manifest: Path, apk: Path, apk_entry: str) -> Path:
-    json.loads(manifest.read_text(encoding="utf-8"))
+def pack_child(
+    out_name: str,
+    manifest: Path,
+    apk: Path,
+    apk_entry: str,
+    key_path: Path,
+    temp_dir: Path,
+) -> Path:
+    root = json.loads(manifest.read_text(encoding="utf-8"))
+    root.pop("integrity", None)
+    root.pop("signature", None)
+    root["integrity"] = {
+        "algorithm": "SHA-256",
+        "entries": {apk_entry: sha256_file(apk)},
+    }
+    root["signature"] = {
+        "algorithm": "Ed25519",
+        "signer_id": CHILD_SIGNER_ID,
+        "entry": SIGNATURE_ENTRY,
+    }
+    manifest_bytes = canonical_json_bytes(root)
+    signature = sign_bytes(manifest_bytes, key_path, temp_dir, out_name.replace(".", "-"))
     out = DIST / out_name
     if out.exists():
         out.unlink()
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=9) as archive:
-        archive.writestr(manifest.name, manifest.read_bytes())
+        archive.writestr(manifest.name, manifest_bytes)
         archive.write(apk, apk_entry)
+        archive.writestr(SIGNATURE_ENTRY, signature)
     return out
 
 
@@ -124,8 +165,11 @@ def main() -> None:
         key_path = prepare_parent_key(temp_dir)
         for out_name, manifest, apk, entry in PARENTS:
             print_artifact(pack_parent(out_name, manifest, apk, entry, key_path, temp_dir))
-    for out_name, manifest, apk, entry in CHILDREN:
-        print_artifact(pack_child(out_name, manifest, apk, entry))
+    with tempfile.TemporaryDirectory(prefix="ailimbs-child-sign-") as raw_temp:
+        temp_dir = Path(raw_temp)
+        key_path = prepare_child_key(temp_dir)
+        for out_name, manifest, apk, entry in CHILDREN:
+            print_artifact(pack_child(out_name, manifest, apk, entry, key_path, temp_dir))
 
 
 if __name__ == "__main__":

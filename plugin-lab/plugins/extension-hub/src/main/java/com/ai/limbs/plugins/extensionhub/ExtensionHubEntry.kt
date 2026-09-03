@@ -9,6 +9,8 @@ import com.ai.limbs.plugin.runtime.ChildExtensionHost
 import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionTarget
+import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
+import com.ai.limbs.plugin.runtime.InProcessUiContributionProvider
 import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
@@ -18,6 +20,7 @@ import dalvik.system.DexClassLoader
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
+import java.util.Base64
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.zip.ZipEntry
@@ -31,6 +34,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -51,6 +56,17 @@ private object ExtensionPackage {
     const val MANIFEST = "extension.json"
 }
 
+private data class ExtensionIntegritySpec(
+    val algorithm: String,
+    val entries: Map<String, String>
+)
+
+private data class ExtensionSignatureSpec(
+    val algorithm: String,
+    val signerId: String,
+    val entry: String
+)
+
 private data class ExtensionManifest(
     val extensionId: String,
     val version: String,
@@ -61,6 +77,8 @@ private data class ExtensionManifest(
     val entryClass: String,
     val requestedCapabilities: Set<String>,
     val roles: Set<String>,
+    val integrity: ExtensionIntegritySpec,
+    val signature: ExtensionSignatureSpec,
     val rawJson: String
 )
 
@@ -90,6 +108,13 @@ private data class ActiveChild(
 private class ExtensionHubServiceImpl(
     private val host: InProcessPluginHost
 ) : ExtensionHubService {
+    private val delegatedGateway = requireNotNull(
+        host.services.resolve(DELEGATED_GATEWAY_SERVICE, DELEGATED_GATEWAY_API)
+    ) { "Plugin Center delegated gateway is unavailable" }.also { binding ->
+        check(binding.ownerPluginId == PLUGIN_CENTER_PLUGIN_ID) {
+            "Delegated gateway is not owned by Plugin Center: ${binding.ownerPluginId}"
+        }
+    }
     private val root = File(host.dataDir, "extension_store")
     private val staging = File(root, "staging")
     private val extensionsRoot = File(root, "extensions")
@@ -102,8 +127,14 @@ private class ExtensionHubServiceImpl(
     private val active = ConcurrentHashMap<String, ActiveChild>()
     private val mutableSnapshots = MutableStateFlow<List<ChildExtensionSnapshot>>(emptyList())
     private val mutableBackupSnapshots = MutableStateFlow<List<ChildExtensionBackupSnapshot>>(emptyList())
+
+    // UI contributions are instance overlays, not component definitions. Keeping them in Extension Hub
+    // binds every entry to the verified child identity and gives child lifecycle one cleanup point.
+    private val uiContributions = ConcurrentHashMap<String, ChildUiContributionSnapshot>()
+    private val mutableUiContributions = MutableStateFlow<List<ChildUiContributionSnapshot>>(emptyList())
     private val pointFlows = ConcurrentHashMap<String, MutableStateFlow<List<ChildExtensionSnapshot>>>()
     private val usageCounts = ConcurrentHashMap<String, Long>()
+    private val lifecycleLocks = ConcurrentHashMap<String, Mutex>()
     @Volatile private var autoBackupEnabled = false
     @Volatile private var highFrequencyUseCount = 10L
 
@@ -121,6 +152,10 @@ private class ExtensionHubServiceImpl(
     suspend fun stop() {
         active.keys.toList().forEach { stopChild(it) }
         points.clear()
+        // Defense in depth: normal child stop paths already revoke overlays, but service shutdown
+        // also clears the registry explicitly so no stale contribution can survive an unusual state.
+        uiContributions.clear()
+        publishUiContributions()
         publishSnapshots()
     }
 
@@ -287,6 +322,9 @@ private class ExtensionHubServiceImpl(
     override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> =
         mutableBackupSnapshots.asStateFlow()
 
+    override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> =
+        mutableUiContributions.asStateFlow()
+
     private suspend fun restoreInstalled() {
         extensionsRoot.listFiles()?.filter(File::isDirectory)?.forEach { dir ->
             runCatching {
@@ -311,7 +349,13 @@ private class ExtensionHubServiceImpl(
     }
 
     private suspend fun tryActivate(record: StoredExtension) {
-        stopChild(record.manifest.extensionId)
+        lifecycleLock(record.manifest.extensionId).withLock {
+            tryActivateLocked(record)
+        }
+    }
+
+    private suspend fun tryActivateLocked(record: StoredExtension) {
+        stopChildLocked(record.manifest.extensionId)
         if (!record.enabled) {
             record.lifecycle = ChildExtensionLifecycle.DISABLED
             record.lastError = null
@@ -357,10 +401,68 @@ private class ExtensionHubServiceImpl(
                         ChildExtensionBinding(extensionId, version, target, record.manifest.displayName, metadata, payload)
                     )
                 }
+
+                override fun publishUiContribution(
+                    screenId: String,
+                    componentId: String,
+                    slotId: String,
+                    contributionId: String,
+                    provider: InProcessUiContributionProvider
+                ): AutoCloseable {
+                    // Child code may choose only the local target names. Parent identity and extension
+                    // point come from the verified manifest and therefore cannot be spoofed here.
+                    val normalizedScreen = screenId.trim().lowercase()
+                    val normalizedComponent = componentId.trim().lowercase()
+                    val normalizedSlot = slotId.trim().lowercase()
+                    val normalizedContribution = contributionId.trim().lowercase()
+                    listOf(normalizedScreen, normalizedComponent, normalizedSlot, normalizedContribution).forEach { value ->
+                        require(ID_PATTERN.matches(value)) { "Invalid child UI contribution id: $value" }
+                    }
+                    val key = "$extensionId|$normalizedScreen|$normalizedComponent|$normalizedSlot|$normalizedContribution"
+                    val snapshot = ChildUiContributionSnapshot(
+                        extensionId = extensionId,
+                        target = target,
+                        screenId = normalizedScreen,
+                        componentId = normalizedComponent,
+                        slotId = normalizedSlot,
+                        contributionId = normalizedContribution,
+                        provider = provider
+                    )
+                    check(uiContributions.putIfAbsent(key, snapshot) == null) {
+                        "Child UI contribution already published: $normalizedContribution"
+                    }
+                    publishUiContributions()
+                    return AutoCloseable {
+                        if (uiContributions.remove(key, snapshot)) publishUiContributions()
+                    }
+                }
+
                 override suspend fun invokeHostCapability(id: String, parametersJson: String): String {
                     check(id in record.manifest.requestedCapabilities) { "Child extension did not declare host capability: $id" }
+                    val currentPoint = points[record.manifest.target.point]
+                        ?: error("Parent extension point is not active: ${record.manifest.target.point}")
+                    check(
+                        currentPoint.ownerPluginId == record.manifest.target.parentPluginId &&
+                            currentPoint.apiVersion == record.manifest.target.apiVersion
+                    ) { "Parent/point/API contract changed during child invocation" }
+                    check(id in currentPoint.allowedHostCapabilities) {
+                        "Parent extension point no longer delegates host capability: $id"
+                    }
+                    val capabilityParameters = if (parametersJson.isBlank()) {
+                        JSONObject()
+                    } else {
+                        JSONObject(parametersJson)
+                    }
                     recordUse(record.manifest.extensionId)
-                    return host.invokeHostCapability(id, parametersJson)
+                    return delegatedGateway.invoke(
+                        "invoke_child_capability",
+                        JSONObject()
+                            .put("parent_plugin_id", record.manifest.target.parentPluginId)
+                            .put("extension_id", record.manifest.extensionId)
+                            .put("capability_id", id)
+                            .put("parameters", capabilityParameters)
+                            .toString()
+                    )
                 }
             }
             val apk = prepareRuntimeApk(record)
@@ -374,6 +476,7 @@ private class ExtensionHubServiceImpl(
             record.lastError = null
         } catch (error: Throwable) {
             runCatching { bindingHandle?.close() }
+            removeUiContributionsForExtension(record.manifest.extensionId)
             childScope.cancel()
             record.lifecycle = ChildExtensionLifecycle.FAILED
             record.lastError = error.message ?: error::class.java.simpleName
@@ -395,15 +498,43 @@ private class ExtensionHubServiceImpl(
     }
 
     private suspend fun stopChild(extensionId: String) {
+        lifecycleLock(extensionId).withLock {
+            stopChildLocked(extensionId)
+        }
+    }
+
+    private suspend fun stopChildLocked(extensionId: String) {
+        // Contributions are bound to the child lifecycle. Remove them even when no ActiveChild handle
+        // remains (for example after a partial mount failure) so stale UI can never outlive the .ailx.
+        removeUiContributionsForExtension(extensionId)
         val mounted = active.remove(extensionId) ?: return
         runCatching { mounted.bindingHandle?.close() }
         runCatching { mounted.handle.stop() }
         mounted.scope.cancel()
     }
 
-    private fun verifyAndExtract(packageFile: File, destination: File): ExtensionManifest {
-        var manifestRaw: String? = null
+    private fun removeUiContributionsForExtension(extensionId: String) {
+        var changed = false
+        uiContributions.entries.toList().forEach { entry ->
+            if (entry.value.extensionId == extensionId && uiContributions.remove(entry.key, entry.value)) {
+                changed = true
+            }
+        }
+        if (changed) publishUiContributions()
+    }
+
+    private fun publishUiContributions() {
+        mutableUiContributions.value = uiContributions.values
+            .sortedWith(compareBy({ it.target.parentPluginId }, { it.screenId }, { it.componentId }, { it.slotId }, { it.extensionId }, { it.contributionId }))
+    }
+
+    private fun lifecycleLock(extensionId: String): Mutex =
+        lifecycleLocks.computeIfAbsent(extensionId) { Mutex() }
+
+    private suspend fun verifyAndExtract(packageFile: File, destination: File): ExtensionManifest {
+        var manifestBytes: ByteArray? = null
         val executable = linkedSetOf<String>()
+        val fileEntries = linkedSetOf<String>()
         val seen = linkedSetOf<String>()
         var entries = 0
         var total = 0L
@@ -415,24 +546,65 @@ private class ExtensionHubServiceImpl(
                 val name = safePath(entry.name.removeSuffix("/"))
                 require(seen.add(name)) { "Duplicate .ailx entry: $name" }
                 if (entry.isDirectory) { safeFile(destination, name).mkdirs(); continue }
+                fileEntries += name
                 if (name.lowercase().endsWith(".apk") || name.lowercase().endsWith(".dex") ||
                     name.lowercase().endsWith(".jar") || name.lowercase().endsWith(".so") || name.lowercase().endsWith(".class")) executable += name
                 val out = safeFile(destination, name); out.parentFile?.mkdirs()
                 zip.getInputStream(entry).use { input -> FileOutputStream(out).use { output ->
                     val buffer = ByteArray(8192)
-                    while (true) { val n=input.read(buffer); if (n<0) break; total += n; require(total <= 128L*1024L*1024L) { ".ailx expands too large" }; output.write(buffer,0,n) }
+                    while (true) {
+                        val n = input.read(buffer)
+                        if (n < 0) break
+                        total += n
+                        require(total <= 128L * 1024L * 1024L) { ".ailx expands too large" }
+                        output.write(buffer, 0, n)
+                    }
                 } }
-                if (name == ExtensionPackage.MANIFEST) manifestRaw = out.readText()
+                if (name == ExtensionPackage.MANIFEST) manifestBytes = out.readBytes()
             }
         }
-        val raw = manifestRaw ?: error("Root ${ExtensionPackage.MANIFEST} is required")
+        val rawBytes = manifestBytes ?: error("Root ${ExtensionPackage.MANIFEST} is required")
+        val raw = rawBytes.toString(Charsets.UTF_8)
         val manifest = parseManifest(raw)
         require(executable == setOf(manifest.entry)) { ".ailx may contain only its declared APK executable" }
+        require(manifest.signature.entry in fileEntries) { "Child extension signature entry is missing: ${manifest.signature.entry}" }
+        val payloadEntries = fileEntries - setOf(ExtensionPackage.MANIFEST, manifest.signature.entry)
+        require(payloadEntries == manifest.integrity.entries.keys) {
+            "Child extension integrity map must cover every payload entry exactly"
+        }
+        manifest.integrity.entries.forEach { (relative, expected) ->
+            val file = safeFile(destination, relative)
+            require(file.isFile) { "Child extension integrity entry is missing: $relative" }
+            require(sha256(file) == expected) { "Child extension integrity mismatch: $relative" }
+        }
+        val signatureFile = safeFile(destination, manifest.signature.entry)
+        require(signatureFile.isFile) { "Child extension signature file is missing" }
+        verifyChildPublisher(manifest, rawBytes, signatureFile.readBytes())
         val runtimeApk = File(destination, manifest.entry)
         require(runtimeApk.isFile) { "Child runtime APK is missing" }
         require(runtimeApk.setReadOnly()) { "Could not make child runtime APK read-only" }
         File(destination, "package.sha256").writeText(sha256(packageFile))
         return manifest
+    }
+
+    private suspend fun verifyChildPublisher(
+        manifest: ExtensionManifest,
+        manifestBytes: ByteArray,
+        signatureBytes: ByteArray
+    ) {
+        val parameters = JSONObject()
+            .put("signer_id", manifest.signature.signerId)
+            .put("payload_base64", Base64.getEncoder().encodeToString(manifestBytes))
+            .put("signature_base64", Base64.getEncoder().encodeToString(signatureBytes))
+        val result = JSONObject(
+            delegatedGateway.invoke(
+                "verify_child_publisher",
+                parameters.toString()
+            )
+        )
+        require(result.optBoolean("trusted", false)) {
+            "Child extension publisher signature verification failed: ${manifest.signature.signerId}"
+        }
     }
 
     private fun parseManifest(raw: String): ExtensionManifest {
@@ -456,9 +628,41 @@ private class ExtensionHubServiceImpl(
         requested.forEach { require(ID_PATTERN.matches(it)) { "Invalid host capability id: $it" } }
         val roles = root.optJSONArray("roles")?.strings() ?: emptySet()
         roles.forEach { require(ID_PATTERN.matches(it)) { "Invalid extension role: $it" } }
+
+        val integrityObject = root.optJSONObject("integrity")
+            ?: error("Child extension integrity block is required")
+        val integrityAlgorithm = integrityObject.optString("algorithm").trim()
+        require(integrityAlgorithm == "SHA-256") { "Child extension integrity algorithm must be SHA-256" }
+        val entriesObject = integrityObject.optJSONObject("entries")
+            ?: error("Child extension integrity.entries is required")
+        val integrityEntries = linkedMapOf<String, String>()
+        val entryKeys = entriesObject.keys()
+        while (entryKeys.hasNext()) {
+            val relative = safePath(entryKeys.next())
+            require(relative != ExtensionPackage.MANIFEST) { "extension.json must not appear in integrity.entries" }
+            val digest = entriesObject.getString(relative).trim().lowercase()
+            require(SHA256_PATTERN.matches(digest)) { "Invalid SHA-256 digest for $relative" }
+            require(integrityEntries.put(relative, digest) == null) { "Duplicate integrity entry: $relative" }
+        }
+        require(integrityEntries.isNotEmpty()) { "Child extension integrity.entries must not be empty" }
+        require(entry in integrityEntries) { "Child runtime APK must be covered by integrity.entries" }
+
+        val signatureObject = root.optJSONObject("signature")
+            ?: error("Child extension publisher signature is required")
+        val signatureAlgorithm = signatureObject.optString("algorithm").trim()
+        require(signatureAlgorithm == "Ed25519") { "Child extension signature algorithm must be Ed25519" }
+        val signerId = signatureObject.optString("signer_id").trim()
+        require(ID_PATTERN.matches(signerId)) { "Invalid child extension signer_id" }
+        val signatureEntry = safePath(signatureObject.optString("entry"))
+        require(signatureEntry != ExtensionPackage.MANIFEST) { "Child extension signature entry cannot be extension.json" }
+        require(signatureEntry !in integrityEntries) { "Child extension signature entry must not be hashed by integrity.entries" }
+
         return ExtensionManifest(
             id, version, name, description, ChildExtensionTarget(parent, point, api),
-            entry, entryClass, requested, roles, raw
+            entry, entryClass, requested, roles,
+            ExtensionIntegritySpec(integrityAlgorithm, integrityEntries),
+            ExtensionSignatureSpec(signatureAlgorithm, signerId, signatureEntry),
+            raw
         )
     }
 
@@ -629,6 +833,10 @@ private class ExtensionHubServiceImpl(
         private val ID_PATTERN = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
         private val SEMVER = Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$")
         private val CLASS_PATTERN = Regex("^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)+$")
+        private val SHA256_PATTERN = Regex("^[0-9a-f]{64}$")
+        private const val PLUGIN_CENTER_PLUGIN_ID = "ai_limbs.system.plugin_center"
+        private const val DELEGATED_GATEWAY_SERVICE = "system.plugin_center.delegated_gateway"
+        private const val DELEGATED_GATEWAY_API = 1
         private fun JSONArray.strings(): Set<String> = buildSet { for (i in 0 until length()) add(getString(i).trim()) }
     }
 }

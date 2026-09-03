@@ -3,7 +3,7 @@ plugins { alias(libs.plugins.android.application); alias(libs.plugins.kotlin.and
 android {
     namespace = "com.ai.limbs.plugins.bridge"
     compileSdk = 36
-    defaultConfig { applicationId = "com.ai.limbs.payload.bridge"; minSdk = 26; targetSdk = 34; versionCode = 6; versionName = "1.3.0" }
+    defaultConfig { applicationId = "com.ai.limbs.payload.bridge"; minSdk = 26; targetSdk = 34; versionCode = 7; versionName = "1.3.1" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures { buildConfig = false }
 }

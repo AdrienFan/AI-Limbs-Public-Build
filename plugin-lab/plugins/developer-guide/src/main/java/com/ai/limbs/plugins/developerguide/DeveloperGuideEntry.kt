@@ -1,15 +1,12 @@
 package com.ai.limbs.plugins.developerguide
 
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
-import com.ai.limbs.plugin.runtime.InProcessDynamicPanelProvider
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
-import com.ai.limbs.plugin.runtime.InProcessPanelResult
-import com.ai.limbs.plugin.runtime.InProcessPanelState
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
-import com.ai.limbs.plugin.runtime.InProcessScreenBlock
+import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -45,9 +42,16 @@ class DeveloperGuideEntry : InProcessPluginEntry {
                 id = SCREEN_ID,
                 title = "AI Limbs 开发说明",
                 description = "当前正式插件开发、升级、安全与维护规范。UI 与机器读取接口共用同一内容源。",
-                blocks = DeveloperGuideContent.sections.map { section ->
-                    InProcessScreenBlock.DynamicPanel(section.providerId)
-                }
+                // The document is interpreted by Plugin Center. Host only routes this opaque JSON.
+                schemaId = PLUGIN_CENTER_UI_SCHEMA,
+                documentJson = JSONObject()
+                    .put("schema", 1)
+                    .put("blocks", JSONArray().apply {
+                        DeveloperGuideContent.sections.forEach { section ->
+                            put(JSONObject().put("type", "dynamic_panel").put("provider_id", section.providerId))
+                        }
+                    })
+                    .toString()
             )
         )
         host.registerHomeTile(
@@ -66,23 +70,29 @@ class DeveloperGuideEntry : InProcessPluginEntry {
         const val TILE_ID = "plugin.system.developer_guide.tile"
         const val HANDBOOK_CAPABILITY_ID = "plugin.developer_guide.handbook"
         const val SECTION_CAPABILITY_ID = "plugin.developer_guide.section"
+        const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
     }
 }
 
-private class StaticGuidePanel(section: GuideSection) : InProcessDynamicPanelProvider {
-    private val mutableState = MutableStateFlow(
-        InProcessPanelState(
-            title = section.title,
-            description = section.description,
-            statusLines = section.lines
-        )
+private class StaticGuidePanel(section: GuideSection) : InProcessUiStateProvider {
+    /**
+     * Read-only guide state encoded with the Plugin Center component schema.
+     * Stable Kernel only transports this JSON and never learns how guide sections are rendered.
+     */
+    private val mutableState = MutableStateFlow<String?>(
+        JSONObject()
+            .put("schema", 1)
+            .put("title", section.title)
+            .put("description", section.description)
+            .put("status_lines", JSONArray(section.lines))
+            .put("fields", JSONArray())
+            .put("actions", JSONArray())
+            .toString()
     )
-    override val state: StateFlow<InProcessPanelState?> = mutableState.asStateFlow()
+    override val stateJson: StateFlow<String?> = mutableState.asStateFlow()
 
-    override suspend fun perform(
-        actionId: String,
-        fieldValues: Map<String, String>
-    ): InProcessPanelResult = error("开发说明为只读内容")
+    override suspend fun perform(eventId: String, payloadJson: String): String =
+        error("开发说明为只读内容")
 }
 
 private object DeveloperGuideMachineApi {

@@ -6,63 +6,62 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeProviderCatalo
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderUiSlots
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderControl
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelFieldKind
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelState
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderNotificationState
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
 import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
-import com.ai.limbs.plugin.runtime.InProcessDynamicPanelProvider
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessNotificationAction
 import com.ai.limbs.plugin.runtime.InProcessNotificationActionHandler
 import com.ai.limbs.plugin.runtime.InProcessNotificationHost
 import com.ai.limbs.plugin.runtime.InProcessNotificationState
-import com.ai.limbs.plugin.runtime.InProcessPanelAction
-import com.ai.limbs.plugin.runtime.InProcessPanelField
-import com.ai.limbs.plugin.runtime.InProcessPanelFieldKind
-import com.ai.limbs.plugin.runtime.InProcessPanelResult
-import com.ai.limbs.plugin.runtime.InProcessPanelState
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
-import com.ai.limbs.plugin.runtime.InProcessScreenBlock
-import com.ai.limbs.plugin.runtime.InProcessSelectionProvider
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
+import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
+import org.json.JSONArray
 import org.json.JSONObject
 
 class BridgePluginEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
-        val hub = host.providers.resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER)?.payload as? ExtensionHubService
-            ?: error("Plugin Extension Hub is not active")
-        val runtime = BridgeRuntime(host, hub)
+        val runtime = BridgeRuntime(host)
         runtime.mount()
         return InProcessPluginHandle { runtime.stop() }
     }
 }
 
 private class BridgeRuntime(
-    private val host: InProcessPluginHost,
-    private val hub: ExtensionHubService
+    private val host: InProcessPluginHost
 ) {
     private data class BridgePresentationState(
         val revision: Long = 0L,
         val selectedExtensionId: String? = null,
-        val panel: InProcessPanelState? = null,
+        val panel: BridgeProviderPanelState? = null,
         val notification: InProcessNotificationState? = null
     )
 
@@ -77,6 +76,11 @@ private class BridgeRuntime(
     private var manager: AiLimbsBridgeManager? = null
     private var managerScope: CoroutineScope? = null
     private var pointHandle: AutoCloseable? = null
+    private var hubWatcher: Job? = null
+    @Volatile
+    private var activeHub: ExtensionHubService? = null
+    private var hubGeneration = 0L
+    private var stopped = false
     fun mount() {
         try {
             val notificationHost =
@@ -85,27 +89,6 @@ private class BridgeRuntime(
             notificationHandle = notificationHost.publish(
                 notificationProvider.state,
                 InProcessNotificationActionHandler { actionId -> notificationProvider.perform(actionId) }
-            )
-            pointHandle = hub.publishPoint(
-                ownerPluginId = host.pluginId,
-                point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
-                apiVersion = 3,
-                title = "Bridge Provider",
-                description = "AI Limbs remote Bridge provider contract",
-                allowedHostCapabilities = setOf("core.bridge.remote.invoke"),
-                binder = ChildExtensionBinder { binding ->
-                    val contribution = binding.payload as? BridgeProviderContribution
-                        ?: error("Bridge child extension did not publish BridgeProviderContribution")
-                    require(contribution.factory.profiles.isNotEmpty()) { "Bridge provider has no profiles" }
-                    check(contributions.putIfAbsent(binding.extensionId, contribution) == null) {
-                        "Bridge child extension already bound: ${binding.extensionId}"
-                    }
-                    rebuildManager()
-                    AutoCloseable {
-                        contributions.remove(binding.extensionId, contribution)
-                        rebuildManager()
-                    }
-                }
             )
             registerCapabilities()
             host.registerProvider(
@@ -118,26 +101,59 @@ private class BridgeRuntime(
                     id = SCREEN_ID,
                     title = "Bridge",
                     description = "AI Limbs Bridge Core · Provider 由 .ailx 子插件动态接入",
-                    blocks = listOf(
-                        InProcessScreenBlock.ChildExtensionInstaller(
-                            "添加 Bridge Provider",
-                            InProcessSystemIds.BRIDGE_PROVIDER_POINT
-                        ),
-                        InProcessScreenBlock.ChildExtensionSelector(
-                            "当前 Bridge Provider",
-                            InProcessSystemIds.BRIDGE_PROVIDER_POINT,
-                            SELECT_CAPABILITY,
-                            PANEL_PROVIDER_ID
-                        ),
-                        InProcessScreenBlock.DynamicPanel(PANEL_PROVIDER_ID),
-                        InProcessScreenBlock.ChildExtensionList(InProcessSystemIds.BRIDGE_PROVIDER_POINT)
-                    )
+                    // UI component semantics are owned by Plugin Center, not by the Host SDK.
+                    // Bridge only declares what it needs and keeps all provider business logic here.
+                    schemaId = PLUGIN_CENTER_UI_SCHEMA,
+                    documentJson = JSONObject()
+                        .put("schema", 1)
+                        .put(
+                            "blocks",
+                            JSONArray()
+                                .put(JSONObject()
+                                    .put("type", "child_extension_installer")
+                                    .put("label", "添加 Bridge Provider")
+                                    .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT))
+                                .put(JSONObject()
+                                    .put("type", "child_extension_selector")
+                                    .put("label", "当前 Bridge Provider")
+                                    .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT)
+                                    .put("select_capability_id", SELECT_CAPABILITY)
+                                    .put("selection_provider_id", PANEL_PROVIDER_ID))
+                                .put(
+                                    JSONObject()
+                                        // The generic component remains owned by Plugin Center. This wrapper
+                                        // changes only this Bridge screen instance and opens one child slot.
+                                        .put("type", "component_slot")
+                                        .put("id", BridgeProviderUiSlots.PROVIDER_PANEL_COMPONENT_ID)
+                                        .put(
+                                            "component",
+                                            JSONObject()
+                                                .put("type", "dynamic_panel")
+                                                .put("provider_id", PANEL_PROVIDER_ID)
+                                        )
+                                        .put(
+                                            "child_slots",
+                                            JSONObject().put(
+                                                BridgeProviderUiSlots.PROVIDER_PANEL_AFTER,
+                                                JSONObject().put(
+                                                    "points",
+                                                    JSONArray().put(InProcessSystemIds.BRIDGE_PROVIDER_POINT)
+                                                )
+                                            )
+                                        )
+                                )
+                                .put(JSONObject().put("type", "child_extension_list").put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT))
+                        )
+                        .toString()
                 )
             )
             host.registerHomeTile(
                 InProcessHomeTile(TILE_ID, "Bridge", "可插拔 Bridge Provider", SCREEN_ID)
             )
+            startHubWatcher()
         } catch (error: Throwable) {
+            hubWatcher?.cancel()
+            hubWatcher = null
             pointHandle?.close()
             pointHandle = null
             notificationHandle?.close()
@@ -147,21 +163,124 @@ private class BridgeRuntime(
         }
     }
 
-    suspend fun stop() {
-        pointHandle?.close()
+    private fun startHubWatcher() {
+        hubWatcher?.cancel()
+        hubWatcher = presentationScope.launch {
+            host.providers.observe(InProcessSystemIds.EXTENSION_HUB_PROVIDER).collectLatest { binding ->
+                val observedHub = binding?.payload as? ExtensionHubService
+                while (currentCoroutineContext().isActive) {
+                    val failure = runCatching { switchExtensionHub(observedHub) }.exceptionOrNull()
+                    if (failure == null) break
+                    if (failure is CancellationException) throw failure
+                    delay(HUB_ATTACH_RETRY_MS)
+                    val latestHub = host.providers
+                        .resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
+                        ?.payload as? ExtensionHubService
+                    if (latestHub !== observedHub) break
+                }
+            }
+        }
+    }
+
+    @Synchronized
+    private fun switchExtensionHub(nextHub: ExtensionHubService?) {
+        if (stopped) return
+        if (activeHub === nextHub && (nextHub == null || pointHandle != null)) return
+
+        hubGeneration += 1L
+        val previousPoint = pointHandle
         pointHandle = null
-        notificationHandle?.close()
-        notificationHandle = null
+        activeHub = null
+        try {
+            previousPoint?.close()
+        } finally {
+            clearContributionsLocked()
+        }
+        if (nextHub == null) return
+
+        activeHub = nextHub
+        val generation = hubGeneration
+        try {
+            pointHandle = nextHub.publishPoint(
+                ownerPluginId = host.pluginId,
+                point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
+                apiVersion = 3,
+                title = "Bridge Provider",
+                description = "AI Limbs remote Bridge provider contract",
+                allowedHostCapabilities = setOf("core.bridge.remote.invoke"),
+                binder = ChildExtensionBinder { binding ->
+                    bindContribution(generation, binding.extensionId, binding.payload)
+                }
+            )
+        } catch (error: Throwable) {
+            activeHub = null
+            hubGeneration += 1L
+            runCatching { clearContributionsLocked() }
+                .exceptionOrNull()
+                ?.let(error::addSuppressed)
+            throw error
+        }
+    }
+
+    private fun bindContribution(
+        generation: Long,
+        extensionId: String,
+        payload: Any
+    ): AutoCloseable {
+        val contribution = payload as? BridgeProviderContribution
+            ?: error("Bridge child extension did not publish BridgeProviderContribution")
+        require(contribution.factory.profiles.isNotEmpty()) { "Bridge provider has no profiles" }
         synchronized(this) {
+            check(!stopped && generation == hubGeneration && activeHub != null) {
+                "Bridge extension point is no longer active"
+            }
+            check(contributions.putIfAbsent(extensionId, contribution) == null) {
+                "Bridge child extension already bound: $extensionId"
+            }
+            try {
+                rebuildManager()
+            } catch (error: Throwable) {
+                contributions.remove(extensionId, contribution)
+                runCatching { rebuildManager() }
+                    .exceptionOrNull()
+                    ?.let(error::addSuppressed)
+                throw error
+            }
+        }
+        return AutoCloseable {
+            synchronized(this) {
+                if (contributions.remove(extensionId, contribution)) rebuildManager()
+            }
+        }
+    }
+
+    private fun clearContributionsLocked() {
+        if (contributions.isEmpty() && manager == null) return
+        contributions.clear()
+        rebuildManager()
+    }
+
+    suspend fun stop() {
+        hubWatcher?.cancel()
+        hubWatcher = null
+        synchronized(this) {
+            stopped = true
+            hubGeneration += 1L
+            val publishedPoint = pointHandle
+            pointHandle = null
+            activeHub = null
+            contributions.clear()
+            runCatching { publishedPoint?.close() }
             manager?.stopRuntime()
             manager = null
             managerScope?.cancel()
             managerScope = null
             AiLimbsBridgeProviderCatalog.replaceFactories(emptyList())
-            contributions.clear()
             clearPresentation()
-            presentationScope.cancel()
         }
+        notificationHandle?.close()
+        notificationHandle = null
+        presentationScope.cancel()
     }
 
     @Synchronized
@@ -170,7 +289,9 @@ private class BridgeRuntime(
         managerScope?.cancel()
         manager = null
         managerScope = null
-        val values = contributions.values.toList()
+        val values = contributions.entries
+            .sortedBy { it.key }
+            .map { it.value }
         AiLimbsBridgeProviderCatalog.replaceFactories(values.map { it.factory })
         if (values.isEmpty()) {
             clearPresentation()
@@ -222,8 +343,9 @@ private class BridgeRuntime(
         manager ?: error("No Bridge Provider is active")
 
     private fun recordUseCompat(extensionId: String) {
+        val currentHub = activeHub ?: return
         try {
-            hub.recordUse(extensionId)
+            currentHub.recordUse(extensionId)
         } catch (_: LinkageError) {
             // Usage accounting is optional when an older Extension Hub is still installed.
         }
@@ -275,7 +397,7 @@ private class BridgeRuntime(
             return
         }
         val control = snapshotControlFor(currentManager, bridgeState)
-        val panel = selected.value.panel.snapshot(host.applicationContext, control).toInProcessState()
+        val panel = selected.value.panel.snapshot(host.applicationContext, control)
         val notification = selected.value.notification
             ?.snapshot(host.applicationContext, control)
             ?.toInProcessState()
@@ -287,33 +409,40 @@ private class BridgeRuntime(
         )
     }
 
-    private inner class BridgeDynamicPanelProvider : InProcessDynamicPanelProvider, InProcessSelectionProvider {
-        override val state: StateFlow<InProcessPanelState?> = presentation
-            .map { it.panel }
-            .stateIn(presentationScope, SharingStarted.Eagerly, presentation.value.panel)
-        override val selectedId: StateFlow<String?> = presentation
-            .map { it.selectedExtensionId }
-            .stateIn(presentationScope, SharingStarted.Eagerly, presentation.value.selectedExtensionId)
+    /**
+     * Exposes Bridge presentation through the generic Plugin Center UI state/event channel.
+     *
+     * Bridge still owns the business-level BridgeProviderPanelState contract. Only this adapter turns
+     * that state into Plugin Center schema JSON, so Stable Kernel never learns Bridge field types.
+     */
+    private inner class BridgeDynamicPanelProvider : InProcessUiStateProvider {
+        override val stateJson: StateFlow<String?> = presentation
+            .map { it.toPluginCenterUiStateJson() }
+            .stateIn(
+                presentationScope,
+                SharingStarted.Eagerly,
+                presentation.value.toPluginCenterUiStateJson()
+            )
 
-        override suspend fun perform(
-            actionId: String,
-            fieldValues: Map<String, String>
-        ): InProcessPanelResult {
+        override suspend fun perform(eventId: String, payloadJson: String): String {
+            val fieldValues = JSONObject(payloadJson)
+                .optJSONObject("field_values")
+                .toStringMap()
             val currentManager = requireManager()
             val selected = selectedEntry(currentManager)
                 ?: error("Selected Bridge Provider contribution is missing")
             recordUseCompat(selected.key)
             val result = selected.value.panel.perform(
                 host.applicationContext,
-                actionId,
+                eventId,
                 fieldValues,
                 liveControlFor(currentManager)
             )
             publishPresentation(currentManager, currentManager.state.value)
-            return InProcessPanelResult(
-                message = result.message,
-                fieldValues = result.fieldValues
-            )
+            return JSONObject()
+                .put("message", result.message)
+                .put("field_values", JSONObject(result.fieldValues))
+                .toString()
         }
     }
 
@@ -353,39 +482,57 @@ private class BridgeRuntime(
             }
         )
 
-    private fun com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelState.toInProcessState() =
-        InProcessPanelState(
-            title = title,
-            description = description,
-            statusLines = statusLines,
-            fields = fields.map { field ->
-                InProcessPanelField(
-                    id = field.id,
-                    label = field.label,
-                    kind = if (field.kind == BridgeProviderPanelFieldKind.SECRET) {
-                        InProcessPanelFieldKind.SECRET
-                    } else {
-                        InProcessPanelFieldKind.TEXT
-                    },
-                    value = field.value,
-                    placeholder = field.placeholder,
-                    enabled = field.enabled
-                )
-            },
-            actions = actions.map { action ->
-                InProcessPanelAction(
-                    id = action.id,
-                    label = action.label,
-                    enabled = action.enabled,
-                    requiredFieldIds = action.requiredFieldIds
-                )
-            }
-        )
+    /**
+     * Serializes the current Bridge panel into Plugin Center schema v1.
+     * Field kinds such as `secret` live in this schema now; adding a future Bridge-specific visual
+     * field no longer requires changing an AI Limbs Host enum.
+     */
+    private fun BridgePresentationState.toPluginCenterUiStateJson(): String? {
+        if (selectedExtensionId == null && panel == null) return null
+        val root = JSONObject()
+            .put("schema", 1)
+            .put("panel_available", panel != null)
+        selectedExtensionId?.let { root.put("selected_id", it) }
+        panel?.let { current ->
+            root.put("title", current.title)
+                .put("description", current.description)
+                .put("status_lines", JSONArray(current.statusLines))
+                .put("fields", JSONArray().apply {
+                    current.fields.forEach { field ->
+                        put(JSONObject()
+                            .put("id", field.id)
+                            .put("label", field.label)
+                            .put("kind", if (field.kind == BridgeProviderPanelFieldKind.SECRET) "secret" else "text")
+                            .put("value", field.value)
+                            .put("placeholder", field.placeholder)
+                            .put("enabled", field.enabled))
+                    }
+                })
+                .put("actions", JSONArray().apply {
+                    current.actions.forEach { action ->
+                        put(JSONObject()
+                            .put("id", action.id)
+                            .put("label", action.label)
+                            .put("enabled", action.enabled)
+                            .put("required_field_ids", JSONArray(action.requiredFieldIds.toList())))
+                    }
+                })
+        }
+        return root.toString()
+    }
+
+    private fun JSONObject?.toStringMap(): Map<String, String> {
+        if (this == null) return emptyMap()
+        return buildMap { keys().forEach { key -> put(key, optString(key)) } }
+    }
 
     companion object {
-        private const val SCREEN_ID = "plugin.system.bridge.screen"
+        private const val SCREEN_ID = BridgeProviderUiSlots.SCREEN_ID
         private const val TILE_ID = "plugin.system.bridge.tile"
         private const val SELECT_CAPABILITY = "plugin.bridge.select_provider"
         private const val PANEL_PROVIDER_ID = "plugin.bridge.control_panel"
+        // Component schema is versioned by Plugin Center; adding new controls must not change Host ABI.
+        private const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
+        private const val HUB_ATTACH_RETRY_MS = 1_000L
     }
 }

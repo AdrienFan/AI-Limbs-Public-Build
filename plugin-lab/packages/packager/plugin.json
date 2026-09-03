@@ -2,28 +2,55 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.packager",
-  "version": "0.1.0",
-  "api": { "target": 1, "min": 1 },
+  "version": "0.2.0",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
   "display": {
     "name": "AI Limbs 打包中心",
     "description": "在工具箱中识别、打包、签名并验证 .ailpsys / .ailp / .ailx 插件分发包。"
   },
-  "roles": ["system_packager"],
-  "activation": { "mode": "hot" },
+  "roles": [
+    "system_packager"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
   "runtime": {
     "kind": "android_inprocess",
     "entry": "payload/plugin.apk",
-    "config": { "entry_class": "com.ai.limbs.plugins.packager.PackagerEntry" }
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.packager.PackagerEntry"
+    }
   },
-  "dependencies": { "plugins": [], "services": [] },
-  "permissions": { "requested_scopes": [] },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": []
+  },
   "provides": {
-    "capabilities": ["plugin.packager.inspect", "plugin.packager.package"],
+    "capabilities": [
+      "plugin.packager.inspect",
+      "plugin.packager.package"
+    ],
     "services": [],
-    "providers": ["plugin.packager.control_panel"],
+    "providers": [
+      "plugin.packager.control_panel"
+    ],
     "extensions": [
-      { "point": "ai_limbs.ui.home_tile", "id": "plugin.system.packager.tile", "api": 1 },
-      { "point": "ai_limbs.ui.screen", "id": "plugin.system.packager.screen", "api": 1 }
+      {
+        "point": "ai_limbs.ui.home_tile",
+        "id": "plugin.system.packager.tile",
+        "api": 1
+      },
+      {
+        "point": "ai_limbs.ui.screen",
+        "id": "plugin.system.packager.screen",
+        "api": 2
+      }
     ]
   }
 }
