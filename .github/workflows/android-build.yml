@@ -15,7 +15,7 @@ env:
 
 jobs:
   build:
-    name: Build Plugin Lab Alt + Six Plugins
+    name: Build Plugin Lab Alt + Seven Plugins
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -80,16 +80,21 @@ jobs:
         run: |
           set -euo pipefail
           ./gradlew :packager-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Build 6 - Ubuntu Terminal plugin payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :ubuntu-terminal-plugin:assembleDebug --stacktrace --no-daemon
 
       # Child extensions share the same Plugin Lab SDK/Bridge contract as their parent plugins.
       # They are compiled here as payload APKs only; final .ailx signing remains in the secure local release step.
-      - name: Build 6 - RDC child extension payload
+      - name: Build 7 - RDC child extension payload
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :rdc-extension:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 7 - TRIGGERcmd child extension payload
+      - name: Build 8 - TRIGGERcmd child extension payload
         shell: bash
         run: |
           set -euo pipefail
@@ -106,7 +111,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload six plugin payload APKs
+      - name: Upload seven plugin payload APKs
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -116,6 +121,7 @@ jobs:
             plugin-lab/plugins/bridge-core/build/outputs/apk/debug/*.apk
             plugin-lab/plugins/developer-guide/build/outputs/apk/debug/*.apk
             plugin-lab/plugins/packager/build/outputs/apk/debug/*.apk
+            plugin-lab/plugins/ubuntu-terminal/build/outputs/apk/debug/*.apk
             plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
             plugin-lab/extensions/triggercmd/build/outputs/apk/debug/*.apk
           if-no-files-found: error

@@ -1,0 +1,10 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:hasCode="true"
+        android:label="Ubuntu命令终端">
+        <meta-data android:name="ai_limbs.package.type" android:value="parent_plugin" />
+        <meta-data android:name="ai_limbs.plugin_id" android:value="plugin.system.ubuntu_terminal" />
+        <meta-data android:name="ai_limbs.display_name" android:value="Ubuntu命令终端" />
+        <meta-data android:name="ai_limbs.entry_class" android:value="com.ai.limbs.plugins.ubuntu.UbuntuTerminalEntry" />
+    </application>
+</manifest>

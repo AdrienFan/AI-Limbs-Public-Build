@@ -10,6 +10,7 @@ object OfficialPackageProfiles {
         "com.ai.limbs.payload.bridge" -> PackagerArtifactType.PARENT to bridge(version)
         "com.ai.limbs.payload.developerguide" -> PackagerArtifactType.PARENT to developerGuide(version)
         "com.ai.limbs.payload.packager" -> PackagerArtifactType.PARENT to packager(version)
+        "com.ai.limbs.payload.ubuntu.v010" -> PackagerArtifactType.PARENT to ubuntuTerminal(version)
         "com.ai.limbs.payload.rdc" -> PackagerArtifactType.CHILD to rdc(version)
         "com.ai.limbs.payload.triggercmd" -> PackagerArtifactType.CHILD to triggerCmd(version)
         else -> null
@@ -121,6 +122,29 @@ object OfficialPackageProfiles {
             )
         )
     )
+
+    private fun ubuntuTerminal(version: String): JSONObject {
+        val root = parentBase(
+            pluginId = "plugin.system.ubuntu_terminal",
+            version = version,
+            name = "Ubuntu命令终端",
+            description = "复用 AI Limbs Ubuntu Runtime 与持久 PTY 的工具箱终端插件。",
+            role = "ubuntu_terminal",
+            entryClass = "com.ai.limbs.plugins.ubuntu.UbuntuTerminalEntry"
+        )
+        root.put("permissions", JSONObject().put("requested_scopes", JSONArray()
+            .put("host.process@1")
+            .put("host.ubuntu.runtime@1")))
+        root.put("provides", provides(
+            capabilities = listOf("plugin.ubuntu.status", "plugin.ubuntu.command"),
+            providers = listOf("plugin.ubuntu.terminal_panel"),
+            extensions = listOf(
+                extension("ai_limbs.ui.home_tile", "plugin.system.ubuntu_terminal.tile"),
+                extension("ai_limbs.ui.screen", "plugin.system.ubuntu_terminal.screen", api = 2)
+            )
+        ))
+        return root
+    }
 
     private fun rdc(version: String): JSONObject = childBase(
         extensionId = "ai_limbs.bridge.rdc",

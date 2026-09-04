@@ -1,0 +1,59 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.system.ubuntu_terminal",
+  "version": "0.1.0",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
+  "display": {
+    "name": "Ubuntu命令终端",
+    "description": "复刻 AI Limbs 0.6.4.7.8 工具箱 Ubuntu 终端体验，通过 Host Primitive 使用 Ubuntu Runtime 与持久终端会话。"
+  },
+  "roles": [
+    "ubuntu_terminal"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.ubuntu.UbuntuTerminalEntry"
+    }
+  },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": [
+      "host.process@1",
+      "host.ubuntu.runtime@1"
+    ]
+  },
+  "provides": {
+    "capabilities": [
+      "plugin.ubuntu.status",
+      "plugin.ubuntu.command"
+    ],
+    "services": [],
+    "providers": [
+      "plugin.ubuntu.terminal_panel"
+    ],
+    "extensions": [
+      {
+        "point": "ai_limbs.ui.home_tile",
+        "id": "plugin.system.ubuntu_terminal.tile",
+        "api": 1
+      },
+      {
+        "point": "ai_limbs.ui.screen",
+        "id": "plugin.system.ubuntu_terminal.screen",
+        "api": 2
+      }
+    ]
+  }
+}
