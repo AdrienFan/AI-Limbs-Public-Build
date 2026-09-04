@@ -78,6 +78,12 @@ class HostSurfacePolicy(context: Context) {
         return ids.isNotEmpty() && ids.all(::isAllowed)
     }
 
+    fun requireScopeAllowed(scope: String) {
+        val ids = surfaceIdsForScope(scope)
+        require(ids.isNotEmpty()) { "未注册宿主权限策略：$scope" }
+        ids.forEach(::requireAllowed)
+    }
+
     fun setScopeAllowed(scope: String, allowed: Boolean) {
         val ids = surfaceIdsForScope(scope)
         require(ids.isNotEmpty()) { "未注册宿主权限策略：$scope" }
