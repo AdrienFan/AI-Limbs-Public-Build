@@ -183,7 +183,8 @@ class PluginPackageVerifier(
             "plugin.system.extension_hub" to "system_extension_hub",
             "plugin.system.bridge" to "system_bridge",
             "plugin.system.developer_guide" to "system_plugin",
-            "plugin.system.packager" to "system_packager"
+            "plugin.system.packager" to "system_packager",
+            "plugin.system.ubuntu_terminal" to "ubuntu_terminal"
         )
 
         fun sha256(file: File): String {
