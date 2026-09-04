@@ -154,12 +154,20 @@ object AppRouteCatalog {
         if (entry.routeId.startsWith(DYNAMIC_NAVIGATION_ROUTE_PREFIX)) {
             val surfaceId = (entry.args["surfaceId"] as? String)
                 ?: entry.routeId.removePrefix(DYNAMIC_NAVIGATION_ROUTE_PREFIX)
-            return Screen.DynamicNavigationPage(surfaceId)
+            return Screen.DynamicNavigationPage(
+                surfaceId = surfaceId,
+                focusKind = entry.args["focusKind"] as? String,
+                focusId = entry.args["focusId"] as? String
+            )
         }
         if (entry.routeId.startsWith(PLUGIN_DECLARATIVE_ROUTE_PREFIX)) {
             val screenId = (entry.args["screenId"] as? String)
                 ?: entry.routeId.removePrefix(PLUGIN_DECLARATIVE_ROUTE_PREFIX)
-            return Screen.PluginDeclarativePage(screenId)
+            return Screen.PluginDeclarativePage(
+                screenId = screenId,
+                focusKind = entry.args["focusKind"] as? String,
+                focusId = entry.args["focusId"] as? String
+            )
         }
         if (entry.routeId.startsWith(SYSTEM_PLUGIN_ROUTE_PREFIX)) {
             val entryId = (entry.args["entryId"] as? String)

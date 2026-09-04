@@ -67,16 +67,54 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
     }
 
     private fun openUiSurface(parameters: JSONObject): JSONObject {
-        val surfaceId = required(parameters, "surface_id")
-        val surface = PluginPlatformKernel.dynamicNavigationRegistry.find(surfaceId)
-            ?: throw PluginInstallException("DYNAMIC_SURFACE_NOT_FOUND", "Dynamic surface does not exist: $surfaceId")
-        val routeId = dynamicNavigationRouteId(surface.id)
-        val routeArgs = JSONObject().put("surfaceId", surface.id)
-        appContext.startActivity(ToolPkgDesktopWidgetHost.buildLaunchIntent(appContext, routeId, routeArgs.toString()))
-        return JSONObject()
-            .put("opened", true)
-            .put("surface_id", surface.id)
-            .put("route_id", routeId)
+        val surfaceId = parameters.optString("surface_id").trim().takeIf { it.isNotEmpty() }
+        val screenId = parameters.optString("screen_id").trim().takeIf { it.isNotEmpty() }
+        if ((surfaceId == null) == (screenId == null)) {
+            throw PluginInstallException(
+                "HOST_UI_TARGET_INVALID",
+                "Exactly one of surface_id or screen_id is required"
+            )
+        }
+
+        val focusKind = parameters.optString("focus_kind").trim().lowercase().takeIf { it.isNotEmpty() }
+        val focusId = parameters.optString("focus_id").trim().takeIf { it.isNotEmpty() }
+        if ((focusKind == null) != (focusId == null) || (focusKind != null && focusKind !in setOf("plugin", "child"))) {
+            throw PluginInstallException(
+                "HOST_UI_FOCUS_INVALID",
+                "focus_kind and focus_id must be supplied together; focus_kind must be plugin or child"
+            )
+        }
+
+        val routeArgs = JSONObject()
+        val routeId: String
+        val result = JSONObject().put("opened", true)
+        if (surfaceId != null) {
+            val surface = PluginPlatformKernel.dynamicNavigationRegistry.find(surfaceId)
+                ?: throw PluginInstallException(
+                    "DYNAMIC_SURFACE_NOT_FOUND",
+                    "Dynamic surface does not exist: $surfaceId"
+                )
+            routeId = dynamicNavigationRouteId(surface.id)
+            routeArgs.put("surfaceId", surface.id)
+            result.put("surface_id", surface.id)
+        } else {
+            val screen = PluginPlatformKernel.uiRegistry.screen(screenId!!)
+                ?: throw PluginInstallException(
+                    "PLUGIN_SCREEN_NOT_FOUND",
+                    "Plugin screen does not exist: $screenId"
+                )
+            routeId = "plugin.declarative.page.${screen.id}"
+            routeArgs.put("screenId", screen.id)
+            result.put("screen_id", screen.id)
+        }
+        if (focusKind != null && focusId != null) {
+            routeArgs.put("focusKind", focusKind)
+            routeArgs.put("focusId", focusId)
+        }
+        appContext.startActivity(
+            ToolPkgDesktopWidgetHost.buildLaunchIntent(appContext, routeId, routeArgs.toString())
+        )
+        return result.put("route_id", routeId)
     }
 
     private suspend fun invokeCapability(ownerPluginId: String, parameters: JSONObject): JSONObject {

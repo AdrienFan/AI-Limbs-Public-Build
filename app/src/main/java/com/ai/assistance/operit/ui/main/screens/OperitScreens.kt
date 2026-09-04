@@ -578,7 +578,11 @@ sealed class Screen(
             PluginPlatformKernel.systemUiRegistry.entry(entryId)?.title ?: "System Plugin"
     }
 
-    data class DynamicNavigationPage(val surfaceId: String) : Screen() {
+    data class DynamicNavigationPage(
+        val surfaceId: String,
+        val focusKind: String? = null,
+        val focusId: String? = null
+    ) : Screen() {
         @Composable
         override fun Content(
             navController: NavController,
@@ -591,6 +595,8 @@ sealed class Screen(
         ) {
             DynamicNavigationScreen(
                 surfaceId = surfaceId,
+                focusKind = focusKind,
+                focusId = focusId,
                 onOpenPluginScreen = { screenId -> navigateTo(PluginDeclarativePage(screenId)) }
             )
         }
@@ -600,7 +606,11 @@ sealed class Screen(
             PluginPlatformKernel.dynamicNavigationRegistry.find(surfaceId)?.title ?: "动态页面"
     }
 
-    data class PluginDeclarativePage(val screenId: String) : Screen() {
+    data class PluginDeclarativePage(
+        val screenId: String,
+        val focusKind: String? = null,
+        val focusId: String? = null
+    ) : Screen() {
         @Composable
         override fun Content(
             navController: NavController,
@@ -611,7 +621,11 @@ sealed class Screen(
             onError: (String) -> Unit,
             onGestureConsumed: (Boolean) -> Unit
         ) {
-            PluginDeclarativeScreen(screenId)
+            PluginDeclarativeScreen(
+                screenId = screenId,
+                focusKind = focusKind,
+                focusId = focusId
+            )
         }
 
         @Composable

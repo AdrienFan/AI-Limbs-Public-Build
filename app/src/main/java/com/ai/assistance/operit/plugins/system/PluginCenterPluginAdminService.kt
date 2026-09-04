@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins.system
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.provider.DocumentsContract
 import com.ai.assistance.operit.plugins.center.HostSurfacePolicy
 import com.ai.assistance.operit.plugins.center.InactivityThresholdMode
 import com.ai.assistance.operit.plugins.center.PluginBackupPolicyStore
@@ -15,6 +16,7 @@ import com.ai.assistance.operit.plugins.center.PluginLifecycleState
 import com.ai.assistance.operit.plugins.center.PluginManager
 import com.ai.assistance.operit.plugins.center.PluginManifest
 import com.ai.assistance.operit.plugins.center.PluginPackageInspector
+import com.ai.assistance.operit.plugins.center.PluginPackageVerifier
 import com.ai.assistance.operit.plugins.center.PluginPersistentState
 import com.ai.assistance.operit.plugins.center.PluginSnapshot
 import java.io.File
@@ -139,6 +141,7 @@ internal class KernelPluginAdminJsonServiceV1(
             "backups",
             JSONArray(manager.backupSnapshots().map(::backupJson))
         )
+        "export_backups" -> exportBackups(parameters)
         "backup" -> backupJson(
             manager.backup(parameters.requireAdminText("plugin_id"))
         )
@@ -154,6 +157,56 @@ internal class KernelPluginAdminJsonServiceV1(
             "Unknown plugin administration operation: $operation"
         )
     }
+    /**
+     * Exports already-created backup packages to a user-granted document tree.
+     *
+     * Plugin Center selects the destination through Android SAF, but the Stable Kernel-owned backup
+     * store remains the only code allowed to read the private backup package file. This keeps export
+     * as a narrow copy operation rather than exposing internal backup paths to the system plugin.
+     */
+    private fun exportBackups(parameters: JSONObject): JSONObject {
+        val pluginIds = parameters.optJSONArray("plugin_ids").toAdminStringSet()
+        if (pluginIds.isEmpty()) {
+            throw PluginInstallException("BACKUP_EXPORT_EMPTY", "At least one plugin backup must be selected")
+        }
+        val treeUri = Uri.parse(parameters.requireAdminText("tree_uri"))
+        val treeDocumentId = runCatching { DocumentsContract.getTreeDocumentId(treeUri) }
+            .getOrElse { throw PluginInstallException("BACKUP_EXPORT_TREE_INVALID", "Selected export directory is invalid", it) }
+        val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocumentId)
+        val snapshots = manager.backupSnapshots().associateBy { it.pluginId }
+        val exported = JSONArray()
+        pluginIds.sorted().forEach { pluginId ->
+            val backup = snapshots[pluginId]
+                ?: throw PluginInstallException("BACKUP_EXPORT_MISSING", "Plugin backup does not exist: $pluginId")
+            if (!backup.packageFile.isFile || PluginPackageVerifier.sha256(backup.packageFile) != backup.packageSha256) {
+                throw PluginInstallException("BACKUP_EXPORT_DIGEST_MISMATCH", "Plugin backup is missing or corrupted: $pluginId")
+            }
+            val fileName = exportFileName(backup.manifest.display.name, backup.version, ".ailp")
+            val targetUri = DocumentsContract.createDocument(
+                appContext.contentResolver,
+                parentUri,
+                "application/zip",
+                fileName
+            ) ?: throw PluginInstallException("BACKUP_EXPORT_CREATE_FAILED", "Could not create exported backup: $fileName")
+            val output = appContext.contentResolver.openOutputStream(targetUri, "w")
+                ?: throw PluginInstallException("BACKUP_EXPORT_OPEN_FAILED", "Could not open exported backup: $fileName")
+            output.use { destination -> backup.packageFile.inputStream().buffered().use { it.copyTo(destination) } }
+            exported.put(fileName)
+        }
+        return JSONObject().put("ok", true).put("count", exported.length()).put("files", exported)
+    }
+
+    private fun exportFileName(displayName: String, version: String, suffix: String): String {
+        val safeName = displayName.trim()
+            .map { char -> if (char.isISOControl() || char in "\\/:*?\"<>|") '_' else char }
+            .joinToString("")
+            .trim(' ', '.')
+            .ifBlank { "plugin-backup" }
+            .take(96)
+        val safeVersion = version.trim().replace(Regex("[^0-9A-Za-z._+-]+"), "_").ifBlank { "unknown" }
+        return "$safeName v$safeVersion$suffix"
+    }
+
     private suspend fun installUri(
         file: File,
         parameters: JSONObject
