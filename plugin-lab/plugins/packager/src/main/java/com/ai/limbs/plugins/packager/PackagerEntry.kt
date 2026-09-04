@@ -187,7 +187,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
                 }
         }
         statusLines = buildList {
-            add("$origin完成：发现 $discovered 个，加入 $added 个，重复 $duplicate 个，失败 ${failures.size} 个。")
+            add("${origin}完成：发现 $discovered 个，加入 $added 个，重复 $duplicate 个，失败 ${failures.size} 个。")
             failures.take(5).forEach { add("• $it") }
             if (failures.size > 5) add("• 另有 ${failures.size - 5} 个识别失败项目")
         }
