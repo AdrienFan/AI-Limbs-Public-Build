@@ -37,7 +37,7 @@ internal class PluginHostCapabilityRegistry(
 
     private data class HostCapability(
         val requiredScope: String,
-        val execute: suspend (JSONObject) -> JSONObject
+        val execute: suspend (String, JSONObject) -> JSONObject
     )
 
     private val capabilities = ConcurrentHashMap<String, OwnedCapability>()
@@ -45,7 +45,13 @@ internal class PluginHostCapabilityRegistry(
     // Ordinary plugin scope adapters remain intentionally narrow here.
     // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 39-item Gateway catalog.
     private val hostCapabilities = mapOf(
-        "host.logging@1" to HostCapability("host.logging@1", ::invokeLogging)
+        "host.process@1" to HostCapability("host.process@1") { ownerPluginId, parameters ->
+            invokeSystemHostFromPlugin(ownerPluginId, "host.process@1", parameters)
+        },
+        "host.ubuntu.runtime@1" to HostCapability("host.ubuntu.runtime@1") { ownerPluginId, parameters ->
+            invokeSystemHostFromPlugin(ownerPluginId, "host.ubuntu.runtime@1", parameters)
+        },
+        "host.logging@1" to HostCapability("host.logging@1") { _, parameters -> invokeLogging(parameters) }
     )
 
     init {
@@ -303,8 +309,29 @@ internal class PluginHostCapabilityRegistry(
                     "$ownerPluginId was not granted required scope: ${capability.requiredScope}"
                 )
             }
-            capability.execute(JSONObject(parameters.toString()))
+            capability.execute(ownerPluginId, JSONObject(parameters.toString()))
         }
+
+    private suspend fun invokeSystemHostFromPlugin(
+        ownerPluginId: String,
+        primitiveId: String,
+        parameters: JSONObject
+    ): JSONObject {
+        val copy = JSONObject(parameters.toString())
+        val operation = copy.optString("operation").trim().lowercase().ifBlank {
+            throw PluginInstallException(
+                "HOST_OPERATION_REQUIRED",
+                "$primitiveId requires an operation"
+            )
+        }
+        copy.remove("operation")
+        val executor = systemExecutor
+            ?: throw PluginInstallException(
+                "HOST_GATEWAY_NOT_READY",
+                "System Host Gateway executor is not initialized"
+            )
+        return executor.invoke(ownerPluginId, primitiveId, operation, copy)
+    }
 
     private suspend fun invokeLogging(parameters: JSONObject): JSONObject {
         return when (parameters.optString("operation", "read").trim().lowercase()) {

@@ -23,8 +23,8 @@ data class HostPrimitiveSnapshot(
 object AiLimbsHostPrimitiveCatalog {
     val all: List<HostPrimitiveDefinition> = listOf(
         HostPrimitiveDefinition(1, "host.filesystem@1", "Filesystem", "受控文件系统访问：列目录、读取、写入、删除、移动、复制、建目录、搜索与文件观察。", "Host 负责路径校验、权限、插件沙箱和跨环境基础 I/O；日志查看、备份、文件管理器等高层逻辑由插件组合。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
-        HostPrimitiveDefinition(2, "host.process@1", "Process / Terminal Session", "受控创建和管理进程/终端会话，包括输入输出流、交互、终止和会话生命周期。", "Host 负责进程资源与合法执行后端；具体命令和业务工具由插件定义。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
-        HostPrimitiveDefinition(3, "host.ubuntu.runtime@1", "Ubuntu Runtime", "管理 AI Limbs Ubuntu 运行时的状态、启动、停止和空闲策略。", "Host 只管理 Ubuntu 容器/运行时生命周期；Ubuntu 内的具体命令与工具仍属于插件或上层能力。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
+        HostPrimitiveDefinition(2, "host.process@1", "Process / Terminal Session", "受控创建和管理进程/终端会话，包括输入输出流、交互、终止和会话生命周期。", "Host 负责进程资源与合法执行后端；具体命令和业务工具由插件定义。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
+        HostPrimitiveDefinition(3, "host.ubuntu.runtime@1", "Ubuntu Runtime", "管理 AI Limbs Ubuntu 运行时的状态、启动、停止和空闲策略。", "Host 只管理 Ubuntu 容器/运行时生命周期；Ubuntu 内的具体命令与工具仍属于插件或上层能力。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(4, "host.ui.automation@1", "UI Automation / Interaction", "读取 UI 结构并执行点击、长按、滑动、文本输入和系统按键等界面操作。", "Host 屏蔽 Accessibility、Shower 等具体后端；插件只面向统一的 UI snapshot/node/action 语义。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(5, "host.screen.capture@1", "Screen Capture", "获取设备屏幕或显示目标的截图/原始画面帧。", "Host 负责屏幕捕获授权与 capture 生命周期；压缩、OCR、视觉推理和归档由插件完成。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(6, "host.network@1", "Network I/O", "提供受控网络连接与流式收发，并实施端点、代理、TLS 和监听端口策略。", "Host 管网络权限和连接资源；HTTP、WebSocket、Webhook 等具体协议和业务语义由插件实现。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
