@@ -1,5 +1,7 @@
 package com.ai.limbs.plugins.extensionhub
 
+import android.net.Uri
+import android.provider.DocumentsContract
 import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
 import com.ai.limbs.plugin.runtime.ChildExtensionBinding
@@ -40,11 +42,19 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 class ExtensionHubEntry : InProcessPluginEntry {
+    companion object {
+        const val CHILD_BACKUP_EXPORT_CAPABILITY = "plugin.extension_hub.export_backups"
+    }
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
         val service = ExtensionHubServiceImpl(host)
         service.start()
         host.registerProvider(InProcessSystemIds.EXTENSION_HUB_PROVIDER, service,
             mapOf("format" to ExtensionPackage.FORMAT, "package_extension" to ExtensionPackage.SUFFIX))
+        host.registerCapability(
+            CHILD_BACKUP_EXPORT_CAPABILITY,
+            "导出子插件备份",
+            "将选中的 .ailx 备份复制到用户通过系统目录选择器授权的目录。"
+        ) { parametersJson -> service.exportBackups(parametersJson) }
         return InProcessPluginHandle { service.stop() }
     }
 }
@@ -270,6 +280,56 @@ private class ExtensionHubServiceImpl(
         }
         publishBackupSnapshots()
         return readBackup(extensionId) ?: error("Child extension backup could not be read after write")
+    }
+
+    /**
+     * Exports only Extension Hub-owned backup packages. The destination tree URI is granted by the
+     * Plugin Center UI through Android SAF; no private Extension Hub data path is exposed to callers.
+     */
+    suspend fun exportBackups(parametersJson: String): String {
+        val parameters = JSONObject(parametersJson)
+        val array = parameters.optJSONArray("extension_ids") ?: JSONArray()
+        val extensionIds = linkedSetOf<String>()
+        for (index in 0 until array.length()) {
+            array.optString(index).trim().takeIf { it.isNotEmpty() }?.let(extensionIds::add)
+        }
+        require(extensionIds.isNotEmpty()) { "At least one child backup must be selected" }
+        val treeUri = Uri.parse(parameters.optString("tree_uri").trim().also {
+            require(it.isNotEmpty()) { "tree_uri is required" }
+        })
+        val treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri)
+        val parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocumentId)
+        val exported = JSONArray()
+        extensionIds.sorted().forEach { extensionId ->
+            val backup = readBackup(extensionId) ?: error("Child extension backup does not exist: $extensionId")
+            val packageFile = backupPackage(extensionId)
+            require(packageFile.isFile && sha256(packageFile) == backup.packageSha256) {
+                "Child extension backup is missing or corrupted: $extensionId"
+            }
+            val fileName = exportFileName(backup.displayName, backup.version)
+            val targetUri = DocumentsContract.createDocument(
+                host.applicationContext.contentResolver,
+                parentUri,
+                "application/zip",
+                fileName
+            ) ?: error("Could not create exported child backup: $fileName")
+            val output = host.applicationContext.contentResolver.openOutputStream(targetUri, "w")
+                ?: error("Could not open exported child backup: $fileName")
+            output.use { destination -> packageFile.inputStream().buffered().use { it.copyTo(destination) } }
+            exported.put(fileName)
+        }
+        return JSONObject().put("ok", true).put("count", exported.length()).put("files", exported).toString()
+    }
+
+    private fun exportFileName(displayName: String, version: String): String {
+        val safeName = displayName.trim()
+            .map { char -> if (char.isISOControl() || char in "\\/:*?\"<>|") '_' else char }
+            .joinToString("")
+            .trim(' ', '.')
+            .ifBlank { "child-backup" }
+            .take(96)
+        val safeVersion = version.trim().replace(Regex("[^0-9A-Za-z._+-]+"), "_").ifBlank { "unknown" }
+        return "$safeName v$safeVersion${ExtensionPackage.SUFFIX}"
     }
 
     override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot {

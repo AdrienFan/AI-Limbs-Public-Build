@@ -28,7 +28,7 @@ object OfficialPackageProfiles {
         pluginId = "plugin.system.extension_hub",
         version = version,
         name = "Plugin Extension Hub",
-        description = "AI Limbs 二级扩展管理器：对 AIL_EXTENSION_V1 / .ailx 执行完整性、发布者信任、安装、挂载、备份与生命周期管理。",
+        description = "AI Limbs 子插件管理器：对 AIL_EXTENSION_V1 / .ailx 执行完整性、发布者信任、安装、挂载、备份、导出与生命周期管理。",
         role = "system_extension_hub",
         entryClass = "com.ai.limbs.plugins.extensionhub.ExtensionHubEntry"
     ).put(
@@ -45,7 +45,10 @@ object OfficialPackageProfiles {
             )
     ).put(
         "provides",
-        provides(providers = listOf("system.extension.hub"))
+        provides(
+            capabilities = listOf("plugin.extension_hub.export_backups"),
+            providers = listOf("system.extension.hub")
+        )
     )
 
     private fun bridge(version: String): JSONObject {
