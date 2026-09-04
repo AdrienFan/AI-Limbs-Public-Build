@@ -1,15 +1,15 @@
 {
   "format": "AIL_PLUGIN_V1",
-  "schema_version": 1,
   "plugin_id": "plugin.system.packager",
-  "version": "0.2.0",
+  "schema_version": 1,
+  "version": "0.3.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "AI Limbs 打包中心",
-    "description": "在工具箱中识别、打包、签名并验证 .ailpsys / .ailp / .ailx 插件分发包。"
+    "description": "多选或扫描 APK，按队列识别、打包、签名并验证 .ailpsys / .ailp / .ailx 插件分发包。"
   },
   "roles": [
     "system_packager"

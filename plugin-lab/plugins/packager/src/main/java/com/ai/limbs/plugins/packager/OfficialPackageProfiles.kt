@@ -104,7 +104,7 @@ object OfficialPackageProfiles {
         pluginId = "plugin.system.packager",
         version = version,
         name = "AI Limbs 打包中心",
-        description = "在工具箱中识别、打包、签名并验证 .ailpsys / .ailp / .ailx 插件分发包。",
+        description = "多选或扫描 APK，按队列识别、打包、签名并验证 .ailpsys / .ailp / .ailx 插件分发包。",
         role = "system_packager",
         entryClass = "com.ai.limbs.plugins.packager.PackagerEntry"
     ).put(
