@@ -296,7 +296,7 @@ internal class PluginHostCapabilityRegistry(
                     "HOST_PRIMITIVE_NOT_BOUND",
                     "Host Primitive has no runtime adapter: ${primitive.id}"
                 )
-            surfacePolicy?.requireAllowed(PluginSurfaceIds.hostPrimitive(primitive.id))
+            surfacePolicy?.requireScopeAllowed(primitive.id)
             if (capability.requiredScope !in grantedScopes) {
                 throw PluginInstallException(
                     "PLUGIN_SCOPE_DENIED",

@@ -73,6 +73,17 @@ class HostSurfacePolicy(context: Context) {
         return if (prefs.contains(key)) prefs.getBoolean(key, true) else true
     }
 
+    fun isScopeAllowed(scope: String): Boolean {
+        val ids = surfaceIdsForScope(scope)
+        return ids.isNotEmpty() && ids.all(::isAllowed)
+    }
+
+    fun setScopeAllowed(scope: String, allowed: Boolean) {
+        val ids = surfaceIdsForScope(scope)
+        require(ids.isNotEmpty()) { "未注册宿主权限策略：$scope" }
+        setAllowed(ids, allowed)
+    }
+
     fun setAllowed(surfaceId: String, allowed: Boolean) {
         check(developerMode) { "请先开启开发模式再修改宿主接口" }
         val id = surfaceId.trim().lowercase()
@@ -126,6 +137,15 @@ class HostSurfacePolicy(context: Context) {
                 surface.requiredScope in manifest.permissions.requestedScopes
             ) add(surface.id)
         }
+    }
+
+    private fun surfaceIdsForScope(scope: String): List<String> {
+        val normalized = scope.trim().lowercase()
+        return definitions.values
+            .filter { it.requiredScope?.trim()?.lowercase() == normalized }
+            .map { it.id }
+            .distinct()
+            .sorted()
     }
 
     private fun allowedKey(id: String) = "allowed:$id"

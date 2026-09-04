@@ -12,7 +12,6 @@ import com.ai.assistance.operit.plugins.center.PluginContributionRegistry
 import com.ai.assistance.operit.plugins.center.PluginHostCapabilityRegistry
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginManager
-import com.ai.assistance.operit.plugins.center.PluginSurfaceIds
 import com.ai.assistance.operit.plugins.center.SystemPluginUiRegistry
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -255,7 +254,7 @@ internal class KernelSystemHostGatewayV1(
 
     private fun descriptor(definition: HostPrimitiveDefinition): SystemHostPrimitiveDescriptor {
         val policyAllowed = if (definition.requestableScope && definition.exposure == HostPrimitiveExposure.BOUND) {
-            surfacePolicy.isAllowed(PluginSurfaceIds.hostPrimitive(definition.id))
+            surfacePolicy.isScopeAllowed(definition.id)
         } else null
         return SystemHostPrimitiveDescriptor(
             definition.number, definition.id, definition.title,
@@ -279,7 +278,7 @@ internal class KernelPluginPlatformControlV1(
     override fun hostPrimitiveSnapshots(): List<SystemHostPrimitiveDescriptor> =
         AiLimbsHostPrimitiveCatalog.all.map { definition ->
             val allowed = if (definition.requestableScope && definition.exposure == HostPrimitiveExposure.BOUND) {
-                surfacePolicy.isAllowed(PluginSurfaceIds.hostPrimitive(definition.id))
+                surfacePolicy.isScopeAllowed(definition.id)
             } else null
             SystemHostPrimitiveDescriptor(
                 definition.number, definition.id, definition.title,
@@ -307,7 +306,7 @@ internal class KernelPluginPlatformControlV1(
                 "Host Primitive policy is not user-toggleable: ${primitive.id} (${primitive.exposure})"
             )
         }
-        surfacePolicy.setAllowed(PluginSurfaceIds.hostPrimitive(primitive.id), allowed)
+        surfacePolicy.setScopeAllowed(primitive.id, allowed)
         manager.reconcileHostSurfacePolicy()
     }
 }

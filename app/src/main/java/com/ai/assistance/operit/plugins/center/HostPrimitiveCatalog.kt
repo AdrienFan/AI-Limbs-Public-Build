@@ -69,7 +69,7 @@ object AiLimbsHostPrimitiveCatalog {
 
     fun snapshots(surfacePolicy: HostSurfacePolicy): List<HostPrimitiveSnapshot> = all.map { definition ->
         val policyAllowed = if (definition.requestableScope && definition.exposure == HostPrimitiveExposure.BOUND) {
-            surfacePolicy.isAllowed(PluginSurfaceIds.hostPrimitive(definition.id))
+            surfacePolicy.isScopeAllowed(definition.id)
         } else null
         HostPrimitiveSnapshot(definition, policyAllowed)
     }
