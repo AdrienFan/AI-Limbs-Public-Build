@@ -98,7 +98,7 @@ fun interface SystemPluginUiActionsV2 {
      * The renderer never receives a free-form pluginId here. This prevents a generic UI component
      * from turning into an impersonation primitive while still letting buttons call their owner.
      */
-    suspend fun invokeCapability(capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject
+    suspend fun invokeCapability(capabilityId: String, parameters: JSONObject): JSONObject
 }
 
 data class SystemPluginUiSurfaceV2(

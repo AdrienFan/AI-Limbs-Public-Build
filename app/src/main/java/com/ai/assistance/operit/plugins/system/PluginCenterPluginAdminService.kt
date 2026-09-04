@@ -164,7 +164,7 @@ internal class KernelPluginAdminJsonServiceV1(
      * store remains the only code allowed to read the private backup package file. This keeps export
      * as a narrow copy operation rather than exposing internal backup paths to the system plugin.
      */
-    private fun exportBackups(parameters: JSONObject): JSONObject {
+    private suspend fun exportBackups(parameters: JSONObject): JSONObject {
         val pluginIds = parameters.optJSONArray("plugin_ids").toAdminStringSet()
         if (pluginIds.isEmpty()) {
             throw PluginInstallException("BACKUP_EXPORT_EMPTY", "At least one plugin backup must be selected")
