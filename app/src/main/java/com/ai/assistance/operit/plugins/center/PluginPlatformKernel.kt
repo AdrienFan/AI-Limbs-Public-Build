@@ -53,6 +53,13 @@ internal object PluginPlatformKernel {
 
     val isInitialized: Boolean get() = initialized
     val isStarted: Boolean get() = started
+    internal val foregroundNotification
+        get() = requireInitialized().let { notificationHostInstance.foregroundState }
+    val hasForegroundNotification: Boolean
+        get() =
+            initialized &&
+                notificationHostInstance.hasForegroundResponsibility
+
     internal val manager: PluginManager
         get() = requireInitialized().let { managerInstance }
     internal val runtimeAdapters: PluginRuntimeAdapterRegistry

@@ -6,10 +6,8 @@ import android.app.NotificationManager
 import android.app.PendingIntent
 import android.app.Service
 import android.app.ActivityManager
-import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -17,15 +15,11 @@ import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.AudioRecordingConfiguration
 import android.media.MediaRecorder
-import android.net.ConnectivityManager
-import android.net.Network
-import android.net.NetworkCapabilities
 import android.net.Uri
 import android.os.Build
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
-import android.os.PowerManager
 import android.os.Process
 import android.provider.Settings
 import android.view.Gravity
@@ -50,11 +44,10 @@ import com.ai.assistance.operit.data.preferences.ExternalHttpApiConfig
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpServer
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpState
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeHostSignal
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkState
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkTransport
-import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
+import com.ai.assistance.operit.plugins.center.PluginForegroundNotificationSnapshot
+import com.ai.assistance.operit.plugins.center.PluginNotificationActionReceiver
+import com.ai.assistance.operit.plugins.center.PluginNotificationHost
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
 import com.ai.assistance.operit.data.preferences.WakeWordPreferences
@@ -113,7 +106,6 @@ class AIForegroundService : Service() {
     companion object {
         private const val TAG = "AIForegroundService"
         private const val NOTIFICATION_ID = 1
-        private const val LEGACY_RDC_NOTIFICATION_ID = 7320
         private const val REPLY_NOTIFICATION_ID = 2001
         private const val CHANNEL_ID = "AI_SERVICE_CHANNEL"
         private const val REPLY_CHANNEL_ID_PREFIX = "AI_REPLY_COMPLETE_CHANNEL"
@@ -124,14 +116,9 @@ class AIForegroundService : Service() {
 
         private const val ACTION_EXIT_APP = "com.ai.assistance.operit.action.EXIT_APP"
         private const val REQUEST_CODE_EXIT_APP = 9003
-        private const val REQUEST_CODE_BRIDGE_CONNECT = 9010
-        private const val REQUEST_CODE_BRIDGE_STOP = 9011
-        private const val REQUEST_CODE_BRIDGE_RECONNECT = 9012
-        private const val REQUEST_CODE_BRIDGE_RECOVER = 9018
-        private const val REQUEST_CODE_BRIDGE_REPAIR = 9013
-        private const val REQUEST_CODE_BRIDGE_OPEN_AUTH = 9014
         private const val REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED = 9015
-        private const val REQUEST_CODE_BRIDGE_REFRESH = 9016
+        private const val ACTION_REFRESH_PLUGIN_NOTIFICATION =
+            "com.ai.assistance.operit.action.REFRESH_PLUGIN_NOTIFICATION"
         private const val REQUEST_CODE_VOICE_FLOATING = 9005
         private const val NOTIFICATION_WATCHDOG_INTERVAL_MS = 15_000L
 
@@ -157,23 +144,6 @@ class AIForegroundService : Service() {
         private const val ACTION_STOP_EXTERNAL_HTTP =
             "com.ai.assistance.operit.action.STOP_EXTERNAL_HTTP"
 
-        const val ACTION_BRIDGE_CONNECT =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_CONNECT"
-        const val ACTION_BRIDGE_STOP =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_STOP"
-        const val ACTION_BRIDGE_RECONNECT =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_RECONNECT"
-        const val ACTION_BRIDGE_RECOVER =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_RECOVER"
-        const val ACTION_BRIDGE_REPAIR =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REPAIR"
-        const val ACTION_BRIDGE_OPEN_AUTH =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_OPEN_AUTH"
-        const val ACTION_BRIDGE_REFRESH =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_REFRESH"
-        private const val ACTION_BRIDGE_SELECT_PROVIDER =
-            "com.ai.assistance.operit.action.AI_LIMBS_BRIDGE_SELECT_PROVIDER"
-        private const val EXTRA_BRIDGE_PROVIDER_ID = "extra_bridge_provider_id"
         private const val ACTION_FOREGROUND_NOTIFICATION_DISMISSED =
             "com.ai.assistance.operit.action.AI_LIMBS_FOREGROUND_NOTIFICATION_DISMISSED"
 
@@ -519,66 +489,10 @@ class AIForegroundService : Service() {
             startServiceForAction(context, ACTION_STOP_EXTERNAL_HTTP)
         }
 
-        fun requestBridgeAction(
-            context: Context,
-            action: BridgeAction,
-            providerId: String? = null
-        ) {
-            val appContext = context.applicationContext
-            val intent = Intent(appContext, AIForegroundService::class.java).apply {
-                this.action = bridgeIntentAction(action)
-                providerId?.takeIf { it.isNotBlank() }?.let {
-                    putExtra(EXTRA_BRIDGE_PROVIDER_ID, it)
-                }
-            }
-            startServiceIntent(context, intent)
+        internal fun refreshPluginNotification(context: Context, requireStart: Boolean) {
+            if (!requireStart && !isRunning.get()) return
+            startServiceForAction(context, ACTION_REFRESH_PLUGIN_NOTIFICATION)
         }
-
-        fun requestBridgeProviderSelection(context: Context, providerId: String) {
-            require(providerId.isNotBlank()) {
-                "Bridge provider id must not be blank"
-            }
-            val appContext = context.applicationContext
-            val intent = Intent(appContext, AIForegroundService::class.java).apply {
-                action = ACTION_BRIDGE_SELECT_PROVIDER
-                putExtra(EXTRA_BRIDGE_PROVIDER_ID, providerId)
-            }
-            startServiceIntent(context, intent)
-        }
-
-        private fun bridgeIntentAction(action: BridgeAction): String =
-            when (action) {
-                BridgeAction.CONNECT -> ACTION_BRIDGE_CONNECT
-                BridgeAction.STOP -> ACTION_BRIDGE_STOP
-                BridgeAction.RECONNECT -> ACTION_BRIDGE_RECONNECT
-                BridgeAction.RECOVER -> ACTION_BRIDGE_RECOVER
-                BridgeAction.REPAIR -> ACTION_BRIDGE_REPAIR
-                BridgeAction.OPEN_AUTH -> ACTION_BRIDGE_OPEN_AUTH
-                BridgeAction.REFRESH -> ACTION_BRIDGE_REFRESH
-            }
-
-        private fun bridgeActionFromIntent(action: String?): BridgeAction? =
-            when (action) {
-                ACTION_BRIDGE_CONNECT -> BridgeAction.CONNECT
-                ACTION_BRIDGE_STOP -> BridgeAction.STOP
-                ACTION_BRIDGE_RECONNECT -> BridgeAction.RECONNECT
-                ACTION_BRIDGE_RECOVER -> BridgeAction.RECOVER
-                ACTION_BRIDGE_REPAIR -> BridgeAction.REPAIR
-                ACTION_BRIDGE_OPEN_AUTH -> BridgeAction.OPEN_AUTH
-                ACTION_BRIDGE_REFRESH -> BridgeAction.REFRESH
-                else -> null
-            }
-
-        private fun bridgeActionRequestCode(action: BridgeAction): Int =
-            when (action) {
-                BridgeAction.CONNECT -> REQUEST_CODE_BRIDGE_CONNECT
-                BridgeAction.STOP -> REQUEST_CODE_BRIDGE_STOP
-                BridgeAction.RECONNECT -> REQUEST_CODE_BRIDGE_RECONNECT
-                BridgeAction.RECOVER -> REQUEST_CODE_BRIDGE_RECOVER
-                BridgeAction.REPAIR -> REQUEST_CODE_BRIDGE_REPAIR
-                BridgeAction.OPEN_AUTH -> REQUEST_CODE_BRIDGE_OPEN_AUTH
-                BridgeAction.REFRESH -> REQUEST_CODE_BRIDGE_REFRESH
-            }
 
         private fun startServiceForAction(context: Context, action: String) {
             val appContext = context.applicationContext
@@ -624,8 +538,10 @@ class AIForegroundService : Service() {
                     config.enabled && ExternalHttpApiPreferences.isValidPort(config.port)
                 }
             }.getOrDefault(false)
-            return alwaysListeningEnabled || backgroundKeepAliveEnabled || externalHttpEnabled ||
-                AiLimbsBridgeManager.shouldKeepAlive(appContext)
+            return alwaysListeningEnabled ||
+                backgroundKeepAliveEnabled ||
+                externalHttpEnabled ||
+                (PluginPlatformKernel.isInitialized && PluginPlatformKernel.hasForegroundNotification)
         }
     }
 
@@ -836,58 +752,9 @@ class AIForegroundService : Service() {
     private var wakeSpeechProvider: SpeechService? = null
     private val workflowRepository by lazy { WorkflowRepository(applicationContext) }
     private val externalHttpPreferences by lazy { ExternalHttpApiPreferences.getInstance(applicationContext) }
-    private val aiLimbsBridgeManager by lazy { AiLimbsBridgeManager(applicationContext, serviceScope) }
     private val backgroundSurvivalManager by lazy {
         AiLimbsBackgroundSurvivalManager(applicationContext)
     }
-    private var bridgeScreenReceiverRegistered = false
-    private var bridgeNetworkCallbackRegistered = false
-    @Volatile
-    private var bridgeNetworkState = AiLimbsBridgeNetworkState.UNKNOWN
-    @Volatile
-    private var bridgeNetworkTransport = AiLimbsBridgeNetworkTransport.NONE
-    private var bridgeScreenOffWakeLock: PowerManager.WakeLock? = null
-    private val bridgeNetworkCallback =
-        object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                publishBridgeNetworkState("network_available")
-            }
-
-            override fun onLost(network: Network) {
-                publishBridgeNetworkState("network_lost")
-            }
-
-            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-                publishBridgeNetworkState("network_capabilities_changed")
-            }
-        }
-    private val bridgeScreenStateReceiver =
-        object : BroadcastReceiver() {
-            override fun onReceive(context: Context?, intent: Intent?) {
-                if (!isRunning.get()) return
-                val action = intent?.action ?: return
-                val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-                when (action) {
-                    Intent.ACTION_SCREEN_OFF -> {
-                        applyBackgroundSurvivalForeground("screen_off", force = true)
-                        updateBridgeScreenOffWakeLock("screen_broadcast:$action")
-                        logBridgeHostHealth("screen_off")
-                        aiLimbsBridgeManager.onHostSignal(AiLimbsBridgeHostSignal.ScreenOff)
-                    }
-                    Intent.ACTION_SCREEN_ON -> {
-                        updateBridgeScreenOffWakeLock("screen_broadcast:$action")
-                        logBridgeHostHealth("screen_on")
-                        aiLimbsBridgeManager.onHostSignal(AiLimbsBridgeHostSignal.ScreenOn)
-                    }
-                    PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED -> {
-                        logBridgeHostHealth("device_idle_changed")
-                        aiLimbsBridgeManager.onHostSignal(
-                            AiLimbsBridgeHostSignal.DeviceIdleChanged(powerManager.isDeviceIdleMode)
-                        )
-                    }
-                }
-            }
-        }
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private var keepAliveOverlayView: View? = null
@@ -1096,136 +963,6 @@ class AIForegroundService : Service() {
         }.getOrDefault(false)
     }
 
-    private fun registerBridgeScreenStateReceiver() {
-        if (bridgeScreenReceiverRegistered) return
-        val filter = IntentFilter().apply {
-            addAction(Intent.ACTION_SCREEN_OFF)
-            addAction(Intent.ACTION_SCREEN_ON)
-            addAction(PowerManager.ACTION_DEVICE_IDLE_MODE_CHANGED)
-        }
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                registerReceiver(bridgeScreenStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
-            } else {
-                @Suppress("DEPRECATION")
-                registerReceiver(bridgeScreenStateReceiver, filter)
-            }
-            bridgeScreenReceiverRegistered = true
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to register AI Limbs bridge screen receiver", e)
-        }
-    }
-
-    private fun unregisterBridgeScreenStateReceiver() {
-        if (!bridgeScreenReceiverRegistered) return
-        runCatching { unregisterReceiver(bridgeScreenStateReceiver) }
-            .onFailure { AppLogger.w(TAG, "Failed to unregister AI Limbs bridge screen receiver", it) }
-        bridgeScreenReceiverRegistered = false
-    }
-
-    private fun registerBridgeNetworkCallback() {
-        if (bridgeNetworkCallbackRegistered) return
-        val connectivityManager =
-            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        try {
-            connectivityManager.registerDefaultNetworkCallback(bridgeNetworkCallback)
-            bridgeNetworkCallbackRegistered = true
-            publishBridgeNetworkState("network_callback_registered")
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Failed to register AI Limbs bridge network callback", e)
-        }
-    }
-
-    private fun unregisterBridgeNetworkCallback() {
-        if (!bridgeNetworkCallbackRegistered) return
-        val connectivityManager =
-            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        runCatching { connectivityManager.unregisterNetworkCallback(bridgeNetworkCallback) }
-            .onFailure { AppLogger.w(TAG, "Failed to unregister AI Limbs bridge network callback", it) }
-        bridgeNetworkCallbackRegistered = false
-    }
-
-    private fun publishBridgeNetworkState(reason: String) {
-        if (!isRunning.get()) return
-        val connectivityManager =
-            getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        val activeNetwork = connectivityManager.activeNetwork
-        val capabilities = activeNetwork?.let { connectivityManager.getNetworkCapabilities(it) }
-        val nextState = when {
-            activeNetwork == null -> AiLimbsBridgeNetworkState.LOST
-            capabilities?.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED) == true ->
-                AiLimbsBridgeNetworkState.VALIDATED
-            else -> AiLimbsBridgeNetworkState.AVAILABLE_UNVALIDATED
-        }
-        val nextTransport = when {
-            capabilities == null -> AiLimbsBridgeNetworkTransport.NONE
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_VPN) -> AiLimbsBridgeNetworkTransport.VPN
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> AiLimbsBridgeNetworkTransport.WIFI
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> AiLimbsBridgeNetworkTransport.CELLULAR
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_ETHERNET) -> AiLimbsBridgeNetworkTransport.ETHERNET
-            else -> AiLimbsBridgeNetworkTransport.OTHER
-        }
-        val changed = nextState != bridgeNetworkState || nextTransport != bridgeNetworkTransport
-        if (!changed && reason != "network_callback_registered") return
-        bridgeNetworkState = nextState
-        bridgeNetworkTransport = nextTransport
-        logBridgeHostHealth(reason)
-        aiLimbsBridgeManager.onHostSignal(
-            AiLimbsBridgeHostSignal.NetworkChanged(nextState, nextTransport)
-        )
-    }
-
-    private fun logBridgeHostHealth(reason: String) {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val batteryOptimizationIgnored =
-            runCatching { powerManager.isIgnoringBatteryOptimizations(packageName) }.getOrDefault(false)
-        AppLogger.i(
-            TAG,
-            "AI Limbs bridge host health: reason=$reason, interactive=${powerManager.isInteractive}, " +
-                "deviceIdle=${powerManager.isDeviceIdleMode}, wakeLockHeld=${bridgeScreenOffWakeLock?.isHeld == true}, " +
-                "batteryOptimizationIgnored=$batteryOptimizationIgnored, " +
-                "network=$bridgeNetworkState/$bridgeNetworkTransport, " +
-                "bridge=${aiLimbsBridgeManager.state.value.phase}"
-        )
-    }
-
-    private fun updateBridgeScreenOffWakeLock(reason: String) {
-        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-        val shouldHold =
-            !powerManager.isInteractive &&
-                (aiLimbsBridgeManager.shouldKeepAlive ||
-                    aiLimbsBridgeManager.hasActivePairingTransaction) &&
-                aiLimbsBridgeManager.requiresScreenOffCpuKeepAlive
-        if (shouldHold) {
-            if (bridgeScreenOffWakeLock == null) {
-                bridgeScreenOffWakeLock =
-                    powerManager.newWakeLock(
-                        PowerManager.PARTIAL_WAKE_LOCK,
-                        "$packageName:AiLimbsBridgeScreenOff"
-                    ).apply { setReferenceCounted(false) }
-            }
-            if (bridgeScreenOffWakeLock?.isHeld != true) {
-                bridgeScreenOffWakeLock?.acquire()
-                AppLogger.i(
-                    TAG,
-                    "AI Limbs bridge screen-off WakeLock acquired: reason=$reason, " +
-                        "provider=${aiLimbsBridgeManager.activeProfile.id}, deviceIdle=${powerManager.isDeviceIdleMode}"
-                )
-            }
-        } else {
-            releaseBridgeScreenOffWakeLock(reason)
-        }
-    }
-
-    private fun releaseBridgeScreenOffWakeLock(reason: String) {
-        val wakeLock = bridgeScreenOffWakeLock ?: return
-        if (wakeLock.isHeld) {
-            runCatching { wakeLock.release() }
-                .onSuccess { AppLogger.i(TAG, "AI Limbs bridge screen-off WakeLock released: reason=$reason") }
-                .onFailure { AppLogger.w(TAG, "Failed to release AI Limbs bridge screen-off WakeLock", it) }
-        }
-    }
-
     private fun shouldRequestPersistentBackgroundSurvival(): Boolean {
         return hasPersistentForegroundResponsibility() ||
             hasPersistentForegroundResponsibilityConfigured(applicationContext)
@@ -1234,7 +971,7 @@ class AIForegroundService : Service() {
     private fun shouldUseSpecialForegroundType(): Boolean {
         val externalHttpEnabled =
             externalHttpStateFlow.value.isRunning || isExternalHttpEnabledNow()
-        return aiLimbsBridgeManager.shouldKeepAlive || externalHttpEnabled
+        return PluginPlatformKernel.hasForegroundNotification || externalHttpEnabled
     }
 
     private fun applyBackgroundSurvivalForeground(
@@ -1277,13 +1014,12 @@ class AIForegroundService : Service() {
             alwaysListeningEnabled ||
             backgroundKeepAliveEnabled ||
             externalHttpEnabled ||
-            aiLimbsBridgeManager.hasActivePairingTransaction ||
-            aiLimbsBridgeManager.shouldKeepAlive
+            PluginPlatformKernel.hasForegroundNotification
     }
 
     private fun persistentStartMode(): Int =
         if (
-            aiLimbsBridgeManager.shouldKeepAlive ||
+            PluginPlatformKernel.hasForegroundNotification ||
             externalHttpStateFlow.value.isRunning ||
             isExternalHttpEnabledNow()
         ) {
@@ -1327,20 +1063,13 @@ class AIForegroundService : Service() {
             microphone = false,
             force = true
         )
-        cancelLegacyRdcNotification()
         startNotificationWatchdog()
-        observeBridgeState()
+        observePluginForegroundNotification()
         observeRuntimeTaskViewPreference()
         observeBackgroundKeepAlivePreference()
         observeChatRuntimeStats()
         startWakeMonitoring()
         startExternalHttpMonitoring()
-        registerBridgeScreenStateReceiver()
-        aiLimbsBridgeManager.startIfDesired()
-        registerBridgeNetworkCallback()
-        updateBridgeScreenOffWakeLock("service_create")
-        logBridgeHostHealth("service_create")
-        AppLogger.i(TAG, "AI Limbs bridge manager initialized")
         AppLogger.d(TAG, "AI 前台服务已启动。")
     }
 
@@ -1500,9 +1229,6 @@ class AIForegroundService : Service() {
             }
 
             stopExternalHttpServer(lastError = null)
-            aiLimbsBridgeManager.stopByUser()
-            AppLogger.i(TAG, "AI Limbs bridge stopped by explicit app exit")
-
             try {
                 val activity = ActivityLifecycleManager.getCurrentActivity()
                 activity?.runOnUiThread {
@@ -1519,7 +1245,6 @@ class AIForegroundService : Service() {
             try {
                 val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                 manager.cancel(NOTIFICATION_ID)
-                manager.cancel(LEGACY_RDC_NOTIFICATION_ID)
                 activeReplyNotificationTags.forEach { tag ->
                     manager.cancel(tag, REPLY_NOTIFICATION_ID)
                 }
@@ -1551,48 +1276,9 @@ class AIForegroundService : Service() {
             return persistentStartMode()
         }
 
-        if (intent?.action == ACTION_BRIDGE_SELECT_PROVIDER) {
-            val providerId = intent.getStringExtra(EXTRA_BRIDGE_PROVIDER_ID)
-            if (providerId.isNullOrBlank()) {
-                AppLogger.e(TAG, "Bridge provider selection is missing a provider id")
-            } else {
-                try {
-                    aiLimbsBridgeManager.selectProvider(providerId)
-                    AppLogger.i(TAG, "AI Limbs active bridge provider changed to $providerId")
-                } catch (e: Exception) {
-                    AppLogger.e(TAG, "Unable to select bridge provider $providerId", e)
-                }
-            }
+        if (intent?.action == ACTION_REFRESH_PLUGIN_NOTIFICATION) {
             refreshServiceNotification()
-            return persistentStartMode()
-        }
-
-        val requestedBridgeAction = bridgeActionFromIntent(intent?.action)
-        if (requestedBridgeAction != null) {
-            val handled =
-                try {
-                    aiLimbsBridgeManager.perform(
-                        requestedBridgeAction,
-                        intent?.getStringExtra(EXTRA_BRIDGE_PROVIDER_ID)
-                    )
-                } catch (e: Exception) {
-                    AppLogger.e(
-                        TAG,
-                        "AI Limbs bridge action failed: $requestedBridgeAction",
-                        e
-                    )
-                    false
-                }
-            if (!handled) {
-                AppLogger.w(
-                    TAG,
-                    "AI Limbs bridge action was not available: $requestedBridgeAction"
-                )
-            }
-            if (handled && requestedBridgeAction == BridgeAction.STOP) {
-                stopSelfIfIdle(ignoreAppForeground = true)
-            }
-            refreshServiceNotification()
+            stopSelfIfIdle(ignoreAppForeground = true)
             return persistentStartMode()
         }
 
@@ -1737,16 +1423,8 @@ class AIForegroundService : Service() {
         stopNotificationWatchdog()
         updateAiBusyState(false)
         hideKeepAliveOverlay()
-        AppLogger.w(
-            TAG,
-            "AIForegroundService onDestroy: bridge=${aiLimbsBridgeManager.statusSummary()}"
-        )
-        unregisterBridgeNetworkCallback()
-        unregisterBridgeScreenStateReceiver()
-        aiLimbsBridgeManager.stopRuntime()
-        releaseBridgeScreenOffWakeLock("service_destroy")
+        AppLogger.d(TAG, "AIForegroundService onDestroy")
         stopWakeMonitoring()
-        cancelLegacyRdcNotification()
         AppLogger.d(TAG, "AI 前台服务已销毁。")
         super.onDestroy()
     }
@@ -2310,17 +1988,32 @@ class AIForegroundService : Service() {
         return cleaned
     }
 
-    private fun observeBridgeState() {
+    private fun observePluginForegroundNotification() {
         serviceScope.launch {
-            aiLimbsBridgeManager.state.collect { state ->
-                updateBridgeScreenOffWakeLock("bridge_state:${state.phase}")
+            PluginPlatformKernel.foregroundNotification.collect { snapshot ->
+                refreshServiceNotification()
+                if (snapshot == null) {
+                    stopSelfIfIdle(ignoreAppForeground = true)
+                }
             }
         }
     }
 
-    private fun cancelLegacyRdcNotification() {
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.cancel(LEGACY_RDC_NOTIFICATION_ID)
+    private fun pluginActionPendingIntent(
+        snapshot: PluginForegroundNotificationSnapshot,
+        actionId: String
+    ): PendingIntent {
+        val intent = Intent(this, PluginNotificationActionReceiver::class.java).apply {
+            action = PluginNotificationHost.ACTION_NOTIFICATION
+            putExtra(PluginNotificationHost.EXTRA_BINDING_ID, snapshot.bindingId)
+            putExtra(PluginNotificationHost.EXTRA_ACTION_ID, actionId)
+        }
+        return PendingIntent.getBroadcast(
+            this,
+            31 * snapshot.bindingId.hashCode() + actionId.hashCode(),
+            intent,
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
     }
 
     private fun serviceActionPendingIntent(action: String, requestCode: Int): PendingIntent {
@@ -2365,24 +2058,63 @@ class AIForegroundService : Service() {
                 getString(R.string.service_running_http_listening, externalHttpSnapshot.port)
             else -> getString(R.string.service_ai_limbs_running)
         }
+        val pluginSnapshot =
+            if (PluginPlatformKernel.isInitialized) {
+                PluginPlatformKernel.foregroundNotification.value
+            } else {
+                null
+            }
+        val pluginState = pluginSnapshot?.state
+        val contentText =
+            if (pluginState == null) {
+                runtimeText
+            } else {
+                pluginState.summary.ifBlank {
+                    pluginState.statusLines.firstOrNull().orEmpty()
+                }
+            }
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.service_ai_limbs_running))
-            .setContentText(runtimeText)
-            .setSmallIcon(R.drawable.ic_ai_limbs_notification)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setSilent(true)
-            .setDeleteIntent(
-                serviceActionPendingIntent(
-                    ACTION_FOREGROUND_NOTIFICATION_DISMISSED,
-                    REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED
+        val builder =
+            NotificationCompat.Builder(this, CHANNEL_ID)
+                .setContentTitle(pluginState?.title ?: getString(R.string.service_ai_limbs_running))
+                .setContentText(contentText)
+                .setSmallIcon(R.drawable.ic_ai_limbs_notification)
+                .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setCategory(NotificationCompat.CATEGORY_SERVICE)
+                .setOngoing(true)
+                .setOnlyAlertOnce(true)
+                .setSilent(true)
+                .setDeleteIntent(
+                    serviceActionPendingIntent(
+                        ACTION_FOREGROUND_NOTIFICATION_DISMISSED,
+                        REQUEST_CODE_FOREGROUND_NOTIFICATION_DISMISSED
+                    )
                 )
+                .setContentIntent(mainContentPendingIntent())
+
+        if (pluginSnapshot != null && pluginState != null) {
+            val expandedText =
+                buildString {
+                    pluginState.summary.takeIf { it.isNotBlank() }?.let(::append)
+                    pluginState.statusLines.forEach { line ->
+                        if (isNotEmpty()) append('\n')
+                        append(line)
+                    }
+                }
+            builder.setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle(pluginState.title)
+                    .bigText(expandedText)
             )
-            .setContentIntent(mainContentPendingIntent())
-            .build()
+            pluginState.actions.take(2).forEach { action ->
+                builder.addAction(
+                    R.drawable.ic_ai_limbs_notification,
+                    action.label,
+                    pluginActionPendingIntent(pluginSnapshot, action.id)
+                )
+            }
+        }
+        return builder.build()
     }
 
 }

@@ -41,7 +41,6 @@ import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.data.preferences.WakeWordPreferences
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRdcClient
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPlugin
 import com.ai.assistance.operit.data.preferences.initAndroidPermissionPreferences
 import com.ai.assistance.operit.data.preferences.initUserPreferencesManager
@@ -506,7 +505,7 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
             val externalHttpEnabled = runBlocking {
                 ExternalHttpApiPreferences.getInstance(applicationContext).enabledFlow.first()
             }
-            if ((!alwaysListeningEnabled && !externalHttpEnabled && !AiLimbsRdcClient.ENABLED) || AIForegroundService.isRunning.get()) {
+            if ((!alwaysListeningEnabled && !externalHttpEnabled && !PluginPlatformKernel.hasForegroundNotification) || AIForegroundService.isRunning.get()) {
                 return
             }
             val intent = Intent(this, AIForegroundService::class.java).apply {

@@ -1,18 +1,9 @@
 package com.ai.assistance.operit.plugins.center
 
-import android.app.NotificationChannel
-import android.app.NotificationManager
-import android.app.PendingIntent
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.content.res.Configuration
-import android.graphics.Color
-import android.view.View
-import android.widget.RemoteViews
-import android.os.Build
-import androidx.core.app.NotificationCompat
-import com.ai.assistance.operit.R
+import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.limbs.plugin.runtime.InProcessNotificationActionHandler
 import com.ai.limbs.plugin.runtime.InProcessNotificationHost
@@ -25,9 +16,17 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
+
+internal data class PluginForegroundNotificationSnapshot(
+    val bindingId: String,
+    val ownerPluginId: String,
+    val state: InProcessNotificationState
+)
 
 internal class PluginNotificationHost(
     context: Context,
@@ -41,22 +40,14 @@ internal class PluginNotificationHost(
     )
 
     private val appContext = context.applicationContext
-    private val manager = appContext.getSystemService(NotificationManager::class.java)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val bindings = ConcurrentHashMap<String, Binding>()
     private val ownerBindings = ConcurrentHashMap<String, String>()
+    private val foregroundStateFlow = MutableStateFlow<PluginForegroundNotificationSnapshot?>(null)
 
-    init {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            manager.createNotificationChannel(
-                NotificationChannel(
-                    CHANNEL_ID,
-                    "AI Limbs 插件通知",
-                    NotificationManager.IMPORTANCE_LOW
-                ).apply { description = "由 AI Limbs Notification Host Surface 统一渲染" }
-            )
-        }
-    }
+    val foregroundState: StateFlow<PluginForegroundNotificationSnapshot?> = foregroundStateFlow.asStateFlow()
+    val hasForegroundResponsibility: Boolean
+        get() = foregroundStateFlow.value != null
 
     fun bindingFor(ownerPluginId: String, requestedScopes: Set<String>): InProcessProviderBinding? {
         if (NOTIFICATION_SCOPE !in requestedScopes || !surfacePolicy.isAllowed(PluginSurfaceIds.HOST_NOTIFICATION)) {
@@ -90,15 +81,14 @@ internal class PluginNotificationHost(
         bindings[bindingId] = binding
         binding.job = scope.launch {
             state.collect { raw ->
-                val sanitized = raw?.sanitize()
-                binding.latest = sanitized
-                if (sanitized == null) cancelNotification(bindingId) else render(bindingId, sanitized)
+                binding.latest = raw?.sanitize()
+                recomputeForegroundState()
             }
         }
         return AutoCloseable {
             bindings.remove(bindingId)?.job?.cancel()
             ownerBindings.remove(ownerPluginId, bindingId)
-            cancelNotification(bindingId)
+            recomputeForegroundState()
         }
     }
 
@@ -113,14 +103,38 @@ internal class PluginNotificationHost(
     }
 
     fun refreshAll() {
-        bindings.forEach { (id, binding) -> binding.latest?.let { render(id, it) } }
+        recomputeForegroundState()
     }
 
     fun clear() {
-        bindings.keys.toList().forEach(::cancelNotification)
         bindings.values.forEach { it.job?.cancel() }
         bindings.clear()
         ownerBindings.clear()
+        recomputeForegroundState()
+    }
+
+    @Synchronized
+    private fun recomputeForegroundState() {
+        // The foreground service owns one Android notification. Stable owner ordering keeps
+        // competing plugin updates from stealing the card based on timing.
+        foregroundStateFlow.value =
+            bindings.entries
+                .asSequence()
+                .mapNotNull { (bindingId, binding) ->
+                    binding.latest?.let { state ->
+                        PluginForegroundNotificationSnapshot(
+                            bindingId,
+                            binding.ownerPluginId,
+                            state
+                        )
+                    }
+                }
+                .sortedWith(compareBy({ it.ownerPluginId }, { it.bindingId }))
+                .firstOrNull()
+        AIForegroundService.refreshPluginNotification(
+            appContext,
+            requireStart = foregroundStateFlow.value != null
+        )
     }
 
     private fun InProcessNotificationState.sanitize(): InProcessNotificationState {
@@ -139,107 +153,10 @@ internal class PluginNotificationHost(
         return copy(title = cleanTitle, summary = cleanSummary, statusLines = cleanLines, actions = cleanActions)
     }
 
-    private fun render(bindingId: String, state: InProcessNotificationState) {
-        val detail = state.statusLines.joinToString("\n")
-        val contentText = state.summary.ifBlank { state.statusLines.firstOrNull().orEmpty() }
-        val launchPendingIntent = launchPendingIntent(bindingId)
-        val expanded = createExpandedView(bindingId, state, detail, launchPendingIntent)
-        val builder = NotificationCompat.Builder(appContext, CHANNEL_ID)
-            .setSmallIcon(android.R.drawable.stat_notify_sync)
-            .setContentTitle(state.title)
-            .setContentText(contentText)
-            .setStyle(NotificationCompat.DecoratedCustomViewStyle())
-            .setCustomBigContentView(expanded)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
-            .setCategory(NotificationCompat.CATEGORY_SERVICE)
-            .setOngoing(true)
-            .setOnlyAlertOnce(true)
-            .setSilent(true)
-
-        launchPendingIntent?.let(builder::setContentIntent)
-        runCatching { manager.notify(bindingId, NOTIFICATION_ID, builder.build()) }
-            .onFailure { AppLogger.w(TAG, "Notification render skipped: ${it.message}", it) }
-    }
-
-    private fun createExpandedView(
-        bindingId: String,
-        state: InProcessNotificationState,
-        detail: String,
-        launchPendingIntent: PendingIntent?
-    ): RemoteViews {
-        val views = RemoteViews(appContext.packageName, R.layout.notification_plugin_surface)
-        val nightMode =
-            appContext.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK ==
-                Configuration.UI_MODE_NIGHT_YES
-        val primary = if (nightMode) Color.WHITE else Color.rgb(32, 33, 36)
-        val secondary = if (nightMode) Color.rgb(210, 214, 220) else Color.rgb(82, 86, 94)
-        val actionColor = if (nightMode) Color.rgb(138, 180, 248) else Color.rgb(25, 103, 210)
-        views.setTextViewText(R.id.notification_surface_title, state.title)
-        views.setTextColor(R.id.notification_surface_title, primary)
-        launchPendingIntent?.let { views.setOnClickPendingIntent(R.id.notification_surface_title, it) }
-        val body = buildString {
-            state.summary.takeIf { it.isNotBlank() }?.let { append(it) }
-            if (detail.isNotBlank()) {
-                if (isNotEmpty()) append('\n')
-                append(detail)
-            }
-        }
-        views.setTextViewText(R.id.notification_surface_details, body)
-        views.setTextColor(R.id.notification_surface_details, secondary)
-        bindAction(views, R.id.notification_surface_action_primary, state.actions.getOrNull(0), bindingId, actionColor)
-        bindAction(views, R.id.notification_surface_action_secondary, state.actions.getOrNull(1), bindingId, actionColor)
-        return views
-    }
-
-    private fun bindAction(
-        views: RemoteViews,
-        viewId: Int,
-        action: com.ai.limbs.plugin.runtime.InProcessNotificationAction?,
-        bindingId: String,
-        textColor: Int
-    ) {
-        if (action == null) {
-            views.setViewVisibility(viewId, View.GONE)
-            return
-        }
-        views.setViewVisibility(viewId, View.VISIBLE)
-        views.setTextViewText(viewId, action.label)
-        views.setTextColor(viewId, textColor)
-        views.setOnClickPendingIntent(viewId, actionPendingIntent(bindingId, action.id))
-        views.setContentDescription(viewId, action.label)
-    }
-
-    private fun launchPendingIntent(bindingId: String): PendingIntent? =
-        appContext.packageManager.getLaunchIntentForPackage(appContext.packageName)?.let { launch ->
-            PendingIntent.getActivity(
-                appContext,
-                bindingId.hashCode(),
-                launch,
-                PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-            )
-        }
-
-    private fun actionPendingIntent(bindingId: String, actionId: String): PendingIntent =
-        PendingIntent.getBroadcast(
-            appContext,
-            31 * bindingId.hashCode() + actionId.hashCode(),
-            Intent(appContext, PluginNotificationActionReceiver::class.java)
-                .setAction(ACTION_NOTIFICATION)
-                .putExtra(EXTRA_BINDING_ID, bindingId)
-                .putExtra(EXTRA_ACTION_ID, actionId),
-            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
-        )
-
-    private fun cancelNotification(bindingId: String) {
-        manager.cancel(bindingId, NOTIFICATION_ID)
-    }
-
     companion object {
         private const val TAG = "PluginNotificationHost"
         private const val HOST_OWNER_ID = "core.notification.host"
         const val NOTIFICATION_SCOPE = "host.notification@1"
-        private const val CHANNEL_ID = "ai_limbs_plugin_notification"
-        private const val NOTIFICATION_ID = 7053
         private const val MAX_TITLE = 80
         private const val MAX_SUMMARY = 160
         private const val MAX_LINE = 160
