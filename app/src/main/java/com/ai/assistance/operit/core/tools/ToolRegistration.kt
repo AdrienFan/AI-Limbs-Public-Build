@@ -403,7 +403,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
     handler.registerTool(
             name = "ai_limbs.bridge.reconnect",
             descriptionGenerator = { "Schedule an AI Limbs Bridge reconnect after this tool response is returned" },
-            executor = { tool -> AiLimbsBridgeReconnectToolExecutor(context).execute(tool) }
+            executor = { tool -> AiLimbsBridgeReconnectToolExecutor().execute(tool) }
     )
 
     handler.registerTool(

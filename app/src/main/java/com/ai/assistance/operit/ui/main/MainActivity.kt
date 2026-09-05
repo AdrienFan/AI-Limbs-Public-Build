@@ -36,6 +36,7 @@ import androidx.lifecycle.lifecycleScope
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.preferences.AgreementPreferences
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
@@ -115,13 +116,12 @@ class MainActivity : ComponentActivity() {
         if (isGranted) {
             AppLogger.d(TAG, "通知权限已授予")
             runCatching {
-                startService(
-                    Intent(this, AIForegroundService::class.java).apply {
-                        action = AIForegroundService.ACTION_BRIDGE_REFRESH
-                    }
+                AIForegroundService.refreshPluginNotification(
+                    this,
+                    requireStart = PluginPlatformKernel.hasForegroundNotification
                 )
             }.onFailure { error ->
-                AppLogger.w(TAG, "通知权限授予后刷新 AI Limbs 桥状态失败: ${error.message}", error)
+                AppLogger.w(TAG, "通知权限授予后刷新 AI Limbs 插件通知失败: ${error.message}", error)
             }
         } else {
             AppLogger.d(TAG, "通知权限被拒绝")
