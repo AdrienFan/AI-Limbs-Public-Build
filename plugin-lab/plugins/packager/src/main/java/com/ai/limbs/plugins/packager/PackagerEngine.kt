@@ -10,7 +10,6 @@ import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import java.io.File
 import java.io.FileOutputStream
 import java.security.MessageDigest
-import java.util.Base64
 import java.util.UUID
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
@@ -51,6 +50,7 @@ class PackagerEngine(private val host: InProcessPluginHost) {
     private val context = host.applicationContext
     private val packageManager = context.packageManager
     private val resolver = context.contentResolver
+    private val signingVault = DevelopmentSigningVault(host.dataDir)
 
     fun inspectJson(inputSource: String, manifestSource: String? = null): JSONObject {
         val prepared = prepareApk(inputSource)
@@ -88,16 +88,9 @@ class PackagerEngine(private val host: InProcessPluginHost) {
                     .put("entry", signatureEntry)
             )
             val manifestBytes = canonicalJson(manifest).toByteArray(Charsets.UTF_8)
-            val signing = signingRequest(
-                operation = "sign",
-                profile = inspection.type.signingProfile,
-                data = manifestBytes
-            )
-            require(signing.optString("status") == "OK") {
-                signing.optString("message").ifBlank { "Signing failed" }
-            }
-            require(signing.optString("signer_id") == signerId) { "Unexpected signer identity" }
-            val signature = Base64.getDecoder().decode(signing.getString("signature_base64"))
+            val signing = signingVault.sign(inspection.type, manifestBytes)
+            require(signing.signerId == signerId) { "Unexpected signer identity" }
+            val signature = signing.signature
 
             val outputDir = resolveOutputDirectory(inspection.input, inspection.source, outputDirectory)
             val outputName = outputName(inspection.displayName, inspection.version, inspection.type)
@@ -133,7 +126,7 @@ class PackagerEngine(private val host: InProcessPluginHost) {
                 .put("output_name", output.name)
                 .put("package_sha256", sha256(output))
                 .put("signer_id", signerId)
-                .put("fingerprint_sha256", signing.optString("fingerprint_sha256"))
+                .put("fingerprint_sha256", signing.fingerprintSha256)
         } finally {
             prepared.cleanup()
         }
@@ -160,11 +153,18 @@ class PackagerEngine(private val host: InProcessPluginHost) {
         }
     }
 
-    suspend fun signingStatus(import: Boolean): JSONObject = signingRequest(
-        operation = if (import) "import" else "status",
-        profile = null,
-        data = null
-    )
+    fun signingStatus(): JSONObject = signingVault.status()
+
+    fun importSigningKey(type: PackagerArtifactType, source: String): JSONObject {
+        val pem = readBinarySource(source)
+        return try {
+            signingVault.importPrivateKey(type, pem)
+        } finally {
+            pem.fill(0)
+        }
+    }
+
+    fun clearSigningKeys(): JSONObject = signingVault.clearAll()
 
     private fun inspectPrepared(
         source: String,
@@ -260,6 +260,19 @@ class PackagerEngine(private val host: InProcessPluginHost) {
             ?.let { it.absolutePath to it.readText(Charsets.UTF_8) }
     }
 
+    private fun readBinarySource(source: String): ByteArray {
+        val normalized = source.trim()
+        require(normalized.isNotBlank()) { "私钥来源为空" }
+        return if (normalized.startsWith("content://")) {
+            resolver.openInputStream(Uri.parse(normalized)).use { input ->
+                requireNotNull(input) { "无法读取选择的私钥文件" }
+                input.readBytes()
+            }
+        } else {
+            requireSharedFile(normalized).readBytes()
+        }
+    }
+
     private fun readTextSource(source: String): String {
         val normalized = source.trim()
         return if (normalized.startsWith("content://")) {
@@ -349,8 +362,7 @@ class PackagerEngine(private val host: InProcessPluginHost) {
         require(manifest.optString("version") == expectedVersion) { "Packaged version mismatch" }
         val display = manifest.optJSONObject("display")?.optString("name")?.trim().orEmpty()
         require(display == expectedName) { "Packaged display name mismatch" }
-        val verify = signingRequest("verify", type.signingProfile, archiveManifest, archiveSignature)
-        val verified = verify.optString("status") == "OK" && verify.optBoolean("verified")
+        val verified = signingVault.verify(type, archiveManifest, archiveSignature)
         return JSONObject()
             .put("verified", verified)
             .put("manifest_verified", true)
@@ -359,20 +371,7 @@ class PackagerEngine(private val host: InProcessPluginHost) {
             .put("artifact_type", type.name.lowercase())
             .put("display_name", expectedName)
             .put("version", expectedVersion)
-            .put("message", if (verified) "Package, integrity and Ed25519 signature verified" else verify.optString("message"))
-    }
-
-    private suspend fun signingRequest(
-        operation: String,
-        profile: String?,
-        data: ByteArray?,
-        signature: ByteArray? = null
-    ): JSONObject {
-        val request = JSONObject().put("operation", operation)
-        if (profile != null) request.put("profile", profile)
-        if (data != null) request.put("data_base64", Base64.getEncoder().encodeToString(data))
-        if (signature != null) request.put("signature_base64", Base64.getEncoder().encodeToString(signature))
-        return JSONObject(host.invokeHostCapability(PRIVATE_SIGNING_CAPABILITY, request.toString()))
+            .put("message", if (verified) "Package, integrity and Ed25519 signature verified" else "Ed25519 signature verification failed")
     }
 
     private fun typeForFormat(format: String): PackagerArtifactType = when (format) {
@@ -471,11 +470,7 @@ class PackagerEngine(private val host: InProcessPluginHost) {
     private fun officialManifest(packageName: String, version: String): Pair<PackagerArtifactType, JSONObject>? =
         OfficialPackageProfiles.resolve(packageName, version)
 
-    private fun signerIdFor(type: PackagerArtifactType): String = when (type) {
-        PackagerArtifactType.SYSTEM -> "ai-limbs-plugin-center-dev-v1"
-        PackagerArtifactType.PARENT -> "ai-limbs-parent-plugin-dev-v1"
-        PackagerArtifactType.CHILD -> "ai-limbs-child-extension-dev-v1"
-    }
+    private fun signerIdFor(type: PackagerArtifactType): String = signingVault.signerId(type)
 
     private fun JSONObject.requiredRuntimeEntry(): String {
         val value = optJSONObject("runtime")?.optString("entry")?.trim().orEmpty()
@@ -484,7 +479,4 @@ class PackagerEngine(private val host: InProcessPluginHost) {
         return value
     }
 
-    companion object {
-        private const val PRIVATE_SIGNING_CAPABILITY = "host.private.plugin_signing@1"
-    }
 }

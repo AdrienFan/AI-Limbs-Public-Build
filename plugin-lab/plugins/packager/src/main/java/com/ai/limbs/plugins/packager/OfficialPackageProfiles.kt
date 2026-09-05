@@ -4,17 +4,21 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 object OfficialPackageProfiles {
-    fun resolve(packageName: String, version: String): Pair<PackagerArtifactType, JSONObject>? = when (packageName) {
-        "com.ai.limbs.plugincenter.system.v1" -> PackagerArtifactType.SYSTEM to pluginCenter(version)
-        "com.ai.limbs.payload.extensionhub" -> PackagerArtifactType.PARENT to extensionHub(version)
-        "com.ai.limbs.payload.bridge" -> PackagerArtifactType.PARENT to bridge(version)
-        "com.ai.limbs.payload.developerguide" -> PackagerArtifactType.PARENT to developerGuide(version)
-        "com.ai.limbs.payload.packager" -> PackagerArtifactType.PARENT to packager(version)
-        "com.ai.limbs.payload.rdc" -> PackagerArtifactType.CHILD to rdc(version)
-        "com.ai.limbs.payload.triggercmd" -> PackagerArtifactType.CHILD to triggerCmd(version)
-        else -> null
+    fun resolve(packageName: String, version: String): Pair<PackagerArtifactType, JSONObject>? {
+        if (packageName.matches(Regex("^com\.ai\.limbs\.plugincenter\.system\.v[0-9]+$"))) {
+            return PackagerArtifactType.SYSTEM to pluginCenter(version)
+        }
+        return when (packageName) {
+            "com.ai.limbs.payload.extensionhub" -> PackagerArtifactType.PARENT to extensionHub(version)
+            "com.ai.limbs.payload.bridge" -> PackagerArtifactType.PARENT to bridge(version)
+            "com.ai.limbs.payload.developerguide" -> PackagerArtifactType.PARENT to developerGuide(version)
+            "com.ai.limbs.payload.packager",
+            "com.ai.limbs.payload.packager.v040" -> PackagerArtifactType.PARENT to packager(version)
+            "com.ai.limbs.payload.rdc" -> PackagerArtifactType.CHILD to rdc(version)
+            "com.ai.limbs.payload.triggercmd" -> PackagerArtifactType.CHILD to triggerCmd(version)
+            else -> null
+        }
     }
-
     private fun pluginCenter(version: String): JSONObject = JSONObject()
         .put("format", "AIL_SYSTEM_PLUGIN_V1")
         .put("schema_version", 1)
@@ -107,7 +111,7 @@ object OfficialPackageProfiles {
         pluginId = "plugin.system.packager",
         version = version,
         name = "AI Limbs 打包中心",
-        description = "多选或扫描 APK，按队列识别、打包、签名并验证 .ailpsys / .ailp / .ailx 插件分发包。",
+        description = "开发期私有打包工具：使用设备私有加密签名仓打包并验证 .ailpsys / .ailp / .ailx。",
         role = "system_packager",
         entryClass = "com.ai.limbs.plugins.packager.PackagerEntry"
     ).put(

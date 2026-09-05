@@ -34,12 +34,12 @@ class PackagerEntry : InProcessPluginEntry {
             InProcessScreen(
                 id = SCREEN_ID,
                 title = "AI Limbs 打包中心",
-                description = "多选 APK / 扫描指定文件夹 → 队列识别 → Ed25519 签名 → 复验 → 最终分发包。",
+                description = "开发期私有工具：导入正式私钥到设备私有加密签名仓 → 队列识别 → Ed25519 签名 → 复验。",
                 schemaId = PLUGIN_CENTER_UI_SCHEMA,
                 documentJson = JSONObject()
                     .put("schema", 1)
                     .put("blocks", JSONArray()
-                        .put(JSONObject().put("type", "text").put("text", "支持系统插件、插件与 .ailx 子插件。可多选 APK 或扫描指定文件夹加入队列；已知官方 payload 自动识别，第三方包可提供 Manifest 模板。"))
+                        .put(JSONObject().put("type", "text").put("text", "支持系统插件、插件与 .ailx 子插件。首次分别导入三类正式私钥，之后由 Android Keystore 加密签名仓自动完成对应签名；私钥不会以明文写入插件或共享存储。"))
                         .put(JSONObject().put("type", "dynamic_panel").put("provider_id", PANEL_ID)))
                     .toString()
             )
@@ -106,8 +106,10 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
     private var manifestPath = ""
     private var outputDirectory = ""
     private var isPackaging = false
+    private var clearKeysArmed = false
     private var statusLines = listOf(
         "选择一个或多个 APK，或扫描指定文件夹；识别成功后会加入待打包队列。",
+        "首次分别导入三把正式私钥；之后 Packager 会自动使用设备私有加密签名仓。",
         "队列按顺序执行；单项失败不会阻断后续项目。"
     )
 
@@ -123,12 +125,17 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         val fieldValues = payload.optJSONObject("field_values")
         manifestPath = fieldValues?.optString(FIELD_MANIFEST)?.trim().orEmpty()
         outputDirectory = fieldValues?.optString(FIELD_OUTPUT)?.trim().orEmpty()
+        if (eventId != ACTION_CLEAR_KEYS) clearKeysArmed = false
         return when (eventId) {
             ACTION_ADD_FILES -> addSelectedFiles(payload)
             ACTION_SCAN_FOLDER -> scanFolder(payload)
             ACTION_REMOVE -> removeItem(payload)
             ACTION_CLEAR -> clearQueue()
+            ACTION_IMPORT_SYSTEM_KEY -> importKey(PackagerArtifactType.SYSTEM, payload)
+            ACTION_IMPORT_PARENT_KEY -> importKey(PackagerArtifactType.PARENT, payload)
+            ACTION_IMPORT_CHILD_KEY -> importKey(PackagerArtifactType.CHILD, payload)
             ACTION_KEYS -> keys()
+            ACTION_CLEAR_KEYS -> clearSigningKeys()
             ACTION_PACKAGE_QUEUE -> packageQueue()
             else -> result("未知操作：$eventId")
         }
@@ -210,21 +217,54 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         return result("队列已清空")
     }
 
-    private suspend fun keys(): String = runCatching {
-        val root = engine.signingStatus(import = true)
+    private fun importKey(type: PackagerArtifactType, payload: JSONObject): String = runCatching {
+        val source = payload.optString("selected_uri").trim()
+        require(source.isNotBlank()) { "没有选择私钥文件" }
+        val profile = engine.importSigningKey(type, source)
+        require(profile.optBoolean("valid")) { profile.optString("message").ifBlank { "私钥自检失败" } }
+        statusLines = listOf(
+            "✅ ${profile.optString("artifact")} 私钥已导入开发签名仓。",
+            "Signer：${profile.optString("signer_id")}",
+            "私钥只以 Android Keystore AES-GCM 加密密文保存在 Packager 私有目录。"
+        )
+        result("${profile.optString("artifact")} 私钥导入成功")
+    }.getOrElse { failure("私钥导入失败", it) }
+
+    private fun keys(): String = runCatching {
+        val root = engine.signingStatus()
         require(root.optString("status") == "OK") { root.optString("message") }
         val items = root.optJSONArray("profiles")
         statusLines = buildList {
-            add("三套签名身份已检查：")
+            add("开发签名仓检查完成：")
             if (items != null) {
                 for (index in 0 until items.length()) {
                     val item = items.getJSONObject(index)
-                    add("• ${item.optString("profile")} · ${item.optString("signer_id")} · imported=${item.optBoolean("imported")}")
+                    val state = when {
+                        item.optBoolean("valid") -> "已配置 · 自检通过"
+                        item.optBoolean("configured") -> "已配置 · 自检失败"
+                        else -> "未配置"
+                    }
+                    add("• ${item.optString("artifact")} · $state")
                 }
             }
         }
-        result("签名密钥已导入/检查")
-    }.getOrElse { failure("密钥检查失败", it) }
+        result("签名仓已检查")
+    }.getOrElse { failure("签名仓检查失败", it) }
+
+    private fun clearSigningKeys(): String = runCatching {
+        if (!clearKeysArmed) {
+            clearKeysArmed = true
+            statusLines = listOf(
+                "⚠️ 将清除 Packager 私有目录中的三类加密私钥，并删除 Android Keystore 包装密钥。",
+                "如确定清除，请再次点击“再次确认清除开发密钥”。"
+            )
+            return@runCatching result("等待二次确认")
+        }
+        clearKeysArmed = false
+        engine.clearSigningKeys()
+        statusLines = listOf("开发签名仓已清除；后续打包前需要重新导入对应私钥。")
+        result("开发签名仓已清除")
+    }.getOrElse { failure("清除开发签名仓失败", it) }
 
     /** Sequential by design: signing/output resources stay deterministic and one failure does not stop the queue. */
     private suspend fun packageQueue(): String {
@@ -268,7 +308,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         .put("schema", 1)
         .put("title", "插件打包队列")
         .put("description", "多选 APK 或扫描指定文件夹加入队列；每项独立识别并按顺序打包验证。")
-        .put("status_lines", JSONArray(statusLines))
+        .put("status_lines", JSONArray(signingStateLines() + statusLines))
         .put("leading_actions", JSONArray()
             .put(action(
                 ACTION_ADD_FILES,
@@ -313,9 +353,46 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
                 "留空 = 文件路径沿用同目录；系统选择器来源输出到 Download/AI-Limbs-Packager"
             )))
         .put("actions", JSONArray()
-            .put(action(ACTION_KEYS, "导入/检查密钥"))
+            .put(action(
+                ACTION_IMPORT_SYSTEM_KEY,
+                "导入 .ailpsys 私钥",
+                kind = "file_picker",
+                mimeTypes = PRIVATE_KEY_MIME_TYPES
+            ))
+            .put(action(
+                ACTION_IMPORT_PARENT_KEY,
+                "导入 .ailp 私钥",
+                kind = "file_picker",
+                mimeTypes = PRIVATE_KEY_MIME_TYPES
+            ))
+            .put(action(
+                ACTION_IMPORT_CHILD_KEY,
+                "导入 .ailx 私钥",
+                kind = "file_picker",
+                mimeTypes = PRIVATE_KEY_MIME_TYPES
+            ))
+            .put(action(ACTION_KEYS, "检查签名仓"))
+            .put(action(ACTION_CLEAR_KEYS, if (clearKeysArmed) "再次确认清除开发密钥" else "清除开发密钥"))
             .put(action(ACTION_PACKAGE_QUEUE, "开始队列打包", enabled = queue.isNotEmpty() && !isPackaging)))
         .toString()
+
+    private fun signingStateLines(): List<String> = runCatching {
+        val profiles = engine.signingStatus().optJSONArray("profiles") ?: return@runCatching emptyList()
+        val states = buildList {
+            for (index in 0 until profiles.length()) {
+                val profile = profiles.getJSONObject(index)
+                val state = when {
+                    profile.optBoolean("valid") -> "✓"
+                    profile.optBoolean("configured") -> "!"
+                    else -> "○"
+                }
+                add("$state ${profile.optString("artifact")} 签名权限：${profile.optString("message")}")
+            }
+        }
+        listOf("开发签名仓：") + states
+    }.getOrElse { error ->
+        listOf("开发签名仓：状态读取失败 · ${error.message ?: error::class.java.simpleName}")
+    }
 
     private fun queueStatus(item: PackagerQueueItem): String = when (item.state) {
         "PACKAGING" -> "状态：处理中 · ${item.message}"
@@ -375,7 +452,12 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         const val ACTION_SCAN_FOLDER = "scan_folder"
         const val ACTION_REMOVE = "remove_queue_item"
         const val ACTION_CLEAR = "clear_queue"
+        const val ACTION_IMPORT_SYSTEM_KEY = "import_system_private_key"
+        const val ACTION_IMPORT_PARENT_KEY = "import_parent_private_key"
+        const val ACTION_IMPORT_CHILD_KEY = "import_child_private_key"
         const val ACTION_KEYS = "keys"
+        const val ACTION_CLEAR_KEYS = "clear_signing_keys"
         const val ACTION_PACKAGE_QUEUE = "package_queue"
+        val PRIVATE_KEY_MIME_TYPES = listOf("application/x-pem-file", "text/plain", "application/octet-stream", "*/*")
     }
 }
