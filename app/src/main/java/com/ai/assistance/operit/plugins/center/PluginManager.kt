@@ -59,7 +59,8 @@ internal class PluginManager(
     private val backupPolicy: PluginBackupPolicyStore,
     private val runtimeHost: PluginRuntimeHost,
     private val pluginContextFactory: PluginContextFactory,
-    private val packageVerifier: PluginPackageVerifier = PluginPackageVerifier()
+    private val identityRegistry: OfficialPluginIdentityRegistry,
+    private val packageVerifier: PluginPackageVerifier
 ) {
     private val stateRepository = PluginStateRepository(store)
     private val activeMounts = ConcurrentHashMap<String, ActivePluginMount>()
@@ -245,6 +246,20 @@ internal class PluginManager(
                 manifest = verified.manifest,
                 packageSha256 = verified.packageSha256
             )
+            if (verified.manifest.runtime.kind == OfficialPluginIdentityRegistry.RUNTIME_ANDROID_INPROCESS) {
+                if (!identityRegistry.isApproved(verified.manifest)) {
+                    throw PluginInstallException(
+                        "INPROCESS_IDENTITY_NOT_APPROVED",
+                        "android_inprocess identity has not been approved by Plugin Center"
+                    )
+                }
+                if (!trust.isTrusted || trust.signerId != OfficialPluginIdentityRegistry.OFFICIAL_SIGNER_ID) {
+                    throw PluginInstallException(
+                        "INPROCESS_OFFICIAL_SIGNATURE_REQUIRED",
+                        "android_inprocess requires the official AI Limbs plugin signer"
+                    )
+                }
+            }
             if (!trust.isTrusted && !options.allowUntrustedForDevelopment) {
                 throw PluginInstallException(
                     "PLUGIN_UNTRUSTED",
@@ -646,7 +661,8 @@ internal class PluginManager(
 
     private fun isTrustedOfficialSystemPlugin(pluginId: String, version: String): Boolean {
         val metadata = stateRepository.readInstallMetadata(pluginId, version) ?: return false
-        return OfficialParentPluginIdentity.isTrusted(pluginId, metadata)
+        val manifest = runCatching { stateRepository.readInstalledManifest(pluginId, version) }.getOrNull() ?: return false
+        return identityRegistry.isTrusted(manifest, metadata)
     }
 
     private fun isAutoDisableExempt(pluginId: String, version: String): Boolean {

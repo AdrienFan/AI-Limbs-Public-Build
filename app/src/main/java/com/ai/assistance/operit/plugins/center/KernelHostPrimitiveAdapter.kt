@@ -341,7 +341,7 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
         val contentDir = File(probeRoot, "content")
         return try {
             probeRoot.mkdirs()
-            val verified = PluginPackageVerifier().verifyAndExtract(source, contentDir)
+            val verified = PluginPackageVerifier(PluginPlatformKernel.officialIdentities).verifyAndExtract(source, contentDir)
             val trust = StrictPluginTrustVerifier.verify(
                 source,
                 contentDir,

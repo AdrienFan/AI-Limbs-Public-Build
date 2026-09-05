@@ -13,6 +13,8 @@ import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginInstallMetadata
 import com.ai.assistance.operit.plugins.center.PluginInstallOptions
 import com.ai.assistance.operit.plugins.center.PluginLifecycleState
+import com.ai.assistance.operit.plugins.center.OfficialPluginIdentityRecord
+import com.ai.assistance.operit.plugins.center.OfficialPluginIdentityRegistry
 import com.ai.assistance.operit.plugins.center.PluginManager
 import com.ai.assistance.operit.plugins.center.PluginManifest
 import com.ai.assistance.operit.plugins.center.PluginPackageInspector
@@ -28,7 +30,8 @@ internal class KernelPluginAdminJsonServiceV1(
     private val manager: PluginManager,
     private val surfacePolicy: HostSurfacePolicy,
     private val inactivityPolicy: PluginInactivityPolicyStore,
-    private val backupPolicy: PluginBackupPolicyStore
+    private val backupPolicy: PluginBackupPolicyStore,
+    private val identityRegistry: OfficialPluginIdentityRegistry
 ) : SystemJsonServiceV1 {
     private val appContext = context.applicationContext
     private val importDir = File(appContext.cacheDir, "plugin-center-imports").apply { mkdirs() }
@@ -102,6 +105,27 @@ internal class KernelPluginAdminJsonServiceV1(
             surfacePolicy.setAllowed(ids, parameters.getBoolean("allowed"))
             manager.reconcileHostSurfacePolicy()
             JSONObject().put("ok", true)
+        }
+        "official_identities" -> JSONObject().put(
+            "identities",
+            JSONArray(identityRegistry.snapshot().map(::officialIdentityJson))
+        )
+        "approve_official_identity" -> {
+            val pluginId = parameters.requireAdminText("plugin_id")
+            val runtimeKind = parameters.requireAdminText("runtime_kind")
+            val roles = parameters.optJSONArray("roles").toAdminStringSet()
+            officialIdentityJson(identityRegistry.approve(pluginId, runtimeKind, roles))
+        }
+        "revoke_official_identity" -> {
+            val pluginId = parameters.requireAdminText("plugin_id")
+            val installed = runCatching { manager.snapshot(pluginId) }.getOrNull()
+            if (installed?.persistentState?.enabled == true) {
+                throw PluginInstallException(
+                    "OFFICIAL_IDENTITY_REVOKE_ACTIVE",
+                    "Disable the plugin before revoking its privileged identity"
+                )
+            }
+            JSONObject().put("revoked", identityRegistry.revoke(pluginId))
         }
         "inactivity_status" -> inactivityPolicy.snapshot().let { policy ->
             JSONObject()
@@ -211,23 +235,61 @@ internal class KernelPluginAdminJsonServiceV1(
         file: File,
         parameters: JSONObject
     ): JSONObject {
-        val result = manager.install(
-            file,
-            PluginInstallOptions(
-                allowUntrustedForDevelopment = parameters.optBoolean(
-                    "allow_untrusted_for_development",
-                    false
-                ),
-                enableAfterInstall = parameters.optBoolean("enable_after_install", false),
-                approvedScopes = parameters.optJSONArray("approved_scopes").toAdminStringSet()
+        val manifest = PluginPackageInspector.inspect(file)
+        val inProcess = manifest.runtime.kind == OfficialPluginIdentityRegistry.RUNTIME_ANDROID_INPROCESS
+        var previousIdentity: OfficialPluginIdentityRecord? = null
+        var identityChanged = false
+        if (inProcess && !identityRegistry.isApproved(manifest)) {
+            if (!parameters.optBoolean("approve_inprocess_identity", false)) {
+                throw PluginInstallException(
+                    "INPROCESS_IDENTITY_APPROVAL_REQUIRED",
+                    "Plugin Center approval is required before installing a new android_inprocess identity"
+                )
+            }
+            val approvedRoles = parameters.optJSONArray("approved_inprocess_roles")
+                .toAdminStringSet()
+                .map { it.trim().lowercase() }
+                .filter { it.isNotBlank() }
+                .toSet()
+            val manifestRoles = manifest.roles.map { it.trim().lowercase() }.filter { it.isNotBlank() }.toSet()
+            if (approvedRoles != manifestRoles) {
+                throw PluginInstallException(
+                    "INPROCESS_ROLE_APPROVAL_MISMATCH",
+                    "Approved in-process roles must exactly match the manifest roles: $manifestRoles"
+                )
+            }
+            previousIdentity = identityRegistry.record(manifest.pluginId)
+            identityRegistry.approve(
+                pluginId = manifest.pluginId,
+                runtimeKind = manifest.runtime.kind,
+                roles = manifest.roles
             )
-        )
-        return JSONObject()
-            .put("disposition", result.disposition.name)
-            .put("plugin_id", result.pluginId)
-            .put("version", result.version)
-            .put("package_sha256", result.packageSha256)
-            .put("state", stateJson(result.state))
+            identityChanged = true
+        }
+        return try {
+            val result = manager.install(
+                file,
+                PluginInstallOptions(
+                    allowUntrustedForDevelopment = parameters.optBoolean(
+                        "allow_untrusted_for_development",
+                        false
+                    ),
+                    enableAfterInstall = parameters.optBoolean("enable_after_install", false),
+                    approvedScopes = parameters.optJSONArray("approved_scopes").toAdminStringSet()
+                )
+            )
+            JSONObject()
+                .put("disposition", result.disposition.name)
+                .put("plugin_id", result.pluginId)
+                .put("version", result.version)
+                .put("package_sha256", result.packageSha256)
+                .put("state", stateJson(result.state))
+        } catch (error: Throwable) {
+            if (identityChanged) {
+                identityRegistry.restore(manifest.pluginId, previousIdentity)
+            }
+            throw error
+        }
     }
 
     private suspend fun <T> withUriPackage(
@@ -294,8 +356,13 @@ internal class KernelPluginAdminJsonServiceV1(
             PluginLifecycleState.BLOCKED -> "ATTENTION"
             else -> "OK"
         }
+        val activeManifest = snapshot.activeManifest
+        val installMetadata = snapshot.installMetadata
+        val officialIdentityTrusted = activeManifest != null && installMetadata != null &&
+            identityRegistry.isTrusted(activeManifest, installMetadata)
         return JSONObject()
             .put("plugin_id", snapshot.pluginId)
+            .put("official_identity_trusted", officialIdentityTrusted)
             .put("versions", JSONArray(snapshot.versions))
             .put("state", state?.let(::stateJson) ?: JSONObject.NULL)
             .put("manifest", snapshot.activeManifest?.let(::manifestJson) ?: JSONObject.NULL)
@@ -310,6 +377,12 @@ internal class KernelPluginAdminJsonServiceV1(
             .put("backup", snapshot.backup?.let(::backupJson) ?: JSONObject.NULL)
             .put("mounted_version", snapshot.mountedVersion ?: JSONObject.NULL)
     }
+    private fun officialIdentityJson(record: OfficialPluginIdentityRecord): JSONObject = JSONObject()
+        .put("plugin_id", record.pluginId)
+        .put("runtime_kind", record.runtimeKind)
+        .put("roles", JSONArray(record.approvedRoles.sorted()))
+        .put("source", record.source)
+
     private fun installIdentityJson(metadata: PluginInstallMetadata): JSONObject = JSONObject()
         .put("plugin_id", metadata.pluginId)
         .put("version", metadata.version)

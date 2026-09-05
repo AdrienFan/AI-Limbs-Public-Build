@@ -23,7 +23,8 @@ import org.json.JSONObject
 
 internal class AndroidInProcessPluginRuntimeAdapter(
     private val contributions: PluginContributionRegistry,
-    private val notificationHost: PluginNotificationHost
+    private val notificationHost: PluginNotificationHost,
+    private val identityRegistry: OfficialPluginIdentityRegistry
 ) : PluginRuntimeAdapter {
     override val kind: String = "android_inprocess"
 
@@ -79,19 +80,10 @@ internal class AndroidInProcessPluginRuntimeAdapter(
     }
 
     private fun requireSystemPlugin(context: PluginRuntimeAdapterContext) {
-        val requiredRole = OfficialParentPluginIdentity.requiredRole(context.manifest.pluginId)
-            ?: throw PluginInstallException(
-                "INPROCESS_SYSTEM_IDENTITY_REQUIRED",
-                "android_inprocess is reserved for approved system plugin identities"
-            )
-        // The role grants the requested function; the persisted signature decision establishes identity.
-        if (
-            requiredRole !in context.manifest.roles ||
-            !OfficialParentPluginIdentity.isTrusted(context.manifest.pluginId, context.installMetadata)
-        ) {
+        if (!identityRegistry.isTrusted(context.manifest, context.installMetadata)) {
             throw PluginInstallException(
                 "INPROCESS_SYSTEM_IDENTITY_REQUIRED",
-                "android_inprocess is reserved for approved system plugin identities"
+                "android_inprocess requires Plugin Center approval and the official plugin signer"
             )
         }
     }

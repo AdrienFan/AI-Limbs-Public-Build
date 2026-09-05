@@ -46,6 +46,7 @@ internal object PluginPlatformKernel {
     private lateinit var inactivityPolicyInstance: PluginInactivityPolicyStore
     private lateinit var backupPolicyInstance: PluginBackupPolicyStore
     private lateinit var notificationHostInstance: PluginNotificationHost
+    private lateinit var officialIdentitiesInstance: OfficialPluginIdentityRegistry
     private lateinit var systemPluginControllerInstance: com.ai.assistance.operit.plugins.system.SystemPluginController
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var inactivityMonitorJob: Job? = null
@@ -76,6 +77,8 @@ internal object PluginPlatformKernel {
         get() = requireInitialized().let { surfacePolicyInstance }
     val adminSecurity: AdminSecurityManager
         get() = requireInitialized().let { adminSecurityInstance }
+    internal val officialIdentities: OfficialPluginIdentityRegistry
+        get() = requireInitialized().let { officialIdentitiesInstance }
 
     /**
      * Runtime hand-off for an already admitted system plugin. Trust/signature admission must happen
@@ -125,7 +128,8 @@ internal object PluginPlatformKernel {
             manager = managerInstance,
             surfacePolicy = surfacePolicyInstance,
             inactivityPolicy = inactivityPolicyInstance,
-            backupPolicy = backupPolicyInstance
+            backupPolicy = backupPolicyInstance,
+            identityRegistry = officialIdentitiesInstance
         )
         val adminSecurity = com.ai.assistance.operit.plugins.system.KernelAdminSecurityJsonServiceV1(adminSecurityInstance)
         val selfMaintenance = com.ai.assistance.operit.plugins.system.KernelSelfMaintenanceJsonServiceV1(systemPluginControllerInstance)
@@ -198,10 +202,11 @@ internal object PluginPlatformKernel {
                 )
             )
             val notificationHost = PluginNotificationHost(appContext, surfacePolicy)
+            val officialIdentities = OfficialPluginIdentityRegistry(appContext)
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
                 register(DeclarativePluginRuntimeAdapter)
-                register(AndroidInProcessPluginRuntimeAdapter(contributions, notificationHost))
+                register(AndroidInProcessPluginRuntimeAdapter(contributions, notificationHost, officialIdentities))
             }
             listOf(
                 Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 AI Limbs 首页添加入口"),
@@ -304,7 +309,9 @@ internal object PluginPlatformKernel {
                 backupStore = backupStore,
                 backupPolicy = backupPolicy,
                 runtimeHost = PluginRuntimeHost(),
-                pluginContextFactory = pluginContextFactory
+                pluginContextFactory = pluginContextFactory,
+                identityRegistry = officialIdentities,
+                packageVerifier = PluginPackageVerifier(officialIdentities)
             )
             manager.initialize()
             appContextInstance = appContext
@@ -323,6 +330,7 @@ internal object PluginPlatformKernel {
             inactivityPolicyInstance = inactivityPolicy
             backupPolicyInstance = backupPolicy
             notificationHostInstance = notificationHost
+            officialIdentitiesInstance = officialIdentities
             val systemPluginController = com.ai.assistance.operit.plugins.system.SystemPluginController(
                 context = appContext,
                 uiRegistry = systemUiRegistry,

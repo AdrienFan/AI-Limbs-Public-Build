@@ -34,7 +34,8 @@ data class VerifiedPluginPackage(
     val entryCount: Int
 )
 
-class PluginPackageVerifier(
+internal class PluginPackageVerifier(
+    private val identityRegistry: OfficialPluginIdentityRegistry,
     private val limits: PluginInstallLimits = PluginInstallLimits()
 ) {
     fun verifyAndExtract(managedPackage: File, contentDir: File): VerifiedPluginPackage {
@@ -152,10 +153,9 @@ class PluginPackageVerifier(
 
     private fun validateExecutablePayloads(manifest: PluginManifest, entries: Set<String>) {
         if (entries.isEmpty()) return
-        val requiredRole = PRIVILEGED_INPROCESS_PLUGIN_IDS[manifest.pluginId]
         val entry = manifest.runtime.entry
-        val valid = manifest.runtime.kind == "android_inprocess" &&
-            requiredRole != null && requiredRole in manifest.roles &&
+        val valid = manifest.runtime.kind == OfficialPluginIdentityRegistry.RUNTIME_ANDROID_INPROCESS &&
+            identityRegistry.isApproved(manifest) &&
             entry != null && entry.lowercase().endsWith(".apk") &&
             entries == setOf(entry)
         if (!valid) {
@@ -179,14 +179,6 @@ class PluginPackageVerifier(
     companion object {
         private val FORBIDDEN_EXECUTABLE_SUFFIXES =
             setOf(".apk", ".class", ".dex", ".jar", ".so")
-        private val PRIVILEGED_INPROCESS_PLUGIN_IDS = mapOf(
-            "plugin.system.extension_hub" to "system_extension_hub",
-            "plugin.system.bridge" to "system_bridge",
-            "plugin.system.developer_guide" to "system_plugin",
-            "plugin.system.packager" to "system_packager",
-            "plugin.system.ubuntu_terminal" to "ubuntu_terminal"
-        )
-
         fun sha256(file: File): String {
             val digest = MessageDigest.getInstance("SHA-256")
             file.inputStream().buffered().use { input ->
