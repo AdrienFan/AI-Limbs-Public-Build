@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 object OfficialPackageProfiles {
     fun resolve(packageName: String, version: String): Pair<PackagerArtifactType, JSONObject>? {
-        if (packageName.matches(Regex("^com\.ai\.limbs\.plugincenter\.system\.v[0-9]+$"))) {
+        if (packageName.matches(Regex("""^com\.ai\.limbs\.plugincenter\.system\.v[0-9]+$"""))) {
             return PackagerArtifactType.SYSTEM to pluginCenter(version)
         }
         return when (packageName) {
