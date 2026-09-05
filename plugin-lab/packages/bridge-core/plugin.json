@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.bridge",
-  "version": "1.3.4",
+  "version": "1.3.5",
   "api": {
     "target": 1,
     "min": 1
@@ -35,7 +35,8 @@
   },
   "provides": {
     "capabilities": [
-      "plugin.bridge.select_provider"
+      "plugin.bridge.select_provider",
+      "plugin.bridge.perform_action"
     ],
     "services": [],
     "providers": [

@@ -344,6 +344,34 @@ private class BridgeRuntime(
                     .toString()
             }
         )
+        host.registerCapability(
+            ACTION_CAPABILITY,
+            "执行 Bridge Provider 动作",
+            description = "对指定 Bridge Provider 执行 CONNECT/STOP/RECONNECT 等受状态约束的动作。",
+            executor = InProcessCapabilityExecutor { raw ->
+                val request = JSONObject(raw)
+                val actionName = request.getString("action").trim().uppercase()
+                val action = runCatching { BridgeAction.valueOf(actionName) }
+                    .getOrElse { error("Unknown Bridge action: $actionName") }
+                val providerId = request.optString("provider_id").trim().takeIf { it.isNotBlank() }
+                val currentManager = requireManager()
+                val target = providerId?.let { requestedProviderId ->
+                    contributions.entries.firstOrNull { (_, contribution) ->
+                        contribution.factory.profiles.any { profile -> profile.id == requestedProviderId }
+                    }
+                } ?: selectedEntry(currentManager)
+                check(currentManager.perform(action, providerId)) {
+                    "Bridge action $action is not available for provider ${providerId ?: currentManager.activeProfile.id}"
+                }
+                target?.let { recordUseCompat(it.key) }
+                publishPresentation(currentManager, currentManager.state.value)
+                JSONObject()
+                    .put("success", true)
+                    .put("action", action.name)
+                    .put("provider_id", providerId ?: currentManager.activeProfile.id)
+                    .toString()
+            }
+        )
     }
 
     private fun selectedEntry(currentManager: PluginBridgeManager): Map.Entry<String, BridgeProviderContribution>? {
@@ -574,6 +602,7 @@ private class BridgeRuntime(
         private const val SCREEN_ID = BridgeProviderUiSlots.SCREEN_ID
         private const val TILE_ID = "plugin.system.bridge.tile"
         private const val SELECT_CAPABILITY = "plugin.bridge.select_provider"
+        private const val ACTION_CAPABILITY = "plugin.bridge.perform_action"
         private const val PANEL_PROVIDER_ID = "plugin.bridge.control_panel"
         // Component schema is versioned by Plugin Center; adding new controls must not change Host ABI.
         private const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
