@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "plugin_id": "plugin.system.packager",
   "schema_version": 1,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "api": {
     "target": 1,
     "min": 1
