@@ -73,6 +73,7 @@ private class BridgeRuntime(
     private val panelProvider = BridgeDynamicPanelProvider()
     private val notificationProvider = BridgeNotificationPublisher()
     private var notificationHandle: AutoCloseable? = null
+    @Volatile
     private var manager: PluginBridgeManager? = null
     private var managerScope: CoroutineScope? = null
     private var pointHandle: AutoCloseable? = null
@@ -81,6 +82,9 @@ private class BridgeRuntime(
     private var activeHub: ExtensionHubService? = null
     private var hubGeneration = 0L
     private var stopped = false
+    private val hostLifecycle =
+        BridgeHostLifecycleController(host.applicationContext) { manager }
+
     fun mount() {
         try {
             val notificationHost =
@@ -151,6 +155,7 @@ private class BridgeRuntime(
             host.registerHomeTile(
                 InProcessHomeTile(TILE_ID, "Bridge", "可插拔 Bridge Provider", SCREEN_ID)
             )
+            hostLifecycle.start()
             startHubWatcher()
         } catch (error: Throwable) {
             hubWatcher?.cancel()
@@ -159,6 +164,7 @@ private class BridgeRuntime(
             pointHandle = null
             notificationHandle?.close()
             notificationHandle = null
+            hostLifecycle.close()
             clearPresentation()
             throw error
         }
@@ -262,6 +268,7 @@ private class BridgeRuntime(
     }
 
     suspend fun stop() {
+        hostLifecycle.close()
         hubWatcher?.cancel()
         hubWatcher = null
         synchronized(this) {
@@ -295,6 +302,7 @@ private class BridgeRuntime(
             .map { it.value }
         PluginBridgeProviderCatalog.replaceFactories(values.map { it.factory })
         if (values.isEmpty()) {
+            hostLifecycle.onManagerStateChanged("manager_cleared")
             clearPresentation()
             return
         }
@@ -302,9 +310,14 @@ private class BridgeRuntime(
         val nextManager = PluginBridgeManager(host.applicationContext, scope)
         managerScope = scope
         manager = nextManager
+        nextManager.startIfDesired()
+        hostLifecycle.onManagerChanged("manager_rebuilt")
         publishPresentation(nextManager, nextManager.state.value)
         scope.launch {
             nextManager.state.collect { bridgeState ->
+                hostLifecycle.onManagerStateChanged(
+                    "bridge_state:${bridgeState.phase}"
+                )
                 publishPresentation(nextManager, bridgeState)
             }
         }
@@ -399,11 +412,19 @@ private class BridgeRuntime(
         }
         val control = snapshotControlFor(currentManager, bridgeState)
         val panel = selected.value.panel.snapshot(host.applicationContext, control)
-        val notification = selected.value.notification
-            ?.snapshot(host.applicationContext, control)
-            ?.toInProcessState()
+        val revision = ++presentationRevision
+        val notification =
+            if (currentManager.shouldKeepAlive ||
+                currentManager.hasActivePairingTransaction
+            ) {
+                selected.value.notification
+                    ?.snapshot(host.applicationContext, control)
+                    ?.toInProcessState(revision, selected.key)
+            } else {
+                null
+            }
         mutablePresentation.value = BridgePresentationState(
-            revision = ++presentationRevision,
+            revision = revision,
             selectedExtensionId = selected.key,
             panel = panel,
             notification = notification
@@ -453,29 +474,51 @@ private class BridgeRuntime(
             .stateIn(presentationScope, SharingStarted.Eagerly, presentation.value.notification)
 
         suspend fun perform(actionId: String) {
+            val actionParts = actionId.split('|', limit = 3)
+            check(actionParts.size == 3) {
+                "Bridge notification action is malformed"
+            }
+            val expectedRevision =
+                actionParts[0].toLongOrNull()
+                    ?: error("Bridge notification action has no revision")
+            val expectedExtensionId = actionParts[1]
+            val providerActionId = actionParts[2]
+            val current = presentation.value
+            check(
+                current.revision == expectedRevision &&
+                    current.selectedExtensionId == expectedExtensionId
+            ) {
+                "Bridge notification action expired after provider switch"
+            }
             val currentManager = requireManager()
             val selected = selectedEntry(currentManager)
                 ?: error("Selected Bridge Provider contribution is missing")
+            check(selected.key == expectedExtensionId) {
+                "Bridge Provider changed before notification action dispatch"
+            }
             val notification = selected.value.notification
                 ?: error("Selected Bridge Provider has no notification contribution")
             recordUseCompat(selected.key)
             notification.perform(
                 host.applicationContext,
-                actionId,
+                providerActionId,
                 liveControlFor(currentManager)
             )
             publishPresentation(currentManager, currentManager.state.value)
         }
     }
 
-    private fun BridgeProviderNotificationState.toInProcessState() =
+    private fun BridgeProviderNotificationState.toInProcessState(
+        revision: Long,
+        extensionId: String
+    ) =
         InProcessNotificationState(
             title = title,
             summary = summary,
             statusLines = statusLines,
             actions = actions.map { action ->
                 InProcessNotificationAction(
-                    id = action.id,
+                    id = "$revision|$extensionId|${action.id}",
                     label = action.label,
                     priority = action.priority,
                     enabled = action.enabled

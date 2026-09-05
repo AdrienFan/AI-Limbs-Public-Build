@@ -1,7 +1,22 @@
-name: AI Limbs Plugin Lab Alt Build
+name: AI Limbs Plugin Subject Build
 
 on:
   workflow_dispatch:
+    inputs:
+      build_target:
+        description: Plugin Lab subject to compile
+        required: true
+        default: bridge-core
+        type: choice
+        options:
+          - bridge-core
+          - plugin-lab
+          - extension-hub
+          - developer-guide
+          - packager
+          - rdc
+          - triggercmd
+          - all
 
 concurrency:
   group: plugin-lab-alt-${{ github.ref }}
@@ -15,7 +30,7 @@ env:
 
 jobs:
   build:
-    name: Build Plugin Lab Alt + Six Plugins
+    name: Build selected Plugin Lab subject
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -49,51 +64,36 @@ jobs:
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Build 1 - Plugin Lab v0.5.3
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
 
-      - name: Build 2 - plugin-extension-hub.ailp payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :plugin-extension-hub:assembleDebug --stacktrace --no-daemon
+      - name: Build Plugin Lab app
+        if: inputs.build_target == 'plugin-lab' || inputs.build_target == 'all'
+        run: ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 3 - bridge-core.ailp payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :bridge-core-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Build Extension Hub payload
+        if: inputs.build_target == 'extension-hub' || inputs.build_target == 'all'
+        run: ./gradlew :plugin-extension-hub:assembleDebug --stacktrace --no-daemon
 
+      - name: Build Bridge Core payload
+        if: inputs.build_target == 'bridge-core' || inputs.build_target == 'all'
+        run: ./gradlew :bridge-core-plugin:assembleDebug --stacktrace --no-daemon
 
+      - name: Build Developer Guide payload
+        if: inputs.build_target == 'developer-guide' || inputs.build_target == 'all'
+        run: ./gradlew :developer-guide-plugin:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 4 - developer-guide.ailp payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :developer-guide-plugin:assembleDebug --stacktrace --no-daemon
-      - name: Build 5 - AI Limbs Packager payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :packager-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Build Packager payload
+        if: inputs.build_target == 'packager' || inputs.build_target == 'all'
+        run: ./gradlew :packager-plugin:assembleDebug --stacktrace --no-daemon
 
-      # Child extensions share the same Plugin Lab SDK/Bridge contract as their parent plugins.
-      # They are compiled here as payload APKs only; final .ailx signing remains in the secure local release step.
-      - name: Build 6 - RDC child extension payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :rdc-extension:assembleDebug --stacktrace --no-daemon
+      - name: Build RDC child extension payload
+        if: inputs.build_target == 'rdc' || inputs.build_target == 'all'
+        run: ./gradlew :rdc-extension:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 7 - TRIGGERcmd child extension payload
-        shell: bash
-        run: |
-          set -euo pipefail
-          ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
+      - name: Build TRIGGERcmd child extension payload
+        if: inputs.build_target == 'triggercmd' || inputs.build_target == 'all'
+        run: ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
 
       - name: Upload Android reports
         if: always()
@@ -106,11 +106,11 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload six plugin payload APKs
+      - name: Upload selected plugin payload APKs
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ai-limbs-plugin-payloads-v073-${{ github.run_number }}
+          name: ai-limbs-${{ inputs.build_target }}-${{ github.run_number }}
           path: |
             plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
             plugin-lab/plugins/bridge-core/build/outputs/apk/debug/*.apk
