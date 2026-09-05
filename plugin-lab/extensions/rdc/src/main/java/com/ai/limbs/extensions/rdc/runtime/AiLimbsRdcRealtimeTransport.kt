@@ -1,7 +1,7 @@
 // Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; runtime host adapters are separate files.
-package com.ai.assistance.operit.integrations.ailimbs
+package com.ai.limbs.extensions.rdc.runtime
 
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatQueueChangedEvent
+import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatQueueChangedEvent
 import com.ai.limbs.extensions.rdc.RdcLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets

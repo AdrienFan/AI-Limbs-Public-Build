@@ -1,11 +1,10 @@
 // Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c.
-package com.ai.assistance.operit.integrations.ailimbs
+package com.ai.limbs.extensions.rdc.runtime
 
 import android.content.Context
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeHostSignal
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeProvider
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRdcClient
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory

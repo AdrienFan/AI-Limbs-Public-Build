@@ -1,4 +1,4 @@
-package com.ai.assistance.operit.integrations.ailimbs
+package com.ai.limbs.extensions.rdc.runtime
 
 import android.content.Context
 import com.ai.limbs.plugin.runtime.ChildExtensionHost

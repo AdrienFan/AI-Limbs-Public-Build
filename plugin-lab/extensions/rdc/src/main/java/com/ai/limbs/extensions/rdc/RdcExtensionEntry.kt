@@ -1,8 +1,8 @@
 package com.ai.limbs.extensions.rdc
 
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
-import com.ai.assistance.operit.integrations.ailimbs.RdcBridgeProvider
-import com.ai.assistance.operit.integrations.ailimbs.RdcPluginHostBridge
+import com.ai.limbs.extensions.rdc.runtime.RdcBridgeProvider
+import com.ai.limbs.extensions.rdc.runtime.RdcPluginHostBridge
 import com.ai.limbs.plugin.runtime.ChildExtensionEntry
 import com.ai.limbs.plugin.runtime.ChildExtensionHandle
 import com.ai.limbs.plugin.runtime.ChildExtensionHost

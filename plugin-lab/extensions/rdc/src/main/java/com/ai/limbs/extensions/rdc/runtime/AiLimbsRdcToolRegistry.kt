@@ -1,5 +1,5 @@
 // Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; runtime host adapters are separate files.
-package com.ai.assistance.operit.integrations.ailimbs
+package com.ai.limbs.extensions.rdc.runtime
 
 import org.json.JSONObject
 

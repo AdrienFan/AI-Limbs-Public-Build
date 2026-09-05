@@ -1,7 +1,12 @@
 // Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; runtime host adapters are separate files.
-package com.ai.assistance.operit.integrations.ailimbs
+package com.ai.limbs.extensions.rdc.runtime
 
 import android.content.Context
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeHostSignal
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkState
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkTransport
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
 import android.content.Intent
 import android.content.SharedPreferences
 import android.net.Uri
@@ -11,9 +16,9 @@ import android.util.Base64
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
 import com.ai.limbs.extensions.rdc.BuildConfig
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatQueueChangedEvent
-import com.ai.assistance.operit.integrations.ailimbs.chat.requiresWorkAttention
+import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatBridgeService
+import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatQueueChangedEvent
+import com.ai.limbs.extensions.rdc.runtime.chat.requiresWorkAttention
 import com.ai.limbs.extensions.rdc.RdcLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
