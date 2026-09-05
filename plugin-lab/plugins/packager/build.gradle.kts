@@ -9,11 +9,11 @@ android {
     namespace = "com.ai.limbs.plugins.packager"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.packager"
+        applicationId = "com.ai.limbs.payload.packager.v040"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.3.2"
+        versionCode = 4
+        versionName = "0.4.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
