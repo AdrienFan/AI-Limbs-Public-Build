@@ -9,11 +9,11 @@ android {
     namespace = "com.ai.limbs.plugins.ubuntu"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.ubuntu.v010"
+        applicationId = "com.ai.limbs.payload.ubuntu.v020"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

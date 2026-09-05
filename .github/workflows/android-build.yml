@@ -2,6 +2,15 @@ name: AI Limbs Plugin Lab Alt Build
 
 on:
   workflow_dispatch:
+    inputs:
+      target:
+        description: Build target
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - ubuntu-terminal
 
 concurrency:
   group: plugin-lab-alt-${{ github.ref }}
@@ -15,6 +24,7 @@ env:
 
 jobs:
   build:
+    if: inputs.target == 'all'
     name: Build Plugin Lab Alt + Seven Plugins
     runs-on: ubuntu-24.04
     timeout-minutes: 60
@@ -124,5 +134,59 @@ jobs:
             plugin-lab/plugins/ubuntu-terminal/build/outputs/apk/debug/*.apk
             plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
             plugin-lab/extensions/triggercmd/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
+
+  ubuntu_terminal:
+    if: inputs.target == 'ubuntu-terminal'
+    name: Build Ubuntu Terminal v0.2.0 only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-36" \
+            "build-tools;35.0.0"
+
+      - name: Configure Android SDK
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Build Ubuntu Terminal payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :ubuntu-terminal-plugin:assembleDebug --stacktrace --no-daemon
+
+      - name: Upload Ubuntu Terminal payload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ubuntu-terminal-v0.2.0-${{ github.run_number }}
+          path: |
+            plugin-lab/plugins/ubuntu-terminal/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/ubuntu-terminal/plugin.json
           if-no-files-found: error
           retention-days: 14

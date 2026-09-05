@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.ubuntu_terminal",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "Ubuntu命令终端",
-    "description": "复刻 AI Limbs 0.6.4.7.8 工具箱 Ubuntu 终端体验，通过 Host Primitive 使用 Ubuntu Runtime 与持久终端会话。"
+    "description": "复刻 AI Limbs 0.6.4.7.8 的全屏终端工作台，支持多标签持久 PTY、兰儿共享观察、运行时控制与命令输入。"
   },
   "roles": [
     "ubuntu_terminal"
