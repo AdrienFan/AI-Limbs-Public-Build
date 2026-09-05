@@ -6,6 +6,7 @@ import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
 import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.ui.permissions.PermissionLevel
 import com.ai.assistance.operit.ui.permissions.ToolPermissionSystem
 import kotlinx.coroutines.flow.first
@@ -411,17 +412,15 @@ class AiLimbsExecutionPolicyEngine(
             coreRegistration?.provider == AiLimbsCoreProvider.BRIDGE &&
                 coreRegistration.availabilityPolicy == AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT
         ) {
-            val bridge = AiLimbsBridgeManager.runtimeState.value
-            if (BridgeAction.RECONNECT !in AiLimbsBridgeManager.availableActions(appContext, bridge)) {
+            val bridgeActionCapabilityActive =
+                PluginPlatformKernel.isInitialized &&
+                    PluginPlatformKernel.isStarted &&
+                    BRIDGE_ACTION_CAPABILITY_ID in PluginPlatformKernel.capabilities.activeIds()
+            if (!bridgeActionCapabilityActive) {
                 return AiLimbsAvailabilityResult(
                     available = false,
                     reasonCode = "BRIDGE_RECONNECT_UNAVAILABLE",
-                    reason =
-                        "Bridge reconnect is unavailable while " +
-                            bridge.providerId +
-                            " is " +
-                            bridge.phase.name +
-                            "."
+                    reason = "Bridge plugin action capability is not active."
                 )
             }
         }
