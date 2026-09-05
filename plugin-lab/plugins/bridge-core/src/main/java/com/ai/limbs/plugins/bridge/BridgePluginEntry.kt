@@ -1,8 +1,8 @@
 package com.ai.limbs.plugins.bridge
 
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
+import com.ai.assistance.operit.integrations.ailimbs.PluginBridgeManager
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeProviderCatalog
+import com.ai.assistance.operit.integrations.ailimbs.PluginBridgeProviderCatalog
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
@@ -73,7 +73,7 @@ private class BridgeRuntime(
     private val panelProvider = BridgeDynamicPanelProvider()
     private val notificationProvider = BridgeNotificationPublisher()
     private var notificationHandle: AutoCloseable? = null
-    private var manager: AiLimbsBridgeManager? = null
+    private var manager: PluginBridgeManager? = null
     private var managerScope: CoroutineScope? = null
     private var pointHandle: AutoCloseable? = null
     private var hubWatcher: Job? = null
@@ -276,7 +276,7 @@ private class BridgeRuntime(
             manager = null
             managerScope?.cancel()
             managerScope = null
-            AiLimbsBridgeProviderCatalog.replaceFactories(emptyList())
+            PluginBridgeProviderCatalog.replaceFactories(emptyList())
             clearPresentation()
         }
         notificationHandle?.close()
@@ -293,13 +293,13 @@ private class BridgeRuntime(
         val values = contributions.entries
             .sortedBy { it.key }
             .map { it.value }
-        AiLimbsBridgeProviderCatalog.replaceFactories(values.map { it.factory })
+        PluginBridgeProviderCatalog.replaceFactories(values.map { it.factory })
         if (values.isEmpty()) {
             clearPresentation()
             return
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val nextManager = AiLimbsBridgeManager(host.applicationContext, scope)
+        val nextManager = PluginBridgeManager(host.applicationContext, scope)
         managerScope = scope
         manager = nextManager
         publishPresentation(nextManager, nextManager.state.value)
@@ -333,14 +333,14 @@ private class BridgeRuntime(
         )
     }
 
-    private fun selectedEntry(currentManager: AiLimbsBridgeManager): Map.Entry<String, BridgeProviderContribution>? {
+    private fun selectedEntry(currentManager: PluginBridgeManager): Map.Entry<String, BridgeProviderContribution>? {
         val profileId = currentManager.activeProfile.id
         return contributions.entries.firstOrNull { (_, contribution) ->
             contribution.factory.profiles.any { it.id == profileId }
         }
     }
 
-    private fun requireManager(): AiLimbsBridgeManager =
+    private fun requireManager(): PluginBridgeManager =
         manager ?: error("No Bridge Provider is active")
 
     private fun recordUseCompat(extensionId: String) {
@@ -352,7 +352,7 @@ private class BridgeRuntime(
         }
     }
 
-    private fun liveControlFor(current: AiLimbsBridgeManager): BridgeProviderControl =
+    private fun liveControlFor(current: PluginBridgeManager): BridgeProviderControl =
         object : BridgeProviderControl {
             override val profile: BridgeProfile
                 get() = current.activeProfile
@@ -366,7 +366,7 @@ private class BridgeRuntime(
         }
 
     private fun snapshotControlFor(
-        current: AiLimbsBridgeManager,
+        current: PluginBridgeManager,
         bridgeState: AiLimbsBridgeState
     ): BridgeProviderControl {
         val capturedProfile = current.activeProfile
@@ -389,7 +389,7 @@ private class BridgeRuntime(
 
     @Synchronized
     private fun publishPresentation(
-        currentManager: AiLimbsBridgeManager,
+        currentManager: PluginBridgeManager,
         bridgeState: AiLimbsBridgeState
     ) {
         if (manager !== currentManager) return

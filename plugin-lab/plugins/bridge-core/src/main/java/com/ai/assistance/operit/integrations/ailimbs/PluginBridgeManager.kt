@@ -1,4 +1,4 @@
-// Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; dynamic catalog compatibility patch only.
+// Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; plugin-owned dynamic provider runtime; unique class names avoid host ABI shadowing.
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
@@ -18,12 +18,12 @@ import kotlinx.coroutines.launch
  * the provider currently selected for status/configuration/actions; selecting a
  * different provider never stops the other bridge runtimes.
  */
-class AiLimbsBridgeManager(
+class PluginBridgeManager(
     context: Context,
     private val scope: CoroutineScope
 ) {
     private val appContext = context.applicationContext
-    private val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+    private val registry = PluginBridgeProviderCatalog.createRegistry()
     private val preferences =
         appContext.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
     private var activeProfileValue =
@@ -259,7 +259,7 @@ class AiLimbsBridgeManager(
                 }
             }
         }
-        if (providerId == AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
+        if (providerId == PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
             publishRuntimeState(newState)
         }
         if (providerId == activeProfileValue.id) {
@@ -269,7 +269,7 @@ class AiLimbsBridgeManager(
 
     private fun publishSelectedState() {
         publishControlState(selectedProvider().state.value)
-        val primary = checkNotNull(providersById[AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID])
+        val primary = checkNotNull(providersById[PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID])
         publishRuntimeState(primary.state.value)
     }
 
@@ -283,7 +283,7 @@ class AiLimbsBridgeManager(
     }
 
     private fun publishRuntimeState(newState: AiLimbsBridgeState) {
-        val primaryProfile = registry.requireProfile(AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID)
+        val primaryProfile = registry.requireProfile(PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID)
         runtimeStateFlow.value = newState.copy(
             providerId = primaryProfile.id,
             providerLabel = primaryProfile.label
@@ -312,7 +312,7 @@ class AiLimbsBridgeManager(
         val controlState: StateFlow<AiLimbsBridgeState> = controlStateFlow.asStateFlow()
 
         fun persistActiveProvider(context: Context, profileId: String) {
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             val profile = registry.requireProfile(profileId)
             context.applicationContext
                 .getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
@@ -322,10 +322,10 @@ class AiLimbsBridgeManager(
         }
 
         fun availableProfiles(): List<BridgeProfile> =
-            AiLimbsBridgeProviderCatalog.createRegistry().profiles
+            PluginBridgeProviderCatalog.createRegistry().profiles
 
         fun activeProviderId(context: Context): String {
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             return initializeActiveProviderId(
                 context.applicationContext
                     .getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE),
@@ -337,7 +337,7 @@ class AiLimbsBridgeManager(
             context: Context,
             state: AiLimbsBridgeState
         ): List<BridgeAction> {
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             val profileId = state.providerId.takeIf { it.isNotBlank() } ?: activeProviderId(context)
             val profile = registry.requireProfile(profileId)
             if (!profile.enabled) return emptyList()
@@ -348,7 +348,7 @@ class AiLimbsBridgeManager(
             if (!ENABLED) return false
             val appContext = context.applicationContext
             val preferences = appContext.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             return registry.profiles.any { profile ->
                 profile.enabled && desiredConnected(preferences, profile.id)
             }
@@ -362,7 +362,7 @@ class AiLimbsBridgeManager(
             if (preferences.contains(key)) {
                 return preferences.getBoolean(key, false)
             }
-            if (profileId == AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
+            if (profileId == PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
                 return if (preferences.contains(KEY_DESIRED_CONNECTED)) {
                     preferences.getBoolean(KEY_DESIRED_CONNECTED, true)
                 } else {
@@ -381,7 +381,7 @@ class AiLimbsBridgeManager(
         ): String {
             if (!preferences.contains(KEY_ACTIVE_PROVIDER)) {
                 val defaultProfile = registry.requireProfile(
-                    AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID
+                    PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID
                 )
                 preferences.edit()
                     .putString(KEY_ACTIVE_PROVIDER, defaultProfile.id)
@@ -393,7 +393,7 @@ class AiLimbsBridgeManager(
             if (!profileId.isNullOrBlank() && registry.profiles.any { it.id == profileId }) {
                 return profileId
             }
-            val fallback = registry.requireProfile(AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID)
+            val fallback = registry.requireProfile(PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID)
             preferences.edit().putString(KEY_ACTIVE_PROVIDER, fallback.id).apply()
             return fallback.id
         }
