@@ -27,3 +27,14 @@ tasks.register("assembleDebugClone") {
     dependsOn(":app:assembleClone")
     description = "Build the clone (co-installable) debug APK with package name suffix .clone"
 }
+
+subprojects {
+    pluginManager.withPlugin("com.android.application") {
+        val packageManifestDir = rootProject.file("plugin-lab/packages/${projectDir.name}")
+        if (packageManifestDir.isDirectory) {
+            extensions.configure<com.android.build.api.dsl.ApplicationExtension> {
+                sourceSets.getByName("main").assets.srcDir(packageManifestDir)
+            }
+        }
+    }
+}

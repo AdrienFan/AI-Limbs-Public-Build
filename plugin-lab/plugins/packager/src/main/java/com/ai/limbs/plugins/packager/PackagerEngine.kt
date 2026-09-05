@@ -177,7 +177,30 @@ class PackagerEngine(private val host: InProcessPluginHost) {
         require(version.isNotBlank()) { "APK versionName is missing" }
 
         val official = officialManifest(packageName, version)
-        if (official != null) {
+        val template = resolveTemplate(prepared.file, source, manifestSource)
+        if (template != null) {
+            val root = JSONObject(template.second)
+            val type = typeForFormat(root.optString("format"))
+            val templateVersion = root.optString("version").trim()
+            require(templateVersion == version) { "Version mismatch: APK=$version, manifest=$templateVersion" }
+            validateOfficialIdentity(packageName, type, root, official)
+            root.remove("signature")
+            root.remove("integrity")
+            val displayName = root.optJSONObject("display")?.optString("name")?.trim().orEmpty().ifBlank { packageName }
+            return PackagerInspection(
+                source = source,
+                sourceName = prepared.sourceName,
+                input = prepared.file,
+                packageName = packageName,
+                version = version,
+                displayName = displayName,
+                type = type,
+                manifest = root,
+                manifestSource = template.first
+            )
+        }
+
+        if (official != null && official.first == PackagerArtifactType.SYSTEM) {
             return PackagerInspection(
                 source = source,
                 sourceName = prepared.sourceName,
@@ -187,30 +210,31 @@ class PackagerEngine(private val host: InProcessPluginHost) {
                 displayName = official.second.optJSONObject("display")?.optString("name").orEmpty(),
                 type = official.first,
                 manifest = official.second,
-                manifestSource = "official_profile"
+                manifestSource = "legacy_system_profile"
             )
         }
+        if (official != null) {
+            error("Official plugin APK is missing its embedded manifest. Rebuild it with the Plugin Lab manifest embedding convention or provide the manifest explicitly.")
+        }
+        error("Unknown APK. Embed a plugin manifest in the APK or provide a Manifest template.")
+    }
 
-        val template = resolveTemplate(prepared.file, source, manifestSource)
-            ?: error("Unknown APK. Provide a Manifest template; same-directory auto-discovery is available for shared-storage file paths.")
-        val root = JSONObject(template.second)
-        val type = typeForFormat(root.optString("format"))
-        val templateVersion = root.optString("version").trim()
-        require(templateVersion == version) { "Version mismatch: APK=$version, manifest=$templateVersion" }
-        root.remove("signature")
-        root.remove("integrity")
-        val displayName = root.optJSONObject("display")?.optString("name")?.trim().orEmpty().ifBlank { packageName }
-        return PackagerInspection(
-            source = source,
-            sourceName = prepared.sourceName,
-            input = prepared.file,
-            packageName = packageName,
-            version = version,
-            displayName = displayName,
-            type = type,
-            manifest = root,
-            manifestSource = template.first
-        )
+    private fun validateOfficialIdentity(
+        packageName: String,
+        type: PackagerArtifactType,
+        manifest: JSONObject,
+        official: Pair<PackagerArtifactType, JSONObject>?
+    ) {
+        if (official == null) return
+        require(type == official.first) {
+            "Official APK type mismatch: package=$packageName expected=${official.first.name.lowercase()} actual=${type.name.lowercase()}"
+        }
+        val identityKey = if (type == PackagerArtifactType.CHILD) "extension_id" else "plugin_id"
+        val expectedIdentity = official.second.optString(identityKey).trim()
+        val actualIdentity = manifest.optString(identityKey).trim()
+        require(expectedIdentity.isNotBlank() && actualIdentity == expectedIdentity) {
+            "Official APK identity mismatch: package=$packageName expected=$expectedIdentity actual=$actualIdentity"
+        }
     }
 
     private fun inspectionJson(item: PackagerInspection): JSONObject = JSONObject()
@@ -253,11 +277,23 @@ class PackagerEngine(private val host: InProcessPluginHost) {
         if (!explicitSource.isNullOrBlank()) {
             return explicitSource.trim() to readTextSource(explicitSource.trim())
         }
+        resolveEmbeddedTemplate(input)?.let { return it }
         if (inputSource.trim().startsWith("content://")) return null
         return listOf("plugin.json", "extension.json", "system-plugin.json")
             .map { File(input.parentFile, it) }
             .firstOrNull(File::isFile)
             ?.let { it.absolutePath to it.readText(Charsets.UTF_8) }
+    }
+
+    private fun resolveEmbeddedTemplate(input: File): Pair<String, String>? {
+        ZipFile(input).use { zip ->
+            for (entryName in listOf("assets/plugin.json", "assets/extension.json", "assets/system-plugin.json")) {
+                val entry = zip.getEntry(entryName) ?: continue
+                val body = zip.getInputStream(entry).use { it.readBytes().toString(Charsets.UTF_8) }
+                return "apk:$entryName" to body
+            }
+        }
+        return null
     }
 
     private fun readBinarySource(source: String): ByteArray {
