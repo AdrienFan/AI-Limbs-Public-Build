@@ -111,7 +111,7 @@ private class BridgeRuntime(
                             JSONArray()
                                 .put(JSONObject()
                                     .put("type", "child_extension_installer")
-                                    .put("label", "添加 Bridge Provider")
+                                    .put("label", "添加子插件")
                                     .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT))
                                 .put(JSONObject()
                                     .put("type", "child_extension_selector")
@@ -119,6 +119,8 @@ private class BridgeRuntime(
                                     .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT)
                                     .put("select_capability_id", SELECT_CAPABILITY)
                                     .put("selection_provider_id", PANEL_PROVIDER_ID))
+                                .put(JSONObject()
+                                    .put("type", "page_plugin_drawer"))
                                 .put(
                                     JSONObject()
                                         // The generic component remains owned by Plugin Center. This wrapper
@@ -142,7 +144,6 @@ private class BridgeRuntime(
                                             )
                                         )
                                 )
-                                .put(JSONObject().put("type", "child_extension_list").put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT))
                         )
                         .toString()
                 )
