@@ -139,7 +139,7 @@ jobs:
 
   ubuntu_terminal:
     if: inputs.target == 'ubuntu-terminal'
-    name: Build Ubuntu Terminal v0.2.0 only
+    name: Build Ubuntu Terminal v0.2.1 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -184,7 +184,7 @@ jobs:
       - name: Upload Ubuntu Terminal payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ubuntu-terminal-v0.2.0-${{ github.run_number }}
+          name: ubuntu-terminal-v0.2.1-${{ github.run_number }}
           path: |
             plugin-lab/plugins/ubuntu-terminal/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-terminal/plugin.json
