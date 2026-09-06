@@ -7,6 +7,7 @@ object PluginExtensionPoints {
     const val UI_HOME_TILE = "ai_limbs.ui.home_tile"
     const val UI_SCREEN = "ai_limbs.ui.screen"
     const val UI_THEME = "ai_limbs.ui.theme"
+    const val LOCAL_MODEL_LOADER = "ai_limbs.model.local_loader"
 }
 
 data class ExtensionPointDefinition(

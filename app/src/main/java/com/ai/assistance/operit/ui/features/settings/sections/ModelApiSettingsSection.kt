@@ -50,6 +50,7 @@ import com.ai.assistance.operit.api.chat.llmprovider.LlamaProvider
 import com.ai.assistance.operit.api.chat.llmprovider.ModelListFetcher
 import com.ai.assistance.operit.data.collects.ApiProviderConfigs
 import com.ai.assistance.operit.data.model.ApiProviderType
+import com.ai.assistance.operit.data.model.ApiIngressRouteMode
 import com.ai.assistance.operit.data.model.ModelConfigData
 import com.ai.assistance.operit.data.model.ModelOption
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
@@ -141,6 +142,7 @@ fun ModelApiSettingsSection(
     
     // Tool Call配置状态
     var enableToolCallInput by remember(config.id) { mutableStateOf(config.enableToolCall) }
+    var apiIngressRouteModeInput by remember(config.id) { mutableStateOf(config.apiIngressRouteMode) }
 
     data class ApiAutoSaveState(
         val apiEndpoint: String,
@@ -159,6 +161,7 @@ fun ModelApiSettingsSection(
         val enableGoogleSearch: Boolean,
         val enableClaude1hPromptCache: Boolean,
         val enableToolCall: Boolean,
+        val apiIngressRouteMode: ApiIngressRouteMode,
     )
 
     // 保存设置的通用函数
@@ -183,6 +186,7 @@ fun ModelApiSettingsSection(
                     enableGoogleSearch = state.enableGoogleSearch,
                     enableClaude1hPromptCache = state.enableClaude1hPromptCache,
                     enableToolCall = state.enableToolCall,
+                    apiIngressRouteMode = state.apiIngressRouteMode,
                 )
 
                 EnhancedAIService.refreshAllServices(
@@ -210,6 +214,7 @@ fun ModelApiSettingsSection(
             enableGoogleSearch = enableGoogleSearchInput,
             enableClaude1hPromptCache = enableClaude1hPromptCacheInput,
             enableToolCall = enableToolCallInput,
+            apiIngressRouteMode = apiIngressRouteModeInput,
         )
     }
 
@@ -769,6 +774,15 @@ fun ModelApiSettingsSection(
                 checked = enableToolCallInput,
                 onCheckedChange = { enableToolCallInput = it }
             )
+
+            if (selectedApiProvider != ApiProviderType.MNN &&
+                selectedApiProvider != ApiProviderType.LLAMA_CPP
+            ) {
+                ApiIngressRouteRow(
+                    selected = apiIngressRouteModeInput,
+                    onSelected = { apiIngressRouteModeInput = it }
+                )
+            }
 
         }
     }
@@ -1344,6 +1358,51 @@ private fun SettingsSelectorRow(
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.primary
             )
+        }
+    }
+}
+
+@Composable
+private fun ApiIngressRouteRow(
+    selected: ApiIngressRouteMode,
+    onSelected: (ApiIngressRouteMode) -> Unit
+) {
+    Surface(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(12.dp)) {
+            Text(
+                text = stringResource(R.string.api_ingress_route_title),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Medium
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = stringResource(R.string.api_ingress_route_desc),
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(10.dp))
+            SingleChoiceSegmentedButtonRow(modifier = Modifier.fillMaxWidth()) {
+                SegmentedButton(
+                    modifier = Modifier.weight(1f),
+                    selected = selected == ApiIngressRouteMode.LEGACY,
+                    onClick = { onSelected(ApiIngressRouteMode.LEGACY) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 0, count = 2),
+                    icon = {},
+                    label = { Text(stringResource(R.string.api_ingress_route_legacy)) }
+                )
+                SegmentedButton(
+                    modifier = Modifier.weight(1f),
+                    selected = selected == ApiIngressRouteMode.UNIFIED,
+                    onClick = { onSelected(ApiIngressRouteMode.UNIFIED) },
+                    shape = SegmentedButtonDefaults.itemShape(index = 1, count = 2),
+                    icon = {},
+                    label = { Text(stringResource(R.string.api_ingress_route_unified)) }
+                )
+            }
         }
     }
 }

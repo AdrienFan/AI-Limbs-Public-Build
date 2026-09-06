@@ -18,6 +18,7 @@ import com.ai.assistance.operit.data.model.ParameterCategory
 import com.ai.assistance.operit.data.model.ParameterValueType
 import com.ai.assistance.operit.data.model.StandardModelParameters
 import com.ai.assistance.operit.data.model.ApiProviderType
+import com.ai.assistance.operit.data.model.ApiIngressRouteMode
 import com.ai.assistance.operit.data.model.ApiKeyInfo
 import java.util.UUID
 import kotlinx.coroutines.flow.Flow
@@ -365,7 +366,8 @@ class ModelConfigManager(private val context: Context) {
             enableDirectVideoProcessing: Boolean,
             enableGoogleSearch: Boolean,
             enableClaude1hPromptCache: Boolean,
-            enableToolCall: Boolean
+            enableToolCall: Boolean,
+            apiIngressRouteMode: ApiIngressRouteMode
     ): ModelConfigData {
         return updateConfigInternal(configId) {
             it.copy(
@@ -384,7 +386,8 @@ class ModelConfigManager(private val context: Context) {
                     enableDirectVideoProcessing = enableDirectVideoProcessing,
                     enableGoogleSearch = enableGoogleSearch,
                     enableClaude1hPromptCache = enableClaude1hPromptCache,
-                    enableToolCall = enableToolCall
+                    enableToolCall = enableToolCall,
+                    apiIngressRouteMode = apiIngressRouteMode
             )
         }
     }

@@ -151,6 +151,13 @@ interface InProcessPluginHost {
     fun registerHomeTile(tile: InProcessHomeTile)
     fun registerScreen(screen: InProcessScreen)
 
+    fun registerExtension(
+        point: String,
+        id: String,
+        payload: Any,
+        metadata: Map<String, String> = emptyMap()
+    )
+
     suspend fun invokeHostCapability(id: String, parametersJson: String = "{}"): String
 }
 

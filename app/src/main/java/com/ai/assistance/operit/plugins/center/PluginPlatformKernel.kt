@@ -36,6 +36,7 @@ internal object PluginPlatformKernel {
     private lateinit var contributionsInstance: PluginContributionRegistry
     private lateinit var extensionPointsInstance: ExtensionPointRegistry
     private lateinit var extensionRouterInstance: ExtensionRouter
+    private lateinit var localModelLoadersInstance: LocalModelLoaderRegistry
     private lateinit var uiRegistryInstance: PluginUiRegistry
     private lateinit var systemUiRegistryInstance: SystemPluginUiRegistry
     private lateinit var dynamicNavigationRegistryInstance: DynamicNavigationSurfaceRegistry
@@ -70,6 +71,8 @@ internal object PluginPlatformKernel {
         get() = requireInitialized().let { extensionPointsInstance }
     internal val extensionRouter: ExtensionRouter
         get() = requireInitialized().let { extensionRouterInstance }
+    internal val localModelLoaders: LocalModelLoaderRegistry
+        get() = requireInitialized().let { localModelLoadersInstance }
     internal val uiRegistry: PluginUiRegistry
         get() = requireInitialized().let { uiRegistryInstance }
     internal val systemUiRegistry: SystemPluginUiRegistry
@@ -218,7 +221,8 @@ internal object PluginPlatformKernel {
             listOf(
                 Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 AI Limbs 首页添加入口"),
                 Triple(PluginExtensionPoints.UI_SCREEN, "插件页面", "允许插件提供可打开的界面页面"),
-                Triple(PluginExtensionPoints.UI_THEME, "全局主题 / 皮肤", "允许插件实时接管宿主主题与配色")
+                Triple(PluginExtensionPoints.UI_THEME, "全局主题 / 皮肤", "允许插件实时接管宿主主题与配色"),
+                Triple(PluginExtensionPoints.LOCAL_MODEL_LOADER, "本地模型加载器", "允许插件提供新的本地模型加载实现；内嵌 MNN/llama.cpp 保持默认")
             ).forEach { (point, title, detail) ->
                 // UI screen v2 is a permanent opaque-document boundary.  Component evolution belongs
                 // to Plugin Center's schema, not this extension point.  Home tile/theme stay on v1.
@@ -236,6 +240,10 @@ internal object PluginPlatformKernel {
                         "PluginRegistrar.registerExtension",
                         "PluginThemeSpec"
                     )
+                    PluginExtensionPoints.LOCAL_MODEL_LOADER -> listOf(
+                        "PluginRegistrar.registerExtension",
+                        "PluginLocalModelLoaderSpec"
+                    )
                     else -> emptyList()
                 }
                 surfacePolicy.register(
@@ -247,6 +255,10 @@ internal object PluginPlatformKernel {
                         publicContracts = contracts
                     )
                 )
+            }
+            val localModelLoaders = LocalModelLoaderRegistry().apply {
+                registerBuiltIn("built-in:mnn", "MNN", setOf("MNN"))
+                registerBuiltIn("built-in:llama_cpp", "llama.cpp", setOf("LLAMA_CPP"))
             }
             val extensionPoints = ExtensionPointRegistry().apply {
                 register(
@@ -291,6 +303,20 @@ internal object PluginPlatformKernel {
                         }
                     )
                 )
+                register(
+                    ExtensionPointDefinition(
+                        point = PluginExtensionPoints.LOCAL_MODEL_LOADER,
+                        apiVersion = 1,
+                        binder = { record ->
+                            val loader = record.payload as? PluginLocalModelLoaderSpec
+                                ?: throw PluginInstallException(
+                                    "LOCAL_MODEL_LOADER_PAYLOAD_INVALID",
+                                    "Local model loader payload has the wrong type"
+                                )
+                            localModelLoaders.registerPlugin(record.ownerPluginId, record.id, loader)
+                        }
+                    )
+                )
             }
             val extensionRouter = ExtensionRouter(extensionPoints, surfacePolicy)
             val pluginContextFactory = PluginContextFactory(
@@ -327,6 +353,7 @@ internal object PluginPlatformKernel {
             contributionsInstance = contributions
             extensionPointsInstance = extensionPoints
             extensionRouterInstance = extensionRouter
+            localModelLoadersInstance = localModelLoaders
             uiRegistryInstance = uiRegistry
             systemUiRegistryInstance = systemUiRegistry
             dynamicNavigationRegistryInstance = dynamicNavigationRegistry

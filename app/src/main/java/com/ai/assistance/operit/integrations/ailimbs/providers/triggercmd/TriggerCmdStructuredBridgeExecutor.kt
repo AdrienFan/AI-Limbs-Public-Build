@@ -3,7 +3,9 @@ package com.ai.assistance.operit.integrations.ailimbs.providers.triggercmd
 import android.content.Context
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRemoteInvocationExecutor
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsIngressGateway
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsIngressResult
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsIngressSession
 import java.util.LinkedHashMap
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
@@ -16,14 +18,14 @@ import org.json.JSONObject
 
 internal class TriggerCmdStructuredBridgeExecutor(
     private val scope: CoroutineScope,
-    private val executeRemote: suspend (String, JSONObject) -> JSONObject
+    private val executeIngress: suspend (String, JSONObject) -> AiLimbsIngressResult
 ) {
     private data class RequestRecord(val signature: String)
     private data class CachedResponse(val signature: String, val response: String)
 
     constructor(context: Context, scope: CoroutineScope) : this(
         scope = scope,
-        executeRemote = createRemoteExecutor(context)
+        executeIngress = createIngressExecutor(context)
     )
 
     private val stateMutex = Mutex()
@@ -74,9 +76,11 @@ internal class TriggerCmdStructuredBridgeExecutor(
 
     private suspend fun executeInBackground(request: TriggerCmdBridgeRequest) {
         val response = try {
+            val ingressResult = executeIngress(request.tool, request.args)
             TriggerCmdBridgeProtocol.completed(
                 request,
-                executeRemote(request.tool, request.args)
+                ingressResult.payload,
+                ingressResult.accessBootstrap
             )
         } catch (error: CancellationException) {
             throw error
@@ -98,18 +102,21 @@ internal class TriggerCmdStructuredBridgeExecutor(
         private const val MAX_IN_FLIGHT_REQUESTS = 32
         private const val MAX_CACHED_RESPONSES = 128
 
-        private fun createRemoteExecutor(
+        private fun createIngressExecutor(
             context: Context
-        ): suspend (String, JSONObject) -> JSONObject {
-            val remoteExecutor =
-                AiLimbsRemoteInvocationExecutor(
+        ): suspend (String, JSONObject) -> AiLimbsIngressResult {
+            val ingressGateway =
+                AiLimbsIngressGateway(
                     context.applicationContext,
-                    AiLimbsExecutionSession(
-                        transport = AiLimbsExecutionTransport.TRIGGERCMD,
-                        scopeId = "triggercmd-" + UUID.randomUUID()
+                    AiLimbsIngressSession(
+                        sourceId = AiLimbsExecutionTransport.TRIGGERCMD.wireValue,
+                        executionSession = AiLimbsExecutionSession(
+                            transport = AiLimbsExecutionTransport.TRIGGERCMD,
+                            scopeId = "triggercmd-" + UUID.randomUUID()
+                        )
                     )
                 )
-            return { tool, args -> remoteExecutor.execute(tool, args) }
+            return { tool, args -> ingressGateway.invoke(tool, args) }
         }
     }
 }

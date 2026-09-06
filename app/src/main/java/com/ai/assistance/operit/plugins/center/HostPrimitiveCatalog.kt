@@ -60,7 +60,9 @@ object AiLimbsHostPrimitiveCatalog {
         HostPrimitiveDefinition(36, "host.authorization@1", "Execution Authorization / Policy", "对 Core、Host Tool 和 Plugin Capability 统一执行 ALLOW/ASK/FORBID、收据与用户授权策略。", "这是 Kernel 强制授权平面；插件只能得到决策结果，不能自我授权或绕过 Dispatcher。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.KERNEL_GATE, false),
         HostPrimitiveDefinition(37, "kernel.plugin.trust@1", "Plugin Package Integrity / Provenance Gate", "在安装前校验插件包结构、路径安全、摘要、签名/发布者和版本内容一致性。", "这是安装时 Kernel Gate；它回答“包能否被接纳”，不能替代运行时最小权限与 Authorization。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.KERNEL_GATE, false),
         HostPrimitiveDefinition(38, "host.ui.widget@1", "Desktop AppWidget Surface", "让插件通过受控描述和渲染路由向 Android 桌面 Launcher 提供 AppWidget。", "Host 持有 Manifest 静态壳、AppWidget 生命周期、配置与点击路由；插件不直接获得 AppWidgetManager/RemoteViews/PendingIntent。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
-        HostPrimitiveDefinition(39, "host.camera.capture@1", "Camera Capture / Visual Sensor", "在用户授权下发起相机拍摄并管理临时输出、捕获生命周期与结果内容。", "Host 管 CAMERA 权限、capture lease、ActivityResult 和受控 content handle；插件不直接取得 Activity/Context/CameraManager。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false)
+        HostPrimitiveDefinition(39, "host.camera.capture@1", "Camera Capture / Visual Sensor", "在用户授权下发起相机拍摄并管理临时输出、捕获生命周期与结果内容。", "Host 管 CAMERA 权限、capture lease、ActivityResult 和受控 content handle；插件不直接取得 Activity/Context/CameraManager。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
+        HostPrimitiveDefinition(40, "host.custom_access_prompt@1", "Custom Access Prompt", "读取、保存、查看历史并恢复用户自定义 AI Limbs 接入提示。", "只管理用户可编辑的自定义接入提示；代码化的 System Access Prompt 不属于该原语，也不可由插件修改。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
+        HostPrimitiveDefinition(41, "host.work_manual@1", "Work Manual", "读取、保存、查看历史并恢复 AI Limbs Work Manual 的可编辑正文。", "保护头由基座代码生成且始终存在；插件只能管理 editable body，读取时 Host 始终返回保护头与当前正文。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
     )
 
     private val byId = all.associateBy { it.id.lowercase() }

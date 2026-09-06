@@ -43,13 +43,19 @@ internal class PluginHostCapabilityRegistry(
     private val capabilities = ConcurrentHashMap<String, OwnedCapability>()
 
     // Ordinary plugin scope adapters remain intentionally narrow here.
-    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 39-item Gateway catalog.
+    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 41-item Gateway catalog.
     private val hostCapabilities = mapOf(
         "host.process@1" to HostCapability("host.process@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.process@1", parameters)
         },
         "host.ubuntu.runtime@1" to HostCapability("host.ubuntu.runtime@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.ubuntu.runtime@1", parameters)
+        },
+        "host.custom_access_prompt@1" to HostCapability("host.custom_access_prompt@1") { ownerPluginId, parameters ->
+            invokeSystemHostFromPlugin(ownerPluginId, "host.custom_access_prompt@1", parameters)
+        },
+        "host.work_manual@1" to HostCapability("host.work_manual@1") { ownerPluginId, parameters ->
+            invokeSystemHostFromPlugin(ownerPluginId, "host.work_manual@1", parameters)
         },
         "host.logging@1" to HostCapability("host.logging@1") { _, parameters -> invokeLogging(parameters) }
     )

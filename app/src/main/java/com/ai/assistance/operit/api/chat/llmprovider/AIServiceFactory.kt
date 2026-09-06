@@ -6,6 +6,7 @@ import com.ai.assistance.operit.data.model.ApiProviderType
 import com.ai.assistance.operit.data.model.ModelConfigData
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.plugins.toolpkg.ToolPkgAiProviderRegistry
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.util.AppLogger
 import java.io.IOException
@@ -294,6 +295,11 @@ object AIServiceFactory {
                 config = config,
                 provider = provider
             )
+        }
+        if (PluginPlatformKernel.isInitialized) {
+            PluginPlatformKernel.localModelLoaders
+                .createPluginService(providerTypeId, config)
+                ?.let { return it }
         }
 
         val httpClient = SharedHttpClient.instance

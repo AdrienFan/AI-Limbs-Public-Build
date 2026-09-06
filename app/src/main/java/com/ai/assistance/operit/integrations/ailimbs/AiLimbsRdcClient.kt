@@ -58,17 +58,20 @@ class AiLimbsRdcClient(
     private val scope: CoroutineScope
 ) {
     private val appContext = context.applicationContext
-    private val remoteExecutor =
-        AiLimbsRemoteInvocationExecutor(
+    private val ingressGateway =
+        AiLimbsIngressGateway(
             appContext,
-            AiLimbsExecutionSession(
-                transport = AiLimbsExecutionTransport.RDC,
-                scopeId = "rdc-" + UUID.randomUUID()
+            AiLimbsIngressSession(
+                sourceId = PROVIDER_ID,
+                executionSession = AiLimbsExecutionSession(
+                    transport = AiLimbsExecutionTransport.RDC,
+                    scopeId = "rdc-" + UUID.randomUUID()
+                )
             )
         )
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
-    private val adapter = AiLimbsRdcToolAdapter(appContext, remoteExecutor)
-    private val searchCompat = AiLimbsRdcSearchCompat(remoteExecutor, scope)
+    private val adapter = AiLimbsRdcToolAdapter(appContext, ingressGateway)
+    private val searchCompat = AiLimbsRdcSearchCompat(ingressGateway, scope)
     private val httpClient =
         OkHttpClient.Builder()
             .retryOnConnectionFailure(true)
@@ -398,6 +401,7 @@ class AiLimbsRdcClient(
         closeRealtimeTransport()
         cancelActiveCalls("RDC stopped")
         activeAuthorization = null
+        ingressGateway.resetAccessBootstrap()
         isRunning = false
         stateFlow.value =
             AiLimbsBridgeState(
@@ -449,6 +453,7 @@ class AiLimbsRdcClient(
         closeRealtimeTransport()
         cancelActiveCalls("manual re-pair")
         clearSession()
+        ingressGateway.resetAccessBootstrap()
         activeAuthorization = null
         reconnectAttempt = 0
         updateState(
@@ -1160,7 +1165,12 @@ class AiLimbsRdcClient(
             val rawResult =
                 protocolToolRegistry.executeOrNull(toolName, args)
                     ?: adapter.execute(toolName, args)
-            val result = attachLanerChatWorkNotification(rawResult)
+            val withWorkNotification = attachLanerChatWorkNotification(rawResult)
+            val ingressResult = ingressGateway.complete(withWorkNotification)
+            val result =
+                ingressResult.accessBootstrap?.let { bootstrap ->
+                    prependTextContent(ingressResult.payload, bootstrap)
+                } ?: ingressResult.payload
             logOutboundResultMetadata(callId, toolName, result)
             updateCall(
                 info,

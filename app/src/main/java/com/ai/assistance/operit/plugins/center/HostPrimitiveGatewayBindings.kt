@@ -3,15 +3,18 @@ package com.ai.assistance.operit.plugins.center
 import android.content.Context
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDocumentId
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDocumentProvider
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRegistry
 import com.ai.assistance.operit.util.AppLogger
+import org.json.JSONArray
 import org.json.JSONObject
 
-internal enum class HostGatewayRouteKind { HOST_TOOL, CORE_CAPABILITY, LOGGING, KERNEL, UNBOUND }
+internal enum class HostGatewayRouteKind { HOST_TOOL, CORE_CAPABILITY, MANAGED_DOCUMENT, LOGGING, KERNEL, UNBOUND }
 
 internal data class HostGatewayOperationBinding(
     val operation: String,
@@ -22,6 +25,7 @@ internal data class HostGatewayOperationBinding(
 internal object HostPrimitiveGatewayBindings {
     private fun tool(operation: String, target: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.HOST_TOOL, target)
     private fun core(operation: String, target: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.CORE_CAPABILITY, target)
+    private fun document(operation: String, target: AiLimbsDocumentId) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.MANAGED_DOCUMENT, target.stableId)
     private fun logging(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.LOGGING)
     private fun kernel(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.KERNEL)
     private fun pending(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.UNBOUND)
@@ -67,6 +71,8 @@ internal object HostPrimitiveGatewayBindings {
         "kernel.plugin.trust@1" to ops(kernel("status"), kernel("verify_package"), kernel("verify_detached"), kernel("install_keyring")),
         "host.ui.widget@1" to ops(pending("list"), pending("register"), pending("update"), pending("remove")),
         "host.camera.capture@1" to ops(pending("capture")),
+        "host.custom_access_prompt@1" to ops(document("read", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("write", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("snapshots", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("restore", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)),
+        "host.work_manual@1" to ops(document("read", AiLimbsDocumentId.WORK_MANUAL), document("write", AiLimbsDocumentId.WORK_MANUAL), document("snapshots", AiLimbsDocumentId.WORK_MANUAL), document("restore", AiLimbsDocumentId.WORK_MANUAL)),
     )
 
     fun operations(primitiveId: String): Map<String, HostGatewayOperationBinding> =
@@ -82,6 +88,7 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
     private val appContext = context.applicationContext
     private val toolHandler = AIToolHandler.getInstance(appContext)
     private val kernelAdapter = KernelHostPrimitiveAdapter(appContext)
+    private val documents = AiLimbsDocumentProvider(appContext)
 
     init {
         toolHandler.registerDefaultTools()
@@ -96,6 +103,10 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
         return when (binding.kind) {
             HostGatewayRouteKind.HOST_TOOL -> binding.target in toolHandler.getAllToolNames()
             HostGatewayRouteKind.CORE_CAPABILITY -> binding.target?.let(AiLimbsCapabilityRegistry::isRegisteredInvokeName) == true
+            HostGatewayRouteKind.MANAGED_DOCUMENT -> binding.target in setOf(
+                AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT.stableId,
+                AiLimbsDocumentId.WORK_MANUAL.stableId
+            )
             HostGatewayRouteKind.LOGGING -> true
             HostGatewayRouteKind.KERNEL -> kernelAdapter.isAvailable(primitiveId, binding.operation)
             HostGatewayRouteKind.UNBOUND -> false
@@ -142,6 +153,11 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
                     dispatcher(ownerPluginId).execute(target, JSONObject(parameters.toString()))
                 }
             }
+            HostGatewayRouteKind.MANAGED_DOCUMENT -> invokeManagedDocument(
+                requireNotNull(binding.target),
+                normalizedOperation,
+                parameters
+            )
             HostGatewayRouteKind.LOGGING -> readLogs(parameters)
             HostGatewayRouteKind.KERNEL -> kernelAdapter.invoke(ownerPluginId, normalizedId, normalizedOperation, JSONObject(parameters.toString()))
             HostGatewayRouteKind.UNBOUND -> error("unreachable")
@@ -169,6 +185,78 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
             AiLimbsExecutionPolicyEngine(appContext, session),
             preserveHostToolResultData = true
         )
+    }
+
+    private suspend fun invokeManagedDocument(
+        target: String,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject {
+        val documentId = when (target) {
+            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT.stableId -> AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT
+            AiLimbsDocumentId.WORK_MANUAL.stableId -> AiLimbsDocumentId.WORK_MANUAL
+            else -> throw PluginInstallException("HOST_DOCUMENT_UNKNOWN", "Unsupported managed document: $target")
+        }
+        return when (operation) {
+            "read" -> managedDocumentState(documentId)
+            "write" -> {
+                if (!parameters.has("content")) {
+                    throw PluginInstallException("HOST_DOCUMENT_CONTENT_REQUIRED", "write requires content")
+                }
+                val content = parameters.optString("content")
+                val changed = when (documentId) {
+                    AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> documents.writeCustomAccessPrompt(content)
+                    AiLimbsDocumentId.WORK_MANUAL -> documents.writeWorkManual(content)
+                    AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> error("unreachable")
+                }
+                managedDocumentState(documentId).put("changed", changed)
+            }
+            "snapshots" -> {
+                val items = JSONArray()
+                documents.listSnapshots(documentId).forEach { snapshot ->
+                    items.put(
+                        JSONObject()
+                            .put("id", snapshot.id)
+                            .put("created_at_epoch_ms", snapshot.createdAtEpochMillis)
+                            .put("sha256", snapshot.sha256)
+                    )
+                }
+                JSONObject().put("document", documentId.stableId).put("snapshots", items)
+            }
+            "restore" -> {
+                val snapshotId = parameters.optString("snapshot_id").trim()
+                if (snapshotId.isBlank()) {
+                    throw PluginInstallException("HOST_DOCUMENT_SNAPSHOT_REQUIRED", "restore requires snapshot_id")
+                }
+                val changed = documents.restoreSnapshot(documentId, snapshotId)
+                managedDocumentState(documentId)
+                    .put("changed", changed)
+                    .put("restored_snapshot_id", snapshotId)
+            }
+            else -> throw PluginInstallException("HOST_OPERATION_UNSUPPORTED", "Unsupported managed-document operation: $operation")
+        }
+    }
+
+    private suspend fun managedDocumentState(documentId: AiLimbsDocumentId): JSONObject {
+        val reference = documents.documentReference(documentId)
+        val result = JSONObject()
+            .put("document", reference.documentId)
+            .put("version", reference.version)
+            .put("path", reference.path)
+        return when (documentId) {
+            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> result
+                .put("empty", reference.isEmpty)
+                .put("content", documents.readCustomAccessPrompt())
+            AiLimbsDocumentId.WORK_MANUAL -> {
+                val editable = documents.readWorkManual()
+                result
+                    .put("content", documents.readWorkManualForAgent())
+                    .put("editable_content", editable)
+                    .put("editable_empty", editable.isBlank())
+                    .put("protected_header_present", true)
+            }
+            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT -> error("System Access Prompt is not exposed as a Host Primitive")
+        }
     }
 
     private fun readLogs(parameters: JSONObject): JSONObject {

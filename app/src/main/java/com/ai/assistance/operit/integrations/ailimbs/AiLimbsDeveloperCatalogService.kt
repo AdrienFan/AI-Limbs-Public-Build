@@ -78,6 +78,28 @@ internal class AiLimbsDeveloperCatalogService {
                 )
             }
 
+        val localModelLoaders = JSONArray()
+        PluginPlatformKernel.localModelLoaders.snapshots()
+            .filter { loader ->
+                query.isBlank() || listOf(
+                    loader.loaderId,
+                    loader.ownerPluginId.orEmpty(),
+                    loader.displayName,
+                    loader.providerTypeIds.joinToString(" "),
+                    if (loader.builtIn) "built-in" else "plugin"
+                ).any { it.lowercase().contains(query) }
+            }
+            .forEach { loader ->
+                localModelLoaders.put(
+                    JSONObject()
+                        .put("loader_id", loader.loaderId)
+                        .put("owner_plugin_id", loader.ownerPluginId ?: JSONObject.NULL)
+                        .put("display_name", loader.displayName)
+                        .put("provider_type_ids", JSONArray(loader.providerTypeIds.sorted()))
+                        .put("built_in", loader.builtIn)
+                )
+            }
+
         val surfaces = JSONArray()
         surfacePolicy.snapshots()
             .filter { item ->
@@ -113,9 +135,11 @@ internal class AiLimbsDeveloperCatalogService {
             .put("catalog_schema", "AI_LIMBS_DEVELOPER_CATALOG_V1")
             .put("host_primitive_count", primitives.length())
             .put("extension_point_count", extensionPoints.length())
+            .put("local_model_loader_count", localModelLoaders.length())
             .put("surface_count", surfaces.length())
             .put("host_primitives", primitives)
             .put("extension_points", extensionPoints)
+            .put("local_model_loaders", localModelLoaders)
             .put("surfaces", surfaces)
             .put(
                 "note",

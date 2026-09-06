@@ -8324,4 +8324,8 @@
     <string name="laner_document_restored">Backup restored</string>
     <string name="plugin_center_bootstrap_title">Install Plugin Center</string>
     <string name="plugin_center_bootstrap_description">Select and validate a .ailpsys system plugin</string>
+    <string name="api_ingress_route_title">API ingress route</string>
+    <string name="api_ingress_route_desc">Choose whether API models enter AI Limbs through the legacy path or the unified ingress. New model sessions use the current selection.</string>
+    <string name="api_ingress_route_legacy">Legacy path</string>
+    <string name="api_ingress_route_unified">Unified ingress</string>
 </resources>

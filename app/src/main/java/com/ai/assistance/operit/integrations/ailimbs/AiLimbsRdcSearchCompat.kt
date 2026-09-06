@@ -15,7 +15,7 @@ import org.json.JSONObject
  * permission, receipts, and lifecycle policy remain authoritative.
  */
 internal class AiLimbsRdcSearchCompat(
-    private val remoteExecutor: AiLimbsRemoteInvocationExecutor,
+    private val ingressGateway: AiLimbsIngressGateway,
     private val scope: CoroutineScope
 ) {
     private val sessions = ConcurrentHashMap<String, SearchSession>()
@@ -154,7 +154,7 @@ internal class AiLimbsRdcSearchCompat(
     }
 
     private suspend fun executeHostTool(name: String, parameters: JSONObject): JSONObject =
-        remoteExecutor.execute(
+        ingressGateway.executeWithinSession(
             AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
                 AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
             ),

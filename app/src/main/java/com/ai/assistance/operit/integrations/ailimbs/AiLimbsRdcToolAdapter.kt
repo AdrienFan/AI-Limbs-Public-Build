@@ -24,7 +24,7 @@ internal fun aiLimbsRdcHostAlias(toolName: String): String? =
 
 class AiLimbsRdcToolAdapter(
     context: Context,
-    private val remoteExecutor: AiLimbsRemoteInvocationExecutor
+    private val ingressGateway: AiLimbsIngressGateway
 ) {
     private val appContext = context.applicationContext
     private val terminal = Terminal.getInstance(appContext)
@@ -55,7 +55,7 @@ class AiLimbsRdcToolAdapter(
     private suspend fun readFile(args: JSONObject): JSONObject {
         val path = args.optString("path")
         managedDocumentTool(path, write = false)?.let { tool ->
-            return mcpResult(remoteExecutor.execute(tool, JSONObject()))
+            return mcpResult(ingressGateway.executeWithinSession(tool, JSONObject()))
         }
         val offset = args.optInt("offset", 0).coerceAtLeast(0)
         val length = args.optInt("length", 0).coerceAtLeast(0)
@@ -123,7 +123,7 @@ class AiLimbsRdcToolAdapter(
                 return mcpError("AI Limbs managed documents require a full body save")
             }
             return mcpResult(
-                remoteExecutor.execute(
+                ingressGateway.executeWithinSession(
                     tool,
                     JSONObject().put("content", args.optString("content"))
                 )
@@ -204,7 +204,7 @@ class AiLimbsRdcToolAdapter(
             val parameters = request.optJSONObject("parameters") ?: JSONObject()
             val result =
                 if (shouldEnterAiLimbsDispatcher(name)) {
-                    remoteExecutor.execute(name, parameters)
+                    ingressGateway.executeWithinSession(name, parameters)
                 } else {
                     executeHostTool(name, parameters)
                 }
@@ -249,7 +249,7 @@ class AiLimbsRdcToolAdapter(
         args: JSONObject
     ): JSONObject {
         if (shouldEnterAiLimbsDispatcher(toolName)) {
-            return mcpResult(remoteExecutor.execute(toolName, args))
+            return mcpResult(ingressGateway.executeWithinSession(toolName, args))
         }
         handler.registerDefaultTools()
         if (toolName !in handler.getAllToolNames()) {
@@ -261,7 +261,7 @@ class AiLimbsRdcToolAdapter(
     }
 
     private suspend fun executeHostTool(name: String, params: JSONObject): JSONObject =
-        remoteExecutor.execute(
+        ingressGateway.executeWithinSession(
             AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
                 AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
             ),

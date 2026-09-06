@@ -237,6 +237,15 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         }
 
+        override fun registerExtension(
+            point: String,
+            id: String,
+            payload: Any,
+            metadata: Map<String, String>
+        ) {
+            context.payloadContext.registrar.registerExtension(point, id, payload, metadata)
+        }
+
         override suspend fun invokeHostCapability(id: String, parametersJson: String): String {
             val parameters = runCatching { JSONObject(parametersJson) }.getOrElse {
                 throw PluginInstallException("INPROCESS_PARAMETERS_INVALID", "Host capability parameters must be JSON")

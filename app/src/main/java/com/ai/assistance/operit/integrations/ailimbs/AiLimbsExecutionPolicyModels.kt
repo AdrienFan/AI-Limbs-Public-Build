@@ -120,7 +120,7 @@ internal data class AiLimbsPolicyDecision(
 
 object AiLimbsExecutionPolicyDescriptor {
     const val PROTOCOL_VERSION = 2
-    private const val POLICY_SCHEMA_REVISION = "execution-policy-v2.2"
+    private const val POLICY_SCHEMA_REVISION = "execution-policy-v2.3"
 
     private val readOnlyHostTools =
         setOf(
@@ -227,7 +227,11 @@ object AiLimbsExecutionPolicyDescriptor {
             payloadKind = AiLimbsPayloadKind.STRUCTURED_DATA
         )
 
-    internal fun specForHostTool(targetName: String, parameters: JSONObject): AiLimbsPolicySpec {
+    internal fun specForHostTool(
+        targetName: String,
+        parameters: JSONObject,
+        transport: AiLimbsExecutionTransport
+    ): AiLimbsPolicySpec {
         val uiTool = isUiTool(targetName)
         val ubuntuTool =
             targetName in ubuntuHostTools ||
@@ -261,7 +265,10 @@ object AiLimbsExecutionPolicyDescriptor {
             ).map { key -> parameters.optString(key).trim() }
                 .filter { it.isNotEmpty() }
         val requiresManual =
-            targetName in processHostTools ||
+            (
+                targetName in processHostTools &&
+                    transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME
+            ) ||
                 (
                     targetName in storageWriteHostTools &&
                         storagePaths.any(::requiresWorkManualForPath)
@@ -313,7 +320,7 @@ object AiLimbsExecutionPolicyDescriptor {
             appendLine("- Resolver 解释政策；Dispatcher 执行同一份政策；领域服务原子复核最终不变量。")
             appendLine("- Core、HostTool 与 Plugin Capability 进入同一 Policy Engine；插件不得绕过 ALLOW、ASK、FORBID。")
             appendLine("- 权限结果只有 ALLOW、ASK、FORBID，未知外层调用不会绕开 Dispatcher。")
-            appendLine("- 任意进程命令、项目修改、开发环境和设备配置要求当前工作手册收据。")
+            appendLine("- RDC/远程运维执行进程命令仍要求当前工作手册收据；Plugin Runtime 通过已授权 Host Primitive 执行进程操作时不把工作手册作为插件运行凭证。")
             appendLine("- 普通长期保存不要求反复读取手册，但持久产物必须有确定归属、唯一地址与可恢复索引。")
             appendLine("- 只有实际附带像素内容的响应才标记 IMAGE_PIXELS；OCR 与结构化 UI 不是像素。")
             appendLine("- Laner Chat、Ubuntu 生命周期、托管文档与 UI readiness 在各自领域内终态复核。")

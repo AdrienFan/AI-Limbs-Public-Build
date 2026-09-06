@@ -27,7 +27,7 @@ class TriggerCmdStructuredBridgeExecutorTest {
             TriggerCmdStructuredBridgeExecutor(scope) { _, _ ->
                 calls.incrementAndGet()
                 started.complete(Unit)
-                finish.await()
+                AiLimbsIngressResult(finish.await(), null)
             }
         val request = request("req-poll", "capability.search", JSONObject().put("query", "Ubuntu"))
 
@@ -72,7 +72,7 @@ class TriggerCmdStructuredBridgeExecutorTest {
                     secondStarted.complete(Unit)
                 }
                 release.await()
-                JSONObject().put("success", true)
+                AiLimbsIngressResult(JSONObject().put("success", true), null)
             }
 
         val first = request("req-first", "slow.first")

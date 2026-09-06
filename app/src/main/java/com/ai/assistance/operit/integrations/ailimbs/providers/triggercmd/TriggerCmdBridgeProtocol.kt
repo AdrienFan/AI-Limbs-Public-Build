@@ -91,7 +91,11 @@ internal object TriggerCmdBridgeProtocol {
     fun running(request: TriggerCmdBridgeRequest): String =
         progressResponse(request, "running")
 
-    fun completed(request: TriggerCmdBridgeRequest, result: JSONObject): String {
+    fun completed(
+        request: TriggerCmdBridgeRequest,
+        result: JSONObject,
+        accessBootstrap: String? = null
+    ): String {
         val ok = if (result.has("success")) result.optBoolean("success", false) else true
         val response = JSONObject()
             .put("protocol", PROTOCOL)
@@ -100,6 +104,9 @@ internal object TriggerCmdBridgeProtocol {
             .put("ok", ok)
             .put("tool", request.tool)
             .put("result", result)
+        accessBootstrap?.let { bootstrap ->
+            response.put("access_bootstrap", JSONObject(bootstrap))
+        }
         if (!ok) {
             response.put(
                 "code",

@@ -24,14 +24,16 @@ class AiLimbsExecutionPolicyDescriptorTest {
         val ordinaryWrite =
             AiLimbsExecutionPolicyDescriptor.specForHostTool(
                 "write_file",
-                JSONObject().put("path", "/storage/emulated/0/Laner/notes/today.txt")
+                JSONObject().put("path", "/storage/emulated/0/Laner/notes/today.txt"),
+                AiLimbsExecutionTransport.RDC
             )
         val projectMove =
             AiLimbsExecutionPolicyDescriptor.specForHostTool(
                 "move_file",
                 JSONObject()
                     .put("source", "/tmp/result.kt")
-                    .put("destination_path", "/root/laner/projects/AI-Limbs/app/result.kt")
+                    .put("destination_path", "/root/laner/projects/AI-Limbs/app/result.kt"),
+                AiLimbsExecutionTransport.RDC
             )
 
         assertEquals(
@@ -48,11 +50,33 @@ class AiLimbsExecutionPolicyDescriptorTest {
     }
 
     @Test
+    fun pluginRuntimeProcessHostToolsDoNotRequireOperatorWorkManual() {
+        val operatorSpec = AiLimbsExecutionPolicyDescriptor.specForHostTool(
+            "create_terminal_session", JSONObject(), AiLimbsExecutionTransport.RDC
+        )
+        val pluginSpec = AiLimbsExecutionPolicyDescriptor.specForHostTool(
+            "create_terminal_session", JSONObject(), AiLimbsExecutionTransport.PLUGIN_RUNTIME
+        )
+        val pluginProjectWrite = AiLimbsExecutionPolicyDescriptor.specForHostTool(
+            "write_file",
+            JSONObject().put("path", "/root/laner/projects/AI-Limbs/app/result.kt"),
+            AiLimbsExecutionTransport.PLUGIN_RUNTIME
+        )
+
+        assertTrue(AiLimbsRequiredReceipt.WORK_MANUAL in operatorSpec.requiredReceipts)
+        assertFalse(AiLimbsRequiredReceipt.WORK_MANUAL in pluginSpec.requiredReceipts)
+        assertTrue(AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT in pluginSpec.requiredReceipts)
+        assertEquals(AiLimbsEffect.PROCESS_EXECUTION, pluginSpec.effect)
+        assertTrue(AiLimbsRequiredReceipt.WORK_MANUAL in pluginProjectWrite.requiredReceipts)
+    }
+
+    @Test
     fun canonicalRdcAliasesKeepCorrectPolicySemantics() {
-        val fileInfo = AiLimbsExecutionPolicyDescriptor.specForHostTool("file_info", JSONObject())
+        val fileInfo = AiLimbsExecutionPolicyDescriptor.specForHostTool("file_info", JSONObject(), AiLimbsExecutionTransport.RDC)
         val projectDirectory = AiLimbsExecutionPolicyDescriptor.specForHostTool(
             "make_directory",
-            JSONObject().put("path", "/root/laner/projects/new-module")
+            JSONObject().put("path", "/root/laner/projects/new-module"),
+            AiLimbsExecutionTransport.RDC
         )
 
         assertEquals(AiLimbsEffect.READ_ONLY, fileInfo.effect)
@@ -63,8 +87,8 @@ class AiLimbsExecutionPolicyDescriptorTest {
 
     @Test
     fun rdcSearchBackendsRemainReadOnlyStorageCapabilities() {
-        val findFiles = AiLimbsExecutionPolicyDescriptor.specForHostTool("find_files", JSONObject())
-        val grepCode = AiLimbsExecutionPolicyDescriptor.specForHostTool("grep_code", JSONObject())
+        val findFiles = AiLimbsExecutionPolicyDescriptor.specForHostTool("find_files", JSONObject(), AiLimbsExecutionTransport.RDC)
+        val grepCode = AiLimbsExecutionPolicyDescriptor.specForHostTool("grep_code", JSONObject(), AiLimbsExecutionTransport.RDC)
 
         listOf(findFiles, grepCode).forEach { spec ->
             assertEquals(AiLimbsEffect.READ_ONLY, spec.effect)
@@ -79,7 +103,8 @@ class AiLimbsExecutionPolicyDescriptorTest {
                 "read_file_full",
                 JSONObject()
                     .put("path", "/storage/emulated/0/Pictures/example.png")
-                    .put("direct_image", true)
+                    .put("direct_image", true),
+                AiLimbsExecutionTransport.RDC
             )
 
         assertEquals(AiLimbsPayloadKind.STRUCTURED_DATA, spec.payloadKind)

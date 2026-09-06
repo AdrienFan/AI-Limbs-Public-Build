@@ -77,4 +77,25 @@ class TriggerCmdBridgeProtocolTest {
         assertEquals("capability.search", decoded.request.tool)
         assertEquals("Ubuntu", decoded.request.args.getString("query"))
     }
+
+    @Test
+    fun completedEnvelopeCarriesAccessBootstrapWhenProvided() {
+        val request = (
+            TriggerCmdBridgeProtocol.decode(
+                """{"protocol":"AIL_TRIGGER_BRIDGE_V1","request_id":"req-bootstrap","tool":"capability.search","args":{}}"""
+            ) as TriggerCmdBridgeDecodeResult.Success
+        ).request
+        val response = JSONObject(
+            TriggerCmdBridgeProtocol.completed(
+                request,
+                JSONObject().put("success", true),
+                JSONObject().put("kind", "IMMUTABLE_ACCESS_BOOTSTRAP").toString()
+            )
+        )
+
+        assertEquals(
+            "IMMUTABLE_ACCESS_BOOTSTRAP",
+            response.getJSONObject("access_bootstrap").getString("kind")
+        )
+    }
 }

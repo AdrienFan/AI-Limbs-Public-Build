@@ -63,7 +63,7 @@ class AiLimbsExecutionPolicyEngine(
                         targetName = canonicalName
                         parameters = args
                         route = AiLimbsCapabilityRoute.HostTool(targetName)
-                        spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters)
+                        spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters, session.transport)
                     }
                     is AiLimbsCoreRoute.Local -> {
                         if (coreRoute.operation == AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE) {
@@ -74,7 +74,7 @@ class AiLimbsExecutionPolicyEngine(
                             }
                             parameters = args.optJSONObject("parameters") ?: JSONObject()
                             route = AiLimbsCapabilityRoute.HostTool(targetName)
-                            spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters)
+                            spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, parameters, session.transport)
                         } else {
                             targetName = canonicalName
                             parameters = args
@@ -135,7 +135,7 @@ class AiLimbsExecutionPolicyEngine(
                 val core = registration.registration
                 if (core.route == AiLimbsCoreRoute.ForwardHostTool) {
                     route = AiLimbsCapabilityRoute.HostTool(targetName)
-                    spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject())
+                    spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject(), session.transport)
                 } else {
                     route = AiLimbsCapabilityRoute.Core(core)
                     spec = AiLimbsExecutionPolicyDescriptor.specForCoreRoute(core.route)
@@ -147,7 +147,7 @@ class AiLimbsExecutionPolicyEngine(
             }
             null -> {
                 route = AiLimbsCapabilityRoute.HostTool(targetName)
-                spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject())
+                spec = AiLimbsExecutionPolicyDescriptor.specForHostTool(targetName, JSONObject(), session.transport)
             }
         }
         val inspection =

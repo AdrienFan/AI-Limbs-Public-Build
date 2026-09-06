@@ -2,6 +2,13 @@ package com.ai.assistance.operit.data.model
 
 import kotlinx.serialization.Serializable
 
+/** API 模型进入 AI Limbs 时使用的接入路线。 */
+@Serializable
+enum class ApiIngressRouteMode {
+        LEGACY,
+        UNIFIED
+}
+
 /** API提供商类型枚举 */
 @Serializable
 enum class ApiProviderType {
@@ -154,6 +161,9 @@ data class ModelConfigData(
 
         // Tool Call配置
         val enableToolCall: Boolean = ModelConfigDefaults.DEFAULT_ENABLE_TOOL_CALL, // 是否启用Tool Call接口调用工具（使用模型原生工具调用而非XML格式）
+
+        // AI Limbs API 接入路线；默认保留原始行为，用户可显式切换到统一入口。
+        val apiIngressRouteMode: ApiIngressRouteMode = ApiIngressRouteMode.LEGACY,
 
         // 请求频率限制配置
         val requestLimitPerMinute: Int = 0, // 每分钟最大请求次数，0表示不限流
