@@ -55,6 +55,7 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
                                 .put("type", "terminal_workbench")
                                 .put("provider_id", PANEL_ID)
                                 .put("action_capability_id", UI_ACTION_CAPABILITY)
+                                .put("metrics_profile", "ai_limbs_06478")
                         )
                     )
                     .toString()
