@@ -104,6 +104,6 @@ internal object AiLimbsExecutionAuthorization {
             normalized.startsWith("system:") -> normalized.removePrefix("system:")
             normalized.startsWith("plugin-ui:") -> normalized.removePrefix("plugin-ui:")
             else -> null
-        }.trim().takeIf { it.isNotEmpty() }
+        }?.trim()?.takeIf { it.isNotEmpty() }
     }
 }
