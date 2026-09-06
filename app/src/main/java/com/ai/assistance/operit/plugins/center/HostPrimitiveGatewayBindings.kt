@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins.center
 import android.content.Context
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
@@ -111,8 +112,36 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
         }
         AppLogger.d("HostGateway", "System invoke: $ownerPluginId -> $normalizedId/$normalizedOperation")
         return when (binding.kind) {
-            HostGatewayRouteKind.HOST_TOOL -> invokeHostTool(ownerPluginId, requireNotNull(binding.target), parameters)
-            HostGatewayRouteKind.CORE_CAPABILITY -> dispatcher(ownerPluginId).execute(requireNotNull(binding.target), JSONObject(parameters.toString()))
+            HostGatewayRouteKind.HOST_TOOL -> {
+                val target = requireNotNull(binding.target)
+                if (isApprovedScopeRead(normalizedId, normalizedOperation)) {
+                    AiLimbsExecutionAuthorization.withApprovedScopeRead(
+                        ownerPluginId = ownerPluginId,
+                        primitiveId = normalizedId,
+                        operation = normalizedOperation,
+                        targetName = target
+                    ) {
+                        invokeHostTool(ownerPluginId, target, parameters)
+                    }
+                } else {
+                    invokeHostTool(ownerPluginId, target, parameters)
+                }
+            }
+            HostGatewayRouteKind.CORE_CAPABILITY -> {
+                val target = requireNotNull(binding.target)
+                if (isApprovedScopeRead(normalizedId, normalizedOperation)) {
+                    AiLimbsExecutionAuthorization.withApprovedScopeRead(
+                        ownerPluginId = ownerPluginId,
+                        primitiveId = normalizedId,
+                        operation = normalizedOperation,
+                        targetName = target
+                    ) {
+                        dispatcher(ownerPluginId).execute(target, JSONObject(parameters.toString()))
+                    }
+                } else {
+                    dispatcher(ownerPluginId).execute(target, JSONObject(parameters.toString()))
+                }
+            }
             HostGatewayRouteKind.LOGGING -> readLogs(parameters)
             HostGatewayRouteKind.KERNEL -> kernelAdapter.invoke(ownerPluginId, normalizedId, normalizedOperation, JSONObject(parameters.toString()))
             HostGatewayRouteKind.UNBOUND -> error("unreachable")
@@ -125,9 +154,21 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
             JSONObject().put("name", toolName).put("parameters", JSONObject(parameters.toString()))
         )
 
+    private fun isApprovedScopeRead(primitiveId: String, operation: String): Boolean =
+        when (primitiveId to operation) {
+            "host.ubuntu.runtime@1" to "status",
+            "host.ubuntu.runtime@1" to "idle_get",
+            "host.process@1" to "session_screen" -> true
+            else -> false
+        }
+
     private fun dispatcher(ownerPluginId: String): AiLimbsDispatcher {
         val session = AiLimbsExecutionSession(AiLimbsExecutionTransport.PLUGIN_RUNTIME, "system:$ownerPluginId")
-        return AiLimbsDispatcher(appContext, AiLimbsExecutionPolicyEngine(appContext, session))
+        return AiLimbsDispatcher(
+            appContext,
+            AiLimbsExecutionPolicyEngine(appContext, session),
+            preserveHostToolResultData = true
+        )
     }
 
     private fun readLogs(parameters: JSONObject): JSONObject {

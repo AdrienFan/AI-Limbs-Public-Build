@@ -31,6 +31,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.system.SystemPluginUiActionsV2
 import com.ai.assistance.operit.plugins.system.SystemPluginUiSurfaceV2
@@ -172,17 +173,23 @@ fun PluginDeclarativeScreen(
             actions = SystemPluginUiActionsV2 { capabilityId, parameters ->
                 // Bind capability execution to the Host-trusted screen owner. Plugin Center receives
                 // no arbitrary plugin-id parameter, so a component cannot impersonate another plugin.
-                PluginPlatformKernel.capabilities.requireOwnedCapability(
-                    screen.ownerPluginId,
-                    capabilityId
-                )
-                val authorization = PluginPlatformKernel.manager.activeAuthorization(screen.ownerPluginId)
-                PluginPlatformKernel.capabilities.invokeDelegated(
-                    ownerPluginId = authorization.pluginId,
-                    grantedScopes = authorization.grantedScopes,
-                    capabilityId = capabilityId,
-                    parameters = org.json.JSONObject(parameters.toString())
-                )
+                AiLimbsExecutionAuthorization.withExplicitUiAction(
+                    ownerPluginId = screen.ownerPluginId,
+                    screenId = screen.id,
+                    capabilityId = capabilityId
+                ) {
+                    PluginPlatformKernel.capabilities.requireOwnedCapability(
+                        screen.ownerPluginId,
+                        capabilityId
+                    )
+                    val authorization = PluginPlatformKernel.manager.activeAuthorization(screen.ownerPluginId)
+                    PluginPlatformKernel.capabilities.invokeDelegated(
+                        ownerPluginId = authorization.pluginId,
+                        grantedScopes = authorization.grantedScopes,
+                        capabilityId = capabilityId,
+                        parameters = org.json.JSONObject(parameters.toString())
+                    )
+                }
             }
         )
     )

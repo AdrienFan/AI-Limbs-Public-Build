@@ -24,10 +24,12 @@ import java.util.Locale
 import java.util.TimeZone
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.coroutines.coroutineContext
 
 class AiLimbsDispatcher(
     context: Context,
-    private val policyEngine: AiLimbsExecutionPolicyEngine
+    private val policyEngine: AiLimbsExecutionPolicyEngine,
+    private val preserveHostToolResultData: Boolean = false
 ) {
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
@@ -263,6 +265,11 @@ class AiLimbsDispatcher(
                 responseLocation = 0..0
             )
         val emitted = mutableListOf<String>()
+        val preapprovedAsk = AiLimbsExecutionAuthorization.allows(
+            coroutineContext,
+            policyEngine.session,
+            name
+        )
         val results =
             ToolExecutionManager.executeInvocations(
                 invocations = listOf(invocation),
@@ -270,6 +277,8 @@ class AiLimbsDispatcher(
                 toolHandler = handler,
                 packageManager = handler.getOrCreatePackageManager(),
                 callerName = "AI Limbs Bridge",
+                preapprovedAsk = preapprovedAsk,
+                preserveStructuredResult = preserveHostToolResultData,
                 collector =
                     object : StreamCollector<String> {
                         override suspend fun emit(value: String) {

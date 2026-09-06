@@ -422,7 +422,8 @@ object ToolExecutionManager {
     suspend fun checkToolPermission(
         toolHandler: AIToolHandler,
         invocation: ToolInvocation,
-        toolExposureMode: ToolExposureMode = ToolExposureMode.FULL
+        toolExposureMode: ToolExposureMode = ToolExposureMode.FULL,
+        preapprovedAsk: Boolean = false
     ): Pair<Boolean, ToolResult?> {
         val resolvedTarget = resolveToolTarget(invocation.tool)
         val permissionTool =
@@ -452,7 +453,10 @@ object ToolExecutionManager {
         if (hasPromptForPermission) {
             // 检查权限，如果需要则弹出权限请求界面
             val toolPermissionSystem = toolHandler.getToolPermissionSystem()
-            val hasPermission = toolPermissionSystem.checkToolPermission(permissionTool)
+            val hasPermission = toolPermissionSystem.checkToolPermission(
+                permissionTool,
+                preapprovedAsk = preapprovedAsk
+            )
 
             // 如果权限被拒绝，创建错误结果
             if (!hasPermission) {
@@ -501,7 +505,9 @@ object ToolExecutionManager {
         toolExposureMode: ToolExposureMode = ToolExposureMode.FULL,
         callerName: String? = null,
         callerChatId: String? = null,
-        callerCardId: String? = null
+        callerCardId: String? = null,
+        preapprovedAsk: Boolean = false,
+        preserveStructuredResult: Boolean = false
     ): List<ToolResult> = coroutineScope {
         // 默认工具注册现在可能在启动阶段被延后；这里确保在真正执行工具前已完成注册
         // registerDefaultTools() 是幂等且线程安全的，可安全重复调用
@@ -575,7 +581,12 @@ object ToolExecutionManager {
             when (val interception = toolHandler.checkToolInterception(interceptionTool)) {
                 AIToolHookDecision.Allow -> {
                     val (hasPermission, errorResult) =
-                        checkToolPermission(toolHandler, invocation, toolExposureMode)
+                        checkToolPermission(
+                            toolHandler,
+                            invocation,
+                            toolExposureMode,
+                            preapprovedAsk = preapprovedAsk
+                        )
                     if (hasPermission) {
                         permittedInvocations.add(invocation)
                     } else {
@@ -644,7 +655,8 @@ object ToolExecutionManager {
                         toolHandler = toolHandler,
                         packageManager = packageManager,
                         collector = collector,
-                        runtimeContext = toolRuntimeContext
+                        runtimeContext = toolRuntimeContext,
+                        preserveStructuredResult = preserveStructuredResult
                     )
                 executionResults[invocation] = result
             }
@@ -658,7 +670,8 @@ object ToolExecutionManager {
                     toolHandler = toolHandler,
                     packageManager = packageManager,
                     collector = collector,
-                    runtimeContext = toolRuntimeContext
+                    runtimeContext = toolRuntimeContext,
+                    preserveStructuredResult = preserveStructuredResult
                 )
             executionResults[invocation] = result
         }
@@ -685,7 +698,8 @@ object ToolExecutionManager {
         toolHandler: AIToolHandler,
         packageManager: PackageManager,
         collector: StreamCollector<String>,
-        runtimeContext: ToolRuntimeContext
+        runtimeContext: ToolRuntimeContext,
+        preserveStructuredResult: Boolean
     ): ToolResult {
         val toolName = invocation.tool.name
         val displayToolName = resolveDisplayToolName(invocation.tool)
@@ -735,24 +749,44 @@ object ToolExecutionManager {
                     return@withContext emptyResult
                 }
 
-                val lastResult = collectedResults.last()
-                val combinedResultString = collectedResults.joinToString("\n") { res ->
-                    (if (res.success) res.result.toString() else "Step error: ${res.error ?: "Unknown error"}").trim()
-                }.trim()
-
-                val finalResult =
-                    ToolResult(
-                        toolName = displayToolName,
-                        success = lastResult.success,
-                        result = StringResultData(combinedResultString),
-                        error = lastResult.error
-                    )
+                val finalResult = finalizeCollectedToolResult(
+                    displayToolName = displayToolName,
+                    collectedResults = collectedResults,
+                    preserveStructuredResult = preserveStructuredResult
+                )
                 toolHandler.notifyToolExecutionResult(invocation.tool, finalResult)
                 return@withContext finalResult
             } finally {
                 toolHandler.notifyToolExecutionFinished(invocation.tool)
             }
         }
+    }
+
+    internal fun finalizeCollectedToolResult(
+        displayToolName: String,
+        collectedResults: List<ToolResult>,
+        preserveStructuredResult: Boolean
+    ): ToolResult {
+        require(collectedResults.isNotEmpty()) { "collectedResults must not be empty" }
+        val lastResult = collectedResults.last()
+        if (preserveStructuredResult) {
+            return ToolResult(
+                toolName = displayToolName,
+                success = lastResult.success,
+                result = lastResult.result,
+                error = lastResult.error
+            )
+        }
+
+        val combinedResultString = collectedResults.joinToString("\n") { result ->
+            (if (result.success) result.result.toString() else "Step error: ${result.error ?: "Unknown error"}").trim()
+        }.trim()
+        return ToolResult(
+            toolName = displayToolName,
+            success = lastResult.success,
+            result = StringResultData(combinedResultString),
+            error = lastResult.error
+        )
     }
 
     /**

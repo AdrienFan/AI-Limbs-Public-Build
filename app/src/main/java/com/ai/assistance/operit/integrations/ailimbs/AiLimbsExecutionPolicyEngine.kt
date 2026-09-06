@@ -14,6 +14,7 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.coroutines.coroutineContext
 
 private data class AiLimbsAvailabilityResult(
     val available: Boolean,
@@ -183,6 +184,13 @@ class AiLimbsExecutionPolicyEngine(
             inspection.permission == PermissionLevel.ASK.name &&
                 !invocation.spec.hostPermissionEnforced
         ) {
+            if (AiLimbsExecutionAuthorization.allows(coroutineContext, session, invocation.targetName)) {
+                return AiLimbsPolicyDecision(
+                    proceed = true,
+                    inspection = inspection.copy(outcome = AiLimbsPolicyOutcome.ALLOW),
+                    confirmedDuringEvaluation = true
+                )
+            }
             val granted =
                 corePermissionMutex.withLock {
                     permissionSystem.checkToolPermission(toAiTool(invocation))

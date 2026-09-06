@@ -188,7 +188,10 @@ class ToolPermissionSystem private constructor(private val context: Context) {
     /**
      * Check if a tool is allowed to execute
      */
-    suspend fun checkToolPermission(tool: AITool): Boolean {
+    suspend fun checkToolPermission(tool: AITool): Boolean =
+        checkToolPermission(tool, preapprovedAsk = false)
+
+    suspend fun checkToolPermission(tool: AITool, preapprovedAsk: Boolean): Boolean {
         AppLogger.d(TAG, "Starting permission check: ${tool.name}")
         
         val preferences = context.toolPermissionsDataStore.data.first()
@@ -200,7 +203,17 @@ class ToolPermissionSystem private constructor(private val context: Context) {
         
         return when (permissionLevel) {
             PermissionLevel.ALLOW -> true
-            PermissionLevel.ASK -> requestPermission(tool)
+            PermissionLevel.ASK -> {
+                if (preapprovedAsk) {
+                    AppLogger.d(
+                        TAG,
+                        "ASK satisfied by Host-trusted foreground/scope authorization: ${tool.name}"
+                    )
+                    true
+                } else {
+                    requestPermission(tool)
+                }
+            }
             PermissionLevel.FORBID -> false
         }
     }
