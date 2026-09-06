@@ -13,7 +13,7 @@ data class AiLimbsIngressSession(
     }
 }
 
-internal data class AiLimbsIngressResult(
+data class AiLimbsIngressResult(
     val payload: JSONObject,
     val accessBootstrap: String?
 )
