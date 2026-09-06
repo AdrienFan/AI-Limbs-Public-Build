@@ -33,6 +33,12 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
             "在插件持有的兰儿共享 PTY 会话中执行命令，并同步到只读共享标签。",
             InProcessCapabilityExecutor { parameters -> panel.commandCapability(parameters) }
         )
+        host.registerCapability(
+            UI_ACTION_CAPABILITY,
+            "Ubuntu 终端前台操作",
+            "承接 Plugin Center 终端工作台的明确用户操作；后台调用仍经过正常策略链。",
+            InProcessCapabilityExecutor { parameters -> panel.uiActionCapability(parameters) }
+        )
         host.registerScreen(
             InProcessScreen(
                 id = SCREEN_ID,
@@ -48,6 +54,7 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
                             JSONObject()
                                 .put("type", "terminal_workbench")
                                 .put("provider_id", PANEL_ID)
+                                .put("action_capability_id", UI_ACTION_CAPABILITY)
                         )
                     )
                     .toString()
@@ -71,6 +78,7 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
         const val TILE_ID = "plugin.system.ubuntu_terminal.tile"
         const val STATUS_CAPABILITY = "plugin.ubuntu.status"
         const val COMMAND_CAPABILITY = "plugin.ubuntu.command"
+        const val UI_ACTION_CAPABILITY = "plugin.ubuntu.ui_action"
         const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
     }
 }
@@ -113,10 +121,9 @@ private class UbuntuTerminalPanel(
         host.scope.launch {
             runCatching {
                 refreshStatusInternal()
-                if (ubuntuState == RUNNING) ensureSession(tabs.first())
                 refreshAllScreens()
                 statusMessage = if (ubuntuState == RUNNING) {
-                    "Ubuntu 已运行，Local 会话已就绪。"
+                    "Ubuntu 已运行；Local 会话将在首次前台操作时创建。"
                 } else {
                     "Ubuntu 尚未运行。"
                 }
@@ -159,6 +166,14 @@ private class UbuntuTerminalPanel(
                 else -> error("未知操作：" + eventId)
             }
         }.getOrElse { failure(eventId, it) }
+    }
+
+    suspend fun uiActionCapability(parametersJson: String): String {
+        val parameters = runCatching { JSONObject(parametersJson) }.getOrElse { JSONObject() }
+        val eventId = parameters.optString("event_id").trim()
+        require(eventId.isNotBlank()) { "event_id 不能为空" }
+        val payload = parameters.optJSONObject("payload") ?: JSONObject()
+        return perform(eventId, payload.toString())
     }
 
     suspend fun statusCapability(): String {
