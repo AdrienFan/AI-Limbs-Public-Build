@@ -123,8 +123,6 @@ private class BridgeRuntime(
                                     .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT)
                                     .put("select_capability_id", SELECT_CAPABILITY)
                                     .put("selection_provider_id", PANEL_PROVIDER_ID))
-                                .put(JSONObject()
-                                    .put("type", "page_plugin_drawer"))
                                 .put(
                                     JSONObject()
                                         // The generic component remains owned by Plugin Center. This wrapper
