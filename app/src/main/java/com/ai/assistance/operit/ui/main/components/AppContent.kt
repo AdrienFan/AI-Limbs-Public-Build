@@ -47,6 +47,7 @@ import androidx.navigation.NavController
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.ui.common.NavItem
 import com.ai.assistance.operit.ui.common.displays.FpsCounter
 import com.ai.assistance.operit.ui.main.NavigationTransitionSource
@@ -177,6 +178,25 @@ fun AppContent(
     val useBackgroundImage = themeSnapshot.useBackgroundImage
     val backgroundImageUri = themeSnapshot.backgroundImageUri
     val hasBackgroundImage = useBackgroundImage && backgroundImageUri != null
+    val pageAccessoryRenderer by PluginPlatformKernel.systemUiRegistry.pageAccessoryRenderer.collectAsState()
+    val pluginScreens by PluginPlatformKernel.uiRegistry.activeScreens.collectAsState()
+    val pluginHomeTiles by PluginPlatformKernel.uiRegistry.homeTiles.collectAsState()
+    val dynamicBindings by PluginPlatformKernel.dynamicNavigationRegistry.bindings.collectAsState()
+    val pageContext = remember(
+        currentRouteEntry.routeId,
+        currentScreen,
+        pluginScreens,
+        pluginHomeTiles,
+        dynamicBindings
+    ) {
+        resolveSystemPageContext(
+            routeEntry = currentRouteEntry,
+            screen = currentScreen,
+            pluginScreens = pluginScreens,
+            pluginHomeTiles = pluginHomeTiles,
+            dynamicBindings = dynamicBindings
+        )
+    }
 
     // Get toolbar transparency setting
     val toolbarTransparent = themeSnapshot.toolbarTransparent
@@ -725,6 +745,14 @@ fun AppContent(
                                         }
                                     }
                                 }
+                            }
+                        }
+
+                        // Global page accessory slot. Plugin Center owns the renderer and decides
+                        // whether the current page has any visible plugin relationship at all.
+                        pageAccessoryRenderer?.let { renderer ->
+                            Box(Modifier.fillMaxSize().zIndex(3f)) {
+                                renderer.Render(pageContext)
                             }
                         }
 

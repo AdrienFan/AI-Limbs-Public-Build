@@ -122,6 +122,35 @@ interface SystemPluginUiRendererV2 {
     fun Render(surface: SystemPluginUiSurfaceV2)
 }
 
+/**
+ * Stable identity for the page currently hosted by AI Limbs' main page shell.
+ *
+ * The Host supplies identity and neutral participation hints only. Plugin Center owns the meaning of
+ * page participants and all management UI rendered in the accessory slot.
+ */
+data class SystemPageContextV1(
+    val pageId: String,
+    val kind: String,
+    val ownerPluginId: String? = null,
+    val screenId: String? = null,
+    val surfaceId: String? = null,
+    val documentJson: String? = null,
+    val embeddedPluginIds: List<String> = emptyList()
+)
+
+interface SystemPageAccessoryRendererV1 {
+    @Composable
+    fun Render(context: SystemPageContextV1)
+}
+
+/**
+ * Optional Host UI extension implemented by kernels that provide a global page accessory slot.
+ * Kept separate from SystemUiHostV2 so existing ABI-2 system plugins remain binary compatible.
+ */
+interface SystemPageAccessoryHostV1 {
+    fun registerPageAccessoryRenderer(renderer: SystemPageAccessoryRendererV1): AutoCloseable
+}
+
 interface SystemUiHostV2 : SystemUiHostV1 {
     /**
      * Registers the single semantic owner of ordinary-plugin UI documents.
@@ -315,7 +344,7 @@ internal class KernelSystemUiHostV1(
     private val ownerPluginId: String,
     private val admittedRole: String,
     private val registry: SystemPluginUiRegistry
-) : SystemUiHostV2 {
+) : SystemUiHostV2, SystemPageAccessoryHostV1 {
     init { requirePluginCenterRole(admittedRole) }
 
     override fun registerToolboxEntry(entry: SystemToolboxEntryV1): AutoCloseable {
@@ -326,6 +355,11 @@ internal class KernelSystemUiHostV1(
     override fun registerPluginSurfaceRenderer(renderer: SystemPluginUiRendererV2): AutoCloseable {
         requirePluginCenterRole(admittedRole)
         return registry.registerPluginSurfaceRenderer(ownerPluginId, renderer)
+    }
+
+    override fun registerPageAccessoryRenderer(renderer: SystemPageAccessoryRendererV1): AutoCloseable {
+        requirePluginCenterRole(admittedRole)
+        return registry.registerPageAccessoryRenderer(ownerPluginId, renderer)
     }
 }
 
