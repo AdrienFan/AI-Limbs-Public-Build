@@ -13,7 +13,6 @@ import com.ai.assistance.operit.data.model.ToolParameterSchema
 object AiLimbsCoreCapabilityRegistry {
     const val CORE_PROVIDER = "ai_limbs_core"
     const val BRIDGE_PROVIDER = "ai_limbs_bridge"
-    const val UBUNTU_PROVIDER = "ubuntu"
 
     private val registrations: List<AiLimbsCoreCapabilityRegistration> = listOf(
         registration(
@@ -210,18 +209,6 @@ object AiLimbsCoreCapabilityRegistry {
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.UI_STATUS),
             catalogEntry =
             entry("ai_limbs.ui.status", "AI Limbs 视觉与触觉状态", "Read live AI Limbs UI and visual-control readiness.")
-        ),
-        registration(
-            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SHARED_UBUNTU_STATUS),
-            capabilityId = "ubuntu.share.status",
-            capabilityAliases = listOf("ai.ubuntu.share.status"),
-            catalogEntry =
-            entry(
-                        "ai_limbs.ubuntu.share.status",
-                        "兰儿 Ubuntu 共享窗口状态",
-                        "Read shared Ubuntu activity and participant counts without returning command or output content.",
-                        keywords = listOf("共享窗口", "眼睛", "只读", "兰儿操作", "Ubuntu share")
-                    )
         ),
         registration(
             route = AiLimbsCoreRoute.ForwardHostTool,
@@ -567,63 +554,7 @@ object AiLimbsCoreCapabilityRegistry {
                     keywords = listOf("host tool", "dispatcher", "permission", "execute", "工具执行")
                 )
         ),
-        registration(
-            route = AiLimbsCoreRoute.ForwardHostTool,
-            capabilityId = "ubuntu.status",
-            provider = AiLimbsCoreProvider.UBUNTU,
-            availabilityPolicy = AiLimbsCoreAvailabilityPolicy.UBUNTU_STATUS,
-            capabilityAliases = listOf("ubuntu.lifecycle.status"),
-            catalogEntry =
-            ubuntuEntry("ubuntu.status", "查询 Ubuntu 状态", "Read the lifecycle state of the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "沙箱", "生命周期"))
-        ),
-        registration(
-            route = AiLimbsCoreRoute.ForwardHostTool,
-            capabilityId = "ubuntu.start",
-            provider = AiLimbsCoreProvider.UBUNTU,
-            availabilityPolicy = AiLimbsCoreAvailabilityPolicy.UBUNTU_START,
-            capabilityAliases = listOf("ubuntu.lifecycle.start"),
-            catalogEntry =
-            ubuntuEntry("ubuntu.start", "启动 Ubuntu", "Start the AI Limbs Ubuntu sandbox.", listOf("Ubuntu", "Linux", "开机", "启动沙箱"))
-        ),
-        registration(
-            route = AiLimbsCoreRoute.ForwardHostTool,
-            capabilityId = "ubuntu.stop",
-            provider = AiLimbsCoreProvider.UBUNTU,
-            availabilityPolicy = AiLimbsCoreAvailabilityPolicy.UBUNTU_STOP,
-            capabilityAliases = listOf("ubuntu.lifecycle.stop"),
-            catalogEntry =
-            ubuntuEntry(
-                        "ubuntu.stop",
-                        "停止 Ubuntu",
-                        "Stop the AI Limbs Ubuntu sandbox unless another UI user or AI operation is active.",
-                        listOf("Ubuntu", "Linux", "关机", "停止沙箱", "其他用户", "并发保护")
-                    )
-        ),
-        registration(
-            route = AiLimbsCoreRoute.ForwardHostTool,
-            capabilityId = "ubuntu.idle.get",
-            provider = AiLimbsCoreProvider.UBUNTU,
-            availabilityPolicy = AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY,
-            catalogEntry =
-            ubuntuIdleEntry("ubuntu.idle.get", "查询 Ubuntu 空闲策略", "Read the Ubuntu idle auto-stop policy.", listOf("Ubuntu", "自动关机", "空闲时间"))
-        ),
-        registration(
-            route = AiLimbsCoreRoute.ForwardHostTool,
-            capabilityId = "ubuntu.idle.set",
-            provider = AiLimbsCoreProvider.UBUNTU,
-            availabilityPolicy = AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY,
-            catalogEntry =
-            ubuntuIdleEntry(
-                        "ubuntu.idle.set",
-                        "修改 Ubuntu 空闲策略",
-                        "Change the Ubuntu idle auto-stop policy.",
-                        listOf("Ubuntu", "自动关机", "保持开机", "自定义时间"),
-                        listOf(
-                            ToolParameterSchema("mode", "string", "KEEP_RUNNING, MINUTES_10, MINUTES_15, MINUTES_30, MINUTES_60, or CUSTOM", true),
-                            ToolParameterSchema("custom_minutes", "integer", "Required for CUSTOM; allowed range is 1 to 1440 minutes", false)
-                        )
-                    )
-        )
+
     )
 
     private val registrationsByInvokeName: Map<String, AiLimbsCoreCapabilityRegistration> =
@@ -728,38 +659,6 @@ object AiLimbsCoreCapabilityRegistry {
         capabilityAliases = capabilityAliases,
         provider = provider,
         availabilityPolicy = availabilityPolicy
-    )
-
-    private fun ubuntuEntry(
-        name: String,
-        displayName: String,
-        description: String,
-        keywords: List<String>,
-        parameters: List<ToolParameterSchema> = emptyList()
-    ): ToolCatalogEntry = entry(
-        name = name,
-        displayName = displayName,
-        description = description,
-        parameters = parameters,
-        keywords = keywords,
-        sourceName = UBUNTU_PROVIDER,
-        sourceLocator = "ubuntu://lifecycle/${name.substringAfterLast('.')}"
-    )
-
-    private fun ubuntuIdleEntry(
-        name: String,
-        displayName: String,
-        description: String,
-        keywords: List<String>,
-        parameters: List<ToolParameterSchema> = emptyList()
-    ): ToolCatalogEntry = entry(
-        name = name,
-        displayName = displayName,
-        description = description,
-        parameters = parameters,
-        keywords = keywords,
-        sourceName = UBUNTU_PROVIDER,
-        sourceLocator = "ubuntu://idle/${name.substringAfterLast('.')}"
     )
 
     private fun bridgeEntry(

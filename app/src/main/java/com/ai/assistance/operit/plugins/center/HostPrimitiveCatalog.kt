@@ -23,8 +23,7 @@ data class HostPrimitiveSnapshot(
 object AiLimbsHostPrimitiveCatalog {
     val all: List<HostPrimitiveDefinition> = listOf(
         HostPrimitiveDefinition(1, "host.filesystem@1", "Filesystem", "受控文件系统访问：列目录、读取、写入、删除、移动、复制、建目录、搜索与文件观察。", "Host 负责路径校验、权限、插件沙箱和跨环境基础 I/O；日志查看、备份、文件管理器等高层逻辑由插件组合。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
-        HostPrimitiveDefinition(2, "host.process@1", "Process / Terminal Session", "受控创建和管理进程/终端会话，包括输入输出流、交互、终止和会话生命周期。", "Host 负责进程资源与合法执行后端；具体命令和业务工具由插件定义。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
-        HostPrimitiveDefinition(3, "host.ubuntu.runtime@1", "Ubuntu Runtime", "管理 AI Limbs Ubuntu 运行时的状态、启动、停止和空闲策略。", "Host 只管理 Ubuntu 容器/运行时生命周期；Ubuntu 内的具体命令与工具仍属于插件或上层能力。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
+        HostPrimitiveDefinition(2, "host.process@1", "Process", "受控执行 Host 侧进程；长进程 start/read/input/terminate/list 采用通用进程语义并逐步绑定，不承载任何 Ubuntu 或终端会话实现。", "Host 负责 Android/Host 进程资源与合法执行后端；Linux/Ubuntu 等系统环境由独立 capability provider 提供，连接层不得通过 host.process@1 暗绑具体系统环境。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(4, "host.ui.automation@1", "UI Automation / Interaction", "读取 UI 结构并执行点击、长按、滑动、文本输入和系统按键等界面操作。", "Host 屏蔽 Accessibility、Shower 等具体后端；插件只面向统一的 UI snapshot/node/action 语义。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(5, "host.screen.capture@1", "Screen Capture", "获取设备屏幕或显示目标的截图/原始画面帧。", "Host 负责屏幕捕获授权与 capture 生命周期；压缩、OCR、视觉推理和归档由插件完成。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(6, "host.network@1", "Network I/O", "提供受控网络连接与流式收发，并实施端点、代理、TLS 和监听端口策略。", "Host 管网络权限和连接资源；HTTP、WebSocket、Webhook 等具体协议和业务语义由插件实现。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
@@ -62,7 +61,11 @@ object AiLimbsHostPrimitiveCatalog {
         HostPrimitiveDefinition(38, "host.ui.widget@1", "Desktop AppWidget Surface", "让插件通过受控描述和渲染路由向 Android 桌面 Launcher 提供 AppWidget。", "Host 持有 Manifest 静态壳、AppWidget 生命周期、配置与点击路由；插件不直接获得 AppWidgetManager/RemoteViews/PendingIntent。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(39, "host.camera.capture@1", "Camera Capture / Visual Sensor", "在用户授权下发起相机拍摄并管理临时输出、捕获生命周期与结果内容。", "Host 管 CAMERA 权限、capture lease、ActivityResult 和受控 content handle；插件不直接取得 Activity/Context/CameraManager。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(40, "host.custom_access_prompt@1", "Custom Access Prompt", "读取、保存、查看历史并恢复用户自定义 AI Limbs 接入提示。", "只管理用户可编辑的自定义接入提示；代码化的 System Access Prompt 不属于该原语，也不可由插件修改。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
-        HostPrimitiveDefinition(41, "host.work_manual@1", "Work Manual", "读取、保存、查看历史并恢复 AI Limbs Work Manual 的可编辑正文。", "保护头由基座代码生成且始终存在；插件只能管理 editable body，读取时 Host 始终返回保护头与当前正文。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
+        HostPrimitiveDefinition(41, "host.work_manual@1", "Work Manual", "读取、保存、查看历史并恢复 AI Limbs Work Manual 的可编辑正文。", "保护头由基座代码生成且始终存在；插件只能管理 editable body，读取时 Host 始终返回保护头与当前正文。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
+        HostPrimitiveDefinition(42, "host.peripheral.power@1", "Power", "为系统环境提供受控供电租约、后台生存与宿主生命周期承载。", "Host 只提供电源与生存资源；Ubuntu、Winlator 等系统环境自己的启动、停止、空闲策略和恢复逻辑属于环境插件。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false),
+        HostPrimitiveDefinition(43, "host.peripheral.display@1", "Display", "为系统环境提供受控显示会话与 AI Limbs 内部显示容器。", "Host 只提供显示设备和会话承载；终端、桌面、窗口管理和具体画面语义由系统环境插件输出。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false),
+        HostPrimitiveDefinition(44, "host.peripheral.keyboard@1", "Keyboard", "向绑定的系统显示/环境会话发送文本、按键与组合键输入。", "键盘输入必须绑定明确的系统环境会话，不提供对 Android 全局界面的任意按键注入。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false),
+        HostPrimitiveDefinition(45, "host.peripheral.pointer@1", "Pointer / Mouse", "向绑定的系统显示/环境会话发送移动、按键、滚轮、点击与触摸指针事件。", "指针输入必须绑定明确的系统环境会话；Android Accessibility/UI Automation 继续由 host.ui.automation@1 独立负责。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false)
     )
 
     private val byId = all.associateBy { it.id.lowercase() }

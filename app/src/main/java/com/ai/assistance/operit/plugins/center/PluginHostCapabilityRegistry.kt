@@ -1,4 +1,6 @@
 package com.ai.assistance.operit.plugins.center
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDomain
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsEffect
 
 import android.content.Context
 import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
@@ -47,9 +49,6 @@ internal class PluginHostCapabilityRegistry(
     private val hostCapabilities = mapOf(
         "host.process@1" to HostCapability("host.process@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.process@1", parameters)
-        },
-        "host.ubuntu.runtime@1" to HostCapability("host.ubuntu.runtime@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.ubuntu.runtime@1", parameters)
         },
         "host.custom_access_prompt@1" to HostCapability("host.custom_access_prompt@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.custom_access_prompt@1", parameters)
@@ -137,8 +136,15 @@ internal class PluginHostCapabilityRegistry(
         val catalogEntry = pluginCatalogEntry(ownerPluginId, normalized, capability)
         val dynamicHandle = try {
             AiLimbsCapabilityRegistry.registerPluginCapability(
-                ownerPluginId, normalized, aliases, catalogEntry,
-                AiLimbsPluginCapabilityExecutor { args -> executePluginDirect(normalized, args) }
+                ownerPluginId = ownerPluginId,
+                capabilityId = normalized,
+                invokeAliases = aliases,
+                catalogEntry = catalogEntry,
+                effect = AiLimbsEffect.valueOf(capability.effect.name),
+                domain = AiLimbsDomain.valueOf(capability.domain.name),
+                workContextRequiredReceipts = capability.workContextRequiredReceipts
+                    .mapTo(linkedSetOf()) { AiLimbsRequiredReceipt.valueOf(it.name) },
+                executor = AiLimbsPluginCapabilityExecutor { args -> executePluginDirect(normalized, args) }
             )
         } catch (error: Throwable) {
             capabilities.remove(normalized, candidate)

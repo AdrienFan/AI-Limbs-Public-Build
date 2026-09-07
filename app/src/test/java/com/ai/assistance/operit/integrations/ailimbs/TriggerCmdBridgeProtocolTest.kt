@@ -24,13 +24,13 @@ class TriggerCmdBridgeProtocolTest {
 
     @Test
     fun decodesBase64UrlEnvelope() {
-        val json = """{"protocol":"AIL_TRIGGER_BRIDGE_V1","request_id":"req-2","tool":"ubuntu.status","args":{}}"""
+        val json = """{"protocol":"AIL_TRIGGER_BRIDGE_V1","request_id":"req-2","tool":"system.status","args":{}}"""
         val encoded = Base64.getUrlEncoder().withoutPadding()
             .encodeToString(json.toByteArray(StandardCharsets.UTF_8))
         val decoded = TriggerCmdBridgeProtocol.decode("b64:$encoded") as TriggerCmdBridgeDecodeResult.Success
 
         assertEquals("req-2", decoded.request.requestId)
-        assertEquals("ubuntu.status", decoded.request.tool)
+        assertEquals("system.status", decoded.request.tool)
     }
 
     @Test
@@ -46,7 +46,7 @@ class TriggerCmdBridgeProtocolTest {
     fun completedEnvelopePreservesDispatcherFailure() {
         val request = (
             TriggerCmdBridgeProtocol.decode(
-                """{"protocol":"AIL_TRIGGER_BRIDGE_V1","request_id":"req-4","tool":"ubuntu.status","args":{}}"""
+                """{"protocol":"AIL_TRIGGER_BRIDGE_V1","request_id":"req-4","tool":"system.status","args":{}}"""
             ) as TriggerCmdBridgeDecodeResult.Success
         ).request
         val response = JSONObject(

@@ -12,7 +12,6 @@ import com.ai.assistance.operit.data.model.ToolResult
 import com.ai.assistance.operit.data.preferences.CharacterCardToolAccessResolver
 import com.ai.assistance.operit.data.preferences.ResolvedCharacterCardToolAccess
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeReconnectToolExecutor
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRdcProcessToolExecutor
 import com.ai.assistance.operit.integrations.tasker.triggerAIAgentAction
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.ui.common.displays.VirtualDisplayOverlay
@@ -311,7 +310,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_create_terminal_session_desc, displayName)
             },
             executor = { tool ->
-                val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                 terminalTool.createOrGetSession(tool)
             }
     )
@@ -324,7 +323,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_execute_in_terminal_session_desc, sessionId ?: "", command)
             },
             executor = { tool ->
-                val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                 terminalTool.executeCommandInSession(tool)
             }
     )
@@ -339,14 +338,14 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             executor =
                     object : ToolExecutor {
                         override fun invoke(tool: AITool): ToolResult {
-                            val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                            val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                             return terminalTool.executeCommandInSession(tool)
                         }
 
                         override fun invokeAndStream(
                                 tool: AITool
                         ): kotlinx.coroutines.flow.Flow<ToolResult> {
-                            val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                            val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                             return terminalTool.executeCommandInSessionStream(tool)
                         }
                     }
@@ -361,43 +360,9 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_execute_hidden_terminal_command_desc, executorKey, command)
             },
             executor = { tool ->
-                val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                 terminalTool.executeHiddenCommand(tool)
             }
-    )
-
-    handler.registerTool(
-            name = "rdc_process_start",
-            descriptionGenerator = { tool -> "Start RDC process session: ${tool.parameters.find { it.name == "command" }?.value.orEmpty()}" },
-            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).start(tool) }
-    )
-
-    handler.registerTool(
-            name = "rdc_process_read",
-            descriptionGenerator = { tool -> "Read RDC process output for PID ${tool.parameters.find { it.name == "pid" }?.value.orEmpty()}" },
-            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).read(tool) }
-    )
-
-    handler.registerTool(
-            name = "rdc_process_interact",
-            descriptionGenerator = { tool ->
-                val pid = tool.parameters.find { it.name == "pid" }?.value.orEmpty()
-                val input = tool.parameters.find { it.name == "input" }?.value.orEmpty().take(240)
-                "Send input to RDC process PID $pid: $input"
-            },
-            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).interact(tool) }
-    )
-
-    handler.registerTool(
-            name = "rdc_process_list",
-            descriptionGenerator = { "List active and recently completed RDC process sessions" },
-            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).list(tool) }
-    )
-
-    handler.registerTool(
-            name = "rdc_process_terminate",
-            descriptionGenerator = { tool -> "Terminate RDC process PID ${tool.parameters.find { it.name == "pid" }?.value.orEmpty()}" },
-            executor = { tool -> AiLimbsRdcProcessToolExecutor(context).terminate(tool) }
     )
 
     handler.registerTool(
@@ -407,58 +372,13 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
     )
 
     handler.registerTool(
-            name = "ubuntu.status",
-            descriptionGenerator = { s(R.string.toolreg_ubuntu_status_desc) },
-            executor = { tool ->
-                ToolGetter.getTerminalCommandExecutor(context).getUbuntuStatus(tool)
-            }
-    )
-
-    handler.registerTool(
-            name = "ubuntu.start",
-            descriptionGenerator = { s(R.string.toolreg_ubuntu_start_desc) },
-            executor = { tool ->
-                ToolGetter.getTerminalCommandExecutor(context).startUbuntu(tool)
-            }
-    )
-
-    handler.registerTool(
-            name = "ubuntu.stop",
-            descriptionGenerator = { s(R.string.toolreg_ubuntu_stop_desc) },
-            executor = { tool ->
-                ToolGetter.getTerminalCommandExecutor(context).stopUbuntu(tool)
-            }
-    )
-
-    handler.registerTool(
-            name = "ubuntu.idle.get",
-            descriptionGenerator = { s(R.string.toolreg_ubuntu_idle_get_desc) },
-            executor = { tool ->
-                ToolGetter.getTerminalCommandExecutor(context).getUbuntuIdlePolicy(tool)
-            }
-    )
-
-    handler.registerTool(
-            name = "ubuntu.idle.set",
-            descriptionGenerator = { tool ->
-                val mode = tool.parameters.find { it.name == "mode" }?.value.orEmpty()
-                val customMinutes =
-                    tool.parameters.find { it.name == "custom_minutes" }?.value.orEmpty()
-                s(R.string.toolreg_ubuntu_idle_set_desc, mode, customMinutes)
-            },
-            executor = { tool ->
-                ToolGetter.getTerminalCommandExecutor(context).setUbuntuIdlePolicy(tool)
-            }
-    )
-
-    handler.registerTool(
             name = "close_terminal_session",
             descriptionGenerator = { tool ->
                 val sessionId = tool.parameters.find { it.name == "session_id" }?.value
                 s(R.string.toolreg_close_terminal_session_desc, sessionId ?: "")
             },
             executor = { tool ->
-                val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                 terminalTool.closeSession(tool)
             }
     )
@@ -471,7 +391,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_input_in_terminal_session_desc, sessionId ?: "", control)
             },
             executor = { tool ->
-                val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                 terminalTool.inputInSession(tool)
             }
     )
@@ -483,7 +403,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
                 s(R.string.toolreg_get_terminal_session_screen_desc, sessionId)
             },
             executor = { tool ->
-                val terminalTool = ToolGetter.getTerminalCommandExecutor(context)
+                val terminalTool = ToolGetter.getSystemEnvironmentCommandExecutor(context)
                 terminalTool.getSessionScreen(tool)
             }
     )

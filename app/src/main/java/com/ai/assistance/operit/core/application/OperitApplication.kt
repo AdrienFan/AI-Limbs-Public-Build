@@ -32,7 +32,6 @@ import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookPluginRegistry
 import com.ai.assistance.operit.core.config.SystemPromptConfig
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
-import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.core.workflow.WorkflowSchedulerInitializer
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupPreferences
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupScheduler
@@ -618,16 +617,6 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
             AppLogger.e(TAG, "终止时停止 AIForegroundService 失败: ${e.message}", e)
         }
 
-        // 清理终端管理器和SSH连接
-        try {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                Terminal.getInstance(applicationContext).destroy()
-                AppLogger.d(TAG, "应用终止，已清理所有终端会话和SSH连接")
-            }
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "清理终端管理器失败: ${e.message}", e)
-        }
-        
         // 在应用终止时关闭LocalWebServer服务器
         try {
             val webServer = LocalWebServer.getInstance(applicationContext, LocalWebServer.ServerType.WORKSPACE)

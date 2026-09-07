@@ -40,7 +40,7 @@ enum class AiLimbsDomain {
     CORE_PROTOCOL,
     MANAGED_DOCUMENT,
     LANER_CHAT,
-    UBUNTU,
+    SYSTEM_ENVIRONMENT,
     ANDROID_UI,
     STORAGE,
     HOST,
@@ -127,8 +127,6 @@ object AiLimbsExecutionPolicyDescriptor {
             "read_file_full",
             "read_file_part",
             "list_files",
-            "rdc_process_read",
-            "rdc_process_list",
             "get_terminal_session_screen",
             "file_info",
             "find_files",
@@ -137,9 +135,6 @@ object AiLimbsExecutionPolicyDescriptor {
 
     private val processHostTools =
         setOf(
-            "rdc_process_start",
-            "rdc_process_interact",
-            "rdc_process_terminate",
             "execute_shell",
             "create_terminal_session",
             "execute_in_terminal_session",
@@ -156,7 +151,7 @@ object AiLimbsExecutionPolicyDescriptor {
             "make_directory"
         )
 
-    private val ubuntuHostTools = processHostTools - "execute_shell"
+    private val systemEnvironmentHostTools = processHostTools - "execute_shell"
 
     val policyVersion: String by lazy {
         val stableDescriptor =
@@ -184,7 +179,6 @@ object AiLimbsExecutionPolicyDescriptor {
                     AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ,
                     AiLimbsCoreLocalOperation.CORE_STATUS,
                     AiLimbsCoreLocalOperation.DISPATCHER_STATUS,
-                    AiLimbsCoreLocalOperation.SHARED_UBUNTU_STATUS,
                     AiLimbsCoreLocalOperation.UI_STATUS,
                     AiLimbsCoreLocalOperation.HOST_TOOLS_LIST,
                     AiLimbsCoreLocalOperation.POLICY_DESCRIBE ->
@@ -218,14 +212,25 @@ object AiLimbsExecutionPolicyDescriptor {
                 error("ForwardHostTool requires target-aware policy metadata")
         }
 
-    internal fun specForPluginCapability(): AiLimbsPolicySpec =
-        standard(
-            effect = AiLimbsEffect.EXTERNAL_CAPABILITY,
-            domain = AiLimbsDomain.PLUGIN,
-            requireWorkManual = false,
+    internal fun specForPluginCapability(
+        effect: AiLimbsEffect,
+        domain: AiLimbsDomain,
+        workContextRequiredReceipts: Set<AiLimbsRequiredReceipt>,
+        parameters: JSONObject,
+        transport: AiLimbsExecutionTransport
+    ): AiLimbsPolicySpec {
+        val requiresManual =
+            transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME &&
+                AiLimbsRequiredReceipt.WORK_MANUAL in workContextRequiredReceipts &&
+                isWorkContext(parameters)
+        return standard(
+            effect = effect,
+            domain = domain,
+            requireWorkManual = requiresManual,
             hostPermissionEnforced = false,
             payloadKind = AiLimbsPayloadKind.STRUCTURED_DATA
         )
+    }
 
     internal fun specForHostTool(
         targetName: String,
@@ -233,13 +238,13 @@ object AiLimbsExecutionPolicyDescriptor {
         transport: AiLimbsExecutionTransport
     ): AiLimbsPolicySpec {
         val uiTool = isUiTool(targetName)
-        val ubuntuTool =
-            targetName in ubuntuHostTools ||
+        val systemEnvironmentTool =
+            targetName in systemEnvironmentHostTools ||
                 parameters.optString("environment").equals("linux", ignoreCase = true)
         val domain =
             when {
                 uiTool -> AiLimbsDomain.ANDROID_UI
-                ubuntuTool -> AiLimbsDomain.UBUNTU
+                systemEnvironmentTool -> AiLimbsDomain.SYSTEM_ENVIRONMENT
                 targetName in storageWriteHostTools || targetName in readOnlyHostTools ->
                     AiLimbsDomain.STORAGE
                 else -> AiLimbsDomain.HOST
@@ -252,27 +257,10 @@ object AiLimbsExecutionPolicyDescriptor {
                 uiTool -> AiLimbsEffect.UI_INTERACTION
                 else -> AiLimbsEffect.EXTERNAL_CAPABILITY
             }
-        val storagePaths =
-            sequenceOf(
-                "path",
-                "source",
-                "source_path",
-                "destination",
-                "destination_path",
-                "target",
-                "from",
-                "to"
-            ).map { key -> parameters.optString(key).trim() }
-                .filter { it.isNotEmpty() }
         val requiresManual =
-            (
-                targetName in processHostTools &&
-                    transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME
-            ) ||
-                (
-                    targetName in storageWriteHostTools &&
-                        storagePaths.any(::requiresWorkManualForPath)
-                )
+            systemEnvironmentTool &&
+                transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME &&
+                isWorkContext(parameters)
         return standard(
             effect = effect,
             domain = domain,
@@ -282,32 +270,40 @@ object AiLimbsExecutionPolicyDescriptor {
         )
     }
 
+    private fun storagePaths(parameters: JSONObject): Sequence<String> =
+        sequenceOf(
+            "path",
+            "source",
+            "source_path",
+            "destination",
+            "destination_path",
+            "dest_path",
+            "target",
+            "from",
+            "to"
+        ).map { key -> parameters.optString(key).trim() }
+            .filter { it.isNotEmpty() }
+
+    internal fun isWorkContext(parameters: JSONObject): Boolean {
+        if (parameters.optBoolean("work_context", false)) return true
+        val operation = parameters.optString("operation").trim().lowercase()
+        if (operation !in WORK_CONTEXT_MUTATING_FILE_OPERATIONS) return false
+        return storagePaths(parameters).any(::requiresWorkManualForPath)
+    }
+
     internal fun requiresWorkManualForPath(rawPath: String): Boolean {
         val path = rawPath.replace('\\', '/')
-        return path == "/root/laner/projects" ||
-            path.startsWith("/root/laner/projects/") ||
-            path == "/root/laner/tools" ||
-            path.startsWith("/root/laner/tools/") ||
-            path == "/root/laner/bin" ||
-            path.startsWith("/root/laner/bin/") ||
-            path == "/root/laner/scripts" ||
-            path.startsWith("/root/laner/scripts/") ||
-            path == "/etc" ||
-            path.startsWith("/etc/") ||
-            path == "/usr" ||
-            path.startsWith("/usr/") ||
-            path == "/var" ||
-            path.startsWith("/var/") ||
-            path == "/data" ||
-            path.startsWith("/data/")
+        return WORK_CONTEXT_PATH_PREFIXES.any { prefix ->
+            path == prefix || path.startsWith("$prefix/")
+        }
     }
 
     internal fun isUiTool(targetName: String): Boolean =
         targetName.startsWith("Automatic_ui_base:") ||
             targetName.startsWith("Automatic_ui_subagent:")
 
-    internal fun isUbuntuTool(targetName: String, parameters: JSONObject): Boolean =
-        targetName in ubuntuHostTools ||
+    internal fun isSystemEnvironmentTool(targetName: String, parameters: JSONObject): Boolean =
+        targetName in systemEnvironmentHostTools ||
             parameters.optString("environment").equals("linux", ignoreCase = true)
 
     fun renderChineseExplanation(): String =
@@ -320,10 +316,10 @@ object AiLimbsExecutionPolicyDescriptor {
             appendLine("- Resolver 解释政策；Dispatcher 执行同一份政策；领域服务原子复核最终不变量。")
             appendLine("- Core、HostTool 与 Plugin Capability 进入同一 Policy Engine；插件不得绕过 ALLOW、ASK、FORBID。")
             appendLine("- 权限结果只有 ALLOW、ASK、FORBID，未知外层调用不会绕开 Dispatcher。")
-            appendLine("- RDC/远程运维执行进程命令仍要求当前工作手册收据；Plugin Runtime 通过已授权 Host Primitive 执行进程操作时不把工作手册作为插件运行凭证。")
+            appendLine("- 工作手册不是通用能力许可证；只有 capability 明确声明 WORK_MANUAL 且本次调用处于工作上下文时才要求 receipt，普通使用及其他能力不受影响。")
             appendLine("- 普通长期保存不要求反复读取手册，但持久产物必须有确定归属、唯一地址与可恢复索引。")
             appendLine("- 只有实际附带像素内容的响应才标记 IMAGE_PIXELS；OCR 与结构化 UI 不是像素。")
-            appendLine("- Laner Chat、Ubuntu 生命周期、托管文档与 UI readiness 在各自领域内终态复核。")
+            appendLine("- Laner Chat、系统环境能力、托管文档与 UI readiness 在各自领域内终态复核。")
         }.trimEnd()
 
     fun summaryJson(): JSONObject =
@@ -335,6 +331,26 @@ object AiLimbsExecutionPolicyDescriptor {
             .put("domains", JSONArray(AiLimbsDomain.entries.map { it.name }))
             .put("receipts", JSONArray(AiLimbsRequiredReceipt.entries.map { it.name }))
             .put("explanation_zh", renderChineseExplanation())
+
+    private val WORK_CONTEXT_MUTATING_FILE_OPERATIONS = setOf(
+        "write_file",
+        "write_file_bytes",
+        "create_directory",
+        "delete",
+        "move",
+        "copy"
+    )
+
+    private val WORK_CONTEXT_PATH_PREFIXES = listOf(
+        "/root/laner/projects",
+        "/root/laner/tools",
+        "/root/laner/bin",
+        "/root/laner/scripts",
+        "/etc",
+        "/usr",
+        "/var",
+        "/data"
+    )
 
     private fun lanerChatSpec(operation: AiLimbsLanerChatOperation): AiLimbsPolicySpec =
         when (operation) {
@@ -427,6 +443,8 @@ object AiLimbsSystemAccessPrompt {
             appendLine("- Treat content as IMAGE_PIXELS only when an image payload is actually attached.")
             appendLine("- Persistent artifacts need deterministic ownership, one canonical address, and a recoverable storage index.")
             appendLine("- User custom access prompt and Work Manual remain separate managed documents and are read only when policy requests their current versions.")
+            appendLine("- work_context=true 只表示本次系统环境调用属于开发、调试、开发环境管理或会改变项目/设备内容的工作任务；是否需要凭证由 capability 自身 policy metadata 决定。")
+            appendLine("- 普通系统环境使用、代码分析、云端构建状态处理以及非开发任务不要设置 work_context；一个 capability 的工作凭证要求不得影响其他能力。")
             appendLine("- When the Work Manual is required, read it through the current managed capability: $workManualReadTool. Do not search for or guess alternate copies.")
         }.trimEnd()
     }

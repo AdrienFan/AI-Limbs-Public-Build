@@ -69,7 +69,7 @@ import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceConf
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspacePreviewRefreshBus
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspacePreviewRefreshEvent
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.toWorkspaceCommandOutputEntries
-import com.ai.assistance.operit.core.tools.system.Terminal
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
 import com.ai.assistance.operit.util.TtsCleaner
 import com.ai.assistance.operit.util.TtsSegmenter
 import com.ai.assistance.operit.ui.features.chat.util.findMentionTokens
@@ -171,16 +171,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     // 工具权限系统
     private val toolPermissionSystem = ToolPermissionSystem.getInstance(context)
     
-    // 终端管理器（用于执行工作区命令）
-    private val terminal: Terminal? by lazy {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            Terminal.getInstance(context)
-        } else {
-            null
-        }
-    }
-    
-    // 工作区终端会话映射表：workspacePath -> sessionId
+    // 工作区系统环境会话映射表：workspacePath -> sessionId
     private val workspaceTerminalSessions = mutableMapOf<String, String>()
     private var workspaceCommandExecutionJob: Job? = null
     private var workspaceOpenJob: Job? = null
@@ -2608,8 +2599,6 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             uiStateDelegate.showErrorMessage(context.getString(R.string.chat_terminal_requires_android_8))
             return
         }
-        val terminalInstance = terminal ?: return
-
         if (command.usesDedicatedSession) {
             executeBackgroundWorkspaceCommand(command, workspacePath, commandText)
             return
@@ -2627,29 +2616,20 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 
                 val workspaceDir = File(workspacePath)
 
-                // 使用工作区的共享会话
-                var sharedSessionId = workspaceTerminalSessions[workspacePath]
-
-                // 如果会话不存在或已关闭，创建新会话
-                if (sharedSessionId == null || terminalInstance.terminalState.value.sessions.none { it.id == sharedSessionId }) {
-                    val workspaceName = workspaceDir.name.take(4) // 只取前4位
-
-                    sharedSessionId = terminalInstance.createSession("Workspace: $workspaceName")
-
-                    // 保存会话 ID
-                    workspaceTerminalSessions[workspacePath] = sharedSessionId
-
-                    AppLogger.d(
-                        TAG,
-                        "Created new workspace terminal session $sharedSessionId for $workspacePath"
-                    )
-                }
-
+                // Resolve by stable session name every time. The provider reuses an active session and
+                // recreates it after a runtime/plugin restart, so Base never inspects provider state.
+                val workspaceName = workspaceDir.name.take(4) // 保留原有短标题行为
+                val sharedSessionId = SystemEnvironmentClient.createSession("Workspace: $workspaceName")
+                workspaceTerminalSessions[workspacePath] = sharedSessionId
                 sessionId = sharedSessionId
 
-                val activeSessionId = sessionId ?: return@launch
+                AppLogger.d(
+                    TAG,
+                    "Resolved workspace system-environment session $sharedSessionId for $workspacePath"
+                )
 
-                terminalInstance.executeCommand(activeSessionId, "cd \"${workspaceDir.absolutePath}\"")
+                val activeSessionId = sharedSessionId
+                SystemEnvironmentClient.executeSession(activeSessionId, "cd \"${workspaceDir.absolutePath}\"")
 
                 _workspaceCommandExecutionState.value =
                     WorkspaceCommandExecutionState(
@@ -2660,19 +2640,17 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                         usesDedicatedSession = command.usesDedicatedSession
                     )
 
-                terminalInstance.executeCommandFlow(activeSessionId, commandText).collect { event ->
+                SystemEnvironmentClient.executeSessionFlow(activeSessionId, commandText).collect { event ->
                     val currentState = _workspaceCommandExecutionState.value
                     if (currentState?.sessionId != activeSessionId) {
                         return@collect
                     }
 
+                    val appendedEntries = event.outputChunk.toWorkspaceCommandOutputEntries()
                     if (event.isCompleted) {
-                        val finalEntries = event.outputChunk.toWorkspaceCommandOutputEntries()
                         _workspaceCommandExecutionState.value =
                             currentState.copy(
-                                outputEntries =
-                                    finalEntries.takeIf { it.isNotEmpty() }
-                                        ?: currentState.outputEntries,
+                                outputEntries = currentState.outputEntries + appendedEntries,
                                 isRunning = false,
                                 isCancelling = false
                             )
@@ -2682,11 +2660,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                             affectedPaths = listOf(workspacePath),
                             source = "workspace_command:${command.id}"
                         )
-                    } else {
-                        val appendedEntries = event.outputChunk.toWorkspaceCommandOutputEntries()
-                        if (appendedEntries.isEmpty()) {
-                            return@collect
-                        }
+                    } else if (appendedEntries.isNotEmpty()) {
                         _workspaceCommandExecutionState.value =
                             currentState.copy(
                                 outputEntries = currentState.outputEntries + appendedEntries
@@ -2722,16 +2696,12 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             try {
                 AppLogger.d(TAG, "Executing background workspace command: $commandText in $workspacePath")
 
-                val terminalInstance = terminal ?: run {
-                    uiStateDelegate.showErrorMessage(context.getString(R.string.chat_terminal_requires_android_8))
-                    return@launch
-                }
                 val workspaceDir = File(workspacePath)
                 val sessionTitle = command.sessionTitle ?: command.label
-                val dedicatedSessionId = terminalInstance.createSession(sessionTitle)
+                val dedicatedSessionId = SystemEnvironmentClient.createSession(sessionTitle)
 
-                terminalInstance.executeCommand(dedicatedSessionId, "cd \"${workspaceDir.absolutePath}\"")
-                terminalInstance.sendInput(dedicatedSessionId, commandText + "\r")
+                SystemEnvironmentClient.executeSession(dedicatedSessionId, "cd \"${workspaceDir.absolutePath}\"")
+                SystemEnvironmentClient.sendInput(dedicatedSessionId, commandText + "\r")
                 openAiComputerForTerminalSession()
 
                 AppLogger.d(
@@ -2776,7 +2746,14 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         }
 
         _workspaceCommandExecutionState.value = currentState.copy(isCancelling = true)
-        terminal?.sendInterruptSignal(currentState.sessionId)
+        viewModelScope.launch {
+            runCatching { SystemEnvironmentClient.interruptSession(currentState.sessionId) }
+                .onFailure { error ->
+                    AppLogger.e(TAG, "Failed to interrupt workspace system-environment session", error)
+                    _workspaceCommandExecutionState.value =
+                        _workspaceCommandExecutionState.value?.copy(isCancelling = false)
+                }
+        }
     }
 
     private fun executeWorkspaceTool(command: CommandConfig, workspacePath: String, toolName: String) {

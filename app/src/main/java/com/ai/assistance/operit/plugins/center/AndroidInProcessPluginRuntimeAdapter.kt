@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
@@ -61,7 +62,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         }
 
-        val host = Host(context, runtimeScope, contributions, notificationHost)
+        val host = Host(context, entryFile, runtimeScope, contributions, notificationHost)
         val handle = try {
             entry.mount(host)
         } catch (error: Throwable) {
@@ -127,6 +128,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
 
     private class Host(
         private val context: PluginRuntimeAdapterContext,
+        override val runtimeEntryFile: File,
         override val scope: CoroutineScope,
         private val contributions: PluginContributionRegistry,
         private val notificationHost: PluginNotificationHost
@@ -190,13 +192,41 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             description: String,
             executor: InProcessCapabilityExecutor
         ) {
-            context.payloadContext.registrar.registerCapability(
-                id,
-                PluginCapabilitySpec(
+            registerCapability(
+                InProcessCapabilitySpec(
+                    id = id,
                     displayName = displayName,
                     description = description,
+                    executor = executor
+                )
+            )
+        }
+
+        override fun registerCapability(spec: InProcessCapabilitySpec) {
+            context.payloadContext.registrar.registerCapability(
+                spec.id,
+                PluginCapabilitySpec(
+                    displayName = spec.displayName,
+                    description = spec.description,
+                    invokeAliases = spec.invokeAliases,
+                    keywords = spec.keywords,
+                    parameters = spec.parameters.map { parameter ->
+                        PluginCapabilityParameterSpec(
+                            name = parameter.name,
+                            type = parameter.type,
+                            description = parameter.description,
+                            required = parameter.required,
+                            default = parameter.default
+                        )
+                    },
+                    suggestedParamsJson = spec.suggestedParamsJson,
+                    inputSchema = spec.inputSchema,
+                    effect = PluginCapabilityEffect.valueOf(spec.effect.name),
+                    domain = PluginCapabilityDomain.valueOf(spec.domain.name),
+                    workContextRequiredReceipts = spec.workContextRequiredReceipts
+                        .mapTo(linkedSetOf()) { PluginCapabilityReceipt.valueOf(it.name) },
                     executor = PluginCapabilityExecutor { parameters ->
-                        val raw = executor.invoke(parameters.toString())
+                        val raw = spec.executor.invoke(parameters.toString())
                         runCatching { JSONObject(raw) }.getOrElse {
                             JSONObject().put("content", raw)
                         }

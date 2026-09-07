@@ -40,7 +40,6 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import com.ai.assistance.operit.util.FileUtils
-import com.ai.assistance.operit.util.PathMapper
 import com.ai.assistance.operit.util.ImagePoolManager
 import com.ai.assistance.operit.util.MediaPoolManager
 import com.ai.assistance.operit.util.HttpMultiPartDownloader
@@ -66,9 +65,6 @@ import com.ai.assistance.operit.core.config.FunctionalPrompts
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
-import com.ai.assistance.operit.terminal.TerminalManager
-import com.ai.assistance.operit.terminal.provider.filesystem.FileSystemProvider
-import com.ai.assistance.operit.terminal.utils.SSHFileConnectionManager
 import com.ai.assistance.operit.core.tools.defaultTool.PathValidator
 import com.ai.assistance.operit.util.LocaleUtils
 import com.ai.assistance.operit.util.ripgrep.NativeRipgrep
@@ -98,39 +94,12 @@ open class StandardFileSystemTools(protected val context: Context) {
         ApiPreferences.getInstance(context)
     }
 
-    // SSH文件管理器（单例，懒加载）
-    private val sshFileManager by lazy {
-        SSHFileConnectionManager.getInstance(context)
+    // Linux 文件系统由当前系统环境 Provider 实现；Base 只保留稳定协议代理。
+    private val linuxFileSystemProvider: LinuxFileSystemProvider by lazy {
+        SystemEnvironmentFileSystemProvider()
     }
 
-    // TerminalManager（单例，懒加载）
-    private val terminalManager by lazy {
-        TerminalManager.getInstance(context)
-    }
-
-    private var lastLinuxFileSystemProviderLabel: String? = null
-
-    // Linux文件系统提供者，优先使用SSH连接，否则从TerminalManager获取
-    protected fun getLinuxFileSystem(): FileSystemProvider {
-        // 先尝试获取SSH连接的文件系统
-        val sshProvider = sshFileManager.getFileSystemProvider()
-        
-        // 如果SSH已登录，使用SSH文件系统
-        if (sshProvider != null) {
-            if (lastLinuxFileSystemProviderLabel != "ssh") {
-                AppLogger.d(TAG, "Using SSH file system provider")
-                lastLinuxFileSystemProviderLabel = "ssh"
-            }
-            return sshProvider
-        }
-        
-        // 否则使用本地Terminal的文件系统
-        if (lastLinuxFileSystemProviderLabel != "local") {
-            AppLogger.d(TAG, "Using local terminal file system provider")
-            lastLinuxFileSystemProviderLabel = "local"
-        }
-        return terminalManager.getFileSystemProvider()
-    }
+    protected fun getLinuxFileSystem(): LinuxFileSystemProvider = linuxFileSystemProvider
 
     // Linux文件系统工具实例
     protected val linuxTools: LinuxFileSystemTools by lazy {
@@ -3524,12 +3493,6 @@ open class StandardFileSystemTools(protected val context: Context) {
                         error = "include_root_directory must be true or false"
                     )
             }
-        PathValidator.validateAndroidPath(sourcePath, tool.name, "source")?.let { return it }
-        PathValidator.validateAndroidPath(zipPath, tool.name, "destination")?.let { return it }
-
-        val actualSourcePath = PathMapper.resolvePath(context, sourcePath, environment)
-        val actualZipPath = PathMapper.resolvePath(context, zipPath, environment)
-
         if (sourcePath.isBlank() || zipPath.isBlank()) {
             return ToolResult(
                 toolName = tool.name,
@@ -3538,6 +3501,39 @@ open class StandardFileSystemTools(protected val context: Context) {
                 error = "Source and destination parameters are required"
             )
         }
+
+        if (isLinuxEnvironment(environment)) {
+            return try {
+                val result = getLinuxFileSystem().zip(sourcePath, zipPath, includeRootDirectory)
+                ToolResult(
+                    toolName = tool.name,
+                    success = result.success,
+                    result = FileOperationData(
+                        operation = "zip",
+                        env = "linux",
+                        path = sourcePath,
+                        successful = result.success,
+                        details = result.message.ifBlank {
+                            if (result.success) "Successfully compressed $sourcePath to $zipPath"
+                            else "Failed to compress $sourcePath"
+                        }
+                    ),
+                    error = if (result.success) "" else result.message
+                )
+            } catch (error: Exception) {
+                ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Error compressing Linux path: ${error.message}"
+                )
+            }
+        }
+
+        PathValidator.validateAndroidPath(sourcePath, tool.name, "source")?.let { return it }
+        PathValidator.validateAndroidPath(zipPath, tool.name, "destination")?.let { return it }
+        val actualSourcePath = sourcePath
+        val actualZipPath = zipPath
 
         return try {
             val sourceFile = File(actualSourcePath)
@@ -3681,12 +3677,6 @@ open class StandardFileSystemTools(protected val context: Context) {
         val zipPath = tool.parameters.find { it.name == "source" }?.value ?: ""
         val destPath = tool.parameters.find { it.name == "destination" }?.value ?: ""
         val environment = tool.parameters.find { it.name == "environment" }?.value
-        PathValidator.validateAndroidPath(zipPath, tool.name, "source")?.let { return it }
-        PathValidator.validateAndroidPath(destPath, tool.name, "destination")?.let { return it }
-
-        val actualZipPath = PathMapper.resolvePath(context, zipPath, environment)
-        val actualDestPath = PathMapper.resolvePath(context, destPath, environment)
-
         if (zipPath.isBlank() || destPath.isBlank()) {
             return ToolResult(
                 toolName = tool.name,
@@ -3695,6 +3685,39 @@ open class StandardFileSystemTools(protected val context: Context) {
                 error = "Source and destination parameters are required"
             )
         }
+
+        if (isLinuxEnvironment(environment)) {
+            return try {
+                val result = getLinuxFileSystem().unzip(zipPath, destPath)
+                ToolResult(
+                    toolName = tool.name,
+                    success = result.success,
+                    result = FileOperationData(
+                        operation = "unzip",
+                        env = "linux",
+                        path = zipPath,
+                        successful = result.success,
+                        details = result.message.ifBlank {
+                            if (result.success) "Successfully extracted $zipPath to $destPath"
+                            else "Failed to extract $zipPath"
+                        }
+                    ),
+                    error = if (result.success) "" else result.message
+                )
+            } catch (error: Exception) {
+                ToolResult(
+                    toolName = tool.name,
+                    success = false,
+                    result = StringResultData(""),
+                    error = "Error extracting Linux archive: ${error.message}"
+                )
+            }
+        }
+
+        PathValidator.validateAndroidPath(zipPath, tool.name, "source")?.let { return it }
+        PathValidator.validateAndroidPath(destPath, tool.name, "destination")?.let { return it }
+        val actualZipPath = zipPath
+        val actualDestPath = destPath
 
         return try {
             ToolProgressBus.update(tool.name, -1f, "Preparing to unzip...")
@@ -4292,9 +4315,10 @@ open class StandardFileSystemTools(protected val context: Context) {
         val destPath = tool.parameters.find { it.name == "destination" }?.value ?: ""
         val headersParam = tool.parameters.find { it.name == "headers" }?.value
         val environment = tool.parameters.find { it.name == "environment" }?.value
-        PathValidator.validateAndroidPath(destPath, tool.name, "destination")?.let { return it }
-
-        val actualDestPath = PathMapper.resolvePath(context, destPath, environment)
+        val linuxDestination = isLinuxEnvironment(environment)
+        if (!linuxDestination) {
+            PathValidator.validateAndroidPath(destPath, tool.name, "destination")?.let { return it }
+        }
 
         fun parseHeaders(headersJson: String?): Map<String, String> {
             if (headersJson.isNullOrBlank()) return emptyMap()
@@ -4409,7 +4433,9 @@ open class StandardFileSystemTools(protected val context: Context) {
         }
 
         return try {
-            val destFile = File(actualDestPath)
+            val temporaryDownload =
+                if (linuxDestination) File(context.cacheDir, "ai_limbs_download_${System.nanoTime()}.tmp") else null
+            val destFile = temporaryDownload ?: File(destPath)
 
             fun formatSize(bytes: Long): String {
                 return when {
@@ -4422,9 +4448,7 @@ open class StandardFileSystemTools(protected val context: Context) {
             ToolProgressBus.update(tool.name, 0f, "Connecting...")
             try {
                 val destParent = destFile.parentFile
-                if (destParent != null && !destParent.exists()) {
-                    destParent.mkdirs()
-                }
+                if (destParent != null && !destParent.exists()) destParent.mkdirs()
 
                 val lastEmitMs = java.util.concurrent.atomic.AtomicLong(0L)
                 val headers = parseHeaders(headersParam)
@@ -4435,50 +4459,68 @@ open class StandardFileSystemTools(protected val context: Context) {
                     if (!lastEmitMs.compareAndSet(last, now)) return@download
 
                     val p = if (total > 0L) (downloaded.toFloat() / total.toFloat()).coerceIn(0f, 1f) else -1f
-                    val msg =
-                        if (total > 0L) {
-                            val percent = ((downloaded.toDouble() / total.toDouble()) * 100.0).toInt().coerceIn(0, 99)
-                            "Downloading... $percent% (${formatSize(downloaded)}/${formatSize(total)})"
-                        } else {
-                            "Downloading... ${formatSize(downloaded)}"
-                        }
+                    val msg = if (total > 0L) {
+                        val percent = ((downloaded.toDouble() / total.toDouble()) * 100.0).toInt().coerceIn(0, 99)
+                        "Downloading... $percent% (${formatSize(downloaded)}/${formatSize(total)})"
+                    } else {
+                        "Downloading... ${formatSize(downloaded)}"
+                    }
                     ToolProgressBus.update(tool.name, p, msg)
                 }
-                ToolProgressBus.update(tool.name, 1f, "Completed")
 
-                if (destFile.exists()) {
-                    val fileSize = destFile.length()
-                    val formattedSize = formatSize(fileSize)
-                    return ToolResult(
-                        toolName = tool.name,
-                        success = true,
-                        result =
-                        FileOperationData(
-                            operation = "download",
-                            path = destPath,
-                            successful = true,
-                            details =
-                            "File downloaded successfully: $resolvedUrl -> $destPath (file size: $formattedSize)"
-                        ),
-                        error = ""
-                    )
-                } else {
+                if (!destFile.exists()) {
                     return ToolResult(
                         toolName = tool.name,
                         success = false,
-                        result =
-                        FileOperationData(
+                        result = FileOperationData(
                             operation = "download",
+                            env = if (linuxDestination) "linux" else "android",
                             path = destPath,
                             successful = false,
-                            details =
-                            "Download completed but file was not created"
+                            details = "Download completed but file was not created"
                         ),
                         error = "Download completed but file was not created"
                     )
                 }
+
+                val fileSize = destFile.length()
+                if (linuxDestination) {
+                    ToolProgressBus.update(tool.name, 0.99f, "Writing to System Environment...")
+                    // Provider binary writes are currently message-based; use a host temp file so Base never maps plugin-private rootfs paths.
+                    val written = getLinuxFileSystem().writeFileBytes(destPath, destFile.readBytes())
+                    if (!written.success) {
+                        return ToolResult(
+                            toolName = tool.name,
+                            success = false,
+                            result = FileOperationData(
+                                operation = "download",
+                                env = "linux",
+                                path = destPath,
+                                successful = false,
+                                details = written.message.ifBlank { "Failed to write downloaded file to System Environment" }
+                            ),
+                            error = written.message.ifBlank { "Failed to write downloaded file to System Environment" }
+                        )
+                    }
+                }
+
+                ToolProgressBus.update(tool.name, 1f, "Completed")
+                val formattedSize = formatSize(fileSize)
+                ToolResult(
+                    toolName = tool.name,
+                    success = true,
+                    result = FileOperationData(
+                        operation = "download",
+                        env = if (linuxDestination) "linux" else "android",
+                        path = destPath,
+                        successful = true,
+                        details = "File downloaded successfully: $resolvedUrl -> $destPath (file size: $formattedSize)"
+                    ),
+                    error = ""
+                )
             } finally {
                 ToolProgressBus.clear()
+                temporaryDownload?.delete()
             }
         } catch (e: Exception) {
             AppLogger.e(TAG, "Error downloading file", e)

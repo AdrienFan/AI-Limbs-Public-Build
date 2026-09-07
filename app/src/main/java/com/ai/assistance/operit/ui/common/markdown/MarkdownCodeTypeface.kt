@@ -14,7 +14,7 @@ private object MarkdownCodeTypefaceCache {
         return synchronized(this) {
             cachedTypeface
                 ?: runCatching {
-                    context.resources.getFont(com.ai.assistance.operit.terminal.R.font.jetbrains_mono_nerd_font_regular)
+                    context.resources.getFont(com.ai.assistance.operit.R.font.jetbrains_mono_nerd_font_regular)
                 }.getOrElse {
                     Typeface.MONOSPACE
                 }.also { cachedTypeface = it }

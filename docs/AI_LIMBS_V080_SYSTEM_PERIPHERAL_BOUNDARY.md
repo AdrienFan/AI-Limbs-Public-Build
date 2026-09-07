@@ -31,15 +31,17 @@ Ubuntu 第一阶段可以直接复用；未来 Winlator 接入前需要重新评
 
 0.8 第一阶段应优先把它真正绑定，而不是新造 Ubuntu 专用电源接口。
 
-### Input：新增通用 `host.input@1`
+### 外设宿主原语：独立 `host.peripheral.*@1` 命名空间
 
-当前 Host Primitive Catalog 没有适合“系统环境外设输入”的独立原语。
-现有 `host.ui.automation@1` 面向 Android Accessibility/Shower，控制的是宿主 Android UI，不能充当 Ubuntu/Winlator 的键盘鼠标。
+0.8 将系统环境所需外设从普通 Host Primitive 中单独建模并在总控台独立显示：
+- `host.peripheral.power@1`：Power。
+- `host.peripheral.display@1`：Display。
+- `host.peripheral.keyboard@1`：Keyboard。
+- `host.peripheral.pointer@1`：Pointer / Mouse（含点击、滚轮与触摸指针语义）。
 
-0.8 第一阶段新增统一输入原语，键盘与鼠标共享同一显示/环境会话路由。
-建议操作语义包括：`keyboard_text`、`keyboard_key`、`keyboard_modifier`、`pointer_move`、`pointer_button`、`pointer_scroll`、`pointer_tap`。
-Ubuntu 第一阶段只实现终端实际需要的文本、按键与组合键；Winlator 接入时再使用完整 pointer 能力。
-输入必须绑定明确的 system/display session，不能退化成对 Android 全局界面的任意注入。
+现有 `host.ui.automation@1` 继续只面向 Android Accessibility/Shower，不能充当系统环境键盘鼠标。
+键盘与指针必须绑定明确的 system/display session，不能退化成对 Android 全局界面的任意注入。
+底层实现可以复用 background runtime、UI surface 等通用 Host 能力，但外部协议和所有权保持独立。
 
 ### `host.plugin.runtime@1` 不是电源
 
@@ -91,7 +93,7 @@ Ubuntu 第一阶段只实现终端实际需要的文本、按键与组合键；W
 
 1. 绑定 `host.background.runtime@1`，把它正式作为系统环境的 Power lease。
 2. 保留并验证 `host.ui.surface@1` 作为 Ubuntu 阶段的 Display 外壳。
-3. 新增并绑定 `host.input@1`，作为系统环境的 Keyboard / Pointer / Touch 输入外设。
+3. 建立并逐步绑定 `host.peripheral.power/display/keyboard/pointer@1` 四个系统外设原语。
 4. 补齐 android_inprocess 插件 native library 装载能力。
 5. 把 Terminal Core / PTY / rootfs / bootstrap / Ubuntu lifecycle 迁进 Ubuntu 插件。
 6. 清除 Base 的 `host.ubuntu.runtime@1` 与 `ubuntu.*` 业务能力。

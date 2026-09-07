@@ -7,7 +7,7 @@ import com.ai.assistance.operit.core.tools.mcp.MCPManager
 import com.ai.assistance.operit.core.tools.mcp.McpRuntimeDescriptor
 import com.ai.assistance.operit.data.mcp.MCPLocalServer
 import com.ai.assistance.operit.data.mcp.MCPRepository
-import com.ai.assistance.operit.core.tools.system.Terminal
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
@@ -34,7 +34,6 @@ class MCPStarter(private val context: Context) {
     // Coroutine scope for async operations
     private val starterDispatcher = Dispatchers.IO.limitedParallelism(6)
     private val starterScope = CoroutineScope(starterDispatcher + SupervisorJob())
-    private val terminal = Terminal.getInstance(context)
     private var pnpmInstalled: Boolean? = null
 
     /** Plugin initialization status enum */
@@ -78,8 +77,8 @@ class MCPStarter(private val context: Context) {
         }
 
         try {
-            val result = terminal.executeCommand(sessionId, "command -v pnpm")
-            val installed = result != null && result.contains("pnpm")
+            val result = SystemEnvironmentClient.executeSession(sessionId, "command -v pnpm")
+            val installed = result.contains("pnpm")
             pnpmInstalled = installed
             return installed
         } catch (e: Exception) {
@@ -90,9 +89,10 @@ class MCPStarter(private val context: Context) {
     }
 
     /** Check if terminal service is connected and initialized */
-    private suspend fun isTerminalServiceConnected(): Boolean {
-        return terminal.isConnected()
-    }
+    private suspend fun isTerminalServiceConnected(): Boolean =
+        runCatching { SystemEnvironmentClient.ensureRunning() }
+            .onFailure { AppLogger.e(TAG, "System Environment provider is unavailable", it) }
+            .getOrDefault(false)
 
     /** Initialize and start the bridge */
     private suspend fun initBridge(): Boolean {

@@ -519,14 +519,6 @@ object RawSnapshotBackupManager {
                 return true
             }
 
-            // Exclude Ubuntu rootfs package (very large). Stored as a top-level file in filesDir.
-            if (!relNormalized.contains('/')) {
-                val name = relNormalized
-                if (name.startsWith("ubuntu-", ignoreCase = true) && name.endsWith(".tar.xz", ignoreCase = true)) {
-                    return true
-                }
-            }
-
             if (!relNormalized.contains('/')) {
                 if (relNormalized.startsWith("memory_hnsw_") && relNormalized.endsWith(".idx")) {
                     return true

@@ -3,7 +3,6 @@ package com.ai.assistance.operit.integrations.ailimbs
 import android.content.Context
 import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
 import com.ai.assistance.operit.core.tools.AIToolHandler
-import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
@@ -27,8 +26,8 @@ class AiLimbsRdcToolAdapter(
     private val ingressGateway: AiLimbsIngressGateway
 ) {
     private val appContext = context.applicationContext
-    private val terminal = Terminal.getInstance(appContext)
     private val handler = AIToolHandler.getInstance(appContext)
+    private val processRouter = AiLimbsProcessRouter(ingressGateway)
     private val managedDocumentRoot =
         File(appContext.filesDir, "ai_limbs/docs").canonicalFile
     private val toolRegistry =
@@ -40,11 +39,11 @@ class AiLimbsRdcToolAdapter(
             .register("get_file_info") { args -> executeAliasedHostTool("get_file_info", args) }
             .register("create_directory") { args -> executeAliasedHostTool("create_directory", args) }
             .register("start_process") { args -> startProcess(args) }
-            .register("read_process_output") { args -> rdcProcessTool("rdc_process_read", args) }
-            .register("interact_with_process") { args -> rdcProcessTool("rdc_process_interact", args) }
-            .register("list_sessions") { args -> rdcProcessTool("rdc_process_list", args) }
+            .register("read_process_output") { args -> processTool("read", args) }
+            .register("interact_with_process") { args -> processTool("interact", args) }
+            .register("list_sessions") { args -> processTool("list", args) }
             .register(listOf("kill_process", "force_terminate")) { args ->
-                rdcProcessTool("rdc_process_terminate", args)
+                processTool("terminate", args)
             }
 
     suspend fun execute(toolName: String, args: JSONObject): JSONObject =
@@ -75,10 +74,7 @@ class AiLimbsRdcToolAdapter(
             params.put("start_line", offset + 1)
             params.put("end_line", offset + length)
         }
-        val result = executeTrackedFileOperation(path, environment, "read_file") {
-            executeHostTool(hostToolName, params)
-        }
-        return mcpResult(result)
+        return mcpResult(executeHostTool(hostToolName, params))
     }
 
     private suspend fun readMultipleFiles(args: JSONObject): JSONObject {
@@ -136,11 +132,7 @@ class AiLimbsRdcToolAdapter(
             .put("content", args.optString("content"))
             .put("append", append)
             .put("environment", environment)
-        val action = if (append) "write_file --append" else "write_file"
-        val result = executeTrackedFileOperation(path, environment, action) {
-            executeHostTool("write_file", params)
-        }
-        return mcpResult(result)
+        return mcpResult(executeHostTool("write_file", params))
     }
 
     private suspend fun listDirectory(args: JSONObject): JSONObject {
@@ -149,45 +141,7 @@ class AiLimbsRdcToolAdapter(
         val params = JSONObject()
             .put("path", path)
             .put("environment", environment)
-        val result = executeTrackedFileOperation(path, environment, "list_directory") {
-            executeHostTool("list_files", params)
-        }
-        return mcpResult(result)
-    }
-
-    private suspend fun executeTrackedFileOperation(
-        path: String,
-        environment: String,
-        action: String,
-        block: suspend () -> JSONObject
-    ): JSONObject {
-        if (!isTrackedUbuntuPath(path, environment)) return block()
-        if (!terminal.registerHiddenAiOperation()) return block()
-        val operationId = terminal.beginSharedHiddenOperation("$action ${toUbuntuDisplayPath(path)}")
-        return try {
-            val result = block()
-            val error = result.optString("error").trim().takeIf { it.isNotEmpty() }
-            terminal.finishSharedHiddenOperation(operationId, result.toString(2), error)
-            result
-        } catch (error: Throwable) {
-            terminal.finishSharedHiddenOperation(
-                operationId,
-                null,
-                error.message ?: error::class.java.simpleName
-            )
-            throw error
-        } finally {
-            terminal.unregisterHiddenAiOperation()
-        }
-    }
-
-    private fun isTrackedUbuntuPath(path: String, environment: String): Boolean =
-        environment == "linux" || path.contains(UBUNTU_ROOTFS_MARKER)
-
-    private fun toUbuntuDisplayPath(path: String): String {
-        val markerIndex = path.indexOf(UBUNTU_ROOTFS_MARKER)
-        if (markerIndex < 0) return path
-        return path.substring(markerIndex + UBUNTU_ROOTFS_MARKER.length).ifBlank { "/" }
+        return mcpResult(executeHostTool("list_files", params))
     }
 
     private suspend fun startProcess(args: JSONObject): JSONObject {
@@ -224,11 +178,11 @@ class AiLimbsRdcToolAdapter(
         val params = JSONObject()
             .put("command", command)
             .put("timeout_ms", timeoutMs)
-        return rdcProcessTool("rdc_process_start", params)
+        return processTool("start", params)
     }
 
-    private suspend fun rdcProcessTool(name: String, args: JSONObject): JSONObject =
-        mcpResult(executeHostTool(name, args))
+    private suspend fun processTool(operation: String, args: JSONObject): JSONObject =
+        mcpProcessResult(processRouter.executeSystemEnvironment(operation, args))
 
     private suspend fun executeAliasedHostTool(
         rdcToolName: String,
@@ -305,6 +259,17 @@ class AiLimbsRdcToolAdapter(
         return AiLimbsCoreCapabilityRegistry.managedDocumentInvokeName(documentId, write)
     }
 
+
+    private fun mcpProcessResult(result: JSONObject): JSONObject {
+        val success = result.optBoolean("success", false)
+        val text = result.optString("text").ifBlank { result.toString(2) }
+        val response = JSONObject()
+            .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", text)))
+            .put("isError", !success)
+        if (result.has("execution_policy")) response.put("execution_policy", result.optJSONObject("execution_policy"))
+        return response
+    }
+
     private fun mcpResult(result: JSONObject): JSONObject {
         val success = result.optBoolean("success", false)
         val images =
@@ -362,7 +327,6 @@ class AiLimbsRdcToolAdapter(
     companion object {
         private const val TAG = "AiLimbsRdcToolAdapter"
         private const val DEFAULT_RDC_START_WAIT_MS = 10_000L
-        private const val UBUNTU_ROOTFS_MARKER = "/var/lib/proot-distro/installed-rootfs/ubuntu"
         private val DIRECT_IMAGE_EXTENSIONS = setOf("jpg", "jpeg", "png", "gif", "bmp", "webp")
     }
 }

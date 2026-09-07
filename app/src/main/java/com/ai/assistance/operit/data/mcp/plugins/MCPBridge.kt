@@ -5,7 +5,7 @@ import com.ai.assistance.operit.R
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.OperitPaths
 import com.ai.assistance.operit.util.PortProcessKiller
-import com.ai.assistance.operit.core.tools.system.Terminal
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
@@ -225,28 +225,12 @@ class MCPBridge private constructor(private val context: Context) {
 
                     AppLogger.d(TAG, "桥接器文件已复制到公共目录: ${publicBridgeDir.absolutePath}")
 
-                    // 2. 确保终端目录存在并复制文件
-                    // 获取终端管理器
-                    val terminal = Terminal.getInstance(context)
-                    
-                    // 确保已连接到终端服务
-                    if (!terminal.isConnected()) {
-                        val connected = terminal.initialize()
-                        if (!connected) {
-                            AppLogger.e(TAG, "无法连接到终端服务")
-                            return@withContext false
-                        }
+                    // 2. 通过稳定的 System Environment capability 确保运行环境和持久会话可用。
+                    if (!SystemEnvironmentClient.ensureRunning()) {
+                        AppLogger.e(TAG, "系统环境 Provider 不可用")
+                        return@withContext false
                     }
-
-                    // 使用传入的sessionId或创建新的会话
-                    val actualSessionId = sessionId ?: run {
-                        val newSessionId = terminal.createSession("mcp-bridge-deploy")
-                        if (newSessionId == null) {
-                            AppLogger.e(TAG, "无法创建终端会话或会话初始化超时")
-                            return@withContext false
-                        }
-                        newSessionId
-                    }
+                    val actualSessionId = sessionId ?: SystemEnvironmentClient.createSession("mcp-bridge-deploy")
 
                     // 使用sdcard路径而不是Android storage路径
                     val sdcardBridgePath = OperitPaths.bridgePathSdcard()
@@ -256,7 +240,7 @@ class MCPBridge private constructor(private val context: Context) {
                     
                     // 先创建目标目录
                     val mkdirCommand = "mkdir -p $TERMUX_BRIDGE_PATH"
-                    terminal.executeCommand(actualSessionId, mkdirCommand)
+                    SystemEnvironmentClient.executeSession(actualSessionId, mkdirCommand)
                     delay(100) // 等待目录创建
                     
                     // 使用 AIToolHandler 复制打包后的文件（跨环境复制：Android -> Linux）
@@ -333,29 +317,14 @@ class MCPBridge private constructor(private val context: Context) {
                         cachedDetectedPort = null
                         cachedDetectedPortAtMs = 0L
 
-                        // 获取终端管理器
-                        val terminal = Terminal.getInstance(ctx)
-                        
-                        // 确保已连接到终端服务
-                        if (!terminal.isConnected()) {
-                            val connected = terminal.initialize()
-                            if (!connected) {
-                                AppLogger.e(TAG, "无法连接到终端服务")
-                                deferred.complete(false)
-                                return@withContext false
-                            }
+                        if (!SystemEnvironmentClient.ensureRunning()) {
+                            AppLogger.e(TAG, "系统环境 Provider 不可用")
+                            deferred.complete(false)
+                            return@withContext false
                         }
 
-                        // 使用传入的sessionId或创建新的会话
-                        val actualSessionId = sessionId ?: run {
-                            val newSessionId = terminal.createSession("mcp-bridge-daemon")
-                            if (newSessionId == null) {
-                                AppLogger.e(TAG, "无法创建终端会话或会话初始化超时")
-                                deferred.complete(false)
-                                return@withContext false
-                            }
-                            newSessionId
-                        }
+                        // 使用传入的 sessionId，或按稳定名称创建/复用 daemon 会话。
+                        val actualSessionId = sessionId ?: SystemEnvironmentClient.createSession("mcp-bridge-daemon")
 
                         // 构建启动命令 - 使用后台方式运行
                         val command = StringBuilder("cd $TERMUX_BRIDGE_PATH && node index.js $port")
@@ -381,7 +350,7 @@ class MCPBridge private constructor(private val context: Context) {
                         if (shouldSendStartCommand) {
                             AppLogger.d(TAG, "发送启动命令: $command")
                             AppLogger.d(TAG, "进行桥接器启动...")
-                            terminal.executeCommand(actualSessionId, command.toString())
+                            SystemEnvironmentClient.executeSession(actualSessionId, command.toString())
                         } else {
                             AppLogger.w(TAG, "桥接器启动命令发送过于频繁，跳过本次发送")
                         }

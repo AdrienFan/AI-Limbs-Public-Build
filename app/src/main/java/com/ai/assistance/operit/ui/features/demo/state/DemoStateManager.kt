@@ -26,7 +26,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ai.assistance.operit.core.tools.system.AccessibilityProviderInstaller
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
-import com.ai.assistance.operit.core.tools.system.Terminal
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
 import com.ai.assistance.operit.data.mcp.plugins.MCPSharedSession
 import com.ai.assistance.operit.R
 
@@ -282,33 +282,31 @@ class DemoStateManager(private val context: Context, private val coroutineScope:
                 return
             }
 
-            val terminal = Terminal.getInstance(context)
-            
             // 检查pnpm安装状态
-            val pnpmResult = terminal.executeCommand(sessionId, "command -v pnpm")
-            isPnpmInstalled.value = pnpmResult != null && pnpmResult.contains("pnpm")
+            val pnpmResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pnpm")
+            isPnpmInstalled.value = pnpmResult.contains("pnpm")
             
             // 检查python安装状态
-            val pythonResult = terminal.executeCommand(sessionId, "command -v python")
-            var hasPython = pythonResult != null && (pythonResult.contains("python") || pythonResult.contains("/python"))
+            val pythonResult = SystemEnvironmentClient.executeSession(sessionId, "command -v python")
+            var hasPython = pythonResult.contains("python") || pythonResult.contains("/python")
             
             // 如果python不存在，检查python3
             if (!hasPython) {
-                val python3Result = terminal.executeCommand(sessionId, "command -v python3")
-                hasPython = python3Result != null && (python3Result.contains("python3") || python3Result.contains("/python3"))
+                val python3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v python3")
+                hasPython = python3Result.contains("python3") || python3Result.contains("/python3")
             }
 
             // 检查pip安装状态 - 只有python存在时才检查pip
             var hasPip = false
             if (hasPython) {
                 // 尝试检查pip
-                val pipResult = terminal.executeCommand(sessionId, "command -v pip")
-                hasPip = pipResult != null && pipResult.contains("pip")
+                val pipResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pip")
+                hasPip = pipResult.contains("pip")
                 
                 // 如果pip不存在，检查pip3
                 if (!hasPip) {
-                    val pip3Result = terminal.executeCommand(sessionId, "command -v pip3")
-                    hasPip = pip3Result != null && pip3Result.contains("pip3")
+                    val pip3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v pip3")
+                    hasPip = pip3Result.contains("pip3")
                 }
             }
 
@@ -365,29 +363,28 @@ suspend fun refreshPermissionsAndStatus(
     val isNodejsPythonEnvironmentReady = try {
         val sessionId = MCPSharedSession.getOrCreateSharedSession(context)
         if (sessionId != null) {
-            val terminal = Terminal.getInstance(context)
-            val pnpmResult = terminal.executeCommand(sessionId, "command -v pnpm")
-            val isPnpmInstalled = pnpmResult != null && pnpmResult.contains("pnpm")
+            val pnpmResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pnpm")
+            val isPnpmInstalled = pnpmResult.contains("pnpm")
             
-            val pythonResult = terminal.executeCommand(sessionId, "command -v python")
-            var hasPython = pythonResult != null && (pythonResult.contains("python") || pythonResult.contains("/python"))
+            val pythonResult = SystemEnvironmentClient.executeSession(sessionId, "command -v python")
+            var hasPython = pythonResult.contains("python") || pythonResult.contains("/python")
             
             if (!hasPython) {
-                val python3Result = terminal.executeCommand(sessionId, "command -v python3")
-                hasPython = python3Result != null && (python3Result.contains("python3") || python3Result.contains("/python3"))
+                val python3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v python3")
+                hasPython = python3Result.contains("python3") || python3Result.contains("/python3")
             }
             
             // 检查pip安装状态 - 只有python存在时才检查pip
             var hasPip = false
             if (hasPython) {
                 // 尝试检查pip
-                val pipResult = terminal.executeCommand(sessionId, "command -v pip")
-                hasPip = pipResult != null && pipResult.contains("pip")
+                val pipResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pip")
+                hasPip = pipResult.contains("pip")
                 
                 // 如果pip不存在，检查pip3
                 if (!hasPip) {
-                    val pip3Result = terminal.executeCommand(sessionId, "command -v pip3")
-                    hasPip = pip3Result != null && pip3Result.contains("pip3")
+                    val pip3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v pip3")
+                    hasPip = pip3Result.contains("pip3")
                 }
             }
             

@@ -33,8 +33,14 @@ internal object HostPrimitiveGatewayBindings {
 
     val all: Map<String, Map<String, HostGatewayOperationBinding>> = linkedMapOf(
         "host.filesystem@1" to ops(tool("list", "list_files"), tool("read", "read_file"), tool("read_range", "read_file_part"), tool("read_full", "read_file_full"), tool("read_binary", "read_file_binary"), tool("write", "write_file"), tool("write_binary", "write_file_binary"), tool("delete", "delete_file"), tool("move", "move_file"), tool("copy", "copy_file"), tool("mkdir", "make_directory"), tool("stat", "file_info"), tool("find", "find_files"), tool("grep", "grep_code"), tool("open", "open_file"), tool("share", "share_file")),
-        "host.process@1" to ops(tool("execute", "execute_shell"), tool("create_session", "create_terminal_session"), tool("session_execute", "execute_in_terminal_session"), tool("session_stream", "execute_in_terminal_session_streaming"), tool("hidden_execute", "execute_hidden_terminal_command"), tool("session_input", "input_in_terminal_session"), tool("session_screen", "get_terminal_session_screen"), tool("session_close", "close_terminal_session")),
-        "host.ubuntu.runtime@1" to ops(core("status", "ubuntu.status"), core("start", "ubuntu.start"), core("stop", "ubuntu.stop"), core("idle_get", "ubuntu.idle.get"), core("idle_set", "ubuntu.idle.set")),
+        "host.process@1" to ops(
+            tool("execute", "execute_shell"),
+            pending("start"),
+            pending("read"),
+            pending("input"),
+            pending("terminate"),
+            pending("list")
+        ),
         "host.ui.automation@1" to ops(tool("snapshot", "get_page_info"), tool("click", "click_element"), tool("tap", "tap"), tool("long_press", "long_press"), tool("set_text", "set_input_text"), tool("key", "press_key"), tool("swipe", "swipe")),
         "host.screen.capture@1" to ops(tool("capture", "capture_screenshot")),
         "host.network@1" to ops(tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), pending("listen")),
@@ -172,9 +178,6 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
 
     private fun isApprovedScopeRead(primitiveId: String, operation: String): Boolean =
         when (primitiveId to operation) {
-            "host.ubuntu.runtime@1" to "status",
-            "host.ubuntu.runtime@1" to "idle_get",
-            "host.process@1" to "session_screen" -> true
             else -> false
         }
 

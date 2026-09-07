@@ -10,6 +10,31 @@ fun interface PluginCapabilityExecutor {
     suspend fun execute(parameters: JSONObject): JSONObject
 }
 
+enum class PluginCapabilityEffect {
+    READ_ONLY,
+    STATE_CHANGE,
+    PERSISTENT_WRITE,
+    EXTERNAL_COMMUNICATION,
+    PROCESS_EXECUTION,
+    UI_INTERACTION,
+    EXTERNAL_CAPABILITY
+}
+
+enum class PluginCapabilityDomain {
+    CORE_PROTOCOL,
+    MANAGED_DOCUMENT,
+    LANER_CHAT,
+    SYSTEM_ENVIRONMENT,
+    ANDROID_UI,
+    STORAGE,
+    HOST,
+    PLUGIN
+}
+
+enum class PluginCapabilityReceipt {
+    WORK_MANUAL
+}
+
 data class PluginCapabilityParameterSpec(
     val name: String,
     val type: String = "string",
@@ -26,6 +51,9 @@ data class PluginCapabilitySpec(
     val parameters: List<PluginCapabilityParameterSpec> = emptyList(),
     val suggestedParamsJson: String? = null,
     val inputSchema: String? = null,
+    val effect: PluginCapabilityEffect = PluginCapabilityEffect.EXTERNAL_CAPABILITY,
+    val domain: PluginCapabilityDomain = PluginCapabilityDomain.PLUGIN,
+    val workContextRequiredReceipts: Set<PluginCapabilityReceipt> = emptySet(),
     val executor: PluginCapabilityExecutor
 )
 

@@ -21,7 +21,6 @@ rootProject.name = "Operit"
 include(":app")
 include(":dragonbones")
 project(":dragonbones").projectDir = file("avator/dragonbones")
-include(":terminal")
 include(":mnn")
 project(":mnn").projectDir = file("llm/mnn")
 include(":llama")

@@ -3,7 +3,6 @@ package com.ai.assistance.operit.integrations.ailimbs
 import android.content.Context
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
-import com.ai.assistance.operit.core.tools.system.Terminal
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
@@ -38,7 +37,6 @@ class AiLimbsExecutionPolicyEngine(
     private val handler = AIToolHandler.getInstance(appContext)
     private val permissionSystem = ToolPermissionSystem.getInstance(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
-    private val terminal = Terminal.getInstance(appContext)
     private val receipts = AiLimbsAccessGate(appContext)
 
     internal fun normalize(tool: String, args: JSONObject): AiLimbsNormalizedInvocation {
@@ -97,7 +95,13 @@ class AiLimbsExecutionPolicyEngine(
                 parameters = args
                 route = AiLimbsCapabilityRoute.Plugin(plugin)
                 sourceEnabled = plugin.catalogEntry.sourceEnabled
-                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
+                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability(
+                    effect = plugin.effect,
+                    domain = plugin.domain,
+                    workContextRequiredReceipts = plugin.workContextRequiredReceipts,
+                    parameters = args,
+                    transport = session.transport
+                )
             }
         }
 
@@ -143,7 +147,14 @@ class AiLimbsExecutionPolicyEngine(
             }
             is AiLimbsCapabilityRegistration.Plugin -> {
                 route = AiLimbsCapabilityRoute.Plugin(registration.registration)
-                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability()
+                val plugin = registration.registration
+                spec = AiLimbsExecutionPolicyDescriptor.specForPluginCapability(
+                    effect = plugin.effect,
+                    domain = plugin.domain,
+                    workContextRequiredReceipts = plugin.workContextRequiredReceipts,
+                    parameters = JSONObject(),
+                    transport = session.transport
+                )
             }
             null -> {
                 route = AiLimbsCapabilityRoute.HostTool(targetName)
@@ -433,85 +444,7 @@ class AiLimbsExecutionPolicyEngine(
             }
         }
 
-        val usesUbuntu =
-            coreRegistration?.provider == AiLimbsCoreProvider.UBUNTU ||
-                AiLimbsExecutionPolicyDescriptor.isUbuntuTool(targetName, parameters)
-        if (usesUbuntu) {
-            return ubuntuAvailability(coreRegistration)
-        }
         return AiLimbsAvailabilityResult(available = true)
-    }
-
-    private fun ubuntuAvailability(
-        registration: AiLimbsCoreCapabilityRegistration?
-    ): AiLimbsAvailabilityResult {
-        val phase = terminal.currentUbuntuRuntimeState().phase.name
-        val prerequisites = listOf("Ubuntu runtime state: " + phase)
-        return when (registration?.availabilityPolicy) {
-            AiLimbsCoreAvailabilityPolicy.UBUNTU_START ->
-                when (phase) {
-                    "STARTING", "STOPPING" ->
-                        AiLimbsAvailabilityResult(
-                            false,
-                            "UBUNTU_TRANSITION",
-                            "Ubuntu is currently " + phase + ".",
-                            prerequisites = prerequisites
-                        )
-                    "RUNNING" ->
-                        AiLimbsAvailabilityResult(
-                            false,
-                            "UBUNTU_ALREADY_RUNNING",
-                            "Ubuntu is already RUNNING.",
-                            prerequisites = prerequisites
-                        )
-                    else -> AiLimbsAvailabilityResult(true, prerequisites = prerequisites)
-                }
-            AiLimbsCoreAvailabilityPolicy.UBUNTU_STOP -> {
-                if (phase != "RUNNING") {
-                    AiLimbsAvailabilityResult(
-                        false,
-                        "UBUNTU_NOT_RUNNING",
-                        "Ubuntu is " + phase + ".",
-                        prerequisites = prerequisites
-                    )
-                } else {
-                    val usage = terminal.currentUbuntuUsageState()
-                    if (usage.userInterfaceClients > 0 || usage.hiddenAiOperations > 0) {
-                        AiLimbsAvailabilityResult(
-                            false,
-                            "UBUNTU_IN_USE",
-                            "Ubuntu is still used by another interface or hidden operation.",
-                            prerequisites =
-                                prerequisites +
-                                    ("Ubuntu participants: " + usage.participantCount)
-                        )
-                    } else {
-                        AiLimbsAvailabilityResult(true, prerequisites = prerequisites)
-                    }
-                }
-            }
-            AiLimbsCoreAvailabilityPolicy.UBUNTU_STATUS,
-            AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY ->
-                AiLimbsAvailabilityResult(true, prerequisites = prerequisites)
-            AiLimbsCoreAvailabilityPolicy.DEFAULT,
-            AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT,
-            null ->
-                if (phase == "RUNNING") {
-                    AiLimbsAvailabilityResult(true, prerequisites = prerequisites)
-                } else {
-                    AiLimbsAvailabilityResult(
-                        false,
-                        "UBUNTU_NOT_RUNNING",
-                        "Ubuntu is " + phase + ".",
-                        nextAction =
-                            transportInvocation(
-                                "ubuntu.start",
-                                JSONObject()
-                            ),
-                        prerequisites = prerequisites
-                    )
-                }
-        }
     }
 
     private fun missingReceiptInspection(

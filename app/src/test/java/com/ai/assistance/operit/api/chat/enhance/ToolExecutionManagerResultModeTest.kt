@@ -2,7 +2,7 @@ package com.ai.assistance.operit.api.chat.enhance
 
 import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.core.tools.TerminalSessionCreationResultData
-import com.ai.assistance.operit.core.tools.UbuntuRuntimeStatusResultData
+import com.ai.assistance.operit.core.tools.FileOperationData
 import com.ai.assistance.operit.data.model.ToolResult
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
@@ -10,20 +10,22 @@ import org.junit.Test
 
 class ToolExecutionManagerResultModeTest {
     @Test
-    fun structuredModePreservesUbuntuStatusPayload() {
-        val payload = UbuntuRuntimeStatusResultData(
-            state = "RUNNING",
-            detail = "Ubuntu is running.",
-            idleMode = "KEEP_RUNNING"
+    fun structuredModePreservesStructuredPayload() {
+        val payload = FileOperationData(
+            operation = "status",
+            env = "system",
+            path = "/system",
+            successful = true,
+            details = "System environment running"
         )
         val result = ToolExecutionManager.finalizeCollectedToolResult(
-            displayToolName = "ubuntu.status",
-            collectedResults = listOf(ToolResult("ubuntu.status", true, payload)),
+            displayToolName = "system.status",
+            collectedResults = listOf(ToolResult("system.status", true, payload)),
             preserveStructuredResult = true
         )
 
-        assertTrue(result.result is UbuntuRuntimeStatusResultData)
-        assertEquals("RUNNING", (result.result as UbuntuRuntimeStatusResultData).state)
+        assertTrue(result.result is FileOperationData)
+        assertEquals("status", (result.result as FileOperationData).operation)
     }
 
     @Test
@@ -45,18 +47,20 @@ class ToolExecutionManagerResultModeTest {
 
     @Test
     fun legacyModeKeepsChatTextAggregation() {
-        val payload = UbuntuRuntimeStatusResultData(
-            state = "RUNNING",
-            detail = "Ubuntu is running.",
-            idleMode = "KEEP_RUNNING"
+        val payload = FileOperationData(
+            operation = "status",
+            env = "system",
+            path = "/system",
+            successful = true,
+            details = "System environment running"
         )
         val result = ToolExecutionManager.finalizeCollectedToolResult(
-            displayToolName = "ubuntu.status",
-            collectedResults = listOf(ToolResult("ubuntu.status", true, payload)),
+            displayToolName = "system.status",
+            collectedResults = listOf(ToolResult("system.status", true, payload)),
             preserveStructuredResult = false
         )
 
         assertTrue(result.result is StringResultData)
-        assertTrue((result.result as StringResultData).value.contains("Ubuntu runtime: RUNNING"))
+        assertTrue((result.result as StringResultData).value.contains("System environment running"))
     }
 }

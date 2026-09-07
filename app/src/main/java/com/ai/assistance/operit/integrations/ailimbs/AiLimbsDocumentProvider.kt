@@ -328,14 +328,11 @@ class AiLimbsDocumentProvider(context: Context) {
         File(documentsDirectory, RETIRED_TOOL_MANUAL_FILE).delete()
         File(backupsDirectory, RETIRED_TOOL_MANUAL_STABLE_ID).deleteRecursively()
         File(legacyArchiveDirectory, "LANER_TOOL_MANUAL_PRE_V054.md").delete()
-        val ubuntuRoot = File(appContext.filesDir, "usr/var/lib/proot-distro/installed-rootfs/ubuntu")
-        File(ubuntuRoot, "root/laner/docs/$RETIRED_TOOL_MANUAL_FILE").delete()
-        File(ubuntuRoot, "root/$RETIRED_TOOL_MANUAL_FILE").delete()
+        // System Environment storage is plugin-owned. Base retires only its own document copies.
     }
 
     private fun isLegacySystemAccessPrompt(content: String): Boolean =
-        content.contains("ubuntu.status") &&
-            content.contains("Ubuntu is stopped. Call ubuntu.start first.") &&
+        content.contains("Ubuntu 工具使用规则") &&
             content.contains("任务涉及开发") &&
             content.contains("工作手册")
 

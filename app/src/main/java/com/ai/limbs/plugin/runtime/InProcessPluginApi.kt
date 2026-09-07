@@ -17,6 +17,54 @@ fun interface InProcessCapabilityExecutor {
     suspend fun invoke(parametersJson: String): String
 }
 
+enum class InProcessCapabilityEffect {
+    READ_ONLY,
+    STATE_CHANGE,
+    PERSISTENT_WRITE,
+    EXTERNAL_COMMUNICATION,
+    PROCESS_EXECUTION,
+    UI_INTERACTION,
+    EXTERNAL_CAPABILITY
+}
+
+enum class InProcessCapabilityDomain {
+    CORE_PROTOCOL,
+    MANAGED_DOCUMENT,
+    LANER_CHAT,
+    SYSTEM_ENVIRONMENT,
+    ANDROID_UI,
+    STORAGE,
+    HOST,
+    PLUGIN
+}
+
+enum class InProcessCapabilityReceipt {
+    WORK_MANUAL
+}
+
+data class InProcessCapabilityParameterSpec(
+    val name: String,
+    val type: String = "string",
+    val description: String = "",
+    val required: Boolean = true,
+    val default: String? = null
+)
+
+data class InProcessCapabilitySpec(
+    val id: String,
+    val displayName: String,
+    val description: String = "",
+    val invokeAliases: List<String> = emptyList(),
+    val keywords: List<String> = emptyList(),
+    val parameters: List<InProcessCapabilityParameterSpec> = emptyList(),
+    val suggestedParamsJson: String? = null,
+    val inputSchema: String? = null,
+    val effect: InProcessCapabilityEffect = InProcessCapabilityEffect.EXTERNAL_CAPABILITY,
+    val domain: InProcessCapabilityDomain = InProcessCapabilityDomain.PLUGIN,
+    val workContextRequiredReceipts: Set<InProcessCapabilityReceipt> = emptySet(),
+    val executor: InProcessCapabilityExecutor
+)
+
 data class InProcessProviderBinding(
     val ownerPluginId: String,
     val id: String,
@@ -132,6 +180,8 @@ interface InProcessPluginHost {
     val scope: CoroutineScope
     val dataDir: File
     val cacheDir: File
+    /** Exact mounted runtime payload (for example payload/plugin.apk). */
+    val runtimeEntryFile: File
     val providers: InProcessProviderDirectory
     val services: InProcessServiceDirectory
 
@@ -147,6 +197,15 @@ interface InProcessPluginHost {
         description: String = "",
         executor: InProcessCapabilityExecutor
     )
+
+    fun registerCapability(spec: InProcessCapabilitySpec) {
+        registerCapability(
+            id = spec.id,
+            displayName = spec.displayName,
+            description = spec.description,
+            executor = spec.executor
+        )
+    }
 
     fun registerHomeTile(tile: InProcessHomeTile)
     fun registerScreen(screen: InProcessScreen)

@@ -153,6 +153,9 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
             parameters = parameterSpecs,
             suggestedParamsJson = descriptor.optJSONObject("suggested_params")?.toString(),
             inputSchema = descriptor.optJSONObject("input_schema")?.toString(),
+            effect = descriptor.enumValue("effect", PluginCapabilityEffect.EXTERNAL_CAPABILITY),
+            domain = descriptor.enumValue("domain", PluginCapabilityDomain.PLUGIN),
+            workContextRequiredReceipts = descriptor.enumSet<PluginCapabilityReceipt>("work_context_required_receipts"),
             executor = executor
         )
     }
@@ -293,6 +296,25 @@ internal object DeclarativePluginRuntimeAdapter : PluginRuntimeAdapter {
     private fun JSONObject.requiredString(name: String): String =
         optString(name).trim().takeIf { it.isNotBlank() }
             ?: throw PluginInstallException("DECLARATIVE_FIELD_REQUIRED", "Missing string field: $name")
+
+    private inline fun <reified T : Enum<T>> JSONObject.enumValue(name: String, default: T): T {
+        val raw = optString(name).trim().uppercase()
+        if (raw.isBlank()) return default
+        return enumValues<T>().firstOrNull { it.name == raw }
+            ?: throw PluginInstallException(
+                "DECLARATIVE_CAPABILITY_POLICY_INVALID",
+                "Unsupported $name policy value: $raw"
+            )
+    }
+
+    private inline fun <reified T : Enum<T>> JSONObject.enumSet(name: String): Set<T> =
+        stringList(name).mapTo(linkedSetOf()) { raw ->
+            enumValues<T>().firstOrNull { it.name == raw.trim().uppercase() }
+                ?: throw PluginInstallException(
+                    "DECLARATIVE_CAPABILITY_POLICY_INVALID",
+                    "Unsupported $name policy value: $raw"
+                )
+        }
 
     private fun JSONObject.stringList(name: String): List<String> {
         val array = optJSONArray(name) ?: return emptyList()

@@ -9,7 +9,6 @@ internal enum class AiLimbsCoreLocalOperation {
     DEVELOPER_CATALOG_READ,
     CORE_STATUS,
     DISPATCHER_STATUS,
-    SHARED_UBUNTU_STATUS,
     UI_STATUS,
     HOST_TOOLS_LIST,
     HOST_TOOL_EXECUTE,
@@ -48,17 +47,12 @@ internal sealed interface AiLimbsCoreRoute {
 
 internal enum class AiLimbsCoreProvider {
     CORE,
-    BRIDGE,
-    UBUNTU
+    BRIDGE
 }
 
 internal enum class AiLimbsCoreAvailabilityPolicy {
     DEFAULT,
-    BRIDGE_RECONNECT,
-    UBUNTU_STATUS,
-    UBUNTU_START,
-    UBUNTU_STOP,
-    UBUNTU_IDLE_POLICY
+    BRIDGE_RECONNECT
 }
 
 internal data class AiLimbsCoreCapabilityRegistration(

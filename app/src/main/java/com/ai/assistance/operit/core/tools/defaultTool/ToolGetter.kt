@@ -131,12 +131,12 @@ object ToolGetter {
     }
 
     /**
-     * 获取终端命令执行器
-     * @param context 应用上下文
-     * @return 终端命令执行器实现（只有标准版本）
+     * 获取系统环境兼容命令执行器。
+     *
+     * 旧 terminal tool 名仍由该执行器承接，但 Base 不再持有具体终端/Ubuntu 实现。
      */
-    fun getTerminalCommandExecutor(context: Context): StandardTerminalCommandExecutor {
-        return StandardTerminalCommandExecutor(context)
+    fun getSystemEnvironmentCommandExecutor(context: Context): StandardSystemEnvironmentCommandExecutor {
+        return StandardSystemEnvironmentCommandExecutor(context)
     }
 
     /**

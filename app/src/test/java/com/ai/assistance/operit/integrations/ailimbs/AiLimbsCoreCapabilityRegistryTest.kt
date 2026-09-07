@@ -78,11 +78,6 @@ class AiLimbsCoreCapabilityRegistryTest {
             when (registration.availabilityPolicy) {
                 AiLimbsCoreAvailabilityPolicy.BRIDGE_RECONNECT ->
                     assertEquals(AiLimbsCoreProvider.BRIDGE, registration.provider)
-                AiLimbsCoreAvailabilityPolicy.UBUNTU_STATUS,
-                AiLimbsCoreAvailabilityPolicy.UBUNTU_START,
-                AiLimbsCoreAvailabilityPolicy.UBUNTU_STOP,
-                AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY ->
-                    assertEquals(AiLimbsCoreProvider.UBUNTU, registration.provider)
                 AiLimbsCoreAvailabilityPolicy.DEFAULT -> Unit
             }
         }
@@ -99,20 +94,6 @@ class AiLimbsCoreCapabilityRegistryTest {
                         registration.catalogEntry.sourceName
                     )
                     assertTrue(locator.startsWith("ai-limbs://bridge/"))
-                }
-                AiLimbsCoreProvider.UBUNTU -> {
-                    assertEquals(
-                        AiLimbsCoreCapabilityRegistry.UBUNTU_PROVIDER,
-                        registration.catalogEntry.sourceName
-                    )
-                    if (
-                        registration.availabilityPolicy ==
-                            AiLimbsCoreAvailabilityPolicy.UBUNTU_IDLE_POLICY
-                    ) {
-                        assertTrue(locator.startsWith("ubuntu://idle/"))
-                    } else {
-                        assertTrue(locator.startsWith("ubuntu://lifecycle/"))
-                    }
                 }
                 AiLimbsCoreProvider.CORE -> Unit
             }

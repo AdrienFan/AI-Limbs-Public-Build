@@ -51,7 +51,7 @@ import org.json.JSONObject
 
 /**
  * Native Remote Desktop Commander device transport for AI Limbs.
- * Ubuntu/PRoot is not part of this transport; it is reached only through AI Limbs Terminal tools.
+ * System environments are not part of this transport; process/capability requests enter AI Limbs routing and are resolved by the capability layer.
  */
 class AiLimbsRdcClient(
     context: Context,

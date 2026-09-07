@@ -113,7 +113,6 @@ class AiLimbsDispatcher(
             AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ -> developerCatalog.read(args)
             AiLimbsCoreLocalOperation.CORE_STATUS -> coreStatus()
             AiLimbsCoreLocalOperation.DISPATCHER_STATUS -> dispatcherStatus()
-            AiLimbsCoreLocalOperation.SHARED_UBUNTU_STATUS -> sharedUbuntuStatus()
             AiLimbsCoreLocalOperation.UI_STATUS -> uiCapabilityStatus()
             AiLimbsCoreLocalOperation.HOST_TOOLS_LIST -> {
                 handler.registerDefaultTools()
@@ -334,7 +333,7 @@ class AiLimbsDispatcher(
                         "AI Limbs Tool Dispatcher",
                         "AI Limbs Execution Policy Engine",
                         "AI Limbs Storage Index",
-                        "AI Limbs Ubuntu Runtime",
+                        "AI Limbs System Environment Capability Bus",
                         "AI Limbs Laner Chat Bridge"
                     )
                 )
@@ -352,22 +351,6 @@ class AiLimbsDispatcher(
             .put("session_scope", policyEngine.session.scopeId)
             .put("transport", policyEngine.session.transport.wireValue)
             .put("transport_neutral", true)
-
-    private fun sharedUbuntuStatus(): JSONObject {
-        val terminal = com.ai.assistance.operit.core.tools.system.Terminal.getInstance(appContext)
-        val state = terminal.currentSharedHiddenTerminalState()
-        val usage = terminal.currentUbuntuUsageState()
-        return ok()
-            .put("module", "Laner Ubuntu Shared View")
-            .put("active", state.isActive)
-            .put("active_operation_count", state.activeOperationCount)
-            .put("has_recent_operation", state.operationId != null)
-            .put("read_only", true)
-            .put("persisted", false)
-            .put("participant_count", usage.participantCount)
-            .put("user_interface_clients", usage.userInterfaceClients)
-            .put("hidden_ai_operations", usage.hiddenAiOperations)
-    }
 
     private fun lanerChatStatus(): JSONObject {
         // A remote status query is itself verified agent activity. Renew presence before snapshotting

@@ -311,27 +311,11 @@ object ToolCapabilityCatalog {
             }
     }
 
-    private fun runtimeParameterSchemas(toolName: String): List<ToolParameterSchema> = when (toolName) {
-        "ubuntu.idle.set" -> listOf(
-            ToolParameterSchema(
-                name = "mode",
-                type = "string",
-                description = "KEEP_RUNNING, MINUTES_10, MINUTES_15, MINUTES_30, MINUTES_60, or CUSTOM",
-                required = true
-            ),
-            ToolParameterSchema(
-                name = "custom_minutes",
-                type = "integer",
-                description = "Required for CUSTOM; allowed range is 1 to 1440 minutes",
-                required = false
-            )
-        )
-        else -> emptyList()
-    }
+    // Concrete System Environment plugins publish their own rich parameter/keyword metadata.
+    // Native Base tools must not hardcode Ubuntu lifecycle semantics here.
+    private fun runtimeParameterSchemas(toolName: String): List<ToolParameterSchema> = emptyList()
 
     private fun runtimeKeywords(toolName: String): List<String> = when {
-        toolName.startsWith("ubuntu.") ->
-            listOf("ubuntu", "linux", "沙箱", "开机", "关机", "启动", "停止", "空闲")
         toolName.startsWith("ai_limbs.") -> listOf("ai limbs", "兰儿")
         else -> emptyList()
     }

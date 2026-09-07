@@ -17,6 +17,9 @@ internal data class AiLimbsPluginCapabilityRegistration(
     val capabilityId: String,
     val invokeAliases: List<String>,
     val catalogEntry: ToolCatalogEntry,
+    val effect: AiLimbsEffect,
+    val domain: AiLimbsDomain,
+    val workContextRequiredReceipts: Set<AiLimbsRequiredReceipt>,
     val executor: AiLimbsPluginCapabilityExecutor
 )
 
@@ -65,6 +68,9 @@ object AiLimbsCapabilityRegistry {
         capabilityId: String,
         invokeAliases: List<String>,
         catalogEntry: ToolCatalogEntry,
+        effect: AiLimbsEffect,
+        domain: AiLimbsDomain,
+        workContextRequiredReceipts: Set<AiLimbsRequiredReceipt>,
         executor: AiLimbsPluginCapabilityExecutor
     ): AutoCloseable {
         val canonical = normalize(catalogEntry.targetToolName)
@@ -78,6 +84,9 @@ object AiLimbsCapabilityRegistry {
             capabilityId = normalizedCapabilityId,
             invokeAliases = aliases,
             catalogEntry = catalogEntry.copy(targetToolName = canonical),
+            effect = effect,
+            domain = domain,
+            workContextRequiredReceipts = workContextRequiredReceipts,
             executor = executor
         )
         val owned = OwnedPluginRegistration(UUID.randomUUID().toString(), registration)
