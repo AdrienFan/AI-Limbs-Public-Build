@@ -1,4 +1,4 @@
-package com.ai.assistance.operit.integrations.ailimbs.chat
+package com.ai.limbs.extensions.rdc.runtime.chat
 
 import android.content.Context
 import java.util.UUID
