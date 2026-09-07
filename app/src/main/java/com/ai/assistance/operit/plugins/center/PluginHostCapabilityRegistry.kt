@@ -11,12 +11,15 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsIngressGateway
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsIngressSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsPluginCapabilityExecutor
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRequiredReceipt
 import com.ai.assistance.operit.plugins.system.SystemHostPrimitiveAvailability
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import org.json.JSONArray
 import org.json.JSONObject
 
 /**
@@ -44,6 +47,7 @@ internal class PluginHostCapabilityRegistry(
     )
 
     private val capabilities = ConcurrentHashMap<String, OwnedCapability>()
+    private val bridgeIngressGateways = ConcurrentHashMap<String, AiLimbsIngressGateway>()
 
     // Ordinary plugin scope adapters remain intentionally narrow here.
     // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 41-item Gateway catalog.
@@ -194,6 +198,9 @@ internal class PluginHostCapabilityRegistry(
         if (normalized.isBlank()) {
             throw PluginInstallException("CAPABILITY_ID_REQUIRED", "Delegated capability ID is required")
         }
+        if (normalized == BRIDGE_REMOTE_INVOKE_CAPABILITY_ID) {
+            return invokeBridgeRemote(ownerPluginId, parameters)
+        }
         val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
         if (primitive != null) {
             return create(ownerPluginId, grantedScopes)
@@ -219,6 +226,66 @@ internal class PluginHostCapabilityRegistry(
         )
         return AiLimbsDispatcher(context, AiLimbsExecutionPolicyEngine(context, session))
             .execute(normalized, JSONObject(parameters.toString()))
+    }
+
+    private suspend fun invokeBridgeRemote(ownerPluginId: String, parameters: JSONObject): JSONObject {
+        if (ownerPluginId != SYSTEM_BRIDGE_PLUGIN_ID) {
+            throw PluginInstallException(
+                "BRIDGE_DELEGATION_OWNER_MISMATCH",
+                "$BRIDGE_REMOTE_INVOKE_CAPABILITY_ID is reserved for $SYSTEM_BRIDGE_PLUGIN_ID"
+            )
+        }
+        val context = appContext
+            ?: throw PluginInstallException(
+                "HOST_RUNTIME_UNAVAILABLE",
+                "Bridge remote ingress requires the Android Host runtime"
+            )
+        val transportId = parameters.optString("transport").trim().lowercase()
+        val transport = AiLimbsExecutionTransport.values().firstOrNull { it.wireValue == transportId }
+            ?: throw PluginInstallException(
+                "BRIDGE_TRANSPORT_UNSUPPORTED",
+                "Unsupported Bridge transport: $transportId"
+            )
+        if (transport == AiLimbsExecutionTransport.PLUGIN_RUNTIME) {
+            throw PluginInstallException(
+                "BRIDGE_TRANSPORT_UNSUPPORTED",
+                "Plugin runtime cannot be used as an external Bridge transport"
+            )
+        }
+        val tool = parameters.optString("tool").trim()
+        if (tool.isBlank()) {
+            throw PluginInstallException("CAPABILITY_ID_REQUIRED", "Bridge remote tool is required")
+        }
+        val args = parameters.optJSONObject("args") ?: JSONObject()
+        val gatewayKey = "$ownerPluginId:${transport.wireValue}"
+        val gateway = bridgeIngressGateways.computeIfAbsent(gatewayKey) {
+            AiLimbsIngressGateway(
+                context,
+                AiLimbsIngressSession(
+                    sourceId = transport.wireValue,
+                    executionSession = AiLimbsExecutionSession(
+                        transport = transport,
+                        scopeId = "bridge-${transport.wireValue}-" + UUID.randomUUID()
+                    )
+                )
+            )
+        }
+        val ingressResult = gateway.invoke(tool, JSONObject(args.toString()))
+        return ingressResult.accessBootstrap?.let { bootstrap ->
+            prependBridgeAccessBootstrap(ingressResult.payload, bootstrap)
+        } ?: ingressResult.payload
+    }
+
+    private fun prependBridgeAccessBootstrap(payload: JSONObject, bootstrap: String): JSONObject {
+        val result = JSONObject(payload.toString())
+        val oldContent = result.optJSONArray("content") ?: JSONArray()
+        val newContent = JSONArray().put(
+            JSONObject().put("type", "text").put("text", bootstrap)
+        )
+        for (index in 0 until oldContent.length()) {
+            newContent.put(oldContent.opt(index))
+        }
+        return result.put("content", newContent)
     }
 
     private suspend fun executePluginDirect(capabilityId: String, parameters: JSONObject): JSONObject {
@@ -368,6 +435,8 @@ internal class PluginHostCapabilityRegistry(
     }
 
     private companion object {
+        const val BRIDGE_REMOTE_INVOKE_CAPABILITY_ID = "core.bridge.remote.invoke"
+        const val SYSTEM_BRIDGE_PLUGIN_ID = "plugin.system.bridge"
         val PLUGIN_CAPABILITY_ID = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
         val HOST_PRIMITIVE_INVOKE_CONTRACTS = listOf(
             "PluginContext.capabilityInvoker",

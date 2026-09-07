@@ -13,4 +13,4 @@ Steps:
 3. Restore Plugin Center before ordinary parent plugins and stop it after them.
 4. Verify the forbidden Hub-to-Kernel gateway is absent.
 
-Deferred: late Hub provider discovery in Bridge and `core.bridge.remote.invoke` implementation.
+Completed in V0.8.0.1: Bridge late-Hub discovery is active and `core.bridge.remote.invoke` delegates child Bridge transports into the stable AI Limbs ingress gateway.
