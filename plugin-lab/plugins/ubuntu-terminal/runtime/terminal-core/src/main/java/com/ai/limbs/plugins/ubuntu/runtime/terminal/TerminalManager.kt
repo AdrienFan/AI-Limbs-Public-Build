@@ -86,6 +86,8 @@ class TerminalManager private constructor(
     private val nativeLibDir: String = context.applicationInfo.nativeLibraryDir
     private val activeSessions = ConcurrentHashMap<String, TerminalSession>()
     private val closingSessions = ConcurrentHashMap.newKeySet<String>()
+    private val sessionInitializationFailures = ConcurrentHashMap<String, String>()
+    private val sessionInitializationOutput = ConcurrentHashMap<String, String>()
     
     // SharedPreferences for reading settings
     private val prefs = context.getSharedPreferences("terminal_settings", Context.MODE_PRIVATE)
@@ -574,21 +576,31 @@ class TerminalManager private constructor(
             initializeSession(newSession.id)
         }
 
-        // 等待会话初始化完成
+        // 等待会话初始化完成：READY、提前退出、真实超时分别处理。
         val initializedState = withTimeoutOrNull(SESSION_INITIALIZATION_TIMEOUT_MS) {
             terminalState.first { state ->
                 val session = state.sessions.find { it.id == newSession.id }
                 session == null || session.initState == SessionInitState.READY
             }
         }
-
-        val readySession = initializedState?.sessions?.find { it.id == newSession.id }
-
-        if (readySession?.initState != SessionInitState.READY) {
-            Log.e(TAG, "Session initialization failed or timed out for session: ${newSession.id}")
+        if (initializedState == null) {
+            sessionInitializationOutput.remove(newSession.id)
+            sessionInitializationFailures.remove(newSession.id)
+            Log.e(TAG, "SESSION_READY_TIMEOUT for session: ${newSession.id}")
             sessionManager.closeSession(newSession.id)
-            throw IllegalStateException("Session initialization failed or timed out")
+            throw IllegalStateException("SESSION_READY_TIMEOUT: session did not reach READY within ${SESSION_INITIALIZATION_TIMEOUT_MS}ms")
         }
+        val readySession = initializedState.sessions.find { it.id == newSession.id }
+        if (readySession == null) {
+            val failure = sessionInitializationFailures.remove(newSession.id)
+                ?: "PROCESS_EXITED_DURING_INITIALIZATION: terminal process exited before READY"
+            val startupOutput = sessionInitializationOutput.remove(newSession.id)?.trim().orEmpty()
+            val detail = if (startupOutput.isBlank()) failure else "$failure; startup_output=${startupOutput.takeLast(4096)}"
+            Log.e(TAG, detail)
+            throw IllegalStateException(detail)
+        }
+        sessionInitializationFailures.remove(newSession.id)
+        sessionInitializationOutput.remove(newSession.id)
 
         Log.d(TAG, "Session ${newSession.id} initialized successfully")
         return readySession
@@ -935,6 +947,11 @@ class TerminalManager private constructor(
                             var bytesRead: Int
                             while (inputStream.read(buffer).also { bytesRead = it } != -1) {
                                 val chunk = String(buffer, 0, bytesRead)
+                                if (sessionManager.getSession(sessionId)?.initState != SessionInitState.READY) {
+                                    sessionInitializationOutput.merge(sessionId, chunk) { previous, current ->
+                                        (previous + current).takeLast(4096)
+                                    }
+                                }
                                 if (sessionManager.getSession(sessionId)?.terminalType == TerminalType.LOCAL) {
                                     recordUbuntuActivity()
                                 }
@@ -967,7 +984,9 @@ class TerminalManager private constructor(
                     )
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error starting session", e)
+                val detail = "SESSION_START_FAILED: ${e.message ?: e.javaClass.simpleName}"
+                sessionInitializationFailures[sessionId] = detail
+                Log.e(TAG, detail, e)
                 sessionManager.closeSession(sessionId)
             }
         }
@@ -991,6 +1010,10 @@ class TerminalManager private constructor(
             }
 
         Log.i(TAG, "Terminal session $sessionId exited with code $exitCode")
+        if (session.initState != SessionInitState.READY) {
+            sessionInitializationFailures[sessionId] =
+                "PROCESS_EXITED_DURING_INITIALIZATION: exit_code=$exitCode"
+        }
         outputProcessor.handleSessionExit(
             sessionId = sessionId,
             message = "Terminal exited with code $exitCode",
@@ -1047,6 +1070,8 @@ class TerminalManager private constructor(
         }
         activeSessions.clear()
         closingSessions.clear()
+        sessionInitializationFailures.clear()
+        sessionInitializationOutput.clear()
     }
 
     suspend fun initializeEnvironment(): Boolean {

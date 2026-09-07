@@ -1,6 +1,8 @@
 package com.ai.limbs.plugins.ubuntu
 
 import android.os.Build
+import com.ai.limbs.plugin.runtime.InProcessNativeExecutableIds
+import com.ai.limbs.plugin.runtime.InProcessNativeRuntime
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import java.io.File
 import java.util.zip.ZipFile
@@ -11,9 +13,16 @@ internal data class UbuntuNativeRuntime(
     val ptyLibrary: File
 )
 
-/** Extracts the native payload carried by the Ubuntu plugin APK into host code-cache. */
+/**
+ * Uses the host-owned read-only executable substrate for execve targets and
+ * extracts only the Ubuntu PTY JNI library from the dynamic plugin APK.
+ */
 internal object UbuntuNativeRuntimeInstaller {
+    private const val REQUIRED_HOST_RUNTIME_API = 1
+    private const val PTY_LIBRARY = "libubuntu_plugin_pty.so"
+
     fun prepare(host: InProcessPluginHost): UbuntuNativeRuntime {
+        val executableDirectory = resolveHostExecutableDirectory(host.nativeRuntime)
         val apk = host.runtimeEntryFile.canonicalFile
         require(apk.isFile) { "Ubuntu runtime APK is missing: ${apk.absolutePath}" }
 
@@ -23,45 +32,70 @@ internal object UbuntuNativeRuntimeInstaller {
                 host.applicationContext.codeCacheDir,
                 "ailp-native/${sanitize(host.pluginId)}/${host.version}/$abi"
             ).apply { mkdirs() }
-            extractAbiLibraries(zip, abi, root)
-            val pty = File(root, "libubuntu_plugin_pty.so")
-            require(pty.isFile) { "Ubuntu PTY library was not packaged for ABI $abi" }
-            require(pty.setExecutable(true, false) || pty.canExecute()) {
-                "Ubuntu PTY library is not executable: ${pty.absolutePath}"
-            }
-            return UbuntuNativeRuntime(abi, root, pty)
+            val pty = extractPtyLibrary(zip, abi, root)
+            return UbuntuNativeRuntime(abi, executableDirectory, pty)
         }
     }
 
-    private fun selectAbi(zip: ZipFile): String {
-        val packaged = zip.entries().asSequence()
-            .mapNotNull { entry ->
-                val parts = entry.name.split('/')
-                if (parts.size >= 3 && parts[0] == "lib" && parts.last().endsWith(".so")) parts[1] else null
+    private fun resolveHostExecutableDirectory(runtime: InProcessNativeRuntime): File {
+        require(runtime.apiVersion >= REQUIRED_HOST_RUNTIME_API) {
+            "Host native runtime API $REQUIRED_HOST_RUNTIME_API is required; available=${runtime.apiVersion}"
+        }
+        val required = linkedMapOf(
+            "libbash.so" to InProcessNativeExecutableIds.POSIX_BASH,
+            "libbusybox.so" to InProcessNativeExecutableIds.BUSYBOX,
+            "liboperit_proot.so" to InProcessNativeExecutableIds.PROOT,
+            "liboperit_loader.so" to InProcessNativeExecutableIds.PROOT_LOADER,
+            "libsudo.so" to InProcessNativeExecutableIds.SUDO
+        )
+        val resolved = required.mapValues { (_, id) ->
+            runtime.resolveExecutable(id)?.canonicalFile
+                ?: error("Host native executable is unavailable: $id")
+        }
+
+        resolved.forEach { (expectedName, file) ->
+            require(file.name == expectedName) {
+                "Host native runtime v1 returned unexpected file for $expectedName: ${file.name}"
             }
-            .toSet()
-        return Build.SUPPORTED_ABIS.firstOrNull(packaged::contains)
-            ?: error("Ubuntu plugin has no native libraries for supported ABIs ${Build.SUPPORTED_ABIS.joinToString()}")
+            require(file.isFile && file.canExecute()) {
+                "Host native executable is not executable: ${file.absolutePath}"
+            }
+        }
+        val directories = resolved.values.map { it.parentFile.canonicalFile }.toSet()
+        require(directories.size == 1) {
+            "Host native runtime v1 executables must share one nativeLibraryDir: $directories"
+        }
+        return directories.single()
     }
-    private fun extractAbiLibraries(zip: ZipFile, abi: String, root: File) {
-        zip.entries().asSequence()
-            .filter { !it.isDirectory && it.name.startsWith("lib/$abi/") && it.name.endsWith(".so") }
-            .forEach { entry ->
-                val target = File(root, entry.name.substringAfterLast('/'))
-                val temp = File(root, ".${target.name}.tmp")
-                zip.getInputStream(entry).use { input ->
-                    temp.outputStream().use(input::copyTo)
-                }
-                if (!temp.renameTo(target)) {
-                    temp.copyTo(target, overwrite = true)
-                    temp.delete()
-                }
-                target.setReadable(true, false)
-                target.setExecutable(true, false)
-            }
+
+    private fun selectAbi(zip: ZipFile): String =
+        Build.SUPPORTED_ABIS.firstOrNull { abi -> zip.getEntry("lib/$abi/$PTY_LIBRARY") != null }
+            ?: error(
+                "Ubuntu plugin has no PTY library for supported ABIs ${Build.SUPPORTED_ABIS.joinToString()}"
+            )
+
+    private fun extractPtyLibrary(zip: ZipFile, abi: String, root: File): File {
+        val entry = zip.getEntry("lib/$abi/$PTY_LIBRARY")
+            ?: error("Ubuntu PTY library was not packaged for ABI $abi")
+        val target = File(root, PTY_LIBRARY)
+        val temp = File(root, ".$PTY_LIBRARY.tmp")
+        zip.getInputStream(entry).use { input ->
+            temp.outputStream().use(input::copyTo)
+        }
+        if (!temp.renameTo(target)) {
+            temp.copyTo(target, overwrite = true)
+            temp.delete()
+        }
+        target.setReadable(true, false)
+        require(target.setExecutable(true, false) || target.canExecute()) {
+            "Ubuntu PTY library is not executable: ${target.absolutePath}"
+        }
+        return target
     }
 
     private fun sanitize(value: String): String = buildString(value.length) {
-        value.forEach { ch -> append(if (ch.isLetterOrDigit() || ch == '_' || ch == '-') ch else '_') }
+        value.forEach { ch ->
+            append(if (ch.isLetterOrDigit() || ch == '_' || ch == '-') ch else '_')
+        }
     }
 }

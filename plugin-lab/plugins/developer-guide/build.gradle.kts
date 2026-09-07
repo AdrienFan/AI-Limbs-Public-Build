@@ -12,8 +12,8 @@ android {
         applicationId = "com.ai.limbs.payload.developerguide"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "1.4.0"
+        versionCode = 8
+        versionName = "1.4.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

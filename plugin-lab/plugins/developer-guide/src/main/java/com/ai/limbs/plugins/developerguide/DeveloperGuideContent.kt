@@ -121,7 +121,8 @@ internal object DeveloperGuideContent {
                 "Runtime stop 前先 revokeAll()；停止超时、崩溃或策略阻断不能留下仍可调用的 contribution。",
                 "动态 Dex/APK 在加载前必须只读；任何恢复、回滚或旧版本重新 mount 都必须重新检查，而不是只在首次安装时检查。",
                 "System Environment 的进程与文件系统必须是 transport-neutral Provider 能力：通用入口调用 plugin.system_environment.process / filesystem，当前 Ubuntu Provider 可提供 start/read/interact/list/terminate 与 Linux filesystem；Local/SSH/SFTP 选择、PTY、rootfs、挂载映射都属于插件私有实现。",
-                "Base 不得把 Linux 路径映射进插件私有 rootfs，也不得保存 Ubuntu lifecycle DTO 或 chassis 实现；需要归档等文件操作时通过 filesystem Provider，下层可在插件内部为 Local 模式使用流式 I/O，为远程 Provider 使用抽象文件接口。host.process@1 只承载真正的 Host/Android 进程语义，不能暗中充当 Ubuntu 进程入口。"
+                "Base 不得把 Linux 路径映射进插件私有 rootfs，也不得保存 Ubuntu lifecycle DTO 或 chassis 实现；需要归档等文件操作时通过 filesystem Provider，下层可在插件内部为 Local 模式使用流式 I/O，为远程 Provider 使用抽象文件接口。host.process@1 只承载真正的 Host/Android 进程语义，不能暗中充当 Ubuntu 进程入口。",
+                "Android 对动态插件的 native 边界：插件可从自身只读 APK 提取并 System.load JNI，但需要作为独立进程 execve 的 ELF 不得从可写 code_cache/dataDir 执行。此类通用可执行载荷必须由版本化 Host Native Runtime 暴露，当前 v1 通过逻辑 ID 解析 Android 安装期 nativeLibraryDir 中的只读 executable；Host 不得因此恢复 Ubuntu lifecycle、rootfs 或 session 逻辑。"
             )
         ),
         GuideSection(

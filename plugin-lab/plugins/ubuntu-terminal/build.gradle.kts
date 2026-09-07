@@ -12,8 +12,8 @@ android {
         applicationId = "com.ai.limbs.payload.ubuntu.v030"
         minSdk = 26
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.3.0"
+        versionCode = 6
+        versionName = "0.3.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -28,6 +28,15 @@ android {
                 "META-INF/LICENSE.txt",
                 "META-INF/NOTICE",
                 "META-INF/NOTICE.txt"
+            )
+        }
+        jniLibs {
+            excludes += setOf(
+                "**/libbash.so",
+                "**/libbusybox.so",
+                "**/liboperit_loader.so",
+                "**/liboperit_proot.so",
+                "**/libsudo.so"
             )
         }
     }

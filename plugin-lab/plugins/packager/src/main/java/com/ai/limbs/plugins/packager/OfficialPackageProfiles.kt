@@ -10,7 +10,7 @@ object OfficialPackageProfiles {
         "com.ai.limbs.payload.bridge" -> PackagerArtifactType.PARENT to bridge(version)
         "com.ai.limbs.payload.developerguide" -> PackagerArtifactType.PARENT to developerGuide(version)
         "com.ai.limbs.payload.packager" -> PackagerArtifactType.PARENT to packager(version)
-        "com.ai.limbs.payload.ubuntu.v010" -> PackagerArtifactType.PARENT to ubuntuTerminal(version)
+        "com.ai.limbs.payload.ubuntu.v030" -> PackagerArtifactType.PARENT to ubuntuTerminal(version)
         "com.ai.limbs.payload.rdc" -> PackagerArtifactType.CHILD to rdc(version)
         "com.ai.limbs.payload.triggercmd" -> PackagerArtifactType.CHILD to triggerCmd(version)
         else -> null
@@ -128,17 +128,24 @@ object OfficialPackageProfiles {
             pluginId = "plugin.system.ubuntu_terminal",
             version = version,
             name = "Ubuntu命令终端",
-            description = "自持有 Ubuntu Runtime、PTY、rootfs 与终端资源的系统插件。",
+            description = "自持有 Ubuntu Runtime、PTY、rootfs 与终端资源，并通过 Host Native Runtime v1 使用 Android 安装期原生执行底座。",
             role = "ubuntu_terminal",
             entryClass = "com.ai.limbs.plugins.ubuntu.UbuntuTerminalEntry"
         )
         root.put("permissions", JSONObject().put("requested_scopes", JSONArray()))
         root.put("provides", provides(
-            capabilities = listOf("plugin.ubuntu.status", "plugin.ubuntu.command", "plugin.ubuntu.ui_action"),
+            capabilities = listOf(
+                "plugin.ubuntu.status", "plugin.ubuntu.start", "plugin.ubuntu.stop",
+                "plugin.ubuntu.idle.get", "plugin.ubuntu.idle.set",
+                "plugin.ubuntu.session.create", "plugin.ubuntu.session.execute", "plugin.ubuntu.command",
+                "plugin.ubuntu.filesystem", "plugin.ubuntu.process", "plugin.ubuntu.session.input",
+                "plugin.ubuntu.session.interrupt", "plugin.ubuntu.session.screen",
+                "plugin.ubuntu.session.close", "plugin.ubuntu.ui_action"
+            ),
             providers = listOf("plugin.ubuntu.terminal_panel"),
             extensions = listOf(
                 extension("ai_limbs.ui.home_tile", "plugin.system.ubuntu_terminal.tile"),
-                extension("ai_limbs.ui.screen", "plugin.system.ubuntu_terminal.screen", api = 2)
+                extension("ai_limbs.ui.screen", "plugin.system_environment.screen", api = 2)
             )
         ))
         return root

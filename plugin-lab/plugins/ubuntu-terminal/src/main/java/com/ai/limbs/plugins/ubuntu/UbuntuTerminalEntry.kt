@@ -60,12 +60,12 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
             InProcessScreen(
                 id = SCREEN_ID,
                 title = "Ubuntu命令终端",
-                description = "插件自持有 Ubuntu Runtime、持久 PTY、多标签终端与兰儿共享观察。",
+                description = "插件自持 Ubuntu rootfs、持久 PTY、多标签终端与兰儿共享观察；原生可执行底座由 Host Native Runtime v1 提供。",
                 schemaId = PLUGIN_CENTER_UI_SCHEMA,
                 documentJson = JSONObject().put("schema", 1).put("layout", "edge_to_edge").put("blocks", JSONArray().put(JSONObject().put("type", "terminal_workbench").put("provider_id", PANEL_ID).put("action_capability_id", UI_ACTION_CAPABILITY).put("metrics_profile", "ai_limbs_06478"))).toString()
             )
         )
-        host.registerHomeTile(InProcessHomeTile(id = TILE_ID, title = "Ubuntu命令终端", description = "插件自持有 Ubuntu 与多标签持久 PTY", screenId = SCREEN_ID))
+        host.registerHomeTile(InProcessHomeTile(id = TILE_ID, title = "Ubuntu命令终端", description = "插件自持 Ubuntu rootfs 与多标签持久 PTY，原生执行由 Host Native Runtime v1 提供", screenId = SCREEN_ID))
         panel.start()
         return InProcessPluginHandle {
             panel.stop()

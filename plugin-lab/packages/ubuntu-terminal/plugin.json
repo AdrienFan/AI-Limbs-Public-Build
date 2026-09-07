@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.ubuntu_terminal",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "Ubuntu命令终端",
-    "description": "自持有 Ubuntu Runtime、PTY、rootfs 与完整终端运行资源的系统插件，保留 0.6.4.7.8 终端工作台交互。"
+    "description": "自持有 Ubuntu Runtime、PTY、rootfs 与终端资源，并通过 Host Native Runtime v1 使用 Android 安装期原生执行底座，保留 0.6.4.7.8 终端工作台交互。"
   },
   "roles": [
     "ubuntu_terminal"
