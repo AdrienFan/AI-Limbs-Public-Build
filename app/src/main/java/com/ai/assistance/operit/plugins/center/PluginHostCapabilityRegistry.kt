@@ -12,6 +12,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngin
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsPluginCapabilityExecutor
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRequiredReceipt
 import com.ai.assistance.operit.plugins.system.SystemHostPrimitiveAvailability
 import com.ai.assistance.operit.util.AppLogger
 import java.util.UUID
