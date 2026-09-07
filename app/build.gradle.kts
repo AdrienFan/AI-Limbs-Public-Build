@@ -150,11 +150,15 @@ fun signApkWithRotation(apkFile: File) {
 val requiredExternallyBuiltNativeLibraries =
     listOf(
         file("src/main/jniLibs/arm64-v8a/liboperit_ripgrep.so"),
-        file("src/main/jniLibs/arm64-v8a/libbash.so"),
-        file("src/main/jniLibs/arm64-v8a/libbusybox.so"),
-        file("src/main/jniLibs/arm64-v8a/liboperit_loader.so"),
-        file("src/main/jniLibs/arm64-v8a/liboperit_proot.so"),
-        file("src/main/jniLibs/arm64-v8a/libsudo.so"),
+    )
+
+val requiredHostNativeRuntimeLibraries =
+    listOf(
+        file("src/hostNativeRuntime/jniLibs/arm64-v8a/libbash.so"),
+        file("src/hostNativeRuntime/jniLibs/arm64-v8a/libbusybox.so"),
+        file("src/hostNativeRuntime/jniLibs/arm64-v8a/liboperit_loader.so"),
+        file("src/hostNativeRuntime/jniLibs/arm64-v8a/liboperit_proot.so"),
+        file("src/hostNativeRuntime/jniLibs/arm64-v8a/libsudo.so"),
     )
 
 val ffmpegKitLocalAar = file("libs/ffmpeg-kit-local.aar")
@@ -173,11 +177,15 @@ val requiredFfmpegKitArm64Libraries =
     )
 
 val verifyExternallyBuiltNativeLibraries by tasks.registering {
-    description = "Checks native libraries built outside Gradle before Android packaging."
+    description = "Checks native libraries required before Android packaging."
     group = "verification"
     inputs.property(
         "requiredLibraries",
         requiredExternallyBuiltNativeLibraries.map { library -> library.path },
+    )
+    inputs.property(
+        "requiredHostNativeRuntimeLibraries",
+        requiredHostNativeRuntimeLibraries.map { library -> library.path },
     )
     inputs.property("ffmpegKitAar", ffmpegKitLocalAar.path)
     inputs.property("ffmpegKitArm64Libraries", requiredFfmpegKitArm64Libraries)
@@ -192,6 +200,16 @@ val verifyExternallyBuiltNativeLibraries by tasks.registering {
             "Missing or empty externally built native library: " +
                 invalidLibraries.joinToString { library -> library.path } +
                 ". Run tools/native_ripgrep/build_native_ripgrep.ps1 before packaging."
+        }
+
+        val invalidHostNativeRuntimeLibraries =
+            requiredHostNativeRuntimeLibraries.filter { library ->
+                !library.isFile || library.length() == 0L
+            }
+        require(invalidHostNativeRuntimeLibraries.isEmpty()) {
+            "Missing or empty Host Native Runtime v1 library: " +
+                invalidHostNativeRuntimeLibraries.joinToString { library -> library.path } +
+                ". These repository-owned payloads must be present under src/hostNativeRuntime/jniLibs."
         }
 
         require(ffmpegKitLocalAar.isFile && ffmpegKitLocalAar.length() > 0L) {
@@ -369,6 +387,7 @@ android {
     sourceSets {
         getByName("main") {
             assets.setSrcDirs(listOf(generatedMainAssetsDir.get().asFile))
+            jniLibs.srcDir("src/hostNativeRuntime/jniLibs")
         }
     }
 
