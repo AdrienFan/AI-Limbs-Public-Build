@@ -25,7 +25,7 @@ env:
 jobs:
   build:
     if: inputs.target == 'all'
-    name: Build Plugin Lab Alt + Seven Plugins
+    name: Build Seven Plugin Payloads
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -59,20 +59,13 @@ jobs:
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Build 1 - Plugin Lab v0.5.3
-        shell: bash
-        run: |
-          set -euo pipefail
-          chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest :app:assembleDebug --stacktrace --no-daemon
-
-      - name: Build 2 - plugin-extension-hub.ailp payload
+      - name: Build 1 - plugin-extension-hub.ailp payload
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :plugin-extension-hub:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 3 - bridge-core.ailp payload
+      - name: Build 2 - bridge-core.ailp payload
         shell: bash
         run: |
           set -euo pipefail
@@ -80,17 +73,17 @@ jobs:
 
 
 
-      - name: Build 4 - developer-guide.ailp payload
+      - name: Build 3 - developer-guide.ailp payload
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :developer-guide-plugin:assembleDebug --stacktrace --no-daemon
-      - name: Build 5 - AI Limbs Packager payload
+      - name: Build 4 - AI Limbs Packager payload
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :packager-plugin:assembleDebug --stacktrace --no-daemon
-      - name: Build 6 - Ubuntu Terminal plugin payload
+      - name: Build 5 - Ubuntu Terminal plugin payload
         shell: bash
         run: |
           set -euo pipefail
@@ -98,13 +91,13 @@ jobs:
 
       # Child extensions share the same Plugin Lab SDK/Bridge contract as their parent plugins.
       # They are compiled here as payload APKs only; final .ailx signing remains in the secure local release step.
-      - name: Build 7 - RDC child extension payload
+      - name: Build 6 - RDC child extension payload
         shell: bash
         run: |
           set -euo pipefail
           ./gradlew :rdc-extension:assembleDebug --stacktrace --no-daemon
 
-      - name: Build 8 - TRIGGERcmd child extension payload
+      - name: Build 7 - TRIGGERcmd child extension payload
         shell: bash
         run: |
           set -euo pipefail
@@ -116,7 +109,6 @@ jobs:
         with:
           name: plugin-lab-alt-reports-${{ github.run_number }}
           path: |
-            app/build/reports/**
             build/reports/**
           if-no-files-found: warn
           retention-days: 14
@@ -125,7 +117,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ai-limbs-plugin-payloads-v073-${{ github.run_number }}
+          name: ai-limbs-plugin-payloads-v080-${{ github.run_number }}
           path: |
             plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
             plugin-lab/plugins/bridge-core/build/outputs/apk/debug/*.apk
@@ -139,7 +131,7 @@ jobs:
 
   ubuntu_terminal:
     if: inputs.target == 'ubuntu-terminal'
-    name: Build Ubuntu Terminal v0.2.2 only
+    name: Build Ubuntu Terminal v0.3.0 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -184,7 +176,7 @@ jobs:
       - name: Upload Ubuntu Terminal payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ubuntu-terminal-v0.2.2-${{ github.run_number }}
+          name: ubuntu-terminal-v0.3.0-${{ github.run_number }}
           path: |
             plugin-lab/plugins/ubuntu-terminal/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-terminal/plugin.json

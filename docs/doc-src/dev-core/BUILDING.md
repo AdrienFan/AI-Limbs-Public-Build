@@ -145,15 +145,14 @@ org.gradle.parallel=true
 环境准备就绪，现在开始编译项目。
 
 1. 克隆项目仓库并进入目录:  
-请根据需要选择以下两种克隆方式（项目包含 Git 子模块）：
+请根据需要选择以下两种克隆方式。Ubuntu Terminal Core 已由插件自持有，不需要初始化根目录 `terminal` 子模块：
 
 **推荐：先 Fork 后克隆你的仓库**  
 在 GitHub 打开上游仓库并点击 Fork： [AAswordman/Operit](https://github.com/AAswordman/Operit)  
-克隆你的 Fork，并只初始化公开构建依赖 `terminal`：
+克隆你的 Fork：
 ```bash
 git clone https://github.com/<你的 GitHub 用户名>/Operit.git
 cd Operit
-git submodule update --init --recursive terminal
 ```  
 （可选）添加上游仓库以便同步更新：  
 ```bash
@@ -164,13 +163,8 @@ git remote add upstream https://github.com/AAswordman/Operit.git
 ```bash
 git clone https://github.com/AAswordman/Operit.git
 cd Operit
-git submodule update --init --recursive terminal
 ```  
 
-如果你已克隆但尚未初始化公开子模块，可在仓库目录中执行：
-```bash
-git submodule update --init --recursive terminal
-```  
 其中 DragonBonesCPP、`ufbx`、`Bullet3`、`Saba`、`ncnn`、`sherpa-ncnn`、WAMR、`llama.cpp`、QuickJS、MNN 和 MNN 使用的 KleidiAI 由 CMake 通过 `FetchContent` 获取。CMake 会先解析远端 ref 的 commit，再下载对应 GitHub archive，因此不会拉取完整 Git 历史；默认跟随各自上游主分支、固定提交或上游工程声明的 tag。如需覆盖某个 ref，可在 CMake 参数中设置 `OPERIT_DRAGONBONES_CPP_GIT_REF`、`OPERIT_UFBX_GIT_REF`、`OPERIT_BULLET3_GIT_REF`、`OPERIT_SABA_GIT_REF`、`OPERIT_NCNN_GIT_REF`、`OPERIT_SHERPA_NCNN_GIT_REF`、`OPERIT_WAMR_GIT_REF`、`OPERIT_LLAMA_CPP_GIT_REF`、`OPERIT_QUICKJS_GIT_REF`、`OPERIT_MNN_GIT_REF` 或 `OPERIT_KLEIDIAI_GIT_REF`。
 
 MNN 的 Android CMake 配置会在加入 MNN 子项目前，使用 MNN 自带的 FlatBuffers 源码编译一个宿主机 `flatc`，并从同一份 `schema/default/*.fbs` 重新生成 `schema/current/*.h`。因此构建机除了 Android NDK 和 CMake，还必须提供可用的宿主机 C/C++ 编译器；Linux 构建明确使用 `gcc` 和 `g++`，生成器不会使用 Android ABI 编译，也不会依赖工作区外的预生成头文件。

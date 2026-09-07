@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.ubuntu_terminal",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "Ubuntu命令终端",
-    "description": "复刻 AI Limbs 0.6.4.7.8 的全屏终端工作台，支持多标签持久 PTY、兰儿共享观察、运行时控制与命令输入。"
+    "description": "自持有 Ubuntu Runtime、PTY、rootfs 与完整终端运行资源的系统插件，保留 0.6.4.7.8 终端工作台交互。"
   },
   "roles": [
     "ubuntu_terminal"
@@ -29,15 +29,24 @@
     "services": []
   },
   "permissions": {
-    "requested_scopes": [
-      "host.process@1",
-      "host.ubuntu.runtime@1"
-    ]
+    "requested_scopes": []
   },
   "provides": {
     "capabilities": [
       "plugin.ubuntu.status",
+      "plugin.ubuntu.start",
+      "plugin.ubuntu.stop",
+      "plugin.ubuntu.idle.get",
+      "plugin.ubuntu.idle.set",
+      "plugin.ubuntu.session.create",
+      "plugin.ubuntu.session.execute",
       "plugin.ubuntu.command",
+      "plugin.ubuntu.filesystem",
+      "plugin.ubuntu.process",
+      "plugin.ubuntu.session.input",
+      "plugin.ubuntu.session.interrupt",
+      "plugin.ubuntu.session.screen",
+      "plugin.ubuntu.session.close",
       "plugin.ubuntu.ui_action"
     ],
     "services": [],
@@ -52,7 +61,7 @@
       },
       {
         "point": "ai_limbs.ui.screen",
-        "id": "plugin.system.ubuntu_terminal.screen",
+        "id": "plugin.system_environment.screen",
         "api": 2
       }
     ]

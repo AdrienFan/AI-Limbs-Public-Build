@@ -128,15 +128,13 @@ object OfficialPackageProfiles {
             pluginId = "plugin.system.ubuntu_terminal",
             version = version,
             name = "Ubuntu命令终端",
-            description = "复用 AI Limbs Ubuntu Runtime 与持久 PTY 的工具箱终端插件。",
+            description = "自持有 Ubuntu Runtime、PTY、rootfs 与终端资源的系统插件。",
             role = "ubuntu_terminal",
             entryClass = "com.ai.limbs.plugins.ubuntu.UbuntuTerminalEntry"
         )
-        root.put("permissions", JSONObject().put("requested_scopes", JSONArray()
-            .put("host.process@1")
-            .put("host.ubuntu.runtime@1")))
+        root.put("permissions", JSONObject().put("requested_scopes", JSONArray()))
         root.put("provides", provides(
-            capabilities = listOf("plugin.ubuntu.status", "plugin.ubuntu.command"),
+            capabilities = listOf("plugin.ubuntu.status", "plugin.ubuntu.command", "plugin.ubuntu.ui_action"),
             providers = listOf("plugin.ubuntu.terminal_panel"),
             extensions = listOf(
                 extension("ai_limbs.ui.home_tile", "plugin.system.ubuntu_terminal.tile"),

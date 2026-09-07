@@ -20,7 +20,7 @@ Operit-follow-up/
 │   └── mnn/          MNN 本地推理 Android 模块
 ├── quickjs/         QuickJS JNI 模块
 ├── showerclient/    Shower 虚拟显示客户端库
-├── terminal/        OperitTerminalCore Git 子模块
+├── plugin-lab/      AI Limbs 插件 SDK、插件源码与打包清单
 ├── tools/           开发、调试与构建辅助工具
 └── web-chat/        React + Vite Web Chat 前端
 ```
@@ -85,9 +85,9 @@ Operit-follow-up/
 
 这是 Shower 客户端 Android 库，负责连接 Shower server、建立虚拟显示、发送触控和按键事件、请求截图，并提供可选的视频解码渲染组件。宿主应用需要注入 `ShellRunner` 并处理 Binder 广播。
 
-### [`terminal`](terminal/)
+### [`plugin-lab`](plugin-lab/)
 
-这是 [OperitTerminalCore](https://github.com/AAswordman/OperitTerminalCore) Git 子模块，对应 Gradle 中的 `:terminal` 
+这是 AI Limbs 插件开发区。Ubuntu 终端的 Terminal Core 已 vendored 到 `plugin-lab/plugins/ubuntu-terminal/runtime/terminal-core`，由 `:ubuntu-terminal-core` 模块随 Ubuntu 插件构建，不再使用根目录 `:terminal` Git 子模块。
 
 ### [`tools`](tools/)
 
@@ -99,5 +99,5 @@ Operit-follow-up/
 
 ## 相关说明
 
-- `app`、`avator/dragonbones`、`terminal`、`llm/mnn`、`llm/llama`、`avator/mmd`、`avator/fbx`、`showerclient`、`quickjs` 是根 `settings.gradle.kts` 声明的 Gradle 模块。
-- 仍作为 Git 子模块维护的第三方目录，以根目录的 `.gitmodules` 为准。
+- `app`、`avator/dragonbones`、`llm/mnn`、`llm/llama`、`avator/mmd`、`avator/fbx`、`showerclient`、`quickjs` 以及 `plugin-lab` 下的插件模块由根 `settings.gradle.kts` 声明；Ubuntu 终端使用 `:ubuntu-terminal-plugin` + `:ubuntu-terminal-core`。
+- Ubuntu Terminal Core 已由插件自持有，不需要根目录 `.gitmodules` 或 `terminal` gitlink。

@@ -9,11 +9,11 @@ android {
     namespace = "com.ai.limbs.plugins.ubuntu"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.ubuntu.v022"
+        applicationId = "com.ai.limbs.payload.ubuntu.v030"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.2.2"
+        versionCode = 5
+        versionName = "0.3.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -26,5 +26,6 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))
+    implementation(project(":ubuntu-terminal-core"))
     implementation(libs.coroutines.android)
 }

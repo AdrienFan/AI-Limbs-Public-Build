@@ -38,7 +38,6 @@ Fork 并克隆仓库后，建议保留 `upstream` 远程：
 ```bash
 git clone https://github.com/<your-account>/Operit.git
 cd Operit
-git submodule update --init --recursive terminal
 git remote add upstream https://github.com/AAswordman/Operit.git
 git fetch upstream
 git switch -c fix/short-description upstream/main

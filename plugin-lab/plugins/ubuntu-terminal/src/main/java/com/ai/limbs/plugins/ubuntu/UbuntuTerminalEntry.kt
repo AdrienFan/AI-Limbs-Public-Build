@@ -1,12 +1,22 @@
 package com.ai.limbs.plugins.ubuntu
 
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
+import com.ai.limbs.plugin.runtime.InProcessCapabilityDomain
+import com.ai.limbs.plugin.runtime.InProcessCapabilityEffect
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import com.ai.limbs.plugins.ubuntu.runtime.terminal.Pty
+import com.ai.limbs.plugins.ubuntu.runtime.terminal.TerminalManager
+import com.ai.limbs.plugins.ubuntu.runtime.terminal.TerminalRuntimeAssets
+import com.ai.limbs.plugins.ubuntu.runtime.terminal.data.UbuntuIdleMode
+import com.ai.limbs.plugins.ubuntu.runtime.terminal.data.UbuntuIdlePolicy
+import com.ai.limbs.plugins.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
+import com.ai.limbs.plugins.ubuntu.runtime.terminal.data.UbuntuStopRequester
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,66 +29,55 @@ import org.json.JSONObject
 
 class UbuntuTerminalEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
-        val panel = UbuntuTerminalPanel(host)
+        val nativeRuntime = UbuntuNativeRuntimeInstaller.prepare(host)
+        TerminalRuntimeAssets.configure(host.runtimeEntryFile)
+        Pty.configureNativeLibrary(nativeRuntime.ptyLibrary)
+        val runtimeContext = UbuntuPluginRuntimeContext(
+            base = host.applicationContext,
+            pluginId = host.pluginId,
+            pluginDataDir = host.dataDir,
+            pluginCacheDir = host.cacheDir,
+            nativeLibraryDir = nativeRuntime.directory
+        )
+        val terminal = TerminalManager.getInstance(runtimeContext)
+        val panel = UbuntuTerminalPanel(host, terminal)
         host.registerProvider(PANEL_ID, panel, mapOf("kind" to "ubuntu_terminal_workbench"))
+        UbuntuToolCapabilities.register(host, terminal)
+        UbuntuFileSystemCapability.register(host, terminal)
+        val processCapability = UbuntuProcessCapability(host.scope, terminal)
+        processCapability.register(host)
         host.registerCapability(
-            STATUS_CAPABILITY,
-            "Ubuntu 终端状态",
-            "读取 Ubuntu Runtime、插件终端标签与兰儿共享会话状态。",
-            InProcessCapabilityExecutor { panel.statusCapability() }
-        )
-        host.registerCapability(
-            COMMAND_CAPABILITY,
-            "Ubuntu 终端命令",
-            "在插件持有的兰儿共享 PTY 会话中执行命令，并同步到只读共享标签。",
-            InProcessCapabilityExecutor { parameters -> panel.commandCapability(parameters) }
-        )
-        host.registerCapability(
-            UI_ACTION_CAPABILITY,
-            "Ubuntu 终端前台操作",
-            "承接 Plugin Center 终端工作台的明确用户操作；后台调用仍经过正常策略链。",
-            InProcessCapabilityExecutor { parameters -> panel.uiActionCapability(parameters) }
+            InProcessCapabilitySpec(
+                id = UI_ACTION_CAPABILITY,
+                displayName = "Ubuntu 终端前台操作",
+                description = "承接 Plugin Center 终端工作台的明确用户操作。",
+                effect = InProcessCapabilityEffect.UI_INTERACTION,
+                domain = InProcessCapabilityDomain.SYSTEM_ENVIRONMENT,
+                executor = InProcessCapabilityExecutor { parameters -> panel.uiActionCapability(parameters) }
+            )
         )
         host.registerScreen(
             InProcessScreen(
                 id = SCREEN_ID,
                 title = "Ubuntu命令终端",
-                description = "持久 Ubuntu PTY、多标签终端、兰儿共享观察与运行时控制。",
+                description = "插件自持有 Ubuntu Runtime、持久 PTY、多标签终端与兰儿共享观察。",
                 schemaId = PLUGIN_CENTER_UI_SCHEMA,
-                documentJson = JSONObject()
-                    .put("schema", 1)
-                    .put("layout", "edge_to_edge")
-                    .put(
-                        "blocks",
-                        JSONArray().put(
-                            JSONObject()
-                                .put("type", "terminal_workbench")
-                                .put("provider_id", PANEL_ID)
-                                .put("action_capability_id", UI_ACTION_CAPABILITY)
-                                .put("metrics_profile", "ai_limbs_06478")
-                        )
-                    )
-                    .toString()
+                documentJson = JSONObject().put("schema", 1).put("layout", "edge_to_edge").put("blocks", JSONArray().put(JSONObject().put("type", "terminal_workbench").put("provider_id", PANEL_ID).put("action_capability_id", UI_ACTION_CAPABILITY).put("metrics_profile", "ai_limbs_06478"))).toString()
             )
         )
-        host.registerHomeTile(
-            InProcessHomeTile(
-                id = TILE_ID,
-                title = "Ubuntu命令终端",
-                description = "多标签持久 PTY 与兰儿共享终端",
-                screenId = SCREEN_ID
-            )
-        )
+        host.registerHomeTile(InProcessHomeTile(id = TILE_ID, title = "Ubuntu命令终端", description = "插件自持有 Ubuntu 与多标签持久 PTY", screenId = SCREEN_ID))
         panel.start()
-        return InProcessPluginHandle { panel.stop() }
+        return InProcessPluginHandle {
+            panel.stop()
+            processCapability.shutdown()
+            terminal.prepareForMaintenance()
+        }
     }
 
     private companion object {
         const val PANEL_ID = "plugin.ubuntu.terminal_panel"
-        const val SCREEN_ID = "plugin.system.ubuntu_terminal.screen"
+        const val SCREEN_ID = "plugin.system_environment.screen"
         const val TILE_ID = "plugin.system.ubuntu_terminal.tile"
-        const val STATUS_CAPABILITY = "plugin.ubuntu.status"
-        const val COMMAND_CAPABILITY = "plugin.ubuntu.command"
         const val UI_ACTION_CAPABILITY = "plugin.ubuntu.ui_action"
         const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
     }
@@ -93,7 +92,8 @@ private data class TerminalTab(
 )
 
 private class UbuntuTerminalPanel(
-    private val host: InProcessPluginHost
+    private val host: InProcessPluginHost,
+    private val terminal: TerminalManager
 ) : InProcessUiStateProvider {
     private val mutableState = MutableStateFlow<String?>(null)
     override val stateJson: StateFlow<String?> = mutableState.asStateFlow()
@@ -104,7 +104,6 @@ private class UbuntuTerminalPanel(
     private var activeTabId = LOCAL_TAB_ID
     private var nextTabNumber = 2
     private var sharedVisible = true
-    private var sharedSessionId: String? = null
     private var sharedContent = ""
     private var sharedOnline = false
     private var ubuntuState = "UNKNOWN"
@@ -113,6 +112,7 @@ private class UbuntuTerminalPanel(
     private var idleTimeoutMinutes: Int? = null
     private var statusMessage = "正在读取 Ubuntu Runtime 状态…"
     private var pollJob: Job? = null
+    private var uiClientCount = 0
 
     init {
         publishState()
@@ -123,31 +123,25 @@ private class UbuntuTerminalPanel(
             runCatching {
                 refreshStatusInternal()
                 refreshAllScreens()
-                statusMessage = if (ubuntuState == RUNNING) {
-                    "Ubuntu 已运行；Local 会话将在首次前台操作时创建。"
-                } else {
-                    "Ubuntu 尚未运行。"
-                }
+                refreshSharedScreen()
+                statusMessage = if (ubuntuState == RUNNING) "Ubuntu 已运行；Local 会话将在首次前台操作时创建。" else "Ubuntu 尚未运行。"
             }.onFailure { statusMessage = "状态读取失败：" + (it.message ?: "未知错误") }
             publishState()
         }
         pollJob = host.scope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MS)
-                var changed = false
-                tabs.filter { it.sessionId != null }.forEach { tab ->
-                    runCatching { refreshTabScreen(tab) }.onSuccess { changed = true }
-                }
-                if (sharedSessionId != null) {
-                    runCatching { refreshSharedScreen() }.onSuccess { changed = true }
-                }
-                if (changed) publishState()
+                runCatching { refreshStatusInternal() }
+                runCatching { refreshAllScreens() }
+                runCatching { refreshSharedScreen() }
+                publishState()
             }
         }
     }
 
     suspend fun stop() {
         pollJob?.cancel()
+        detachAllUiClients()
         closeAllSessions()
     }
 
@@ -155,6 +149,8 @@ private class UbuntuTerminalPanel(
         val payload = runCatching { JSONObject(payloadJson) }.getOrElse { JSONObject() }
         return runCatching {
             when (eventId) {
+                ACTION_UI_ATTACH -> attachUiClient()
+                ACTION_UI_DETACH -> detachUiClient()
                 ACTION_START -> startUbuntu()
                 ACTION_STOP -> stopUbuntu()
                 ACTION_ADD_TAB -> addTab()
@@ -169,6 +165,28 @@ private class UbuntuTerminalPanel(
         }.getOrElse { failure(eventId, it) }
     }
 
+    @Synchronized
+    private fun attachUiClient(): String {
+        terminal.registerUbuntuUiClient()
+        uiClientCount += 1
+        return result("Ubuntu 终端前台已连接。")
+    }
+
+    @Synchronized
+    private fun detachUiClient(): String {
+        if (uiClientCount > 0) {
+            uiClientCount -= 1
+            terminal.unregisterUbuntuUiClient()
+        }
+        return result("Ubuntu 终端前台已离开。")
+    }
+
+    @Synchronized
+    private fun detachAllUiClients() {
+        repeat(uiClientCount) { terminal.unregisterUbuntuUiClient() }
+        uiClientCount = 0
+    }
+
     suspend fun uiActionCapability(parametersJson: String): String {
         val parameters = runCatching { JSONObject(parametersJson) }.getOrElse { JSONObject() }
         val eventId = parameters.optString("event_id").trim()
@@ -180,6 +198,7 @@ private class UbuntuTerminalPanel(
     suspend fun statusCapability(): String {
         refreshStatusInternal()
         refreshAllScreens()
+        refreshSharedScreen()
         publishState()
         return JSONObject()
             .put("ubuntu_state", ubuntuState)
@@ -188,19 +207,8 @@ private class UbuntuTerminalPanel(
             .put("idle_timeout_minutes", idleTimeoutMinutes ?: JSONObject.NULL)
             .put("active_tab_id", activeTabId)
             .put("shared_online", sharedOnline)
-            .put(
-                "tabs",
-                JSONArray().apply {
-                    tabs.forEach { tab ->
-                        put(
-                            JSONObject()
-                                .put("id", tab.id)
-                                .put("title", tab.title)
-                                .put("session_id", tab.sessionId ?: JSONObject.NULL)
-                        )
-                    }
-                }
-            )
+            .put("runtime_owner", "plugin")
+            .put("tabs", JSONArray().apply { tabs.forEach { tab -> put(JSONObject().put("id", tab.id).put("title", tab.title).put("session_id", tab.sessionId ?: JSONObject.NULL)) } })
             .toString()
     }
 
@@ -208,54 +216,51 @@ private class UbuntuTerminalPanel(
         val parameters = runCatching { JSONObject(parametersJson) }.getOrElse { JSONObject() }
         val command = parameters.optString("command").trim()
         if (command.isBlank()) return errorJson(IllegalArgumentException("command 不能为空"))
-
         sharedVisible = true
         sharedOnline = true
-        sharedContent = "$ " + command + "\n"
-        statusMessage = "兰儿正在共享会话中执行命令。"
+        statusMessage = "兰儿正在 Ubuntu 插件共享 shell 中执行命令。"
         publishState()
         return try {
             refreshStatusInternal()
             require(ubuntuState == RUNNING) { "Ubuntu 当前未运行，请先启动 Ubuntu" }
-            ensureSharedSession()
-            val root = invokeProcess(
-                "session_execute",
-                JSONObject()
-                    .put("session_id", sharedSessionId)
-                    .put("command", command)
-            )
+            val exec = terminal.executeHiddenCommand(command, executorKey = "plugin.ubuntu.command")
             refreshSharedScreen()
-            root.toString()
+            JSONObject()
+                .put("status", exec.state.name)
+                .put("success", exec.isOk)
+                .put("exit_code", exec.exitCode)
+                .put("output", exec.output)
+                .put("error", exec.error.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+                .toString()
         } catch (error: Throwable) {
-            sharedContent += "\n[ERROR] " + (error.message ?: error::class.java.simpleName)
             errorJson(error)
         } finally {
-            sharedOnline = false
+            sharedOnline = terminal.sharedHiddenTerminalState.value.isActive
             statusMessage = "兰儿共享命令已结束。"
             publishState()
         }
     }
 
     private suspend fun startUbuntu(): String {
-        invokeUbuntu("start")
+        val state = terminal.startUbuntu(offerDevelopmentPrompt = true)
         refreshStatusInternal()
-        require(ubuntuState == RUNNING) { "Ubuntu 启动后状态不是 RUNNING：" + ubuntuState }
+        require(state.phase == UbuntuRuntimePhase.RUNNING) { state.error ?: state.detail }
         val local = activeLocalTab() ?: tabs.first()
         activeTabId = local.id
         ensureSession(local)
         refreshTabScreen(local)
-        statusMessage = "Ubuntu 已启动，终端会话已打开。"
+        statusMessage = "Ubuntu 已启动，插件 PTY 会话已打开。"
         return result(statusMessage)
     }
 
     private suspend fun stopUbuntu(): String {
         require(activeTabId != SHARED_TAB_ID) { "兰儿共享标签为只读，不能在此停止 Ubuntu" }
         closeAllSessions()
-        invokeUbuntu("stop")
+        val state = terminal.stopUbuntu(UbuntuStopRequester.USER_INTERFACE)
         refreshStatusInternal()
         tabs.forEach { it.content = "" }
         sharedContent = ""
-        statusMessage = "Ubuntu Runtime 已停止。"
+        statusMessage = state.error ?: state.detail
         return result(statusMessage)
     }
 
@@ -304,7 +309,7 @@ private class UbuntuTerminalPanel(
         }
         val tab = tabs.firstOrNull { it.id == tabId } ?: error("终端标签不存在：" + tabId)
         require(tab.closable) { "Local 主标签不能关闭" }
-        tab.sessionId?.let { closeSession(it) }
+        tab.sessionId?.let { terminal.closeSession(it) }
         tabs.remove(tab)
         if (activeTabId == tabId) activeTabId = tabs.first().id
         statusMessage = tab.title + " 已关闭。"
@@ -328,13 +333,8 @@ private class UbuntuTerminalPanel(
         refreshStatusInternal()
         require(ubuntuState == RUNNING) { "Ubuntu 当前未运行，请先启动 Ubuntu" }
         ensureSession(tab)
-        invokeProcess(
-            "session_input",
-            JSONObject()
-                .put("session_id", tab.sessionId)
-                .put("input", command)
-                .put("control", "enter")
-        )
+        val ok = terminal.sendInputToSessionNow(tab.sessionId ?: error("PTY 会话未创建"), command + "\r")
+        require(ok) { "命令未能写入插件 PTY" }
         delay(120)
         refreshTabScreen(tab)
         statusMessage = "命令已发送到 " + tab.title + "。"
@@ -344,13 +344,7 @@ private class UbuntuTerminalPanel(
     private suspend fun sendControlC(): String {
         val tab = activeLocalTab() ?: error("兰儿共享标签为只读，不能发送 Ctrl+C")
         val sessionId = tab.sessionId ?: error("当前标签没有打开 PTY 会话")
-        invokeProcess(
-            "session_input",
-            JSONObject()
-                .put("session_id", sessionId)
-                .put("input", "c")
-                .put("control", "ctrl")
-        )
+        require(terminal.sendInterruptSignalToSessionNow(sessionId)) { "Ctrl+C 未能写入插件 PTY" }
         delay(80)
         runCatching { refreshTabScreen(tab) }
         statusMessage = "已向 " + tab.title + " 发送 Ctrl+C。"
@@ -359,122 +353,73 @@ private class UbuntuTerminalPanel(
 
     private suspend fun setIdlePolicy(mode: String): String {
         require(activeTabId != SHARED_TAB_ID) { "兰儿共享标签为只读，不能修改环境配置" }
-        require(mode in IDLE_MODES) { "不支持的空闲策略：" + mode }
-        invokeUbuntu("idle_set", JSONObject().put("mode", mode))
+        val idleModeValue = runCatching { UbuntuIdleMode.valueOf(mode) }.getOrElse { error("不支持的空闲策略：$mode") }
+        terminal.updateUbuntuIdlePolicy(UbuntuIdlePolicy(mode = idleModeValue))
         refreshStatusInternal()
         statusMessage = "Ubuntu 空闲策略已更新：" + idleLabel()
         return result(statusMessage)
     }
 
     private suspend fun refreshStatusInternal() {
-        val data = payloadObject(invokeUbuntu("status"))
-        ubuntuState = data.optString("state", "UNKNOWN")
-        ubuntuDetail = data.optString("detail").ifBlank { "Ubuntu Runtime 状态未知" }
-        idleMode = data.optString("idleMode", data.optString("idle_mode", "UNKNOWN"))
-        idleTimeoutMinutes = when {
-            data.has("idleTimeoutMinutes") && !data.isNull("idleTimeoutMinutes") ->
-                data.optInt("idleTimeoutMinutes")
-            data.has("idle_timeout_minutes") && !data.isNull("idle_timeout_minutes") ->
-                data.optInt("idle_timeout_minutes")
-            else -> null
-        }
+        val runtime = terminal.currentUbuntuRuntimeState()
+        val idle = terminal.currentUbuntuIdlePolicy()
+        ubuntuState = runtime.phase.name
+        ubuntuDetail = runtime.error ?: runtime.detail
+        idleMode = idle.mode.name
+        idleTimeoutMinutes = idle.timeoutMinutes
         if (ubuntuState != RUNNING) {
             tabs.forEach { it.sessionId = null }
-            sharedSessionId = null
             sharedOnline = false
         }
     }
 
     private suspend fun ensureSession(tab: TerminalTab) {
-        if (tab.sessionId != null) return
-        val data = payloadObject(
-            invokeProcess(
-                "create_session",
-                JSONObject().put("session_name", "AI Limbs " + tab.title)
-            )
-        )
-        tab.sessionId = data.sessionIdRequired()
-    }
-
-    private suspend fun ensureSharedSession() {
-        if (sharedSessionId != null) return
-        val data = payloadObject(
-            invokeProcess(
-                "create_session",
-                JSONObject().put("session_name", "AI Limbs Laner Shared")
-            )
-        )
-        sharedSessionId = data.sessionIdRequired()
+        if (tab.sessionId != null && terminal.terminalState.value.sessions.any { it.id == tab.sessionId }) return
+        val created = terminal.createNewSession(tab.title)
+        tab.sessionId = created.id
     }
 
     private suspend fun refreshAllScreens() {
-        tabs.filter { it.sessionId != null }.forEach { tab ->
-            runCatching { refreshTabScreen(tab) }
+        tabs.forEach { tab ->
+            if (tab.sessionId != null) runCatching { refreshTabScreen(tab) }
         }
-        if (sharedSessionId != null) runCatching { refreshSharedScreen() }
     }
 
     private suspend fun refreshTabScreen(tab: TerminalTab) {
         val sessionId = tab.sessionId ?: return
-        val data = payloadObject(
-            invokeProcess("session_screen", JSONObject().put("session_id", sessionId))
-        )
-        tab.content = data.optString("content")
+        val session = terminal.terminalState.value.sessions.firstOrNull { it.id == sessionId }
+        if (session == null) {
+            tab.sessionId = null
+            return
+        }
+        tab.content = renderScreen(session.ansiParser.getScreenContent())
     }
 
     private suspend fun refreshSharedScreen() {
-        val sessionId = sharedSessionId ?: return
-        val data = payloadObject(
-            invokeProcess("session_screen", JSONObject().put("session_id", sessionId))
-        )
-        sharedContent = data.optString("content")
+        val shared = terminal.sharedHiddenTerminalState.value
+        sharedOnline = shared.isActive
+        sharedContent = buildString {
+            if (shared.command.isNotBlank()) append("$ " + shared.command + "\n")
+            if (shared.output.isNotBlank()) append(shared.output)
+            if (!shared.error.isNullOrBlank()) append("\n[ERROR] " + shared.error)
+            if (shared.exitCode != null && !shared.isActive) append("\n[exit " + shared.exitCode + "]")
+        }
     }
 
     private suspend fun closeAllSessions() {
-        val sessionIds = buildList {
-            tabs.mapNotNullTo(this) { it.sessionId }
-            sharedSessionId?.let(::add)
-        }.distinct()
+        tabs.mapNotNull { it.sessionId }.distinct().forEach { terminal.closeSession(it) }
         tabs.forEach { it.sessionId = null }
-        sharedSessionId = null
         sharedOnline = false
-        sessionIds.forEach { sessionId -> runCatching { closeSession(sessionId) } }
-    }
-
-    private suspend fun closeSession(sessionId: String) {
-        invokeProcess("session_close", JSONObject().put("session_id", sessionId))
     }
 
     private fun activeLocalTab(): TerminalTab? =
         tabs.firstOrNull { it.id == activeTabId }
 
-    private suspend fun invokeProcess(
-        operation: String,
-        parameters: JSONObject = JSONObject()
-    ): JSONObject = invokeHost(PROCESS_SCOPE, operation, parameters)
-
-    private suspend fun invokeUbuntu(
-        operation: String,
-        parameters: JSONObject = JSONObject()
-    ): JSONObject = invokeHost(UBUNTU_SCOPE, operation, parameters)
-
-    private suspend fun invokeHost(
-        scopeId: String,
-        operation: String,
-        parameters: JSONObject
-    ): JSONObject {
-        val request = JSONObject(parameters.toString()).put("operation", operation)
-        val root = JSONObject(host.invokeHostCapability(scopeId, request.toString()))
-        if (!root.optBoolean("success", true)) {
-            val message = root.optString("error").takeUnless { it.isBlank() || it == "null" }
-                ?: (scopeId + "/" + operation + " 调用失败")
-            error(message)
-        }
-        return root
+    private fun renderScreen(screen: Array<Array<com.ai.limbs.plugins.ubuntu.runtime.terminal.view.domain.ansi.TerminalChar>>): String {
+        val lines = screen.map { row -> buildString { row.forEach { cell -> append(cell.char) } }.trimEnd() }.toMutableList()
+        while (lines.isNotEmpty() && lines.last().isEmpty()) lines.removeAt(lines.lastIndex)
+        return lines.joinToString("\n")
     }
-
-    private fun payloadObject(root: JSONObject): JSONObject =
-        root.optJSONObject("result") ?: root
 
     private fun buildStateJson(): String {
         val active = activeLocalTab()
@@ -528,6 +473,8 @@ private class UbuntuTerminalPanel(
             .put(
                 "events",
                 JSONObject()
+                    .put("ui_attach", ACTION_UI_ATTACH)
+                    .put("ui_detach", ACTION_UI_DETACH)
                     .put("start", ACTION_START)
                     .put("stop", ACTION_STOP)
                     .put("add_tab", ACTION_ADD_TAB)
@@ -573,18 +520,13 @@ private class UbuntuTerminalPanel(
     private fun JSONObject.textRequired(key: String): String =
         optString(key).trim().ifBlank { error(key + " 不能为空") }
 
-    private fun JSONObject.sessionIdRequired(): String =
-        optString("sessionId", optString("session_id")).ifBlank {
-            error("Host 未返回终端 session id")
-        }
-
     private companion object {
-        const val PROCESS_SCOPE = "host.process@1"
-        const val UBUNTU_SCOPE = "host.ubuntu.runtime@1"
         const val RUNNING = "RUNNING"
         const val LOCAL_TAB_ID = "local-1"
         const val SHARED_TAB_ID = "laner-shared"
         const val POLL_INTERVAL_MS = 650L
+        const val ACTION_UI_ATTACH = "ui_attach"
+        const val ACTION_UI_DETACH = "ui_detach"
         const val ACTION_START = "start_ubuntu"
         const val ACTION_STOP = "stop_ubuntu"
         const val ACTION_ADD_TAB = "add_tab"
@@ -594,12 +536,5 @@ private class UbuntuTerminalPanel(
         const val ACTION_EXECUTE = "execute_command"
         const val ACTION_CTRL_C = "ctrl_c"
         const val ACTION_SET_IDLE = "set_idle_policy"
-        val IDLE_MODES = setOf(
-            "KEEP_RUNNING",
-            "MINUTES_10",
-            "MINUTES_15",
-            "MINUTES_30",
-            "MINUTES_60"
-        )
     }
 }
