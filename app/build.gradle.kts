@@ -150,6 +150,11 @@ fun signApkWithRotation(apkFile: File) {
 val requiredExternallyBuiltNativeLibraries =
     listOf(
         file("src/main/jniLibs/arm64-v8a/liboperit_ripgrep.so"),
+        file("src/main/jniLibs/arm64-v8a/libbash.so"),
+        file("src/main/jniLibs/arm64-v8a/libbusybox.so"),
+        file("src/main/jniLibs/arm64-v8a/liboperit_loader.so"),
+        file("src/main/jniLibs/arm64-v8a/liboperit_proot.so"),
+        file("src/main/jniLibs/arm64-v8a/libsudo.so"),
     )
 
 val ffmpegKitLocalAar = file("libs/ffmpeg-kit-local.aar")

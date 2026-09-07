@@ -3,6 +3,8 @@ package com.ai.assistance.operit.plugins.center
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
+import com.ai.limbs.plugin.runtime.InProcessNativeExecutableIds
+import com.ai.limbs.plugin.runtime.InProcessNativeRuntime
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
@@ -138,6 +140,16 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val version: String = context.manifest.version
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
+        override val nativeRuntime: InProcessNativeRuntime = InProcessNativeRuntime(
+            apiVersion = 1,
+            executables = mapOf(
+                InProcessNativeExecutableIds.POSIX_BASH to File(context.appContext.applicationInfo.nativeLibraryDir, "libbash.so"),
+                InProcessNativeExecutableIds.BUSYBOX to File(context.appContext.applicationInfo.nativeLibraryDir, "libbusybox.so"),
+                InProcessNativeExecutableIds.PROOT to File(context.appContext.applicationInfo.nativeLibraryDir, "liboperit_proot.so"),
+                InProcessNativeExecutableIds.PROOT_LOADER to File(context.appContext.applicationInfo.nativeLibraryDir, "liboperit_loader.so"),
+                InProcessNativeExecutableIds.SUDO to File(context.appContext.applicationInfo.nativeLibraryDir, "libsudo.so")
+            )
+        )
         override val services: InProcessServiceDirectory = object : InProcessServiceDirectory {
             override fun resolve(id: String, minApi: Int?): InProcessServiceBinding? {
                 val resolved = context.payloadContext.serviceResolver.resolve(id, minApi)

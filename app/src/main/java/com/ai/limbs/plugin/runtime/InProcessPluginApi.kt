@@ -173,6 +173,30 @@ interface InProcessServiceDirectory {
     fun resolve(id: String, minApi: Int? = null): InProcessServiceBinding?
 }
 
+/** Versioned host-owned native executable substrate. */
+class InProcessNativeRuntime(
+    val apiVersion: Int,
+    private val executables: Map<String, File>
+) {
+    fun resolveExecutable(id: String): File? =
+        executables[id.trim()]?.takeIf { it.isFile && it.canExecute() }
+
+    fun availableExecutableIds(): Set<String> =
+        executables.filterValues { it.isFile && it.canExecute() }.keys.toSet()
+
+    companion object {
+        val UNAVAILABLE = InProcessNativeRuntime(apiVersion = 0, executables = emptyMap())
+    }
+}
+
+object InProcessNativeExecutableIds {
+    const val POSIX_BASH = "posix.bash"
+    const val BUSYBOX = "tool.busybox"
+    const val PROOT = "sandbox.proot"
+    const val PROOT_LOADER = "sandbox.proot_loader"
+    const val SUDO = "privilege.sudo"
+}
+
 interface InProcessPluginHost {
     val applicationContext: Context
     val pluginId: String
@@ -182,6 +206,9 @@ interface InProcessPluginHost {
     val cacheDir: File
     /** Exact mounted runtime payload (for example payload/plugin.apk). */
     val runtimeEntryFile: File
+    /** Host-owned executable substrate; apiVersion=0 means unavailable. */
+    val nativeRuntime: InProcessNativeRuntime
+        get() = InProcessNativeRuntime.UNAVAILABLE
     val providers: InProcessProviderDirectory
     val services: InProcessServiceDirectory
 
