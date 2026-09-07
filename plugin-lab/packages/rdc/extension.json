@@ -2,13 +2,13 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.rdc",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "roles": [
     "system_extension"
   ],
   "display": {
     "name": "RDC",
-    "description": "AI Limbs V0.6.4.7.8 Remote Desktop Commander Bridge Provider。"
+    "description": "AI Limbs V0.8 Remote Desktop Commander Bridge Provider。"
   },
   "target": {
     "plugin_id": "plugin.system.bridge",
