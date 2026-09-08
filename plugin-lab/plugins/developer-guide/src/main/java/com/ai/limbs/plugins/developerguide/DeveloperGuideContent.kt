@@ -115,6 +115,7 @@ internal object DeveloperGuideContent {
                 "Kernel Invariant 包括 Trust/签名、管理员安全、Host Surface Policy、Extension Router、Capability/Provider/Service 注册约束、生命周期、回滚与恢复。",
                 "普通插件不得获得裸 Android Context、PluginManager、Policy Engine、Trust verifier、SharedPreferences、私有文件路径或可直接 mutation 的 Registry。",
                 "少数官方 android_inprocess 插件获得更高信任边界，可由 Host 创建绑定其 APK Resources/ClassLoader 的 UI Context 以承载自持页面；仍受固定 plugin_id + role 白名单、唯一 APK、只读 Dex 等约束，不能把该特例推广成第三方标准。",
+                "android_inprocess 自持页面若携带独立 APK Resources，runtime APK 不得复用 AI Limbs 基座默认 0x7f 资源 package-id；当前官方动态 runtime 使用 0x80。AI Limbs Host 必须以插件独立 Resources 为底叠加 AI Limbs APK Resources，使父优先 ClassLoader 中的 AndroidX/Compose 资源引用与插件自身 R.* 能在同一 UI Context 中共存。",
                 "Host Primitive 目录包含 CONFIRMED/CANDIDATE、DECLARED/PARTIAL/BOUND/KERNEL_GATE 等状态；只有明确 BOUND 且授权可请求的能力才能作为插件依赖。",
                 "敏感凭据必须通过受控 Secret/Credential Broker 或插件自己的受保护存储策略获取；禁止把 API key、恢复密钥、签名私钥写入分发包。",
                 "Root Trust 私钥与各发布者私钥不得进入 Git 仓库、GitHub Actions、APK、.ailpsys / .ailp / .ailx 分发包或日志；云端构建只产出 payload，最终发布签名在受控安全环境完成。",

@@ -13,8 +13,8 @@ android {
         applicationId = "com.ai.limbs.payload.ubuntu.v030"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "0.3.4"
+        versionCode = 10
+        versionName = "0.3.5"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -23,6 +23,11 @@ android {
     buildFeatures {
         buildConfig = false
         compose = true
+    }
+    androidResources {
+        // Dynamic in-process APKs must not share AI Limbs' default 0x7f resource package.
+        // AI Limbs mounts this APK as an additional resource provider beside AI Limbs resources.
+        additionalParameters += listOf("--package-id", "0x80")
     }
     packaging {
         resources {
