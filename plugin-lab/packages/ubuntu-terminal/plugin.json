@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.ubuntu_terminal",
-  "version": "0.3.6",
+  "version": "0.3.7",
   "api": {
     "target": 1,
     "min": 1
@@ -30,7 +30,8 @@
   },
   "permissions": {
     "requested_scopes": [
-      "host.network@1"
+      "host.network@1",
+      "host.ui.presentation@1"
     ]
   },
   "provides": {

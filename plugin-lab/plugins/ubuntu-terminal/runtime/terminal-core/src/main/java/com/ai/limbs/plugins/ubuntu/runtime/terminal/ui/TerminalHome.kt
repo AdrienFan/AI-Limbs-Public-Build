@@ -82,7 +82,10 @@ fun TerminalHome(
     env: TerminalEnv,
     useLocalImeHandling: Boolean = true,
     onNavigateToSetup: () -> Unit,
-    onNavigateToSettings: () -> Unit
+    onNavigateToSettings: () -> Unit,
+    onRequestPortraitFullscreen: () -> Unit = {},
+    onRequestLandscapeFullscreen: () -> Unit = {},
+    onRequestExitFullscreen: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val terminalManager = remember(context) { TerminalManager.getInstance(context) }
@@ -498,6 +501,9 @@ fun TerminalHome(
                         padding = padding,
                         onNavigateToSetup = onNavigateToSetup,
                         onNavigateToSettings = onNavigateToSettings,
+                        onRequestPortraitFullscreen = onRequestPortraitFullscreen,
+                        onRequestLandscapeFullscreen = onRequestLandscapeFullscreen,
+                        onRequestExitFullscreen = onRequestExitFullscreen,
                         runtimeState = env.ubuntuRuntimeState,
                         idlePolicy = env.ubuntuIdlePolicy,
                         onStartUbuntu = env::onStartUbuntu,
@@ -759,6 +765,9 @@ private fun TerminalToolbar(
     padding: androidx.compose.ui.unit.Dp,
     onNavigateToSetup: () -> Unit,
     onNavigateToSettings: () -> Unit,
+    onRequestPortraitFullscreen: () -> Unit,
+    onRequestLandscapeFullscreen: () -> Unit,
+    onRequestExitFullscreen: () -> Unit,
     runtimeState: UbuntuRuntimeState,
     idlePolicy: UbuntuIdlePolicy,
     onStartUbuntu: () -> Unit,
@@ -772,6 +781,7 @@ private fun TerminalToolbar(
 ) {
     val context = LocalContext.current
     var showIdlePolicyDialog by remember { mutableStateOf(false) }
+    var showPresentationDialog by remember { mutableStateOf(false) }
     val runtimeActionText =
         when (runtimeState.phase) {
             UbuntuRuntimePhase.STOPPED -> com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ubuntu_runtime_start
@@ -960,6 +970,21 @@ private fun TerminalToolbar(
                 }
             }
 
+            // 页面显示模式：由 Ubuntu 自己提供交互，Host 只负责执行沉浸式显示。
+            Surface(
+                modifier = Modifier.clickable { showPresentationDialog = true },
+                color = Color(0xFF3A3A3A),
+                shape = RoundedCornerShape(6.dp)
+            ) {
+                Text(
+                    text = "⛶",
+                    color = Color.White,
+                    fontFamily = FontFamily.Default,
+                    fontSize = fontSize * 1.2f,
+                    modifier = Modifier.padding(horizontal = padding * 0.7f, vertical = padding * 0.35f)
+                )
+            }
+
             // 设置按钮
             Icon(
                 imageVector = Icons.Default.Settings,
@@ -981,6 +1006,52 @@ private fun TerminalToolbar(
                 onIdlePolicyChange(policy)
                 showIdlePolicyDialog = false
             }
+        )
+    }
+
+    if (showPresentationDialog) {
+        AlertDialog(
+            onDismissRequest = { showPresentationDialog = false },
+            title = {
+                Text(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.fullscreen_dialog_title))
+            },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(
+                        onClick = {
+                            showPresentationDialog = false
+                            onRequestPortraitFullscreen()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.fullscreen_portrait))
+                    }
+                    TextButton(
+                        onClick = {
+                            showPresentationDialog = false
+                            onRequestLandscapeFullscreen()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.fullscreen_landscape))
+                    }
+                    TextButton(
+                        onClick = {
+                            showPresentationDialog = false
+                            onRequestExitFullscreen()
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.fullscreen_exit))
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { showPresentationDialog = false }) {
+                    Text(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cancel))
+                }
+            },
+            containerColor = Color(0xFF2D2D2D)
         )
     }
 }

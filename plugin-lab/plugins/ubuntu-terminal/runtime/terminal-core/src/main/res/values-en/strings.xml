@@ -265,4 +265,8 @@
     <string name="standard_dev_env_desc">Optionally install Git, GitHub CLI, Python, Node.js, build tools, and AI Limbs development helpers.</string>
     <string name="standard_dev_env_open_guide">Open install guide</string>
     <string name="standard_dev_env_open_failed">Unable to open the install guide. Make sure a foreground Ubuntu terminal is available.</string>
+    <string name="fullscreen_dialog_title">Fullscreen</string>
+    <string name="fullscreen_portrait">Portrait fullscreen</string>
+    <string name="fullscreen_landscape">Landscape fullscreen</string>
+    <string name="fullscreen_exit">Exit fullscreen</string>
 </resources> 

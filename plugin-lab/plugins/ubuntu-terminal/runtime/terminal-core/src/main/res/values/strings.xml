@@ -265,4 +265,8 @@
     <string name="standard_dev_env_desc">可选安装 Git、GitHub CLI、Python、Node.js、编译工具和 AI Limbs 开发辅助工具。</string>
     <string name="standard_dev_env_open_guide">打开安装向导</string>
     <string name="standard_dev_env_open_failed">无法打开安装向导，请先确认前台 Ubuntu 终端可用。</string>
+    <string name="fullscreen_dialog_title">全屏显示</string>
+    <string name="fullscreen_portrait">竖屏全屏</string>
+    <string name="fullscreen_landscape">横屏全屏</string>
+    <string name="fullscreen_exit">退出全屏</string>
 </resources> 

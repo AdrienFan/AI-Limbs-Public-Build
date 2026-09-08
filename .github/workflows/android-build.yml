@@ -11,11 +11,12 @@ on:
         options:
           - all
           - packager
+          - developer-guide
           - ubuntu-terminal
           - rdc
 
 concurrency:
-  group: plugin-lab-alt-${{ github.ref }}
+  group: plugin-lab-alt-${{ github.ref }}-${{ inputs.target }}
   cancel-in-progress: true
 
 permissions:
@@ -179,9 +180,56 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
+  developer_guide:
+    if: inputs.target == 'developer-guide'
+    name: Build Developer Guide v1.4.4 only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-36" \
+            "build-tools;35.0.0"
+      - name: Configure Android SDK
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Build Developer Guide payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :developer-guide-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Upload Developer Guide payload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: developer-guide-v1.4.4-${{ github.run_number }}
+          path: |
+            plugin-lab/plugins/developer-guide/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/developer-guide/plugin.json
+          if-no-files-found: error
+          retention-days: 14
   ubuntu_terminal:
     if: inputs.target == 'ubuntu-terminal'
-    name: Build Ubuntu Terminal v0.3.6 only
+    name: Build Ubuntu Terminal v0.3.7 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -226,7 +274,7 @@ jobs:
       - name: Upload Ubuntu Terminal payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ubuntu-terminal-v0.3.6-${{ github.run_number }}
+          name: ubuntu-terminal-v0.3.7-${{ github.run_number }}
           path: |
             plugin-lab/plugins/ubuntu-terminal/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-terminal/plugin.json

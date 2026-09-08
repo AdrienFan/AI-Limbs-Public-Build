@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
@@ -28,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -45,6 +47,8 @@ import com.ai.limbs.plugins.ubuntu.runtime.terminal.rememberTerminalEnv
 import com.ai.limbs.plugins.ubuntu.runtime.terminal.ui.SettingsScreen
 import com.ai.limbs.plugins.ubuntu.runtime.terminal.ui.TerminalHome
 import java.io.File
+import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 internal class UbuntuTerminalPageProvider(
     private val host: InProcessPluginHost,
@@ -63,24 +67,50 @@ internal class UbuntuTerminalPageProvider(
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
-                    UbuntuTerminalPluginPage(terminal, sharedUi)
+                    UbuntuTerminalPluginPage(host, terminal, sharedUi)
                 }
             }
         }
     }
 }
 
+private const val HOST_PRESENTATION_CAPABILITY = "host.ui.presentation@1"
+private const val UBUNTU_SCREEN_ID = "plugin.system_environment.screen"
+
 private enum class UbuntuPageRoute { TERMINAL, ENVIRONMENT_CONFIG, SETTINGS }
 
 @Composable
 private fun UbuntuTerminalPluginPage(
+    host: InProcessPluginHost,
     terminal: TerminalManager,
     sharedUi: InProcessSharedUiHost
 ) {
     val context = LocalContext.current
     val activity = remember(context) { context.findActivity() }
     val originalSoftInputMode = remember(activity) { activity?.manifestSoftInputMode() }
+    val scope = rememberCoroutineScope()
     var route by remember { mutableStateOf(UbuntuPageRoute.TERMINAL) }
+
+    fun requestPresentationMode(mode: String) {
+        scope.launch {
+            runCatching {
+                host.invokeHostCapability(
+                    HOST_PRESENTATION_CAPABILITY,
+                    JSONObject()
+                        .put("operation", "set_mode")
+                        .put("screen_id", UBUNTU_SCREEN_ID)
+                        .put("mode", mode)
+                        .toString()
+                )
+            }.onFailure { error ->
+                Toast.makeText(
+                    context,
+                    "全屏切换失败：${error.message ?: error.javaClass.simpleName}",
+                    Toast.LENGTH_LONG
+                ).show()
+            }
+        }
+    }
     val env = rememberTerminalEnv(terminal)
 
     BackHandler(enabled = route != UbuntuPageRoute.TERMINAL) {
@@ -107,7 +137,10 @@ private fun UbuntuTerminalPluginPage(
             env = env,
             useLocalImeHandling = true,
             onNavigateToSetup = { route = UbuntuPageRoute.ENVIRONMENT_CONFIG },
-            onNavigateToSettings = { route = UbuntuPageRoute.SETTINGS }
+            onNavigateToSettings = { route = UbuntuPageRoute.SETTINGS },
+            onRequestPortraitFullscreen = { requestPresentationMode("fullscreen_portrait") },
+            onRequestLandscapeFullscreen = { requestPresentationMode("fullscreen_landscape") },
+            onRequestExitFullscreen = { requestPresentationMode("normal") }
         )
         UbuntuPageRoute.ENVIRONMENT_CONFIG -> UbuntuEnvironmentConfigPage(
             sharedUi = sharedUi,

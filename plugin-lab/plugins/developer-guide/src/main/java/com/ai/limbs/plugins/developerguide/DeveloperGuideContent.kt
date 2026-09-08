@@ -15,7 +15,7 @@ internal object DeveloperGuideContent {
             description = "AI Limbs V0.8：Stable Kernel + Host Gateway + 统一入口 + 可替换能力 Provider。",
             lines = listOf(
                 "AI Limbs 本体只保留稳定 Kernel、Host Gateway、Runtime、Policy、Dispatcher、基础服务与恢复能力；可升级业务能力优先外置为插件。",
-                "Host Gateway V1 是稳定总线入口：通过 list / describe / operations / availability / invoke 访问版本化 Host Primitive；V0.8 当前 44 条 Primitive 均可发现，BOUND / KERNEL_GATE 必须真实可执行，DECLARED / PARTIAL 可以诚实返回不可用而不扩张 ABI。",
+                "Host Gateway V1 是稳定总线入口：通过 list / describe / operations / availability / invoke 访问版本化 Host Primitive；V0.8 当前 46 条 Primitive 均可发现，BOUND / KERNEL_GATE 必须真实可执行，DECLARED / PARTIAL 可以诚实返回不可用而不扩张 ABI。",
                 "开发前先选包类型：普通顶层能力使用 .ailp；宿主级系统控制面使用 .ailpsys；父插件专属二级扩展使用 .ailx。三者不是同一种权限等级。",
                 ".ailp 由 Plugin Platform 管理，强调声明、权限、可撤销贡献和可停止 Runtime；普通第三方插件不得依赖宿主内部实现类。",
                 ".ailpsys 使用独立 System Plugin Protocol 与 System Host ABI，面向 Plugin Center、恢复、Host Adapter 等高信任系统角色。",
@@ -44,6 +44,7 @@ internal object DeveloperGuideContent {
                 "插件可执行 capability 必须位于 plugin.* 命名空间；宿主能力使用版本化 host.*@N Primitive，通过 Host Gateway 调用，插件不得抢占宿主命名空间。",
                 "permissions.requested_scopes 只能申请当前 Kernel 标记为 BOUND 且 requestable 的 Host Primitive；目录中存在但尚未绑定的 Primitive 不能当作可用 API。",
                 "当前普通插件 Host capability 绑定以实际 Kernel 为准；例如 host.logging@1 已接入正式调用链，其他 Primitive 必须先确认 exposure 与 runtime adapter。",
+                "host.network@1 的 listeners 操作只返回 Host 侧当前 TCP LISTEN 端口快照；Host 内部可以使用受控系统能力采集，但插件不会因此获得 Shell、/proc 或任意命令执行权限。",
                 "扩展声明必须包含 point、id、api；当前正式 UI 扩展点包括 ai_limbs.ui.home_tile、ai_limbs.ui.screen、ai_limbs.ui.theme，其中页面契约使用 ai_limbs.ui.screen@2。",
                 "安装包只用于安装输入。安装完成后运行区保留已安装 content 与 metadata，不把原始 .ailp 永久复制为备份。"
             )
@@ -94,6 +95,7 @@ internal object DeveloperGuideContent {
                 "UI 入口使用 ai_limbs.ui.home_tile；页面使用 ai_limbs.ui.screen@2；主题使用 ai_limbs.ui.theme。扩展 ID 必须稳定，不能拿显示标题当身份。",
                 "screen@2 的 Host 契约只保留 owner、screenId、title、description、schemaId 与 opaque documentJson；Stable Kernel 不解析 blocks，也不认识 Text、Button、Selector、DynamicPanel 等具体控件。",
                 "页面所有权与共享控件必须分离：插件自己的 Text、Button、TextField、Tabs、Canvas、布局、文案和业务状态由插件自己实现；Plugin Center 只拥有它明确声明为 Shared UI 的可复用控件。不得把一整个插件业务页面包装成所谓通用控件。",
+                "插件若需要改变当前页面呈现方式，使用 host.ui.presentation@1 请求 normal / fullscreen_portrait / fullscreen_landscape；只允许当前正在显示且 owner 匹配的 screen 发起。Host 只管理 AI Limbs 外壳、Android system bars 与屏幕方向，插件仍完全拥有自己的页面内容与全屏入口 UI。",
                 "Plugin Center Component Registry 是私有控制面：schema 页面可使用已经发布的 renderer；插件自持页面可通过 InProcessPageProvider + plugin_page 挂载完整页面，并通过 InProcessSharedUiHost 选择性嵌入 Plugin Center 明确发布的 Shared UI。插件不能注册、覆盖或删除共享控件定义。",
                 "父插件通过 component_slot 对某一个组件实例做非破坏性定制；V1 提供 before/after 两个实例 Slot。slots 只影响当前父插件页面实例，绝不回写 Plugin Center Component Definition。",
                 "父插件只有在 child_slots.<slot>.points 中显式列出 Extension Point，子插件才可向该 Slot 贡献 UI；Extension Hub 用已验证 .ailx 身份绑定 extensionId、parent、point，并在停用、卸载、失败或停止时自动撤销贡献。",
