@@ -239,6 +239,13 @@ interface InProcessPluginHost {
      */
     fun createPluginContext(baseContext: Context): Context = baseContext
 
+    /** Builds a resource Context for a verified child runtime APK. */
+    fun createRuntimeContext(
+        baseContext: Context,
+        runtimeEntryFile: File,
+        runtimeClassLoader: ClassLoader
+    ): Context = baseContext
+
     fun registerProvider(
         id: String,
         payload: Any,
@@ -395,6 +402,12 @@ interface ChildExtensionHost {
     val scope: CoroutineScope
     val dataDir: File
     val cacheDir: File
+    /** Exact verified child runtime APK. */
+    val runtimeEntryFile: File
+    /** Parent-delegated host-owned native executable substrate. */
+    val nativeRuntime: InProcessNativeRuntime
+    /** Builds a UI/resource Context backed by this child runtime APK. */
+    fun createExtensionContext(baseContext: Context): Context
 
     fun publish(
         payload: Any,

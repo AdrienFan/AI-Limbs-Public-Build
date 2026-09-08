@@ -422,7 +422,7 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 76
+        versionCode = 77
         versionName = "0.8.0.4"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -459,7 +459,7 @@ android {
         }
         debug {
             applicationIdSuffix = ".ailimbs.v080"
-            versionNameSuffix = "-build2"
+            versionNameSuffix = "-build3"
             signingConfig = signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")
         }

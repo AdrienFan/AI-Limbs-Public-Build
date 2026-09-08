@@ -191,7 +191,12 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
         override fun createPluginContext(baseContext: Context): Context =
-            PluginArchiveContext(baseContext, runtimeEntryFile, runtimeClassLoader)
+            createRuntimeContext(baseContext, runtimeEntryFile, runtimeClassLoader)
+        override fun createRuntimeContext(
+            baseContext: Context,
+            runtimeEntryFile: File,
+            runtimeClassLoader: ClassLoader
+        ): Context = PluginArchiveContext(baseContext, runtimeEntryFile, runtimeClassLoader)
         override val nativeRuntime: InProcessNativeRuntime = InProcessNativeRuntime(
             apiVersion = 1,
             executables = mapOf(
