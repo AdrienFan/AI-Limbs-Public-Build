@@ -11,7 +11,7 @@ internal class UbuntuSubsystem private constructor(
     private val hostListenerSync: UbuntuSubsystemHostListenerSync,
     private val processCapability: UbuntuSubsystemProcessCapability,
 ) {
-    fun close() {
+    suspend fun close() {
         hostListenerSync.close()
         processCapability.shutdown()
         terminal.prepareForMaintenance()
