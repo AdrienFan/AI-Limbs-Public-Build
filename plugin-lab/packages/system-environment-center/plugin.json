@@ -1,0 +1,71 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.system.environment_center",
+  "version": "0.3.7",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
+  "display": {
+    "name": "系统环境中心",
+    "description": "统一承载和管理系统环境；当前以 Ubuntu 0.3.7 为迁移母本，后续承载 Ubuntu、Winlator 等系统环境子系统。"
+  },
+  "roles": [
+    "system_environment_center"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.ubuntu.SystemEnvironmentCenterEntry"
+    }
+  },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": [
+      "host.network@1",
+      "host.ui.presentation@1"
+    ]
+  },
+  "provides": {
+    "capabilities": [
+      "plugin.ubuntu.status",
+      "plugin.ubuntu.start",
+      "plugin.ubuntu.stop",
+      "plugin.ubuntu.idle.get",
+      "plugin.ubuntu.idle.set",
+      "plugin.ubuntu.session.create",
+      "plugin.ubuntu.session.execute",
+      "plugin.ubuntu.command",
+      "plugin.ubuntu.filesystem",
+      "plugin.ubuntu.process",
+      "plugin.ubuntu.session.input",
+      "plugin.ubuntu.session.interrupt",
+      "plugin.ubuntu.session.screen",
+      "plugin.ubuntu.session.close"
+    ],
+    "services": [],
+    "providers": [
+      "plugin.ubuntu.page"
+    ],
+    "extensions": [
+      {
+        "point": "ai_limbs.ui.home_tile",
+        "id": "plugin.system.environment_center.tile",
+        "api": 1
+      },
+      {
+        "point": "ai_limbs.ui.screen",
+        "id": "plugin.system_environment_center.screen",
+        "api": 2
+      }
+    ]
+  }
+}
