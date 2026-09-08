@@ -470,6 +470,7 @@ class TerminalManager private constructor(
                 continue
             }
             if (hasActiveUbuntuWork()) {
+                Log.d(TAG, "Ubuntu idle timeout reached, but active work still exists; rechecking later.")
                 delay(ACTIVE_WORK_RECHECK_MS)
                 continue
             }
@@ -496,6 +497,7 @@ class TerminalManager private constructor(
                     ubuntuIdleShutdownJob = null
                 }
             }
+            Log.i(TAG, "Ubuntu idle timeout reached; stopping idle runtime automatically.")
             stopUbuntuLocked()
             true
         }
@@ -503,14 +505,15 @@ class TerminalManager private constructor(
     private fun hasActiveUbuntuWork(): Boolean {
         if (activeHiddenUbuntuOperations.get() > 0) return true
         return terminalState.value.sessions.any { session ->
-            session.terminalType == TerminalType.LOCAL &&
-                (
-                    session.initState != SessionInitState.READY ||
-                        session.currentExecutingCommand?.isExecuting == true ||
-                        session.commandQueue.isNotEmpty() ||
-                        session.isInteractiveMode ||
-                        session.isWaitingForInteractiveInput
-                    )
+            if (session.terminalType != TerminalType.LOCAL) return@any false
+
+            val commandIsExecuting = session.currentExecutingCommand?.isExecuting == true
+
+            // A bare Bash prompt is also a PTY "waiting for input" state, but it is idle.
+            // Interactive prompts created by a running command remain protected by commandIsExecuting.
+            session.initState != SessionInitState.READY ||
+                commandIsExecuting ||
+                session.commandQueue.isNotEmpty()
         }
     }
 
