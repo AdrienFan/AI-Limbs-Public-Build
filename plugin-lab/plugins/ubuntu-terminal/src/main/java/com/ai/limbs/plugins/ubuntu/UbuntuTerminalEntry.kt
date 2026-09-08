@@ -25,6 +25,7 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
             nativeLibraryDir = nativeRuntime.directory
         )
         val terminal = TerminalManager.getInstance(runtimeContext)
+        val lanerNetHostListenerSync = LanerNetHostListenerSync(host)
         val pageProvider = UbuntuTerminalPageProvider(
             host = host,
             terminal = terminal,
@@ -75,6 +76,7 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
         )
 
         return InProcessPluginHandle {
+            lanerNetHostListenerSync.close()
             processCapability.shutdown()
             terminal.prepareForMaintenance()
         }

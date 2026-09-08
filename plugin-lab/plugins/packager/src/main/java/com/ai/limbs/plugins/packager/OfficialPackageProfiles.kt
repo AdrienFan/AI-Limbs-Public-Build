@@ -136,7 +136,7 @@ object OfficialPackageProfiles {
             role = "ubuntu_terminal",
             entryClass = "com.ai.limbs.plugins.ubuntu.UbuntuTerminalEntry"
         )
-        root.put("permissions", JSONObject().put("requested_scopes", JSONArray()))
+        root.put("permissions", JSONObject().put("requested_scopes", JSONArray().put("host.network@1")))
         root.put("provides", provides(
             capabilities = listOf(
                 "plugin.ubuntu.status", "plugin.ubuntu.start", "plugin.ubuntu.stop",
