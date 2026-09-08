@@ -1,7 +1,7 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build.git
 branch: feat/plugin-lab-system-environment-center
-status: draft
+status: done
 ---
 
 # 系统环境中心子系统扩展拆分
