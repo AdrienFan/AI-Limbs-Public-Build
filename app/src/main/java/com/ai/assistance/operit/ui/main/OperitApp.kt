@@ -380,11 +380,13 @@ fun OperitApp(
 
     BackHandler(enabled = currentScreen !is Screen.AiChat && !isImmersivePluginPage, onBack = { requestGoBack() })
     BackHandler(enabled = isImmersivePluginPage && currentPagePresentation != null) {
-        PluginPlatformKernel.pagePresentationRegistry.set(
-            ownerPluginId = currentPagePresentation.ownerPluginId,
-            screenId = currentPagePresentation.screenId,
-            mode = PluginPagePresentationMode.NORMAL
-        )
+        currentPagePresentation?.let { presentation ->
+            PluginPlatformKernel.pagePresentationRegistry.set(
+                ownerPluginId = presentation.ownerPluginId,
+                screenId = presentation.screenId,
+                mode = PluginPagePresentationMode.NORMAL
+            )
+        }
     }
 
     val canGoBack = routerState.canPop
