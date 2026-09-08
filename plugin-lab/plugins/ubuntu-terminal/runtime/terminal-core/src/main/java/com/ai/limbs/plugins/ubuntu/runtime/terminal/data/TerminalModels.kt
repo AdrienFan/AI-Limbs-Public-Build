@@ -83,6 +83,7 @@ data class TerminalSessionData(
     val title: String,
     val terminalType: TerminalType = TerminalType.LOCAL,
     val isBackground: Boolean = false,
+    val displayNumber: Int? = null,
     val terminalSession: com.ai.limbs.plugins.ubuntu.runtime.terminal.TerminalSession? = null,
     val pty: com.ai.limbs.plugins.ubuntu.runtime.terminal.Pty? = null, // PTY 对象，用于获取终端模式
     val sessionWriter: OutputStreamWriter? = null,

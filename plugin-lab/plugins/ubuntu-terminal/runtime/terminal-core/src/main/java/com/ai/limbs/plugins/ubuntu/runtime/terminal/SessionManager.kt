@@ -8,7 +8,6 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
-import java.util.concurrent.atomic.AtomicInteger
 
 /**
  * 终端会话管理器
@@ -18,7 +17,6 @@ class SessionManager(private val terminalManager: TerminalManager) {
     
     private val _state = MutableStateFlow(TerminalState())
     val state: StateFlow<TerminalState> = _state.asStateFlow()
-    private val nextForegroundSessionNumber = AtomicInteger(1)
     
     /**
      * 创建新会话
@@ -33,8 +31,18 @@ class SessionManager(private val terminalManager: TerminalManager) {
         isBackground: Boolean = false
     ): TerminalSessionData {
         lateinit var newSession: TerminalSessionData
-        val sessionNumber = if (isBackground) null else nextForegroundSessionNumber.getAndIncrement()
         _state.update { currentState ->
+            val displayNumber =
+                if (isBackground) {
+                    null
+                } else {
+                    val usedNumbers = currentState.sessions
+                        .asSequence()
+                        .filter { !it.isBackground }
+                        .mapNotNull { it.displayNumber }
+                        .toSet()
+                    generateSequence(1) { it + 1 }.first { it !in usedNumbers }
+                }
             val defaultTitle =
                 if (isBackground) {
                     when (terminalType) {
@@ -44,15 +52,16 @@ class SessionManager(private val terminalManager: TerminalManager) {
                     }
                 } else {
                     when (terminalType) {
-                        TerminalType.LOCAL -> "Ubuntu ${requireNotNull(sessionNumber)}"
-                        TerminalType.SSH -> "SSH ${requireNotNull(sessionNumber)}"
-                        else -> "Terminal ${requireNotNull(sessionNumber)}"
+                        TerminalType.LOCAL -> "Ubuntu ${requireNotNull(displayNumber)}"
+                        TerminalType.SSH -> "SSH ${requireNotNull(displayNumber)}"
+                        else -> "Terminal ${requireNotNull(displayNumber)}"
                     }
                 }
             newSession = TerminalSessionData(
                 title = title ?: defaultTitle,
                 terminalType = terminalType,
-                isBackground = isBackground
+                isBackground = isBackground,
+                displayNumber = displayNumber
             )
             currentState.copy(
                 sessions = currentState.sessions + newSession,
@@ -195,7 +204,6 @@ class SessionManager(private val terminalManager: TerminalManager) {
         }
         
         _state.value = TerminalState()
-        nextForegroundSessionNumber.set(1)
         Log.d("SessionManager", "All sessions cleaned up")
     }
 } 
