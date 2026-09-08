@@ -1,5 +1,9 @@
 package com.ai.assistance.operit.plugins.center
 
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.res.AssetManager
+import android.content.res.Resources
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
@@ -64,7 +68,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         }
 
-        val host = Host(context, entryFile, runtimeScope, contributions, notificationHost)
+        val host = Host(context, entryFile, loader, runtimeScope, contributions, notificationHost)
         val handle = try {
             entry.mount(host)
         } catch (error: Throwable) {
@@ -128,9 +132,33 @@ internal class AndroidInProcessPluginRuntimeAdapter(
     }
 
 
+    /** UI Context for a trusted dynamic runtime APK. */
+    private class PluginArchiveContext(
+        base: Context,
+        private val runtimeApk: File,
+        private val runtimeClassLoader: ClassLoader
+    ) : ContextWrapper(base) {
+        private val archiveInfo by lazy {
+            requireNotNull(packageManager.getPackageArchiveInfo(runtimeApk.absolutePath, 0)?.applicationInfo) {
+                "Could not read plugin APK resources: ${runtimeApk.name}"
+            }.apply {
+                sourceDir = runtimeApk.absolutePath
+                publicSourceDir = runtimeApk.absolutePath
+            }
+        }
+        private val archiveResources: Resources by lazy {
+            packageManager.getResourcesForApplication(archiveInfo)
+        }
+        override fun getResources(): Resources = archiveResources
+        override fun getAssets(): AssetManager = archiveResources.assets
+        override fun getClassLoader(): ClassLoader = runtimeClassLoader
+        override fun getPackageName(): String = baseContext.packageName
+    }
+
     private class Host(
         private val context: PluginRuntimeAdapterContext,
         override val runtimeEntryFile: File,
+        private val runtimeClassLoader: ClassLoader,
         override val scope: CoroutineScope,
         private val contributions: PluginContributionRegistry,
         private val notificationHost: PluginNotificationHost
@@ -140,6 +168,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val version: String = context.manifest.version
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
+        override fun createPluginContext(baseContext: Context): Context =
+            PluginArchiveContext(baseContext, runtimeEntryFile, runtimeClassLoader)
         override val nativeRuntime: InProcessNativeRuntime = InProcessNativeRuntime(
             apiVersion = 1,
             executables = mapOf(

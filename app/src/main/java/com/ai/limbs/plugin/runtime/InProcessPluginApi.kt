@@ -1,6 +1,7 @@
 package com.ai.limbs.plugin.runtime
 
 import android.content.Context
+import android.view.View
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -91,6 +92,26 @@ interface InProcessProviderDirectory {
 interface InProcessUiStateProvider {
     val stateJson: StateFlow<String?>
     suspend fun perform(eventId: String, payloadJson: String = "{}"): String
+}
+
+/**
+ * Plugin-owned full page surface. Basic widgets and layout remain inside the plugin. [sharedUi]
+ * exposes only Plugin Center components that were explicitly declared reusable.
+ */
+interface InProcessPageProvider {
+    fun createView(context: Context, sharedUi: InProcessSharedUiHost): View
+}
+
+/** Optional host-owned components that a plugin page may embed without giving up page ownership. */
+interface InProcessSharedUiHost {
+    fun supports(componentId: String): Boolean
+    fun createComponent(componentId: String, parametersJson: String = "{}"): View
+}
+
+object InProcessSharedUiComponentIds {
+    const val CHILD_EXTENSION_INSTALLER = "plugin_center.shared.child_extension_installer"
+    const val CHILD_EXTENSION_SELECTOR = "plugin_center.shared.child_extension_selector"
+    const val CHILD_EXTENSION_LIST = "plugin_center.shared.child_extension_list"
 }
 
 /**
@@ -211,6 +232,12 @@ interface InProcessPluginHost {
         get() = InProcessNativeRuntime.UNAVAILABLE
     val providers: InProcessProviderDirectory
     val services: InProcessServiceDirectory
+
+    /**
+     * Builds a UI Context backed by this trusted runtime APK's Resources/ClassLoader while retaining
+     * the supplied Activity/window context. Ordinary non-inprocess plugins never receive this host.
+     */
+    fun createPluginContext(baseContext: Context): Context = baseContext
 
     fun registerProvider(
         id: String,
