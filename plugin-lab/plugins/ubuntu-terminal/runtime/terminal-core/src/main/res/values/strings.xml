@@ -129,8 +129,8 @@
     <string name="terminal_exited_with_code">终端已退出，退出码：%1$d</string>
     <string name="settings">设置</string>
     <string name="ubuntu_runtime_title">AI Limbs · Ubuntu</string>
-    <string name="ubuntu_runtime_start">启动 Ubuntu</string>
-    <string name="ubuntu_runtime_stop">停止 Ubuntu</string>
+    <string name="ubuntu_runtime_start">启动系统</string>
+    <string name="ubuntu_runtime_stop">停止系统</string>
     <string name="ubuntu_runtime_retry">重试启动</string>
     <string name="ubuntu_runtime_starting">正在启动…</string>
     <string name="ubuntu_runtime_stopping">正在停止…</string>

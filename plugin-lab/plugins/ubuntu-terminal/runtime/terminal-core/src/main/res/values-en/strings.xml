@@ -129,8 +129,8 @@
     <string name="terminal_exited_with_code">Terminal exited with code %1$d</string>
     <string name="settings">Settings</string>
     <string name="ubuntu_runtime_title">AI Limbs · Ubuntu</string>
-    <string name="ubuntu_runtime_start">Start Ubuntu</string>
-    <string name="ubuntu_runtime_stop">Stop Ubuntu</string>
+    <string name="ubuntu_runtime_start">Start system</string>
+    <string name="ubuntu_runtime_stop">Stop system</string>
     <string name="ubuntu_runtime_retry">Retry Start</string>
     <string name="ubuntu_runtime_starting">Starting…</string>
     <string name="ubuntu_runtime_stopping">Stopping…</string>
