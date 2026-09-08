@@ -9,7 +9,7 @@ plugins {
 }
 
 android {
-    namespace = "com.ai.limbs.plugins.ubuntu.runtime.terminal"
+    namespace = "com.ai.limbs.plugins.systemenvironment.subsystems.ubuntu.runtime.terminal"
     compileSdk = 36
 
     defaultConfig {
@@ -94,19 +94,19 @@ dependencies {
     implementation(libs.coroutines.core)
     implementation(libs.coroutines.android)
     implementation(libs.androidx.lifecycle.viewmodel.compose)
-    
+
     // Kotlin Serialization
     implementation(libs.kotlinx.serialization)
-    
+
     // SSH 依赖
     implementation("com.jcraft:jsch:0.1.55")
-    
+
     // FTP服务器依赖
     implementation("org.apache.ftpserver:ftpserver-core:1.2.0") {
         exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")
     }
     implementation("org.apache.ftpserver:ftplet-api:1.2.0")
-    
+
     // SSHD服务器依赖
     implementation("org.apache.sshd:sshd-core:2.10.0") {
         exclude(group = "org.bouncycastle", module = "bcprov-jdk15to18")

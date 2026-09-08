@@ -7,14 +7,14 @@ plugins {
 }
 
 android {
-    namespace = "com.ai.limbs.plugins.ubuntu"
+    namespace = "com.ai.limbs.plugins.systemenvironment"
     compileSdk = 36
     defaultConfig {
         applicationId = "com.ai.limbs.payload.systemenvironment.center"
         minSdk = 26
         targetSdk = 34
-        versionCode = 12
-        versionName = "0.3.7"
+        versionCode = 1
+        versionName = "0.1.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

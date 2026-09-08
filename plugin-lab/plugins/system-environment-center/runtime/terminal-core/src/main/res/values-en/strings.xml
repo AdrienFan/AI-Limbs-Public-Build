@@ -10,13 +10,13 @@
     <string name="collapse">Collapse</string>
     <string name="installed">Installed</string>
     <string name="operit_required">AI Limbs Required</string>
-    
+
     <!-- Dialog -->
     <string name="setup_dialog_title">Notice</string>
     <string name="setup_dialog_message">The environment setup is about to begin, which may take some time. Please try to keep the app in foreground or floating window mode to ensure smooth configuration.\n\nIf the configuration is interrupted unexpectedly, don\'t worry. The next time you return to this page to start configuration, it will automatically continue from the previous progress.</string>
     <string name="dialog_confirm">I Understand</string>
     <string name="dialog_cancel">Cancel</string>
-    
+
     <!-- Package Categories -->
     <string name="category_nodejs_name">Node.js Environment</string>
     <string name="category_nodejs_desc">Node.js and frontend development environment</string>
@@ -30,7 +30,7 @@
     <string name="category_go_desc">Go programming language environment</string>
     <string name="category_ssh_name">SSH Tools</string>
     <string name="category_ssh_desc">SSH client and password authentication tools</string>
-    
+
     <!-- Package Items -->
     <string name="package_nodejs_name">Node.js</string>
     <string name="package_nodejs_desc">JavaScript runtime</string>
@@ -56,11 +56,11 @@
     <string name="package_ssh_client_desc">SSH connection client</string>
     <string name="package_sshpass_name">sshpass</string>
     <string name="package_sshpass_desc">SSH password authentication tool</string>
-    
+
     <!-- SettingsScreen -->
     <string name="settings_title">Settings</string>
     <string name="back">Back</string>
-    
+
     <!-- FTP Server Section -->
     <string name="ftp_server_title">FTP File Server</string>
     <string name="ftp_server_stopping">Stopping…</string>
@@ -68,21 +68,21 @@
     <string name="ftp_server_start">Start</string>
     <string name="ftp_server_tip">💡 Tip: Use an FTP client to connect to the above address to access the Ubuntu file system</string>
     <string name="ftp_server_suggestion">📱 Suggestion: Enable floating window mode to keep the app running and ensure FTP service availability</string>
-    
+
     <!-- Storage Management Section -->
     <string name="storage_management_title">Storage Management</string>
     <string name="ubuntu_environment_size">Ubuntu Environment Size: %s</string>
     <string name="refresh_size_calculating">Calculating…</string>
     <string name="refresh_size">Refresh</string>
     <string name="reset_environment">Reset</string>
-    
+
     <!-- Project Section -->
     <string name="project_address_title">Project Repository</string>
     <string name="project_name">AAswordman/AI Limbs Terminal</string>
     <string name="visit_project">Visit</string>
     <string name="check_updates">Check</string>
     <string name="update_now">Update</string>
-    
+
     <!-- Reset Environment Dialog -->
     <string name="reset_dialog_title">⚠️ Dangerous Operation</string>
     <string name="reset_dialog_description">This operation will completely delete the Ubuntu virtual environment, including:</string>
@@ -92,7 +92,7 @@
     <string name="reset_dialog_warning">After the operation, the Ubuntu environment will need to be reinitialized, which may take several minutes.</string>
     <string name="reset_dialog_ftp_warning">The FTP server will also be stopped. Are you sure you want to continue?</string>
     <string name="reset_confirm">Confirm Reset</string>
-    
+
     <!-- SettingsViewModel -->
     <string name="cache_size_default">Click to refresh</string>
     <string name="update_status_default">Click to check updates</string>
@@ -114,7 +114,7 @@
     <string name="ftp_server_stopped">FTP server stopped</string>
     <string name="ftp_server_stop_failed">Stop failed</string>
     <string name="ftp_server_stop_failed_with_error">Stop failed: %s</string>
-    
+
     <!-- TerminalHome -->
     <string name="confirm_delete_session">Confirm Delete Session</string>
     <string name="delete_session_message">Are you sure you want to delete session \"%s\"?\n\nThis action cannot be undone and all data in the session will be permanently lost.</string>
@@ -157,7 +157,7 @@
     <string name="ubuntu_idle_apply">Apply</string>
     <string name="ubuntu_idle_cancel">Cancel</string>
     <string name="ubuntu_idle_safety_note">Running commands and interactive tasks are never stopped automatically.</string>
-    
+
     <!-- Additional new strings -->
     <string name="initializing">Initializing...</string>
     <string name="new_version_found">New version found: %1$s</string>
@@ -165,13 +165,13 @@
     <string name="cannot_open_browser">Cannot open browser</string>
     <string name="ftp_server_running_info">FTP Server Running\nAddress: %1$s:%2$s\nUsername: %3$s\nPassword: %4$s\nRoot Directory: Ubuntu File System</string>
     <string name="unknown_session">Unknown Session</string>
-    
+
     <!-- SSH Tools Check -->
     <string name="ssh_tools_missing_title">SSH Tools Not Installed</string>
     <string name="ssh_tools_missing_message">Enabling SSH connection requires the following tools:\n\n• ssh - SSH client\n• sshpass - SSH password authentication tool\n\n Please go to the "Environment Setup" page to install SSH tools.</string>
     <string name="go_to_setup">Go to Setup</string>
     <string name="checking_ssh_tools">Checking SSH tools...</string>
-    
+
     <!-- Shared TMP Settings -->
     <string name="shared_tmp_title">Shared Temporary Directory</string>
     <string name="shared_tmp_enabled_desc">Enabled - Android and Ubuntu share /tmp directory</string>
@@ -192,7 +192,7 @@
     <string name="chroot_mount_status_unmounted">Unmounted %1$d chroot hard mounts</string>
     <string name="chroot_mount_status_failed">Mount operation failed: %1$s</string>
     <string name="chroot_mount_details_title">Current mount points:</string>
-    
+
     <!-- SSH Settings -->
     <string name="ssh_enable_title">Enable SSH Connection</string>
     <string name="ssh_use_remote_desc">Using remote SSH terminal</string>
@@ -209,7 +209,7 @@
     <string name="openssh_install_ubuntu_cmd">     apt install sshfs  # Ubuntu/Debian</string>
     <string name="openssh_install_centos_cmd">     yum install fuse-sshfs  # CentOS/RHEL</string>
     <string name="openssh_install_button">Install openssh-server</string>
-    
+
     <!-- Font Settings -->
     <string name="font_settings_title">Terminal Font Settings</string>
     <string name="font_size_title">Font Size</string>
@@ -244,12 +244,12 @@
     <string name="virtual_keyboard_action_ctrl">CTRL</string>
     <string name="virtual_keyboard_action_alt">ALT</string>
     <string name="virtual_keyboard_value_hint">Escape sequences: \\e (ESC), \\t (Tab), \\n, \\r, \\\\.</string>
-    
+
     <!-- Source Management -->
     <string name="source_management_title">Software Source Management</string>
     <string name="source_current">Current Source: %s</string>
     <string name="select_source_title">Select %s Source</string>
-    
+
     <!-- Common Actions -->
     <string name="confirm">Confirm</string>
     <string name="add">Add</string>
@@ -269,4 +269,4 @@
     <string name="fullscreen_portrait">Portrait fullscreen</string>
     <string name="fullscreen_landscape">Landscape fullscreen</string>
     <string name="fullscreen_exit">Exit fullscreen</string>
-</resources> 
+</resources>

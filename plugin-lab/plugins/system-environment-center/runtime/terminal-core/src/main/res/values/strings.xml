@@ -10,13 +10,13 @@
     <string name="collapse">收起</string>
     <string name="installed">已安装</string>
     <string name="operit_required">AI Limbs 必须</string>
-    
+
     <!-- Dialog -->
     <string name="setup_dialog_title">温馨提示</string>
     <string name="setup_dialog_message">即将开始环境配置，这可能需要一些时间。请尽量保持应用在前台或小窗运行以确保配置顺利进行。\n\n如果配置意外中断，不必担心。下次回到本页面再次开始配置时，会自动从上次的进度继续。</string>
     <string name="dialog_confirm">我明白了</string>
     <string name="dialog_cancel">取消</string>
-    
+
     <!-- Package Categories -->
     <string name="category_nodejs_name">Node.js 环境</string>
     <string name="category_nodejs_desc">Node.js 和前端开发环境</string>
@@ -30,7 +30,7 @@
     <string name="category_go_desc">Go 语言开发环境</string>
     <string name="category_ssh_name">SSH 工具</string>
     <string name="category_ssh_desc">SSH 客户端和密码认证工具</string>
-    
+
     <!-- Package Items -->
     <string name="package_nodejs_name">Node.js</string>
     <string name="package_nodejs_desc">JavaScript 运行时</string>
@@ -56,11 +56,11 @@
     <string name="package_ssh_client_desc">SSH 连接客户端</string>
     <string name="package_sshpass_name">sshpass</string>
     <string name="package_sshpass_desc">SSH 密码认证工具</string>
-    
+
     <!-- SettingsScreen -->
     <string name="settings_title">设置</string>
     <string name="back">返回</string>
-    
+
     <!-- FTP Server Section -->
     <string name="ftp_server_title">FTP文件服务器</string>
     <string name="ftp_server_stopping">停止中…</string>
@@ -68,21 +68,21 @@
     <string name="ftp_server_start">启动</string>
     <string name="ftp_server_tip">💡 提示：使用FTP客户端连接到上述地址即可访问Ubuntu文件系统</string>
     <string name="ftp_server_suggestion">📱 建议：开启小窗模式保持应用运行，确保FTP服务持续可用</string>
-    
+
     <!-- Storage Management Section -->
     <string name="storage_management_title">存储管理</string>
     <string name="ubuntu_environment_size">Ubuntu环境大小: %s</string>
     <string name="refresh_size_calculating">计算中…</string>
     <string name="refresh_size">刷新</string>
     <string name="reset_environment">重置</string>
-    
+
     <!-- Project Section -->
     <string name="project_address_title">项目地址</string>
     <string name="project_name">AAswordman/AI Limbs Terminal</string>
     <string name="visit_project">访问</string>
     <string name="check_updates">检查</string>
     <string name="update_now">更新</string>
-    
+
     <!-- Reset Environment Dialog -->
     <string name="reset_dialog_title">⚠️ 危险操作</string>
     <string name="reset_dialog_description">此操作将完全删除Ubuntu虚拟环境，包括：</string>
@@ -92,7 +92,7 @@
     <string name="reset_dialog_warning">操作后需要重新初始化Ubuntu环境，这可能需要几分钟时间。</string>
     <string name="reset_dialog_ftp_warning">FTP服务器也将被停止。确定要继续吗？</string>
     <string name="reset_confirm">确定重置</string>
-    
+
     <!-- SettingsViewModel -->
     <string name="cache_size_default">点击刷新计算</string>
     <string name="update_status_default">点击检查更新</string>
@@ -114,7 +114,7 @@
     <string name="ftp_server_stopped">FTP服务器已停止</string>
     <string name="ftp_server_stop_failed">停止失败</string>
     <string name="ftp_server_stop_failed_with_error">停止失败: %s</string>
-    
+
     <!-- TerminalHome -->
     <string name="confirm_delete_session">确认删除会话</string>
     <string name="delete_session_message">确定要删除会话 \"%s\" 吗？\n\n此操作不可撤销，会话中的所有数据将永久丢失。</string>
@@ -157,7 +157,7 @@
     <string name="ubuntu_idle_apply">应用</string>
     <string name="ubuntu_idle_cancel">取消</string>
     <string name="ubuntu_idle_safety_note">正在执行的命令和交互任务不会被自动关闭。</string>
-    
+
     <!-- Additional new strings -->
     <string name="initializing">正在初始化...</string>
     <string name="new_version_found">发现新版本: %1$s</string>
@@ -165,13 +165,13 @@
     <string name="cannot_open_browser">无法打开浏览器</string>
     <string name="ftp_server_running_info">FTP服务器正在运行\n地址: %1$s:%2$s\n用户名: %3$s\n密码: %4$s\n根目录: Ubuntu文件系统</string>
     <string name="unknown_session">未知会话</string>
-    
+
     <!-- SSH Tools Check -->
     <string name="ssh_tools_missing_title">SSH 工具未安装</string>
     <string name="ssh_tools_missing_message">启用 SSH 连接需要安装以下工具：\n\n• ssh - SSH 客户端\n• sshpass - SSH 密码认证工具\n\n请前往"环境配置"页面安装 SSH 工具。</string>
     <string name="go_to_setup">前往配置</string>
     <string name="checking_ssh_tools">正在检查 SSH 工具...</string>
-    
+
     <!-- Shared TMP Settings -->
     <string name="shared_tmp_title">共享临时目录</string>
     <string name="shared_tmp_enabled_desc">已启用 - Android 和 Ubuntu 共享 /tmp 目录</string>
@@ -209,7 +209,7 @@
     <string name="openssh_install_ubuntu_cmd">     apt install sshfs  # Ubuntu/Debian</string>
     <string name="openssh_install_centos_cmd">     yum install fuse-sshfs  # CentOS/RHEL</string>
     <string name="openssh_install_button">去安装 openssh-server</string>
-    
+
     <!-- Font Settings -->
     <string name="font_settings_title">终端字体设置</string>
     <string name="font_size_title">字体大小</string>
@@ -244,12 +244,12 @@
     <string name="virtual_keyboard_action_ctrl">CTRL</string>
     <string name="virtual_keyboard_action_alt">ALT</string>
     <string name="virtual_keyboard_value_hint">发送内容支持转义：\\e(ESC)、\\t(Tab)、\\n、\\r、\\\\。</string>
-    
+
     <!-- Source Management -->
     <string name="source_management_title">软件源管理</string>
     <string name="source_current">当前源: %s</string>
     <string name="select_source_title">选择 %s 源</string>
-    
+
     <!-- Common Actions -->
     <string name="confirm">确定</string>
     <string name="add">添加</string>
@@ -269,4 +269,4 @@
     <string name="fullscreen_portrait">竖屏全屏</string>
     <string name="fullscreen_landscape">横屏全屏</string>
     <string name="fullscreen_exit">退出全屏</string>
-</resources> 
+</resources>

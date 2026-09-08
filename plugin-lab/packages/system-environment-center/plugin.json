@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.environment_center",
-  "version": "0.3.7",
+  "version": "0.1.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "系统环境中心",
-    "description": "统一承载和管理系统环境；当前以 Ubuntu 0.3.7 为迁移母本，后续承载 Ubuntu、Winlator 等系统环境子系统。"
+    "description": "系统环境中心父级插件；当前内置 Ubuntu 迁移子系统，后续统一承载 Ubuntu、Winlator 等系统环境。"
   },
   "roles": [
     "system_environment_center"
@@ -21,7 +21,7 @@
     "kind": "android_inprocess",
     "entry": "payload/plugin.apk",
     "config": {
-      "entry_class": "com.ai.limbs.plugins.ubuntu.SystemEnvironmentCenterEntry"
+      "entry_class": "com.ai.limbs.plugins.systemenvironment.SystemEnvironmentCenterEntry"
     }
   },
   "dependencies": {
@@ -36,24 +36,24 @@
   },
   "provides": {
     "capabilities": [
-      "plugin.ubuntu.status",
-      "plugin.ubuntu.start",
-      "plugin.ubuntu.stop",
-      "plugin.ubuntu.idle.get",
-      "plugin.ubuntu.idle.set",
-      "plugin.ubuntu.session.create",
-      "plugin.ubuntu.session.execute",
-      "plugin.ubuntu.command",
-      "plugin.ubuntu.filesystem",
-      "plugin.ubuntu.process",
-      "plugin.ubuntu.session.input",
-      "plugin.ubuntu.session.interrupt",
-      "plugin.ubuntu.session.screen",
-      "plugin.ubuntu.session.close"
+      "plugin.system_environment.ubuntu.status",
+      "plugin.system_environment.ubuntu.start",
+      "plugin.system_environment.ubuntu.stop",
+      "plugin.system_environment.ubuntu.idle.get",
+      "plugin.system_environment.ubuntu.idle.set",
+      "plugin.system_environment.ubuntu.session.create",
+      "plugin.system_environment.ubuntu.session.execute",
+      "plugin.system_environment.ubuntu.command",
+      "plugin.system_environment.ubuntu.filesystem",
+      "plugin.system_environment.ubuntu.process",
+      "plugin.system_environment.ubuntu.session.input",
+      "plugin.system_environment.ubuntu.session.interrupt",
+      "plugin.system_environment.ubuntu.session.screen",
+      "plugin.system_environment.ubuntu.session.close"
     ],
     "services": [],
     "providers": [
-      "plugin.ubuntu.page"
+      "plugin.system_environment_center.page"
     ],
     "extensions": [
       {

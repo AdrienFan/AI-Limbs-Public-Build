@@ -21,7 +21,7 @@
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 
 JNIEXPORT jintArray JNICALL
-Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_createSubprocess(JNIEnv *env, jobject thiz,
+Java_com_ai_limbs_plugins_systemenvironment_subsystems_ubuntu_runtime_terminal_Pty_00024Companion_createSubprocess(JNIEnv *env, jobject thiz,
                                                                           jobjectArray cmdarray,
                                                                           jobjectArray envarray,
                                                                           jstring workingDir) {
@@ -127,7 +127,7 @@ Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_createSubpr
 }
 
 JNIEXPORT jint JNICALL
-Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_waitFor(JNIEnv *env, jobject thiz, jint pid) {
+Java_com_ai_limbs_plugins_systemenvironment_subsystems_ubuntu_runtime_terminal_Pty_00024Companion_waitFor(JNIEnv *env, jobject thiz, jint pid) {
     int status;
     waitpid(pid, &status, 0);
     if (WIFEXITED(status)) {
@@ -145,26 +145,26 @@ Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_waitFor(JNI
  *  bit 3: IEXTEN - enable extended input processing
  */
 JNIEXPORT jint JNICALL
-Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_getTerminalFlags(JNIEnv *env, jobject thiz, jint fd) {
+Java_com_ai_limbs_plugins_systemenvironment_subsystems_ubuntu_runtime_terminal_Pty_00024Companion_getTerminalFlags(JNIEnv *env, jobject thiz, jint fd) {
     struct termios tt;
     if (tcgetattr(fd, &tt) != 0) {
         LOGE("tcgetattr failed for fd %d", fd);
         return -1;
     }
-    
+
     jint flags = 0;
     if (tt.c_lflag & ICANON) flags |= 0x01;
     if (tt.c_lflag & ECHO)   flags |= 0x02;
     if (tt.c_lflag & ISIG)   flags |= 0x04;
     if (tt.c_lflag & IEXTEN) flags |= 0x08;
-    
+
     LOGD("Terminal flags for fd %d: ICANON=%d, ECHO=%d, ISIG=%d, IEXTEN=%d",
          fd,
          (flags & 0x01) != 0,
          (flags & 0x02) != 0,
          (flags & 0x04) != 0,
          (flags & 0x08) != 0);
-    
+
     return flags;
 }
 
@@ -173,7 +173,7 @@ Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_getTerminal
  * 返回值：可读字节数，-1 表示错误
  */
 JNIEXPORT jint JNICALL
-Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_getAvailableBytes(JNIEnv *env, jobject thiz, jint fd) {
+Java_com_ai_limbs_plugins_systemenvironment_subsystems_ubuntu_runtime_terminal_Pty_00024Companion_getAvailableBytes(JNIEnv *env, jobject thiz, jint fd) {
     int available = 0;
     if (ioctl(fd, FIONREAD, &available) != 0) {
         LOGE("ioctl FIONREAD failed for fd %d", fd);
@@ -191,18 +191,18 @@ Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_00024Companion_getAvailabl
  * 返回值：0 表示成功，-1 表示失败
  */
 JNIEXPORT jint JNICALL
-Java_com_ai_limbs_plugins_ubuntu_runtime_terminal_Pty_setPtyWindowSize(JNIEnv *env, jobject thiz, jint fd, jint rows, jint cols) {
+Java_com_ai_limbs_plugins_systemenvironment_subsystems_ubuntu_runtime_terminal_Pty_setPtyWindowSize(JNIEnv *env, jobject thiz, jint fd, jint rows, jint cols) {
     struct winsize ws;
     ws.ws_row = rows;
     ws.ws_col = cols;
     ws.ws_xpixel = 0;
     ws.ws_ypixel = 0;
-    
+
     if (ioctl(fd, TIOCSWINSZ, &ws) != 0) {
         LOGE("ioctl TIOCSWINSZ failed for fd %d: rows=%d, cols=%d", fd, rows, cols);
         return -1;
     }
-    
+
     LOGD("PTY window size set to %dx%d for fd %d", rows, cols, fd);
     return 0;
-} 
+}
