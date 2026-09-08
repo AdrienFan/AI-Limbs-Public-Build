@@ -332,9 +332,9 @@ jobs:
 
   system_environment:
     if: inputs.target == 'system-environment'
-    name: Build System Environment split
+    name: Build System Environment Center v0.2.1 only
     runs-on: ubuntu-24.04
-    timeout-minutes: 60
+    timeout-minutes: 30
     steps:
       - name: Checkout source
         uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
@@ -367,18 +367,12 @@ jobs:
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
 
-      - name: Build Host, Hub, parent, child, and guide
+      - name: Build System Environment Center parent payload
         shell: bash
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew \
-            :app:assembleDebug \
-            :plugin-extension-hub:assembleDebug \
-            :system-environment-center-plugin:assembleDebug \
-            :ubuntu-system-extension:assembleDebug \
-            :developer-guide-plugin:assembleDebug \
-            --stacktrace --no-daemon
+          ./gradlew :system-environment-center-plugin:assembleDebug --stacktrace --no-daemon
 
       - name: Upload Android reports
         if: always()
@@ -387,7 +381,7 @@ jobs:
           name: system-environment-reports-${{ github.run_number }}
           path: |
             build/reports/**
-            app/build/reports/**
+            plugin-lab/plugins/system-environment-center/build/reports/**
           if-no-files-found: warn
           retention-days: 14
 
@@ -395,16 +389,9 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: system-environment-split-${{ github.run_number }}
+          name: system-environment-center-v0.2.1-${{ github.run_number }}
           path: |
-            app/build/outputs/apk/debug/*.apk
-            plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
-            plugin-lab/packages/extension-hub/plugin.json
             plugin-lab/plugins/system-environment-center/build/outputs/apk/debug/*.apk
             plugin-lab/packages/system-environment-center/plugin.json
-            plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug/*.apk
-            plugin-lab/packages/ubuntu-system/extension.json
-            plugin-lab/plugins/developer-guide/build/outputs/apk/debug/*.apk
-            plugin-lab/packages/developer-guide/plugin.json
           if-no-files-found: error
           retention-days: 14

@@ -13,8 +13,8 @@ android {
         applicationId = "com.ai.limbs.payload.systemenvironment.center"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.2.0"
+        versionCode = 3
+        versionName = "0.2.1"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -46,6 +46,7 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))
+    // Shared ABI type identity is owned by the real AI Limbs host; parent and .ailx must not embed copies.
     compileOnly(project(":system-environment-contract"))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)

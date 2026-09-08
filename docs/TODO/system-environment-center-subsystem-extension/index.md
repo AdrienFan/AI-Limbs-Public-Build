@@ -1,7 +1,7 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build.git
 branch: feat/plugin-lab-system-environment-center
-status: done
+status: draft
 ---
 
 # 系统环境中心子系统扩展拆分
@@ -25,3 +25,5 @@ status: done
 - [03 Ubuntu .ailx](03-ubuntu-extension.md)
 - [04 共存与静态检查](04-validation.md)
 - [05 提交与云端构建](05-cloud-build.md)
+
+- [06 正式基座 Contract 运行时打包修复](06-contract-runtime-packaging.md)
