@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.view.View
 import android.view.WindowManager
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -81,6 +82,10 @@ private fun UbuntuTerminalPluginPage(
     val originalSoftInputMode = remember(activity) { activity?.manifestSoftInputMode() }
     var route by remember { mutableStateOf(UbuntuPageRoute.TERMINAL) }
     val env = rememberTerminalEnv(terminal)
+
+    BackHandler(enabled = route != UbuntuPageRoute.TERMINAL) {
+        route = UbuntuPageRoute.TERMINAL
+    }
 
     LaunchedEffect(env.ubuntuRuntimeState.phase, env.sessions.size) {
         if (env.ubuntuRuntimeState.phase == UbuntuRuntimePhase.RUNNING && env.sessions.isEmpty()) {

@@ -912,15 +912,7 @@ private fun TerminalToolbar(
             // 环境配置按钮
             Surface(
                 modifier = Modifier.clickable(enabled = !readOnlySharedView) {
-                    if (runtimeState.phase == UbuntuRuntimePhase.RUNNING) {
-                        onNavigateToSetup()
-                    } else {
-                        Toast.makeText(
-                            context,
-                            context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ubuntu_runtime_start_first),
-                            Toast.LENGTH_SHORT
-                        ).show()
-                    }
+                    onNavigateToSetup()
                 },
                 color = if (readOnlySharedView) Color(0xFF303030) else Color(0xFF4A4A4A),
                 shape = RoundedCornerShape(6.dp)
