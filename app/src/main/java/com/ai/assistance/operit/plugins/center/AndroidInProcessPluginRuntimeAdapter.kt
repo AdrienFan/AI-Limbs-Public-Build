@@ -4,6 +4,10 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.content.res.AssetManager
 import android.content.res.Resources
+import android.content.res.loader.ResourcesLoader
+import android.content.res.loader.ResourcesProvider
+import android.os.Build
+import android.os.ParcelFileDescriptor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
@@ -147,7 +151,25 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             }
         }
         private val archiveResources: Resources by lazy {
-            packageManager.getResourcesForApplication(archiveInfo)
+            val pluginResources = packageManager.getResourcesForApplication(archiveInfo)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Keep the plugin AssetManager isolated, then add the AI Limbs APK resources so
+                // parent-loaded AndroidX/Compose classes can resolve AI Limbs 0x7f resource IDs.
+                // Trusted runtime APKs use a distinct package id, so AI Limbs and plugin IDs coexist.
+                val loader = ResourcesLoader()
+                buildList {
+                    add(baseContext.applicationInfo.sourceDir)
+                    baseContext.applicationInfo.splitSourceDirs?.let { addAll(it.asList()) }
+                }.distinct().forEach { apkPath ->
+                    val provider = ParcelFileDescriptor.open(
+                        File(apkPath),
+                        ParcelFileDescriptor.MODE_READ_ONLY
+                    ).use { descriptor -> ResourcesProvider.loadFromApk(descriptor) }
+                    loader.addProvider(provider)
+                }
+                pluginResources.addLoaders(loader)
+            }
+            pluginResources
         }
         override fun getResources(): Resources = archiveResources
         override fun getAssets(): AssetManager = archiveResources.assets
