@@ -1,7 +1,7 @@
 package com.ai.limbs.plugins.ubuntu.runtime.terminal.ui
 
-import android.app.Application
-import androidx.lifecycle.AndroidViewModel
+import android.content.Context
+import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.ai.limbs.plugins.ubuntu.runtime.terminal.utils.CacheManager
 import com.ai.limbs.plugins.ubuntu.runtime.terminal.utils.UpdateChecker
@@ -22,27 +22,27 @@ import kotlinx.coroutines.Job
 import java.io.File
 
 class SettingsViewModel(
-    application: Application,
+    private val context: Context,
     private val terminalManager: TerminalManager? = null
-) : AndroidViewModel(application) {
-    private val cacheManager = CacheManager(application)
-    private val terminalManagerRef by lazy { terminalManager ?: TerminalManager.getInstance(application) }
-    private val updateChecker = UpdateChecker(application)
-    private val ftpServerManager = FtpServerManager.getInstance(application)
-    private val sourceManager = SourceManager(application)
-    private val sshConfigManager = SSHConfigManager(application)
-    private val virtualKeyboardConfigManager = VirtualKeyboardConfigManager.getInstance(application)
+) : ViewModel() {
+    private val cacheManager = CacheManager(context)
+    private val terminalManagerRef by lazy { terminalManager ?: TerminalManager.getInstance(context) }
+    private val updateChecker = UpdateChecker(context)
+    private val ftpServerManager = FtpServerManager.getInstance(context)
+    private val sourceManager = SourceManager(context)
+    private val sshConfigManager = SSHConfigManager(context)
+    private val virtualKeyboardConfigManager = VirtualKeyboardConfigManager.getInstance(context)
     
     // SharedPreferences for shared tmp setting
-    private val prefs = application.getSharedPreferences("terminal_settings", android.content.Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("terminal_settings", android.content.Context.MODE_PRIVATE)
 
     // 用于跟踪缓存计算任务的Job
     private var cacheSizeCalculationJob: Job? = null
 
-    private val _cacheSize = MutableStateFlow(application.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_size_default))
+    private val _cacheSize = MutableStateFlow(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_size_default))
     val cacheSize = _cacheSize.asStateFlow()
 
-    private val _updateStatus = MutableStateFlow(application.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.update_status_default))
+    private val _updateStatus = MutableStateFlow(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.update_status_default))
     val updateStatus = _updateStatus.asStateFlow()
     
     private val _isCalculatingCache = MutableStateFlow(false)
@@ -52,7 +52,7 @@ class SettingsViewModel(
     val isClearingCache = _isClearingCache.asStateFlow()
 
     // FTP服务器相关状态
-    private val _ftpServerStatus = MutableStateFlow(application.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_not_running))
+    private val _ftpServerStatus = MutableStateFlow(context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_not_running))
     val ftpServerStatus = _ftpServerStatus.asStateFlow()
     
     private val _isFtpServerRunning = MutableStateFlow(false)
@@ -90,7 +90,7 @@ class SettingsViewModel(
     val chrootEnabled = _chrootEnabled.asStateFlow()
 
     private val _chrootMountStatus = MutableStateFlow(
-        application.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_idle)
+        context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_idle)
     )
     val chrootMountStatus = _chrootMountStatus.asStateFlow()
 
@@ -127,7 +127,7 @@ class SettingsViewModel(
     }
 
     private fun areSshToolsInstalled(): Boolean {
-        val filesDir = getApplication<Application>().filesDir
+        val filesDir = context.filesDir
         val ubuntuRoot = File(filesDir, "usr/var/lib/proot-distro/installed-rootfs/ubuntu")
         
         val sshExecutable = File(ubuntuRoot, "usr/bin/ssh")
@@ -137,7 +137,7 @@ class SettingsViewModel(
     }
     
     private fun isOpensshServerInstalled(): Boolean {
-        val filesDir = getApplication<Application>().filesDir
+        val filesDir = context.filesDir
         val ubuntuRoot = File(filesDir, "usr/var/lib/proot-distro/installed-rootfs/ubuntu")
         val sshdExecutable = File(ubuntuRoot, "usr/sbin/sshd")
         return sshdExecutable.exists()
@@ -228,19 +228,19 @@ class SettingsViewModel(
         
         cacheSizeCalculationJob = viewModelScope.launch {
             _isCalculatingCache.value = true
-            _cacheSize.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculating)
+            _cacheSize.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculating)
             try {
                 // 调用新的 getCacheSize，并传入一个更新UI的回调
                 val size = cacheManager.getCacheSize { currentSize ->
                     // 在回调中，实时更新UI状态
-                    _cacheSize.value = "${getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculating)} (${cacheManager.formatSize(currentSize)})"
+                    _cacheSize.value = "${context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculating)} (${cacheManager.formatSize(currentSize)})"
                 }
                 _cacheSize.value = cacheManager.formatSize(size)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) {
-                    _cacheSize.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculation_cancelled)
+                    _cacheSize.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculation_cancelled)
                 } else {
-                    _cacheSize.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculation_failed)
+                    _cacheSize.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.cache_calculation_failed)
                 }
             } finally {
                 _isCalculatingCache.value = false
@@ -264,7 +264,7 @@ class SettingsViewModel(
                 }
             }
             
-            _cacheSize.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.environment_resetting)
+            _cacheSize.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.environment_resetting)
             try {
                 // 在清理缓存前停止FTP服务器
                 if (ftpServerManager.isFtpServerRunning()) {
@@ -273,9 +273,9 @@ class SettingsViewModel(
                 }
                 
                 cacheManager.clearCache(terminalManagerRef)
-                _cacheSize.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.environment_reset_complete)
+                _cacheSize.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.environment_reset_complete)
             } catch (e: Exception) {
-                _cacheSize.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.environment_reset_failed, e.message ?: "")
+                _cacheSize.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.environment_reset_failed, e.message ?: "")
             } finally {
                 _isClearingCache.value = false
             }
@@ -284,18 +284,18 @@ class SettingsViewModel(
 
     fun checkForUpdates() {
         viewModelScope.launch {
-            _updateStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.checking_updates)
+            _updateStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.checking_updates)
             when (val result = updateChecker.checkForUpdates(showToast = true)) {
                 is UpdateChecker.UpdateResult.UpdateAvailable -> {
-                    _updateStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.update_available, result.latestVersion, result.currentVersion)
+                    _updateStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.update_available, result.latestVersion, result.currentVersion)
                     _hasUpdateAvailable.value = true
                 }
                 is UpdateChecker.UpdateResult.UpToDate -> {
-                    _updateStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.up_to_date, result.currentVersion)
+                    _updateStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.up_to_date, result.currentVersion)
                     _hasUpdateAvailable.value = false
                 }
                 is UpdateChecker.UpdateResult.Error -> {
-                    _updateStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.update_check_failed, result.message)
+                    _updateStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.update_check_failed, result.message)
                     _hasUpdateAvailable.value = false
                 }
             }
@@ -313,17 +313,17 @@ class SettingsViewModel(
     fun startFtpServer() {
         viewModelScope.launch {
             _isManagingFtpServer.value = true
-            _ftpServerStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_starting)
+            _ftpServerStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_starting)
             try {
                 val success = ftpServerManager.startFtpServer()
                 if (success) {
                     _isFtpServerRunning.value = true
                     _ftpServerStatus.value = ftpServerManager.getFtpServerInfo()
                 } else {
-                    _ftpServerStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_start_failed_env)
+                    _ftpServerStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_start_failed_env)
                 }
             } catch (e: Exception) {
-                _ftpServerStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_start_failed, e.message ?: "")
+                _ftpServerStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_start_failed, e.message ?: "")
             } finally {
                 _isManagingFtpServer.value = false
             }
@@ -333,17 +333,17 @@ class SettingsViewModel(
     fun stopFtpServer() {
         viewModelScope.launch {
             _isManagingFtpServer.value = true
-            _ftpServerStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stopping_progress)
+            _ftpServerStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stopping_progress)
             try {
                 val success = ftpServerManager.stopFtpServer()
                 if (success) {
                     _isFtpServerRunning.value = false
-                    _ftpServerStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stopped)
+                    _ftpServerStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stopped)
                 } else {
-                    _ftpServerStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stop_failed)
+                    _ftpServerStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stop_failed)
                 }
             } catch (e: Exception) {
-                _ftpServerStatus.value = getApplication<Application>().getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stop_failed_with_error, e.message ?: "")
+                _ftpServerStatus.value = context.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.ftp_server_stop_failed_with_error, e.message ?: "")
             } finally {
                 _isManagingFtpServer.value = false
             }
@@ -426,7 +426,7 @@ class SettingsViewModel(
     }
 
     private fun updateChrootMountDisplay(result: CacheManager.MountInspectionResult) {
-        val app = getApplication<Application>()
+        val app = context
         if (result.count == 0) {
             _chrootMountStatus.value = app.getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_none)
             _chrootMountDetails.value = ""
@@ -443,13 +443,13 @@ class SettingsViewModel(
     fun inspectChrootMounts() {
         viewModelScope.launch {
             _isInspectingChrootMounts.value = true
-            _chrootMountStatus.value = getApplication<Application>()
+            _chrootMountStatus.value = context
                 .getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_checking)
             _chrootMountDetails.value = ""
             try {
                 updateChrootMountDisplay(cacheManager.inspectUbuntuMounts())
             } catch (e: Exception) {
-                _chrootMountStatus.value = getApplication<Application>().getString(
+                _chrootMountStatus.value = context.getString(
                     com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_failed,
                     e.message ?: ""
                 )
@@ -462,18 +462,18 @@ class SettingsViewModel(
     fun unmountChrootMounts() {
         viewModelScope.launch {
             _isUnmountingChrootMounts.value = true
-            _chrootMountStatus.value = getApplication<Application>()
+            _chrootMountStatus.value = context
                 .getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_unmounting)
             try {
                 val removedCount = cacheManager.unmountUbuntuMounts(terminalManagerRef)
                 val result = cacheManager.inspectUbuntuMounts()
                 _chrootMountStatus.value = if (removedCount > 0) {
-                    getApplication<Application>().getString(
+                    context.getString(
                         com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_unmounted,
                         removedCount
                     )
                 } else {
-                    getApplication<Application>().getString(
+                    context.getString(
                         com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_none
                     )
                 }
@@ -483,7 +483,7 @@ class SettingsViewModel(
                     ""
                 }
             } catch (e: Exception) {
-                _chrootMountStatus.value = getApplication<Application>().getString(
+                _chrootMountStatus.value = context.getString(
                     com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_failed,
                     e.message ?: ""
                 )
@@ -497,7 +497,7 @@ class SettingsViewModel(
         prefs.edit().putBoolean("chroot_enabled", enabled).apply()
         _chrootEnabled.value = enabled
         if (!enabled) {
-            _chrootMountStatus.value = getApplication<Application>()
+            _chrootMountStatus.value = context
                 .getString(com.ai.limbs.plugins.ubuntu.runtime.terminal.R.string.chroot_mount_status_idle)
             _chrootMountDetails.value = ""
         }

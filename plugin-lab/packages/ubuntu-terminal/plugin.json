@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.ubuntu_terminal",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "api": {
     "target": 1,
     "min": 1
