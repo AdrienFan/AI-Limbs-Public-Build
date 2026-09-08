@@ -29,9 +29,11 @@ import org.json.JSONObject
 internal class PluginHostCapabilityRegistry(
     context: Context?,
     private val surfacePolicy: HostSurfacePolicy?,
-    private val usageStore: PluginUsageStore? = null
+    private val usageStore: PluginUsageStore? = null,
+    private val uiRegistry: PluginUiRegistry? = null,
+    private val pagePresentationRegistry: PluginPagePresentationRegistry? = null
 ) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
-    internal constructor() : this(null, null, null)
+    internal constructor() : this(null, null, null, null, null)
     private val appContext = context?.applicationContext
     private val systemExecutor = context?.let(::SystemHostPrimitiveExecutor)
 
@@ -50,16 +52,22 @@ internal class PluginHostCapabilityRegistry(
     private val bridgeIngressGateways = ConcurrentHashMap<String, AiLimbsIngressGateway>()
 
     // Ordinary plugin scope adapters remain intentionally narrow here.
-    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 41-item Gateway catalog.
+    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 46-item Gateway catalog.
     private val hostCapabilities = mapOf(
         "host.process@1" to HostCapability("host.process@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.process@1", parameters)
+        },
+        "host.network@1" to HostCapability("host.network@1") { ownerPluginId, parameters ->
+            invokeSystemHostFromPlugin(ownerPluginId, "host.network@1", parameters)
         },
         "host.custom_access_prompt@1" to HostCapability("host.custom_access_prompt@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.custom_access_prompt@1", parameters)
         },
         "host.work_manual@1" to HostCapability("host.work_manual@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.work_manual@1", parameters)
+        },
+        "host.ui.presentation@1" to HostCapability("host.ui.presentation@1") { ownerPluginId, parameters ->
+            invokePagePresentation(ownerPluginId, parameters)
         },
         "host.logging@1" to HostCapability("host.logging@1") { _, parameters -> invokeLogging(parameters) }
     )
@@ -116,6 +124,53 @@ internal class PluginHostCapabilityRegistry(
                     requiredScope = capability.requiredScope,
                     publicContracts = HOST_PRIMITIVE_INVOKE_CONTRACTS
                 )
+            )
+        }
+    }
+
+
+    private fun invokePagePresentation(ownerPluginId: String, parameters: JSONObject): JSONObject {
+        val screens = uiRegistry ?: throw PluginInstallException(
+            "UI_PRESENTATION_UNAVAILABLE",
+            "Plugin page presentation registry is unavailable"
+        )
+        val presentations = pagePresentationRegistry ?: throw PluginInstallException(
+            "UI_PRESENTATION_UNAVAILABLE",
+            "Plugin page presentation registry is unavailable"
+        )
+        val screenId = parameters.optString("screen_id").trim()
+        if (screenId.isEmpty()) {
+            throw PluginInstallException("UI_PRESENTATION_SCREEN_REQUIRED", "screen_id is required")
+        }
+        val screen = screens.screen(screenId) ?: throw PluginInstallException(
+            "UI_PRESENTATION_SCREEN_UNKNOWN",
+            "Plugin screen is not registered: $screenId"
+        )
+        if (screen.ownerPluginId != ownerPluginId) {
+            throw PluginInstallException(
+                "UI_PRESENTATION_OWNER_MISMATCH",
+                "Plugin may change presentation only for its own screen: $screenId"
+            )
+        }
+        if (!presentations.isActiveScreen(screenId)) {
+            throw PluginInstallException(
+                "UI_PRESENTATION_SCREEN_NOT_ACTIVE",
+                "Plugin page presentation may be changed only by the currently displayed screen: $screenId"
+            )
+        }
+        return when (parameters.optString("operation", "set_mode").trim().lowercase()) {
+            "set_mode" -> {
+                val mode = PluginPagePresentationMode.parse(parameters.optString("mode", "normal"))
+                presentations.set(ownerPluginId, screenId, mode)
+                JSONObject().put("ok", true).put("screen_id", screenId).put("mode", mode.name.lowercase())
+            }
+            "get_mode" -> {
+                val mode = presentations.get(screenId)?.mode ?: PluginPagePresentationMode.NORMAL
+                JSONObject().put("ok", true).put("screen_id", screenId).put("mode", mode.name.lowercase())
+            }
+            else -> throw PluginInstallException(
+                "UI_PRESENTATION_OPERATION_UNKNOWN",
+                "Unsupported host.ui.presentation@1 operation"
             )
         }
     }

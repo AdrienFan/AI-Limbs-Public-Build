@@ -59,10 +59,12 @@ internal class SystemPluginController(
     }
 
     fun snapshot(): SystemPluginMaintenanceSnapshot {
-        val active = activeSession?.manifest?.version ?: readStateVersion()
+        val mountedVersion = activeSession?.manifest?.version
+        val storedVersion = readStateVersion()
+        val restorableVersion = mountedVersion ?: storedVersion?.takeIf(::isRestorableVersion)
         return SystemPluginMaintenanceSnapshot(
-            installed = active != null,
-            activeVersion = active,
+            installed = restorableVersion != null,
+            activeVersion = restorableVersion,
             currentBackupVersion = backupVersion(currentBackupFile),
             previousBackupVersion = backupVersion(previousBackupFile)
         )
@@ -354,6 +356,15 @@ internal class SystemPluginController(
     private fun writeState(version: String) {
         root.mkdirs()
         atomicWrite(stateFile, JSONObject().put("active_version", version).toString(2).toByteArray())
+    }
+
+    private fun isRestorableVersion(version: String): Boolean {
+        val file = packageFile(version)
+        if (!file.isFile) return false
+        return runCatching {
+            val validation = SystemPluginPackageValidator.validateForPluginCenterBootstrap(file, file.name)
+            validation.manifest.version == version
+        }.getOrDefault(false)
     }
 
     private fun backupVersion(file: File): String? = runCatching {

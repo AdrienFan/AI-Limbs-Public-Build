@@ -40,6 +40,7 @@ internal object PluginPlatformKernel {
     private lateinit var uiRegistryInstance: PluginUiRegistry
     private lateinit var systemUiRegistryInstance: SystemPluginUiRegistry
     private lateinit var dynamicNavigationRegistryInstance: DynamicNavigationSurfaceRegistry
+    private lateinit var pagePresentationRegistryInstance: PluginPagePresentationRegistry
     private lateinit var capabilityRegistryInstance: PluginHostCapabilityRegistry
     private lateinit var surfacePolicyInstance: HostSurfacePolicy
     private lateinit var adminSecurityInstance: AdminSecurityManager
@@ -79,6 +80,8 @@ internal object PluginPlatformKernel {
         get() = requireInitialized().let { systemUiRegistryInstance }
     internal val dynamicNavigationRegistry: DynamicNavigationSurfaceRegistry
         get() = requireInitialized().let { dynamicNavigationRegistryInstance }
+    internal val pagePresentationRegistry: PluginPagePresentationRegistry
+        get() = requireInitialized().let { pagePresentationRegistryInstance }
     internal val systemPlugins: com.ai.assistance.operit.plugins.system.SystemPluginController
         get() = requireInitialized().let { systemPluginControllerInstance }
     internal val capabilities: PluginHostCapabilityRegistry
@@ -195,7 +198,14 @@ internal object PluginPlatformKernel {
             val uiRegistry = PluginUiRegistry()
             val systemUiRegistry = SystemPluginUiRegistry()
             val dynamicNavigationRegistry = DynamicNavigationSurfaceRegistry(appContext)
-            val capabilityRegistry = PluginHostCapabilityRegistry(appContext, surfacePolicy, usageStore)
+            val pagePresentationRegistry = PluginPagePresentationRegistry()
+            val capabilityRegistry = PluginHostCapabilityRegistry(
+                appContext,
+                surfacePolicy,
+                usageStore,
+                uiRegistry,
+                pagePresentationRegistry
+            )
             val contributions = PluginContributionRegistry()
             surfacePolicy.register(
                 HostSurfaceDefinition(
@@ -357,6 +367,7 @@ internal object PluginPlatformKernel {
             uiRegistryInstance = uiRegistry
             systemUiRegistryInstance = systemUiRegistry
             dynamicNavigationRegistryInstance = dynamicNavigationRegistry
+            pagePresentationRegistryInstance = pagePresentationRegistry
             capabilityRegistryInstance = capabilityRegistry
             surfacePolicyInstance = surfacePolicy
             adminSecurityInstance = adminSecurity

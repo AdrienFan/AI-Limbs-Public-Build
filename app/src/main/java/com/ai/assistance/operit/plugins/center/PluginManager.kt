@@ -551,7 +551,23 @@ internal class PluginManager(
                     madeProgress = true
                     continue
                 }
-                val manifest = stateRepository.readInstalledManifest(pluginId, version)
+                val manifest = try {
+                    stateRepository.readInstalledManifest(pluginId, version)
+                } catch (error: Throwable) {
+                    if (error is CancellationException) throw error
+                    val message = error.message ?: error::class.java.simpleName
+                    AppLogger.e(TAG, "Plugin restore manifest failed: $pluginId $version", error)
+                    stateRepository.write(
+                        state.copy(
+                            lastState = PluginLifecycleState.FAILED,
+                            lastError = "Installed plugin manifest could not be read: $message",
+                            updatedAtEpochMs = System.currentTimeMillis()
+                        )
+                    )
+                    pending.remove(pluginId)
+                    madeProgress = true
+                    continue
+                }
                 if (manifest.activationMode != PluginActivationMode.HOT) {
                     stateRepository.write(
                         state.copy(

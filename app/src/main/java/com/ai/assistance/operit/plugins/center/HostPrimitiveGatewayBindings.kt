@@ -43,7 +43,7 @@ internal object HostPrimitiveGatewayBindings {
         ),
         "host.ui.automation@1" to ops(tool("snapshot", "get_page_info"), tool("click", "click_element"), tool("tap", "tap"), tool("long_press", "long_press"), tool("set_text", "set_input_text"), tool("key", "press_key"), tool("swipe", "swipe")),
         "host.screen.capture@1" to ops(tool("capture", "capture_screenshot")),
-        "host.network@1" to ops(tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), pending("listen")),
+        "host.network@1" to ops(tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), pending("listen")),
         "host.background.runtime@1" to ops(pending("acquire_lease"), pending("update_lease"), pending("release_lease"), pending("status")),
         "host.notification@1" to ops(tool("publish", "send_notification"), tool("observe", "get_notifications")),
         "host.android.settings@1" to ops(tool("get", "get_system_setting"), tool("set", "modify_system_setting")),

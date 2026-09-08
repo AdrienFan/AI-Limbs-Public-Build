@@ -1,6 +1,9 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
+import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
+import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
+import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
@@ -37,6 +40,7 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             )
         }
         return when (id) {
+            "host.network@1" -> invokeNetwork(op)
             "host.ui.surface@1" -> invokeUiSurface(op, parameters)
             "host.capability@1" -> invokeCapability(ownerPluginId, parameters)
             "host.plugin.service@1" -> invokePluginService(op, parameters)
@@ -49,6 +53,67 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
                 "No Kernel adapter for $id/$op"
             )
         }
+    }
+
+    private suspend fun invokeNetwork(operation: String): JSONObject = when (operation) {
+        "listeners" -> snapshotTcpListeners()
+        else -> unsupported("host.network@1", operation)
+    }
+
+    private suspend fun snapshotTcpListeners(): JSONObject {
+        // The plugin never receives Shell access. Host executes one fixed read-only command and
+        // reduces /proc/net to a de-duplicated TCP LISTEN port list before crossing the ABI.
+        val command = "for f in /proc/net/tcp /proc/net/tcp6; do [ -r \"\$f\" ] && cat \"\$f\"; done"
+        val shell = executeListenerSnapshotCommand(command)
+        if (!shell.success) {
+            return JSONObject()
+                .put("available", false)
+                .put("ports", JSONArray())
+                .put("source", "android_proc_net")
+                .put("updated_at_epoch_ms", System.currentTimeMillis())
+                .put("reason", shell.stderr.trim().ifBlank { "Android listener snapshot is unavailable" })
+        }
+
+        val ports = shell.stdout.lineSequence()
+            .mapNotNull(::tcpListenPort)
+            .distinct()
+            .sorted()
+            .toList()
+        return JSONObject()
+            .put("available", true)
+            .put("ports", JSONArray(ports))
+            .put("source", "android_proc_net")
+            .put("updated_at_epoch_ms", System.currentTimeMillis())
+    }
+
+    private suspend fun executeListenerSnapshotCommand(command: String): ShellExecutor.CommandResult {
+        val reasons = mutableListOf<String>()
+        for (level in LISTENER_SNAPSHOT_LEVELS) {
+            val executor = ShellExecutorFactory.getExecutor(appContext, level)
+            val permission = executor.hasPermission()
+            if (!executor.isAvailable() || !permission.granted) {
+                reasons += "$level: ${permission.reason}"
+                continue
+            }
+            val result = executor.executeCommand(command)
+            if (result.success) return result
+            reasons += "$level: ${result.stderr.ifBlank { "exit=${result.exitCode}" }}"
+        }
+        return ShellExecutor.CommandResult(
+            success = false,
+            stdout = "",
+            stderr = reasons.joinToString("; ").ifBlank { "No supported Host shell backend can read Android TCP listeners" },
+            exitCode = -1
+        )
+    }
+
+    private fun tcpListenPort(line: String): Int? {
+        val columns = line.trim().split(Regex("\\s+"))
+        if (columns.size < 4 || columns[3] != "0A") return null
+        val local = columns[1]
+        val separator = local.lastIndexOf(':')
+        if (separator < 0 || separator == local.lastIndex) return null
+        return local.substring(separator + 1).toIntOrNull(16)?.takeIf { it in 1..65535 }
     }
 
     private suspend fun invokeUiSurface(operation: String, parameters: JSONObject): JSONObject {
@@ -385,7 +450,13 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
         )
 
     private companion object {
+        val LISTENER_SNAPSHOT_LEVELS = listOf(
+            AndroidPermissionLevel.DEBUGGER,
+            AndroidPermissionLevel.ROOT,
+            AndroidPermissionLevel.STANDARD
+        )
         val SUPPORTED = setOf(
+            "host.network@1/listeners",
             "host.ui.surface@1/list",
             "host.ui.surface@1/register",
             "host.ui.surface@1/open",

@@ -159,6 +159,7 @@ fun AppContent(
         isNavigatingBack: Boolean = false,
         actions: @Composable RowScope.() -> Unit = {},
         titleContent: TopBarTitleContent? = null,
+        hideHostChrome: Boolean = false,
         /** 当前导航栈中仍存活的路由 screenKey（路由级 ViewModelStore 清理依据）。 */
         aliveScreenKeys: Set<String>
 ) {
@@ -288,9 +289,10 @@ fun AppContent(
         Scaffold(
             contentWindowInsets = WindowInsets(0, 0, 0, 0),
             topBar = {
-                // 单一工具栏 - 使用小型化的设计
-                // 使用 windowInsets 参数让 TopAppBar 自己处理状态栏的 insets
-                TopAppBar(
+                if (!hideHostChrome) {
+                    // 单一工具栏 - 使用小型化的设计
+                    // 使用 windowInsets 参数让 TopAppBar 自己处理状态栏的 insets
+                    TopAppBar(
                     windowInsets = WindowInsets.statusBars,
                     title = {
                         if (titleContent != null) {
@@ -381,8 +383,9 @@ fun AppContent(
                         navigationIconContentColor = appBarContentColor,
                         actionIconContentColor = appBarContentColor
                     ),
-                    // Scaffold会处理 insets, 这里不再需要手动添加 modifier
-                )
+                        // Scaffold会处理 insets, 这里不再需要手动添加 modifier
+                    )
+                }
             },
             containerColor = Color.Transparent
         ) { innerPadding ->
@@ -392,7 +395,7 @@ fun AppContent(
                 modifier = Modifier
                     .padding(innerPadding)
                     .consumeWindowInsets(innerPadding)
-                    .navigationBarsPadding()
+                    .then(if (hideHostChrome) Modifier else Modifier.navigationBarsPadding())
                     .then(
                         if (currentScreenUsesImePadding) {
                             Modifier.imePadding()
