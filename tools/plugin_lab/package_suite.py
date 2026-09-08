@@ -11,8 +11,10 @@ ITEMS = [
     ("plugin-lab/packages/extension-hub/plugin.json", "plugin-extension-hub.ailp", "Parent-Plugins"),
     ("plugin-lab/packages/bridge-core/plugin.json", "bridge-core.ailp", "Parent-Plugins"),
     ("plugin-lab/packages/developer-guide/plugin.json", "developer-guide.ailp", "Parent-Plugins"),
+    ("plugin-lab/packages/system-environment-center/plugin.json", "system-environment-center.ailp", "Parent-Plugins"),
     ("plugin-lab/packages/packager/plugin.json", "ai-limbs-packager.ailp", "Parent-Plugins"),
     ("plugin-lab/packages/rdc/extension.json", "rdc-provider.ailx", "Child-Extensions"),
+    ("plugin-lab/packages/ubuntu-system/extension.json", "ubuntu-system.ailx", "Child-Extensions"),
     ("plugin-lab/packages/triggercmd/extension.json", "triggercmd-provider.ailx", "Child-Extensions"),
 ]
 def load_meta(path: str):

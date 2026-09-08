@@ -75,10 +75,11 @@ internal object DeveloperGuideContent {
                 "根清单必须是 extension.json，format=AIL_EXTENSION_V1，schema_version=1；extension_id、version、display 与 target 必填。",
                 "target.plugin_id 必须指向唯一父插件，target.extension_point 必须是父插件已发布的点，target.api 必须与当前 Point API 匹配。",
                 "当前子插件 Runtime 为 android_child，entry 是唯一声明的 APK，入口实现 ChildExtensionEntry；APK 在加载前必须保持只读。",
-                "ChildExtensionHost 暴露 extensionId、version、target、scope、dataDir、cacheDir、单次业务 binding publish()、受控 Host capability 调用，以及受父级 Slot 约束的 publishUiContribution()；UI Contribution 不授予组件定义权。",
+                "ChildExtensionHost 暴露 extensionId、version、target、scope、dataDir、cacheDir、已验证 runtimeEntryFile、父级委托 nativeRuntime、createExtensionContext()、单次业务 binding publish()、受控 Host capability 调用，以及受父级 Slot 约束的 publishUiContribution()；UI Contribution 不授予组件定义权。",
                 "子插件 mount 后必须 publish 一个且仅一个 binding；未发布、重复发布、payload 类型不匹配都必须失败并撤销已创建资源。",
                 "父插件通过 ExtensionHubService.publishPoint() 声明 point、api、allowedHostCapabilities 与 binder；父插件停用或 Point 消失时子插件必须 BLOCKED/停止。",
                 "子插件能力必须同时通过 Plugin Center 策略、父 Point 当前 allowlist、子清单声明与父插件当前实际授权四层交集；.ailx 不能越过父插件扩大宿主权限。",
+                "系统环境正式示例为 ai_limbs.system_environment.subsystem@1：父插件拥有通用外层运行控制、环境配置页和单一前台 Display Slot；Ubuntu 等 .ailx 拥有 rootfs、PTY、终端 UI 与能力端点。通用 plugin.system_environment.* 能力必须携带 subsystem_id，后台子系统不能靠前台选择被隐式路由。",
                 "Bridge Provider 正式示例为 ai_limbs.bridge.provider@3；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。",
                 "AIL_EXTENSION_V1 强制声明 SHA-256 integrity 与 Ed25519 signature；integrity.entries 必须精确覆盖除 extension.json 与 signature.entry 外的全部 payload，runtime APK 必须被覆盖，signature.entry 不得进入 integrity map。",
                 "Ed25519 detached signature 验证的对象是包内最终 extension.json 的原始字节；Plugin Extension Hub 将 signer_id、manifest 原始字节与签名交给 Plugin Center 委托网关，按固定 child_extension purpose 验签。signature.entry 由 manifest 声明，当前官方 Packager 固定使用 META-INF/AILIMBS.SIG；Hub 不获得裸 Trust Gateway、Keyring 或密钥材料。"

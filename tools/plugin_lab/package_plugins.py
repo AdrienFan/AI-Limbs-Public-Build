@@ -147,11 +147,13 @@ PARENTS = [
     ("plugin-extension-hub.ailp", ROOT / "plugin-lab/packages/extension-hub/plugin.json", find_apk("plugin-lab/plugins/extension-hub/build/outputs/apk/debug"), "payload/plugin.apk"),
     ("bridge-core.ailp", ROOT / "plugin-lab/packages/bridge-core/plugin.json", find_apk("plugin-lab/plugins/bridge-core/build/outputs/apk/debug"), "payload/plugin.apk"),
     ("developer-guide.ailp", ROOT / "plugin-lab/packages/developer-guide/plugin.json", find_apk("plugin-lab/plugins/developer-guide/build/outputs/apk/debug"), "payload/plugin.apk"),
+    ("system-environment-center.ailp", ROOT / "plugin-lab/packages/system-environment-center/plugin.json", find_apk("plugin-lab/plugins/system-environment-center/build/outputs/apk/debug"), "payload/plugin.apk"),
     ("ai-limbs-packager.ailp", ROOT / "plugin-lab/packages/packager/plugin.json", find_apk("plugin-lab/plugins/packager/build/outputs/apk/debug"), "payload/plugin.apk"),
 ]
 CHILDREN = [
     ("rdc-provider.ailx", ROOT / "plugin-lab/packages/rdc/extension.json", find_apk("plugin-lab/extensions/rdc/build/outputs/apk/debug"), "payload/extension.apk"),
     ("triggercmd-provider.ailx", ROOT / "plugin-lab/packages/triggercmd/extension.json", find_apk("plugin-lab/extensions/triggercmd/build/outputs/apk/debug"), "payload/extension.apk"),
+    ("ubuntu-system.ailx", ROOT / "plugin-lab/packages/ubuntu-system/extension.json", find_apk("plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug"), "payload/extension.apk"),
 ]
 
 

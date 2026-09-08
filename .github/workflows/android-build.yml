@@ -14,6 +14,7 @@ on:
           - developer-guide
           - ubuntu-terminal
           - rdc
+          - system-environment
 
 concurrency:
   group: plugin-lab-alt-${{ github.ref }}-${{ inputs.target }}
@@ -182,7 +183,7 @@ jobs:
 
   developer_guide:
     if: inputs.target == 'developer-guide'
-    name: Build Developer Guide v1.4.4 only
+    name: Build Developer Guide v1.5.0 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -221,7 +222,7 @@ jobs:
       - name: Upload Developer Guide payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: developer-guide-v1.4.4-${{ github.run_number }}
+          name: developer-guide-v1.5.0-${{ github.run_number }}
           path: |
             plugin-lab/plugins/developer-guide/build/outputs/apk/debug/*.apk
             plugin-lab/packages/developer-guide/plugin.json
@@ -326,5 +327,84 @@ jobs:
           path: |
             plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
             plugin-lab/packages/rdc/extension.json
+          if-no-files-found: error
+          retention-days: 14
+
+  system_environment:
+    if: inputs.target == 'system-environment'
+    name: Build System Environment split
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-36" \
+            "build-tools;35.0.0"
+
+      - name: Configure Android SDK
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Build Host, Hub, parent, child, and guide
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew \
+            :app:assembleDebug \
+            :plugin-extension-hub:assembleDebug \
+            :system-environment-center-plugin:assembleDebug \
+            :ubuntu-system-extension:assembleDebug \
+            :developer-guide-plugin:assembleDebug \
+            --stacktrace --no-daemon
+
+      - name: Upload Android reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: system-environment-reports-${{ github.run_number }}
+          path: |
+            build/reports/**
+            app/build/reports/**
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Upload system environment integration payloads
+        if: success()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: system-environment-split-${{ github.run_number }}
+          path: |
+            app/build/outputs/apk/debug/*.apk
+            plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/extension-hub/plugin.json
+            plugin-lab/plugins/system-environment-center/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/system-environment-center/plugin.json
+            plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/ubuntu-system/extension.json
+            plugin-lab/plugins/developer-guide/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/developer-guide/plugin.json
           if-no-files-found: error
           retention-days: 14

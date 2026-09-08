@@ -13,8 +13,8 @@ android {
         applicationId = "com.ai.limbs.payload.systemenvironment.center"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.2.0"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -39,15 +39,6 @@ android {
                 "META-INF/NOTICE.txt"
             )
         }
-        jniLibs {
-            excludes += setOf(
-                "**/libbash.so",
-                "**/libbusybox.so",
-                "**/liboperit_loader.so",
-                "**/liboperit_proot.so",
-                "**/libsudo.so"
-            )
-        }
     }
 }
 
@@ -55,7 +46,7 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))
-    implementation(project(":system-environment-center-core"))
+    compileOnly(project(":system-environment-contract"))
     implementation(platform(libs.compose.bom))
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)

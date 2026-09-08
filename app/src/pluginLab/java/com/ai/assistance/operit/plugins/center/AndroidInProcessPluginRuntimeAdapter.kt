@@ -1,7 +1,18 @@
 package com.ai.assistance.operit.plugins.center
 
+import android.content.Context
+import android.content.ContextWrapper
+import android.content.res.AssetManager
+import android.content.res.Resources
+import android.content.res.loader.ResourcesLoader
+import android.content.res.loader.ResourcesProvider
+import android.os.Build
+import android.os.ParcelFileDescriptor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
+import com.ai.limbs.plugin.runtime.InProcessNativeExecutableIds
+import com.ai.limbs.plugin.runtime.InProcessNativeRuntime
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
@@ -30,6 +41,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
     override suspend fun mount(context: PluginRuntimeAdapterContext): PluginRuntimeHandle {
         requireSystemPlugin(context)
         val entryFile = runtimeEntry(context)
+        freezeRuntimeApk(entryFile)
         val entryClass = runtimeEntryClass(context)
         val optimizedDir = File(context.cacheDir, "dex/${context.manifest.version}").apply { mkdirs() }
         val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
@@ -59,7 +71,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         }
 
-        val host = Host(context, runtimeScope, contributions, notificationHost)
+        val host = Host(context, entryFile, loader, runtimeScope, contributions, notificationHost)
         val handle = try {
             entry.mount(host)
         } catch (error: Throwable) {
@@ -82,6 +94,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             "plugin.system.extension_hub" -> "system_extension_hub"
             "plugin.system.bridge" -> "system_bridge"
             "plugin.system.developer_guide" -> "system_plugin"
+            "plugin.system.environment_center" -> "system_environment_center"
             else -> null
         }
         if (requiredRole == null || requiredRole !in context.manifest.roles) {
@@ -103,6 +116,21 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         return file
     }
 
+    private fun freezeRuntimeApk(file: File) {
+        if (file.canWrite() && !file.setReadOnly()) {
+            throw PluginInstallException(
+                "INPROCESS_RUNTIME_READONLY_FAILED",
+                "Could not make privileged runtime APK read-only: ${file.name}"
+            )
+        }
+        if (file.canWrite()) {
+            throw PluginInstallException(
+                "INPROCESS_RUNTIME_WRITABLE",
+                "Privileged runtime APK remains writable: ${file.name}"
+            )
+        }
+    }
+
     private fun runtimeEntryClass(context: PluginRuntimeAdapterContext): String {
         val config = context.manifest.runtime.configJson?.let(::JSONObject) ?: JSONObject()
         return config.optString("entry_class").trim().ifBlank {
@@ -114,8 +142,51 @@ internal class AndroidInProcessPluginRuntimeAdapter(
     }
 
 
+    /** UI Context for a trusted dynamic runtime APK. */
+    private class PluginArchiveContext(
+        base: Context,
+        private val runtimeApk: File,
+        private val runtimeClassLoader: ClassLoader
+    ) : ContextWrapper(base) {
+        private val archiveInfo by lazy {
+            requireNotNull(packageManager.getPackageArchiveInfo(runtimeApk.absolutePath, 0)?.applicationInfo) {
+                "Could not read plugin APK resources: ${runtimeApk.name}"
+            }.apply {
+                sourceDir = runtimeApk.absolutePath
+                publicSourceDir = runtimeApk.absolutePath
+            }
+        }
+        private val archiveResources: Resources by lazy {
+            val pluginResources = packageManager.getResourcesForApplication(archiveInfo)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                // Keep the plugin AssetManager isolated, then add the AI Limbs APK resources so
+                // parent-loaded AndroidX/Compose classes can resolve AI Limbs 0x7f resource IDs.
+                // Trusted runtime APKs use a distinct package id, so AI Limbs and plugin IDs coexist.
+                val loader = ResourcesLoader()
+                buildList {
+                    add(baseContext.applicationInfo.sourceDir)
+                    baseContext.applicationInfo.splitSourceDirs?.let { addAll(it.asList()) }
+                }.distinct().forEach { apkPath ->
+                    val provider = ParcelFileDescriptor.open(
+                        File(apkPath),
+                        ParcelFileDescriptor.MODE_READ_ONLY
+                    ).use { descriptor -> ResourcesProvider.loadFromApk(descriptor) }
+                    loader.addProvider(provider)
+                }
+                pluginResources.addLoaders(loader)
+            }
+            pluginResources
+        }
+        override fun getResources(): Resources = archiveResources
+        override fun getAssets(): AssetManager = archiveResources.assets
+        override fun getClassLoader(): ClassLoader = runtimeClassLoader
+        override fun getPackageName(): String = baseContext.packageName
+    }
+
     private class Host(
         private val context: PluginRuntimeAdapterContext,
+        override val runtimeEntryFile: File,
+        private val runtimeClassLoader: ClassLoader,
         override val scope: CoroutineScope,
         private val contributions: PluginContributionRegistry,
         private val notificationHost: PluginNotificationHost
@@ -125,14 +196,32 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val version: String = context.manifest.version
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
+        override fun createPluginContext(baseContext: Context): Context =
+            createRuntimeContext(baseContext, runtimeEntryFile, runtimeClassLoader)
+        override fun createRuntimeContext(
+            baseContext: Context,
+            runtimeEntryFile: File,
+            runtimeClassLoader: ClassLoader
+        ): Context = PluginArchiveContext(baseContext, runtimeEntryFile, runtimeClassLoader)
+        override val nativeRuntime: InProcessNativeRuntime = InProcessNativeRuntime(
+            apiVersion = 1,
+            executables = mapOf(
+                InProcessNativeExecutableIds.POSIX_BASH to File(context.appContext.applicationInfo.nativeLibraryDir, "libbash.so"),
+                InProcessNativeExecutableIds.BUSYBOX to File(context.appContext.applicationInfo.nativeLibraryDir, "libbusybox.so"),
+                InProcessNativeExecutableIds.PROOT to File(context.appContext.applicationInfo.nativeLibraryDir, "liboperit_proot.so"),
+                InProcessNativeExecutableIds.PROOT_LOADER to File(context.appContext.applicationInfo.nativeLibraryDir, "liboperit_loader.so"),
+                InProcessNativeExecutableIds.SUDO to File(context.appContext.applicationInfo.nativeLibraryDir, "libsudo.so")
+            )
+        )
         override val services: InProcessServiceDirectory = object : InProcessServiceDirectory {
             override fun resolve(id: String, minApi: Int?): InProcessServiceBinding? {
-                val resolved = context.payloadContext.serviceResolver.resolve(id, minApi) ?: return null
+                val resolved = context.payloadContext.serviceResolver.resolve(id, minApi)
+                    ?: return null
                 return InProcessServiceBinding(
-                    ownerPluginId = resolved.ownerPluginId,
-                    id = resolved.serviceId,
-                    apiVersion = resolved.apiVersion,
-                    metadata = resolved.metadata.toMap()
+                    resolved.ownerPluginId,
+                    resolved.serviceId,
+                    resolved.apiVersion,
+                    resolved.metadata.toMap()
                 ) { operation, parametersJson ->
                     val parameters = runCatching { JSONObject(parametersJson) }.getOrElse {
                         throw PluginInstallException(
@@ -144,6 +233,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 }
             }
         }
+
         override val providers: InProcessProviderDirectory = object : InProcessProviderDirectory {
             override fun resolve(id: String): InProcessProviderBinding? {
                 if (id == com.ai.limbs.plugin.runtime.InProcessSystemIds.NOTIFICATION_HOST_PROVIDER) {
@@ -177,13 +267,37 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             description: String,
             executor: InProcessCapabilityExecutor
         ) {
-            context.payloadContext.registrar.registerCapability(
-                id,
-                PluginCapabilitySpec(
+            registerCapability(
+                InProcessCapabilitySpec(
+                    id = id,
                     displayName = displayName,
                     description = description,
+                    executor = executor
+                )
+            )
+        }
+
+        override fun registerCapability(spec: InProcessCapabilitySpec) {
+            context.payloadContext.registrar.registerCapability(
+                spec.id,
+                PluginCapabilitySpec(
+                    displayName = spec.displayName,
+                    description = spec.description,
+                    invokeAliases = spec.invokeAliases,
+                    keywords = spec.keywords,
+                    parameters = spec.parameters.map { parameter ->
+                        PluginCapabilityParameterSpec(
+                            name = parameter.name,
+                            type = parameter.type,
+                            description = parameter.description,
+                            required = parameter.required,
+                            default = parameter.default
+                        )
+                    },
+                    suggestedParamsJson = spec.suggestedParamsJson,
+                    inputSchema = spec.inputSchema,
                     executor = PluginCapabilityExecutor { parameters ->
-                        val raw = executor.invoke(parameters.toString())
+                        val raw = spec.executor.invoke(parameters.toString())
                         runCatching { JSONObject(raw) }.getOrElse {
                             JSONObject().put("content", raw)
                         }
@@ -207,6 +321,9 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerScreen(screen: InProcessScreen) {
+            // Do not parse component JSON here.  android_inprocess plugins and declarative plugins
+            // must cross the same opaque ui.screen@2 boundary so future component types never create
+            // another Host runtime dependency.
             context.payloadContext.registrar.registerExtension(
                 PluginExtensionPoints.UI_SCREEN,
                 screen.id,
@@ -219,6 +336,15 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                     documentJson = screen.documentJson
                 )
             )
+        }
+
+        override fun registerExtension(
+            point: String,
+            id: String,
+            payload: Any,
+            metadata: Map<String, String>
+        ) {
+            context.payloadContext.registrar.registerExtension(point, id, payload, metadata)
         }
 
         override suspend fun invokeHostCapability(id: String, parametersJson: String): String {

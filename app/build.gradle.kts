@@ -80,6 +80,7 @@ kotlin {
 dependencies {
     implementation(project(":plugin-inprocess-api"))
     implementation(project(":bridge-contract"))
+    implementation(project(":system-environment-contract"))
     implementation(libs.androidx.core.ktx)
     implementation(libs.androidx.activity.ktx)
     implementation(libs.lifecycle.runtime.ktx)

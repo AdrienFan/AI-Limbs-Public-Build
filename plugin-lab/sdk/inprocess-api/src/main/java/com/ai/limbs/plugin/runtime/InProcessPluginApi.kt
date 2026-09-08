@@ -239,6 +239,13 @@ interface InProcessPluginHost {
      */
     fun createPluginContext(baseContext: Context): Context = baseContext
 
+    /** Builds a resource Context for a verified child runtime APK. */
+    fun createRuntimeContext(
+        baseContext: Context,
+        runtimeEntryFile: File,
+        runtimeClassLoader: ClassLoader
+    ): Context = baseContext
+
     fun registerProvider(
         id: String,
         payload: Any,
@@ -395,6 +402,12 @@ interface ChildExtensionHost {
     val scope: CoroutineScope
     val dataDir: File
     val cacheDir: File
+    /** Exact verified child runtime APK. */
+    val runtimeEntryFile: File
+    /** Parent-delegated host-owned native executable substrate. */
+    val nativeRuntime: InProcessNativeRuntime
+    /** Builds a UI/resource Context backed by this child runtime APK. */
+    fun createExtensionContext(baseContext: Context): Context
 
     fun publish(
         payload: Any,
@@ -426,5 +439,8 @@ object InProcessSystemIds {
     const val PLUGIN_CENTER_DELEGATED_GATEWAY_SERVICE = "system.plugin_center.delegated_gateway"
     const val BRIDGE_PLUGIN_ID = "plugin.system.bridge"
     const val BRIDGE_PROVIDER_POINT = "ai_limbs.bridge.provider"
+    const val SYSTEM_ENVIRONMENT_PLUGIN_ID = "plugin.system.environment_center"
+    const val SYSTEM_ENVIRONMENT_SUBSYSTEM_POINT = "ai_limbs.system_environment.subsystem"
+    const val SYSTEM_ENVIRONMENT_SUBSYSTEM_API = 1
     const val NOTIFICATION_HOST_PROVIDER = "system.notification.host"
 }

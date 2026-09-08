@@ -1,6 +1,7 @@
 package com.ai.limbs.plugins.extensionhub
 
 import android.net.Uri
+import android.os.Build
 import android.provider.DocumentsContract
 import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
@@ -447,14 +448,28 @@ private class ExtensionHubServiceImpl(
         val childScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         var bindingHandle: AutoCloseable? = null
         try {
+            val apk = prepareRuntimeApk(record)
+            val childDataDir = File(dataRoot, record.manifest.extensionId).apply { mkdirs() }
+            val childCacheDir = File(File(host.cacheDir, "child"), record.manifest.extensionId).apply { mkdirs() }
+            val nativeLibraryDir = prepareNativeLibraryDirectory(apk, childCacheDir)
+            val loader = DexClassLoader(
+                apk.absolutePath,
+                childCacheDir.absolutePath,
+                nativeLibraryDir?.absolutePath,
+                host.applicationContext.classLoader
+            )
             val childHost = object : ChildExtensionHost {
                 override val applicationContext = host.applicationContext
                 override val extensionId = record.manifest.extensionId
                 override val version = record.manifest.version
                 override val target = record.manifest.target
                 override val scope = childScope
-                override val dataDir = File(dataRoot, extensionId).apply { mkdirs() }
-                override val cacheDir = File(host.cacheDir, "child/$extensionId").apply { mkdirs() }
+                override val dataDir = childDataDir
+                override val cacheDir = childCacheDir
+                override val runtimeEntryFile = apk
+                override val nativeRuntime = host.nativeRuntime
+                override fun createExtensionContext(baseContext: android.content.Context): android.content.Context =
+                    host.createRuntimeContext(baseContext, apk, loader)
                 override fun publish(payload: Any, metadata: Map<String, String>) {
                     check(bindingHandle == null) { "Child extension may publish only one binding" }
                     bindingHandle = point.binder.bind(
@@ -525,8 +540,6 @@ private class ExtensionHubServiceImpl(
                     )
                 }
             }
-            val apk = prepareRuntimeApk(record)
-            val loader = DexClassLoader(apk.absolutePath, childHost.cacheDir.absolutePath, null, host.applicationContext.classLoader)
             val instance = loader.loadClass(record.manifest.entryClass).getDeclaredConstructor().newInstance()
             val entry = instance as? ChildExtensionEntry ?: error("${record.manifest.entryClass} does not implement ChildExtensionEntry")
             val handle = entry.mount(childHost)
@@ -542,6 +555,41 @@ private class ExtensionHubServiceImpl(
             record.lastError = error.message ?: error::class.java.simpleName
         }
         persistState(record)
+    }
+
+    private fun prepareNativeLibraryDirectory(apk: File, childCacheDir: File): File? {
+        val nativeRoot = File(childCacheDir, "native")
+        check(!nativeRoot.exists() || nativeRoot.deleteRecursively()) {
+            "Unable to clear child native library directory"
+        }
+        check(nativeRoot.mkdirs() || nativeRoot.isDirectory) {
+            "Unable to create child native library directory"
+        }
+        ZipFile(apk).use { zip ->
+            val entries = Build.SUPPORTED_ABIS.asSequence()
+                .map { abi ->
+                    val prefix = "lib/" + abi + "/"
+                    zip.entries().asSequence()
+                        .filter { entry ->
+                            !entry.isDirectory &&
+                                entry.name.startsWith(prefix) &&
+                                entry.name.endsWith(".so") &&
+                                entry.name.removePrefix(prefix).let { name ->
+                                    name.isNotBlank() && !name.contains("/")
+                                }
+                        }
+                        .toList()
+                }
+                .firstOrNull { it.isNotEmpty() }
+                ?: return null
+            entries.forEach { entry ->
+                val target = File(nativeRoot, entry.name.substringAfterLast("/"))
+                zip.getInputStream(entry).buffered().use { input ->
+                    target.outputStream().buffered().use { output -> input.copyTo(output) }
+                }
+            }
+        }
+        return nativeRoot
     }
 
     private fun prepareRuntimeApk(record: StoredExtension): File {

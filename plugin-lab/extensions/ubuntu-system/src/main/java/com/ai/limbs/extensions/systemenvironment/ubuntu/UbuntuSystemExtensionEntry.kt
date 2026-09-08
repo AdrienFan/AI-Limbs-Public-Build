@@ -1,0 +1,141 @@
+package com.ai.limbs.extensions.systemenvironment.ubuntu
+
+import android.view.View
+import com.ai.limbs.plugin.runtime.ChildExtensionEntry
+import com.ai.limbs.plugin.runtime.ChildExtensionHandle
+import com.ai.limbs.plugin.runtime.ChildExtensionHost
+import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentCapabilityEndpoint
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentCapabilityIds
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentContract
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentDisplayAdapter
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentIdleMode
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentIdlePolicy
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentRuntimeController
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentRuntimePhase
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentRuntimeState
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentSubsystemContribution
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdleMode
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdlePolicy
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+
+class UbuntuSystemExtensionEntry : ChildExtensionEntry {
+    override suspend fun mount(host: ChildExtensionHost): ChildExtensionHandle {
+        require(host.target.parentPluginId == SystemEnvironmentContract.PARENT_PLUGIN_ID)
+        require(host.target.point == SystemEnvironmentContract.EXTENSION_POINT)
+        require(host.target.apiVersion == SystemEnvironmentContract.API_VERSION)
+
+        val adapter = UbuntuChildHostAdapter(host)
+        val subsystem = UbuntuSubsystem.mount(adapter)
+        val capabilitySpecs = adapter.capabilitySpecs()
+        require(capabilitySpecs.keys == SystemEnvironmentCapabilityIds.ALL) {
+            "Ubuntu child capability set does not match the system environment contract"
+        }
+
+        host.publish(
+            SystemEnvironmentSubsystemContribution(
+                subsystemId = host.extensionId,
+                displayName = "Ubuntu",
+                description = "Ubuntu Noble arm64、PTY 与终端显示适配器。",
+                runtime = UbuntuRuntimeController(host, subsystem.terminal),
+                display = SystemEnvironmentDisplayAdapter { context ->
+                    subsystem.pageProvider.createView(context, NoSharedUi)
+                },
+                capabilities = object : SystemEnvironmentCapabilityEndpoint {
+                    override val supportedCapabilityIds = capabilitySpecs.keys
+                    override suspend fun invoke(
+                        capabilityId: String,
+                        parametersJson: String
+                    ): String {
+                        val spec = capabilitySpecs[capabilityId]
+                            ?: error("Unsupported Ubuntu capability: $capabilityId")
+                        return spec.executor.invoke(parametersJson)
+                    }
+                }
+            ),
+            metadata = mapOf(
+                "kind" to "system_environment_subsystem",
+                "display_adapter" to "android_view",
+                "runtime" to "ubuntu_noble_arm64"
+            )
+        )
+
+        return ChildExtensionHandle { subsystem.close() }
+    }
+}
+
+private class UbuntuRuntimeController(
+    host: ChildExtensionHost,
+    private val terminal: TerminalManager
+) : SystemEnvironmentRuntimeController {
+    override val state: StateFlow<SystemEnvironmentRuntimeState> =
+        terminal.ubuntuRuntimeState
+            .map { ubuntu ->
+                SystemEnvironmentRuntimeState(
+                    phase = when (ubuntu.phase) {
+                        UbuntuRuntimePhase.STOPPED -> SystemEnvironmentRuntimePhase.STOPPED
+                        UbuntuRuntimePhase.STARTING -> SystemEnvironmentRuntimePhase.STARTING
+                        UbuntuRuntimePhase.RUNNING -> SystemEnvironmentRuntimePhase.RUNNING
+                        UbuntuRuntimePhase.STOPPING -> SystemEnvironmentRuntimePhase.STOPPING
+                        UbuntuRuntimePhase.ERROR -> SystemEnvironmentRuntimePhase.FAILED
+                    },
+                    detail = ubuntu.error ?: ubuntu.detail
+                )
+            }
+            .stateIn(
+                host.scope,
+                SharingStarted.Eagerly,
+                terminal.currentUbuntuRuntimeState().let { ubuntu ->
+                    SystemEnvironmentRuntimeState(
+                        phase = SystemEnvironmentRuntimePhase.valueOf(
+                            if (ubuntu.phase == UbuntuRuntimePhase.ERROR) "FAILED" else ubuntu.phase.name
+                        ),
+                        detail = ubuntu.error ?: ubuntu.detail
+                    )
+                }
+            )
+
+    override val idlePolicy: StateFlow<SystemEnvironmentIdlePolicy> =
+        terminal.ubuntuIdlePolicy
+            .map(::toContract)
+            .stateIn(
+                host.scope,
+                SharingStarted.Eagerly,
+                toContract(terminal.currentUbuntuIdlePolicy())
+            )
+
+    override suspend fun start() {
+        terminal.startUbuntu(offerDevelopmentPrompt = false)
+    }
+
+    override suspend fun stop() {
+        terminal.stopUbuntu()
+    }
+
+    override suspend fun setIdlePolicy(policy: SystemEnvironmentIdlePolicy) {
+        terminal.updateUbuntuIdlePolicy(
+            UbuntuIdlePolicy(
+                mode = UbuntuIdleMode.valueOf(policy.mode.name),
+                customMinutes = policy.customMinutes
+            )
+        )
+    }
+
+    private fun toContract(policy: UbuntuIdlePolicy): SystemEnvironmentIdlePolicy =
+        SystemEnvironmentIdlePolicy(
+            mode = SystemEnvironmentIdleMode.valueOf(policy.mode.name),
+            customMinutes = policy.customMinutes
+        )
+}
+
+private object NoSharedUi : InProcessSharedUiHost {
+    override fun supports(componentId: String): Boolean = false
+
+    override fun createComponent(componentId: String, parametersJson: String): View =
+        error("Ubuntu display adapter does not host Plugin Center components")
+}

@@ -1,0 +1,30 @@
+{
+  "format": "AIL_EXTENSION_V1",
+  "schema_version": 1,
+  "extension_id": "ai_limbs.system_environment.ubuntu",
+  "version": "0.1.0",
+  "roles": [
+    "system_extension"
+  ],
+  "display": {
+    "name": "Ubuntu",
+    "description": "AI Limbs 系统环境中心的 Ubuntu 子系统扩展。"
+  },
+  "target": {
+    "plugin_id": "plugin.system.environment_center",
+    "extension_point": "ai_limbs.system_environment.subsystem",
+    "api": 1
+  },
+  "runtime": {
+    "kind": "android_child",
+    "entry": "payload/extension.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.extensions.systemenvironment.ubuntu.UbuntuSystemExtensionEntry"
+    }
+  },
+  "permissions": {
+    "host_capabilities": [
+      "host.network@1"
+    ]
+  }
+}

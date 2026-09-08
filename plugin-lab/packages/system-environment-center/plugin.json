@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.environment_center",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "系统环境中心",
-    "description": "系统环境中心父级插件；当前内置 Ubuntu 迁移子系统，后续统一承载 Ubuntu、Winlator 等系统环境。"
+    "description": "通用系统环境空壳、环境配置与前台 Display Slot；子系统由独立 .ailx 提供。"
   },
   "roles": [
     "system_environment_center"
@@ -36,20 +36,20 @@
   },
   "provides": {
     "capabilities": [
-      "plugin.system_environment.ubuntu.status",
-      "plugin.system_environment.ubuntu.start",
-      "plugin.system_environment.ubuntu.stop",
-      "plugin.system_environment.ubuntu.idle.get",
-      "plugin.system_environment.ubuntu.idle.set",
-      "plugin.system_environment.ubuntu.session.create",
-      "plugin.system_environment.ubuntu.session.execute",
-      "plugin.system_environment.ubuntu.command",
-      "plugin.system_environment.ubuntu.filesystem",
-      "plugin.system_environment.ubuntu.process",
-      "plugin.system_environment.ubuntu.session.input",
-      "plugin.system_environment.ubuntu.session.interrupt",
-      "plugin.system_environment.ubuntu.session.screen",
-      "plugin.system_environment.ubuntu.session.close"
+      "plugin.system_environment.status",
+      "plugin.system_environment.start",
+      "plugin.system_environment.stop",
+      "plugin.system_environment.idle.get",
+      "plugin.system_environment.idle.set",
+      "plugin.system_environment.session.create",
+      "plugin.system_environment.session.execute",
+      "plugin.system_environment.command",
+      "plugin.system_environment.filesystem",
+      "plugin.system_environment.process",
+      "plugin.system_environment.session.input",
+      "plugin.system_environment.session.interrupt",
+      "plugin.system_environment.session.screen",
+      "plugin.system_environment.session.close"
     ],
     "services": [],
     "providers": [
