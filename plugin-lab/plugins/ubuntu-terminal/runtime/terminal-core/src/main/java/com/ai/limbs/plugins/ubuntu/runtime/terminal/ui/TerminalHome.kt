@@ -873,7 +873,12 @@ private fun TerminalToolbar(
 
             Surface(
                 modifier = Modifier.clickable { showIdlePolicyDialog = true },
-                color = Color(0xFF3A3A3A),
+                color =
+                    if (idlePolicy.timeoutMinutes != null) {
+                        Color(0xFF245B3A)
+                    } else {
+                        Color(0xFF7A3434)
+                    },
                 shape = RoundedCornerShape(6.dp)
             ) {
                 Row(
