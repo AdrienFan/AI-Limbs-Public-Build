@@ -131,7 +131,10 @@ private class UbuntuTerminalPanel(
         pollJob = host.scope.launch {
             while (isActive) {
                 delay(POLL_INTERVAL_MS)
-                runCatching { refreshStatusInternal() }
+                val previousState = runCatching { refreshStatusInternal() }.getOrNull()
+                if (previousState != null) {
+                    runCatching { reconcileRuntimeState(previousState) }
+                }
                 runCatching { refreshAllScreens() }
                 runCatching { refreshSharedScreen() }
                 publishState()
@@ -159,16 +162,19 @@ private class UbuntuTerminalPanel(
                 ACTION_SHOW_SHARED -> showShared()
                 ACTION_EXECUTE -> sendCommand(payload.textRequired("command"))
                 ACTION_CTRL_C -> sendControlC()
-                ACTION_SET_IDLE -> setIdlePolicy(payload.textRequired("mode"))
+                ACTION_SET_IDLE -> setIdlePolicy(payload.textRequired("mode"), payload.optInt("custom_minutes", UbuntuIdlePolicy.DEFAULT_CUSTOM_MINUTES))
                 else -> error("未知操作：" + eventId)
             }
         }.getOrElse { failure(eventId, it) }
     }
 
-    @Synchronized
-    private fun attachUiClient(): String {
-        terminal.registerUbuntuUiClient()
-        uiClientCount += 1
+    private suspend fun attachUiClient(): String {
+        synchronized(this) {
+            terminal.registerUbuntuUiClient()
+            uiClientCount += 1
+        }
+        val previousState = refreshStatusInternal()
+        reconcileRuntimeState(previousState, forceForegroundSession = true)
         return result("Ubuntu 终端前台已连接。")
     }
 
@@ -265,6 +271,8 @@ private class UbuntuTerminalPanel(
     }
 
     private suspend fun addTab(): String {
+        refreshStatusInternal()
+        require(ubuntuState == RUNNING) { "系统未启动，无法新增终端页面" }
         val number = nextTabNumber++
         val tab = TerminalTab(
             id = "local-" + number,
@@ -273,11 +281,8 @@ private class UbuntuTerminalPanel(
         )
         tabs += tab
         activeTabId = tab.id
-        refreshStatusInternal()
-        if (ubuntuState == RUNNING) {
-            ensureSession(tab)
-            refreshTabScreen(tab)
-        }
+        ensureSession(tab)
+        refreshTabScreen(tab)
         statusMessage = tab.title + " 已创建。"
         return result(statusMessage)
     }
@@ -351,16 +356,22 @@ private class UbuntuTerminalPanel(
         return result(statusMessage)
     }
 
-    private suspend fun setIdlePolicy(mode: String): String {
-        require(activeTabId != SHARED_TAB_ID) { "兰儿共享标签为只读，不能修改环境配置" }
+    private suspend fun setIdlePolicy(mode: String, customMinutes: Int): String {
+        require(activeTabId != SHARED_TAB_ID) { "兰儿共享标签为只读，不能修改空闲策略" }
         val idleModeValue = runCatching { UbuntuIdleMode.valueOf(mode) }.getOrElse { error("不支持的空闲策略：$mode") }
-        terminal.updateUbuntuIdlePolicy(UbuntuIdlePolicy(mode = idleModeValue))
+        val policy = if (idleModeValue == UbuntuIdleMode.CUSTOM) {
+            UbuntuIdlePolicy(mode = idleModeValue, customMinutes = customMinutes)
+        } else {
+            UbuntuIdlePolicy(mode = idleModeValue)
+        }
+        terminal.updateUbuntuIdlePolicy(policy)
         refreshStatusInternal()
-        statusMessage = "Ubuntu 空闲策略已更新：" + idleLabel()
+        statusMessage = "系统空闲策略已更新：" + idleLabel()
         return result(statusMessage)
     }
 
-    private suspend fun refreshStatusInternal() {
+    private suspend fun refreshStatusInternal(): String {
+        val previousState = ubuntuState
         val runtime = terminal.currentUbuntuRuntimeState()
         val idle = terminal.currentUbuntuIdlePolicy()
         ubuntuState = runtime.phase.name
@@ -370,6 +381,30 @@ private class UbuntuTerminalPanel(
         if (ubuntuState != RUNNING) {
             tabs.forEach { it.sessionId = null }
             sharedOnline = false
+        }
+        return previousState
+    }
+
+    private suspend fun reconcileRuntimeState(
+        previousState: String,
+        forceForegroundSession: Boolean = false
+    ) {
+        val stateChanged = previousState != ubuntuState
+        if (ubuntuState == RUNNING) {
+            if (uiClientCount > 0 && (stateChanged || forceForegroundSession)) {
+                val local = activeLocalTab() ?: tabs.firstOrNull()
+                if (local != null) {
+                    ensureSession(local)
+                    refreshTabScreen(local)
+                    statusMessage = "Ubuntu 已运行，插件 PTY 会话已打开。"
+                }
+            } else if (stateChanged) {
+                statusMessage = "Ubuntu 已运行；Local 会话将在首次前台操作时创建。"
+            }
+            return
+        }
+        if (stateChanged) {
+            statusMessage = ubuntuDetail.ifBlank { "Ubuntu 状态：$ubuntuState" }
         }
     }
 
@@ -457,9 +492,9 @@ private class UbuntuTerminalPanel(
                 if (isShared) {
                     "兰儿共享当前没有输出。AI 调用 Ubuntu 终端命令能力时，这里会实时显示。"
                 } else if (ubuntuState == RUNNING) {
-                    "PTY 会话正在初始化…"
+                    "系统正在初始化，请稍后……"
                 } else {
-                    "Ubuntu 尚未启动。点击下方“启动 Ubuntu”即可打开 Local 会话。"
+                    "系统已关机，请点击启动系统使用"
                 }
             )
             .put("ubuntu_running", ubuntuState == RUNNING)
@@ -467,6 +502,8 @@ private class UbuntuTerminalPanel(
             .put("input_enabled", !isShared && ubuntuState == RUNNING && active?.sessionId != null)
             .put("local_controls_enabled", !isShared)
             .put("share_online", sharedOnline)
+            .put("idle_mode", idleMode)
+            .put("idle_timeout_minutes", idleTimeoutMinutes ?: JSONObject.NULL)
             .put("idle_label", idleLabel())
             .put("status_message", statusMessage)
             .put("prompt", "~ $")
