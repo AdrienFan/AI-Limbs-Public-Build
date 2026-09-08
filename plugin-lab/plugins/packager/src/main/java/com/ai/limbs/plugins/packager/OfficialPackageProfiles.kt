@@ -128,7 +128,7 @@ object OfficialPackageProfiles {
             pluginId = "plugin.system.ubuntu_terminal",
             version = version,
             name = "Ubuntu命令终端",
-            description = "自持有 Ubuntu Runtime、PTY、rootfs 与终端资源，并通过 Host Native Runtime v1 使用 Android 安装期原生执行底座。",
+            description = "自持有 Ubuntu 完整页面、Runtime、PTY、rootfs 与终端资源，并通过 Host Native Runtime v1 使用 Android 安装期原生执行底座。",
             role = "ubuntu_terminal",
             entryClass = "com.ai.limbs.plugins.ubuntu.UbuntuTerminalEntry"
         )
@@ -140,9 +140,9 @@ object OfficialPackageProfiles {
                 "plugin.ubuntu.session.create", "plugin.ubuntu.session.execute", "plugin.ubuntu.command",
                 "plugin.ubuntu.filesystem", "plugin.ubuntu.process", "plugin.ubuntu.session.input",
                 "plugin.ubuntu.session.interrupt", "plugin.ubuntu.session.screen",
-                "plugin.ubuntu.session.close", "plugin.ubuntu.ui_action"
+                "plugin.ubuntu.session.close"
             ),
-            providers = listOf("plugin.ubuntu.terminal_panel"),
+            providers = listOf("plugin.ubuntu.page"),
             extensions = listOf(
                 extension("ai_limbs.ui.home_tile", "plugin.system.ubuntu_terminal.tile"),
                 extension("ai_limbs.ui.screen", "plugin.system_environment.screen", api = 2)

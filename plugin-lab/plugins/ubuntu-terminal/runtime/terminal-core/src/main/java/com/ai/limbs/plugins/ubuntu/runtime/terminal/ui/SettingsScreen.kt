@@ -1,5 +1,9 @@
 package com.ai.limbs.plugins.ubuntu.runtime.terminal.ui
 
+import android.app.Application
+import android.content.Context
+import android.content.ContextWrapper
+
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -58,7 +62,7 @@ fun SettingsScreen(
     onBack: () -> Unit
 ) {
     val context = LocalContext.current
-    val viewModel: SettingsViewModel = viewModel { SettingsViewModel(context.applicationContext as android.app.Application) }
+    val viewModel: SettingsViewModel = viewModel { SettingsViewModel(context.requireHostApplication()) }
     
     val cacheSize by viewModel.cacheSize.collectAsState()
     val updateStatus by viewModel.updateStatus.collectAsState()
@@ -1382,3 +1386,12 @@ private fun AddCustomSourceDialog(
         containerColor = SettingsTheme.surfaceColor
     )
 } 
+
+private fun Context.requireHostApplication(): Application {
+    var current: Context? = this
+    while (current != null) {
+        if (current is Application) return current
+        current = (current as? ContextWrapper)?.baseContext
+    }
+    error("Unable to resolve host Application from plugin UI context")
+}

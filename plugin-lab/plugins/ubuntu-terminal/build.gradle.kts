@@ -3,6 +3,7 @@ import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.android)
+    alias(libs.plugins.kotlin.compose)
 }
 
 android {
@@ -12,14 +13,17 @@ android {
         applicationId = "com.ai.limbs.payload.ubuntu.v030"
         minSdk = 26
         targetSdk = 34
-        versionCode = 7
-        versionName = "0.3.2"
+        versionCode = 8
+        versionName = "0.3.3"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { buildConfig = false }
+    buildFeatures {
+        buildConfig = false
+        compose = true
+    }
     packaging {
         resources {
             excludes += setOf(
@@ -47,5 +51,9 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))
     implementation(project(":ubuntu-terminal-core"))
+    implementation(platform(libs.compose.bom))
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.extended)
     implementation(libs.coroutines.android)
 }
