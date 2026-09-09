@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.environment_center",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "api": {
     "target": 1,
     "min": 1
@@ -26,7 +26,12 @@
   },
   "dependencies": {
     "plugins": [],
-    "services": []
+    "services": [
+      {
+        "id": "system.plugin_center.ui_accessories",
+        "min_api": 1
+      }
+    ]
   },
   "permissions": {
     "requested_scopes": [

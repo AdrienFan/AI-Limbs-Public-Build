@@ -74,6 +74,30 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
             )
         )
 
+        val pageSlotService = host.services.resolve(
+            PLUGIN_CENTER_UI_ACCESSORY_SERVICE,
+            PLUGIN_CENTER_UI_ACCESSORY_API
+        )
+        var pageSlotRegistered = false
+        if (pageSlotService?.metadata?.get("authority") == "plugin_center") {
+            pageSlotRegistered = runCatching {
+                JSONObject(
+                    pageSlotService.invoke(
+                        "register_page_slot_action",
+                        JSONObject()
+                            .put("action_id", PAGE_SLOT_ACTION_ID)
+                            .put("target_page_id", AI_CHAT_PAGE_ID)
+                            .put("slot_id", TOP_BAR_START_SLOT)
+                            .put("provider_id", PAGE_PROVIDER_ID)
+                            .put("icon_key", "terminal")
+                            .put("content_description", "系统环境中心")
+                            .put("priority", 100)
+                            .toString()
+                    )
+                ).optBoolean("registered", false)
+            }.getOrDefault(false)
+        }
+
         var pointHandle: AutoCloseable? = null
         val pointObserver = host.scope.launch {
             host.providers.observe(InProcessSystemIds.EXTENSION_HUB_PROVIDER).collect { binding ->
@@ -99,6 +123,14 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         }
 
         return InProcessPluginHandle {
+            if (pageSlotRegistered) {
+                runCatching {
+                    pageSlotService?.invoke(
+                        "unregister_page_slot_action",
+                        JSONObject().put("action_id", PAGE_SLOT_ACTION_ID).toString()
+                    )
+                }
+            }
             pointObserver.cancelAndJoin()
             pointHandle?.close()
         }
@@ -111,5 +143,10 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         const val SYSTEM_ENVIRONMENT_PAGE_COMPONENT_ID = "system_environment_page"
         const val SYSTEM_ENVIRONMENT_CHILD_SLOT = "after"
         const val HOST_NETWORK_CAPABILITY = "host.network@1"
+        const val PLUGIN_CENTER_UI_ACCESSORY_SERVICE = "system.plugin_center.ui_accessories"
+        const val PLUGIN_CENTER_UI_ACCESSORY_API = 1
+        const val PAGE_SLOT_ACTION_ID = "system_environment_center"
+        const val AI_CHAT_PAGE_ID = "host:main.ai_chat"
+        const val TOP_BAR_START_SLOT = "top_bar_start"
     }
 }
