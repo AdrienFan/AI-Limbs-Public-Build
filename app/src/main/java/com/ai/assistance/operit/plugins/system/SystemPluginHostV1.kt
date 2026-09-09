@@ -151,6 +151,28 @@ interface SystemPageAccessoryHostV1 {
     fun registerPageAccessoryRenderer(renderer: SystemPageAccessoryRendererV1): AutoCloseable
 }
 
+object SystemPageSlotIdsV1 {
+    const val TOP_BAR_START = "top_bar_start"
+    const val TOP_BAR_END = "top_bar_end"
+    const val OVERLAY = "overlay"
+}
+
+data class SystemPageSlotContextV1(
+    val page: SystemPageContextV1,
+    val slotId: String,
+    val contentColorArgb: Int? = null,
+    val enabled: Boolean = true
+)
+
+interface SystemPageSlotRendererV1 {
+    @Composable
+    fun Render(context: SystemPageSlotContextV1)
+}
+
+interface SystemPageSlotHostV1 {
+    fun registerPageSlotRenderer(renderer: SystemPageSlotRendererV1): AutoCloseable
+}
+
 interface SystemUiHostV2 : SystemUiHostV1 {
     /**
      * Registers the single semantic owner of ordinary-plugin UI documents.
@@ -344,7 +366,7 @@ internal class KernelSystemUiHostV1(
     private val ownerPluginId: String,
     private val admittedRole: String,
     private val registry: SystemPluginUiRegistry
-) : SystemUiHostV2, SystemPageAccessoryHostV1 {
+) : SystemUiHostV2, SystemPageAccessoryHostV1, SystemPageSlotHostV1 {
     init { requirePluginCenterRole(admittedRole) }
 
     override fun registerToolboxEntry(entry: SystemToolboxEntryV1): AutoCloseable {
@@ -360,6 +382,11 @@ internal class KernelSystemUiHostV1(
     override fun registerPageAccessoryRenderer(renderer: SystemPageAccessoryRendererV1): AutoCloseable {
         requirePluginCenterRole(admittedRole)
         return registry.registerPageAccessoryRenderer(ownerPluginId, renderer)
+    }
+
+    override fun registerPageSlotRenderer(renderer: SystemPageSlotRendererV1): AutoCloseable {
+        requirePluginCenterRole(admittedRole)
+        return registry.registerPageSlotRenderer(ownerPluginId, renderer)
     }
 }
 

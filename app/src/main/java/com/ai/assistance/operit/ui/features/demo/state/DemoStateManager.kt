@@ -279,12 +279,7 @@ class DemoStateManager(private val context: Context, private val coroutineScope:
      * page must not start a System Environment runtime, create a session, or execute commands.
      */
     suspend fun refreshNodejsPythonEnvironment() {
-        val available = runCatching {
-            SystemEnvironmentClient.status()
-            true
-        }.onFailure { error ->
-            AppLogger.d(TAG, "系统环境终端支持不可用: ${error.message}")
-        }.getOrDefault(false)
+        val available = SystemEnvironmentClient.isAvailable()
 
         isPnpmInstalled.value = available
         isPythonInstalled.value = available
@@ -327,12 +322,7 @@ suspend fun refreshPermissionsAndStatus(
 
     // Pluginized terminal support is a passive availability check. Do not auto-start the runtime
     // or execute pnpm/python probes merely because the permission page is being displayed.
-    val isSystemEnvironmentAvailable = runCatching {
-        SystemEnvironmentClient.status()
-        true
-    }.onFailure { error ->
-        AppLogger.d(TAG, "系统环境终端支持不可用: ${error.message}")
-    }.getOrDefault(false)
+    val isSystemEnvironmentAvailable = SystemEnvironmentClient.isAvailable()
     updateOperitTerminalInstalled(isSystemEnvironmentAvailable)
 
     // 检查存储权限

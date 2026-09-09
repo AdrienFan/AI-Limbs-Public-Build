@@ -37,6 +37,7 @@ import androidx.compose.runtime.compositionLocalOf
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
@@ -48,6 +49,8 @@ import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.data.repository.ChatHistoryManager
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.system.SystemPageSlotContextV1
+import com.ai.assistance.operit.plugins.system.SystemPageSlotIdsV1
 import com.ai.assistance.operit.ui.common.NavItem
 import com.ai.assistance.operit.ui.common.displays.FpsCounter
 import com.ai.assistance.operit.ui.main.NavigationTransitionSource
@@ -180,6 +183,7 @@ fun AppContent(
     val backgroundImageUri = themeSnapshot.backgroundImageUri
     val hasBackgroundImage = useBackgroundImage && backgroundImageUri != null
     val pageAccessoryRenderer by PluginPlatformKernel.systemUiRegistry.pageAccessoryRenderer.collectAsState()
+    val pageSlotRenderer by PluginPlatformKernel.systemUiRegistry.pageSlotRenderer.collectAsState()
     val pluginScreens by PluginPlatformKernel.uiRegistry.activeScreens.collectAsState()
     val pluginHomeTiles by PluginPlatformKernel.uiRegistry.homeTiles.collectAsState()
     val dynamicBindings by PluginPlatformKernel.dynamicNavigationRegistry.bindings.collectAsState()
@@ -370,7 +374,23 @@ fun AppContent(
                             )
                         }
                     },
-                    actions = actions,
+                    actions = {
+                        pageSlotRenderer?.Render(
+                            SystemPageSlotContextV1(
+                                page = pageContext,
+                                slotId = SystemPageSlotIdsV1.TOP_BAR_START,
+                                contentColorArgb = appBarContentColor.toArgb()
+                            )
+                        )
+                        actions()
+                        pageSlotRenderer?.Render(
+                            SystemPageSlotContextV1(
+                                page = pageContext,
+                                slotId = SystemPageSlotIdsV1.TOP_BAR_END,
+                                contentColorArgb = appBarContentColor.toArgb()
+                            )
+                        )
+                    },
                     colors =
                     TopAppBarDefaults.topAppBarColors(
                         containerColor =
@@ -756,6 +776,18 @@ fun AppContent(
                         pageAccessoryRenderer?.let { renderer ->
                             Box(Modifier.fillMaxSize().zIndex(3f)) {
                                 renderer.Render(pageContext)
+                            }
+                        }
+
+                        pageSlotRenderer?.let { renderer ->
+                            Box(Modifier.fillMaxSize().zIndex(4f)) {
+                                renderer.Render(
+                                    SystemPageSlotContextV1(
+                                        page = pageContext,
+                                        slotId = SystemPageSlotIdsV1.OVERLAY,
+                                        contentColorArgb = appBarContentColor.toArgb()
+                                    )
+                                )
                             }
                         }
 

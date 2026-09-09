@@ -50,6 +50,10 @@ internal object SystemEnvironmentClient {
         val error: String?
     )
 
+    fun isAvailable(): Boolean =
+        PluginPlatformKernel.isInitialized &&
+            STATUS_CAPABILITY in PluginPlatformKernel.capabilities.activeIds()
+
     suspend fun status(): Status {
         val result = call(STATUS_CAPABILITY)
         val state = result.optString("state")

@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.plugins.center
 
+import com.ai.assistance.operit.plugins.system.SystemPageSlotRendererV1
 import com.ai.assistance.operit.plugins.system.SystemPageAccessoryRendererV1
 import com.ai.assistance.operit.plugins.system.SystemPluginUiRendererV2
 import com.ai.assistance.operit.plugins.system.SystemToolboxEntryV1
@@ -35,6 +36,12 @@ internal class SystemPluginUiRegistry {
         val renderer: SystemPageAccessoryRendererV1
     )
 
+    private data class OwnedPageSlotRenderer(
+        val token: String,
+        val ownerPluginId: String,
+        val renderer: SystemPageSlotRendererV1
+    )
+
     private val entries = ConcurrentHashMap<String, Owned>()
     private val mutableToolboxEntries = MutableStateFlow<List<SystemToolboxEntryV1>>(emptyList())
     private val rendererLock = Any()
@@ -43,6 +50,10 @@ internal class SystemPluginUiRegistry {
     private val accessoryRendererLock = Any()
     private var ownedPageAccessoryRenderer: OwnedPageAccessoryRenderer? = null
     private val mutablePageAccessoryRenderer = MutableStateFlow<SystemPageAccessoryRendererV1?>(null)
+    private val pageSlotRendererLock = Any()
+    private var ownedPageSlotRenderer: OwnedPageSlotRenderer? = null
+    private val mutablePageSlotRenderer =
+        MutableStateFlow<SystemPageSlotRendererV1?>(null)
 
     val toolboxEntries: StateFlow<List<SystemToolboxEntryV1>> = mutableToolboxEntries.asStateFlow()
 
@@ -56,6 +67,9 @@ internal class SystemPluginUiRegistry {
     /** Global page accessory supplied by Plugin Center. Null means the host shell renders no accessory. */
     val pageAccessoryRenderer: StateFlow<SystemPageAccessoryRendererV1?> =
         mutablePageAccessoryRenderer.asStateFlow()
+
+    val pageSlotRenderer: StateFlow<SystemPageSlotRendererV1?> =
+        mutablePageSlotRenderer.asStateFlow()
 
     fun registerToolboxEntry(ownerPluginId: String, entry: SystemToolboxEntryV1): AutoCloseable {
         val id = entry.id.trim()
@@ -128,6 +142,33 @@ internal class SystemPluginUiRegistry {
                 if (ownedPageAccessoryRenderer?.token == token) {
                     ownedPageAccessoryRenderer = null
                     mutablePageAccessoryRenderer.value = null
+                }
+            }
+        }
+    }
+
+    fun registerPageSlotRenderer(
+        ownerPluginId: String,
+        renderer: SystemPageSlotRendererV1
+    ): AutoCloseable {
+        requirePluginCenterUiOwner(ownerPluginId)
+        val token = UUID.randomUUID().toString()
+        synchronized(pageSlotRendererLock) {
+            if (ownedPageSlotRenderer != null) {
+                throw PluginInstallException(
+                    "SYSTEM_PAGE_SLOT_RENDERER_CONFLICT",
+                    "A generic page slot renderer is already registered"
+                )
+            }
+            ownedPageSlotRenderer =
+                OwnedPageSlotRenderer(token, ownerPluginId, renderer)
+            mutablePageSlotRenderer.value = renderer
+        }
+        return AutoCloseable {
+            synchronized(pageSlotRendererLock) {
+                if (ownedPageSlotRenderer?.token == token) {
+                    ownedPageSlotRenderer = null
+                    mutablePageSlotRenderer.value = null
                 }
             }
         }
