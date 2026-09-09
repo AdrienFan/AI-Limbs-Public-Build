@@ -100,6 +100,13 @@ fun interface SystemEnvironmentDisplayAdapter {
     fun createView(context: Context): View
 }
 
+interface SystemEnvironmentConfigurableDisplayAdapter : SystemEnvironmentDisplayAdapter {
+    fun createConfigurationView(
+        context: Context,
+        onRequestDisplay: () -> Unit
+    ): View
+}
+
 interface SystemEnvironmentCapabilityEndpoint {
     val supportedCapabilityIds: Set<String>
     suspend fun invoke(capabilityId: String, parametersJson: String): String
