@@ -107,7 +107,17 @@ private data class StoredExtension(
     val manifest: ExtensionManifest,
     var enabled: Boolean,
     var lifecycle: ChildExtensionLifecycle,
-    var lastError: String? = null
+    var lastError: String? = null,
+    val runtimeToken: String = UUID.randomUUID().toString()
+)
+
+private data class LoadedChildRuntime(
+    val token: String,
+    val apkDigest: String,
+    val apk: File,
+    val loader: DexClassLoader,
+    val runtimeDir: File,
+    val nativeLibraryDir: File?
 )
 
 private data class ActiveChild(
@@ -135,6 +145,9 @@ private class ExtensionHubServiceImpl(
     private val backupPolicyFile = File(root, "backup_policy.json")
     private val points = ConcurrentHashMap<String, PointRegistration>()
     private val records = ConcurrentHashMap<String, StoredExtension>()
+    // Keep code loaders resident for this Hub service lifetime. Android binds loaded JNI libraries
+    // to the ClassLoader that opened them, so child disable/enable must remount on the same loader.
+    private val loadedRuntimes = ConcurrentHashMap<String, LoadedChildRuntime>()
     private val active = ConcurrentHashMap<String, ActiveChild>()
     private val mutableSnapshots = MutableStateFlow<List<ChildExtensionSnapshot>>(emptyList())
     private val mutableBackupSnapshots = MutableStateFlow<List<ChildExtensionBackupSnapshot>>(emptyList())
@@ -451,15 +464,15 @@ private class ExtensionHubServiceImpl(
             val apk = prepareRuntimeApk(record)
             val childDataDir = File(dataRoot, record.manifest.extensionId).apply { mkdirs() }
             val childCacheDir = File(File(host.cacheDir, "child"), record.manifest.extensionId).apply { mkdirs() }
-            val nativeLibraryDir = prepareNativeLibraryDirectory(apk, childCacheDir)
-            val loader = DexClassLoader(
-                apk.absolutePath,
-                childCacheDir.absolutePath,
-                nativeLibraryDir?.absolutePath,
-                host.applicationContext.classLoader
-            )
+            val runtime = prepareLoadedRuntime(record, apk, childCacheDir)
+            val loader = runtime.loader
+            val childRuntimeCodeCacheDir = File(runtime.runtimeDir, "code-cache").apply { mkdirs() }
+            val childApplicationContext = object : android.content.ContextWrapper(host.applicationContext) {
+                override fun getApplicationContext(): android.content.Context = this
+                override fun getCodeCacheDir(): File = childRuntimeCodeCacheDir
+            }
             val childHost = object : ChildExtensionHost {
-                override val applicationContext = host.applicationContext
+                override val applicationContext = childApplicationContext
                 override val extensionId = record.manifest.extensionId
                 override val version = record.manifest.version
                 override val target = record.manifest.target
@@ -557,8 +570,43 @@ private class ExtensionHubServiceImpl(
         persistState(record)
     }
 
-    private fun prepareNativeLibraryDirectory(apk: File, childCacheDir: File): File? {
-        val nativeRoot = File(childCacheDir, "native")
+    private fun prepareLoadedRuntime(
+        record: StoredExtension,
+        apk: File,
+        childCacheDir: File
+    ): LoadedChildRuntime {
+        loadedRuntimes[record.runtimeToken]?.let { cached ->
+            check(cached.apkDigest == sha256(apk)) {
+                "Child runtime APK changed while its loaded runtime is active: ${record.manifest.extensionId}"
+            }
+            return cached
+        }
+
+        val apkDigest = sha256(apk)
+        val runtimeDir = File(
+            File(childCacheDir, "runtime"),
+            "${record.runtimeToken}-${apkDigest.take(16)}"
+        ).apply { mkdirs() }
+        val optimizedDir = File(runtimeDir, "dex").apply { mkdirs() }
+        val nativeLibraryDir = prepareNativeLibraryDirectory(apk, runtimeDir)
+        val created = LoadedChildRuntime(
+            token = record.runtimeToken,
+            apkDigest = apkDigest,
+            apk = apk,
+            loader = DexClassLoader(
+                apk.absolutePath,
+                optimizedDir.absolutePath,
+                nativeLibraryDir?.absolutePath,
+                host.applicationContext.classLoader
+            ),
+            runtimeDir = runtimeDir,
+            nativeLibraryDir = nativeLibraryDir
+        )
+        return loadedRuntimes.putIfAbsent(record.runtimeToken, created) ?: created
+    }
+
+    private fun prepareNativeLibraryDirectory(apk: File, runtimeDir: File): File? {
+        val nativeRoot = File(runtimeDir, "native")
         check(!nativeRoot.exists() || nativeRoot.deleteRecursively()) {
             "Unable to clear child native library directory"
         }
