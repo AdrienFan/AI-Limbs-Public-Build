@@ -12,4 +12,4 @@
 
 ## 版本与构建
 
-系统环境中心保持 v0.2.1，用新版本避开已安装 v0.2.0 的 digest 冲突。`system-environment` 快捷 target 继续只构建父插件，用于父插件单独修复验证。完整实机链路还需要安装匹配的正式 AI Limbs 0.8.0.4-build3 与 Extension Hub 1.5.0，再通过系统环境中心安装 Ubuntu `.ailx`。
+系统环境中心保持 v0.2.1，用新版本避开已安装 v0.2.0 的 digest 冲突。`system-environment` 快捷 target 继续只构建父插件，用于父插件单独修复验证。完整实机链路还需要安装匹配的正式 AI Limbs 0.8.0.4-build3 与 Extension Hub 1.5.1，再通过系统环境中心安装 Ubuntu `.ailx`。

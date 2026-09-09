@@ -733,7 +733,7 @@ private class ExtensionHubServiceImpl(
         val entry = safePath(runtime.getString("entry")); require(entry.lowercase().endsWith(".apk")) { "Child runtime entry must be APK" }
         val entryClass = runtime.getJSONObject("config").getString("entry_class").trim(); require(CLASS_PATTERN.matches(entryClass)) { "Invalid entry_class" }
         val requested = root.optJSONObject("permissions")?.optJSONArray("host_capabilities")?.strings() ?: emptySet()
-        requested.forEach { require(ID_PATTERN.matches(it)) { "Invalid host capability id: $it" } }
+        requested.forEach { require(HOST_CAPABILITY_ID_PATTERN.matches(it)) { "Invalid host capability id: $it" } }
         val roles = root.optJSONArray("roles")?.strings() ?: emptySet()
         roles.forEach { require(ID_PATTERN.matches(it)) { "Invalid extension role: $it" } }
 
@@ -939,6 +939,7 @@ private class ExtensionHubServiceImpl(
     companion object {
         private val SYSTEM_EXTENSION_ROLES = setOf("system", "system_extension", "system_provider")
         private val ID_PATTERN = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
+        private val HOST_CAPABILITY_ID_PATTERN = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:@[1-9][0-9]*)?$")
         private val SEMVER = Regex("^(0|[1-9]\\d*)\\.(0|[1-9]\\d*)\\.(0|[1-9]\\d*)(?:-[0-9A-Za-z.-]+)?(?:\\+[0-9A-Za-z.-]+)?$")
         private val CLASS_PATTERN = Regex("^[A-Za-z_$][A-Za-z0-9_$]*(?:\\.[A-Za-z_$][A-Za-z0-9_$]*)+$")
         private val SHA256_PATTERN = Regex("^[0-9a-f]{64}$")
