@@ -2,6 +2,7 @@ package com.ai.limbs.plugins.systemenvironment
 
 import android.content.Context
 import android.view.View
+import android.view.ViewTreeObserver
 import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -29,6 +30,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -150,7 +152,7 @@ private fun ActiveEnvironment(
     AndroidView(
         factory = { context ->
             current.contribution.display.createView(context).also { displayView ->
-                attachChassisControlsWhenReady(
+                installChassisControlRebinder(
                     root = displayView,
                     host = host,
                     current = current,
@@ -159,7 +161,7 @@ private fun ActiveEnvironment(
             }
         },
         update = { displayView ->
-            attachChassisControlsWhenReady(
+            attachChassisControlsIfPresent(
                 root = displayView,
                 host = host,
                 current = current,
@@ -170,33 +172,49 @@ private fun ActiveEnvironment(
     )
 }
 
-private fun attachChassisControlsWhenReady(
+private fun installChassisControlRebinder(
     root: View,
     host: InProcessPluginHost,
     current: MountedSystemEnvironment,
-    onOpenConfig: () -> Unit,
-    attempt: Int = 0
+    onOpenConfig: () -> Unit
+) {
+    val globalLayoutListener = ViewTreeObserver.OnGlobalLayoutListener {
+        attachChassisControlsIfPresent(root, host, current, onOpenConfig)
+    }
+    root.addOnAttachStateChangeListener(object : View.OnAttachStateChangeListener {
+        override fun onViewAttachedToWindow(view: View) {
+            if (view.viewTreeObserver.isAlive) {
+                view.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
+            }
+            attachChassisControlsIfPresent(root, host, current, onOpenConfig)
+        }
+
+        override fun onViewDetachedFromWindow(view: View) {
+            if (view.viewTreeObserver.isAlive) {
+                view.viewTreeObserver.removeOnGlobalLayoutListener(globalLayoutListener)
+            }
+        }
+    })
+    if (root.isAttachedToWindow && root.viewTreeObserver.isAlive) {
+        root.viewTreeObserver.addOnGlobalLayoutListener(globalLayoutListener)
+    }
+    root.post {
+        attachChassisControlsIfPresent(root, host, current, onOpenConfig)
+    }
+}
+
+private fun attachChassisControlsIfPresent(
+    root: View,
+    host: InProcessPluginHost,
+    current: MountedSystemEnvironment,
+    onOpenConfig: () -> Unit
 ) {
     val runtimeSlot = root.findViewWithTag<View>(CHASSIS_RUNTIME_CONTROLS_SLOT_TAG) as? FrameLayout
+        ?: return
     val presentationSlot =
         root.findViewWithTag<View>(CHASSIS_PRESENTATION_CONTROL_SLOT_TAG) as? FrameLayout
-    if (runtimeSlot == null || presentationSlot == null) {
-        if (attempt < 60) {
-            root.postDelayed(
-                {
-                    attachChassisControlsWhenReady(
-                        root,
-                        host,
-                        current,
-                        onOpenConfig,
-                        attempt + 1
-                    )
-                },
-                16L
-            )
-        }
-        return
-    }
+            ?: return
+
     if (runtimeSlot.findViewWithTag<View>(CHASSIS_RUNTIME_CONTROLS_VIEW_TAG) == null) {
         val controls = ComposeView(host.createPluginContext(runtimeSlot.context)).apply {
             tag = CHASSIS_RUNTIME_CONTROLS_VIEW_TAG
@@ -222,7 +240,7 @@ private fun attachChassisControlsWhenReady(
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
-                    ChassisPresentationControl(host)
+                    ChassisPresentationControl(host, current)
                 }
             }
         }
@@ -342,18 +360,28 @@ private fun ChassisRuntimeControls(
 }
 
 @Composable
-private fun ChassisPresentationControl(host: InProcessPluginHost) {
+private fun ChassisPresentationControl(
+    host: InProcessPluginHost,
+    current: MountedSystemEnvironment
+) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val state by current.contribution.runtime.state.collectAsState()
+    val enabled = state.phase == SystemEnvironmentRuntimePhase.RUNNING
     var showDialog by remember { mutableStateOf(false) }
+
+    LaunchedEffect(enabled) {
+        if (!enabled) showDialog = false
+    }
+
     Surface(
-        modifier = Modifier.clickable { showDialog = true },
-        color = Color(0xFF3A3A3A),
+        modifier = Modifier.clickable(enabled = enabled) { showDialog = true },
+        color = if (enabled) Color(0xFF3A3A3A) else Color(0xFF2A2A2A),
         shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp)
     ) {
         Text(
             text = "⛶",
-            color = Color.White,
+            color = if (enabled) Color.White else Color.Gray,
             fontFamily = FontFamily.Default,
             fontSize = 13.4.sp,
             modifier = Modifier.padding(horizontal = 5.6.dp, vertical = 2.8.dp)

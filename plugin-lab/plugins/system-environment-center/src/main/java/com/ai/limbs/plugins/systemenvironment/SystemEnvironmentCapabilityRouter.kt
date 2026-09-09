@@ -17,12 +17,13 @@ internal class SystemEnvironmentCapabilityRouter(
                 InProcessCapabilitySpec(
                     id = capabilityId,
                     displayName = displayName(capabilityId),
-                    description = "Routes the request to the explicitly named active system environment.",
+                    description = "Routes the request to the active system environment; subsystem_id may explicitly override it.",
                     keywords = listOf("system environment", "subsystem"),
                     parameters = listOf(
                         InProcessCapabilityParameterSpec(
                             name = "subsystem_id",
-                            description = "Active .ailx system environment extension ID."
+                            description = "Optional active .ailx system environment extension ID override.",
+                            required = false
                         )
                     ),
                     effect = effect(capabilityId),

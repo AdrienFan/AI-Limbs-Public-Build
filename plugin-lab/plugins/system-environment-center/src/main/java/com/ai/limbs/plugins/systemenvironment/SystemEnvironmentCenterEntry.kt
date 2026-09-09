@@ -42,8 +42,24 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
                         "blocks",
                         JSONArray().put(
                             JSONObject()
-                                .put("type", "plugin_page")
-                                .put("provider_id", PAGE_PROVIDER_ID)
+                                .put("type", "component_slot")
+                                .put("id", SYSTEM_ENVIRONMENT_PAGE_COMPONENT_ID)
+                                .put(
+                                    "component",
+                                    JSONObject()
+                                        .put("type", "plugin_page")
+                                        .put("provider_id", PAGE_PROVIDER_ID)
+                                )
+                                .put(
+                                    "child_slots",
+                                    JSONObject().put(
+                                        SYSTEM_ENVIRONMENT_CHILD_SLOT,
+                                        JSONObject().put(
+                                            "points",
+                                            JSONArray().put(SystemEnvironmentContract.EXTENSION_POINT)
+                                        )
+                                    )
+                                )
                         )
                     )
                     .toString()
@@ -92,6 +108,8 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         const val PAGE_PROVIDER_ID = "plugin.system_environment_center.page"
         const val TILE_ID = "plugin.system.environment_center.tile"
         const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
+        const val SYSTEM_ENVIRONMENT_PAGE_COMPONENT_ID = "system_environment_page"
+        const val SYSTEM_ENVIRONMENT_CHILD_SLOT = "after"
         const val HOST_NETWORK_CAPABILITY = "host.network@1"
     }
 }

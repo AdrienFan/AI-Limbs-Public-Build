@@ -69,10 +69,14 @@ internal class SystemEnvironmentSubsystemRegistry {
 
     suspend fun invoke(capabilityId: String, parametersJson: String): String {
         val parameters = if (parametersJson.isBlank()) JSONObject() else JSONObject(parametersJson)
-        val subsystemId = parameters.optString("subsystem_id").trim()
-        require(subsystemId.isNotBlank()) { "subsystem_id is required" }
-        val mounted = mountedById[subsystemId]
-            ?: error("System environment is not active: $subsystemId")
+        val requestedSubsystemId = parameters.optString("subsystem_id").trim()
+        val mounted = if (requestedSubsystemId.isNotBlank()) {
+            mountedById[requestedSubsystemId]
+                ?: error("System environment is not active: $requestedSubsystemId")
+        } else {
+            foreground() ?: error("No active system environment is available")
+        }
+        val subsystemId = mounted.extensionId
         require(capabilityId in mounted.contribution.capabilities.supportedCapabilityIds) {
             "System environment $subsystemId does not support $capabilityId"
         }
