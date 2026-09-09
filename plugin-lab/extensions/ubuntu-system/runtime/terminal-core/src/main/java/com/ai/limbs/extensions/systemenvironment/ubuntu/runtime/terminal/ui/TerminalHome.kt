@@ -4,6 +4,7 @@ import android.content.Context
 import android.graphics.Typeface
 import android.os.Build
 import android.view.inputmethod.InputMethodManager
+import android.widget.FrameLayout
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -35,6 +36,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.text.AnnotatedString
@@ -71,6 +73,11 @@ import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.max
 import kotlin.math.min
+
+private const val CHASSIS_RUNTIME_CONTROLS_SLOT_TAG =
+    "ai_limbs.system_environment.chassis.runtime_controls@1"
+private const val CHASSIS_PRESENTATION_CONTROL_SLOT_TAG =
+    "ai_limbs.system_environment.chassis.presentation_control@1"
 
 @RequiresApi(Build.VERSION_CODES.O)
 @Composable
@@ -809,6 +816,12 @@ private fun TerminalToolbar(
 
             Spacer(Modifier.weight(1f))
 
+            ChassisControlSlot(
+                tagValue = CHASSIS_RUNTIME_CONTROLS_SLOT_TAG,
+                minimumWidth = 140.dp,
+                minimumHeight = padding * 3.4f
+            )
+
             if (isDirectInputMode && !readOnlySharedView) {
                 Surface(
                     modifier = Modifier.clickable { onToggleVirtualKeyboard() },
@@ -844,6 +857,12 @@ private fun TerminalToolbar(
                 }
             }
 
+            ChassisControlSlot(
+                tagValue = CHASSIS_PRESENTATION_CONTROL_SLOT_TAG,
+                minimumWidth = 34.dp,
+                minimumHeight = padding * 3.4f
+            )
+
             Icon(
                 imageVector = Icons.Default.Settings,
                 contentDescription = context.getString(
@@ -858,6 +877,26 @@ private fun TerminalToolbar(
         }
     }
 }
+@Composable
+private fun ChassisControlSlot(
+    tagValue: String,
+    minimumWidth: androidx.compose.ui.unit.Dp,
+    minimumHeight: androidx.compose.ui.unit.Dp
+) {
+    AndroidView(
+        factory = { context ->
+            FrameLayout(context).apply {
+                tag = tagValue
+                clipChildren = false
+                clipToPadding = false
+            }
+        },
+        modifier = Modifier
+            .widthIn(min = minimumWidth)
+            .heightIn(min = minimumHeight)
+    )
+}
+
 @Composable
 private fun VirtualKeyboard(
     onKeyPress: (String) -> Unit,
