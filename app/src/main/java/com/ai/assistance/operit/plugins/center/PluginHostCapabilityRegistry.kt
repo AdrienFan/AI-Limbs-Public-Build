@@ -312,7 +312,15 @@ internal class PluginHostCapabilityRegistry(
             throw PluginInstallException("CAPABILITY_ID_REQUIRED", "Bridge remote tool is required")
         }
         val args = parameters.optJSONObject("args") ?: JSONObject()
-        val gatewayKey = "$ownerPluginId:${transport.wireValue}"
+        val providerId = parameters.optString("provider_id").trim()
+        if (providerId.isBlank()) {
+            throw PluginInstallException("BRIDGE_PROVIDER_ID_REQUIRED", "Bridge remote provider_id is required")
+        }
+        val scopeId = parameters.optString("scope_id").trim()
+        if (scopeId.isBlank()) {
+            throw PluginInstallException("BRIDGE_SCOPE_REQUIRED", "Bridge remote scope_id is required")
+        }
+        val gatewayKey = "$ownerPluginId:$providerId:${transport.wireValue}:$scopeId"
         val gateway = bridgeIngressGateways.computeIfAbsent(gatewayKey) {
             AiLimbsIngressGateway(
                 context,
@@ -320,7 +328,7 @@ internal class PluginHostCapabilityRegistry(
                     sourceId = transport.wireValue,
                     executionSession = AiLimbsExecutionSession(
                         transport = transport,
-                        scopeId = "bridge-${transport.wireValue}-" + UUID.randomUUID()
+                        scopeId = scopeId
                     )
                 )
             )
