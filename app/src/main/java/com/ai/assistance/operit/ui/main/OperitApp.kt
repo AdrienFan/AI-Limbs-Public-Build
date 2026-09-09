@@ -314,15 +314,10 @@ fun OperitApp(
     }
 
     fun performGoBack() {
-        if (routerState.canPop) {
-            isNavigatingBack = true
-            navigationTransitionSource = NavigationTransitionSource.DEFAULT
-            routerState.pop()
-        } else if (routerState.currentEntry.routeId != AppRouteCatalog.toEntry(Screen.AiChat).routeId) {
-            isNavigatingBack = true
-            navigationTransitionSource = NavigationTransitionSource.DEFAULT
-            routerState.resetTo(AppRouteCatalog.toEntry(Screen.AiChat))
-        }
+        if (!routerState.canPop) return
+        isNavigatingBack = true
+        navigationTransitionSource = NavigationTransitionSource.DEFAULT
+        routerState.pop()
     }
 
     fun requestGoBack() {
@@ -378,7 +373,11 @@ fun OperitApp(
         navigateTo(Screen.TokenConfig)
     }
 
-    BackHandler(enabled = currentScreen !is Screen.AiChat && !isImmersivePluginPage, onBack = { requestGoBack() })
+    // Root-level destinations leave Android Back to MainActivity, which owns double-back-to-exit.
+    BackHandler(
+        enabled = routerState.canPop && currentScreen !is Screen.AiChat && !isImmersivePluginPage,
+        onBack = { requestGoBack() }
+    )
     BackHandler(enabled = isImmersivePluginPage && currentPagePresentation != null) {
         currentPagePresentation?.let { presentation ->
             PluginPlatformKernel.pagePresentationRegistry.set(

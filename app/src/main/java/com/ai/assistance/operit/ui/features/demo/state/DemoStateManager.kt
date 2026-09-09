@@ -27,7 +27,6 @@ import androidx.lifecycle.viewModelScope
 import com.ai.assistance.operit.core.tools.system.AccessibilityProviderInstaller
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
 import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
-import com.ai.assistance.operit.data.mcp.plugins.MCPSharedSession
 import com.ai.assistance.operit.R
 
 private const val TAG = "DemoStateManager"
@@ -224,7 +223,14 @@ class DemoStateManager(private val context: Context, private val coroutineScope:
                     updateShizukuInstalled = { _uiState.value.isShizukuInstalled.value = it },
                     updateShizukuRunning = { _uiState.value.isShizukuRunning.value = it },
                     updateShizukuPermission = { _uiState.value.hasShizukuPermission.value = it },
-                    updateOperitTerminalInstalled = { _uiState.value.isOperitTerminalInstalled.value = it },
+                    updateOperitTerminalInstalled = {
+                        // Legacy UI fields now represent passive System Environment availability.
+                        // Permission-page refreshes must never start a runtime or execute probe commands.
+                        _uiState.value.isOperitTerminalInstalled.value = it
+                        isPnpmInstalled.value = it
+                        isPythonInstalled.value = it
+                        isNodejsPythonEnvironmentReady.value = it
+                    },
                     updateOperitTerminalRunning = { isOperitTerminalRunning -> 
                         // Add logic if needed for OperitTerminal running state
                     },
@@ -255,9 +261,6 @@ class DemoStateManager(private val context: Context, private val coroutineScope:
                 _uiState.value.showShizukuWizard.value = true
             }
 
-            // Check OperitTerminal status
-            refreshNodejsPythonEnvironment()
-
             // 延迟300ms以确保UI能够刷新
             delay(300)
         } catch (e: Exception) {
@@ -270,60 +273,23 @@ class DemoStateManager(private val context: Context, private val coroutineScope:
     }
 
     /**
-     * 检查NodeJS和Python环境状态
+     * Legacy compatibility state for terminal support.
+     *
+     * This is intentionally a passive availability check. Opening or refreshing the permission
+     * page must not start a System Environment runtime, create a session, or execute commands.
      */
     suspend fun refreshNodejsPythonEnvironment() {
-        try {
-            val sessionId = MCPSharedSession.getOrCreateSharedSession(context)
-            if (sessionId == null) {
-                isPnpmInstalled.value = false
-                isPythonInstalled.value = false
-                isNodejsPythonEnvironmentReady.value = false
-                return
-            }
+        val available = runCatching {
+            SystemEnvironmentClient.status()
+            true
+        }.onFailure { error ->
+            AppLogger.d(TAG, "系统环境终端支持不可用: ${error.message}")
+        }.getOrDefault(false)
 
-            // 检查pnpm安装状态
-            val pnpmResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pnpm")
-            isPnpmInstalled.value = pnpmResult.contains("pnpm")
-            
-            // 检查python安装状态
-            val pythonResult = SystemEnvironmentClient.executeSession(sessionId, "command -v python")
-            var hasPython = pythonResult.contains("python") || pythonResult.contains("/python")
-            
-            // 如果python不存在，检查python3
-            if (!hasPython) {
-                val python3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v python3")
-                hasPython = python3Result.contains("python3") || python3Result.contains("/python3")
-            }
-
-            // 检查pip安装状态 - 只有python存在时才检查pip
-            var hasPip = false
-            if (hasPython) {
-                // 尝试检查pip
-                val pipResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pip")
-                hasPip = pipResult.contains("pip")
-                
-                // 如果pip不存在，检查pip3
-                if (!hasPip) {
-                    val pip3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v pip3")
-                    hasPip = pip3Result.contains("pip3")
-                }
-            }
-
-            // 只有python和pip都可用时，python环境才算准备好
-            isPythonInstalled.value = hasPython && hasPip
-
-            // 更新环境就绪状态 - 只有pnpm和python(包含pip)都准备好时才为true
-            isNodejsPythonEnvironmentReady.value = isPnpmInstalled.value && isPythonInstalled.value
-            
-            AppLogger.d(TAG, "NodeJS环境检查 - pnpm: ${isPnpmInstalled.value}, python: $hasPython, pip: $hasPip, python环境: ${isPythonInstalled.value}, 整体ready: ${isNodejsPythonEnvironmentReady.value}")
-            
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "检查NodeJS和Python环境时出错", e)
-            isPnpmInstalled.value = false
-            isPythonInstalled.value = false
-            isNodejsPythonEnvironmentReady.value = false
-        }
+        isPnpmInstalled.value = available
+        isPythonInstalled.value = available
+        isNodejsPythonEnvironmentReady.value = available
+        _uiState.value.isOperitTerminalInstalled.value = available
     }
 }
 
@@ -359,45 +325,15 @@ suspend fun refreshPermissionsAndStatus(
         }
     updateShizukuPermission(hasShizukuPermission)
 
-    // 检查NodeJS和Python环境是否就绪（替代OperitTerminal安装检查）
-    val isNodejsPythonEnvironmentReady = try {
-        val sessionId = MCPSharedSession.getOrCreateSharedSession(context)
-        if (sessionId != null) {
-            val pnpmResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pnpm")
-            val isPnpmInstalled = pnpmResult.contains("pnpm")
-            
-            val pythonResult = SystemEnvironmentClient.executeSession(sessionId, "command -v python")
-            var hasPython = pythonResult.contains("python") || pythonResult.contains("/python")
-            
-            if (!hasPython) {
-                val python3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v python3")
-                hasPython = python3Result.contains("python3") || python3Result.contains("/python3")
-            }
-            
-            // 检查pip安装状态 - 只有python存在时才检查pip
-            var hasPip = false
-            if (hasPython) {
-                // 尝试检查pip
-                val pipResult = SystemEnvironmentClient.executeSession(sessionId, "command -v pip")
-                hasPip = pipResult.contains("pip")
-                
-                // 如果pip不存在，检查pip3
-                if (!hasPip) {
-                    val pip3Result = SystemEnvironmentClient.executeSession(sessionId, "command -v pip3")
-                    hasPip = pip3Result.contains("pip3")
-                }
-            }
-            
-            // 只有pnpm和python(包含pip)都准备好时才为true
-            isPnpmInstalled && hasPython && hasPip
-        } else {
-            false
-        }
-    } catch (e: Exception) {
-        AppLogger.e(TAG, "检查NodeJS和Python环境时出错", e)
-        false
-    }
-    updateOperitTerminalInstalled(isNodejsPythonEnvironmentReady)
+    // Pluginized terminal support is a passive availability check. Do not auto-start the runtime
+    // or execute pnpm/python probes merely because the permission page is being displayed.
+    val isSystemEnvironmentAvailable = runCatching {
+        SystemEnvironmentClient.status()
+        true
+    }.onFailure { error ->
+        AppLogger.d(TAG, "系统环境终端支持不可用: ${error.message}")
+    }.getOrDefault(false)
+    updateOperitTerminalInstalled(isSystemEnvironmentAvailable)
 
     // 检查存储权限
     val hasStoragePermission =
