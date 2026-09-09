@@ -5,6 +5,8 @@ import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatQueueChangedEvent
 import com.ai.limbs.extensions.rdc.RdcLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CompletableDeferred
@@ -16,6 +18,51 @@ import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONArray
 import org.json.JSONObject
+
+internal enum class RdcRealtimeRateLimitKind {
+    CONNECTIONS,
+    JOINS,
+    UNKNOWN
+}
+
+internal class RdcRealtimeHttpException(
+    val statusCode: Int,
+    val serverMessage: String?,
+    val retryAfterMs: Long?,
+    cause: Throwable
+) : IllegalStateException(
+    "RDC Realtime HTTP $statusCode" + serverMessage?.takeIf { it.isNotBlank() }?.let { ": $it" }.orEmpty(),
+    cause
+) {
+    val rateLimitKind: RdcRealtimeRateLimitKind = when {
+        serverMessage?.contains("Too many connected users", ignoreCase = true) == true ->
+            RdcRealtimeRateLimitKind.CONNECTIONS
+        serverMessage?.contains("Too many joins per second", ignoreCase = true) == true ->
+            RdcRealtimeRateLimitKind.JOINS
+        else -> RdcRealtimeRateLimitKind.UNKNOWN
+    }
+}
+
+private fun realtimeServerMessage(body: String?): String? {
+    val raw = body?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return runCatching { JSONObject(raw).optString("error").trim() }
+        .getOrNull()
+        ?.takeIf { it.isNotEmpty() }
+        ?: raw.take(512)
+}
+
+private fun retryAfterMillis(value: String?): Long? {
+    val raw = value?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    raw.toLongOrNull()?.takeIf { it >= 0L }?.let { seconds ->
+        return seconds.coerceAtMost(86_400L) * 1_000L
+    }
+    return runCatching {
+        val retryAtMs = ZonedDateTime.parse(raw, DateTimeFormatter.RFC_1123_DATE_TIME)
+            .toInstant()
+            .toEpochMilli()
+        (retryAtMs - System.currentTimeMillis()).coerceAtLeast(0L)
+    }.getOrNull()
+}
 
 /**
  * Supabase Realtime transport used by the current Remote Desktop Commander device protocol.
@@ -40,6 +87,7 @@ internal class AiLimbsRdcRealtimeTransport(
     private val pendingAcks = ConcurrentHashMap<String, CompletableDeferred<Boolean>>()
     private val topic = "realtime:user:$userId"
     private val legacyTopic = "realtime:device_tool_call_queue"
+    private val socketLock = Any()
 
     @Volatile private var socket: WebSocket? = null
     @Volatile private var joinRef: String? = null
@@ -51,9 +99,12 @@ internal class AiLimbsRdcRealtimeTransport(
     @Volatile private var failureCause: Throwable? = null
 
     suspend fun connectAndAwaitReady(timeoutMs: Long) {
-        check(socket == null) { "RDC Realtime transport is already connected" }
         val request = Request.Builder().url(webSocketUrl()).build()
-        socket = httpClient.newWebSocket(request, listener)
+        synchronized(socketLock) {
+            check(socket == null) { "RDC Realtime transport is already connected" }
+            check(!closing) { "RDC Realtime transport is already closing" }
+            socket = httpClient.newWebSocket(request, listener)
+        }
         val joined = withTimeoutOrNull(timeoutMs) {
             ready.await()
             true
@@ -66,7 +117,7 @@ internal class AiLimbsRdcRealtimeTransport(
 
     fun throwIfFailed() {
         failureCause?.let { error ->
-            throw IllegalStateException("RDC Realtime transport failed: ${error.message}", error)
+            throw error
         }
         check(readyState) { "RDC Realtime transport is not ready" }
     }
@@ -147,29 +198,35 @@ internal class AiLimbsRdcRealtimeTransport(
     }
 
     fun close(force: Boolean = false) {
-        closing = true
-        readyState = false
-        val currentSocket = socket
-        val currentJoinRef = joinRef
-        val currentLegacyJoinRef = legacyJoinRef
-        if (currentSocket != null && currentJoinRef != null) {
-            sendFrame(topic, "phx_leave", JSONObject(), ref(), currentJoinRef)
+        synchronized(socketLock) {
+            closing = true
+            readyState = false
+            val currentSocket = socket
+            val currentJoinRef = joinRef
+            val currentLegacyJoinRef = legacyJoinRef
+            if (currentSocket != null && currentJoinRef != null) {
+                sendFrame(topic, "phx_leave", JSONObject(), ref(), currentJoinRef)
+            }
+            if (currentSocket != null && currentLegacyJoinRef != null) {
+                sendFrame(legacyTopic, "phx_leave", JSONObject(), ref(), currentLegacyJoinRef)
+            }
+            currentSocket?.close(1000, "AI Limbs RDC transport closing")
+            if (force) {
+                // Recovery must not let a half-open socket linger while the replacement channel starts.
+                currentSocket?.cancel()
+            }
+            socket = null
         }
-        if (currentSocket != null && currentLegacyJoinRef != null) {
-            sendFrame(legacyTopic, "phx_leave", JSONObject(), ref(), currentLegacyJoinRef)
-        }
-        currentSocket?.close(1000, "AI Limbs RDC transport closing")
-        if (force) {
-            // Recovery must not let a half-open socket linger while the replacement channel starts.
-            currentSocket?.cancel()
-        }
-        socket = null
         pendingAcks.values.forEach { it.complete(false) }
         pendingAcks.clear()
     }
 
     private val listener = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
+            if (closing) {
+                webSocket.cancel()
+                return
+            }
             val newJoinRef = ref()
             joinRef = newJoinRef
             val payload = JSONObject()
@@ -231,7 +288,20 @@ internal class AiLimbsRdcRealtimeTransport(
         }
 
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            if (!closing) fail(t)
+            val failure = response?.let { failedResponse ->
+                val statusCode = failedResponse.code
+                val retryAfterMs = retryAfterMillis(failedResponse.header("Retry-After"))
+                val responseBody = runCatching { failedResponse.body?.string() }.getOrNull()
+                val serverMessage = realtimeServerMessage(responseBody)
+                failedResponse.close()
+                RdcLogger.w(
+                    TAG,
+                    "RDC Realtime handshake failed: http=$statusCode, " +
+                        "server=${serverMessage ?: "unspecified"}, retryAfterMs=${retryAfterMs ?: -1L}"
+                )
+                RdcRealtimeHttpException(statusCode, serverMessage, retryAfterMs, t)
+            } ?: t
+            if (!closing) fail(failure)
         }
 
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
