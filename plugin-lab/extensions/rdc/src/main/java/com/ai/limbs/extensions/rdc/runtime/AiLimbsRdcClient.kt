@@ -16,6 +16,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkState
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatBridgeService
 import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatQueueChangedEvent
 import com.ai.limbs.extensions.rdc.runtime.chat.requiresWorkAttention
@@ -28,7 +29,6 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -62,17 +62,11 @@ import org.json.JSONObject
  */
 class AiLimbsRdcClient(
     context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    remoteIngress: BridgeRemoteIngress
 ) {
     private val appContext = context.applicationContext
-    private val remoteExecutor =
-        AiLimbsRemoteInvocationExecutor(
-            appContext,
-            AiLimbsExecutionSession(
-                transport = AiLimbsExecutionTransport.RDC,
-                scopeId = "rdc-" + UUID.randomUUID()
-            )
-        )
+    private val remoteExecutor = AiLimbsRemoteInvocationExecutor(remoteIngress)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val adapter = AiLimbsRdcToolAdapter(appContext, remoteExecutor)
     private val searchCompat = AiLimbsRdcSearchCompat(remoteExecutor, scope)

@@ -12,6 +12,7 @@ class BridgeProviderRegistry {
         check(factory.type !in factoriesByType) {
             "Bridge factory type is already registered: ${factory.type}"
         }
+        check(factory.transportId.isNotBlank()) { "Bridge factory transportId must not be blank: ${factory.type}" }
         factory.profiles.forEach { profile ->
             check(profile.type == factory.type) {
                 "Bridge profile ${profile.id} has type ${profile.type}, expected ${factory.type}"
@@ -53,10 +54,18 @@ class BridgeProviderRegistry {
     fun create(
         profile: BridgeProfile,
         context: Context,
-        scope: CoroutineScope
+        scope: CoroutineScope,
+        remoteIngressFactory: BridgeRemoteIngressFactory
     ): AiLimbsBridgeProvider {
         val factory = requireFactory(profile)
-        val provider = factory.create(context, scope, profile)
+        val remoteIngress = remoteIngressFactory.create(factory.transportId, profile.id)
+        check(remoteIngress.transportId == factory.transportId) {
+            "Bridge ingress transport mismatch for ${profile.id}: ${remoteIngress.transportId} != ${factory.transportId}"
+        }
+        check(remoteIngress.providerId == profile.id) {
+            "Bridge ingress provider mismatch: ${remoteIngress.providerId} != ${profile.id}"
+        }
+        val provider = factory.create(context, scope, profile, remoteIngress)
         check(provider.id == profile.id) {
             "Bridge factory returned provider ${provider.id} for profile ${profile.id}"
         }

@@ -8,6 +8,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import com.ai.assistance.operit.integrations.ailimbs.NativeBridgeProfile
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
@@ -15,9 +16,10 @@ import kotlinx.coroutines.flow.StateFlow
 internal class RdcBridgeProvider private constructor(
     context: Context,
     scope: CoroutineScope,
-    private val profile: NativeBridgeProfile
+    private val profile: NativeBridgeProfile,
+    remoteIngress: BridgeRemoteIngress
 ) : AiLimbsBridgeProvider {
-    private val client = AiLimbsRdcClient(context, scope)
+    private val client = AiLimbsRdcClient(context, scope, remoteIngress)
 
     override val id: String
         get() = profile.id
@@ -47,6 +49,7 @@ internal class RdcBridgeProvider private constructor(
 
     internal class Factory : BridgeProviderFactory {
         override val type: String = PROFILE_TYPE
+        override val transportId: String = "rdc"
         override val profiles: List<BridgeProfile> =
             listOf(
                 NativeBridgeProfile(
@@ -63,7 +66,8 @@ internal class RdcBridgeProvider private constructor(
         override fun create(
             context: Context,
             scope: CoroutineScope,
-            profile: BridgeProfile
+            profile: BridgeProfile,
+            remoteIngress: BridgeRemoteIngress
         ): AiLimbsBridgeProvider {
             require(profile is NativeBridgeProfile) {
                 "RDC requires a NativeBridgeProfile"
@@ -71,7 +75,7 @@ internal class RdcBridgeProvider private constructor(
             require(profile.id == PROFILE_ID && profile.type == PROFILE_TYPE) {
                 "Unsupported RDC profile: ${profile.id} (${profile.type})"
             }
-            return RdcBridgeProvider(context, scope, profile)
+            return RdcBridgeProvider(context, scope, profile, remoteIngress)
         }
     }
 
