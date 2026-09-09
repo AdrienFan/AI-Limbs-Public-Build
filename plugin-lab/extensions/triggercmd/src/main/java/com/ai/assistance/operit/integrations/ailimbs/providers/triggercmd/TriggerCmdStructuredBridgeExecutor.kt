@@ -1,12 +1,9 @@
 // Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; host execution is adapted separately.
 package com.ai.assistance.operit.integrations.ailimbs.providers.triggercmd
 
-import android.content.Context
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRemoteInvocationExecutor
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import java.util.LinkedHashMap
-import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -22,9 +19,9 @@ internal class TriggerCmdStructuredBridgeExecutor(
     private data class RequestRecord(val signature: String)
     private data class CachedResponse(val signature: String, val response: String)
 
-    constructor(context: Context, scope: CoroutineScope) : this(
+    constructor(remoteIngress: BridgeRemoteIngress, scope: CoroutineScope) : this(
         scope = scope,
-        executeRemote = createRemoteExecutor(context)
+        executeRemote = createRemoteExecutor(remoteIngress)
     )
 
     private val stateMutex = Mutex()
@@ -100,16 +97,9 @@ internal class TriggerCmdStructuredBridgeExecutor(
         private const val MAX_CACHED_RESPONSES = 128
 
         private fun createRemoteExecutor(
-            context: Context
+            remoteIngress: BridgeRemoteIngress
         ): suspend (String, JSONObject) -> JSONObject {
-            val remoteExecutor =
-                AiLimbsRemoteInvocationExecutor(
-                    context.applicationContext,
-                    AiLimbsExecutionSession(
-                        transport = AiLimbsExecutionTransport.TRIGGERCMD,
-                        scopeId = "triggercmd-" + UUID.randomUUID()
-                    )
-                )
+            val remoteExecutor = AiLimbsRemoteInvocationExecutor(remoteIngress)
             return { tool, args -> remoteExecutor.execute(tool, args) }
         }
     }

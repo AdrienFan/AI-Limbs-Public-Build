@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.bridge",
-  "version": "1.3.7",
+  "version": "1.3.8",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "Bridge",
-    "description": "AI Limbs Bridge Core：发布 ai_limbs.bridge.provider@3，由 .ailx 子插件动态提供 RDC、TRIGGERcmd 等 Bridge Provider。"
+    "description": "AI Limbs Bridge Core：发布 ai_limbs.bridge.provider@4，由 .ailx 子插件动态提供 RDC、TRIGGERcmd 等 Bridge Provider。"
   },
   "roles": [
     "system_bridge"

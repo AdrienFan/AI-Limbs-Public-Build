@@ -20,7 +20,8 @@ import kotlinx.coroutines.launch
  */
 class PluginBridgeManager(
     context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val remoteIngressFactory: BridgeRemoteIngressFactory
 ) {
     private val appContext = context.applicationContext
     private val registry = PluginBridgeProviderCatalog.createRegistry()
@@ -28,9 +29,15 @@ class PluginBridgeManager(
         appContext.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
     private var activeProfileValue =
         registry.requireProfile(initializeActiveProviderId(preferences, registry))
+    private val remoteIngressByProviderId = linkedMapOf<String, BridgeRemoteIngress>()
     private val providersById: MutableMap<String, AiLimbsBridgeProvider> =
         registry.profiles.associate { profile ->
-            profile.id to registry.create(profile, appContext, scope)
+            val capturingFactory = BridgeRemoteIngressFactory { transportId, providerId ->
+                remoteIngressFactory.create(transportId, providerId).also { ingress ->
+                    remoteIngressByProviderId[providerId] = ingress
+                }
+            }
+            profile.id to registry.create(profile, appContext, scope, capturingFactory)
         }.toMutableMap()
     private val providerStateJobs = mutableMapOf<String, Job>()
     private val stateFlow = MutableStateFlow(selectedProvider().state.value)
@@ -69,6 +76,7 @@ class PluginBridgeManager(
     fun startIfDesired() {
         providersById.values.forEach { provider ->
             if (provider.enabled && desiredConnected(provider.id)) {
+                beginIngressSession(provider)
                 provider.start()
             } else {
                 provider.markStopped()
@@ -122,6 +130,7 @@ class PluginBridgeManager(
 
         val nextProvider = selectedProvider()
         if (nextProvider.enabled && desiredConnected(nextProvider.id) && !nextProvider.isRunning) {
+            beginIngressSession(nextProvider)
             nextProvider.start()
         }
     }
@@ -148,6 +157,7 @@ class PluginBridgeManager(
     private fun connectProvider(provider: AiLimbsBridgeProvider) {
         check(provider.enabled) { "Bridge provider is disabled: ${provider.id}" }
         setDesiredConnected(provider.id, true)
+        beginIngressSession(provider)
         provider.start()
     }
 
@@ -165,6 +175,7 @@ class PluginBridgeManager(
             rePairAwaitingAuthorizationProviderId = null
         }
         setDesiredConnected(provider.id, true)
+        beginIngressSession(provider)
         provider.reconnect()
     }
 
@@ -174,6 +185,7 @@ class PluginBridgeManager(
             rePairAwaitingAuthorizationProviderId = null
         }
         setDesiredConnected(provider.id, true)
+        beginIngressSession(provider)
         provider.recover()
     }
 
@@ -182,6 +194,7 @@ class PluginBridgeManager(
         rePairAwaitingAuthorizationProviderId = provider.id
         setDesiredConnected(provider.id, false)
         try {
+            beginIngressSession(provider)
             provider.rePair()
         } catch (e: Exception) {
             rePairAwaitingAuthorizationProviderId = null
@@ -191,6 +204,7 @@ class PluginBridgeManager(
 
     private fun verifyProviderLiveness(provider: AiLimbsBridgeProvider) {
         if (provider.enabled && desiredConnected(provider.id) && !provider.isRunning) {
+            beginIngressSession(provider)
             provider.start()
         } else {
             provider.verifyLiveness()
@@ -200,6 +214,7 @@ class PluginBridgeManager(
     internal fun onHostSignal(signal: AiLimbsBridgeHostSignal) {
         providersById.values.forEach { provider ->
             if (provider.enabled && desiredConnected(provider.id) && !provider.isRunning) {
+                beginIngressSession(provider)
                 provider.start()
             }
             provider.onHostSignal(signal)
@@ -210,6 +225,13 @@ class PluginBridgeManager(
         providersById.values.joinToString(separator = " | ") { provider ->
             "${provider.id}=${provider.statusSummary}"
         }
+
+    private fun beginIngressSession(provider: AiLimbsBridgeProvider) {
+        val ingress = checkNotNull(remoteIngressByProviderId[provider.id]) {
+            "Bridge remote ingress is missing: ${provider.id}"
+        }
+        ingress.beginSession()
+    }
 
     private fun providerFor(providerId: String?): AiLimbsBridgeProvider {
         if (providerId.isNullOrBlank()) return selectedProvider()

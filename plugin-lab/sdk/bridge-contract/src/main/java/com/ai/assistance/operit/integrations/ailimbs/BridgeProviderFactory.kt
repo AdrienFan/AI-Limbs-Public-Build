@@ -4,6 +4,7 @@ package com.ai.assistance.operit.integrations.ailimbs
 import android.content.Context
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
+import org.json.JSONObject
 
 enum class AiLimbsBridgeNetworkState {
     UNKNOWN,
@@ -31,6 +32,18 @@ sealed interface AiLimbsBridgeHostSignal {
     ) : AiLimbsBridgeHostSignal
 }
 
+interface BridgeRemoteIngress {
+    val transportId: String
+    val providerId: String
+
+    fun beginSession()
+    suspend fun invoke(tool: String, args: JSONObject = JSONObject()): JSONObject
+}
+
+fun interface BridgeRemoteIngressFactory {
+    fun create(transportId: String, providerId: String): BridgeRemoteIngress
+}
+
 interface AiLimbsBridgeProvider {
     val id: String
     val enabled: Boolean
@@ -55,12 +68,14 @@ interface AiLimbsBridgeProvider {
 
 interface BridgeProviderFactory {
     val type: String
+    val transportId: String
     val profiles: List<BridgeProfile>
     val supportedActions: Set<BridgeAction>
 
     fun create(
         context: Context,
         scope: CoroutineScope,
-        profile: BridgeProfile
+        profile: BridgeProfile,
+        remoteIngress: BridgeRemoteIngress
     ): AiLimbsBridgeProvider
 }

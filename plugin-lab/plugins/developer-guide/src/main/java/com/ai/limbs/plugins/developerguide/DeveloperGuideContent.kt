@@ -73,7 +73,7 @@ internal object DeveloperGuideContent {
                 "子插件 mount 后必须 publish 一个且仅一个 binding；未发布、重复发布、payload 类型不匹配都必须失败并撤销已创建资源。",
                 "父插件通过 ExtensionHubService.publishPoint() 声明 point、api、allowedHostCapabilities 与 binder；父插件停用或 Point 消失时子插件必须 BLOCKED/停止。",
                 "子插件能力必须同时通过 Plugin Center 策略、父 Point 当前 allowlist、子清单声明与父插件当前实际授权四层交集；.ailx 不能越过父插件扩大宿主权限。",
-                "Bridge Provider 正式示例为 ai_limbs.bridge.provider@3；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。",
+                "Bridge Provider 正式示例为 ai_limbs.bridge.provider@4；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。",
                 "Plugin Extension Hub 对 .ailx 全量 payload 执行 SHA-256，并通过 Plugin Center 委托网关按固定 child_extension purpose 完成 Ed25519 验签；Hub 不获得裸 Trust Gateway、Keyring 或密钥材料。"
             )
         ),

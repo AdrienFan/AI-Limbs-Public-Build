@@ -11,6 +11,8 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderControl
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelFieldKind
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelState
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderNotificationState
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngressFactory
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
 import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
@@ -25,6 +27,7 @@ import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -55,6 +58,43 @@ class BridgePluginEntry : InProcessPluginEntry {
     }
 }
 
+private class HostBridgeRemoteIngress(
+    private val host: InProcessPluginHost,
+    override val transportId: String,
+    override val providerId: String
+) : BridgeRemoteIngress {
+    @Volatile
+    private var scopeId: String = newScopeId()
+
+    init {
+        require(transportId.isNotBlank()) { "Bridge transportId must not be blank" }
+        require(providerId.isNotBlank()) { "Bridge providerId must not be blank" }
+    }
+
+    override fun beginSession() {
+        scopeId = newScopeId()
+    }
+
+    override suspend fun invoke(tool: String, args: JSONObject): JSONObject {
+        require(tool.isNotBlank()) { "Bridge remote tool must not be blank" }
+        val currentScopeId = scopeId
+        val request = JSONObject()
+            .put("transport", transportId)
+            .put("provider_id", providerId)
+            .put("scope_id", currentScopeId)
+            .put("tool", tool)
+            .put("args", JSONObject(args.toString()))
+        return JSONObject(
+            host.invokeHostCapability(BRIDGE_REMOTE_INVOKE_CAPABILITY_ID, request.toString())
+        )
+    }
+
+    private fun newScopeId(): String =
+        "bridge-$transportId-$providerId-${UUID.randomUUID()}"
+}
+
+private const val BRIDGE_REMOTE_INVOKE_CAPABILITY_ID = "core.bridge.remote.invoke"
+
 private class BridgeRuntime(
     private val host: InProcessPluginHost
 ) {
@@ -66,6 +106,9 @@ private class BridgeRuntime(
     )
 
     private val contributions = ConcurrentHashMap<String, BridgeProviderContribution>()
+    private val remoteIngressFactory = BridgeRemoteIngressFactory { transportId, providerId ->
+        HostBridgeRemoteIngress(host, transportId, providerId)
+    }
     private val presentationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutablePresentation = MutableStateFlow(BridgePresentationState())
     private val presentation = mutablePresentation.asStateFlow()
@@ -209,10 +252,10 @@ private class BridgeRuntime(
             pointHandle = nextHub.publishPoint(
                 ownerPluginId = host.pluginId,
                 point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
-                apiVersion = 3,
+                apiVersion = 4,
                 title = "Bridge Provider",
                 description = "AI Limbs remote Bridge provider contract",
-                allowedHostCapabilities = setOf("core.bridge.remote.invoke"),
+                allowedHostCapabilities = emptySet(),
                 binder = ChildExtensionBinder { binding ->
                     bindContribution(generation, binding.extensionId, binding.payload)
                 }
@@ -305,7 +348,7 @@ private class BridgeRuntime(
             return
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val nextManager = PluginBridgeManager(host.applicationContext, scope)
+        val nextManager = PluginBridgeManager(host.applicationContext, scope, remoteIngressFactory)
         managerScope = scope
         manager = nextManager
         nextManager.startIfDesired()
