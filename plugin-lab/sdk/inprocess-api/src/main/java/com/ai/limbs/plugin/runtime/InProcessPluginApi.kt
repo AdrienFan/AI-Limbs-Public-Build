@@ -112,6 +112,7 @@ object InProcessSharedUiComponentIds {
     const val CHILD_EXTENSION_INSTALLER = "plugin_center.shared.child_extension_installer"
     const val CHILD_EXTENSION_SELECTOR = "plugin_center.shared.child_extension_selector"
     const val CHILD_EXTENSION_LIST = "plugin_center.shared.child_extension_list"
+    const val PAGE_ACCESSORY_SUPPRESSOR = "plugin_center.shared.page_accessory_suppressor"
 }
 
 /**

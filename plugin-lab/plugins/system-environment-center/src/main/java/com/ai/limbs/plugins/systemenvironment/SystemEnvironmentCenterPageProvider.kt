@@ -21,6 +21,8 @@ import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
@@ -53,6 +55,7 @@ import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiComponentIds
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentConfigurableDisplayAdapter
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentContract
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentIdleMode
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentIdlePolicy
@@ -91,13 +94,12 @@ private fun SystemEnvironmentCenterPage(
         CenterRoute.DISPLAY -> SystemEnvironmentDisplayPage(
             host = host,
             current = mounted.firstOrNull { it.extensionId == foregroundId },
+            sharedUi = sharedUi,
             onOpenConfig = { route = CenterRoute.ENVIRONMENT_CONFIG }
         )
         CenterRoute.ENVIRONMENT_CONFIG -> EnvironmentConfigPage(
             mounted = mounted,
-            foregroundId = foregroundId,
             sharedUi = sharedUi,
-            onSelect = registry::setForeground,
             onBack = { route = CenterRoute.DISPLAY }
         )
     }
@@ -116,11 +118,13 @@ private const val CHASSIS_PRESENTATION_CONTROL_VIEW_TAG =
 private fun SystemEnvironmentDisplayPage(
     host: InProcessPluginHost,
     current: MountedSystemEnvironment?,
+    sharedUi: InProcessSharedUiHost,
     onOpenConfig: () -> Unit
 ) {
     Box(
         modifier = Modifier.fillMaxSize().background(Color.Black)
     ) {
+        PageAccessorySuppressionLease(sharedUi)
         if (current == null) {
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
@@ -141,6 +145,16 @@ private fun SystemEnvironmentDisplayPage(
             }
         }
     }
+}
+
+@Composable
+private fun PageAccessorySuppressionLease(sharedUi: InProcessSharedUiHost) {
+    val componentId = InProcessSharedUiComponentIds.PAGE_ACCESSORY_SUPPRESSOR
+    if (!sharedUi.supports(componentId)) return
+    AndroidView(
+        factory = { sharedUi.createComponent(componentId) },
+        modifier = Modifier.size(0.dp)
+    )
 }
 
 @Composable
@@ -514,13 +528,10 @@ private fun idleModeLabel(mode: SystemEnvironmentIdleMode): String = when (mode)
 @Composable
 private fun EnvironmentConfigPage(
     mounted: List<MountedSystemEnvironment>,
-    foregroundId: String?,
     sharedUi: InProcessSharedUiHost,
-    onSelect: (String?) -> Unit,
     onBack: () -> Unit
 ) {
     val installerId = InProcessSharedUiComponentIds.CHILD_EXTENSION_INSTALLER
-    val listId = InProcessSharedUiComponentIds.CHILD_EXTENSION_LIST
     val installerParameters = remember {
         JSONObject()
             .put("label", "+ 添加系统环境")
@@ -529,14 +540,6 @@ private fun EnvironmentConfigPage(
             .put("api", SystemEnvironmentContract.API_VERSION)
             .toString()
     }
-    val listParameters = remember {
-        JSONObject()
-            .put("parent_plugin_id", SystemEnvironmentContract.PARENT_PLUGIN_ID)
-            .put("point", SystemEnvironmentContract.EXTENSION_POINT)
-            .put("api", SystemEnvironmentContract.API_VERSION)
-            .toString()
-    }
-
     Column(modifier = Modifier.fillMaxSize().background(Color.Black).padding(12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
@@ -552,39 +555,6 @@ private fun EnvironmentConfigPage(
         }
 
         Text(
-            "已激活系统环境",
-            color = Color.White,
-            modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)
-        )
-        if (mounted.isEmpty()) {
-            Text("当前没有运行中的子系统插件。", color = Color.Gray)
-        } else {
-            mounted.forEach { item ->
-                Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth().padding(12.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(item.displayName)
-                            Text(
-                                "${item.extensionId} · ${item.version}",
-                                style = MaterialTheme.typography.bodySmall
-                            )
-                        }
-                        if (foregroundId == item.extensionId) {
-                            Text("正在显示", color = MaterialTheme.colorScheme.primary)
-                        } else {
-                            OutlinedButton(onClick = { onSelect(item.extensionId) }) {
-                                Text("设为显示")
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        Text(
             "安装与生命周期",
             color = Color.White,
             modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)
@@ -597,13 +567,121 @@ private fun EnvironmentConfigPage(
         } else {
             Text("Plugin Center 未提供子插件安装组件。", color = Color.Red)
         }
-        if (sharedUi.supports(listId)) {
-            AndroidView(
-                factory = { sharedUi.createComponent(listId, listParameters) },
-                modifier = Modifier.fillMaxWidth().weight(1f)
-            )
+
+        Text(
+            "已激活系统环境",
+            color = Color.White,
+            modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)
+        )
+        if (mounted.isEmpty()) {
+            Text("当前没有运行中的子系统插件。", color = Color.Gray)
         } else {
-            Text("Plugin Center 未提供子插件列表组件。", color = Color.Red)
+            mounted.forEach { item ->
+                EnvironmentRuntimeCard(item)
+            }
+        }
+
+        SystemEnvironmentConfigurationSelector(
+            mounted = mounted,
+            onRequestDisplay = onBack
+        )
+    }
+}
+
+@Composable
+private fun EnvironmentRuntimeCard(item: MountedSystemEnvironment) {
+    val runtimeState by item.contribution.runtime.state.collectAsState()
+    val (statusText, statusColor) = when (runtimeState.phase) {
+        SystemEnvironmentRuntimePhase.RUNNING -> "已启动" to Color(0xFF66BB6A)
+        SystemEnvironmentRuntimePhase.STOPPED -> "已关闭" to Color(0xFFEF5350)
+        SystemEnvironmentRuntimePhase.STARTING -> "启动中" to Color(0xFFFFB74D)
+        SystemEnvironmentRuntimePhase.STOPPING -> "关闭中" to Color(0xFFFFB74D)
+        SystemEnvironmentRuntimePhase.FAILED -> "启动失败" to Color(0xFFEF5350)
+    }
+    Card(modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth().padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text(item.displayName)
+                Text(
+                    "${item.extensionId} · ${item.version}",
+                    style = MaterialTheme.typography.bodySmall
+                )
+            }
+            Text(statusText, color = statusColor, fontWeight = FontWeight.Medium)
+        }
+    }
+}
+
+@Composable
+private fun SystemEnvironmentConfigurationSelector(
+    mounted: List<MountedSystemEnvironment>,
+    onRequestDisplay: () -> Unit
+) {
+    var expanded by remember { mutableStateOf(false) }
+    var selectedId by remember { mutableStateOf<String?>(null) }
+    val mountedIds = mounted.map { it.extensionId }
+
+    LaunchedEffect(mountedIds) {
+        if (selectedId !in mountedIds) {
+            selectedId = mounted.firstOrNull()?.extensionId
+        }
+    }
+
+    val selected = mounted.firstOrNull { it.extensionId == selectedId }
+
+    Text(
+        "系统环境配置",
+        color = Color.White,
+        modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)
+    )
+    Box(modifier = Modifier.fillMaxWidth()) {
+        OutlinedButton(
+            onClick = { expanded = true },
+            enabled = mounted.isNotEmpty(),
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text(selected?.displayName ?: "请选择系统环境")
+            Text("  ▼")
+        }
+        DropdownMenu(
+            expanded = expanded,
+            onDismissRequest = { expanded = false },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            mounted.forEach { item ->
+                DropdownMenuItem(
+                    text = { Text(item.displayName) },
+                    onClick = {
+                        selectedId = item.extensionId
+                        expanded = false
+                    }
+                )
+            }
+        }
+    }
+
+    val configurationAdapter =
+        selected?.contribution?.display as? SystemEnvironmentConfigurableDisplayAdapter
+    when {
+        selected == null -> Text("当前没有可配置的系统环境。", color = Color.Gray)
+        configurationAdapter == null -> Text(
+            "该系统环境暂未提供环境配置。",
+            color = Color.Gray,
+            modifier = Modifier.padding(top = 8.dp)
+        )
+        else -> key(selected.extensionId) {
+            AndroidView(
+                factory = { context ->
+                    configurationAdapter.createConfigurationView(
+                        context = context,
+                        onRequestDisplay = onRequestDisplay
+                    )
+                },
+                modifier = Modifier.fillMaxWidth().padding(top = 8.dp)
+            )
         }
     }
 }

@@ -7,6 +7,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import android.view.View
 import android.view.WindowManager
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -16,6 +17,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
@@ -25,10 +27,13 @@ import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.type.TerminalType
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.rememberTerminalEnv
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.SettingsScreen
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.StandardDevelopmentEnvironmentCard
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.TerminalHome
 import java.io.File
+import kotlinx.coroutines.launch
 
 internal class UbuntuSubsystemPageProvider(
     private val host: InProcessPluginHost,
@@ -39,14 +44,7 @@ internal class UbuntuSubsystemPageProvider(
         context: Context,
         @Suppress("UNUSED_PARAMETER") sharedUi: InProcessSharedUiHost
     ): View {
-        val uiContext = UbuntuSubsystemRuntimeContext(
-            base = host.createPluginContext(context),
-            pluginId = host.pluginId,
-            pluginDataDir = host.dataDir,
-            pluginCacheDir = host.cacheDir,
-            nativeLibraryDir = nativeLibraryDir
-        )
-        return ComposeView(uiContext).apply {
+        return ComposeView(createUiContext(context)).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
@@ -55,9 +53,68 @@ internal class UbuntuSubsystemPageProvider(
             }
         }
     }
+
+    fun createConfigurationView(
+        context: Context,
+        onRequestDisplay: () -> Unit
+    ): View = ComposeView(createUiContext(context)).apply {
+        setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+        setContent {
+            MaterialTheme(colorScheme = darkColorScheme()) {
+                UbuntuConfigurationPanel(terminal, onRequestDisplay)
+            }
+        }
+    }
+
+    private fun createUiContext(context: Context): Context = UbuntuSubsystemRuntimeContext(
+        base = host.createPluginContext(context),
+        pluginId = host.pluginId,
+        pluginDataDir = host.dataDir,
+        pluginCacheDir = host.cacheDir,
+        nativeLibraryDir = nativeLibraryDir
+    )
 }
 
 private enum class UbuntuDisplayRoute { TERMINAL, SETTINGS }
+
+@Composable
+private fun UbuntuConfigurationPanel(
+    terminal: TerminalManager,
+    onRequestDisplay: () -> Unit
+) {
+    val context = LocalContext.current
+    val coroutineScope = rememberCoroutineScope()
+    var launching by remember { mutableStateOf(false) }
+
+    StandardDevelopmentEnvironmentCard(
+        enabled = !launching,
+        onOpenGuide = {
+            launching = true
+            coroutineScope.launch {
+                val foreground = terminal.terminalState.value.sessions
+                    .firstOrNull { !it.isBackground && it.terminalType == TerminalType.LOCAL }
+                val prepared = terminal.prepareDevelopmentEnvironmentInstaller()
+                if (foreground != null && prepared) {
+                    terminal.switchToSession(foreground.id)
+                    terminal.sendCommandToSession(
+                        foreground.id,
+                        "/usr/local/lib/ai-limbs/bootstrap.sh --force-prompt"
+                    )
+                    onRequestDisplay()
+                } else {
+                    Toast.makeText(
+                        context,
+                        context.getString(
+                            com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_open_failed
+                        ),
+                        Toast.LENGTH_SHORT
+                    ).show()
+                }
+                launching = false
+            }
+        }
+    )
+}
 
 @Composable
 private fun UbuntuDisplay(terminal: TerminalManager) {

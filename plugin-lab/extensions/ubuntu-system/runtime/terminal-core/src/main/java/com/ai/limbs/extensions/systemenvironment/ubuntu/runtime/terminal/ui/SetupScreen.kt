@@ -311,56 +311,33 @@ fun SetupScreen(
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth().padding(bottom = 16.dp),
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF243247)),
-            shape = RoundedCornerShape(8.dp)
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Text(
-                    text = context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_title),
-                    color = Color.White,
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(6.dp))
-                Text(
-                    text = context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_desc),
-                    color = Color.LightGray,
-                    fontSize = 12.sp
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Button(
-                    enabled = !standardEnvironmentLaunching,
-                    onClick = {
-                        standardEnvironmentLaunching = true
-                        coroutineScope.launch {
-                            val foreground = terminalManager.terminalState.value.sessions
-                                .firstOrNull { !it.isBackground && it.terminalType == TerminalType.LOCAL }
-                            val prepared = terminalManager.prepareDevelopmentEnvironmentInstaller()
-                            if (foreground != null && prepared) {
-                                terminalManager.switchToSession(foreground.id)
-                                terminalManager.sendCommandToSession(
-                                    foreground.id,
-                                    "/usr/local/lib/ai-limbs/bootstrap.sh --force-prompt"
-                                )
-                                onBack()
-                            } else {
-                                Toast.makeText(
-                                    context,
-                                    context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_open_failed),
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            }
-                            standardEnvironmentLaunching = false
-                        }
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006400))
-                ) {
-                    Text(context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_open_guide))
+        StandardDevelopmentEnvironmentCard(
+            enabled = !standardEnvironmentLaunching,
+            modifier = Modifier.padding(bottom = 16.dp),
+            onOpenGuide = {
+                standardEnvironmentLaunching = true
+                coroutineScope.launch {
+                    val foreground = terminalManager.terminalState.value.sessions
+                        .firstOrNull { !it.isBackground && it.terminalType == TerminalType.LOCAL }
+                    val prepared = terminalManager.prepareDevelopmentEnvironmentInstaller()
+                    if (foreground != null && prepared) {
+                        terminalManager.switchToSession(foreground.id)
+                        terminalManager.sendCommandToSession(
+                            foreground.id,
+                            "/usr/local/lib/ai-limbs/bootstrap.sh --force-prompt"
+                        )
+                        onBack()
+                    } else {
+                        Toast.makeText(
+                            context,
+                            context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_open_failed),
+                            Toast.LENGTH_SHORT
+                        ).show()
+                    }
+                    standardEnvironmentLaunching = false
                 }
             }
-        }
+        )
 
         // 包分类列表
         LazyColumn(
@@ -500,6 +477,43 @@ fun SetupScreen(
                 colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006400))
             ) {
                 Text(context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.start_setup), color = Color.White)
+            }
+        }
+    }
+}
+
+@Composable
+fun StandardDevelopmentEnvironmentCard(
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    onOpenGuide: () -> Unit
+) {
+    val context = LocalContext.current
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        colors = CardDefaults.cardColors(containerColor = Color(0xFF243247)),
+        shape = RoundedCornerShape(8.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_title),
+                color = Color.White,
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+            Text(
+                text = context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_desc),
+                color = Color.LightGray,
+                fontSize = 12.sp
+            )
+            Spacer(modifier = Modifier.height(12.dp))
+            Button(
+                enabled = enabled,
+                onClick = onOpenGuide,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF006400))
+            ) {
+                Text(context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.standard_dev_env_open_guide))
             }
         }
     }

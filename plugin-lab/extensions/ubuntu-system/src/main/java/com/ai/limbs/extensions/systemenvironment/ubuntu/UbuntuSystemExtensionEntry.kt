@@ -8,7 +8,7 @@ import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentCapabilityEndpoint
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentCapabilityIds
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentContract
-import com.ai.limbs.systemenvironment.contract.SystemEnvironmentDisplayAdapter
+import com.ai.limbs.systemenvironment.contract.SystemEnvironmentConfigurableDisplayAdapter
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentIdleMode
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentIdlePolicy
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentRuntimeController
@@ -43,8 +43,17 @@ class UbuntuSystemExtensionEntry : ChildExtensionEntry {
                 displayName = "Ubuntu",
                 description = "Ubuntu Noble arm64、PTY 与终端显示适配器。",
                 runtime = UbuntuRuntimeController(host, subsystem.terminal),
-                display = SystemEnvironmentDisplayAdapter { context ->
-                    subsystem.pageProvider.createView(context, NoSharedUi)
+                display = object : SystemEnvironmentConfigurableDisplayAdapter {
+                    override fun createView(context: android.content.Context): View =
+                        subsystem.pageProvider.createView(context, NoSharedUi)
+
+                    override fun createConfigurationView(
+                        context: android.content.Context,
+                        onRequestDisplay: () -> Unit
+                    ): View = subsystem.pageProvider.createConfigurationView(
+                        context = context,
+                        onRequestDisplay = onRequestDisplay
+                    )
                 },
                 capabilities = object : SystemEnvironmentCapabilityEndpoint {
                     override val supportedCapabilityIds = capabilitySpecs.keys

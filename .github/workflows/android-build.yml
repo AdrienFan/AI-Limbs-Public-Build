@@ -382,7 +382,7 @@ jobs:
 
   ubuntu_system:
     if: inputs.target == 'ubuntu-system'
-    name: Build Ubuntu System v0.1.2 child extension only
+    name: Build Ubuntu System v0.1.3 child extension only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -421,7 +421,7 @@ jobs:
       - name: Upload Ubuntu System child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ubuntu-system-v0.1.2-${{ github.run_number }}
+          name: ubuntu-system-v0.1.3-${{ github.run_number }}
           path: |
             plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-system/extension.json
@@ -430,7 +430,7 @@ jobs:
 
   system_environment:
     if: inputs.target == 'system-environment'
-    name: Build System Environment Center v0.2.3 only
+    name: Build System Environment Center v0.2.4 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -487,7 +487,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: system-environment-center-v0.2.3-${{ github.run_number }}
+          name: system-environment-center-v0.2.4-${{ github.run_number }}
           path: |
             plugin-lab/plugins/system-environment-center/build/outputs/apk/debug/*.apk
             plugin-lab/packages/system-environment-center/plugin.json
