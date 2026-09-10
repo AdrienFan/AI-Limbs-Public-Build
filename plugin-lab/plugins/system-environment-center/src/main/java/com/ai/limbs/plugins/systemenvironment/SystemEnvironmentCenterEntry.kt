@@ -22,7 +22,6 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         }
         val registry = SystemEnvironmentSubsystemRegistry()
         val pageProvider = SystemEnvironmentCenterPageProvider(host, registry)
-        SystemEnvironmentCapabilityRouter(registry).register(host)
 
         host.registerProvider(
             PAGE_PROVIDER_ID,

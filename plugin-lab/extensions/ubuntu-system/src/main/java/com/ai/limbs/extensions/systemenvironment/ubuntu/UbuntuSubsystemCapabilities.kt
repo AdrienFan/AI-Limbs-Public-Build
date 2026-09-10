@@ -28,35 +28,40 @@ internal object UbuntuSubsystemCapabilities {
 
     private fun capabilities(terminal: TerminalManager): List<InProcessCapabilitySpec> = listOf(
         spec(
-            id = "plugin.system_environment.status",
+            id = "plugin.ubuntu.status",
+            invokeAliases = listOf("plugin.system_environment.status"),
             name = "查询 Ubuntu 状态",
             description = "读取 系统环境中心内置 Ubuntu 子系统持有 Runtime 的生命周期、空闲策略与当前使用者状态。",
             keywords = listOf("Ubuntu", "Linux", "状态", "生命周期", "runtime"),
             effect = InProcessCapabilityEffect.READ_ONLY
         ) { status(terminal) },
         spec(
-            id = "plugin.system_environment.start",
+            id = "plugin.ubuntu.start",
+            invokeAliases = listOf("plugin.system_environment.start"),
             name = "启动 Ubuntu",
             description = "启动 系统环境中心内置 Ubuntu 子系统持有的本地 Runtime。AI 调用不会触发前台开发环境提示。",
             keywords = listOf("Ubuntu", "Linux", "启动", "开机", "runtime"),
             effect = InProcessCapabilityEffect.STATE_CHANGE
         ) { start(terminal) },
         spec(
-            id = "plugin.system_environment.stop",
+            id = "plugin.ubuntu.stop",
+            invokeAliases = listOf("plugin.system_environment.stop"),
             name = "停止 Ubuntu",
             description = "停止 Ubuntu Runtime；若前台 UI 或其他隐藏 AI 操作仍在使用则拒绝。",
             keywords = listOf("Ubuntu", "Linux", "停止", "关机", "并发保护"),
             effect = InProcessCapabilityEffect.STATE_CHANGE
         ) { stop(terminal) },
         spec(
-            id = "plugin.system_environment.idle.get",
+            id = "plugin.ubuntu.idle.get",
+            invokeAliases = listOf("plugin.system_environment.idle.get"),
             name = "查询 Ubuntu 空闲策略",
             description = "读取 Ubuntu Runtime 的空闲自动停止策略。",
             keywords = listOf("Ubuntu", "空闲", "自动关机", "idle"),
             effect = InProcessCapabilityEffect.READ_ONLY
         ) { idleGet(terminal) },
         spec(
-            id = "plugin.system_environment.idle.set",
+            id = "plugin.ubuntu.idle.set",
+            invokeAliases = listOf("plugin.system_environment.idle.set"),
             name = "修改 Ubuntu 空闲策略",
             description = "修改 Ubuntu Runtime 的空闲自动停止策略；CUSTOM 时 custom_minutes 为 1 到 1440。",
             keywords = listOf("Ubuntu", "空闲", "自动关机", "保持开机", "idle"),
@@ -68,7 +73,8 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.STATE_CHANGE
         ) { p -> idleSet(terminal, p) },
         spec(
-            id = "plugin.system_environment.session.create",
+            id = "plugin.ubuntu.session.create",
+            invokeAliases = listOf("plugin.system_environment.session.create"),
             name = "创建 Ubuntu 终端会话",
             description = "创建或复用一个插件自持有的持久终端会话。",
             keywords = listOf("Ubuntu", "terminal", "终端", "会话", "PTY"),
@@ -77,7 +83,8 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.STATE_CHANGE
         ) { p -> sessionCreate(terminal, p) },
         spec(
-            id = "plugin.system_environment.session.execute",
+            id = "plugin.ubuntu.session.execute",
+            invokeAliases = listOf("plugin.system_environment.session.execute"),
             name = "在 Ubuntu 会话中执行命令",
             description = "向指定持久终端会话发送命令并等待该命令完成；适合需要保留 shell 状态的任务。",
             keywords = listOf("Ubuntu", "terminal", "命令", "shell", "持久会话"),
@@ -90,7 +97,8 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.PROCESS_EXECUTION
         ) { p -> sessionExecute(terminal, p) },
         spec(
-            id = "plugin.system_environment.command",
+            id = "plugin.ubuntu.command",
+            invokeAliases = listOf("plugin.system_environment.command"),
             name = "执行 Ubuntu 隐藏命令",
             description = "在插件自持有的后台 Ubuntu shell 中执行一次命令，不占用前台终端标签。",
             keywords = listOf("Ubuntu", "terminal", "后台", "隐藏命令", "shell"),
@@ -103,7 +111,8 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.PROCESS_EXECUTION
         ) { p -> hiddenExecute(terminal, p) },
         spec(
-            id = "plugin.system_environment.session.input",
+            id = "plugin.ubuntu.session.input",
+            invokeAliases = listOf("plugin.system_environment.session.input"),
             name = "向 Ubuntu 会话输入",
             description = "向持久 PTY 会话写入文本或终端控制键；支持 Ctrl/Alt/Shift 组合。",
             keywords = listOf("Ubuntu", "terminal", "输入", "PTY", "交互"),
@@ -115,7 +124,8 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.PROCESS_EXECUTION
         ) { p -> sessionInput(terminal, p) },
         spec(
-            id = "plugin.system_environment.session.interrupt",
+            id = "plugin.ubuntu.session.interrupt",
+            invokeAliases = listOf("plugin.system_environment.session.interrupt"),
             name = "中断 Ubuntu 会话",
             description = "向指定终端会话发送 Ctrl+C/SIGINT 语义的中断。",
             keywords = listOf("Ubuntu", "terminal", "中断", "Ctrl+C", "SIGINT"),
@@ -123,7 +133,8 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.STATE_CHANGE
         ) { p -> sessionInterrupt(terminal, p) },
         spec(
-            id = "plugin.system_environment.session.screen",
+            id = "plugin.ubuntu.session.screen",
+            invokeAliases = listOf("plugin.system_environment.session.screen"),
             name = "读取 Ubuntu 会话屏幕",
             description = "读取指定持久终端当前可见屏幕，不包含历史滚动缓冲。",
             keywords = listOf("Ubuntu", "terminal", "屏幕", "输出", "PTY"),
@@ -131,7 +142,8 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.READ_ONLY
         ) { p -> sessionScreen(terminal, p) },
         spec(
-            id = "plugin.system_environment.session.close",
+            id = "plugin.ubuntu.session.close",
+            invokeAliases = listOf("plugin.system_environment.session.close"),
             name = "关闭 Ubuntu 终端会话",
             description = "关闭指定插件终端会话并释放对应 PTY。",
             keywords = listOf("Ubuntu", "terminal", "关闭会话", "PTY"),
@@ -364,7 +376,7 @@ internal object UbuntuSubsystemCapabilities {
     private fun requireRunning(terminal: TerminalManager) {
         val state = terminal.currentUbuntuRuntimeState()
         require(state.phase == UbuntuRuntimePhase.RUNNING) {
-            state.error ?: "Ubuntu is ${state.phase.name}. Call plugin.system_environment.start first."
+            state.error ?: "Ubuntu is ${state.phase.name}. Call plugin.ubuntu.start first."
         }
     }
 

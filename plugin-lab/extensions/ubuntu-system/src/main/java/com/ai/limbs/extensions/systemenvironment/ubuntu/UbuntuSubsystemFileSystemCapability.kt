@@ -27,14 +27,16 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal object UbuntuSubsystemFileSystemCapability {
-    const val ID = "plugin.system_environment.filesystem"
+    const val ID = "plugin.ubuntu.filesystem"
+    private const val LEGACY_ID = "plugin.system_environment.filesystem"
 
     fun register(host: InProcessPluginHost, terminal: TerminalManager) {
         host.registerCapability(
             InProcessCapabilitySpec(
                 id = ID,
+                invokeAliases = listOf(LEGACY_ID),
                 displayName = "Ubuntu 文件系统",
-                description = "访问当前 System Environment Provider 的文件系统；Ubuntu 本地模式使用插件 rootfs，SSH 模式使用当前 SSH/SFTP 文件系统。",
+                description = "访问 Ubuntu 子插件持有的文件系统；本地模式使用 Ubuntu rootfs，SSH 模式使用当前 SSH/SFTP 文件系统。",
                 keywords = listOf("Ubuntu", "Linux", "文件系统", "SSH", "SFTP", "zip", "unzip"),
                 parameters = listOf(
                     param("operation", "string", "文件系统操作名"),

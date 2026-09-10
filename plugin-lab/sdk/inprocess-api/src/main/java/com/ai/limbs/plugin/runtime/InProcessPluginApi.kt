@@ -269,6 +269,12 @@ interface InProcessPluginHost {
         )
     }
 
+    /** Privileged Extension Hub path for lifecycle-bound child-owned capabilities. */
+    fun registerChildCapability(
+        ownerExtensionId: String,
+        spec: InProcessCapabilitySpec
+    ): AutoCloseable = error("Child capability publication is not supported by this host")
+
     fun registerHomeTile(tile: InProcessHomeTile)
     fun registerScreen(screen: InProcessScreen)
 
@@ -409,6 +415,10 @@ interface ChildExtensionHost {
     val nativeRuntime: InProcessNativeRuntime
     /** Builds a UI/resource Context backed by this child runtime APK. */
     fun createExtensionContext(baseContext: Context): Context
+
+    /** Publishes a capability owned by this verified child extension instance. */
+    fun registerCapability(spec: InProcessCapabilitySpec): AutoCloseable =
+        error("Child capability publication is not supported by this host")
 
     fun publish(
         payload: Any,

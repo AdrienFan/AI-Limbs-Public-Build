@@ -29,7 +29,8 @@ internal class UbuntuSubsystemProcessCapability(
     private val terminal: TerminalManager
 ) {
     companion object {
-        const val ID = "plugin.system_environment.process"
+        const val ID = "plugin.ubuntu.process"
+        private const val LEGACY_ID = "plugin.system_environment.process"
         private const val MAX_INITIAL_WAIT_MS = 30_000L
         private const val MAX_READ_WAIT_MS = 30_000L
         private const val MAX_INTERACT_WAIT_MS = 30_000L
@@ -72,6 +73,7 @@ internal class UbuntuSubsystemProcessCapability(
         host.registerCapability(
             InProcessCapabilitySpec(
                 id = ID,
+                invokeAliases = listOf(LEGACY_ID),
                 displayName = "Ubuntu 后台进程",
                 description = "插件自持有的后台 Ubuntu 进程协议，提供启动、增量读取、交互、列表和终止；供任意已授权入口通过统一能力层调用，不暴露 Base Terminal 实现。",
                 keywords = listOf("Ubuntu", "process", "后台", "PTY", "交互"),
@@ -151,7 +153,7 @@ internal class UbuntuSubsystemProcessCapability(
             if (existing == null) {
                 terminal.finishSharedHiddenOperation(sharedOperationId, null, "Persistent session not found: $requestedSessionId")
                 terminal.unregisterHiddenAiOperation()
-                return failure("Persistent system-environment session was not found: $requestedSessionId")
+                return failure("Persistent Ubuntu session was not found: $requestedSessionId")
             }
             existing.id
         } else {

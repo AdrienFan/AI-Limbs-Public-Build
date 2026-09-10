@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.environment_center",
-  "version": "0.2.6",
+  "version": "0.2.7",
   "api": {
     "target": 1,
     "min": 1
@@ -40,22 +40,7 @@
     ]
   },
   "provides": {
-    "capabilities": [
-      "plugin.system_environment.status",
-      "plugin.system_environment.start",
-      "plugin.system_environment.stop",
-      "plugin.system_environment.idle.get",
-      "plugin.system_environment.idle.set",
-      "plugin.system_environment.session.create",
-      "plugin.system_environment.session.execute",
-      "plugin.system_environment.command",
-      "plugin.system_environment.filesystem",
-      "plugin.system_environment.process",
-      "plugin.system_environment.session.input",
-      "plugin.system_environment.session.interrupt",
-      "plugin.system_environment.session.screen",
-      "plugin.system_environment.session.close"
-    ],
+    "capabilities": [],
     "services": [],
     "providers": [
       "plugin.system_environment_center.page"

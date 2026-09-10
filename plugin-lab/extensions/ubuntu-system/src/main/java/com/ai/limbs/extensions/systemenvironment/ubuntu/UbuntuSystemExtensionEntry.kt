@@ -33,8 +33,11 @@ class UbuntuSystemExtensionEntry : ChildExtensionEntry {
         val adapter = UbuntuChildHostAdapter(host)
         val subsystem = UbuntuSubsystem.mount(adapter)
         val capabilitySpecs = adapter.capabilitySpecs()
-        require(capabilitySpecs.keys == SystemEnvironmentCapabilityIds.ALL) {
-            "Ubuntu child capability set does not match the system environment contract"
+        val supportedCapabilityNames = capabilitySpecs.values.flatMapTo(linkedSetOf()) { spec ->
+            listOf(spec.id) + spec.invokeAliases
+        }
+        require(SystemEnvironmentCapabilityIds.ALL.all { it in supportedCapabilityNames }) {
+            "Ubuntu child must preserve the legacy system-environment aliases"
         }
 
         host.publish(
@@ -56,12 +59,16 @@ class UbuntuSystemExtensionEntry : ChildExtensionEntry {
                     )
                 },
                 capabilities = object : SystemEnvironmentCapabilityEndpoint {
-                    override val supportedCapabilityIds = capabilitySpecs.keys
+                    override val supportedCapabilityIds = supportedCapabilityNames
                     override suspend fun invoke(
                         capabilityId: String,
                         parametersJson: String
                     ): String {
-                        val spec = capabilitySpecs[capabilityId]
+                        val normalized = capabilityId.trim().lowercase()
+                        val spec = capabilitySpecs[normalized]
+                            ?: capabilitySpecs.values.firstOrNull { candidate ->
+                                candidate.invokeAliases.any { it.trim().lowercase() == normalized }
+                            }
                             ?: error("Unsupported Ubuntu capability: $capabilityId")
                         return spec.executor.invoke(parametersJson)
                     }

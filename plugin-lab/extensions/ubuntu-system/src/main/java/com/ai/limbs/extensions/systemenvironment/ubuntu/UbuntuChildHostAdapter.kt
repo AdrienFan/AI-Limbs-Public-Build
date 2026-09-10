@@ -78,6 +78,12 @@ internal class UbuntuChildHostAdapter(
         check(capabilitiesById.putIfAbsent(spec.id, spec) == null) {
             "Duplicate Ubuntu child capability: ${spec.id}"
         }
+        try {
+            child.registerCapability(spec)
+        } catch (error: Throwable) {
+            capabilitiesById.remove(spec.id, spec)
+            throw error
+        }
     }
 
     override fun registerHomeTile(tile: InProcessHomeTile) {

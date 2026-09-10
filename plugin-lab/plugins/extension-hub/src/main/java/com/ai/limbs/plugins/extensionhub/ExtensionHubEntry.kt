@@ -14,6 +14,8 @@ import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionTarget
 import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
 import com.ai.limbs.plugin.runtime.InProcessUiContributionProvider
+import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
@@ -48,15 +50,23 @@ class ExtensionHubEntry : InProcessPluginEntry {
     }
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
         val service = ExtensionHubServiceImpl(host)
-        service.start()
-        host.registerProvider(InProcessSystemIds.EXTENSION_HUB_PROVIDER, service,
-            mapOf("format" to ExtensionPackage.FORMAT, "package_extension" to ExtensionPackage.SUFFIX))
-        host.registerCapability(
-            CHILD_BACKUP_EXPORT_CAPABILITY,
-            "导出子插件备份",
-            "将选中的 .ailx 备份复制到用户通过系统目录选择器授权的目录。"
-        ) { parametersJson -> service.exportBackups(parametersJson) }
-        return InProcessPluginHandle { service.stop() }
+        try {
+            service.start()
+            host.registerProvider(
+                InProcessSystemIds.EXTENSION_HUB_PROVIDER,
+                service,
+                mapOf("format" to ExtensionPackage.FORMAT, "package_extension" to ExtensionPackage.SUFFIX)
+            )
+            host.registerCapability(
+                CHILD_BACKUP_EXPORT_CAPABILITY,
+                "导出子插件备份",
+                "将选中的 .ailx 备份复制到用户通过系统目录选择器授权的目录。"
+            ) { parametersJson -> service.exportBackups(parametersJson) }
+            return InProcessPluginHandle { service.stop() }
+        } catch (error: Throwable) {
+            runCatching { service.stop() }
+            throw error
+        }
     }
 }
 
@@ -123,6 +133,7 @@ private data class LoadedChildRuntime(
 private data class ActiveChild(
     val handle: ChildExtensionHandle,
     val bindingHandle: AutoCloseable?,
+    val capabilityHandles: List<AutoCloseable>,
     val scope: CoroutineScope
 )
 
@@ -460,6 +471,7 @@ private class ExtensionHubServiceImpl(
         record.lastError = null
         val childScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         var bindingHandle: AutoCloseable? = null
+        val childCapabilityHandles = mutableListOf<AutoCloseable>()
         try {
             val apk = prepareRuntimeApk(record)
             val childDataDir = File(dataRoot, record.manifest.extensionId).apply { mkdirs() }
@@ -483,6 +495,25 @@ private class ExtensionHubServiceImpl(
                 override val nativeRuntime = host.nativeRuntime
                 override fun createExtensionContext(baseContext: android.content.Context): android.content.Context =
                     host.createRuntimeContext(baseContext, apk, loader)
+
+                override fun registerCapability(spec: InProcessCapabilitySpec): AutoCloseable {
+                    val capabilityId = spec.id.trim().lowercase()
+                    val childNamespace = "plugin.${extensionId.substringAfterLast('.')}"
+                    check(capabilityId.startsWith("$childNamespace.")) {
+                        "Child capability must stay inside $childNamespace.*: $capabilityId"
+                    }
+                    val ownedSpec = spec.copy(
+                        id = capabilityId,
+                        executor = InProcessCapabilityExecutor { parametersJson ->
+                            recordUse(record.manifest.extensionId)
+                            spec.executor.invoke(parametersJson)
+                        }
+                    )
+                    val registration = host.registerChildCapability(extensionId, ownedSpec)
+                    childCapabilityHandles += registration
+                    return registration
+                }
+
                 override fun publish(payload: Any, metadata: Map<String, String>) {
                     check(bindingHandle == null) { "Child extension may publish only one binding" }
                     bindingHandle = point.binder.bind(
@@ -557,10 +588,11 @@ private class ExtensionHubServiceImpl(
             val entry = instance as? ChildExtensionEntry ?: error("${record.manifest.entryClass} does not implement ChildExtensionEntry")
             val handle = entry.mount(childHost)
             check(bindingHandle != null) { "Child extension mounted without publishing its binding" }
-            active[record.manifest.extensionId] = ActiveChild(handle, bindingHandle, childScope)
+            active[record.manifest.extensionId] = ActiveChild(handle, bindingHandle, childCapabilityHandles.toList(), childScope)
             record.lifecycle = ChildExtensionLifecycle.ACTIVE
             record.lastError = null
         } catch (error: Throwable) {
+            childCapabilityHandles.asReversed().forEach { handle -> runCatching { handle.close() } }
             runCatching { bindingHandle?.close() }
             removeUiContributionsForExtension(record.manifest.extensionId)
             childScope.cancel()
@@ -664,6 +696,7 @@ private class ExtensionHubServiceImpl(
         // remains (for example after a partial mount failure) so stale UI can never outlive the .ailx.
         removeUiContributionsForExtension(extensionId)
         val mounted = active.remove(extensionId) ?: return
+        mounted.capabilityHandles.asReversed().forEach { handle -> runCatching { handle.close() } }
         runCatching { mounted.bindingHandle?.close() }
         runCatching { mounted.handle.stop() }
         mounted.scope.cancel()

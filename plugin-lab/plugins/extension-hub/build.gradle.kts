@@ -10,8 +10,8 @@ android {
         applicationId = "com.ai.limbs.payload.extensionhub"
         minSdk = 26
         targetSdk = 34
-        versionCode = 9
-        versionName = "1.5.2"
+        versionCode = 10
+        versionName = "1.5.3"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
