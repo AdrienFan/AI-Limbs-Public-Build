@@ -7,10 +7,10 @@ import kotlinx.coroutines.flow.flow
 import org.json.JSONObject
 
 /**
- * Stable Base-side client for the currently active System Environment provider.
+ * Base-side compatibility client for the installed Ubuntu system-environment child.
  *
- * Base depends only on plugin.system_environment.* aliases. Concrete Ubuntu/Debian/SSH runtime
- * ownership belongs to the provider and may change without changing Base callers.
+ * Canonical calls use plugin.ubuntu.* because these runtime operations are owned by the Ubuntu child.
+ * The child keeps legacy plugin.system_environment.* invoke aliases for older callers.
  */
 internal object SystemEnvironmentClient {
     data class Status(
@@ -246,16 +246,16 @@ internal object SystemEnvironmentClient {
     private fun JSONObject.nullableString(key: String): String? =
         if (!has(key) || isNull(key)) null else optString(key).takeIf { it.isNotBlank() }
 
-    private const val STATUS_CAPABILITY = "plugin.system_environment.status"
-    private const val START_CAPABILITY = "plugin.system_environment.start"
-    private const val SESSION_CREATE_CAPABILITY = "plugin.system_environment.session.create"
-    private const val SESSION_EXECUTE_CAPABILITY = "plugin.system_environment.session.execute"
-    private const val SESSION_INPUT_CAPABILITY = "plugin.system_environment.session.input"
-    private const val SESSION_INTERRUPT_CAPABILITY = "plugin.system_environment.session.interrupt"
-    private const val SESSION_SCREEN_CAPABILITY = "plugin.system_environment.session.screen"
-    private const val SESSION_CLOSE_CAPABILITY = "plugin.system_environment.session.close"
-    private const val COMMAND_CAPABILITY = "plugin.system_environment.command"
-    private const val PROCESS_CAPABILITY = "plugin.system_environment.process"
+    private const val STATUS_CAPABILITY = "plugin.ubuntu.status"
+    private const val START_CAPABILITY = "plugin.ubuntu.start"
+    private const val SESSION_CREATE_CAPABILITY = "plugin.ubuntu.session.create"
+    private const val SESSION_EXECUTE_CAPABILITY = "plugin.ubuntu.session.execute"
+    private const val SESSION_INPUT_CAPABILITY = "plugin.ubuntu.session.input"
+    private const val SESSION_INTERRUPT_CAPABILITY = "plugin.ubuntu.session.interrupt"
+    private const val SESSION_SCREEN_CAPABILITY = "plugin.ubuntu.session.screen"
+    private const val SESSION_CLOSE_CAPABILITY = "plugin.ubuntu.session.close"
+    private const val COMMAND_CAPABILITY = "plugin.ubuntu.command"
+    private const val PROCESS_CAPABILITY = "plugin.ubuntu.process"
     private const val PROCESS_READ_LINES = 500
     private const val PROCESS_READ_WAIT_MS = 500L
     private const val WAITING_POLL_DELAY_MS = 100L

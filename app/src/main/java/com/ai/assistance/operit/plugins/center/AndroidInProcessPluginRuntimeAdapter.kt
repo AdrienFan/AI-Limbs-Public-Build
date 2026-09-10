@@ -304,6 +304,46 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         }
 
+        override fun registerChildCapability(
+            ownerExtensionId: String,
+            spec: InProcessCapabilitySpec
+        ): AutoCloseable {
+            check(pluginId == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
+                "Only Extension Hub may publish child-owned capabilities"
+            }
+            return context.payloadContext.registrar.registerChildCapability(
+                ownerExtensionId = ownerExtensionId,
+                id = spec.id,
+                capability = PluginCapabilitySpec(
+                    displayName = spec.displayName,
+                    description = spec.description,
+                    invokeAliases = spec.invokeAliases,
+                    keywords = spec.keywords,
+                    parameters = spec.parameters.map { parameter ->
+                        PluginCapabilityParameterSpec(
+                            name = parameter.name,
+                            type = parameter.type,
+                            description = parameter.description,
+                            required = parameter.required,
+                            default = parameter.default
+                        )
+                    },
+                    suggestedParamsJson = spec.suggestedParamsJson,
+                    inputSchema = spec.inputSchema,
+                    effect = PluginCapabilityEffect.valueOf(spec.effect.name),
+                    domain = PluginCapabilityDomain.valueOf(spec.domain.name),
+                    workContextRequiredReceipts = spec.workContextRequiredReceipts
+                        .mapTo(linkedSetOf()) { PluginCapabilityReceipt.valueOf(it.name) },
+                    executor = PluginCapabilityExecutor { parameters ->
+                        val raw = spec.executor.invoke(parameters.toString())
+                        runCatching { JSONObject(raw) }.getOrElse {
+                            JSONObject().put("content", raw)
+                        }
+                    }
+                )
+            )
+        }
+
         override fun registerHomeTile(tile: InProcessHomeTile) {
             context.payloadContext.registrar.registerExtension(
                 PluginExtensionPoints.UI_HOME_TILE,

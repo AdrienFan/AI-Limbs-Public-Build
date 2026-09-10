@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.plugins.center
 
+import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -131,6 +132,46 @@ class PluginRegistrar internal constructor(
         } catch (error: Throwable) {
             registration.close()
             throw error
+        }
+    }
+
+    fun registerChildCapability(
+        ownerExtensionId: String,
+        id: String,
+        capability: PluginCapabilitySpec,
+        metadata: Map<String, String> = emptyMap()
+    ): AutoCloseable {
+        surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
+        if (manifest.pluginId != InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
+            throw PluginInstallException(
+                "CHILD_CAPABILITY_PUBLISHER_FORBIDDEN",
+                "Only Extension Hub may publish child-owned capabilities"
+            )
+        }
+        val owner = ownerExtensionId.trim().lowercase()
+        if (!Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$").matches(owner)) {
+            throw PluginInstallException("CHILD_CAPABILITY_OWNER_INVALID", "Invalid child extension id: $ownerExtensionId")
+        }
+        val capabilityId = id.trim().lowercase()
+        val contribution = registry.register(
+            PluginContributionRecord(
+                ownerPluginId = owner,
+                kind = PluginContributionKind.CAPABILITY,
+                id = capabilityId,
+                apiVersion = null,
+                metadata = metadata,
+                payload = capability
+            )
+        )
+        val binding = try {
+            capabilityBinder.register(owner, capabilityId, capability)
+        } catch (error: Throwable) {
+            contribution.close()
+            throw error
+        }
+        return PluginRegistrationHandle {
+            binding.close()
+            contribution.close()
         }
     }
 

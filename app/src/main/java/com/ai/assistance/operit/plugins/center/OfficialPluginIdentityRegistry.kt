@@ -24,6 +24,7 @@ internal class OfficialPluginIdentityRegistry(context: Context) {
 
     init {
         ensureLegacyMigration()
+        ensureRetiredIdentityMigration()
     }
 
     fun snapshot(): List<OfficialPluginIdentityRecord> = synchronized(lock) {
@@ -97,6 +98,16 @@ internal class OfficialPluginIdentityRegistry(context: Context) {
         }
     }
 
+    private fun ensureRetiredIdentityMigration() = synchronized(lock) {
+        if (prefs.getBoolean(KEY_RETIRED_V1, false)) return@synchronized
+        val records = readLocked().toMutableMap()
+        RETIRED_PLUGIN_IDS.forEach(records::remove)
+        writeLocked(records)
+        if (!prefs.edit().putBoolean(KEY_RETIRED_V1, true).commit()) {
+            throw PluginInstallException("OFFICIAL_IDENTITY_STORE_FAILED", "Could not persist retired identity migration state")
+        }
+    }
+
     private fun readLocked(): Map<String, OfficialPluginIdentityRecord> {
         val raw = prefs.getString(KEY_RECORDS, null) ?: return emptyMap()
         return runCatching {
@@ -164,14 +175,15 @@ internal class OfficialPluginIdentityRegistry(context: Context) {
         private const val PREFS_NAME = "official_plugin_identity_registry"
         private const val KEY_RECORDS = "records_json"
         private const val KEY_MIGRATED_V1 = "legacy_v1_migrated"
+        private const val KEY_RETIRED_V1 = "retired_v1_migrated"
         private const val SOURCE_PLUGIN_CENTER = "plugin_center"
         private val PLUGIN_ID_PATTERN = Regex("[a-z0-9][a-z0-9_.-]{2,127}")
+        private val RETIRED_PLUGIN_IDS = setOf("plugin.system.ubuntu_terminal")
         private val LEGACY_MIGRATION_SEEDS = listOf(
             seed("plugin.system.extension_hub", "system_extension_hub"),
             seed("plugin.system.bridge", "system_bridge"),
             seed("plugin.system.developer_guide", "system_plugin"),
-            seed("plugin.system.packager", "system_packager"),
-            seed("plugin.system.ubuntu_terminal", "ubuntu_terminal")
+            seed("plugin.system.packager", "system_packager")
         )
 
         private fun seed(pluginId: String, role: String) = OfficialPluginIdentityRecord(

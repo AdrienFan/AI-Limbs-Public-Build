@@ -182,7 +182,7 @@ class AiLimbsRdcToolAdapter(
     }
 
     private suspend fun processTool(operation: String, args: JSONObject): JSONObject =
-        mcpProcessResult(processRouter.executeSystemEnvironment(operation, args))
+        mcpProcessResult(processRouter.executeUbuntu(operation, args))
 
     private suspend fun executeAliasedHostTool(
         rdcToolName: String,

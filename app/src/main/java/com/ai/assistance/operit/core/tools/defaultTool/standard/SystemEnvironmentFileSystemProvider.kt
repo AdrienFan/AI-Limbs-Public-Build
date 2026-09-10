@@ -169,6 +169,6 @@ internal class SystemEnvironmentFileSystemProvider : LinuxFileSystemProvider {
         }
 
     private companion object {
-        const val CAPABILITY_ID = "plugin.system_environment.filesystem"
+        const val CAPABILITY_ID = "plugin.ubuntu.filesystem"
     }
 }
