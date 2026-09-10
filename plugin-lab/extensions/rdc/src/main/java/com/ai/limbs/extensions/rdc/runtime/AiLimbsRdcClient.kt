@@ -1279,6 +1279,7 @@ class AiLimbsRdcClient(
             is String -> runCatching { JSONObject(rawArgs) }.getOrDefault(JSONObject())
             else -> JSONObject()
         }
+        logInboundCallMetadata(callId, toolName, call)
         try {
             val rawResult =
                 protocolToolRegistry.executeOrNull(toolName, args)
@@ -1363,6 +1364,35 @@ class AiLimbsRdcClient(
             // rewrite a completed tool result as failed; the result bytes remain unchanged in RDC.
             RdcLogger.w(TAG, "RDC result doorbell was not acknowledged: call=${shortCallId(callId)}")
         }
+    }
+
+    private fun logInboundCallMetadata(callId: String, toolName: String, call: JSONObject) {
+        val metadata = call.optJSONObject("metadata")
+        if (metadata == null) {
+            RdcLogger.i(TAG, "RDC inbound metadata call=${shortCallId(callId)} tool=$toolName absent")
+            return
+        }
+        val keys = buildList {
+            val iterator = metadata.keys()
+            while (iterator.hasNext()) add(iterator.next())
+        }.sorted()
+        val candidates = JSONObject()
+        listOf(
+            "turn_id", "turnId",
+            "conversation_id", "conversationId",
+            "thread_id", "threadId",
+            "trace_id", "traceId",
+            "request_group_id", "requestGroupId",
+            "session_id", "sessionId",
+            "clientInfo", "transport"
+        ).forEach { key ->
+            if (metadata.has(key)) candidates.put(key, metadata.opt(key))
+        }
+        RdcLogger.i(
+            TAG,
+            "RDC inbound metadata call=${shortCallId(callId)} tool=$toolName " +
+                "keys=$keys candidates=$candidates"
+        )
     }
 
     private fun logOutboundResultMetadata(callId: String, toolName: String, result: JSONObject) {
