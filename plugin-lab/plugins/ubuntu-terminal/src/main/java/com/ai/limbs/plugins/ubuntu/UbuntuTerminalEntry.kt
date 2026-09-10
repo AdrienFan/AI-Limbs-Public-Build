@@ -1,6 +1,8 @@
 package com.ai.limbs.plugins.ubuntu
 
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
+import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
@@ -22,22 +24,51 @@ class UbuntuTerminalEntry : InProcessPluginEntry {
         val panel = UbuntuTerminalPanel(host)
         host.registerProvider(PANEL_ID, panel, mapOf("kind" to "ubuntu_terminal_workbench"))
         host.registerCapability(
-            STATUS_CAPABILITY,
-            "Ubuntu 终端状态",
-            "读取 Ubuntu Runtime、插件终端标签与兰儿共享会话状态。",
-            InProcessCapabilityExecutor { panel.statusCapability() }
+            InProcessCapabilitySpec(
+                id = STATUS_CAPABILITY,
+                displayName = "Ubuntu 终端状态",
+                description = "读取 Ubuntu Runtime、插件终端标签与兰儿共享会话状态。",
+                keywords = listOf("ubuntu", "runtime", "status", "终端状态"),
+                executor = InProcessCapabilityExecutor { panel.statusCapability() }
+            )
         )
         host.registerCapability(
-            COMMAND_CAPABILITY,
-            "Ubuntu 终端命令",
-            "在插件持有的兰儿共享 PTY 会话中执行命令，并同步到只读共享标签。",
-            InProcessCapabilityExecutor { parameters -> panel.commandCapability(parameters) }
+            InProcessCapabilitySpec(
+                id = COMMAND_CAPABILITY,
+                displayName = "Ubuntu 终端命令",
+                description = "在插件持有的兰儿共享 PTY 会话中执行命令，并同步到只读共享标签。Ubuntu 必须已经启动。",
+                keywords = listOf("ubuntu", "terminal", "shell", "command", "执行命令"),
+                parameters = listOf(
+                    InProcessCapabilityParameterSpec(
+                        name = "command",
+                        description = "要在 Ubuntu 兰儿共享 PTY 会话中执行的 shell 命令。"
+                    )
+                ),
+                suggestedParamsJson = "{\"command\":\"pwd\"}",
+                executor = InProcessCapabilityExecutor { parameters -> panel.commandCapability(parameters) }
+            )
         )
         host.registerCapability(
-            UI_ACTION_CAPABILITY,
-            "Ubuntu 终端前台操作",
-            "承接 Plugin Center 终端工作台的明确用户操作；后台调用仍经过正常策略链。",
-            InProcessCapabilityExecutor { parameters -> panel.uiActionCapability(parameters) }
+            InProcessCapabilitySpec(
+                id = UI_ACTION_CAPABILITY,
+                displayName = "Ubuntu 终端前台操作",
+                description = "承接 Ubuntu 终端工作台操作；可启动/停止 Ubuntu、管理标签、执行前台命令、发送 Ctrl+C 或修改空闲策略。",
+                keywords = listOf("ubuntu", "start", "stop", "开机", "关机", "终端操作"),
+                parameters = listOf(
+                    InProcessCapabilityParameterSpec(
+                        name = "event_id",
+                        description = "操作ID：start_ubuntu、stop_ubuntu、add_tab、select_tab、close_tab、show_shared、execute_command、ctrl_c、set_idle_policy。"
+                    ),
+                    InProcessCapabilityParameterSpec(
+                        name = "payload",
+                        type = "object",
+                        description = "操作参数。select_tab/close_tab 传 tab_id；execute_command 传 command；set_idle_policy 传 mode；其他操作可省略。",
+                        required = false
+                    )
+                ),
+                suggestedParamsJson = "{\"event_id\":\"start_ubuntu\",\"payload\":{}}",
+                executor = InProcessCapabilityExecutor { parameters -> panel.uiActionCapability(parameters) }
+            )
         )
         host.registerScreen(
             InProcessScreen(
