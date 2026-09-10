@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.environment_center",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "api": {
     "target": 1,
     "min": 1

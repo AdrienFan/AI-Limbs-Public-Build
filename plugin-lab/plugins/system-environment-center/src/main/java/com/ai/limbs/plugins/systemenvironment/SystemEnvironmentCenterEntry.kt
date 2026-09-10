@@ -146,7 +146,7 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         const val PLUGIN_CENTER_UI_ACCESSORY_SERVICE = "system.plugin_center.ui_accessories"
         const val PLUGIN_CENTER_UI_ACCESSORY_API = 1
         const val PAGE_SLOT_ACTION_ID = "system_environment_center"
-        const val AI_CHAT_PAGE_ID = "host:main.ai_chat"
+        const val AI_CHAT_PAGE_ID = "host:native.ai_chat"
         const val TOP_BAR_START_SLOT = "top_bar_start"
     }
 }

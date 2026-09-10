@@ -80,7 +80,7 @@ internal object DeveloperGuideContent {
                 "父插件通过 ExtensionHubService.publishPoint() 声明 point、api、allowedHostCapabilities 与 binder；父插件停用或 Point 消失时子插件必须 BLOCKED/停止。",
                 "子插件能力必须同时通过 Plugin Center 策略、父 Point 当前 allowlist、子清单声明与父插件当前实际授权四层交集；.ailx 不能越过父插件扩大宿主权限。",
                 "系统环境正式示例为 ai_limbs.system_environment.subsystem@1：父插件拥有通用外层运行控制、环境配置页和单一前台 Display Slot；Ubuntu 等 .ailx 拥有 rootfs、PTY、终端 UI 与能力端点。通用 plugin.system_environment.* 能力必须携带 subsystem_id，后台子系统不能靠前台选择被隐式路由。",
-                "Bridge Provider 正式示例为 ai_limbs.bridge.provider@3；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。",
+                "Bridge Provider 正式示例为 ai_limbs.bridge.provider@4；RDC、TRIGGERcmd 等 Provider 作为 .ailx 发布 BridgeProviderContribution，而不是重新塞回 AI Limbs 本体。",
                 "AIL_EXTENSION_V1 强制声明 SHA-256 integrity 与 Ed25519 signature；integrity.entries 必须精确覆盖除 extension.json 与 signature.entry 外的全部 payload，runtime APK 必须被覆盖，signature.entry 不得进入 integrity map。",
                 "Ed25519 detached signature 验证的对象是包内最终 extension.json 的原始字节；Plugin Extension Hub 将 signer_id、manifest 原始字节与签名交给 Plugin Center 委托网关，按固定 child_extension purpose 验签。signature.entry 由 manifest 声明，当前官方 Packager 固定使用 META-INF/AILIMBS.SIG；Hub 不获得裸 Trust Gateway、Keyring 或密钥材料。"
             )
