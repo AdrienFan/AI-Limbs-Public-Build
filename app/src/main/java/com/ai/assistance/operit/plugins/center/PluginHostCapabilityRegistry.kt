@@ -429,6 +429,9 @@ internal class PluginHostCapabilityRegistry(
     override fun create(ownerPluginId: String, grantedScopes: Set<String>): PluginCapabilityInvoker =
         PluginCapabilityInvoker { capabilityId, parameters ->
             val normalized = capabilityId.trim().lowercase()
+            if (normalized == BRIDGE_REMOTE_INVOKE_CAPABILITY_ID && ownerPluginId == SYSTEM_BRIDGE_PLUGIN_ID) {
+                return@PluginCapabilityInvoker invokeBridgeRemote(ownerPluginId, JSONObject(parameters.toString()))
+            }
             val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
                 ?: throw PluginInstallException(
                     "HOST_PRIMITIVE_UNKNOWN",
