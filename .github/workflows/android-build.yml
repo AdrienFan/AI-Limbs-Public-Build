@@ -186,7 +186,7 @@ jobs:
 
   rdc:
     if: inputs.target == 'rdc'
-    name: Build RDC v1.2.6 only
+    name: Build RDC v1.2.7 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -225,7 +225,7 @@ jobs:
       - name: Upload RDC child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: rdc-extension-v1.2.6-${{ github.run_number }}
+          name: rdc-extension-v1.2.7-${{ github.run_number }}
           path: |
             plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
             plugin-lab/packages/rdc/extension.json

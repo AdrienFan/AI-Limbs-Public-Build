@@ -1384,7 +1384,7 @@ class AiLimbsRdcClient(
             "trace_id", "traceId",
             "request_group_id", "requestGroupId",
             "session_id", "sessionId",
-            "clientInfo", "transport"
+            "clientInfo", "transport", "origin_instance"
         ).forEach { key ->
             if (metadata.has(key)) candidates.put(key, metadata.opt(key))
         }
