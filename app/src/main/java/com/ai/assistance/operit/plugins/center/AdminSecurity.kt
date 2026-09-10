@@ -2,6 +2,7 @@ package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
 import android.util.Base64
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCyclePolicyStore
 import java.security.SecureRandom
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
@@ -18,20 +19,23 @@ enum class AdminAuthFrequency {
 data class AdminSecuritySnapshot(
     val configured: Boolean,
     val recoveryConfigured: Boolean,
-    val authFrequency: AdminAuthFrequency
+    val authFrequency: AdminAuthFrequency,
+    val interactionCycleTimeoutMs: Long
 )
 
 data class AdminSetupResult(val recoveryKey: String)
 
 class AdminSecurityManager(context: Context) {
     private val prefs = pluginCenterPreferences(context, PREFS, LEGACY_PREFS)
+    private val interactionCyclePolicy = AiLimbsInteractionCyclePolicyStore(context)
     private val random = SecureRandom()
     @Volatile private var sessionAuthorized = false
 
     fun snapshot(): AdminSecuritySnapshot = AdminSecuritySnapshot(
         configured = hasBundle(PASSWORD_PREFIX),
         recoveryConfigured = hasBundle(RECOVERY_PREFIX),
-        authFrequency = authFrequency()
+        authFrequency = authFrequency(),
+        interactionCycleTimeoutMs = interactionCycleTimeoutMs()
     )
 
     fun authFrequency(): AdminAuthFrequency =
@@ -40,6 +44,8 @@ class AdminSecurityManager(context: Context) {
                 prefs.getString(KEY_AUTH_FREQUENCY, null) ?: AdminAuthFrequency.EVERY_ACTION.name
             )
         }.getOrDefault(AdminAuthFrequency.EVERY_ACTION)
+
+    fun interactionCycleTimeoutMs(): Long = interactionCyclePolicy.timeoutMs()
 
     fun authorizationRequired(): Boolean = when (authFrequency()) {
         AdminAuthFrequency.EVERY_ACTION -> true
@@ -104,6 +110,15 @@ class AdminSecurityManager(context: Context) {
         master.fill(0)
         prefs.edit().putString(KEY_AUTH_FREQUENCY, frequency.name).apply()
         sessionAuthorized = frequency != AdminAuthFrequency.EVERY_ACTION
+        return true
+    }
+
+    fun changeInteractionCycleTimeout(currentPassword: String, timeoutMs: Long): Boolean {
+        if (!AiLimbsInteractionCyclePolicyStore.isValidTimeoutMs(timeoutMs)) return false
+        val master = unwrap(PASSWORD_PREFIX, currentPassword) ?: return false
+        master.fill(0)
+        interactionCyclePolicy.setTimeoutMs(timeoutMs)
+        sessionAuthorized = true
         return true
     }
 

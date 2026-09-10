@@ -52,7 +52,7 @@ internal class PluginHostCapabilityRegistry(
     private val bridgeIngressGateways = ConcurrentHashMap<String, AiLimbsIngressGateway>()
 
     // Ordinary plugin scope adapters remain intentionally narrow here.
-    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full 46-item Gateway catalog.
+    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full Host Primitive Gateway catalog.
     private val hostCapabilities = mapOf(
         "host.process@1" to HostCapability("host.process@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.process@1", parameters)
@@ -320,7 +320,8 @@ internal class PluginHostCapabilityRegistry(
         if (scopeId.isBlank()) {
             throw PluginInstallException("BRIDGE_SCOPE_REQUIRED", "Bridge remote scope_id is required")
         }
-        val gatewayKey = "$ownerPluginId:$providerId:${transport.wireValue}:$scopeId"
+        // Bridge scope identifies a transport session only; Host owns interaction-cycle lifetime.
+        val gatewayKey = "$ownerPluginId:$providerId:${transport.wireValue}"
         val gateway = bridgeIngressGateways.computeIfAbsent(gatewayKey) {
             AiLimbsIngressGateway(
                 context,
@@ -328,7 +329,7 @@ internal class PluginHostCapabilityRegistry(
                     sourceId = transport.wireValue,
                     executionSession = AiLimbsExecutionSession(
                         transport = transport,
-                        scopeId = scopeId
+                        scopeId = "bridge:$providerId:${transport.wireValue}"
                     )
                 )
             )
@@ -341,7 +342,10 @@ internal class PluginHostCapabilityRegistry(
 
     private fun prependBridgeAccessBootstrap(payload: JSONObject, bootstrap: String): JSONObject {
         val result = JSONObject(payload.toString())
-        val oldContent = result.optJSONArray("content") ?: JSONArray()
+        val oldContent = result.optJSONArray("content")
+        if (oldContent == null) {
+            return result.put("access_bootstrap", bootstrap)
+        }
         val newContent = JSONArray().put(
             JSONObject().put("type", "text").put("text", bootstrap)
         )

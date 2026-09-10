@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins.system
 import com.ai.assistance.operit.plugins.center.AdminAuthFrequency
 import com.ai.assistance.operit.plugins.center.AdminSecurityManager
 import com.ai.assistance.operit.plugins.center.PluginInstallException
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCyclePolicyStore
 import org.json.JSONObject
 
 internal class KernelAdminSecurityJsonServiceV1(
@@ -18,6 +19,8 @@ internal class KernelAdminSecurityJsonServiceV1(
                 .put("recovery_configured", snapshot.recoveryConfigured)
                 .put("auth_frequency", snapshot.authFrequency.name)
                 .put("authorization_required", admin.authorizationRequired())
+                .put("interaction_cycle_timeout_ms", snapshot.interactionCycleTimeoutMs)
+                .put("interaction_cycle_default_timeout_ms", AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS)
         }
         "setup" -> JSONObject()
             .put("recovery_key", admin.setup(parameters.requireText("password")).recoveryKey)
@@ -57,6 +60,22 @@ internal class KernelAdminSecurityJsonServiceV1(
                 admin.changeAuthFrequency(
                     parameters.requireText("password"),
                     frequency
+                )
+            )
+        }
+        "change_interaction_cycle_timeout" -> {
+            val timeoutMs = parameters.optLong("timeout_ms", -1L)
+            if (!AiLimbsInteractionCyclePolicyStore.isValidTimeoutMs(timeoutMs)) {
+                throw PluginInstallException(
+                    "INTERACTION_CYCLE_TIMEOUT_INVALID",
+                    "Interaction cycle timeout is outside the supported range"
+                )
+            }
+            JSONObject().put(
+                "changed",
+                admin.changeInteractionCycleTimeout(
+                    parameters.requireText("password"),
+                    timeoutMs
                 )
             )
         }

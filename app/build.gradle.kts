@@ -459,7 +459,7 @@ android {
         }
         debug {
             applicationIdSuffix = ".ailimbs.v080"
-            versionNameSuffix = "-build10"
+            versionNameSuffix = "-build11"
             signingConfig = signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")
         }

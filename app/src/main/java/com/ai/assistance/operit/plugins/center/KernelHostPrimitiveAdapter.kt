@@ -8,6 +8,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCyclePolicy
 import com.ai.assistance.operit.plugins.system.KernelDynamicNavigationJsonServiceV1
 import com.ai.assistance.operit.widget.ToolPkgDesktopWidgetHost
 import java.io.File
@@ -47,6 +48,7 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             "host.extension.routing@1" -> invokeExtensionRouting(op, parameters)
             "host.plugin.runtime@1" -> invokePluginRuntime(op, parameters)
             "host.authorization@1" -> evaluateAuthorization(ownerPluginId, parameters)
+            "host.interaction.cycle@1" -> invokeInteractionCycle(op, parameters)
             "kernel.plugin.trust@1" -> invokeTrust(op, parameters)
             else -> throw PluginInstallException(
                 "HOST_PRIMITIVE_OPERATION_NOT_BOUND",
@@ -355,6 +357,28 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             .put("inspection_only", true)
     }
 
+    private fun invokeInteractionCycle(operation: String, parameters: JSONObject): JSONObject {
+        val policy = AiLimbsInteractionCyclePolicy(appContext)
+        return when (operation) {
+            "status" -> policy.snapshot().toJson()
+            "set_timeout" -> {
+                val password = required(parameters, "admin_password")
+                if (!PluginPlatformKernel.adminSecurity.verifyPassword(password)) {
+                    return JSONObject().put("changed", false).put("authorized", false)
+                }
+                val timeoutMs = parameters.optLong("timeout_ms", -1L)
+                if (!AiLimbsInteractionCyclePolicy.isValidTimeout(timeoutMs)) {
+                    throw PluginInstallException("INTERACTION_CYCLE_TIMEOUT_INVALID", "Invalid AI Limbs interaction cycle timeout")
+                }
+                val before = policy.timeoutMs()
+                policy.setTimeoutMs(timeoutMs).toJson()
+                    .put("changed", before != timeoutMs)
+                    .put("authorized", true)
+            }
+            else -> unsupported("host.interaction.cycle@1", operation)
+        }
+    }
+
     private fun invokeTrust(operation: String, parameters: JSONObject): JSONObject = when (operation) {
         "status" -> PluginTrustKeyringV1.statusJson()
             .put("plugin_format", PluginAbi.FORMAT)
@@ -474,6 +498,8 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             "host.plugin.runtime@1/mount",
             "host.plugin.runtime@1/stop",
             "host.authorization@1/evaluate",
+            "host.interaction.cycle@1/status",
+            "host.interaction.cycle@1/set_timeout",
             "kernel.plugin.trust@1/status",
             "kernel.plugin.trust@1/verify_package",
             "kernel.plugin.trust@1/verify_detached",

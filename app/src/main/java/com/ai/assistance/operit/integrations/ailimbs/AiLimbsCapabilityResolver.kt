@@ -38,7 +38,11 @@ class AiLimbsCapabilityResolver(
 
     suspend fun search(query: String, requestedLimit: Int): JSONObject {
         val normalizedQuery = query.trim()
-        if (normalizedQuery.isEmpty()) return error("Missing capability search query")
+        if (normalizedQuery.isEmpty()) {
+            return error("Missing capability search query")
+                .put("error_code", "CAPABILITY_SEARCH_QUERY_REQUIRED")
+                .put("next_action", capabilitySearchUsage("<capability intent>"))
+        }
         val limit = requestedLimit.coerceIn(1, MAX_SEARCH_RESULTS)
 
         var definitions = buildDefinitions(forceRefreshPackages = false)
@@ -62,6 +66,14 @@ class AiLimbsCapabilityResolver(
             .put("live_discovery", usedLiveDiscovery)
             .put("results", results)
             .put(
+                "next_action",
+                if (results.length() == 0) {
+                    capabilitySearchUsage("<refined capability intent>")
+                } else {
+                    capabilityDescribeUsage("<capability_id from results>")
+                }
+            )
+            .put(
                 "next",
                 if (results.length() == 0) {
                     "No matching capability is currently installed or registered."
@@ -73,7 +85,11 @@ class AiLimbsCapabilityResolver(
 
     suspend fun describe(identifier: String): JSONObject {
         val normalizedIdentifier = identifier.trim()
-        if (normalizedIdentifier.isEmpty()) return error("Missing capability_id")
+        if (normalizedIdentifier.isEmpty()) {
+            return error("Missing capability_id")
+                .put("error_code", "CAPABILITY_DESCRIBE_ID_REQUIRED")
+                .put("next_action", capabilityDescribeUsage("<capability_id from capability.search>"))
+        }
 
         var definitions = buildDefinitions(forceRefreshPackages = false)
         var definition = findDefinition(definitions, normalizedIdentifier)
@@ -86,6 +102,8 @@ class AiLimbsCapabilityResolver(
         definition ?: return error(
             "Unknown capability '$normalizedIdentifier'. Call capability.search first."
         )
+            .put("error_code", "UNKNOWN_CAPABILITY_ID")
+            .put("next_action", capabilitySearchUsage(normalizedIdentifier))
 
         val availability = readAvailability(definition)
         val entry = definition.catalogEntry
@@ -112,6 +130,39 @@ class AiLimbsCapabilityResolver(
             .put("version", BuildConfig.VERSION_NAME)
             .put("minimal_example", minimalExample(definition))
             .put("error_guidance", errorGuidance(definition, availability))
+    }
+
+    internal fun capabilitySearchUsage(queryExample: String): JSONObject =
+        resolverUsage(
+            invokeId = "capability.search",
+            actionType = "CAPABILITY_SEARCH",
+            exampleParameters = JSONObject().put("query", queryExample)
+        )
+
+    internal fun capabilityDescribeUsage(capabilityIdExample: String): JSONObject =
+        resolverUsage(
+            invokeId = "capability.describe",
+            actionType = "CAPABILITY_DESCRIBE",
+            exampleParameters = JSONObject().put("capability_id", capabilityIdExample)
+        )
+
+    private fun resolverUsage(
+        invokeId: String,
+        actionType: String,
+        exampleParameters: JSONObject
+    ): JSONObject {
+        val registration =
+            AiLimbsCapabilityRegistry.registrationForInvokeName(invokeId)
+                as? AiLimbsCapabilityRegistration.Core
+        val entry = checkNotNull(registration?.registration?.catalogEntry) {
+            "Resolver capability is not registered: $invokeId"
+        }
+        return JSONObject()
+            .put("type", actionType)
+            .put("capability", JSONObject().put("name", invokeId).put("parameters", JSONObject(exampleParameters.toString())))
+            .put("parameters", parametersJson(entry.parameters))
+            .put("schema", schemaJson(entry))
+            .put("transport_invocation", policyEngine.transportInvocation(invokeId, exampleParameters))
     }
 
     internal suspend fun containsInvokeId(invokeId: String): Boolean {

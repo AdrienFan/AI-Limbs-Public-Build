@@ -79,6 +79,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.camera.capture@1" to ops(pending("capture")),
         "host.custom_access_prompt@1" to ops(document("read", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("write", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("snapshots", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("restore", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)),
         "host.work_manual@1" to ops(document("read", AiLimbsDocumentId.WORK_MANUAL), document("write", AiLimbsDocumentId.WORK_MANUAL), document("snapshots", AiLimbsDocumentId.WORK_MANUAL), document("restore", AiLimbsDocumentId.WORK_MANUAL)),
+        "host.interaction.cycle@1" to ops(kernel("status"), kernel("set_timeout")),
     )
 
     fun operations(primitiveId: String): Map<String, HostGatewayOperationBinding> =

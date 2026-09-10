@@ -66,7 +66,8 @@ object AiLimbsHostPrimitiveCatalog {
         HostPrimitiveDefinition(43, "host.peripheral.display@1", "Display", "为系统环境提供受控显示会话与 AI Limbs 内部显示容器。", "Host 只提供显示设备和会话承载；终端、桌面、窗口管理和具体画面语义由系统环境插件输出。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(44, "host.peripheral.keyboard@1", "Keyboard", "向绑定的系统显示/环境会话发送文本、按键与组合键输入。", "键盘输入必须绑定明确的系统环境会话，不提供对 Android 全局界面的任意按键注入。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(45, "host.peripheral.pointer@1", "Pointer / Mouse", "向绑定的系统显示/环境会话发送移动、按键、滚轮、点击与触摸指针事件。", "指针输入必须绑定明确的系统环境会话；Android Accessibility/UI Automation 继续由 host.ui.automation@1 独立负责。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false),
-        HostPrimitiveDefinition(46, "host.ui.presentation@1", "Plugin Page Presentation", "允许当前插件页面请求普通、竖屏沉浸全屏或横屏沉浸全屏显示模式。", "Host 只管理当前插件页面的 AI Limbs 外壳、Android system bars 与屏幕方向；插件仍完全拥有自己的页面内容和业务 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
+        HostPrimitiveDefinition(46, "host.ui.presentation@1", "Plugin Page Presentation", "允许当前插件页面请求普通、竖屏沉浸全屏或横屏沉浸全屏显示模式。", "Host 只管理当前插件页面的 AI Limbs 外壳、Android system bars 与屏幕方向；插件仍完全拥有自己的页面内容和业务 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
+        HostPrimitiveDefinition(47, "host.interaction.cycle@1", "Interaction Cycle", "读取或设置 AI Limbs 外部交互周期。", "总控台只配置周期；周期计时、软过期、系统接入提示与 receipt 边界均由 AI Limbs 基座执行。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, false)
     )
 
     private val byId = all.associateBy { it.id.lowercase() }

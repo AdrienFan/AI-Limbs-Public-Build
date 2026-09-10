@@ -48,6 +48,7 @@ class AiLimbsDispatcher(
                 .getOrElse { failure ->
                     return error(failure.message ?: "Unknown AI Limbs capability")
                         .put("error_code", "UNKNOWN_CAPABILITY")
+                        .put("next_action", capabilityResolver.capabilitySearchUsage(tool))
                 }
         val decision = policyEngine.evaluate(invocation)
         if (!decision.proceed) {

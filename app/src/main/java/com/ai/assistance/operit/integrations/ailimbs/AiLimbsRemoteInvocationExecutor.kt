@@ -40,10 +40,11 @@ internal fun routeRemoteInvocation(
  */
 class AiLimbsRemoteInvocationExecutor(
     context: Context,
-    val session: AiLimbsExecutionSession
+    val session: AiLimbsExecutionSession,
+    sharedAccessGate: AiLimbsAccessGate? = null
 ) {
     private val appContext = context.applicationContext
-    private val policyEngine = AiLimbsExecutionPolicyEngine(appContext, session)
+    private val policyEngine = AiLimbsExecutionPolicyEngine(appContext, session, sharedAccessGate)
     private val capabilityResolver = AiLimbsCapabilityResolver(appContext, policyEngine)
     private val dispatcher = AiLimbsDispatcher(appContext, policyEngine)
     private val hostToolExecutor =
@@ -74,6 +75,10 @@ class AiLimbsRemoteInvocationExecutor(
                 hostToolExecutor = hostToolExecutor
             )
         return dispatcher.execute(invocation.tool, invocation.args)
+    }
+
+    fun resetSessionReceipts() {
+        policyEngine.resetSessionReceipts()
     }
 
     fun describePolicy(): JSONObject = policyEngine.describePolicy()

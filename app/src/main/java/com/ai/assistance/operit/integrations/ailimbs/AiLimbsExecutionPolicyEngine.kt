@@ -31,13 +31,14 @@ private data class AiLimbsAvailabilityResult(
  */
 class AiLimbsExecutionPolicyEngine(
     context: Context,
-    val session: AiLimbsExecutionSession
+    val session: AiLimbsExecutionSession,
+    sharedAccessGate: AiLimbsAccessGate? = null
 ) {
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
     private val permissionSystem = ToolPermissionSystem.getInstance(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
-    private val receipts = AiLimbsAccessGate(appContext)
+    private val receipts = sharedAccessGate ?: AiLimbsAccessGate(appContext)
 
     internal fun normalize(tool: String, args: JSONObject): AiLimbsNormalizedInvocation {
         val registration =
