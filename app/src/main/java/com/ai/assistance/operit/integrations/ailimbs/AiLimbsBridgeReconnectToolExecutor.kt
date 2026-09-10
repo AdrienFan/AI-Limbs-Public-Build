@@ -16,6 +16,11 @@ import org.json.JSONObject
 
 internal const val BRIDGE_ACTION_CAPABILITY_ID = "plugin.bridge.perform_action"
 
+internal fun isBridgePluginActive(): Boolean =
+    PluginPlatformKernel.isInitialized &&
+        PluginPlatformKernel.isStarted &&
+        BRIDGE_ACTION_CAPABILITY_ID in PluginPlatformKernel.capabilities.activeIds()
+
 /**
  * Agent-safe Bridge reconnect entry point.
  *
@@ -25,17 +30,16 @@ internal const val BRIDGE_ACTION_CAPABILITY_ID = "plugin.bridge.perform_action"
  */
 class AiLimbsBridgeReconnectToolExecutor {
     fun execute(tool: AITool): ToolResult {
-        if (!bridgeActionCapabilityActive()) {
+        if (!isBridgePluginActive()) {
             return failure(tool, "Bridge plugin action capability is not active")
         }
 
-        val providerId = AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID
-        val scheduled = scheduleReconnect(providerId)
+        val scheduled = scheduleReconnect()
         val result = JSONObject()
             .put("accepted", true)
             .put("request_id", scheduled.requestId)
             .put("already_pending", !scheduled.created)
-            .put("provider", providerId)
+            .put("provider", "active")
             .put("phase_before", "delegated")
             .put("reconnect_after_ms", AGENT_RECONNECT_DELAY_MS)
             .put("completion", "verify_after_reconnect")
@@ -70,12 +74,8 @@ class AiLimbsBridgeReconnectToolExecutor {
         private val reconnectScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         private val pendingRequestId = AtomicReference<String?>(null)
 
-        private fun bridgeActionCapabilityActive(): Boolean =
-            PluginPlatformKernel.isInitialized &&
-                PluginPlatformKernel.isStarted &&
-                BRIDGE_ACTION_CAPABILITY_ID in PluginPlatformKernel.capabilities.activeIds()
 
-        private fun scheduleReconnect(providerId: String): ScheduleResult {
+        private fun scheduleReconnect(): ScheduleResult {
             while (true) {
                 pendingRequestId.get()?.let { existing ->
                     return ScheduleResult(existing, created = false)
@@ -83,12 +83,12 @@ class AiLimbsBridgeReconnectToolExecutor {
 
                 val requestId = UUID.randomUUID().toString()
                 if (pendingRequestId.compareAndSet(null, requestId)) {
-                    dispatchReconnect(providerId, requestId)
+                    dispatchReconnect(requestId)
                     return ScheduleResult(requestId, created = true)
                 }
             }
         }
-        private fun dispatchReconnect(providerId: String, requestId: String) {
+        private fun dispatchReconnect(requestId: String) {
             AppLogger.i(TAG, "Agent Bridge reconnect accepted: requestId=$requestId")
             reconnectScope.launch {
                 delay(AGENT_RECONNECT_DELAY_MS)
@@ -101,7 +101,6 @@ class AiLimbsBridgeReconnectToolExecutor {
                         BRIDGE_ACTION_CAPABILITY_ID,
                         JSONObject()
                             .put("action", BridgeAction.RECONNECT.name)
-                            .put("provider_id", providerId)
                     )
                     check(dispatch.optBoolean("success", false)) {
                         dispatch.optString("error").ifBlank { "Bridge reconnect capability was rejected" }

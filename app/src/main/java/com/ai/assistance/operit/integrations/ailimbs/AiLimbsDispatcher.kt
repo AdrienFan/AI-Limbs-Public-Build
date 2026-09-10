@@ -357,7 +357,7 @@ class AiLimbsDispatcher(
         // so a reconnecting Laner does not remain visibly stale until another chat operation occurs.
         lanerChat.markAgentSeen()
         val mailbox = lanerChat.snapshot()
-        val bridge = AiLimbsBridgeManager.runtimeState.value
+        val bridgePluginActive = isBridgePluginActive()
         val agentPresence =
             LanerChatContract.presenceState(
                 activeSessionId = mailbox.activeSessionId,
@@ -368,8 +368,15 @@ class AiLimbsDispatcher(
             .put("module", "AI Limbs Laner Chat Bridge")
             .put("protocol_version", 6)
             .put("provider_type_id", LanerChatContract.PROVIDER_TYPE_ID)
-            .put("bridge_provider", bridge.providerId)
-            .put("bridge_phase", bridge.phase.name)
+            .put("bridge_provider", if (bridgePluginActive) "plugin.bridge" else JSONObject.NULL)
+            .put(
+                "bridge_phase",
+                when {
+                    agentOnline -> "ONLINE"
+                    bridgePluginActive -> "CONNECTING"
+                    else -> "STOPPED"
+                }
+            )
             .put("active_session_id", mailbox.activeSessionId ?: JSONObject.NULL)
             .put("bound_chat_id", mailbox.boundChatId ?: JSONObject.NULL)
             .put("agent_session_online", agentOnline)

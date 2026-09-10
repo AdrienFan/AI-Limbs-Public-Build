@@ -23,7 +23,6 @@ import com.ai.assistance.operit.R
 import com.ai.assistance.operit.data.model.ApiKeyFormatValidator
 import com.ai.assistance.operit.ui.common.input.bringIntoViewOnImeFocus
 import com.ai.assistance.operit.ui.features.chat.components.config.TokenInfoDialog
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 
 /** 简洁风格的AI助手配置界面 */
@@ -31,7 +30,6 @@ import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 fun ConfigurationScreen(
         apiKey: String,
         isSaving: Boolean,
-        bridgePhase: AiLimbsBridgePhase,
         bridgeAgentPresence: LanerChatPresenceState,
         bridgePendingCount: Int,
         onSaveApiKey: (String) -> Unit,
@@ -102,18 +100,6 @@ fun ConfigurationScreen(
                                                 fontWeight = FontWeight.Bold
                                         )
                                         Spacer(modifier = Modifier.height(4.dp))
-                                        Text(
-                                                text =
-                                                        stringResource(
-                                                                if (bridgePhase == AiLimbsBridgePhase.ONLINE) {
-                                                                        R.string.laner_chat_rdc_online
-                                                                } else {
-                                                                        R.string.laner_chat_rdc_offline
-                                                                }
-                                                        ),
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
                                         Text(
                                                 text = stringResource(R.string.laner_chat_core_available),
                                                 style = MaterialTheme.typography.bodySmall,

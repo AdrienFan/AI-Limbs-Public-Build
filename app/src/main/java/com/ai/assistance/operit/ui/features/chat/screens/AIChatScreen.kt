@@ -112,8 +112,7 @@ import com.ai.assistance.operit.ui.theme.getTextColorForBackground
 import com.ai.assistance.operit.plugins.chatview.ChatViewEvent
 import com.ai.assistance.operit.plugins.chatview.ChatViewHookParams
 import com.ai.assistance.operit.plugins.chatview.ChatViewHookPluginRegistry
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
+import com.ai.assistance.operit.integrations.ailimbs.isBridgePluginActive
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
@@ -272,11 +271,11 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
         } else {
             inputStyle
         }
-    val bridgeState by AiLimbsBridgeManager.runtimeState.collectAsState()
     val lanerChatService = remember(context.applicationContext) {
         LanerChatBridgeService.getInstance(context.applicationContext)
     }
     val lanerMailboxStatus by lanerChatService.status.collectAsState()
+    val bridgePluginActive = isBridgePluginActive()
     val modelName by actualViewModel.modelName.collectAsState()
     val chatHistory by actualViewModel.chatHistory.collectAsState()
     // 仅对当前会话显示处理中状态（影响“停止/发送”按钮）
@@ -749,8 +748,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             nowMs = lanerStatusClockMs
         )
     val isLanerFullyOnline =
-        bridgeState.phase == AiLimbsBridgePhase.ONLINE &&
-            lanerAgentPresence == LanerChatPresenceState.ACTIVE
+        bridgePluginActive && lanerAgentPresence == LanerChatPresenceState.ACTIVE
 
     LaunchedEffect(
         isCurrentScreen,
@@ -974,7 +972,6 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                 ConfigurationScreen(
                         apiKey = apiKey,
                         isSaving = isSavingInitialConfiguration,
-                        bridgePhase = bridgeState.phase,
                         bridgeAgentPresence = lanerAgentPresence,
                         bridgePendingCount = lanerMailboxStatus.unresolvedCount,
                         onSaveApiKey = { normalizedApiKey ->
@@ -1162,7 +1159,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 Text(
                                     text =
                                         when {
-                                            bridgeState.phase != AiLimbsBridgePhase.ONLINE ->
+                                            !bridgePluginActive ->
                                                 stringResource(
                                                     R.string.laner_chat_status_offline,
                                                     lanerMailboxStatus.unresolvedCount
@@ -1187,7 +1184,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                     style = MaterialTheme.typography.labelMedium,
                                     color =
                                         when {
-                                            bridgeState.phase != AiLimbsBridgePhase.ONLINE -> Color.Gray
+                                            !bridgePluginActive -> Color.Gray
                                             lanerAgentPresence == LanerChatPresenceState.ACTIVE -> Color(0xFF00E676)
                                             lanerAgentPresence == LanerChatPresenceState.RECENT -> Color(0xFFFFC107)
                                             else -> Color.Gray

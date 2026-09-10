@@ -2,6 +2,27 @@ package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
 
+/**
+ * Stable UI contribution targets owned by the Bridge parent contract.
+ *
+ * These ids do not define UI components. They only name the parent-owned screen instance and slot
+ * that Bridge has explicitly opened to ai_limbs.bridge.provider children. Plugin Center remains the
+ * sole owner of component types and rendering semantics.
+ */
+object BridgeProviderUiSlots {
+    const val SCREEN_ID = "plugin.system.bridge.screen"
+    const val PROVIDER_PANEL_COMPONENT_ID = "provider_panel"
+    const val PROVIDER_PANEL_AFTER = "after"
+}
+
+/**
+ * Bridge child-extension presentation contract.
+ *
+ * These field/action types belong to the Bridge provider API, not to Stable Kernel UI ABI. Child
+ * providers publish Bridge business presentation state; the Bridge parent translates that state into
+ * the active Plugin Center UI schema before rendering. Child extensions must not register Host
+ * screens or depend on InProcessScreenBlock/InProcessPanel* UI types.
+ */
 enum class BridgeProviderPanelFieldKind { TEXT, SECRET }
 
 data class BridgeProviderPanelField(

@@ -7,8 +7,7 @@ import com.ai.assistance.operit.data.model.ModelParameter
 import com.ai.assistance.operit.data.model.ToolPrompt
 import com.ai.assistance.operit.data.stats.ProviderUsageSnapshot
 import com.ai.assistance.operit.data.stats.TokenStatCategory
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
+import com.ai.assistance.operit.integrations.ailimbs.isBridgePluginActive
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
 import com.ai.assistance.operit.util.stream.Stream
 
@@ -61,13 +60,10 @@ class LanerBridgeStubAIService : AIService {
         context: Context,
         onUsageReported: (suspend (ProviderUsageSnapshot, attempt: Int) -> Unit)?
     ): Result<String> {
-        val bridgeState = AiLimbsBridgeManager.runtimeState.value
-        return if (bridgeState.phase == AiLimbsBridgePhase.ONLINE) {
-            Result.success("AI Limbs Bridge is online")
+        return if (isBridgePluginActive()) {
+            Result.success("AI Limbs Bridge plugin is active")
         } else {
-            Result.failure(
-                IllegalStateException("AI Limbs Bridge is ${bridgeState.phase.name.lowercase()}")
-            )
+            Result.failure(IllegalStateException("AI Limbs Bridge plugin is not active"))
         }
     }
 

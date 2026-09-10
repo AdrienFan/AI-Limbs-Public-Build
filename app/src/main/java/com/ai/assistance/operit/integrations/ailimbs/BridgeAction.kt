@@ -1,3 +1,4 @@
+// Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; visibility-only ABI adaptation.
 package com.ai.assistance.operit.integrations.ailimbs
 
 enum class BridgeAction {
