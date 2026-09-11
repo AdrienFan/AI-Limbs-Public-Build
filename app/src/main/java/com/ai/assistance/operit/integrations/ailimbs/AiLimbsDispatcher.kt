@@ -40,6 +40,7 @@ class AiLimbsDispatcher(
     private val developerCatalog = AiLimbsDeveloperCatalogService()
     private val storageIndex = AiLimbsStorageIndex(appContext)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
+    private val subsystemIngressGate = AiLimbsSubsystemIngressGate(policyEngine)
     private val gson = Gson()
 
     suspend fun execute(tool: String, args: JSONObject): JSONObject {
@@ -50,7 +51,14 @@ class AiLimbsDispatcher(
                         .put("error_code", "UNKNOWN_CAPABILITY")
                         .put("next_action", capabilityResolver.capabilitySearchUsage(tool))
                 }
-        val decision = policyEngine.evaluate(invocation)
+        val preflight = policyEngine.evaluatePreflight(invocation)
+        if (!preflight.proceed) {
+            return policyEngine.rejectionJson(invocation, preflight)
+        }
+        subsystemIngressGate.intercept(invocation)?.let { discovery ->
+            return discovery.put("execution_policy", preflight.inspection.toJson())
+        }
+        val decision = policyEngine.commitExecution(invocation, preflight)
         if (!decision.proceed) {
             return policyEngine.rejectionJson(invocation, decision)
         }

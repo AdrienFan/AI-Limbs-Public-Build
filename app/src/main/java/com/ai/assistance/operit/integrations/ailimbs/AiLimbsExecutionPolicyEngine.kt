@@ -26,8 +26,9 @@ private data class AiLimbsAvailabilityResult(
 /**
  * Transport-neutral policy kernel shared by discovery and execution.
  *
- * Resolver calls inspectForResolver; Dispatcher calls normalize and evaluate. Domain services still
- * own their atomic final checks because state can change after this preflight.
+ * Resolver calls inspectForResolver; Dispatcher calls normalize, evaluatePreflight, then
+ * commitExecution after non-executing ingress gates. Domain services still own their atomic final
+ * checks because state can change after this preflight.
  */
 class AiLimbsExecutionPolicyEngine(
     context: Context,
@@ -178,7 +179,7 @@ class AiLimbsExecutionPolicyEngine(
         }
     }
 
-    internal suspend fun evaluate(
+    internal suspend fun evaluatePreflight(
         invocation: AiLimbsNormalizedInvocation
     ): AiLimbsPolicyDecision {
         val inspection = inspect(invocation)
@@ -249,22 +250,37 @@ class AiLimbsExecutionPolicyEngine(
                 confirmedDuringEvaluation = true
             }
         }
-        if (workGateApplies && !receipts.claimNormalExecution()) {
-            val blockedInspection = when (receipts.workGateState()) {
-                AiLimbsWorkGateState.WORK_MANUAL_REQUIRED ->
-                    receipts.missingWorkManual()?.let {
-                        missingReceiptInspection(finalInspection, it)
-                    } ?: workModeSelectionInspection(finalInspection)
-                else -> workModeSelectionInspection(finalInspection)
-            }
-            return AiLimbsPolicyDecision(proceed = false, inspection = blockedInspection)
-        }
         return AiLimbsPolicyDecision(
             proceed = true,
             inspection = finalInspection,
             confirmedDuringEvaluation = confirmedDuringEvaluation
         )
     }
+
+    /** Claims the execution permit only after all non-executing ingress gates have passed. */
+    internal suspend fun commitExecution(
+        invocation: AiLimbsNormalizedInvocation,
+        preflight: AiLimbsPolicyDecision
+    ): AiLimbsPolicyDecision {
+        if (!preflight.proceed) return preflight
+        val workGateApplies =
+            session.transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME &&
+                !bypassesWorkModeGate(invocation)
+        if (!workGateApplies || receipts.claimNormalExecution()) return preflight
+
+        val blockedInspection = when (receipts.workGateState()) {
+            AiLimbsWorkGateState.WORK_MANUAL_REQUIRED ->
+                receipts.missingWorkManual()?.let {
+                    missingReceiptInspection(preflight.inspection, it)
+                } ?: workModeSelectionInspection(preflight.inspection)
+            else -> workModeSelectionInspection(preflight.inspection)
+        }
+        return AiLimbsPolicyDecision(proceed = false, inspection = blockedInspection)
+    }
+
+    internal fun subsystemDiscoveryDecision(
+        extensionId: String
+    ): AiLimbsSubsystemDiscoveryDecision = receipts.subsystemDiscoveryDecision(extensionId)
 
     internal suspend fun selectWorkMode(args: JSONObject): JSONObject {
         val rawMode = args.optString("mode").trim().uppercase()
@@ -286,12 +302,6 @@ class AiLimbsExecutionPolicyEngine(
                     .put("one_shot", true)
                     .put("work_gate_unlocked", false)
                     .put("instruction", "Exactly one normal capability may execute; the work-mode gate returns afterward.")
-                if (
-                    mode == AiLimbsWorkMode.NON_WORK &&
-                        receipts.claimNonWorkUbuntuToolDiscovery()
-                ) {
-                    result.put("ubuntu_tool_discovery", ubuntuToolDiscoveryContract())
-                }
                 result
             }
             AiLimbsWorkGateState.WORK_MANUAL_REQUIRED -> {
@@ -596,16 +606,6 @@ class AiLimbsExecutionPolicyEngine(
                         .put("transport_invocation", transportInvocation(selectTool, workArgs))))
         )
     }
-
-    private fun ubuntuToolDiscoveryContract(): JSONObject =
-        JSONObject()
-            .put("type", "UBUNTU_TOOL_DISCOVERY")
-            .put("scope", "interaction_cycle")
-            .put("query_tool", "ail-tool")
-            .put("query_existing_first", true)
-            .put("reuse_existing_first", true)
-            .put("install_only_if_no_match", true)
-            .put("cleanup_install_artifacts_after_verified", true)
 
     private fun managedDocumentNextAction(missing: AiLimbsMissingReceipt): JSONObject =
         JSONObject()

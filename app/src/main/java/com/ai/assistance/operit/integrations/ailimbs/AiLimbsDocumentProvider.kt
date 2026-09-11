@@ -235,15 +235,6 @@ class AiLimbsDocumentProvider(context: Context) {
 
         本节由 AI Limbs 生成，不能通过编辑器或文档写入接口修改。
         不得另外建立同类工作手册。
-
-        ## 2. Ubuntu 工具发现与复用原则
-
-        Ubuntu 工具事实以 `ail-tool` 实时查询为准。
-
-        使用 Ubuntu 工具前：
-        - 先用 `ail-tool` 查询并优先复用现有工具；
-        - 仅在没有合适工具时安装新工具；
-        - 新工具安装并验证后，及时清理无保留价值的安装包、缓存和临时文件。
         """.trimIndent()
 
     private fun extractEditableWorkManualBody(content: String): String {
@@ -299,6 +290,9 @@ class AiLimbsDocumentProvider(context: Context) {
             if (currentSchema < 4) {
                 editableBody = migrateRetiredToolManualRules(editableBody)
             }
+            if (currentSchema < 6) {
+                editableBody = migrateSubsystemDiscoveryOwnership(editableBody)
+            }
             if (editableBody != content) {
                 writeAtomically(workManual, editableBody)
             }
@@ -353,10 +347,16 @@ class AiLimbsDocumentProvider(context: Context) {
         )
         updated = Regex("""(?ms)^## 14\. 基本执行顺序\r?\n.*?(?=^## 15\.)""").replace(
             updated,
-            "## 14. 基本执行顺序\n\n读取工作手册 → 使用 `ail-tool` 查询并优先复用现有工具 → 必要时安装并验证新工具 → 清理无保留价值的安装残留 → 执行任务。\n\n"
+            "## 14. 基本执行顺序\n\n读取工作手册 → 执行任务。\n\n"
         )
         return updated.trimStart('\r', '\n')
     }
+
+    private fun migrateSubsystemDiscoveryOwnership(content: String): String =
+        content.replace(
+            "## 14. 基本执行顺序\n\n读取工作手册 → 使用 `ail-tool` 查询并优先复用现有工具 → 必要时安装并验证新工具 → 清理无保留价值的安装残留 → 执行任务。\n\n",
+            "## 14. 基本执行顺序\n\n读取工作手册 → 执行任务。\n\n"
+        )
 
     private fun archivePreV054Document(source: File) {
         ensureDirectory(legacyArchiveDirectory)
@@ -454,7 +454,7 @@ class AiLimbsDocumentProvider(context: Context) {
         private const val LEGACY_ARCHIVE_DIRECTORY = "legacy"
         private const val PREFERENCES_NAME = "ai_limbs_documents"
         private const val KEY_DOCUMENT_SCHEMA_VERSION = "document_schema_version"
-        private const val DOCUMENT_SCHEMA_VERSION = 5
+        private const val DOCUMENT_SCHEMA_VERSION = 6
         private const val RETIRED_TOOL_MANUAL_FILE = "LANER_TOOL_MANUAL.md"
         private const val RETIRED_TOOL_MANUAL_STABLE_ID = "tool_manual"
         private const val MAX_SNAPSHOTS = 3

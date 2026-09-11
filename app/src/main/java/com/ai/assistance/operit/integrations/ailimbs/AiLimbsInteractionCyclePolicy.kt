@@ -144,11 +144,15 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     fun beginInvocation(): AiLimbsInteractionCycleLease = synchronized(stateLock) {
         val lease = controller.beginInvocation()
         if (lease.startedNewCycle) accessGate.resetForContextBoundary()
+        accessGate.beginInteractionCycleInvocation()
         currentGeneration = lease.generation
         lease
     }
 
-    fun endInvocation() = controller.endInvocation()
+    fun endInvocation() = synchronized(stateLock) {
+        controller.endInvocation()
+        accessGate.endInteractionCycleInvocation()
+    }
 
     fun currentGeneration(): Long = synchronized(stateLock) { currentGeneration }
 

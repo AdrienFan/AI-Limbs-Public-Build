@@ -6,6 +6,7 @@ import com.ai.assistance.operit.plugins.system.KernelSystemHostGatewayV1
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginDelegatedCapabilityInvokerV2
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginProviderDirectoryV2
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginHostV2
+import com.ai.assistance.operit.plugins.system.KernelSystemPluginChildExtensionControlV2
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginServicePublisherV2
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
@@ -49,6 +50,7 @@ internal object PluginPlatformKernel {
     private lateinit var backupPolicyInstance: PluginBackupPolicyStore
     private lateinit var notificationHostInstance: PluginNotificationHost
     private lateinit var officialIdentitiesInstance: OfficialPluginIdentityRegistry
+    private lateinit var childExtensionRuntimeInstance: ChildExtensionRuntime
     private lateinit var systemPluginControllerInstance: com.ai.assistance.operit.plugins.system.SystemPluginController
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var inactivityMonitorJob: Job? = null
@@ -136,6 +138,14 @@ internal object PluginPlatformKernel {
             admittedRole = admittedRole,
             contributions = contributionsInstance
         )
+        val childExtensions = KernelSystemPluginChildExtensionControlV2(
+            admittedRole = admittedRole,
+            runtime = childExtensionRuntimeInstance.bound(
+                com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID,
+                emptySet()
+            ),
+            runtimeOwner = childExtensionRuntimeInstance
+        )
         val pluginAdmin = com.ai.assistance.operit.plugins.system.KernelPluginAdminJsonServiceV1(
             context = appContextInstance,
             manager = managerInstance,
@@ -162,7 +172,8 @@ internal object PluginPlatformKernel {
             systemUi,
             services,
             delegatedCapabilities,
-            providers
+            providers,
+            childExtensions
         )
     }
 
@@ -226,7 +237,7 @@ internal object PluginPlatformKernel {
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
                 register(DeclarativePluginRuntimeAdapter)
-                register(AndroidInProcessPluginRuntimeAdapter(contributions, notificationHost, officialIdentities))
+                register(AndroidInProcessPluginRuntimeAdapter(contributions, notificationHost, officialIdentities) { childExtensionRuntimeInstance })
             }
             listOf(
                 Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 AI Limbs 首页添加入口"),
@@ -337,6 +348,12 @@ internal object PluginPlatformKernel {
                 surfacePolicy = surfacePolicy
             )
             val pluginStore = PluginStore.fromContext(appContext)
+            val childExtensionRuntime = ChildExtensionRuntime(
+                appContext = appContext,
+                pluginStore = pluginStore,
+                contributions = contributions,
+                capabilityRegistry = capabilityRegistry
+            )
             val backupStore = PluginBackupStore(pluginStore)
             val manager = PluginManager(
                 appContext = appContext,
@@ -376,6 +393,7 @@ internal object PluginPlatformKernel {
             backupPolicyInstance = backupPolicy
             notificationHostInstance = notificationHost
             officialIdentitiesInstance = officialIdentities
+            childExtensionRuntimeInstance = childExtensionRuntime
             val systemPluginController = com.ai.assistance.operit.plugins.system.SystemPluginController(
                 context = appContext,
                 uiRegistry = systemUiRegistry,
@@ -394,6 +412,7 @@ internal object PluginPlatformKernel {
             if (started) return
         }
         try {
+            childExtensionRuntimeInstance.start()
             systemPluginControllerInstance.restore()
             managerInstance.restoreEnabledPlugins()
             managerInstance.reconcileInactivityPolicy()

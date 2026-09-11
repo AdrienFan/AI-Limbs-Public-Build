@@ -21,19 +21,63 @@ internal enum class AiLimbsWorkGateState {
     WORK_UNLOCKED
 }
 
+internal enum class AiLimbsSubsystemDiscoveryDecision {
+    DELIVER,
+    BLOCK,
+    ALLOW
+}
+
+internal class AiLimbsSubsystemDiscoveryLedger {
+    private enum class Phase { DELIVERING, DELIVERED }
+
+    private val stateLock = Any()
+    private val phases = linkedMapOf<String, Phase>()
+    private var activeExternalInvocations = 0
+
+    fun beginInvocation() = synchronized(stateLock) {
+        activeExternalInvocations += 1
+    }
+
+    fun endInvocation() = synchronized(stateLock) {
+        check(activeExternalInvocations > 0) { "Subsystem discovery invocation underflow" }
+        activeExternalInvocations -= 1
+        if (activeExternalInvocations == 0) {
+            phases.filterValues { it == Phase.DELIVERING }.keys.toList().forEach { key ->
+                phases[key] = Phase.DELIVERED
+            }
+        }
+    }
+
+    fun resetForContextBoundary() = synchronized(stateLock) {
+        phases.clear()
+    }
+
+    fun decision(extensionId: String): AiLimbsSubsystemDiscoveryDecision = synchronized(stateLock) {
+        val normalized = extensionId.trim().lowercase()
+        require(normalized.isNotBlank()) { "Subsystem extension id must not be blank" }
+        when (phases[normalized]) {
+            Phase.DELIVERING -> AiLimbsSubsystemDiscoveryDecision.BLOCK
+            Phase.DELIVERED -> AiLimbsSubsystemDiscoveryDecision.ALLOW
+            null -> {
+                phases[normalized] =
+                    if (activeExternalInvocations > 0) Phase.DELIVERING else Phase.DELIVERED
+                AiLimbsSubsystemDiscoveryDecision.DELIVER
+            }
+        }
+    }
+}
+
 internal class AiLimbsWorkModeGate {
     private val stateLock = Any()
     private var workSelected = false
     private var nonWorkPermit = false
     private var workUnlocked = false
-    private var nonWorkUbuntuToolDiscoveryDelivered = false
 
     fun reset() {
         synchronized(stateLock) {
             workSelected = false
             nonWorkPermit = false
             workUnlocked = false
-            nonWorkUbuntuToolDiscoveryDelivered = false
         }
     }
 
@@ -60,15 +104,6 @@ internal class AiLimbsWorkModeGate {
                 workUnlocked = true
                 nonWorkPermit = false
             }
-        }
-    }
-
-    fun claimNonWorkUbuntuToolDiscovery(): Boolean = synchronized(stateLock) {
-        if (nonWorkUbuntuToolDiscoveryDelivered) {
-            false
-        } else {
-            nonWorkUbuntuToolDiscoveryDelivered = true
-            true
         }
     }
 
@@ -107,6 +142,7 @@ class AiLimbsAccessGate(context: Context) {
 
     private var customPromptReceiptVersion: String? = null
     private var workManualReceiptVersion: String? = null
+    private val subsystemDiscoveryLedger = AiLimbsSubsystemDiscoveryLedger()
 
     private val customPromptReadTools =
         AiLimbsCoreCapabilityRegistry.managedDocumentInvokeNames(
@@ -138,8 +174,13 @@ class AiLimbsAccessGate(context: Context) {
             customPromptReceiptVersion = null
             workManualReceiptVersion = null
         }
+        subsystemDiscoveryLedger.resetForContextBoundary()
         workModeGate.reset()
     }
+
+    internal fun beginInteractionCycleInvocation() = subsystemDiscoveryLedger.beginInvocation()
+
+    internal fun endInteractionCycleInvocation() = subsystemDiscoveryLedger.endInvocation()
 
     internal fun workGateState(): AiLimbsWorkGateState = workModeGate.state()
 
@@ -151,8 +192,9 @@ class AiLimbsAccessGate(context: Context) {
         return workModeGate.select(mode)
     }
 
-    internal fun claimNonWorkUbuntuToolDiscovery(): Boolean =
-        workModeGate.claimNonWorkUbuntuToolDiscovery()
+    internal fun subsystemDiscoveryDecision(
+        extensionId: String
+    ): AiLimbsSubsystemDiscoveryDecision = subsystemDiscoveryLedger.decision(extensionId)
 
     internal fun claimNormalExecution(): Boolean = workModeGate.claimNormalExecution()
 

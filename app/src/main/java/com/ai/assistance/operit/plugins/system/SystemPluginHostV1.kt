@@ -13,7 +13,13 @@ import com.ai.assistance.operit.plugins.center.PluginHostCapabilityRegistry
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginManager
 import com.ai.assistance.operit.plugins.center.SystemPluginUiRegistry
+import com.ai.assistance.operit.plugins.center.ChildExtensionRuntime
+import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
+import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
+import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
+import com.ai.limbs.plugin.runtime.InProcessChildExtensionRuntime
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import org.json.JSONObject
 
@@ -253,10 +259,25 @@ interface SystemPluginDelegatedCapabilityInvokerV2 {
     ): JSONObject
 }
 
+interface SystemPluginChildExtensionControlV2 {
+    suspend fun uninstall(extensionId: String): Boolean
+    suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot
+    suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot
+    suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot
+    suspend fun deleteBackup(extensionId: String): Boolean
+    suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long = 10L)
+    suspend fun exportBackups(extensionIds: Collection<String>, treeUri: String): List<String>
+    fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
+    fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>>
+    fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>>
+    fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>>
+}
+
 interface SystemPluginHostV2 : SystemPluginHostV1 {
     override val ui: SystemUiHostV2
     val services: SystemPluginServicePublisherV2
     val delegatedCapabilities: SystemPluginDelegatedCapabilityInvokerV2
+    val childExtensions: SystemPluginChildExtensionControlV2
 
     /**
      * Read-only provider discovery used by Plugin Center's generic UI components.  For example,
@@ -504,6 +525,29 @@ internal class KernelSystemPluginDelegatedCapabilityInvokerV2(
     }
 }
 
+internal class KernelSystemPluginChildExtensionControlV2(
+    private val admittedRole: String,
+    private val runtime: InProcessChildExtensionRuntime,
+    private val runtimeOwner: ChildExtensionRuntime
+) : SystemPluginChildExtensionControlV2 {
+    init { requirePluginCenterRole(admittedRole) }
+
+    override suspend fun uninstall(extensionId: String): Boolean = runtime.uninstall(extensionId)
+    override suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot =
+        runtime.setEnabled(extensionId, enabled)
+    override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot = runtime.backup(extensionId)
+    override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot = runtime.restoreBackup(extensionId)
+    override suspend fun deleteBackup(extensionId: String): Boolean = runtime.deleteBackup(extensionId)
+    override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) =
+        runtime.setAutoBackupPolicy(enabled, highFrequencyUseCount)
+    override suspend fun exportBackups(extensionIds: Collection<String>, treeUri: String): List<String> =
+        runtimeOwner.exportBackups(extensionIds, treeUri)
+    override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> = runtime.snapshots()
+    override fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>> = runtime.snapshotsForPoint(point)
+    override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> = runtime.backupSnapshots()
+    override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> = runtime.uiContributions()
+}
+
 internal class KernelSystemPluginHostV2(
     override val hostAbi: Int,
     override val hostGateway: SystemHostGatewayV1,
@@ -515,7 +559,8 @@ internal class KernelSystemPluginHostV2(
     override val ui: SystemUiHostV2,
     override val services: SystemPluginServicePublisherV2,
     override val delegatedCapabilities: SystemPluginDelegatedCapabilityInvokerV2,
-    override val providers: SystemPluginProviderDirectoryV2
+    override val providers: SystemPluginProviderDirectoryV2,
+    override val childExtensions: SystemPluginChildExtensionControlV2
 ) : SystemPluginHostV2
 
 internal class UnsupportedSystemJsonServiceV1(private val serviceName: String) : SystemJsonServiceV1 {

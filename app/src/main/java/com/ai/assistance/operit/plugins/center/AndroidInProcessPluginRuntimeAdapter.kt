@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.ParcelFileDescriptor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
+import com.ai.limbs.plugin.runtime.InProcessChildExtensionRuntime
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessNativeExecutableIds
 import com.ai.limbs.plugin.runtime.InProcessNativeRuntime
@@ -35,7 +36,8 @@ import org.json.JSONObject
 internal class AndroidInProcessPluginRuntimeAdapter(
     private val contributions: PluginContributionRegistry,
     private val notificationHost: PluginNotificationHost,
-    private val identityRegistry: OfficialPluginIdentityRegistry
+    private val identityRegistry: OfficialPluginIdentityRegistry,
+    private val childRuntimeProvider: () -> ChildExtensionRuntime
 ) : PluginRuntimeAdapter {
     override val kind: String = "android_inprocess"
 
@@ -72,7 +74,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         }
 
-        val host = Host(context, entryFile, loader, runtimeScope, contributions, notificationHost)
+        val host = Host(context, entryFile, loader, runtimeScope, contributions, notificationHost, childRuntimeProvider)
         val handle = try {
             entry.mount(host)
         } catch (error: Throwable) {
@@ -183,7 +185,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         private val runtimeClassLoader: ClassLoader,
         override val scope: CoroutineScope,
         private val contributions: PluginContributionRegistry,
-        private val notificationHost: PluginNotificationHost
+        private val notificationHost: PluginNotificationHost,
+        private val childRuntimeProvider: () -> ChildExtensionRuntime
     ) : InProcessPluginHost {
         override val applicationContext = context.appContext
         override val pluginId: String = context.manifest.pluginId
@@ -207,6 +210,9 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 InProcessNativeExecutableIds.SUDO to File(context.appContext.applicationInfo.nativeLibraryDir, "libsudo.so")
             )
         )
+        override val childExtensions: InProcessChildExtensionRuntime
+            get() = childRuntimeProvider().bound(pluginId, context.payloadContext.permissions.grantedScopes)
+
         override val services: InProcessServiceDirectory = object : InProcessServiceDirectory {
             override fun resolve(id: String, minApi: Int?): InProcessServiceBinding? {
                 val resolved = context.payloadContext.serviceResolver.resolve(id, minApi)
@@ -275,46 +281,6 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             context.payloadContext.registrar.registerCapability(
                 spec.id,
                 PluginCapabilitySpec(
-                    displayName = spec.displayName,
-                    description = spec.description,
-                    invokeAliases = spec.invokeAliases,
-                    keywords = spec.keywords,
-                    parameters = spec.parameters.map { parameter ->
-                        PluginCapabilityParameterSpec(
-                            name = parameter.name,
-                            type = parameter.type,
-                            description = parameter.description,
-                            required = parameter.required,
-                            default = parameter.default
-                        )
-                    },
-                    suggestedParamsJson = spec.suggestedParamsJson,
-                    inputSchema = spec.inputSchema,
-                    effect = PluginCapabilityEffect.valueOf(spec.effect.name),
-                    domain = PluginCapabilityDomain.valueOf(spec.domain.name),
-                    workContextRequiredReceipts = spec.workContextRequiredReceipts
-                        .mapTo(linkedSetOf()) { PluginCapabilityReceipt.valueOf(it.name) },
-                    executor = PluginCapabilityExecutor { parameters ->
-                        val raw = spec.executor.invoke(parameters.toString())
-                        runCatching { JSONObject(raw) }.getOrElse {
-                            JSONObject().put("content", raw)
-                        }
-                    }
-                )
-            )
-        }
-
-        override fun registerChildCapability(
-            ownerExtensionId: String,
-            spec: InProcessCapabilitySpec
-        ): AutoCloseable {
-            check(pluginId == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
-                "Only Extension Hub may publish child-owned capabilities"
-            }
-            return context.payloadContext.registrar.registerChildCapability(
-                ownerExtensionId = ownerExtensionId,
-                id = spec.id,
-                capability = PluginCapabilitySpec(
                     displayName = spec.displayName,
                     description = spec.description,
                     invokeAliases = spec.invokeAliases,

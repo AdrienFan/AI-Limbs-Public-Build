@@ -64,21 +64,4 @@ class AiLimbsWorkModeGateTest {
         assertEquals(AiLimbsWorkGateState.SELECTION_REQUIRED, gate.state())
         assertFalse(gate.claimNormalExecution())
     }
-
-    @Test
-    fun nonWorkUbuntuToolDiscoveryIsDeliveredOncePerCycle() {
-        val gate = AiLimbsWorkModeGate()
-
-        gate.select(AiLimbsWorkMode.NON_WORK)
-        assertTrue(gate.claimNonWorkUbuntuToolDiscovery())
-        assertFalse(gate.claimNonWorkUbuntuToolDiscovery())
-
-        assertTrue(gate.claimNormalExecution())
-        gate.select(AiLimbsWorkMode.NON_WORK)
-        assertFalse(gate.claimNonWorkUbuntuToolDiscovery())
-
-        gate.reset()
-        gate.select(AiLimbsWorkMode.NON_WORK)
-        assertTrue(gate.claimNonWorkUbuntuToolDiscovery())
-    }
 }

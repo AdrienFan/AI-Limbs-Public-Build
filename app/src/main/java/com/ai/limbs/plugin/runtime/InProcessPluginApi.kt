@@ -232,6 +232,8 @@ interface InProcessPluginHost {
         get() = InProcessNativeRuntime.UNAVAILABLE
     val providers: InProcessProviderDirectory
     val services: InProcessServiceDirectory
+    val childExtensions: InProcessChildExtensionRuntime
+        get() = InProcessChildExtensionRuntime.UNAVAILABLE
 
     /**
      * Builds a UI Context backed by this trusted runtime APK's Resources/ClassLoader while retaining
@@ -267,12 +269,6 @@ interface InProcessPluginHost {
             executor = spec.executor
         )
     }
-
-    /** Privileged Extension Hub path for lifecycle-bound child-owned capabilities. */
-    fun registerChildCapability(
-        ownerExtensionId: String,
-        spec: InProcessCapabilitySpec
-    ): AutoCloseable = error("Child capability publication is not supported by this host")
 
     fun registerHomeTile(tile: InProcessHomeTile)
     fun registerScreen(screen: InProcessScreen)
@@ -340,7 +336,7 @@ data class ChildExtensionBinding(
 /**
  * Host-attested child contribution routed to one named slot of one parent-owned screen component.
  *
- * Identity fields are supplied by Extension Hub from the mounted .ailx record; child code cannot
+ * Identity fields are supplied by the Host child runtime from the admitted .ailx record; child code cannot
  * choose another parentPluginId or extension point. Plugin Center still decides whether the target
  * slot exists and whether that parent screen opened the slot to this extension point.
  */
@@ -358,9 +354,9 @@ fun interface ChildExtensionBinder {
     fun bind(binding: ChildExtensionBinding): AutoCloseable
 }
 
-interface ExtensionHubService {
+/** Host-owned child-extension runtime. Hub may admit new code, but does not own mounted children. */
+interface InProcessChildExtensionRuntime {
     fun publishPoint(
-        ownerPluginId: String,
         point: String,
         apiVersion: Int,
         title: String,
@@ -369,7 +365,7 @@ interface ExtensionHubService {
         binder: ChildExtensionBinder
     ): AutoCloseable
 
-    suspend fun install(
+    suspend fun installAdmitted(
         packageFile: File,
         expectedParentPluginId: String? = null,
         expectedPoint: String? = null
@@ -384,12 +380,35 @@ interface ExtensionHubService {
     fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
     fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>>
     fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>>
-
-    /**
-     * Live child UI contributions. Plugin Center filters this attested stream against the current
-     * parent screen's declared child_slots before rendering anything.
-     */
     fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>>
+
+    companion object {
+        val UNAVAILABLE: InProcessChildExtensionRuntime = object : InProcessChildExtensionRuntime {
+            private fun unavailable(): Nothing = error("Host child-extension runtime is unavailable")
+            override fun publishPoint(point: String, apiVersion: Int, title: String, description: String, allowedHostCapabilities: Set<String>, binder: ChildExtensionBinder): AutoCloseable = unavailable()
+            override suspend fun installAdmitted(packageFile: File, expectedParentPluginId: String?, expectedPoint: String?): ChildExtensionSnapshot = unavailable()
+            override suspend fun uninstall(extensionId: String): Boolean = unavailable()
+            override suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot = unavailable()
+            override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot = unavailable()
+            override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot = unavailable()
+            override suspend fun deleteBackup(extensionId: String): Boolean = unavailable()
+            override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) = unavailable()
+            override fun recordUse(extensionId: String) = unavailable()
+            override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> = unavailable()
+            override fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>> = unavailable()
+            override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> = unavailable()
+            override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> = unavailable()
+        }
+    }
+}
+
+interface ExtensionHubService {
+    /** Admission-only surface: verifies a new .ailx package, then hands it to the Host child runtime. */
+    suspend fun install(
+        packageFile: File,
+        expectedParentPluginId: String? = null,
+        expectedPoint: String? = null
+    ): ChildExtensionSnapshot
 }
 
 interface ChildExtensionEntry {
@@ -399,6 +418,12 @@ interface ChildExtensionEntry {
 fun interface ChildExtensionHandle {
     suspend fun stop()
 }
+
+/** Child-owned knowledge delivered once when AI first enters this subsystem in an Interaction Cycle. */
+data class ChildAiIngressDiscovery(
+    val schemaId: String,
+    val payloadJson: String
+)
 
 interface ChildExtensionHost {
     val applicationContext: Context
@@ -419,6 +444,13 @@ interface ChildExtensionHost {
     fun registerCapability(spec: InProcessCapabilitySpec): AutoCloseable =
         error("Child capability publication is not supported by this host")
 
+    /**
+     * Publishes child-owned AI ingress knowledge. Host binds the real extension identity and decides
+     * when it is delivered; child code owns only the opaque discovery document.
+     */
+    fun publishAiIngressDiscovery(discovery: ChildAiIngressDiscovery): AutoCloseable =
+        error("AI ingress discovery publication is not supported by this host")
+
     fun publish(
         payload: Any,
         metadata: Map<String, String> = emptyMap()
@@ -428,7 +460,7 @@ interface ChildExtensionHost {
      * Contributes Plugin Center-defined UI into a slot explicitly opened by this extension's parent.
      *
      * The caller names only the parent's screen/component/slot and its own contribution id. Extension
-     * Hub binds the real extension identity and target from the verified manifest, and Plugin Center
+     * Host binds the real extension identity and target from the admitted manifest, and Plugin Center
      * rejects unknown/closed slots. Closing the returned handle removes only this instance overlay.
      */
     fun publishUiContribution(
