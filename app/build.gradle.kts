@@ -392,10 +392,10 @@ android {
     }
 
     signingConfigs {
-        val releaseKeystorePath = localProperties.getProperty("RELEASE_STORE_FILE")
-        val releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD")
-        val releaseKeyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS")
-        val releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD")
+        val releaseKeystorePath = localProperties.getProperty("RELEASE_STORE_FILE") ?: System.getenv("AI_LIMBS_ANDROID_KEYSTORE_PATH")
+        val releaseStorePassword = localProperties.getProperty("RELEASE_STORE_PASSWORD") ?: System.getenv("AI_LIMBS_ANDROID_STORE_PASSWORD")
+        val releaseKeyAlias = localProperties.getProperty("RELEASE_KEY_ALIAS") ?: System.getenv("AI_LIMBS_ANDROID_KEY_ALIAS")
+        val releaseKeyPassword = localProperties.getProperty("RELEASE_KEY_PASSWORD") ?: System.getenv("AI_LIMBS_ANDROID_KEY_PASSWORD")
 
         if (releaseKeystorePath != null &&
             releaseStorePassword != null &&
@@ -422,7 +422,7 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 86
+        versionCode = 87
         versionName = "0.8.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -458,9 +458,10 @@ android {
             }
         }
         debug {
+            // Stable Android package identity: keep this unchanged for in-place updates.
             applicationIdSuffix = ".ailimbs.v080"
-            versionNameSuffix = "-build13"
-            signingConfig = signingConfigs.getByName("debug")
+            versionNameSuffix = "-build14"
+            signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")
         }
         create("clone") {
@@ -479,11 +480,8 @@ android {
                 getDefaultProguardFile("proguard-android-optimize.txt"),
                 "proguard-rules.pro"
             )
-            if (releaseSigningConfig != null) {
-                signingConfig = releaseSigningConfig
-            }
+            signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
             matchingFallbacks += listOf("release")
-            signingConfig = signingConfigs.getByName("debug")
         }
     }
     applicationVariants.all {

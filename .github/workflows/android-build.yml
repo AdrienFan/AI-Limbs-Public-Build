@@ -160,10 +160,32 @@ jobs:
           set -euo pipefail
           echo "sdk.dir=$ANDROID_HOME" > local.properties
 
+      - name: Prepare stable Android update signing
+        env:
+          AI_LIMBS_ANDROID_KEYSTORE_B64: ${{ secrets.AI_LIMBS_ANDROID_KEYSTORE_B64 }}
+          AI_LIMBS_ANDROID_STORE_PASSWORD: ${{ secrets.AI_LIMBS_ANDROID_STORE_PASSWORD }}
+          AI_LIMBS_ANDROID_KEY_ALIAS: ${{ secrets.AI_LIMBS_ANDROID_KEY_ALIAS }}
+          AI_LIMBS_ANDROID_KEY_PASSWORD: ${{ secrets.AI_LIMBS_ANDROID_KEY_PASSWORD }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          : "${AI_LIMBS_ANDROID_KEYSTORE_B64:?Missing AI_LIMBS_ANDROID_KEYSTORE_B64}"
+          : "${AI_LIMBS_ANDROID_STORE_PASSWORD:?Missing AI_LIMBS_ANDROID_STORE_PASSWORD}"
+          : "${AI_LIMBS_ANDROID_KEY_ALIAS:?Missing AI_LIMBS_ANDROID_KEY_ALIAS}"
+          : "${AI_LIMBS_ANDROID_KEY_PASSWORD:?Missing AI_LIMBS_ANDROID_KEY_PASSWORD}"
+          signing_file="$RUNNER_TEMP/ai-limbs-update.jks"
+          printf '%s' "$AI_LIMBS_ANDROID_KEYSTORE_B64" | base64 --decode > "$signing_file"
+          chmod 600 "$signing_file"
+          keytool -list -keystore "$signing_file" -storepass "$AI_LIMBS_ANDROID_STORE_PASSWORD" -alias "$AI_LIMBS_ANDROID_KEY_ALIAS" >/dev/null
+
       - name: Run Gradle build
         env:
           DISPATCH_GRADLE_TASK: ${{ inputs.gradle_task }}
           EVENT_NAME: ${{ github.event_name }}
+          AI_LIMBS_ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/ai-limbs-update.jks
+          AI_LIMBS_ANDROID_STORE_PASSWORD: ${{ secrets.AI_LIMBS_ANDROID_STORE_PASSWORD }}
+          AI_LIMBS_ANDROID_KEY_ALIAS: ${{ secrets.AI_LIMBS_ANDROID_KEY_ALIAS }}
+          AI_LIMBS_ANDROID_KEY_PASSWORD: ${{ secrets.AI_LIMBS_ANDROID_KEY_PASSWORD }}
         shell: bash
         run: |
           set -euo pipefail
