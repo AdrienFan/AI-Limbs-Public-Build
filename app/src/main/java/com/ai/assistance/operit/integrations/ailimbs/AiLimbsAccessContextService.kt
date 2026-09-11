@@ -46,9 +46,13 @@ class AiLimbsAccessContextService(context: Context) {
             AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
                 AiLimbsCoreLocalOperation.POLICY_SESSION_RESET
             )
+        val workModeSelect =
+            AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
+                AiLimbsCoreLocalOperation.WORK_MODE_SELECT
+            )
 
         return JSONObject()
-            .put("protocol", "AIL_EXECUTION_POLICY_V2")
+            .put("protocol", "AIL_EXECUTION_POLICY_V3")
             .put("kind", "IMMUTABLE_ACCESS_BOOTSTRAP")
             .put(
                 "system_access_prompt",
@@ -86,6 +90,24 @@ class AiLimbsAccessContextService(context: Context) {
                     .put("effective_version", workManual.version)
                     .put("path", workManual.path)
                     .put("read_when_requested", capabilityInvocation(workManualReadTool))
+            )
+            .put(
+                "work_mode",
+                JSONObject()
+                    .put("scope", "interaction_cycle")
+                    .put("select_capability", workModeSelect)
+                    .put(
+                        "non_work",
+                        JSONObject()
+                            .put("one_shot", true)
+                            .put("reselect_after_normal_execution", true)
+                    )
+                    .put(
+                        "work",
+                        JSONObject()
+                            .put("requires_work_manual_after_selection", true)
+                            .put("unlocks_until_cycle_boundary", true)
+                    )
             )
             .put(
                 "context_boundary",

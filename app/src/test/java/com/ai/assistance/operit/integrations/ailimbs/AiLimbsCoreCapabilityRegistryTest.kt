@@ -121,6 +121,7 @@ class AiLimbsCoreCapabilityRegistryTest {
         )
         listOf(
             "ai_limbs.policy.describe",
+            "ai_limbs.work_mode.select",
             "ai_limbs.policy.session.reset",
             "ai_limbs.storage.search",
             "ai_limbs.storage.describe",

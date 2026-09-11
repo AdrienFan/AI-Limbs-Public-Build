@@ -84,29 +84,38 @@ class AiLimbsIngressGateway internal constructor(
         AiLimbsInteractionCycleRuntime.state(context.applicationContext)
     )
 
-    internal suspend fun executeWithinSession(tool: String, args: JSONObject): JSONObject =
+    private suspend fun executeRawWithinSession(tool: String, args: JSONObject): JSONObject =
         runtime.execute(tool, args)
 
-    suspend fun invoke(tool: String, args: JSONObject): AiLimbsIngressResult {
+    suspend fun invoke(tool: String, args: JSONObject): AiLimbsIngressResult =
+        invoke { executeRawWithinSession(tool, args) }
+
+    internal suspend fun invokePayload(tool: String, args: JSONObject): JSONObject {
+        val result = invoke(tool, args)
+        return result.accessBootstrap?.let { bootstrap ->
+            JSONObject(result.payload.toString()).put("access_bootstrap", bootstrap)
+        } ?: result.payload
+    }
+
+    private suspend fun invoke(execute: suspend () -> JSONObject): AiLimbsIngressResult {
         val lease = cycleRuntime?.beginInvocation()
         return try {
-            val payload = executeWithinSession(tool, args)
             val generation = lease?.generation ?: cycleRuntime?.currentGeneration()
-            AiLimbsIngressResult(
-                payload = payload,
-                accessBootstrap = takeAccessBootstrap(generation)
-            )
+            val bootstrap = takeAccessBootstrap(generation)
+            if (bootstrap != null) {
+                AiLimbsIngressResult(
+                    payload = JSONObject().put("success", true),
+                    accessBootstrap = bootstrap
+                )
+            } else {
+                AiLimbsIngressResult(
+                    payload = execute(),
+                    accessBootstrap = null
+                )
+            }
         } finally {
             if (lease != null) cycleRuntime?.endInvocation()
         }
-    }
-
-    suspend fun complete(payload: JSONObject): AiLimbsIngressResult {
-        val generation = cycleRuntime?.currentGeneration()
-        return AiLimbsIngressResult(
-            payload = payload,
-            accessBootstrap = takeAccessBootstrap(generation)
-        )
     }
 
     fun resetAccessBootstrap() {

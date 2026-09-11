@@ -192,40 +192,133 @@ class AiLimbsExecutionPolicyEngine(
         if (!inspection.available || inspection.permission == PermissionLevel.FORBID.name) {
             return AiLimbsPolicyDecision(proceed = false, inspection = inspection)
         }
+
+        val workGateApplies =
+            session.transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME &&
+                !bypassesWorkModeGate(invocation)
+        if (workGateApplies) {
+            when (receipts.workGateState()) {
+                AiLimbsWorkGateState.SELECTION_REQUIRED ->
+                    return AiLimbsPolicyDecision(
+                        proceed = false,
+                        inspection = workModeSelectionInspection(inspection)
+                    )
+                AiLimbsWorkGateState.WORK_MANUAL_REQUIRED -> {
+                    val missingManual = receipts.missingWorkManual()
+                    if (missingManual != null) {
+                        return AiLimbsPolicyDecision(
+                            proceed = false,
+                            inspection = missingReceiptInspection(inspection, missingManual)
+                        )
+                    }
+                    return AiLimbsPolicyDecision(
+                        proceed = false,
+                        inspection = workModeSelectionInspection(inspection)
+                    )
+                }
+                AiLimbsWorkGateState.NON_WORK_ONCE,
+                AiLimbsWorkGateState.WORK_UNLOCKED -> Unit
+            }
+        }
+
+        var finalInspection = inspection
+        var confirmedDuringEvaluation = false
         if (
             inspection.permission == PermissionLevel.ASK.name &&
                 !invocation.spec.hostPermissionEnforced
         ) {
             if (AiLimbsExecutionAuthorization.allows(coroutineContext, session, invocation.targetName)) {
-                return AiLimbsPolicyDecision(
-                    proceed = true,
-                    inspection = inspection.copy(outcome = AiLimbsPolicyOutcome.ALLOW),
-                    confirmedDuringEvaluation = true
-                )
-            }
-            val granted =
-                corePermissionMutex.withLock {
+                finalInspection = inspection.copy(outcome = AiLimbsPolicyOutcome.ALLOW)
+                confirmedDuringEvaluation = true
+            } else {
+                val granted = corePermissionMutex.withLock {
                     permissionSystem.checkToolPermission(toAiTool(invocation))
                 }
-            if (!granted) {
-                return AiLimbsPolicyDecision(
-                    proceed = false,
-                    inspection =
-                        inspection.copy(
+                if (!granted) {
+                    return AiLimbsPolicyDecision(
+                        proceed = false,
+                        inspection = inspection.copy(
                             outcome = AiLimbsPolicyOutcome.FORBID,
                             reasonCode = "PERMISSION_DENIED",
                             reason = "The user denied the AI Limbs capability.",
                             nextAction = null
                         )
-                )
-            }
-            return AiLimbsPolicyDecision(
-                proceed = true,
-                inspection = inspection.copy(outcome = AiLimbsPolicyOutcome.ALLOW),
+                    )
+                }
+                finalInspection = inspection.copy(outcome = AiLimbsPolicyOutcome.ALLOW)
                 confirmedDuringEvaluation = true
-            )
+            }
         }
-        return AiLimbsPolicyDecision(proceed = true, inspection = inspection)
+        if (workGateApplies && !receipts.claimNormalExecution()) {
+            val blockedInspection = when (receipts.workGateState()) {
+                AiLimbsWorkGateState.WORK_MANUAL_REQUIRED ->
+                    receipts.missingWorkManual()?.let {
+                        missingReceiptInspection(finalInspection, it)
+                    } ?: workModeSelectionInspection(finalInspection)
+                else -> workModeSelectionInspection(finalInspection)
+            }
+            return AiLimbsPolicyDecision(proceed = false, inspection = blockedInspection)
+        }
+        return AiLimbsPolicyDecision(
+            proceed = true,
+            inspection = finalInspection,
+            confirmedDuringEvaluation = confirmedDuringEvaluation
+        )
+    }
+
+    internal suspend fun selectWorkMode(args: JSONObject): JSONObject {
+        val rawMode = args.optString("mode").trim().uppercase()
+        val mode = AiLimbsWorkMode.entries.firstOrNull { it.name == rawMode }
+            ?: return JSONObject()
+                .put("success", false)
+                .put("error_code", "INVALID_WORK_MODE")
+                .put("error", "mode must be WORK or NON_WORK")
+
+        val state = receipts.selectWorkMode(mode)
+        val result = JSONObject()
+            .put("success", true)
+            .put("selected_mode", mode.name)
+            .put("work_gate_state", state.name)
+
+        return when (state) {
+            AiLimbsWorkGateState.NON_WORK_ONCE -> {
+                result
+                    .put("one_shot", true)
+                    .put("work_gate_unlocked", false)
+                    .put("instruction", "Exactly one normal capability may execute; the work-mode gate returns afterward.")
+                if (
+                    mode == AiLimbsWorkMode.NON_WORK &&
+                        receipts.claimNonWorkUbuntuToolDiscovery()
+                ) {
+                    result.put("ubuntu_tool_discovery", ubuntuToolDiscoveryContract())
+                }
+                result
+            }
+            AiLimbsWorkGateState.WORK_MANUAL_REQUIRED -> {
+                val missing = receipts.missingWorkManual()
+                if (mode == AiLimbsWorkMode.NON_WORK) {
+                    result
+                        .put("success", false)
+                        .put("error_code", "WORK_MODE_ALREADY_SELECTED")
+                        .put("error", "WORK is already selected for this Interaction Cycle and cannot be downgraded to NON_WORK.")
+                        .put("next_action", missing?.let(::managedDocumentNextAction) ?: JSONObject.NULL)
+                } else {
+                    result
+                        .put("work_gate_unlocked", false)
+                        .put("work_manual_required", true)
+                        .put("next_action", missing?.let(::managedDocumentNextAction) ?: JSONObject.NULL)
+                }
+            }
+            AiLimbsWorkGateState.WORK_UNLOCKED ->
+                result
+                    .put("work_gate_unlocked", true)
+                    .put("work_manual_required", false)
+                    .put("cycle_scope", "interaction_cycle")
+            AiLimbsWorkGateState.SELECTION_REQUIRED ->
+                result
+                    .put("success", false)
+                    .put("error_code", "WORK_MODE_SELECTION_REQUIRED")
+        }
     }
 
     internal fun recordSuccessfulExecution(
@@ -447,6 +540,82 @@ class AiLimbsExecutionPolicyEngine(
 
         return AiLimbsAvailabilityResult(available = true)
     }
+
+    private fun bypassesWorkModeGate(invocation: AiLimbsNormalizedInvocation): Boolean =
+        when (val route = invocation.route) {
+            is AiLimbsCapabilityRoute.Core ->
+                when (val coreRoute = route.registration.route) {
+                    is AiLimbsCoreRoute.ManagedDocumentRead ->
+                        when (coreRoute.documentId) {
+                            AiLimbsDocumentId.SYSTEM_ACCESS_PROMPT,
+                            AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT -> true
+                            AiLimbsDocumentId.WORK_MANUAL ->
+                                receipts.workGateState() == AiLimbsWorkGateState.WORK_MANUAL_REQUIRED ||
+                                    receipts.workGateState() == AiLimbsWorkGateState.WORK_UNLOCKED
+                        }
+                    is AiLimbsCoreRoute.Local ->
+                        when (coreRoute.operation) {
+                            AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ,
+                            AiLimbsCoreLocalOperation.CAPABILITY_SEARCH,
+                            AiLimbsCoreLocalOperation.CAPABILITY_DESCRIBE,
+                            AiLimbsCoreLocalOperation.POLICY_DESCRIBE,
+                            AiLimbsCoreLocalOperation.POLICY_SESSION_RESET,
+                            AiLimbsCoreLocalOperation.WORK_MODE_SELECT -> true
+                            else -> false
+                        }
+                    else -> false
+                }
+            else -> false
+        }
+
+    private fun workModeSelectionInspection(
+        base: AiLimbsPolicyInspection
+    ): AiLimbsPolicyInspection {
+        val selectTool = AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
+            AiLimbsCoreLocalOperation.WORK_MODE_SELECT
+        )
+        val workArgs = JSONObject().put("mode", AiLimbsWorkMode.WORK.name)
+        val nonWorkArgs = JSONObject().put("mode", AiLimbsWorkMode.NON_WORK.name)
+        return base.copy(
+            outcome = AiLimbsPolicyOutcome.FORBID,
+            available = false,
+            reasonCode = "WORK_MODE_SELECTION_REQUIRED",
+            reason = "Select WORK or NON_WORK before executing a normal capability.",
+            nextAction = JSONObject()
+                .put("type", "SELECT_WORK_MODE")
+                .put("scope", "interaction_cycle")
+                .put("capability", selectTool)
+                .put("options", JSONArray()
+                    .put(JSONObject()
+                        .put("mode", AiLimbsWorkMode.NON_WORK.name)
+                        .put("semantics", "Allow exactly one normal capability, then require mode selection again.")
+                        .put("transport_invocation", transportInvocation(selectTool, nonWorkArgs)))
+                    .put(JSONObject()
+                        .put("mode", AiLimbsWorkMode.WORK.name)
+                        .put("semantics", "Require the current Work Manual, then unlock normal capabilities for this Interaction Cycle.")
+                        .put("transport_invocation", transportInvocation(selectTool, workArgs))))
+        )
+    }
+
+    private fun ubuntuToolDiscoveryContract(): JSONObject =
+        JSONObject()
+            .put("type", "UBUNTU_TOOL_DISCOVERY")
+            .put("scope", "interaction_cycle")
+            .put("query_tool", "ail-tool")
+            .put("query_existing_first", true)
+            .put("reuse_existing_first", true)
+            .put("install_only_if_no_match", true)
+            .put("cleanup_install_artifacts_after_verified", true)
+
+    private fun managedDocumentNextAction(missing: AiLimbsMissingReceipt): JSONObject =
+        JSONObject()
+            .put("type", "READ_MANAGED_DOCUMENT")
+            .put("document_id", missing.reference.documentId)
+            .put("required_version", missing.reference.version)
+            .put("capability", JSONObject()
+                .put("name", missing.readTool)
+                .put("parameters", JSONObject()))
+            .put("transport_invocation", transportInvocation(missing.readTool, JSONObject()))
 
     private fun missingReceiptInspection(
         base: AiLimbsPolicyInspection,

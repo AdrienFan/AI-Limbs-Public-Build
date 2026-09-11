@@ -54,7 +54,7 @@ class AiLimbsRdcToolAdapter(
     private suspend fun readFile(args: JSONObject): JSONObject {
         val path = args.optString("path")
         managedDocumentTool(path, write = false)?.let { tool ->
-            return mcpResult(ingressGateway.executeWithinSession(tool, JSONObject()))
+            return mcpResult(ingressGateway.invokePayload(tool, JSONObject()))
         }
         val offset = args.optInt("offset", 0).coerceAtLeast(0)
         val length = args.optInt("length", 0).coerceAtLeast(0)
@@ -119,7 +119,7 @@ class AiLimbsRdcToolAdapter(
                 return mcpError("AI Limbs managed documents require a full body save")
             }
             return mcpResult(
-                ingressGateway.executeWithinSession(
+                ingressGateway.invokePayload(
                     tool,
                     JSONObject().put("content", args.optString("content"))
                 )
@@ -158,7 +158,7 @@ class AiLimbsRdcToolAdapter(
             val parameters = request.optJSONObject("parameters") ?: JSONObject()
             val result =
                 if (shouldEnterAiLimbsDispatcher(name)) {
-                    ingressGateway.executeWithinSession(name, parameters)
+                    ingressGateway.invokePayload(name, parameters)
                 } else {
                     executeHostTool(name, parameters)
                 }
@@ -203,7 +203,7 @@ class AiLimbsRdcToolAdapter(
         args: JSONObject
     ): JSONObject {
         if (shouldEnterAiLimbsDispatcher(toolName)) {
-            return mcpResult(ingressGateway.executeWithinSession(toolName, args))
+            return mcpResult(ingressGateway.invokePayload(toolName, args))
         }
         handler.registerDefaultTools()
         if (toolName !in handler.getAllToolNames()) {
@@ -215,7 +215,7 @@ class AiLimbsRdcToolAdapter(
     }
 
     private suspend fun executeHostTool(name: String, params: JSONObject): JSONObject =
-        ingressGateway.executeWithinSession(
+        ingressGateway.invokePayload(
             AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
                 AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
             ),

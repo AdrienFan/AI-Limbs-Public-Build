@@ -88,8 +88,7 @@ internal object SystemEnvironmentClient {
     suspend fun executeSession(
         sessionId: String,
         command: String,
-        timeoutMs: Long = 1_800_000L,
-        workContext: Boolean = false
+        timeoutMs: Long = 1_800_000L
     ): String {
         val result = call(
             SESSION_EXECUTE_CAPABILITY,
@@ -97,7 +96,6 @@ internal object SystemEnvironmentClient {
                 .put("session_id", sessionId)
                 .put("command", command)
                 .put("timeout_ms", timeoutMs)
-                .put("work_context", workContext)
         )
         return result.optString("output")
     }
@@ -105,8 +103,7 @@ internal object SystemEnvironmentClient {
     suspend fun executeHiddenCommand(
         command: String,
         executorKey: String = "base",
-        timeoutMs: Long = 120_000L,
-        workContext: Boolean = false
+        timeoutMs: Long = 120_000L
     ): HiddenCommandResult {
         check(ensureRunning()) { "System Environment provider is not running" }
         val result = invokeRaw(
@@ -115,7 +112,6 @@ internal object SystemEnvironmentClient {
                 .put("command", command)
                 .put("executor_key", executorKey)
                 .put("timeout_ms", timeoutMs)
-                .put("work_context", workContext)
         )
         return HiddenCommandResult(
             success = result.optBoolean("success", false),
@@ -129,10 +125,9 @@ internal object SystemEnvironmentClient {
     suspend fun executeCommand(
         command: String,
         executorKey: String = "base",
-        timeoutMs: Long = 120_000L,
-        workContext: Boolean = false
+        timeoutMs: Long = 120_000L
     ): String {
-        val result = executeHiddenCommand(command, executorKey, timeoutMs, workContext)
+        val result = executeHiddenCommand(command, executorKey, timeoutMs)
         if (!result.success) throw IllegalStateException(result.error ?: "System Environment command failed: ${result.status}")
         return result.output
     }
@@ -140,20 +135,18 @@ internal object SystemEnvironmentClient {
     suspend fun sendSessionInput(
         sessionId: String,
         input: String? = null,
-        control: String? = null,
-        workContext: Boolean = false
+        control: String? = null
     ) {
         require(input != null || !control.isNullOrBlank()) { "Either input or control is required" }
         val request = JSONObject()
             .put("session_id", sessionId)
-            .put("work_context", workContext)
         if (input != null) request.put("input", input)
         if (!control.isNullOrBlank()) request.put("control", control)
         call(SESSION_INPUT_CAPABILITY, request)
     }
 
-    suspend fun sendInput(sessionId: String, input: String, workContext: Boolean = false) {
-        sendSessionInput(sessionId = sessionId, input = input, workContext = workContext)
+    suspend fun sendInput(sessionId: String, input: String) {
+        sendSessionInput(sessionId = sessionId, input = input)
     }
 
     suspend fun interruptSession(sessionId: String) {
@@ -176,8 +169,7 @@ internal object SystemEnvironmentClient {
 
     fun executeSessionFlow(
         sessionId: String,
-        command: String,
-        workContext: Boolean = false
+        command: String
     ): Flow<ProcessEvent> = flow {
         val started = call(
             PROCESS_CAPABILITY,
@@ -186,7 +178,6 @@ internal object SystemEnvironmentClient {
                 .put("command", command)
                 .put("session_id", sessionId)
                 .put("timeout_ms", 0)
-                .put("work_context", workContext)
         )
         val pid = started.getInt("pid")
         val startedRunning = started.optBoolean("running", true)
@@ -202,7 +193,6 @@ internal object SystemEnvironmentClient {
                     .put("offset", 0)
                     .put("length", PROCESS_READ_LINES)
                     .put("timeout_ms", PROCESS_READ_WAIT_MS)
-                    .put("work_context", workContext)
             )
             val output = snapshot.optString("output")
             val running = snapshot.optBoolean("running", false)
@@ -216,13 +206,12 @@ internal object SystemEnvironmentClient {
         }
     }
 
-    suspend fun terminateProcess(pid: Int, workContext: Boolean = false) {
+    suspend fun terminateProcess(pid: Int) {
         call(
             PROCESS_CAPABILITY,
             JSONObject()
                 .put("operation", "terminate")
                 .put("pid", pid)
-                .put("work_context", workContext)
         )
     }
 

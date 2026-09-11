@@ -93,6 +93,31 @@ object AiLimbsCoreCapabilityRegistry {
                 )
         ),
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.WORK_MODE_SELECT),
+            capabilityId = "ai_limbs.work_mode.select",
+            catalogEntry =
+                entry(
+                    name = "ai_limbs.work_mode.select",
+                    displayName = "选择 AI Limbs 工作模式",
+                    description = "Select WORK or NON_WORK at the Host-owned execution gate. NON_WORK grants exactly one normal capability; WORK requires the current Work Manual and unlocks the gate for the rest of the Interaction Cycle.",
+                    parameters = listOf(
+                        ToolParameterSchema(
+                            "mode",
+                            "string",
+                            "WORK or NON_WORK",
+                            true
+                        )
+                    ),
+                    keywords = listOf(
+                        "工作模式",
+                        "非工作模式",
+                        "work mode",
+                        "NON_WORK",
+                        "Work Manual"
+                    )
+                )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.POLICY_SESSION_RESET),
             capabilityId = "ai_limbs.policy.session.reset",
             catalogEntry =

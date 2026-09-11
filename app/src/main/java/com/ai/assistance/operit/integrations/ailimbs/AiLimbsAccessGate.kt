@@ -9,6 +9,90 @@ internal data class AiLimbsMissingReceipt(
     val readTool: String
 )
 
+internal enum class AiLimbsWorkMode {
+    WORK,
+    NON_WORK
+}
+
+internal enum class AiLimbsWorkGateState {
+    SELECTION_REQUIRED,
+    NON_WORK_ONCE,
+    WORK_MANUAL_REQUIRED,
+    WORK_UNLOCKED
+}
+
+internal class AiLimbsWorkModeGate {
+    private val stateLock = Any()
+    private var workSelected = false
+    private var nonWorkPermit = false
+    private var workUnlocked = false
+    private var nonWorkUbuntuToolDiscoveryDelivered = false
+
+    fun reset() {
+        synchronized(stateLock) {
+            workSelected = false
+            nonWorkPermit = false
+            workUnlocked = false
+            nonWorkUbuntuToolDiscoveryDelivered = false
+        }
+    }
+
+    fun state(): AiLimbsWorkGateState = synchronized(stateLock) { stateLocked() }
+
+    fun select(mode: AiLimbsWorkMode): AiLimbsWorkGateState =
+        synchronized(stateLock) {
+            if (workUnlocked) return@synchronized AiLimbsWorkGateState.WORK_UNLOCKED
+            when (mode) {
+                AiLimbsWorkMode.WORK -> {
+                    workSelected = true
+                    nonWorkPermit = false
+                }
+                AiLimbsWorkMode.NON_WORK -> {
+                    if (!workSelected) nonWorkPermit = true
+                }
+            }
+            stateLocked()
+        }
+
+    fun onWorkManualRead() {
+        synchronized(stateLock) {
+            if (workSelected) {
+                workUnlocked = true
+                nonWorkPermit = false
+            }
+        }
+    }
+
+    fun claimNonWorkUbuntuToolDiscovery(): Boolean = synchronized(stateLock) {
+        if (nonWorkUbuntuToolDiscoveryDelivered) {
+            false
+        } else {
+            nonWorkUbuntuToolDiscoveryDelivered = true
+            true
+        }
+    }
+
+    fun claimNormalExecution(): Boolean = synchronized(stateLock) {
+        when {
+            workUnlocked -> true
+            workSelected -> false
+            nonWorkPermit -> {
+                nonWorkPermit = false
+                true
+            }
+            else -> false
+        }
+    }
+
+    private fun stateLocked(): AiLimbsWorkGateState =
+        when {
+            workUnlocked -> AiLimbsWorkGateState.WORK_UNLOCKED
+            workSelected -> AiLimbsWorkGateState.WORK_MANUAL_REQUIRED
+            nonWorkPermit -> AiLimbsWorkGateState.NON_WORK_ONCE
+            else -> AiLimbsWorkGateState.SELECTION_REQUIRED
+        }
+}
+
 /**
  * Receipt ledger owned by one explicit AI Limbs execution session.
  *
@@ -19,6 +103,7 @@ internal data class AiLimbsMissingReceipt(
 class AiLimbsAccessGate(context: Context) {
     private val documents = AiLimbsDocumentProvider(context.applicationContext)
     private val stateLock = Any()
+    private val workModeGate = AiLimbsWorkModeGate()
 
     private var customPromptReceiptVersion: String? = null
     private var workManualReceiptVersion: String? = null
@@ -53,7 +138,26 @@ class AiLimbsAccessGate(context: Context) {
             customPromptReceiptVersion = null
             workManualReceiptVersion = null
         }
+        workModeGate.reset()
     }
+
+    internal fun workGateState(): AiLimbsWorkGateState = workModeGate.state()
+
+    internal suspend fun selectWorkMode(mode: AiLimbsWorkMode): AiLimbsWorkGateState {
+        val before = workModeGate.state()
+        if (mode == AiLimbsWorkMode.WORK && before != AiLimbsWorkGateState.WORK_UNLOCKED) {
+            synchronized(stateLock) { workManualReceiptVersion = null }
+        }
+        return workModeGate.select(mode)
+    }
+
+    internal fun claimNonWorkUbuntuToolDiscovery(): Boolean =
+        workModeGate.claimNonWorkUbuntuToolDiscovery()
+
+    internal fun claimNormalExecution(): Boolean = workModeGate.claimNormalExecution()
+
+    internal suspend fun missingWorkManual(): AiLimbsMissingReceipt? =
+        firstMissing(setOf(AiLimbsRequiredReceipt.WORK_MANUAL))
 
     internal suspend fun firstMissing(
         requiredReceipts: Set<AiLimbsRequiredReceipt>
@@ -99,7 +203,10 @@ class AiLimbsAccessGate(context: Context) {
         synchronized(stateLock) {
             when (invocation.canonicalName) {
                 in customPromptReadTools -> customPromptReceiptVersion = version
-                in workManualReadTools -> workManualReceiptVersion = version
+                in workManualReadTools -> {
+                    workManualReceiptVersion = version
+                    workModeGate.onWorkManualRead()
+                }
             }
         }
     }

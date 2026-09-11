@@ -18,7 +18,7 @@ internal class AiLimbsProcessRouter(
     ): JSONObject {
         val parameters = JSONObject(args.toString())
             .put("operation", operation.trim().lowercase())
-        return ingressGateway.executeWithinSession(
+        return ingressGateway.invokePayload(
             UBUNTU_PROCESS_CAPABILITY,
             parameters
         )

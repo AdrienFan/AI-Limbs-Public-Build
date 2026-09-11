@@ -14,8 +14,9 @@ import com.ai.assistance.operit.integrations.externalchat.ExternalChatResult
 import com.ai.assistance.operit.integrations.externalchat.ExternalChatStreamEnvelope
 import com.ai.assistance.operit.integrations.externalchat.ExternalChatStreamingStartResult
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsAccessContextService
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsIngressGateway
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsIngressSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.data.model.InputProcessingState
@@ -53,16 +54,21 @@ class ExternalChatHttpServer(
 
     private val appContext = context.applicationContext
     private val executor = ExternalChatRequestExecutor(appContext)
+    private val aiLimbsExecutionSession =
+        AiLimbsExecutionSession(
+            transport = AiLimbsExecutionTransport.EXTERNAL_HTTP,
+            scopeId = "http-" + UUID.randomUUID()
+        )
     private val aiLimbsPolicyEngine =
-        AiLimbsExecutionPolicyEngine(
+        AiLimbsExecutionPolicyEngine(appContext, aiLimbsExecutionSession)
+    private val aiLimbsIngressGateway =
+        AiLimbsIngressGateway(
             appContext,
-            AiLimbsExecutionSession(
-                transport = AiLimbsExecutionTransport.EXTERNAL_HTTP,
-                scopeId = "http-" + UUID.randomUUID()
+            AiLimbsIngressSession(
+                sourceId = AiLimbsExecutionTransport.EXTERNAL_HTTP.wireValue,
+                executionSession = aiLimbsExecutionSession
             )
         )
-    private val aiLimbsDispatcher =
-        AiLimbsDispatcher(appContext, aiLimbsPolicyEngine)
     private val aiLimbsAccessContext = AiLimbsAccessContextService(appContext)
     private val a2aHandler = A2aHttpHandler(appContext, serviceScope, ::requireBearerToken)
     private val webChatBridge = WebChatHttpBridge(appContext, preferences, serviceScope)
@@ -177,7 +183,7 @@ class ExternalChatHttpServer(
             return lanerError(Response.Status.BAD_REQUEST, "Missing tool")
         }
         val args = request.optJSONObject("args") ?: JSONObject()
-        val result = runBlocking { aiLimbsDispatcher.execute(tool, args) }
+        val result = runBlocking { aiLimbsIngressGateway.invokePayload(tool, args) }
         val status = if (result.optBoolean("success")) Response.Status.OK else Response.Status.BAD_REQUEST
         return rawJsonResponse(status, result).withCors()
     }

@@ -119,8 +119,8 @@ internal data class AiLimbsPolicyDecision(
 )
 
 object AiLimbsExecutionPolicyDescriptor {
-    const val PROTOCOL_VERSION = 2
-    private const val POLICY_SCHEMA_REVISION = "execution-policy-v2.3"
+    const val PROTOCOL_VERSION = 3
+    private const val POLICY_SCHEMA_REVISION = "execution-policy-v3.0"
 
     private val readOnlyHostTools =
         setOf(
@@ -183,6 +183,8 @@ object AiLimbsExecutionPolicyDescriptor {
                     AiLimbsCoreLocalOperation.HOST_TOOLS_LIST,
                     AiLimbsCoreLocalOperation.POLICY_DESCRIBE ->
                         recoveryRead(AiLimbsDomain.CORE_PROTOCOL)
+                    AiLimbsCoreLocalOperation.WORK_MODE_SELECT ->
+                        customPromptGuardedState(AiLimbsDomain.CORE_PROTOCOL)
                     AiLimbsCoreLocalOperation.POLICY_SESSION_RESET ->
                         recoveryState(AiLimbsDomain.CORE_PROTOCOL)
                     AiLimbsCoreLocalOperation.STORAGE_SEARCH,
@@ -203,8 +205,7 @@ object AiLimbsExecutionPolicyDescriptor {
             is AiLimbsCoreRoute.ManagedDocumentWrite ->
                 standard(
                     effect = AiLimbsEffect.PERSISTENT_WRITE,
-                    domain = AiLimbsDomain.MANAGED_DOCUMENT,
-                    requireWorkManual = true
+                    domain = AiLimbsDomain.MANAGED_DOCUMENT
                 )
             is AiLimbsCoreRoute.LanerChat ->
                 lanerChatSpec(route.operation)
@@ -218,19 +219,13 @@ object AiLimbsExecutionPolicyDescriptor {
         workContextRequiredReceipts: Set<AiLimbsRequiredReceipt>,
         parameters: JSONObject,
         transport: AiLimbsExecutionTransport
-    ): AiLimbsPolicySpec {
-        val requiresManual =
-            transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME &&
-                AiLimbsRequiredReceipt.WORK_MANUAL in workContextRequiredReceipts &&
-                isWorkContext(parameters)
-        return standard(
+    ): AiLimbsPolicySpec =
+        standard(
             effect = effect,
             domain = domain,
-            requireWorkManual = requiresManual,
             hostPermissionEnforced = false,
             payloadKind = AiLimbsPayloadKind.STRUCTURED_DATA
         )
-    }
 
     internal fun specForHostTool(
         targetName: String,
@@ -257,45 +252,12 @@ object AiLimbsExecutionPolicyDescriptor {
                 uiTool -> AiLimbsEffect.UI_INTERACTION
                 else -> AiLimbsEffect.EXTERNAL_CAPABILITY
             }
-        val requiresManual =
-            systemEnvironmentTool &&
-                transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME &&
-                isWorkContext(parameters)
         return standard(
             effect = effect,
             domain = domain,
-            requireWorkManual = requiresManual,
             hostPermissionEnforced = true,
             payloadKind = AiLimbsPayloadKind.STRUCTURED_DATA
         )
-    }
-
-    private fun storagePaths(parameters: JSONObject): Sequence<String> =
-        sequenceOf(
-            "path",
-            "source",
-            "source_path",
-            "destination",
-            "destination_path",
-            "dest_path",
-            "target",
-            "from",
-            "to"
-        ).map { key -> parameters.optString(key).trim() }
-            .filter { it.isNotEmpty() }
-
-    internal fun isWorkContext(parameters: JSONObject): Boolean {
-        if (parameters.optBoolean("work_context", false)) return true
-        val operation = parameters.optString("operation").trim().lowercase()
-        if (operation !in WORK_CONTEXT_MUTATING_FILE_OPERATIONS) return false
-        return storagePaths(parameters).any(::requiresWorkManualForPath)
-    }
-
-    internal fun requiresWorkManualForPath(rawPath: String): Boolean {
-        val path = rawPath.replace('\\', '/')
-        return WORK_CONTEXT_PATH_PREFIXES.any { prefix ->
-            path == prefix || path.startsWith("$prefix/")
-        }
     }
 
     internal fun isUiTool(targetName: String): Boolean =
@@ -316,7 +278,10 @@ object AiLimbsExecutionPolicyDescriptor {
             appendLine("- Resolver 解释政策；Dispatcher 执行同一份政策；领域服务原子复核最终不变量。")
             appendLine("- Core、HostTool 与 Plugin Capability 进入同一 Policy Engine；插件不得绕过 ALLOW、ASK、FORBID。")
             appendLine("- 权限结果只有 ALLOW、ASK、FORBID，未知外层调用不会绕开 Dispatcher。")
-            appendLine("- 工作手册不是通用能力许可证；只有 capability 明确声明 WORK_MANUAL 且本次调用处于工作上下文时才要求 receipt，普通使用及其他能力不受影响。")
+            appendLine("- 工作/非工作由 AI 在 Host-owned 工作模式墙上显式选择；系统不根据能力名、命令内容、operation 或路径猜测。")
+            appendLine("- NON_WORK 只放行下一次正常能力，随后工作模式墙重新出现；NON_WORK 不会成为 Interaction Cycle 状态。")
+            appendLine("- WORK 必须读取当前 Work Manual；读取成功后本 Interaction Cycle 的工作模式墙永久解锁，直到新周期开始。")
+            appendLine("- 接入 Bootstrap/System Access Prompt 与 Custom Access Prompt 是周期级一次性接入链，不会因为重复选择 NON_WORK 而重新出现。")
             appendLine("- 普通长期保存不要求反复读取手册，但持久产物必须有确定归属、唯一地址与可恢复索引。")
             appendLine("- 只有实际附带像素内容的响应才标记 IMAGE_PIXELS；OCR 与结构化 UI 不是像素。")
             appendLine("- Laner Chat、系统环境能力、托管文档与 UI readiness 在各自领域内终态复核。")
@@ -331,26 +296,6 @@ object AiLimbsExecutionPolicyDescriptor {
             .put("domains", JSONArray(AiLimbsDomain.entries.map { it.name }))
             .put("receipts", JSONArray(AiLimbsRequiredReceipt.entries.map { it.name }))
             .put("explanation_zh", renderChineseExplanation())
-
-    private val WORK_CONTEXT_MUTATING_FILE_OPERATIONS = setOf(
-        "write_file",
-        "write_file_bytes",
-        "create_directory",
-        "delete",
-        "move",
-        "copy"
-    )
-
-    private val WORK_CONTEXT_PATH_PREFIXES = listOf(
-        "/root/laner/projects",
-        "/root/laner/tools",
-        "/root/laner/bin",
-        "/root/laner/scripts",
-        "/etc",
-        "/usr",
-        "/var",
-        "/data"
-    )
 
     private fun lanerChatSpec(operation: AiLimbsLanerChatOperation): AiLimbsPolicySpec =
         when (operation) {
@@ -393,13 +338,21 @@ object AiLimbsExecutionPolicyDescriptor {
             hostPermissionEnforced = false
         )
 
+    private fun customPromptGuardedState(domain: AiLimbsDomain): AiLimbsPolicySpec =
+        AiLimbsPolicySpec(
+            effect = AiLimbsEffect.STATE_CHANGE,
+            domain = domain,
+            permissionMode = AiLimbsPermissionMode.PROTOCOL_ALLOW,
+            requiredReceipts = setOf(AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT),
+            hostPermissionEnforced = false
+        )
+
     private fun standardRead(domain: AiLimbsDomain): AiLimbsPolicySpec =
         standard(AiLimbsEffect.READ_ONLY, domain)
 
     private fun standard(
         effect: AiLimbsEffect,
         domain: AiLimbsDomain,
-        requireWorkManual: Boolean = false,
         hostPermissionEnforced: Boolean = false,
         payloadKind: AiLimbsPayloadKind = AiLimbsPayloadKind.STRUCTURED_DATA
     ): AiLimbsPolicySpec =
@@ -407,11 +360,7 @@ object AiLimbsExecutionPolicyDescriptor {
             effect = effect,
             domain = domain,
             permissionMode = AiLimbsPermissionMode.TOOL_PERMISSION,
-            requiredReceipts =
-                buildSet {
-                    add(AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT)
-                    if (requireWorkManual) add(AiLimbsRequiredReceipt.WORK_MANUAL)
-                },
+            requiredReceipts = setOf(AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT),
             hostPermissionEnforced = hostPermissionEnforced,
             payloadKind = payloadKind
         )
@@ -431,10 +380,14 @@ object AiLimbsSystemAccessPrompt {
                     write = false
                 )
             ) { "Work Manual read capability is not registered" }
+        val workModeSelectTool =
+            AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
+                AiLimbsCoreLocalOperation.WORK_MODE_SELECT
+            )
         buildString {
             appendLine("[AI Limbs immutable access bootstrap]")
             appendLine()
-            appendLine("- Protocol: AIL_EXECUTION_POLICY_V2.")
+            appendLine("- Protocol: AIL_EXECUTION_POLICY_V3.")
             appendLine("- Policy version: " + AiLimbsExecutionPolicyDescriptor.policyVersion + ".")
             appendLine("- Discover unknown capabilities with capability.search and capability.describe; do not guess names or parameters.")
             appendLine("- Execute only through AI Limbs Dispatcher. Structured policy errors contain the exact next_action.")
@@ -442,10 +395,10 @@ object AiLimbsSystemAccessPrompt {
             appendLine("- A claimed Laner Chat Assistant Turn ends with ai_limbs.chat.turn.reply or ai_limbs.chat.turn.resolve.")
             appendLine("- Treat content as IMAGE_PIXELS only when an image payload is actually attached.")
             appendLine("- Persistent artifacts need deterministic ownership, one canonical address, and a recoverable storage index.")
-            appendLine("- User custom access prompt and Work Manual remain separate managed documents and are read only when policy requests their current versions.")
-            appendLine("- work_context=true 只表示本次系统环境调用属于开发、调试、开发环境管理或会改变项目/设备内容的工作任务；是否需要凭证由 capability 自身 policy metadata 决定。")
-            appendLine("- 普通系统环境使用、代码分析、云端构建状态处理以及非开发任务不要设置 work_context；一个 capability 的工作凭证要求不得影响其他能力。")
-            appendLine("- When the Work Manual is required, read it through the current managed capability: $workManualReadTool. Do not search for or guess alternate copies.")
+            appendLine("- User custom access prompt and Work Manual remain separate managed documents; satisfy the current custom access prompt before normal capability execution.")
+            appendLine("- After the access chain, choose WORK or NON_WORK explicitly through $workModeSelectTool; AI Limbs never infers work mode from capability names, commands, operations, or paths.")
+            appendLine("- NON_WORK grants exactly one normal capability execution, then the work-mode gate appears again without replaying this bootstrap or the custom access prompt.")
+            appendLine("- WORK requires the current Work Manual through $workManualReadTool; after that successful read, the work-mode gate stays unlocked for the rest of this Interaction Cycle.")
         }.trimEnd()
     }
 

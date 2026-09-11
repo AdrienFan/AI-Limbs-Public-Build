@@ -154,7 +154,7 @@ internal class AiLimbsRdcSearchCompat(
     }
 
     private suspend fun executeHostTool(name: String, parameters: JSONObject): JSONObject =
-        ingressGateway.executeWithinSession(
+        ingressGateway.invokePayload(
             AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
                 AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
             ),

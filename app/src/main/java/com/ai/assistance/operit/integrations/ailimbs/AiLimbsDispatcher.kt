@@ -123,6 +123,7 @@ class AiLimbsDispatcher(
             }
             AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE -> executeHostTool(args)
             AiLimbsCoreLocalOperation.POLICY_DESCRIBE -> policyEngine.describePolicy()
+            AiLimbsCoreLocalOperation.WORK_MODE_SELECT -> policyEngine.selectWorkMode(args)
             AiLimbsCoreLocalOperation.POLICY_SESSION_RESET ->
                 policyEngine.resetSessionReceipts()
             AiLimbsCoreLocalOperation.STORAGE_SEARCH ->

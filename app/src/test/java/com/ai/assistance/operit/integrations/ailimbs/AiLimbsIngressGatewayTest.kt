@@ -10,18 +10,37 @@ import org.junit.Test
 
 class AiLimbsIngressGatewayTest {
     @Test
-    fun bootstrapIsDeliveredOncePerIngressSession() = runBlocking {
+    fun firstInvocationReturnsBootstrapWithoutExecutingCommand() = runBlocking {
         val bootstrapReads = AtomicInteger(0)
-        val gateway = testGateway(bootstrapReads)
+        val executions = AtomicInteger(0)
+        val gateway = testGateway(bootstrapReads, executions)
 
         val first = gateway.invoke("capability.search", JSONObject().put("query", "Ubuntu"))
         val second = gateway.invoke("capability.search", JSONObject().put("query", "Bridge"))
 
         assertEquals("bootstrap-1", first.accessBootstrap)
+        assertEquals(0, first.payload.optInt("execution", 0))
         assertNull(second.accessBootstrap)
+        assertEquals(1, second.payload.optInt("execution"))
+        assertEquals(1, executions.get())
         assertEquals("rdc", gateway.ingressSession.sourceId)
         assertEquals(AiLimbsExecutionTransport.RDC, gateway.ingressSession.executionSession.transport)
         assertEquals(1, bootstrapReads.get())
+    }
+
+    @Test
+    fun invokePayloadAlsoBlocksTheFirstCommand() = runBlocking {
+        val bootstrapReads = AtomicInteger(0)
+        val executions = AtomicInteger(0)
+        val gateway = testGateway(bootstrapReads, executions)
+
+        val first = gateway.invokePayload("anything", JSONObject())
+        val second = gateway.invokePayload("anything", JSONObject())
+
+        assertEquals("bootstrap-1", first.optString("access_bootstrap"))
+        assertEquals(0, first.optInt("execution", 0))
+        assertEquals(1, second.optInt("execution"))
+        assertEquals(1, executions.get())
     }
 
     @Test
@@ -51,20 +70,26 @@ class AiLimbsIngressGatewayTest {
         )
 
         val firstFailure = runCatching {
-            gateway.complete(JSONObject().put("success", true))
+            gateway.invoke("capability.search", JSONObject())
         }.exceptionOrNull()
-        val retry = gateway.complete(JSONObject().put("success", true))
+        val retry = gateway.invoke("capability.search", JSONObject())
 
         assertTrue(firstFailure?.message?.contains("temporary") == true)
         assertEquals("bootstrap-ok", retry.accessBootstrap)
         assertEquals(2, reads.get())
     }
 
-    private fun testGateway(bootstrapReads: AtomicInteger): AiLimbsIngressGateway =
+    private fun testGateway(
+        bootstrapReads: AtomicInteger,
+        executions: AtomicInteger = AtomicInteger(0)
+    ): AiLimbsIngressGateway =
         AiLimbsIngressGateway(
             ingressSession = ingressSession(),
             executeRemote = { tool, args ->
-                JSONObject().put("tool", tool).put("args", args)
+                JSONObject()
+                    .put("tool", tool)
+                    .put("args", args)
+                    .put("execution", executions.incrementAndGet())
             },
             readAccessBootstrap = {
                 "bootstrap-${bootstrapReads.incrementAndGet()}"

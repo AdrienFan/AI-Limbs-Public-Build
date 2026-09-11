@@ -13,6 +13,7 @@ internal enum class AiLimbsCoreLocalOperation {
     HOST_TOOLS_LIST,
     HOST_TOOL_EXECUTE,
     POLICY_DESCRIBE,
+    WORK_MODE_SELECT,
     POLICY_SESSION_RESET,
     STORAGE_SEARCH,
     STORAGE_DESCRIBE,
