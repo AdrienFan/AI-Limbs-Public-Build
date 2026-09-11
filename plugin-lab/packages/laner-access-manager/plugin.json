@@ -1,0 +1,56 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.laner.access_manager",
+  "version": "0.1.0",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
+  "display": {
+    "name": "兰儿接入管理",
+    "description": "管理 AI Limbs 自定义接入提示与工作手册，并保留历史快照恢复能力。"
+  },
+  "roles": [
+    "system_plugin"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.laneraccess.LanerAccessManagerEntry"
+    }
+  },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": [
+      "host.custom_access_prompt@1",
+      "host.work_manual@1"
+    ]
+  },
+  "provides": {
+    "capabilities": [],
+    "services": [],
+    "providers": [
+      "plugin.laner.access_manager.page"
+    ],
+    "extensions": [
+      {
+        "point": "ai_limbs.ui.home_tile",
+        "id": "plugin.laner.access_manager.tile",
+        "api": 1
+      },
+      {
+        "point": "ai_limbs.ui.screen",
+        "id": "plugin.laner.access_manager.screen",
+        "api": 2
+      }
+    ]
+  }
+}
