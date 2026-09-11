@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.extension_hub",
-  "version": "1.5.3",
+  "version": "1.5.4",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "Plugin Extension Hub",
-    "description": "AI Limbs 子插件管理器：对 AIL_EXTENSION_V1 / .ailx 执行完整性、发布者信任、安装、挂载、备份、导出与生命周期管理。"
+    "description": "AI Limbs 子插件准入网关：对 AIL_EXTENSION_V1 / .ailx 执行结构、完整性与发布者信任验证，并将验证通过的包转交 Host Child Runtime 安装。"
   },
   "roles": [
     "system_extension_hub"
@@ -37,9 +37,7 @@
     "requested_scopes": []
   },
   "provides": {
-    "capabilities": [
-      "plugin.extension_hub.export_backups"
-    ],
+    "capabilities": [],
     "services": [],
     "providers": [
       "system.extension.hub"

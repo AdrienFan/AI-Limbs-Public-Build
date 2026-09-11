@@ -1,17 +1,12 @@
 package com.ai.limbs.plugins.systemenvironment
 
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
-import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentContract
-import kotlinx.coroutines.cancelAndJoin
-import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -97,29 +92,14 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
             }.getOrDefault(false)
         }
 
-        var pointHandle: AutoCloseable? = null
-        val pointObserver = host.scope.launch {
-            host.providers.observe(InProcessSystemIds.EXTENSION_HUB_PROVIDER).collect { binding ->
-                pointHandle?.close()
-                pointHandle = null
-                if (binding != null) {
-                    check(binding.ownerPluginId == InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
-                        "Extension Hub provider has an unexpected owner"
-                    }
-                    val hub = binding.payload as? ExtensionHubService
-                        ?: error("Extension Hub provider payload is incompatible")
-                    pointHandle = hub.publishPoint(
-                        ownerPluginId = host.pluginId,
-                        point = SystemEnvironmentContract.EXTENSION_POINT,
-                        apiVersion = SystemEnvironmentContract.API_VERSION,
-                        title = "系统环境子系统",
-                        description = "提供运行时控制、通用能力端点与一个前台 Display Adapter。",
-                        allowedHostCapabilities = setOf(HOST_NETWORK_CAPABILITY),
-                        binder = ChildExtensionBinder(registry::bind)
-                    )
-                }
-            }
-        }
+        val pointHandle = host.childExtensions.publishPoint(
+            point = SystemEnvironmentContract.EXTENSION_POINT,
+            apiVersion = SystemEnvironmentContract.API_VERSION,
+            title = "系统环境子系统",
+            description = "提供运行时控制、通用能力端点与一个前台 Display Adapter。",
+            allowedHostCapabilities = setOf(HOST_NETWORK_CAPABILITY),
+            binder = ChildExtensionBinder(registry::bind)
+        )
 
         return InProcessPluginHandle {
             if (pageSlotRegistered) {
@@ -130,8 +110,7 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
                     )
                 }
             }
-            pointObserver.cancelAndJoin()
-            pointHandle?.close()
+            pointHandle.close()
         }
     }
 
