@@ -1,5 +1,6 @@
-package com.ai.assistance.operit.integrations.ailimbs
+package com.ai.limbs.extensions.triggercmd.runtime
 
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import org.json.JSONObject
 
 class AiLimbsRemoteInvocationExecutor(
