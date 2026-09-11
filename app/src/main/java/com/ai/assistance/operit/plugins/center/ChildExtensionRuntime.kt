@@ -446,7 +446,7 @@ internal class ChildExtensionRuntime(
                 override val dataDir = childDataDir
                 override val cacheDir = childCacheDir
                 override val runtimeEntryFile = apk
-                override val nativeRuntime = nativeRuntime
+                override val nativeRuntime: InProcessNativeRuntime = this@ChildExtensionRuntime.nativeRuntime
                 override fun createExtensionContext(baseContext: android.content.Context): android.content.Context =
                     createRuntimeContext(baseContext, apk, loader)
 
