@@ -2,7 +2,7 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.system_environment.ubuntu",
-  "version": "0.1.5",
+  "version": "0.1.6",
   "roles": [
     "system_extension"
   ],

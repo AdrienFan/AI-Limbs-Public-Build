@@ -420,6 +420,12 @@ fun interface ChildExtensionHandle {
     suspend fun stop()
 }
 
+/** Child-owned knowledge delivered once when AI first enters this subsystem in an Interaction Cycle. */
+data class ChildAiIngressDiscovery(
+    val schemaId: String,
+    val payloadJson: String
+)
+
 interface ChildExtensionHost {
     val applicationContext: Context
     val extensionId: String
@@ -438,6 +444,13 @@ interface ChildExtensionHost {
     /** Publishes a capability owned by this verified child extension instance. */
     fun registerCapability(spec: InProcessCapabilitySpec): AutoCloseable =
         error("Child capability publication is not supported by this host")
+
+    /**
+     * Publishes child-owned AI ingress knowledge. Host binds the real extension identity and decides
+     * when it is delivered; child code owns only the opaque discovery document.
+     */
+    fun publishAiIngressDiscovery(discovery: ChildAiIngressDiscovery): AutoCloseable =
+        error("AI ingress discovery publication is not supported by this host")
 
     fun publish(
         payload: Any,

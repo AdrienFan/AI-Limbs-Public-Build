@@ -382,7 +382,7 @@ jobs:
 
   ubuntu_system:
     if: inputs.target == 'ubuntu-system'
-    name: Build Ubuntu System v0.1.5 child extension only
+    name: Build Ubuntu System v0.1.6 child extension only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -421,7 +421,7 @@ jobs:
       - name: Upload Ubuntu System child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ubuntu-system-v0.1.5-${{ github.run_number }}
+          name: ubuntu-system-v0.1.6-${{ github.run_number }}
           path: |
             plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-system/extension.json
