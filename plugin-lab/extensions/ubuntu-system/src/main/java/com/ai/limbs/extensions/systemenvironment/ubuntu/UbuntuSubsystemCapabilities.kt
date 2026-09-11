@@ -4,7 +4,6 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityDomain
 import com.ai.limbs.plugin.runtime.InProcessCapabilityEffect
 import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
-import com.ai.limbs.plugin.runtime.InProcessCapabilityReceipt
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
@@ -169,11 +168,10 @@ internal object UbuntuSubsystemCapabilities {
         description = description,
         invokeAliases = invokeAliases,
         keywords = keywords,
-        parameters = params + workContextParam(),
+        parameters = params,
         suggestedParamsJson = suggested,
         effect = effect,
         domain = domain,
-        workContextRequiredReceipts = setOf(InProcessCapabilityReceipt.WORK_MANUAL),
         executor = InProcessCapabilityExecutor { raw ->
             val parameters = parse(raw)
             runCatching { executor(parameters) }
@@ -181,15 +179,6 @@ internal object UbuntuSubsystemCapabilities {
                 .toString()
         }
     )
-
-    private fun workContextParam() =
-        InProcessCapabilityParameterSpec(
-            name = "work_context",
-            type = "boolean",
-            description = "仅当本次 Ubuntu 调用属于开发、调试、开发环境管理或会改变项目/设备内容的工作任务时设为 true；普通 Ubuntu 使用保持 false。",
-            required = false,
-            default = "false"
-        )
 
     private fun param(
         name: String,
