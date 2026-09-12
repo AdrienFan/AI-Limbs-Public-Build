@@ -3,7 +3,7 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal
 import android.util.Log as AndroidLog
 import com.ai.limbs.plugin.runtime.InProcessRuntimeLogger
 
-internal object RuntimeLog {
+object RuntimeLog {
     @Volatile private var hostLogger: InProcessRuntimeLogger? = null
     fun bind(logger: InProcessRuntimeLogger?) { hostLogger = logger }
     fun d(tag: String, message: String): Int = hostLogger?.d(tag, message) ?: AndroidLog.d(tag, message)
