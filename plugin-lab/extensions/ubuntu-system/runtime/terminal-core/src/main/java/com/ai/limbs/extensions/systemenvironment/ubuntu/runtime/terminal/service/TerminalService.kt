@@ -82,7 +82,7 @@ class TerminalService : Service() {
         // 监听命令执行事件
         terminalManager.commandExecutionEvents
             .onEach { event ->
-                Log.d("TerminalService", "Received command execution event: $event")
+                Log.d("TerminalService", "Received command execution event id=${event.commandId} session=${event.sessionId} outputChars=${event.outputChunk.length} completed=${event.isCompleted}")
                 broadcastCommandExecutionEvent(event)
             }
             .launchIn(scope)
@@ -109,7 +109,7 @@ class TerminalService : Service() {
     // 事件广播方法
     private fun broadcastCommandExecutionEvent(event: CommandExecutionEvent) {
         val n = callbacks.beginBroadcast()
-        Log.d("TerminalService", "Broadcasting command execution event to $n callbacks: $event")
+        Log.d("TerminalService", "Broadcasting command execution event id=${event.commandId} session=${event.sessionId} outputChars=${event.outputChunk.length} completed=${event.isCompleted} callbacks=$n")
         for (i in 0 until n) {
             try {
                 callbacks.getBroadcastItem(i).onCommandExecutionUpdate(event)

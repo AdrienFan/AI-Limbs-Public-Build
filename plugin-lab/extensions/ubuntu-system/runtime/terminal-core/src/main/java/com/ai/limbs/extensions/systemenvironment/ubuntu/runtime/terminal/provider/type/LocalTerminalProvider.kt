@@ -94,8 +94,8 @@ class LocalTerminalProvider(
                 )
                 val env = buildEnvironment()
 
-                Log.d(TAG, "Starting local terminal session with command: ${command.joinToString(" ")}")
-                Log.d(TAG, "Environment: $env")
+                Log.d(TAG, "Starting local terminal session")
+                Log.d(TAG, "Environment prepared (entries=${env.size})")
 
                 val pty = Pty.start(command, env, filesDir)
 
@@ -145,7 +145,7 @@ class LocalTerminalProvider(
             val result = withTimeout(timeoutMs) {
                 shell.mutex.withLock {
                     val token = UUID.randomUUID().toString()
-                    Log.d(TAG, "Hidden exec command started: key=$executorKey token=$token timeoutMs=$timeoutMs command=${command.lineSequence().firstOrNull().orEmpty().take(200)}")
+                    Log.d(TAG, "Hidden exec command started: key=$executorKey token=$token timeoutMs=$timeoutMs chars=${command.length}")
                     val wrappedCommand = buildHiddenExecEnvelope(command, token)
                     withContext(Dispatchers.IO) {
                         shell.writer.write(wrappedCommand)
@@ -566,7 +566,7 @@ class LocalTerminalProvider(
             .filter { it.isNotBlank() }
             .forEach { line ->
                 line.chunked(3000).forEach { part ->
-                    Log.d(TAG, "Hidden exec output [$executorKey][$token]: $part")
+                    Log.d(TAG, "Hidden exec output received [$executorKey][$token] chars=${part.length}")
                 }
             }
     }

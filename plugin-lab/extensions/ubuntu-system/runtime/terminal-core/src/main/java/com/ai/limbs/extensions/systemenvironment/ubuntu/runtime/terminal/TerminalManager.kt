@@ -732,7 +732,7 @@ class TerminalManager private constructor(
         val isInitializing = session.initState != SessionInitState.READY
 
         if (session.isInteractiveMode || isInitializing) {
-            Log.d(TAG, "Session in interactive mode or initializing, sending as input: $command")
+            Log.d(TAG, "Session ${session.id} input forwarded in interactive/initializing mode (chars=${command.length})")
             sendInput(command + TERMINAL_ENTER)
             return actualCommandId
         }
@@ -741,7 +741,7 @@ class TerminalManager private constructor(
             if (session.currentExecutingCommand?.isExecuting == true) {
                 // 有命令正在执行，将新命令加入队列
                 session.commandQueue.add(QueuedCommand(actualCommandId, command))
-                Log.d(TAG, "Command queued: $command (id: $actualCommandId). Queue size: ${session.commandQueue.size}")
+                Log.d(TAG, "Command queued (id: $actualCommandId, chars=${command.length}). Queue size: ${session.commandQueue.size}")
             } else {
                 // 没有命令在执行，直接执行
                 executeCommandInternal(command, session, actualCommandId)
@@ -762,7 +762,7 @@ class TerminalManager private constructor(
 
         // 如果会话在交互模式，直接发送输入（不创建命令历史）
         if (session.isInteractiveMode) {
-            Log.d(TAG, "Session $sessionId in interactive mode, sending as input: $command")
+            Log.d(TAG, "Session $sessionId interactive input forwarded (chars=${command.length})")
             try {
                 writeInputToKernel(session, command + TERMINAL_ENTER, "interactive-session-command")
             } catch (e: Exception) {
@@ -775,7 +775,7 @@ class TerminalManager private constructor(
             if (session.currentExecutingCommand?.isExecuting == true) {
                 // 有命令正在执行，将新命令加入队列
                 session.commandQueue.add(QueuedCommand(actualCommandId, command))
-                Log.d(TAG, "Command queued for session $sessionId: $command (id: $actualCommandId). Queue size: ${session.commandQueue.size}")
+                Log.d(TAG, "Command queued for session $sessionId (id: $actualCommandId, chars=${command.length}). Queue size: ${session.commandQueue.size}")
             } else {
                 // 没有命令在执行，直接执行
                 executeCommandInternal(command, session, actualCommandId)
@@ -798,7 +798,7 @@ class TerminalManager private constructor(
 
             if (session.commandQueue.isNotEmpty()) {
                 val nextCommand = session.commandQueue.removeAt(0)
-                Log.d(TAG, "Processing next queued command: ${nextCommand.command} (id: ${nextCommand.id}). Queue size: ${session.commandQueue.size}")
+                Log.d(TAG, "Processing next queued command (id: ${nextCommand.id}, chars=${nextCommand.command.length}). Queue size: ${session.commandQueue.size}")
                 executeCommandInternal(nextCommand.command, session, nextCommand.id)
             }
         }
@@ -819,7 +819,7 @@ class TerminalManager private constructor(
             try {
                 val fullInput = "$command$TERMINAL_ENTER"
                 writeInputToKernel(session, fullInput, "command")
-                Log.d(TAG, "Sent command to PTY: $command")
+                Log.d(TAG, "Sent command to PTY (id=$commandId, chars=${command.length})")
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending command", e)
             }
@@ -958,7 +958,7 @@ class TerminalManager private constructor(
                                 if (sessionManager.getSession(sessionId)?.terminalType == TerminalType.LOCAL) {
                                     recordUbuntuActivity()
                                 }
-                                Log.d(TAG, "Read chunk: '$chunk'")
+                                Log.d(TAG, "Read PTY chunk for session $sessionId (bytes=$bytesRead)")
                                 outputProcessor.processOutput(sessionId, chunk, sessionManager)
                             }
                             reachedEof = true

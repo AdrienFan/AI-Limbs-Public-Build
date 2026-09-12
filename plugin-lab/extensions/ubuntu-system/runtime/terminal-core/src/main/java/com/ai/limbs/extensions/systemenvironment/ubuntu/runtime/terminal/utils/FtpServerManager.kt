@@ -97,8 +97,7 @@ class FtpServerManager private constructor(private val context: Context) {
 
             Log.i(TAG, "FTP服务器已启动")
             Log.i(TAG, "服务器地址: ${getLocalIpAddress()}:$FTP_PORT")
-            Log.i(TAG, "用户名: $FTP_USERNAME")
-            Log.i(TAG, "密码: $FTP_PASSWORD")
+            Log.i(TAG, "FTP credentials configured")
             Log.i(TAG, "根目录: $ubuntuRootPath")
 
             true

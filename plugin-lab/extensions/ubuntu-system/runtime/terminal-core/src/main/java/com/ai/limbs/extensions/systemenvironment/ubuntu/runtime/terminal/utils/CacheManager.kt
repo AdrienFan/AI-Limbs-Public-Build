@@ -127,7 +127,7 @@ class CacheManager(private val context: Context) {
             try {
                 val output = process.inputStream.bufferedReader().readText()
                 if (output.isNotBlank()) {
-                    Log.d(TAG, "su output: ${output.take(500)}")
+                    Log.d(TAG, "su command produced output (chars=${output.length})")
                 }
             } catch (_: Exception) {
             }
