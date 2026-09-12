@@ -21,6 +21,12 @@ internal val AI_LIMBS_RDC_HOST_TOOL_ALIASES = mapOf(
 internal fun aiLimbsRdcHostAlias(toolName: String): String? =
     AI_LIMBS_RDC_HOST_TOOL_ALIASES[toolName]
 
+internal fun routeRdcOperitInvocation(
+    requestedTool: String,
+    parameters: JSONObject
+): AiLimbsDispatcherInvocation =
+    AiLimbsDispatcherInvocation(requestedTool.trim(), parameters)
+
 class AiLimbsRdcToolAdapter(
     context: Context,
     private val ingressGateway: AiLimbsIngressGateway
@@ -156,13 +162,12 @@ class AiLimbsRdcToolAdapter(
             val name = request.optString("name").trim()
             if (name.isBlank()) return mcpError("shell=operit requires a tool name")
             val parameters = request.optJSONObject("parameters") ?: JSONObject()
-            val result =
-                if (shouldEnterAiLimbsDispatcher(name)) {
-                    ingressGateway.invokePayload(name, parameters)
-                } else {
-                    executeHostTool(name, parameters)
-                }
-            return mcpResult(result)
+            // shell=operit is the transport-neutral AI Limbs capability ingress. Do not pre-route
+            // here: the shared RemoteInvocationExecutor/Resolver decides Core vs dynamic Plugin vs
+            // Host Tool from the live capability registry. This keeps newly mounted capabilities
+            // discoverable/invokable without teaching the RDC adapter about each new tool.
+            val invocation = routeRdcOperitInvocation(name, parameters)
+            return mcpResult(ingressGateway.invokePayload(invocation.tool, invocation.args))
         }
 
         if (shell == "android") {

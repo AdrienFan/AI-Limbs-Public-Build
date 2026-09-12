@@ -7,6 +7,15 @@ import org.junit.Test
 
 class AiLimbsRemoteInvocationRouterTest {
     @Test
+    fun rdcOperitIngressPreservesCapabilitySearchForSharedResolver() {
+        val args = JSONObject().put("query", "Ubuntu start")
+        val invocation = routeRdcOperitInvocation(" capability.search ", args)
+
+        assertEquals("capability.search", invocation.tool)
+        assertSame(args, invocation.args)
+    }
+
+    @Test
     fun coreCapabilityEntersDispatcherDirectly() {
         val args = JSONObject().put("query", "Ubuntu")
         val invocation =
