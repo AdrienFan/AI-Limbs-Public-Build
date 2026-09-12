@@ -24,6 +24,8 @@ internal class OfficialPluginIdentityRegistry(context: Context) {
 
     init {
         ensureLegacyMigration()
+        ensureLogCenterIdentityMigration()
+        ensureSystemEnvironmentCenterIdentityMigration()
         ensureRetiredIdentityMigration()
     }
 
@@ -95,6 +97,39 @@ internal class OfficialPluginIdentityRegistry(context: Context) {
         writeLocked(records)
         if (!prefs.edit().putBoolean(KEY_MIGRATED_V1, true).commit()) {
             throw PluginInstallException("OFFICIAL_IDENTITY_STORE_FAILED", "Could not persist identity migration state")
+        }
+    }
+
+    private fun ensureLogCenterIdentityMigration() = synchronized(lock) {
+        if (prefs.getBoolean(KEY_LOG_CENTER_V1, false)) return@synchronized
+        val records = readLocked().toMutableMap()
+        val record = seed(
+            pluginId = "plugin.system.log_center",
+            role = "system_plugin",
+            source = "log_center_migration_v1"
+        )
+        records.putIfAbsent(record.pluginId, record)
+        writeLocked(records)
+        if (!prefs.edit().putBoolean(KEY_LOG_CENTER_V1, true).commit()) {
+            throw PluginInstallException("OFFICIAL_IDENTITY_STORE_FAILED", "Could not persist Log Center identity migration state")
+        }
+    }
+
+    private fun ensureSystemEnvironmentCenterIdentityMigration() = synchronized(lock) {
+        if (prefs.getBoolean(KEY_SYSTEM_ENVIRONMENT_CENTER_V1, false)) return@synchronized
+        val records = readLocked().toMutableMap()
+        val record = seed(
+            pluginId = "plugin.system.environment_center",
+            role = "system_environment_center",
+            source = "system_environment_center_migration_v1"
+        )
+        records.putIfAbsent(record.pluginId, record)
+        writeLocked(records)
+        if (!prefs.edit().putBoolean(KEY_SYSTEM_ENVIRONMENT_CENTER_V1, true).commit()) {
+            throw PluginInstallException(
+                "OFFICIAL_IDENTITY_STORE_FAILED",
+                "Could not persist System Environment Center identity migration state"
+            )
         }
     }
 
@@ -176,6 +211,8 @@ internal class OfficialPluginIdentityRegistry(context: Context) {
         private const val KEY_RECORDS = "records_json"
         private const val KEY_MIGRATED_V1 = "legacy_v1_migrated"
         private const val KEY_RETIRED_V1 = "retired_v1_migrated"
+        private const val KEY_LOG_CENTER_V1 = "log_center_v1_migrated"
+        private const val KEY_SYSTEM_ENVIRONMENT_CENTER_V1 = "system_environment_center_v1_migrated"
         private const val SOURCE_PLUGIN_CENTER = "plugin_center"
         private val PLUGIN_ID_PATTERN = Regex("[a-z0-9][a-z0-9_.-]{2,127}")
         private val RETIRED_PLUGIN_IDS = setOf("plugin.system.ubuntu_terminal")
@@ -186,11 +223,15 @@ internal class OfficialPluginIdentityRegistry(context: Context) {
             seed("plugin.system.packager", "system_packager")
         )
 
-        private fun seed(pluginId: String, role: String) = OfficialPluginIdentityRecord(
+        private fun seed(
+            pluginId: String,
+            role: String,
+            source: String = "legacy_migration_v1"
+        ) = OfficialPluginIdentityRecord(
             pluginId = pluginId,
             runtimeKind = RUNTIME_ANDROID_INPROCESS,
             approvedRoles = setOf(role),
-            source = "legacy_migration_v1"
+            source = source
         )
     }
 }

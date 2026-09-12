@@ -352,6 +352,8 @@ internal class ChildExtensionRuntime(
         }
     }
 
+    internal fun loggingSnapshots(): List<ChildExtensionSnapshot> = mutableSnapshots.value.toList()
+
     private fun snapshotsInternal(): StateFlow<List<ChildExtensionSnapshot>> = mutableSnapshots.asStateFlow()
 
     private fun snapshotsForPointInternal(point: String): StateFlow<List<ChildExtensionSnapshot>> =
@@ -445,6 +447,7 @@ internal class ChildExtensionRuntime(
                 override val scope = childScope
                 override val dataDir = childDataDir
                 override val cacheDir = childCacheDir
+                override val logger = HostRuntimeLoggerFactory.extension(record.manifest.extensionId)
                 override val runtimeEntryFile = apk
                 override val nativeRuntime: InProcessNativeRuntime = this@ChildExtensionRuntime.nativeRuntime
                 override fun createExtensionContext(baseContext: android.content.Context): android.content.Context =

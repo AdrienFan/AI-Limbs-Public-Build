@@ -273,7 +273,7 @@ interface PluginLogger {
 }
 
 internal class AppPluginLogger(ownerPluginId: String) : PluginLogger {
-    private val tag = "Plugin:${ownerPluginId.take(48)}"
+    private val tag = HostLogTags.plugin(ownerPluginId, "Plugin")
 
     override fun debug(message: String) { AppLogger.d(tag, message) }
     override fun info(message: String) { AppLogger.i(tag, message) }

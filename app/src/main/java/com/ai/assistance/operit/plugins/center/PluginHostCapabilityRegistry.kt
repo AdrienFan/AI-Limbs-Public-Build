@@ -31,11 +31,12 @@ internal class PluginHostCapabilityRegistry(
     private val surfacePolicy: HostSurfacePolicy?,
     private val usageStore: PluginUsageStore? = null,
     private val uiRegistry: PluginUiRegistry? = null,
-    private val pagePresentationRegistry: PluginPagePresentationRegistry? = null
+    private val pagePresentationRegistry: PluginPagePresentationRegistry? = null,
+    private val loggingService: HostLoggingService? = context?.let { HostLoggingService(it, PluginStore.fromContext(it)) }
 ) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
-    internal constructor() : this(null, null, null, null, null)
+    internal constructor() : this(null, null, null, null, null, null)
     private val appContext = context?.applicationContext
-    private val systemExecutor = context?.let(::SystemHostPrimitiveExecutor)
+    private val systemExecutor = context?.let { SystemHostPrimitiveExecutor(it, requireNotNull(loggingService)) }
 
     private data class OwnedCapability(
         val token: String,
@@ -69,7 +70,7 @@ internal class PluginHostCapabilityRegistry(
         "host.ui.presentation@1" to HostCapability("host.ui.presentation@1") { ownerPluginId, parameters ->
             invokePagePresentation(ownerPluginId, parameters)
         },
-        "host.logging@1" to HostCapability("host.logging@1") { _, parameters -> invokeLogging(parameters) }
+        "host.logging@1" to HostCapability("host.logging@1") { ownerPluginId, parameters -> invokeLogging(ownerPluginId, parameters) }
     )
 
     init {
@@ -483,25 +484,12 @@ internal class PluginHostCapabilityRegistry(
         return executor.invoke(ownerPluginId, primitiveId, operation, copy)
     }
 
-    private suspend fun invokeLogging(parameters: JSONObject): JSONObject {
-        return when (parameters.optString("operation", "read").trim().lowercase()) {
-            "read" -> readLogs(parameters)
-            else -> throw PluginInstallException(
-                "HOST_OPERATION_UNSUPPORTED",
-                "host.logging@1 supports operation=read in Phase 1"
-            )
-        }
-    }
-
-    private fun readLogs(parameters: JSONObject): JSONObject {
-        val maximum = parameters.optInt("max_chars", 60_000).coerceIn(1_000, 120_000)
-        val logFile = AppLogger.getLogFile()
-        val full = if (logFile?.isFile == true) logFile.readText() else ""
-        val content = if (full.length > maximum) full.takeLast(maximum) else full
-        return JSONObject()
-            .put("content", content)
-            .put("truncated", full.length > content.length)
-            .put("characters", content.length)
+    private suspend fun invokeLogging(ownerPluginId: String, parameters: JSONObject): JSONObject {
+        val service = loggingService ?: throw PluginInstallException(
+            "HOST_GATEWAY_NOT_READY",
+            "Logging Host Primitive is not initialized"
+        )
+        return service.invoke(ownerPluginId, parameters)
     }
 
     private companion object {

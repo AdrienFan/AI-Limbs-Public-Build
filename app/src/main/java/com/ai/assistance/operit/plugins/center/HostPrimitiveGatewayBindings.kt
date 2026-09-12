@@ -60,7 +60,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.scheduler@1" to ops(pending("schedule_once"), pending("schedule_periodic"), pending("cancel"), pending("list")),
         "host.ai.inference@1" to ops(pending("invoke"), pending("stream"), pending("estimate_tokens")),
         "host.chat@1" to ops(tool("create", "create_new_chat"), tool("list", "list_chats"), tool("find", "find_chat"), tool("switch", "switch_chat"), tool("title", "update_chat_title"), tool("delete", "delete_chat"), tool("messages", "get_chat_messages"), tool("messages_range", "get_chat_messages_range"), tool("send", "send_message_to_ai"), tool("stream", "send_message_to_ai_streaming")),
-        "host.logging@1" to ops(logging("read")),
+        "host.logging@1" to ops(logging("sources"), logging("read"), logging("export"), logging("clear"), logging("write")),
         "host.secrets@1" to ops(pending("read"), pending("revoke"), pending("rotate")),
         "host.ui.surface@1" to ops(kernel("list"), kernel("register"), kernel("open"), kernel("remove")),
         "host.window.overlay@1" to ops(pending("create"), pending("update"), pending("remove"), pending("list")),
@@ -91,7 +91,10 @@ internal object HostPrimitiveGatewayBindings {
         operations(primitiveId).values.any { it.kind != HostGatewayRouteKind.UNBOUND }
 }
 
-internal class SystemHostPrimitiveExecutor(context: Context) {
+internal class SystemHostPrimitiveExecutor(
+    context: Context,
+    private val loggingService: HostLoggingService
+) {
     private val appContext = context.applicationContext
     private val toolHandler = AIToolHandler.getInstance(appContext)
     private val kernelAdapter = KernelHostPrimitiveAdapter(appContext)
@@ -165,7 +168,7 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
                 normalizedOperation,
                 parameters
             )
-            HostGatewayRouteKind.LOGGING -> readLogs(parameters)
+            HostGatewayRouteKind.LOGGING -> loggingService.invoke(ownerPluginId, normalizedOperation, parameters)
             HostGatewayRouteKind.KERNEL -> kernelAdapter.invoke(ownerPluginId, normalizedId, normalizedOperation, JSONObject(parameters.toString()))
             HostGatewayRouteKind.UNBOUND -> error("unreachable")
         }
@@ -263,11 +266,5 @@ internal class SystemHostPrimitiveExecutor(context: Context) {
         }
     }
 
-    private fun readLogs(parameters: JSONObject): JSONObject {
-        val maximum = parameters.optInt("max_chars", 60_000).coerceIn(1_000, 120_000)
-        val logFile = AppLogger.getLogFile()
-        val full = if (logFile?.isFile == true) logFile.readText() else ""
-        val content = if (full.length > maximum) full.takeLast(maximum) else full
-        return JSONObject().put("content", content).put("truncated", full.length > content.length).put("characters", content.length)
-    }
+
 }

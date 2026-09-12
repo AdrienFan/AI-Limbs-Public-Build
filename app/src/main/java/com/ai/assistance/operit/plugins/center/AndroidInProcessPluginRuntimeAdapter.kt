@@ -193,6 +193,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val version: String = context.manifest.version
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
+        override val logger = HostRuntimeLoggerFactory.plugin(pluginId)
         override fun createPluginContext(baseContext: Context): Context =
             createRuntimeContext(baseContext, runtimeEntryFile, runtimeClassLoader)
         override fun createRuntimeContext(

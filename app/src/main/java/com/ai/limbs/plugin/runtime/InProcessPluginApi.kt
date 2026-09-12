@@ -218,6 +218,16 @@ object InProcessNativeExecutableIds {
     const val SUDO = "privilege.sudo"
 }
 
+/** Host-bound logger. The runtime owns source identity; callers provide only tag/message. */
+interface InProcessRuntimeLogger {
+    fun d(tag: String, message: String): Int
+    fun i(tag: String, message: String): Int
+    fun w(tag: String, message: String): Int
+    fun w(tag: String, message: String, error: Throwable): Int
+    fun e(tag: String, message: String): Int
+    fun e(tag: String, message: String, error: Throwable): Int
+}
+
 interface InProcessPluginHost {
     val applicationContext: Context
     val pluginId: String
@@ -225,6 +235,7 @@ interface InProcessPluginHost {
     val scope: CoroutineScope
     val dataDir: File
     val cacheDir: File
+    val logger: InProcessRuntimeLogger
     /** Exact mounted runtime payload (for example payload/plugin.apk). */
     val runtimeEntryFile: File
     /** Host-owned executable substrate; apiVersion=0 means unavailable. */
@@ -433,6 +444,7 @@ interface ChildExtensionHost {
     val scope: CoroutineScope
     val dataDir: File
     val cacheDir: File
+    val logger: InProcessRuntimeLogger
     /** Exact verified child runtime APK. */
     val runtimeEntryFile: File
     /** Parent-delegated host-owned native executable substrate. */

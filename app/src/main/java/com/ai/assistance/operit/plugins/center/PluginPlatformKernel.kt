@@ -210,12 +210,15 @@ internal object PluginPlatformKernel {
             val systemUiRegistry = SystemPluginUiRegistry()
             val dynamicNavigationRegistry = DynamicNavigationSurfaceRegistry(appContext)
             val pagePresentationRegistry = PluginPagePresentationRegistry()
+            val pluginStore = PluginStore.fromContext(appContext)
+            val loggingService = HostLoggingService(appContext, pluginStore)
             val capabilityRegistry = PluginHostCapabilityRegistry(
                 appContext,
                 surfacePolicy,
                 usageStore,
                 uiRegistry,
-                pagePresentationRegistry
+                pagePresentationRegistry,
+                loggingService
             )
             val contributions = PluginContributionRegistry()
             surfacePolicy.register(
@@ -347,13 +350,13 @@ internal object PluginPlatformKernel {
                 secretBroker = secretBroker,
                 surfacePolicy = surfacePolicy
             )
-            val pluginStore = PluginStore.fromContext(appContext)
             val childExtensionRuntime = ChildExtensionRuntime(
                 appContext = appContext,
                 pluginStore = pluginStore,
                 contributions = contributions,
                 capabilityRegistry = capabilityRegistry
             )
+            loggingService.bindChildSourceProvider(childExtensionRuntime::loggingSnapshots)
             val backupStore = PluginBackupStore(pluginStore)
             val manager = PluginManager(
                 appContext = appContext,
