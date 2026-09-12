@@ -85,29 +85,26 @@ internal data class AiLimbsInteractionCycleLease(
 /**
  * One Host-owned interaction clock shared by all external Bridge providers/transports.
  *
- * Timeout is elapsed cycle time, not inactivity time. Expiry is soft: active work continues. A new
- * generation is created only at a later ingress boundary after all active invocations have finished.
+ * Timeout is inactivity time. Continuous work keeps the current generation alive regardless of total
+ * elapsed work time. A new generation is created only when a later ingress begins after the previous
+ * activity has been idle for at least the configured timeout. Long-running or overlapping invocations
+ * are never interrupted and their completion starts a fresh inactivity window.
  */
 internal class AiLimbsInteractionCycleController(
     private val timeoutProvider: () -> Long,
     private val clockMs: () -> Long = System::currentTimeMillis
 ) {
     private val stateLock = Any()
-    private var cycleStartedAtMs = clockMs()
+    private var lastActivityAtMs = clockMs()
     private var generation = 1L
     private var activeInvocations = 0
-    private var expiredPending = false
 
     fun beginInvocation(): AiLimbsInteractionCycleLease = synchronized(stateLock) {
         val now = clockMs()
-        refreshExpiry(now)
-        val startedNewCycle = expiredPending && activeInvocations == 0
-        if (startedNewCycle) {
-            cycleStartedAtMs = now
-            generation += 1L
-            expiredPending = false
-        }
+        val startedNewCycle = activeInvocations == 0 && inactivityExpired(now)
+        if (startedNewCycle) generation += 1L
         activeInvocations += 1
+        lastActivityAtMs = now
         AiLimbsInteractionCycleLease(generation, startedNewCycle)
     }
 
@@ -115,18 +112,17 @@ internal class AiLimbsInteractionCycleController(
         synchronized(stateLock) {
             check(activeInvocations > 0) { "AI Limbs interaction cycle invocation underflow" }
             activeInvocations -= 1
-            refreshExpiry(clockMs())
+            lastActivityAtMs = clockMs()
         }
     }
 
-    private fun refreshExpiry(now: Long) {
-        if (expiredPending) return
+    private fun inactivityExpired(now: Long): Boolean {
         val timeoutMs = runCatching { timeoutProvider() }
             .getOrDefault(AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS)
             .takeIf(AiLimbsInteractionCyclePolicyStore::isValidTimeoutMs)
             ?: AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS
-        val elapsed = (now - cycleStartedAtMs).coerceAtLeast(0L)
-        if (elapsed >= timeoutMs) expiredPending = true
+        val idleMs = (now - lastActivityAtMs).coerceAtLeast(0L)
+        return idleMs >= timeoutMs
     }
 }
 
