@@ -1,6 +1,7 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu
 
 import android.view.View
+import com.ai.limbs.plugin.runtime.ChildAiIngressDiscovery
 import com.ai.limbs.plugin.runtime.ChildExtensionEntry
 import com.ai.limbs.plugin.runtime.ChildExtensionHandle
 import com.ai.limbs.plugin.runtime.ChildExtensionHost
@@ -24,6 +25,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
+import org.json.JSONObject
 
 class UbuntuSystemExtensionEntry : ChildExtensionEntry {
     override suspend fun mount(host: ChildExtensionHost): ChildExtensionHandle {
@@ -42,6 +44,7 @@ class UbuntuSystemExtensionEntry : ChildExtensionEntry {
             "Ubuntu child must preserve the legacy system-environment aliases"
         }
 
+        host.publishAiIngressDiscovery(ubuntuToolDiscovery())
         host.publish(
             SystemEnvironmentSubsystemContribution(
                 subsystemId = host.extensionId,
@@ -89,6 +92,25 @@ class UbuntuSystemExtensionEntry : ChildExtensionEntry {
         }
     }
 }
+
+private fun ubuntuToolDiscovery(): ChildAiIngressDiscovery =
+    ChildAiIngressDiscovery(
+        schemaId = "ai_limbs.subsystem_tool_discovery.v1",
+        payloadJson = JSONObject()
+            .put("type", "SUBSYSTEM_TOOL_DISCOVERY")
+            .put("display_name", "Ubuntu")
+            .put("query_tool", "ail-tool")
+            .put("query_existing_first", true)
+            .put("reuse_existing_first", true)
+            .put("install_only_if_no_match", true)
+            .put("cleanup_install_artifacts_after_verified", true)
+            .put(
+                "instruction",
+                "Before installing a new Ubuntu tool, query ail-tool first and prefer an existing suitable tool. " +
+                    "Install only when no suitable match exists; after verification, clean expendable packages, caches, and temporary files."
+            )
+            .toString()
+    )
 
 private class UbuntuRuntimeController(
     host: ChildExtensionHost,
