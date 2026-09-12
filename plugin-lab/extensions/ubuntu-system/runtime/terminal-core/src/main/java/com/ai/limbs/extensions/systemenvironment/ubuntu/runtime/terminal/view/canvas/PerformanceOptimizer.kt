@@ -1,7 +1,7 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.canvas
 
 import android.graphics.Rect
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import kotlin.math.max
 import kotlin.math.min
 

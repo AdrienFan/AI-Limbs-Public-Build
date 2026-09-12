@@ -1,7 +1,7 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.type
 
 import android.content.Context
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.Pty
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalSession

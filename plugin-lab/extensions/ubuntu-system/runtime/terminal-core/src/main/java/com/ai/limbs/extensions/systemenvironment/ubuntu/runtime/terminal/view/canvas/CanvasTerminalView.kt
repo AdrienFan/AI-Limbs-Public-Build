@@ -8,7 +8,7 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.c
  import android.os.Handler
  import android.os.Looper
  import android.util.AttributeSet
- import android.util.Log
+ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
  import android.view.ActionMode
  import android.view.KeyEvent
  import android.view.Menu

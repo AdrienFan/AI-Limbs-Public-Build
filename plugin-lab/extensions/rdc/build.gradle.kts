@@ -3,7 +3,7 @@ plugins { alias(libs.plugins.android.application); alias(libs.plugins.kotlin.and
 android {
     namespace = "com.ai.limbs.extensions.rdc"
     compileSdk = 36
-    defaultConfig { applicationId = "com.ai.limbs.payload.rdc"; minSdk = 26; targetSdk = 34; versionCode = 6; versionName = "1.2.3" }
+    defaultConfig { applicationId = "com.ai.limbs.payload.rdc"; minSdk = 26; targetSdk = 34; versionCode = 9; versionName = "1.2.6" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures { buildConfig = true }
 }

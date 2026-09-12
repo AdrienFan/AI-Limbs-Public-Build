@@ -1,7 +1,7 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.domain.ansi
 
 import android.graphics.Color
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import java.util.concurrent.CopyOnWriteArrayList
 
 /**

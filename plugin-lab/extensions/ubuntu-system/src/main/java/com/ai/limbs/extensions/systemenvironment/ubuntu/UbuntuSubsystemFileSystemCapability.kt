@@ -5,6 +5,7 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityDomain
 import com.ai.limbs.plugin.runtime.InProcessCapabilityEffect
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
+import com.ai.limbs.plugin.runtime.InProcessCapabilityReceipt
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
@@ -55,9 +56,11 @@ internal object UbuntuSubsystemFileSystemCapability {
                     param("max_depth", "integer", "最大查找深度，-1 为不限", false),
                     param("case_insensitive", "boolean", "查找时是否忽略大小写", false),
                     param("include_root_directory", "boolean", "压缩目录时是否包含根目录", false),
+                    param("work_context", "boolean", "仅当本次文件操作属于开发/调试/环境管理或项目设备内容变更工作时设为 true", false)
                 ),
                 effect = InProcessCapabilityEffect.PERSISTENT_WRITE,
                 domain = InProcessCapabilityDomain.SYSTEM_ENVIRONMENT,
+                workContextRequiredReceipts = setOf(InProcessCapabilityReceipt.WORK_MANUAL),
                 executor = InProcessCapabilityExecutor { raw ->
                     val request = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
                     runCatching { execute(terminal, request) }

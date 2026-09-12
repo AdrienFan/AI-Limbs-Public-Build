@@ -1,6 +1,6 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.domain
 
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.CommandExecutionEvent
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.SessionDirectoryEvent
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.SessionManager

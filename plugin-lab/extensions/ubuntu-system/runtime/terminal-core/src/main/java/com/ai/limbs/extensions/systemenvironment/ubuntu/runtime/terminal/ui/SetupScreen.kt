@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.onStart
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.UUID
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import android.widget.Toast
 import androidx.compose.ui.platform.LocalContext
 import kotlinx.coroutines.flow.collect

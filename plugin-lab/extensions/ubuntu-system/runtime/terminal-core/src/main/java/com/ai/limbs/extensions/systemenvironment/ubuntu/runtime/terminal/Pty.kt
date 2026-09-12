@@ -1,6 +1,6 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal
 
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import java.io.File
 import java.io.FileDescriptor
 import java.io.FileInputStream

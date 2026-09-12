@@ -13,8 +13,8 @@ android {
         applicationId = "com.ai.limbs.payload.systemenvironment.center"
         minSdk = 26
         targetSdk = 34
-        versionCode = 10
-        versionName = "0.2.8"
+        versionCode = 11
+        versionName = "0.2.9"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

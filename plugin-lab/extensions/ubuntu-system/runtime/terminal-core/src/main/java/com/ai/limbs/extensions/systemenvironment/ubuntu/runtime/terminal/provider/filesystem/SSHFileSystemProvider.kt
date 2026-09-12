@@ -1,6 +1,6 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.filesystem
 
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import com.jcraft.jsch.ChannelSftp
 import com.jcraft.jsch.Session
 import com.jcraft.jsch.SftpException

@@ -15,9 +15,11 @@ on:
           - developer-guide
           - ubuntu-terminal
           - rdc
+          - triggercmd
           - ubuntu-system
           - system-environment
           - laner-access-manager
+          - log-center
 
 concurrency:
   group: plugin-lab-alt-${{ github.ref }}-${{ inputs.target }}
@@ -335,7 +337,7 @@ jobs:
 
   rdc:
     if: inputs.target == 'rdc'
-    name: Build RDC v1.2.3 only
+    name: Build RDC v1.2.6 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -374,16 +376,64 @@ jobs:
       - name: Upload RDC child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: rdc-extension-v1.2.3-${{ github.run_number }}
+          name: rdc-extension-v1.2.6-${{ github.run_number }}
           path: |
             plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
             plugin-lab/packages/rdc/extension.json
           if-no-files-found: error
           retention-days: 14
 
+  triggercmd:
+    if: inputs.target == 'triggercmd'
+    name: Build TriggerCMD v1.2.4 only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-36" \
+            "build-tools;35.0.0"
+      - name: Configure Android SDK
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Build TriggerCMD child extension payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
+      - name: Upload TriggerCMD child extension payload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: triggercmd-extension-v1.2.4-${{ github.run_number }}
+          path: |
+            plugin-lab/extensions/triggercmd/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/triggercmd/extension.json
+          if-no-files-found: error
+          retention-days: 14
+
   ubuntu_system:
     if: inputs.target == 'ubuntu-system'
-    name: Build Ubuntu System v0.1.6 child extension only
+    name: Build Ubuntu System v0.1.5 child extension only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -422,7 +472,7 @@ jobs:
       - name: Upload Ubuntu System child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ubuntu-system-v0.1.6-${{ github.run_number }}
+          name: ubuntu-system-v0.1.5-${{ github.run_number }}
           path: |
             plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-system/extension.json
@@ -431,7 +481,7 @@ jobs:
 
   system_environment:
     if: inputs.target == 'system-environment'
-    name: Build System Environment Center v0.2.8 only
+    name: Build System Environment Center v0.2.9 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -488,7 +538,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: system-environment-center-v0.2.8-${{ github.run_number }}
+          name: system-environment-center-v0.2.9-${{ github.run_number }}
           path: |
             plugin-lab/plugins/system-environment-center/build/outputs/apk/debug/*.apk
             plugin-lab/packages/system-environment-center/plugin.json
@@ -542,5 +592,54 @@ jobs:
           path: |
             plugin-lab/plugins/laner-access-manager/build/outputs/apk/debug/*.apk
             plugin-lab/packages/laner-access-manager/plugin.json
+          if-no-files-found: error
+          retention-days: 14
+
+  log_center:
+    if: inputs.target == 'log-center'
+    name: Build Log Center v0.1.0 only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-36" \
+            "build-tools;35.0.0"
+      - name: Configure Android SDK
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Build Log Center payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :log-center-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Upload Log Center payload
+        if: success()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: log-center-v0.1.0-${{ github.run_number }}
+          path: |
+            plugin-lab/plugins/log-center/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/log-center/plugin.json
           if-no-files-found: error
           retention-days: 14

@@ -16,7 +16,7 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.Ub
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.domain.ansi.AnsiTerminalEmulator
 
 @Stable

@@ -18,10 +18,25 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         val registry = SystemEnvironmentSubsystemRegistry()
         val pageProvider = SystemEnvironmentCenterPageProvider(host, registry)
 
+        val pageSlotActions = JSONArray()
+            .put(
+                JSONObject()
+                    .put("action_id", PAGE_SLOT_ACTION_ID)
+                    .put("target_page_id", AI_CHAT_PAGE_ID)
+                    .put("slot_id", TOP_BAR_START_SLOT)
+                    .put("icon_key", "terminal")
+                    .put("content_description", "系统环境中心")
+                    .put("priority", 100)
+            )
+            .toString()
         host.registerProvider(
             PAGE_PROVIDER_ID,
             pageProvider,
-            mapOf("kind" to "plugin_page", "screen_id" to SystemEnvironmentContract.SCREEN_ID)
+            mapOf(
+                "kind" to "plugin_page",
+                "screen_id" to SystemEnvironmentContract.SCREEN_ID,
+                PAGE_SLOT_ACTIONS_METADATA to pageSlotActions
+            )
         )
         host.registerScreen(
             InProcessScreen(
@@ -72,24 +87,21 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
             PLUGIN_CENTER_UI_ACCESSORY_SERVICE,
             PLUGIN_CENTER_UI_ACCESSORY_API
         )
-        var pageSlotRegistered = false
         if (pageSlotService?.metadata?.get("authority") == "plugin_center") {
-            pageSlotRegistered = runCatching {
-                JSONObject(
-                    pageSlotService.invoke(
-                        "register_page_slot_action",
-                        JSONObject()
-                            .put("action_id", PAGE_SLOT_ACTION_ID)
-                            .put("target_page_id", AI_CHAT_PAGE_ID)
-                            .put("slot_id", TOP_BAR_START_SLOT)
-                            .put("provider_id", PAGE_PROVIDER_ID)
-                            .put("icon_key", "terminal")
-                            .put("content_description", "系统环境中心")
-                            .put("priority", 100)
-                            .toString()
-                    )
-                ).optBoolean("registered", false)
-            }.getOrDefault(false)
+            runCatching {
+                pageSlotService.invoke(
+                    "register_page_slot_action",
+                    JSONObject()
+                        .put("action_id", PAGE_SLOT_ACTION_ID)
+                        .put("target_page_id", AI_CHAT_PAGE_ID)
+                        .put("slot_id", TOP_BAR_START_SLOT)
+                        .put("provider_id", PAGE_PROVIDER_ID)
+                        .put("icon_key", "terminal")
+                        .put("content_description", "系统环境中心")
+                        .put("priority", 100)
+                        .toString()
+                )
+            }
         }
 
         val pointHandle = host.childExtensions.publishPoint(
@@ -102,9 +114,13 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         )
 
         return InProcessPluginHandle {
-            if (pageSlotRegistered) {
-                runCatching {
-                    pageSlotService?.invoke(
+            runCatching {
+                val currentPageSlotService = host.services.resolve(
+                    PLUGIN_CENTER_UI_ACCESSORY_SERVICE,
+                    PLUGIN_CENTER_UI_ACCESSORY_API
+                )
+                if (currentPageSlotService?.metadata?.get("authority") == "plugin_center") {
+                    currentPageSlotService.invoke(
                         "unregister_page_slot_action",
                         JSONObject().put("action_id", PAGE_SLOT_ACTION_ID).toString()
                     )
@@ -123,6 +139,7 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         const val HOST_NETWORK_CAPABILITY = "host.network@1"
         const val PLUGIN_CENTER_UI_ACCESSORY_SERVICE = "system.plugin_center.ui_accessories"
         const val PLUGIN_CENTER_UI_ACCESSORY_API = 1
+        const val PAGE_SLOT_ACTIONS_METADATA = "ai_limbs.page_slot_actions.v1"
         const val PAGE_SLOT_ACTION_ID = "system_environment_center"
         const val AI_CHAT_PAGE_ID = "host:native.ai_chat"
         const val TOP_BAR_START_SLOT = "top_bar_start"

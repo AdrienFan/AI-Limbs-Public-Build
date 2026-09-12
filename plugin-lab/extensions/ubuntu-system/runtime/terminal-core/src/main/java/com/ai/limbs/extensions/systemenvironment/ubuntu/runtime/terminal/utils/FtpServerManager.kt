@@ -1,7 +1,7 @@
 package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.utils
 
 import android.content.Context
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.apache.ftpserver.FtpServer

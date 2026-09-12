@@ -10,6 +10,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import com.ai.assistance.operit.integrations.ailimbs.NativeBridgeProfile
 import com.ai.limbs.extensions.triggercmd.TriggerCmdLogger
 import kotlinx.coroutines.CoroutineScope
@@ -22,12 +23,13 @@ import kotlinx.coroutines.flow.asStateFlow
 internal class TriggerCmdBridgeProvider private constructor(
     context: Context,
     private val scope: CoroutineScope,
-    private val profile: NativeBridgeProfile
+    private val profile: NativeBridgeProfile,
+    remoteIngress: BridgeRemoteIngress
 ) : AiLimbsBridgeProvider, TriggerCmdTransportClient.Listener {
     private val appContext = context.applicationContext
     private val storage = TriggerCmdBridgeStorage(appContext)
     private val client = TriggerCmdTransportClient(storage.transportPreferences(), this)
-    private val structuredExecutor = TriggerCmdStructuredBridgeExecutor(appContext, scope)
+    private val structuredExecutor = TriggerCmdStructuredBridgeExecutor(remoteIngress, scope)
     private val stateFlow = MutableStateFlow(initialState())
 
     override val id: String
@@ -207,6 +209,7 @@ internal class TriggerCmdBridgeProvider private constructor(
 
     internal class Factory : BridgeProviderFactory {
         override val type: String = PROFILE_TYPE
+        override val transportId: String = "triggercmd"
         override val profiles: List<BridgeProfile> = listOf(
             NativeBridgeProfile(
                 id = PROFILE_ID,
@@ -222,7 +225,8 @@ internal class TriggerCmdBridgeProvider private constructor(
         override fun create(
             context: Context,
             scope: CoroutineScope,
-            profile: BridgeProfile
+            profile: BridgeProfile,
+            remoteIngress: BridgeRemoteIngress
         ): AiLimbsBridgeProvider {
             require(profile is NativeBridgeProfile) {
                 "TRIGGERcmd requires a NativeBridgeProfile"
@@ -230,7 +234,7 @@ internal class TriggerCmdBridgeProvider private constructor(
             require(profile.id == PROFILE_ID && profile.type == PROFILE_TYPE) {
                 "Unsupported TRIGGERcmd profile: ${profile.id} (${profile.type})"
             }
-            return TriggerCmdBridgeProvider(context, scope, profile)
+            return TriggerCmdBridgeProvider(context, scope, profile, remoteIngress)
         }
     }
 

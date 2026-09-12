@@ -16,6 +16,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkState
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatBridgeService
 import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatQueueChangedEvent
 import com.ai.limbs.extensions.rdc.runtime.chat.requiresWorkAttention
@@ -28,9 +29,9 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
-import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CoroutineScope
@@ -61,17 +62,11 @@ import org.json.JSONObject
  */
 class AiLimbsRdcClient(
     context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    remoteIngress: BridgeRemoteIngress
 ) {
     private val appContext = context.applicationContext
-    private val remoteExecutor =
-        AiLimbsRemoteInvocationExecutor(
-            appContext,
-            AiLimbsExecutionSession(
-                transport = AiLimbsExecutionTransport.RDC,
-                scopeId = "rdc-" + UUID.randomUUID()
-            )
-        )
+    private val remoteExecutor = AiLimbsRemoteInvocationExecutor(remoteIngress)
     private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val adapter = AiLimbsRdcToolAdapter(appContext, remoteExecutor)
     private val searchCompat = AiLimbsRdcSearchCompat(remoteExecutor, scope)
@@ -121,6 +116,11 @@ class AiLimbsRdcClient(
     @Volatile
     private var realtimeTransport: AiLimbsRdcRealtimeTransport? = null
     private val recoveryInProgress = AtomicBoolean(false)
+    private val workerGeneration = AtomicLong(0L)
+    private val realtimeConnectGateLock = Any()
+    @Volatile private var realtimeConnectNotBeforeUptimeMs = 0L
+    @Volatile private var realtimeConnectGateReason = "none"
+    private var rateLimitAttempt = 0
 
     @Volatile
     var isRunning: Boolean = false
@@ -142,6 +142,7 @@ class AiLimbsRdcClient(
     }
 
     private fun launchWorker(recoveryDeadlineAtMs: Long? = null) {
+        val generation = workerGeneration.incrementAndGet()
         val worker =
             scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 val currentJob = currentCoroutineContext()[Job]
@@ -156,7 +157,7 @@ class AiLimbsRdcClient(
                     }
                 }
                 try {
-                    runForever(recoveryDeadlineAtMs)
+                    runForever(recoveryDeadlineAtMs, generation)
                 } finally {
                     queuePushJob.cancel()
                     if (runJob === currentJob) {
@@ -180,6 +181,7 @@ class AiLimbsRdcClient(
     }
 
     private fun launchPairingWorker() {
+        val generation = workerGeneration.incrementAndGet()
         val worker =
             scope.launch(Dispatchers.IO, start = CoroutineStart.LAZY) {
                 val currentJob = currentCoroutineContext()[Job]
@@ -208,7 +210,7 @@ class AiLimbsRdcClient(
                         "RDC re-pair authorization completed; entering normal connection flow"
                     )
                     reconnectAttempt = 0
-                    runForever()
+                    runForever(null, generation)
                 } catch (e: CancellationException) {
                     throw e
                 } catch (e: Exception) {
@@ -326,6 +328,30 @@ class AiLimbsRdcClient(
         )
     }
 
+    private fun cancelWorkerJob(reason: String) {
+        val invalidatedGeneration = workerGeneration.incrementAndGet()
+        runJob?.cancel()
+        runJob = null
+        RdcLogger.d(TAG, "RDC worker generation invalidated: generation=$invalidatedGeneration, reason=$reason")
+    }
+
+    private fun ensureWorkerGeneration(generation: Long) {
+        if (workerGeneration.get() != generation) {
+            throw CancellationException("Superseded RDC worker generation: $generation")
+        }
+    }
+
+    private fun extendRealtimeConnectGate(delayMs: Long, reason: String) {
+        if (delayMs <= 0L) return
+        val target = SystemClock.uptimeMillis() + delayMs
+        synchronized(realtimeConnectGateLock) {
+            if (target > realtimeConnectNotBeforeUptimeMs) {
+                realtimeConnectNotBeforeUptimeMs = target
+                realtimeConnectGateReason = reason
+            }
+        }
+    }
+
     private fun restartWorkerFast(reason: String, detail: String) {
         if (recoveryInProgress.get()) {
             RdcLogger.d(TAG, "RDC fast restart ignored during recovery: reason=$reason")
@@ -333,8 +359,7 @@ class AiLimbsRdcClient(
         }
         RdcLogger.w(TAG, "RDC fast restart: reason=$reason, network=$networkState/$networkTransport")
         val previousHeartbeat = stateFlow.value.lastHeartbeatAtMs
-        runJob?.cancel()
-        runJob = null
+        cancelWorkerJob("fast_restart:$reason")
         closeRealtimeTransport(force = true)
         cancelActiveCalls(reason)
         reconnectAttempt = 0
@@ -345,6 +370,38 @@ class AiLimbsRdcClient(
             reconnectAttemptValue = 0
         )
         launchWorker()
+    }
+
+    private suspend fun waitForRealtimeConnectGate(
+        recoveryMode: Boolean,
+        recoveryDeadline: Long
+    ): Boolean {
+        var loggedWaiting = false
+        while (currentCoroutineContext().isActive) {
+            val (remainingMs, reason) = synchronized(realtimeConnectGateLock) {
+                (realtimeConnectNotBeforeUptimeMs - SystemClock.uptimeMillis()).coerceAtLeast(0L) to
+                    realtimeConnectGateReason
+            }
+            if (remainingMs <= 0L) return true
+            if (!loggedWaiting) {
+                RdcLogger.w(TAG, "RDC Realtime connect gate active: reason=$reason, remainingMs=$remainingMs")
+                updateState(
+                    if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                    "RDC Realtime 冷却中，等待旧通道释放或服务端限流解除"
+                )
+                loggedWaiting = true
+            }
+            if (recoveryMode && System.currentTimeMillis() >= recoveryDeadline) {
+                finishRecoveryFailure("RDC 修复超时，请稍后重试")
+                return false
+            }
+            if (isNetworkUnavailable()) {
+                if (!waitForUsableNetwork(recoveryMode, recoveryDeadline)) return false
+                continue
+            }
+            delay(minOf(NETWORK_STATE_POLL_MS, remainingMs))
+        }
+        return false
     }
 
     private suspend fun waitForUsableNetwork(
@@ -399,8 +456,7 @@ class AiLimbsRdcClient(
 
     private fun stopWorker(detail: String) {
         recoveryInProgress.set(false)
-        runJob?.cancel()
-        runJob = null
+        cancelWorkerJob("stop")
         closeRealtimeTransport()
         cancelActiveCalls("RDC stopped")
         activeAuthorization = null
@@ -416,8 +472,7 @@ class AiLimbsRdcClient(
 
     fun reconnect() {
         RdcLogger.i(TAG, "RDC manual reconnect requested")
-        runJob?.cancel()
-        runJob = null
+        cancelWorkerJob("manual_reconnect")
         closeRealtimeTransport()
         cancelActiveCalls("manual reconnect")
         reconnectAttempt = 0
@@ -435,8 +490,7 @@ class AiLimbsRdcClient(
         // Recovery is intentionally a single lifecycle transaction. Without this guard, a second
         // connect/re-pair can race the old channel teardown and recreate the fake-online state.
         RdcLogger.w(TAG, "RDC manual recovery requested")
-        runJob?.cancel()
-        runJob = null
+        cancelWorkerJob("manual_recovery")
         closeRealtimeTransport(force = true)
         cancelActiveCalls("manual recovery")
         activeAuthorization = null
@@ -450,8 +504,7 @@ class AiLimbsRdcClient(
 
     fun rePair() {
         RdcLogger.i(TAG, "RDC manual re-pair requested")
-        runJob?.cancel()
-        runJob = null
+        cancelWorkerJob("manual_repair")
         closeRealtimeTransport()
         cancelActiveCalls("manual re-pair")
         clearSession()
@@ -482,11 +535,12 @@ class AiLimbsRdcClient(
         }
     }
 
-    private suspend fun runForever(recoveryDeadlineAtMs: Long? = null) {
+    private suspend fun runForever(recoveryDeadlineAtMs: Long?, generation: Long) {
         var recoveryMode = recoveryDeadlineAtMs != null
         val recoveryDeadline = recoveryDeadlineAtMs ?: Long.MAX_VALUE
 
         while (currentCoroutineContext().isActive) {
+            ensureWorkerGeneration(generation)
             if (recoveryMode && System.currentTimeMillis() >= recoveryDeadline) {
                 finishRecoveryFailure("RDC 修复超时，请重试或重新配对")
                 return
@@ -496,6 +550,9 @@ class AiLimbsRdcClient(
             var attemptPendingProbeJob: Job? = null
             try {
                 if (!waitForUsableNetwork(recoveryMode, recoveryDeadline)) return
+                ensureWorkerGeneration(generation)
+                if (!waitForRealtimeConnectGate(recoveryMode, recoveryDeadline)) return
+                ensureWorkerGeneration(generation)
 
                 if (recoveryMode) {
                     updateState(
@@ -520,6 +577,7 @@ class AiLimbsRdcClient(
                 // authorization with the owner lookup, then advertise online/broadcast only after
                 // private-channel join, Presence, and a Phoenix heartbeat round-trip all succeed.
                 val userId = fetchRdcUserId(info, session)
+                ensureWorkerGeneration(generation)
                 val transport =
                     AiLimbsRdcRealtimeTransport(
                         httpClient = httpClient,
@@ -553,8 +611,10 @@ class AiLimbsRdcClient(
                     )
                 attemptTransport = transport
                 synchronized(realtimeTransportLock) {
+                    ensureWorkerGeneration(generation)
                     realtimeTransport = transport
                 }
+                ensureWorkerGeneration(generation)
                 transport.connectAndAwaitReady(REALTIME_JOIN_TIMEOUT_MS)
 
                 check(transport.sendHeartbeatAndAwaitAck(REALTIME_HEARTBEAT_ACK_TIMEOUT_MS)) {
@@ -563,6 +623,7 @@ class AiLimbsRdcClient(
                 heartbeat(info, session, broadcastCapable = true)
                 var lastHeartbeatAt = System.currentTimeMillis()
                 reconnectAttempt = 0
+                rateLimitAttempt = 0
                 if (recoveryMode) {
                     recoveryMode = false
                     recoveryInProgress.set(false)
@@ -601,6 +662,7 @@ class AiLimbsRdcClient(
                 var lastTransportTickElapsedMs = SystemClock.elapsedRealtime()
                 var lastTransportTickUptimeMs = SystemClock.uptimeMillis()
                 while (currentCoroutineContext().isActive) {
+                    ensureWorkerGeneration(generation)
                     val tickElapsedMs = SystemClock.elapsedRealtime()
                     val tickUptimeMs = SystemClock.uptimeMillis()
                     val elapsedDeltaMs = tickElapsedMs - lastTransportTickElapsedMs
@@ -668,6 +730,58 @@ class AiLimbsRdcClient(
                     "检测到 RDC 调度停顿 ${e.elapsedDeltaMs}ms，正在快速重连"
                 )
                 if (!delayRetryAware(SCHEDULER_GAP_RECONNECT_DELAY_MS, recoveryMode, recoveryDeadline)) return
+            } catch (e: RdcRealtimeHttpException) {
+                attemptTransport?.let { closeRealtimeTransport(it, force = true) }
+                if (e.statusCode == 401) {
+                    reconnectAttempt += 1
+                    RdcLogger.w(TAG, "RDC Realtime authorization expired; refreshing saved session")
+                    clearAccessTokenOnly()
+                    val retryDelay = reconnectDelayMs(reconnectAttempt)
+                    updateState(
+                        if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                        if (recoveryMode) {
+                            "RDC Realtime 授权已过期，正在使用保存的凭证刷新授权"
+                        } else {
+                            "RDC Realtime 授权已过期，正在刷新凭证"
+                        }
+                    )
+                    if (!delayRetryAware(retryDelay, recoveryMode, recoveryDeadline)) return
+                } else if (e.statusCode == 429) {
+                    reconnectAttempt += 1
+                    rateLimitAttempt += 1
+                    val retryDelay = e.retryAfterMs ?: reconnectDelayMs(rateLimitAttempt)
+                    val gateReason = "rate_limit:${e.rateLimitKind.name.lowercase()}"
+                    extendRealtimeConnectGate(retryDelay, gateReason)
+                    val retrySeconds = ((retryDelay + 999L) / 1_000L).coerceAtLeast(1L)
+                    val rateLimitDetail = when (e.rateLimitKind) {
+                        RdcRealtimeRateLimitKind.CONNECTIONS -> "RDC Realtime 服务端连接数已达上限"
+                        RdcRealtimeRateLimitKind.JOINS -> "RDC Realtime 建连过于频繁，服务端正在限流"
+                        RdcRealtimeRateLimitKind.UNKNOWN -> "RDC Realtime 服务端返回 429 限流"
+                    }
+                    if (recoveryMode) {
+                        recoveryMode = false
+                        recoveryInProgress.set(false)
+                    }
+                    RdcLogger.w(
+                        TAG,
+                        "RDC Realtime rate limited: kind=${e.rateLimitKind}, server=${e.serverMessage ?: "unspecified"}, " +
+                            "retryDelayMs=$retryDelay, source=${if (e.retryAfterMs != null) "server" else "client_backoff"}"
+                    )
+                    updateState(
+                        AiLimbsBridgePhase.RECONNECTING,
+                        "$rateLimitDetail，约 ${retrySeconds} 秒后自动重试"
+                    )
+                    if (!delayRetryAware(retryDelay, false, Long.MAX_VALUE)) return
+                } else {
+                    reconnectAttempt += 1
+                    val retryDelay = reconnectDelayMs(reconnectAttempt)
+                    RdcLogger.w(TAG, "RDC Realtime HTTP ${e.statusCode}; retrying after ${retryDelay}ms")
+                    updateState(
+                        if (recoveryMode) AiLimbsBridgePhase.RECOVERING else AiLimbsBridgePhase.RECONNECTING,
+                        "RDC Realtime HTTP ${e.statusCode}：${e.serverMessage ?: "服务端拒绝连接"}；稍后重试"
+                    )
+                    if (!delayRetryAware(retryDelay, recoveryMode, recoveryDeadline)) return
+                }
             } catch (e: UnauthorizedException) {
                 attemptTransport?.let { closeRealtimeTransport(it, force = true) }
                 reconnectAttempt += 1
@@ -738,7 +852,10 @@ class AiLimbsRdcClient(
                     current
                 }
             }
-        transportToClose?.close(force)
+        if (transportToClose != null) {
+            transportToClose.close(force)
+            extendRealtimeConnectGate(REALTIME_SOCKET_SETTLE_MS, "socket_settle")
+        }
     }
 
     private fun updateState(
@@ -1575,9 +1692,10 @@ class AiLimbsRdcClient(
         private const val SCHEDULER_GAP_RECONNECT_DELAY_MS = 250L
         private const val REALTIME_JOIN_TIMEOUT_MS = 15_000L
         private const val REALTIME_HEARTBEAT_ACK_TIMEOUT_MS = 5_000L
+        private const val REALTIME_SOCKET_SETTLE_MS = 300L
         private const val RECOVERY_TIMEOUT_MS = 120_000L
-        private const val RECONNECT_BASE_DELAY_MS = 2_000L
-        private const val RECONNECT_MAX_DELAY_MS = 120_000L
+        private const val RECONNECT_BASE_DELAY_MS = 10_000L
+        private const val RECONNECT_MAX_DELAY_MS = 300_000L
         private const val RECONNECT_JITTER_PERCENT = 15L
         private const val ACCESS_TOKEN_REFRESH_MARGIN_MS = 60_000L
         private const val MAX_CONCURRENT_REMOTE_CALLS = 4

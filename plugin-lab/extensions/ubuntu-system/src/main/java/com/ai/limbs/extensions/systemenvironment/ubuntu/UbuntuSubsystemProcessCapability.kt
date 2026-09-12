@@ -4,6 +4,7 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityDomain
 import com.ai.limbs.plugin.runtime.InProcessCapabilityEffect
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
+import com.ai.limbs.plugin.runtime.InProcessCapabilityReceipt
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
@@ -86,9 +87,11 @@ internal class UbuntuSubsystemProcessCapability(
                     param("input", "string", "interact 输入", false),
                     param("timeout_ms", "integer", "等待毫秒数", false),
                     param("wait_for_prompt", "boolean", "interact 是否等待提示符", false),
+                    param("work_context", "boolean", "仅当本次 Ubuntu 调用属于开发、调试、开发环境管理或会改变项目/设备内容的工作任务时设为 true；普通 Ubuntu 使用保持 false。", false)
                 ),
                 effect = InProcessCapabilityEffect.PROCESS_EXECUTION,
                 domain = InProcessCapabilityDomain.SYSTEM_ENVIRONMENT,
+                workContextRequiredReceipts = setOf(InProcessCapabilityReceipt.WORK_MANUAL),
                 executor = InProcessCapabilityExecutor { raw ->
                     val request = runCatching { JSONObject(raw) }.getOrElse { JSONObject() }
                     runCatching { execute(request) }

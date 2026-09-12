@@ -3,7 +3,7 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provid
 import android.content.Context
 import android.system.Os
 import android.system.OsConstants
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.Pty
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalSession
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.filesystem.FileSystemProvider

@@ -5,7 +5,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.IBinder
 import android.os.RemoteCallbackList
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import androidx.annotation.RequiresApi
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ITerminalCallback
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ITerminalService

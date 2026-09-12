@@ -2,7 +2,7 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.utils
 
 import android.content.Context
 import android.content.SharedPreferences
-import android.util.Log
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.SSHAuthType
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.SSHConfig
 import kotlinx.coroutines.Dispatchers

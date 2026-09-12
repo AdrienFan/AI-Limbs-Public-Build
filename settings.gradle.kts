@@ -62,3 +62,5 @@ project(":triggercmd-extension").projectDir = file("plugin-lab/extensions/trigge
 
 include(":laner-access-manager-plugin")
 project(":laner-access-manager-plugin").projectDir = file("plugin-lab/plugins/laner-access-manager")
+include(":log-center-plugin")
+project(":log-center-plugin").projectDir = file("plugin-lab/plugins/log-center")

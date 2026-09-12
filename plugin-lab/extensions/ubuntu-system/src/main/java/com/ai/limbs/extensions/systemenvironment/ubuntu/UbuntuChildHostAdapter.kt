@@ -27,6 +27,7 @@ internal class UbuntuChildHostAdapter(
     override val scope = child.scope
     override val dataDir = child.dataDir
     override val cacheDir = child.cacheDir
+    override val logger = child.logger
     override val runtimeEntryFile = child.runtimeEntryFile
     override val nativeRuntime = child.nativeRuntime
 
