@@ -48,12 +48,10 @@ class AiLimbsRdcToolAdapter(
             val name = request.optString("name").trim()
             if (name.isBlank()) return mcpError("shell=operit requires a tool name")
             val parameters = request.optJSONObject("parameters") ?: JSONObject()
-            val result = if (isFormalCapability(name)) {
-                remoteExecutor.execute(name, parameters)
-            } else {
-                executeHostTool(name, parameters)
-            }
-            return mcpResult(result)
+            // shell=operit is the generic AI Limbs capability ingress. Forward the requested
+            // capability unchanged; the Host live registry/resolver owns Core vs Plugin vs HostTool
+            // classification. Child Bridge providers must not maintain a static capability list.
+            return mcpResult(remoteExecutor.execute(name, parameters))
         }
         val params = JSONObject(args.toString())
             .put("command", command)
