@@ -6,7 +6,7 @@ import org.junit.Test
 
 class AiLimbsInteractionCycleControllerTest {
     @Test
-    fun `continuous activity can exceed timeout without rotating`() {
+    fun `elapsed timeout rotates only at a later ingress boundary`() {
         var now = 0L
         val controller = AiLimbsInteractionCycleController(
             timeoutProvider = { 60_000L },
@@ -16,19 +16,17 @@ class AiLimbsInteractionCycleControllerTest {
         assertFalse(controller.beginInvocation().startedNewCycle)
         controller.endInvocation()
 
-        repeat(10) {
-            now += 30_000L
-            assertFalse(controller.beginInvocation().startedNewCycle)
-            controller.endInvocation()
-        }
+        now = 59_999L
+        assertFalse(controller.beginInvocation().startedNewCycle)
+        controller.endInvocation()
 
-        now += 60_000L
+        now = 60_000L
         assertTrue(controller.beginInvocation().startedNewCycle)
         controller.endInvocation()
     }
 
     @Test
-    fun `long invocation completion starts a fresh inactivity window`() {
+    fun `invocation crossing timeout is never interrupted`() {
         var now = 0L
         val controller = AiLimbsInteractionCycleController(
             timeoutProvider = { 60_000L },
@@ -39,20 +37,12 @@ class AiLimbsInteractionCycleControllerTest {
         now = 120_000L
         controller.endInvocation()
 
-        assertFalse(controller.beginInvocation().startedNewCycle)
-        controller.endInvocation()
-
-        now = 179_999L
-        assertFalse(controller.beginInvocation().startedNewCycle)
-        controller.endInvocation()
-
-        now = 239_999L
         assertTrue(controller.beginInvocation().startedNewCycle)
         controller.endInvocation()
     }
 
     @Test
-    fun `overlapping work never rotates until a real idle window follows`() {
+    fun `overlapping work stays in old generation until all active invocations finish`() {
         var now = 0L
         val controller = AiLimbsInteractionCycleController(
             timeoutProvider = { 60_000L },
@@ -64,19 +54,14 @@ class AiLimbsInteractionCycleControllerTest {
         assertFalse(controller.beginInvocation().startedNewCycle)
 
         controller.endInvocation()
-        now = 180_000L
         controller.endInvocation()
 
-        assertFalse(controller.beginInvocation().startedNewCycle)
-        controller.endInvocation()
-
-        now = 240_000L
         assertTrue(controller.beginInvocation().startedNewCycle)
         controller.endInvocation()
     }
 
     @Test
-    fun `invalid configured timeout falls back to hard default inactivity window`() {
+    fun `invalid configured timeout falls back to hard default`() {
         var now = 0L
         val controller = AiLimbsInteractionCycleController(
             timeoutProvider = { -1L },
@@ -90,7 +75,7 @@ class AiLimbsInteractionCycleControllerTest {
         assertFalse(controller.beginInvocation().startedNewCycle)
         controller.endInvocation()
 
-        now += AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS
+        now = AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS
         assertTrue(controller.beginInvocation().startedNewCycle)
         controller.endInvocation()
     }
