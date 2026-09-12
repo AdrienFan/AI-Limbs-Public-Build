@@ -127,4 +127,46 @@ class ToolCapabilityCatalogSearchTest {
         assertTrue(result.matches.isNotEmpty())
         assertTrue(result.lowConfidence)
     }
+    private fun ubuntuStartEntry() = ToolCatalogEntry(
+        targetToolName = "plugin.ubuntu.start",
+        displayName = "启动 Ubuntu",
+        description = "启动 Ubuntu 子系统本地 Runtime。",
+        parameterHints = emptyList(),
+        sourceKind = ToolCatalogSourceKind.PACKAGE,
+        keywords = listOf("Ubuntu", "Linux", "启动", "runtime"),
+        sourceName = "plugin:ai_limbs.system_environment.ubuntu",
+        searchMetadata = listOf("ubuntu subsystem", "system environment")
+    )
+
+    @Test
+    fun fuzzyTypo_recallsUbuntuCapability() {
+        val result = ToolCapabilityCatalog.searchDetailed(
+            listOf(rubyEntry(), ubuntuStartEntry()),
+            "ubntu",
+            8
+        )
+        assertEquals("plugin.ubuntu.start", result.matches.first().entry.targetToolName)
+        assertFalse(result.lowConfidence)
+    }
+
+    @Test
+    fun fuzzyTransposition_recallsUbuntuCapability() {
+        val result = ToolCapabilityCatalog.searchDetailed(
+            listOf(ubuntuStartEntry()),
+            "ubutnu",
+            8
+        )
+        assertEquals("plugin.ubuntu.start", result.matches.first().entry.targetToolName)
+    }
+
+    @Test
+    fun providerName_participatesInSearch() {
+        val result = ToolCapabilityCatalog.searchDetailed(
+            listOf(ubuntuStartEntry()),
+            "system environmnt",
+            8
+        )
+        assertEquals("plugin.ubuntu.start", result.matches.first().entry.targetToolName)
+    }
+
 }

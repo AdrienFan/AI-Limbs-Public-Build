@@ -468,7 +468,7 @@ class AiLimbsCapabilityResolver(
     private companion object {
         const val MODULE_NAME = "AI Limbs Capability Resolver"
         const val CAPABILITY_PROTOCOL_VERSION = 2
-        const val MAX_SEARCH_RESULTS = 5
+        const val MAX_SEARCH_RESULTS = 20
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
         const val PROVIDER_BRIDGE = AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER
         const val PROVIDER_SYSTEM_ENVIRONMENT = "system_environment"

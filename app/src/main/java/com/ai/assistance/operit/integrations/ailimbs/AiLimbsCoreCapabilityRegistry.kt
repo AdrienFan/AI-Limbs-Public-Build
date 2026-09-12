@@ -24,7 +24,7 @@ object AiLimbsCoreCapabilityRegistry {
                         description = "Search the current AI Limbs capability catalog without executing a capability.",
                         parameters = listOf(
                             ToolParameterSchema("query", "string", "Capability intent or known tool or module name", true),
-                            ToolParameterSchema("limit", "integer", "Maximum result count from 1 to 5", false, "5")
+                            ToolParameterSchema("limit", "integer", "Maximum result count from 1 to 20", false, "8")
                         ),
                         keywords = listOf("能力", "查找工具", "resolver", "capability resolver", "AI Limbs Core")
                     )

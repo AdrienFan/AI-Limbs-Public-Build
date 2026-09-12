@@ -513,7 +513,9 @@ object ToolCapabilityCatalog {
             entry.parameters.joinToString(" ") { it.description } +
                 " " + entry.parameterHints.joinToString(" ")
         )
-        val metadata = normalize(entry.searchMetadata.joinToString(" "))
+        val metadata = normalize(
+            (entry.searchMetadata + listOfNotNull(entry.sourceName)).joinToString(" ")
+        )
 
         val displayTokens = tokenize(entry.displayName).toSet()
         val targetTokens = tokenize(entry.targetToolName).toSet()
@@ -522,7 +524,8 @@ object ToolCapabilityCatalog {
         val parameterDescriptionTokens =
             (entry.parameters.flatMap { tokenize(it.description) } +
                 entry.parameterHints.flatMap(::tokenize)).toSet()
-        val metadataTokens = entry.searchMetadata.flatMap(::tokenize).toSet()
+        val metadataTokens =
+            (entry.searchMetadata + listOfNotNull(entry.sourceName)).flatMap(::tokenize).toSet()
 
         var score = 0
         var strongIdentityMatch = false
@@ -608,12 +611,69 @@ object ToolCapabilityCatalog {
         normalizedField: String,
         fieldTokens: Set<String>,
         term: String
-    ): Boolean =
+    ): Boolean {
         if (term.any(::isCommonHanCharacter)) {
-            normalizedField.contains(term)
-        } else {
-            fieldTokens.contains(term)
+            return normalizedField.contains(term)
         }
+        if (fieldTokens.contains(term)) return true
+        return fieldTokens.any { candidate -> fuzzyTokenMatch(candidate, term) }
+    }
+
+    private fun fuzzyTokenMatch(candidate: String, query: String): Boolean {
+        if (candidate == query) return true
+        val shorter = minOf(candidate.length, query.length)
+        val longer = maxOf(candidate.length, query.length)
+        if (shorter >= 3 && (candidate.startsWith(query) || query.startsWith(candidate))) {
+            return shorter.toDouble() / longer.toDouble() >= 0.6
+        }
+        if (shorter < 4) return false
+
+        val maxDistance = when {
+            longer <= 5 -> 1
+            longer <= 9 -> 2
+            else -> 3
+        }
+        if (kotlin.math.abs(candidate.length - query.length) > maxDistance) return false
+        val distance = boundedDamerauLevenshtein(candidate, query, maxDistance)
+        if (distance > maxDistance) return false
+        return 1.0 - distance.toDouble() / longer.toDouble() >= 0.68
+    }
+
+    private fun boundedDamerauLevenshtein(left: String, right: String, maxDistance: Int): Int {
+        if (left == right) return 0
+        if (left.isEmpty()) return right.length
+        if (right.isEmpty()) return left.length
+        if (kotlin.math.abs(left.length - right.length) > maxDistance) return maxDistance + 1
+
+        var previousPrevious = IntArray(right.length + 1)
+        var previous = IntArray(right.length + 1) { it }
+        var current = IntArray(right.length + 1)
+        for (i in 1..left.length) {
+            current[0] = i
+            var rowMin = current[0]
+            for (j in 1..right.length) {
+                val substitutionCost = if (left[i - 1] == right[j - 1]) 0 else 1
+                var value = minOf(
+                    previous[j] + 1,
+                    current[j - 1] + 1,
+                    previous[j - 1] + substitutionCost
+                )
+                if (i > 1 && j > 1 &&
+                    left[i - 1] == right[j - 2] && left[i - 2] == right[j - 1]
+                ) {
+                    value = minOf(value, previousPrevious[j - 2] + 1)
+                }
+                current[j] = value
+                rowMin = minOf(rowMin, value)
+            }
+            if (rowMin > maxDistance) return maxDistance + 1
+            val swap = previousPrevious
+            previousPrevious = previous
+            previous = current
+            current = swap
+        }
+        return previous[right.length]
+    }
 
     private fun entryKey(entry: ToolCatalogEntry): String =
         if (entry.sourceKind == ToolCatalogSourceKind.ACTIVATION) {

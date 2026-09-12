@@ -111,7 +111,7 @@ class AiLimbsDispatcher(
             AiLimbsCoreLocalOperation.CAPABILITY_SEARCH ->
                 capabilityResolver.search(
                     query = args.optString("query"),
-                    requestedLimit = args.optInt("limit", 5)
+                    requestedLimit = args.optInt("limit", 8)
                 )
             AiLimbsCoreLocalOperation.CAPABILITY_DESCRIBE ->
                 capabilityResolver.describe(
