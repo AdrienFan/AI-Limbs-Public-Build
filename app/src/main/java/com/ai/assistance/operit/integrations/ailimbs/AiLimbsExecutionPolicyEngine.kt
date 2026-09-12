@@ -338,13 +338,18 @@ class AiLimbsExecutionPolicyEngine(
         receipts.recordSuccessfulRead(invocation, result)
     }
 
-    fun resetSessionReceipts(): JSONObject {
-        receipts.resetForContextBoundary()
+    fun resetInteractionCycle(): JSONObject {
+        val reset = AiLimbsInteractionCycleRuntime.reset(appContext)
         return JSONObject()
             .put("success", true)
             .put("scope_id", session.scopeId)
             .put("transport", session.transport.wireValue)
-            .put("receipts_cleared", true)
+            .put("receipts_cleared", reset.appliedImmediately)
+            .put("interaction_cycle_reset", true)
+            .put("reset_pending", !reset.appliedImmediately)
+            .put("generation", reset.generation)
+            .put("reset_applied_immediately", reset.appliedImmediately)
+            .put("cycle_started_at_ms", reset.cycleStartedAtMs)
     }
 
     fun describePolicy(): JSONObject =

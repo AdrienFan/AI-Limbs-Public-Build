@@ -133,7 +133,7 @@ class AiLimbsDispatcher(
             AiLimbsCoreLocalOperation.POLICY_DESCRIBE -> policyEngine.describePolicy()
             AiLimbsCoreLocalOperation.WORK_MODE_SELECT -> policyEngine.selectWorkMode(args)
             AiLimbsCoreLocalOperation.POLICY_SESSION_RESET ->
-                policyEngine.resetSessionReceipts()
+                policyEngine.resetInteractionCycle()
             AiLimbsCoreLocalOperation.STORAGE_SEARCH ->
                 storageIndex.search(
                     query = args.optString("query"),

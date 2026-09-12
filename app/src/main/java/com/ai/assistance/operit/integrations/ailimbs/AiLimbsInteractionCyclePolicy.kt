@@ -79,7 +79,14 @@ class AiLimbsInteractionCyclePolicy(context: Context) {
 
 internal data class AiLimbsInteractionCycleLease(
     val generation: Long,
-    val startedNewCycle: Boolean
+    val startedNewCycle: Boolean,
+    val admitted: Boolean = true
+)
+
+internal data class AiLimbsInteractionCycleResetResult(
+    val generation: Long,
+    val appliedImmediately: Boolean,
+    val cycleStartedAtMs: Long
 )
 
 /**
@@ -97,10 +104,18 @@ internal class AiLimbsInteractionCycleController(
     private var generation = 1L
     private var activeInvocations = 0
     private var expiredPending = false
+    private var manualResetStartedAtMs: Long? = null
 
     fun beginInvocation(): AiLimbsInteractionCycleLease = synchronized(stateLock) {
         val now = clockMs()
-        refreshExpiry(now)
+        if (manualResetStartedAtMs != null && activeInvocations > 0) {
+            return@synchronized AiLimbsInteractionCycleLease(
+                generation = generation + 1L,
+                startedNewCycle = false,
+                admitted = false
+            )
+        }
+        if (manualResetStartedAtMs == null) refreshExpiry(now)
         val startedNewCycle = expiredPending && activeInvocations == 0
         if (startedNewCycle) {
             cycleStartedAtMs = now
@@ -111,11 +126,33 @@ internal class AiLimbsInteractionCycleController(
         AiLimbsInteractionCycleLease(generation, startedNewCycle)
     }
 
-    fun endInvocation() {
-        synchronized(stateLock) {
-            check(activeInvocations > 0) { "AI Limbs interaction cycle invocation underflow" }
-            activeInvocations -= 1
-            refreshExpiry(clockMs())
+    fun endInvocation(): AiLimbsInteractionCycleResetResult? = synchronized(stateLock) {
+        check(activeInvocations > 0) { "AI Limbs interaction cycle invocation underflow" }
+        activeInvocations -= 1
+        val resetStartedAtMs = manualResetStartedAtMs
+        if (resetStartedAtMs != null && activeInvocations == 0) {
+            cycleStartedAtMs = resetStartedAtMs
+            generation += 1L
+            expiredPending = false
+            manualResetStartedAtMs = null
+            AiLimbsInteractionCycleResetResult(generation, true, cycleStartedAtMs)
+        } else {
+            if (resetStartedAtMs == null) refreshExpiry(clockMs())
+            null
+        }
+    }
+
+    fun resetFromNow(): AiLimbsInteractionCycleResetResult = synchronized(stateLock) {
+        val now = clockMs()
+        expiredPending = false
+        if (activeInvocations == 0) {
+            cycleStartedAtMs = now
+            generation += 1L
+            manualResetStartedAtMs = null
+            AiLimbsInteractionCycleResetResult(generation, true, now)
+        } else {
+            manualResetStartedAtMs = now
+            AiLimbsInteractionCycleResetResult(generation + 1L, false, now)
         }
     }
 
@@ -143,15 +180,29 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
 
     fun beginInvocation(): AiLimbsInteractionCycleLease = synchronized(stateLock) {
         val lease = controller.beginInvocation()
-        if (lease.startedNewCycle) accessGate.resetForContextBoundary()
+        if (!lease.admitted) return@synchronized lease
+        if (lease.startedNewCycle) applyContextBoundary(lease.generation)
         accessGate.beginInteractionCycleInvocation()
         currentGeneration = lease.generation
         lease
     }
 
     fun endInvocation() = synchronized(stateLock) {
-        controller.endInvocation()
+        val completedReset = controller.endInvocation()
         accessGate.endInteractionCycleInvocation()
+        if (completedReset != null) applyContextBoundary(completedReset.generation)
+    }
+
+    fun resetInteractionCycle(): AiLimbsInteractionCycleResetResult = synchronized(stateLock) {
+        val reset = controller.resetFromNow()
+        if (reset.appliedImmediately) applyContextBoundary(reset.generation)
+        reset
+    }
+
+    private fun applyContextBoundary(generation: Long) {
+        accessGate.resetForContextBoundary()
+        bootstrapDeliveredGeneration = null
+        currentGeneration = generation
     }
 
     fun currentGeneration(): Long = synchronized(stateLock) { currentGeneration }
@@ -187,4 +238,7 @@ internal object AiLimbsInteractionCycleRuntime {
             runtime ?: AiLimbsInteractionCycleRuntimeState(context.applicationContext)
                 .also { runtime = it }
         }
+
+    fun reset(context: Context): AiLimbsInteractionCycleResetResult =
+        state(context.applicationContext).resetInteractionCycle()
 }

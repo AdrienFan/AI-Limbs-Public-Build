@@ -77,8 +77,8 @@ class AiLimbsRemoteInvocationExecutor(
         return dispatcher.execute(invocation.tool, invocation.args)
     }
 
-    fun resetSessionReceipts() {
-        policyEngine.resetSessionReceipts()
+    fun resetInteractionCycle() {
+        policyEngine.resetInteractionCycle()
     }
 
     fun describePolicy(): JSONObject = policyEngine.describePolicy()

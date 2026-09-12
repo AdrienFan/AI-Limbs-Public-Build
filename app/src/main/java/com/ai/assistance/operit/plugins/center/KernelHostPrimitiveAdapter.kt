@@ -9,6 +9,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngin
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCyclePolicy
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.system.KernelDynamicNavigationJsonServiceV1
 import com.ai.assistance.operit.widget.ToolPkgDesktopWidgetHost
 import java.io.File
@@ -375,6 +376,19 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
                     .put("changed", before != timeoutMs)
                     .put("authorized", true)
             }
+            "reset" -> {
+                val password = required(parameters, "admin_password")
+                if (!PluginPlatformKernel.adminSecurity.verifyPassword(password)) {
+                    return JSONObject().put("reset", false).put("authorized", false)
+                }
+                val reset = AiLimbsInteractionCycleRuntime.reset(appContext)
+                policy.snapshot().toJson()
+                    .put("reset", true)
+                    .put("authorized", true)
+                    .put("generation", reset.generation)
+                    .put("reset_applied_immediately", reset.appliedImmediately)
+                    .put("cycle_started_at_ms", reset.cycleStartedAtMs)
+            }
             else -> unsupported("host.interaction.cycle@1", operation)
         }
     }
@@ -500,6 +514,7 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             "host.authorization@1/evaluate",
             "host.interaction.cycle@1/status",
             "host.interaction.cycle@1/set_timeout",
+            "host.interaction.cycle@1/reset",
             "kernel.plugin.trust@1/status",
             "kernel.plugin.trust@1/verify_package",
             "kernel.plugin.trust@1/verify_detached",

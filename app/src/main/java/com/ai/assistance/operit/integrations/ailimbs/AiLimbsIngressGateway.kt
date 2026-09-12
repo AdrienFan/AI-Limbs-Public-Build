@@ -99,6 +99,18 @@ class AiLimbsIngressGateway internal constructor(
 
     private suspend fun invoke(execute: suspend () -> JSONObject): AiLimbsIngressResult {
         val lease = cycleRuntime?.beginInvocation()
+        if (lease != null && !lease.admitted) {
+            return AiLimbsIngressResult(
+                payload = JSONObject()
+                    .put("success", false)
+                    .put("error_code", "INTERACTION_CYCLE_RESET_PENDING")
+                    .put("type", "INTERACTION_CYCLE_RESET_PENDING")
+                    .put("scope", "interaction_cycle")
+                    .put("retry_original_capability", true)
+                    .put("target_generation", lease.generation),
+                accessBootstrap = null
+            )
+        }
         return try {
             val generation = lease?.generation ?: cycleRuntime?.currentGeneration()
             val bootstrap = takeAccessBootstrap(generation)
