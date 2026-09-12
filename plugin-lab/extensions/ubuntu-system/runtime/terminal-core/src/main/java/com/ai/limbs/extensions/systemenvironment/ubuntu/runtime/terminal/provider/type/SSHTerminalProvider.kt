@@ -77,8 +77,9 @@ class SSHTerminalProvider(
                     Log.d(TAG, "SSH connection established via manager: $sshConnectionId")
                     Result.success(Unit)
                 } else {
-                    Log.e(TAG, "Failed to connect SSH", result.exceptionOrNull())
-                    Result.failure(result.exceptionOrNull() ?: Exception("Unknown SSH connection error"))
+                    val error = result.exceptionOrNull() ?: Exception("Unknown SSH connection error")
+                    Log.e(TAG, "Failed to connect SSH", error)
+                    Result.failure(error)
                 }
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to connect to SSH server", e)
