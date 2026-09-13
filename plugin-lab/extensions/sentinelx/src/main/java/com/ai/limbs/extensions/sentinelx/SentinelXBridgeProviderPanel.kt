@@ -33,20 +33,22 @@ internal object SentinelXBridgeProviderPanel : BridgeProviderPanel {
                     id = FIELD_TOKEN,
                     label = "Enrollment Token",
                     kind = BridgeProviderPanelFieldKind.SECRET,
-                    placeholder = if (config.configured) "已配置；输入新 Token 可替换" else "粘贴 SentinelX Enrollment JWT",
-                    enabled = config.secureStorageAvailable
+                    placeholder = if (config.configured) "已配置；请先清除绑定后再重新授权" else "粘贴 SentinelX Enrollment JWT",
+                    enabled = config.secureStorageAvailable && !config.configured
                 ),
                 BridgeProviderPanelField(
                     id = FIELD_HUB_URL,
                     label = "Hub URL",
                     value = config.hubUrl,
-                    placeholder = SentinelXBridgeStorage.DEFAULT_HUB_URL
+                    placeholder = SentinelXBridgeStorage.DEFAULT_HUB_URL,
+                    enabled = !config.configured
                 ),
                 BridgeProviderPanelField(
                     id = FIELD_DEVICE_NAME,
                     label = "Device Name",
                     value = config.deviceName,
-                    placeholder = "AI Limbs 设备名称"
+                    placeholder = "AI Limbs 设备名称",
+                    enabled = !config.configured
                 )
             ),
             actions = buildList {
@@ -54,8 +56,8 @@ internal object SentinelXBridgeProviderPanel : BridgeProviderPanel {
                     BridgeProviderPanelAction(
                         id = ACTION_SAVE_CONNECT,
                         label = "保存并连接",
-                        enabled = config.secureStorageAvailable,
-                        requiredFieldIds = if (config.configured) emptySet() else setOf(FIELD_TOKEN)
+                        enabled = config.secureStorageAvailable && !config.configured,
+                        requiredFieldIds = setOf(FIELD_TOKEN)
                     )
                 )
                 if (config.configured) {
@@ -82,6 +84,9 @@ internal object SentinelXBridgeProviderPanel : BridgeProviderPanel {
         val storage = SentinelXBridgeStorage(context)
         return when (actionId) {
             ACTION_SAVE_CONNECT -> {
+                check(!storage.readConfig().configured) {
+                    "SentinelX 已绑定；请先清除绑定后再重新配置"
+                }
                 storage.saveBinding(
                     token = fieldValues[FIELD_TOKEN].orEmpty(),
                     hubUrl = fieldValues[FIELD_HUB_URL].orEmpty(),

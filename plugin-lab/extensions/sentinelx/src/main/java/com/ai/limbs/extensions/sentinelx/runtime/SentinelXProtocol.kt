@@ -15,7 +15,7 @@ data class SentinelXBridgeRequest(
 
 internal object SentinelXProtocol {
     const val PROTOCOL_VERSION = "1.10.0"
-    const val AGENT_VERSION = "0.1.0"
+    const val AGENT_VERSION = "0.1.1"
     const val BRIDGE_PREFIX = "AIL_SENTINEL_BRIDGE_V1 "
 
     fun webSocketUrl(hubUrl: String): String {
@@ -73,6 +73,7 @@ internal object SentinelXProtocol {
                 .put("provider", "SentinelX")
                 .put("transport", "ai_limbs.bridge.remote.invoke")
                 .put("command_prefix", BRIDGE_PREFIX.trim())
+                .put("command_format", "AIL_SENTINEL_BRIDGE_V1 <JSON>")
                 .put("authorization", "AI Limbs Policy Engine / Dispatcher")
         )
 
@@ -86,10 +87,15 @@ internal object SentinelXProtocol {
 
     fun decodeBridgeCommand(command: String): SentinelXBridgeRequest {
         require(command.startsWith(BRIDGE_PREFIX)) { "command 必须使用 $BRIDGE_PREFIX 协议头" }
-        val encoded = command.removePrefix(BRIDGE_PREFIX).trim()
-        require(encoded.isNotBlank()) { "bridge request payload 为空" }
-        val decoded = Base64.decode(encoded, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
-        val payload = JSONObject(String(decoded, StandardCharsets.UTF_8))
+        val body = command.removePrefix(BRIDGE_PREFIX).trim()
+        require(body.isNotBlank()) { "bridge request payload 为空" }
+        val payload = if (body.startsWith("{")) {
+            JSONObject(body)
+        } else {
+            // v0.1.0 compatibility: old clients may still send Base64URL JSON.
+            val decoded = Base64.decode(body, Base64.URL_SAFE or Base64.NO_WRAP or Base64.NO_PADDING)
+            JSONObject(String(decoded, StandardCharsets.UTF_8))
+        }
         val tool = payload.optString("tool").trim()
         require(tool.isNotBlank()) { "bridge request 缺少 tool" }
         val args = payload.optJSONObject("args") ?: JSONObject()
