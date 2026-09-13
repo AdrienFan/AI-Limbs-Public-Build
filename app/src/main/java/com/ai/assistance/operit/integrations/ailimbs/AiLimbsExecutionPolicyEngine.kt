@@ -343,7 +343,7 @@ class AiLimbsExecutionPolicyEngine(
         return JSONObject()
             .put("success", true)
             .put("scope_id", session.scopeId)
-            .put("transport", session.transport.wireValue)
+            .put("transport", session.sourceTransportId)
             .put("receipts_cleared", reset.appliedImmediately)
             .put("interaction_cycle_reset", true)
             .put("reset_pending", !reset.appliedImmediately)
@@ -358,7 +358,7 @@ class AiLimbsExecutionPolicyEngine(
             .put("module", "AI Limbs Execution Policy Engine")
             .put("transport_neutral", true)
             .put("session_scope", session.scopeId)
-            .put("transport", session.transport.wireValue)
+            .put("transport", session.sourceTransportId)
             .put("bootstrap_version", AiLimbsSystemAccessPrompt.version)
             .put("policy", AiLimbsExecutionPolicyDescriptor.summaryJson())
 
@@ -381,6 +381,24 @@ class AiLimbsExecutionPolicyEngine(
                     )
             AiLimbsExecutionTransport.TRIGGERCMD ->
                 AiLimbsTriggerCmdContract.transportInvocation(name, parameters)
+            AiLimbsExecutionTransport.EXTERNAL_BRIDGE ->
+                when (session.sourceTransportId) {
+                    "rdc" ->
+                        JSONObject()
+                            .put("tool", "start_process")
+                            .put("arguments", JSONObject()
+                                .put("shell", "operit")
+                                .put("command", JSONObject()
+                                    .put("name", name)
+                                    .put("parameters", parameters)
+                                    .toString()))
+                    "triggercmd" -> AiLimbsTriggerCmdContract.transportInvocation(name, parameters)
+                    else -> JSONObject()
+                        .put("type", "BRIDGE_CAPABILITY_INVOKE")
+                        .put("transport", session.sourceTransportId)
+                        .put("tool", name)
+                        .put("args", JSONObject(parameters.toString()))
+                }
             AiLimbsExecutionTransport.EXTERNAL_HTTP ->
                 JSONObject()
                     .put("method", "POST")

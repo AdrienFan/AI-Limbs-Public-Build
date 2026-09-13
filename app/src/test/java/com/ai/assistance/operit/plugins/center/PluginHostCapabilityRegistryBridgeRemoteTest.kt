@@ -23,4 +23,13 @@ class PluginHostCapabilityRegistryBridgeRemoteTest {
         }.exceptionOrNull() as PluginInstallException
         assertEquals("HOST_PRIMITIVE_UNKNOWN", error.code)
     }
+    @Test
+    fun `future bridge transport id is accepted without host whitelist`() {
+        val registry = PluginHostCapabilityRegistry()
+        assertEquals(
+            "future_provider_123",
+            registry.normalizeExternalBridgeTransportId(" Future_Provider_123 ")
+        )
+    }
+
 }

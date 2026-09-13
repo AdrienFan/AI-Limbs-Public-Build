@@ -296,18 +296,8 @@ internal class PluginHostCapabilityRegistry(
                 "HOST_RUNTIME_UNAVAILABLE",
                 "Bridge remote ingress requires the Android Host runtime"
             )
-        val transportId = parameters.optString("transport").trim().lowercase()
-        val transport = AiLimbsExecutionTransport.values().firstOrNull { it.wireValue == transportId }
-            ?: throw PluginInstallException(
-                "BRIDGE_TRANSPORT_UNSUPPORTED",
-                "Unsupported Bridge transport: $transportId"
-            )
-        if (transport == AiLimbsExecutionTransport.PLUGIN_RUNTIME) {
-            throw PluginInstallException(
-                "BRIDGE_TRANSPORT_UNSUPPORTED",
-                "Plugin runtime cannot be used as an external Bridge transport"
-            )
-        }
+        val transportId = normalizeExternalBridgeTransportId(parameters.optString("transport"))
+        val transport = AiLimbsExecutionTransport.EXTERNAL_BRIDGE
         val tool = parameters.optString("tool").trim()
         if (tool.isBlank()) {
             throw PluginInstallException("CAPABILITY_ID_REQUIRED", "Bridge remote tool is required")
@@ -322,15 +312,16 @@ internal class PluginHostCapabilityRegistry(
             throw PluginInstallException("BRIDGE_SCOPE_REQUIRED", "Bridge remote scope_id is required")
         }
         // Bridge scope identifies a transport session only; Host owns interaction-cycle lifetime.
-        val gatewayKey = "$ownerPluginId:$providerId:${transport.wireValue}"
+        val gatewayKey = "$ownerPluginId:$providerId:$transportId"
         val gateway = bridgeIngressGateways.computeIfAbsent(gatewayKey) {
             AiLimbsIngressGateway(
                 context,
                 AiLimbsIngressSession(
-                    sourceId = transport.wireValue,
+                    sourceId = transportId,
                     executionSession = AiLimbsExecutionSession(
                         transport = transport,
-                        scopeId = "bridge:$providerId:${transport.wireValue}"
+                        scopeId = "bridge:$providerId:$transportId",
+                        sourceTransportId = transportId
                     )
                 )
             )
@@ -484,6 +475,23 @@ internal class PluginHostCapabilityRegistry(
         return executor.invoke(ownerPluginId, primitiveId, operation, copy)
     }
 
+    internal fun normalizeExternalBridgeTransportId(rawTransportId: String): String {
+        val transportId = rawTransportId.trim().lowercase()
+        if (!BRIDGE_TRANSPORT_ID_REGEX.matches(transportId)) {
+            throw PluginInstallException(
+                "BRIDGE_TRANSPORT_INVALID",
+                "Invalid Bridge transport id: $transportId"
+            )
+        }
+        if (transportId == AiLimbsExecutionTransport.PLUGIN_RUNTIME.wireValue) {
+            throw PluginInstallException(
+                "BRIDGE_TRANSPORT_UNSUPPORTED",
+                "Plugin runtime cannot be used as an external Bridge transport"
+            )
+        }
+        return transportId
+    }
+
     private suspend fun invokeLogging(ownerPluginId: String, parameters: JSONObject): JSONObject {
         val service = loggingService ?: throw PluginInstallException(
             "HOST_GATEWAY_NOT_READY",
@@ -493,6 +501,7 @@ internal class PluginHostCapabilityRegistry(
     }
 
     private companion object {
+        val BRIDGE_TRANSPORT_ID_REGEX = Regex("^[a-z0-9][a-z0-9._-]{0,63}$")
         const val BRIDGE_REMOTE_INVOKE_CAPABILITY_ID = "core.bridge.remote.invoke"
         const val SYSTEM_BRIDGE_PLUGIN_ID = "plugin.system.bridge"
         val PLUGIN_CAPABILITY_ID = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")

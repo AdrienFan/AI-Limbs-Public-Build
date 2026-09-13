@@ -7,16 +7,19 @@ import org.json.JSONObject
 enum class AiLimbsExecutionTransport(val wireValue: String) {
     RDC("rdc"),
     TRIGGERCMD("triggercmd"),
+    EXTERNAL_BRIDGE("external_bridge"),
     EXTERNAL_HTTP("external_http"),
     PLUGIN_RUNTIME("plugin_runtime")
 }
 
 data class AiLimbsExecutionSession(
     val transport: AiLimbsExecutionTransport,
-    val scopeId: String
+    val scopeId: String,
+    val sourceTransportId: String = transport.wireValue
 ) {
     init {
         require(scopeId.isNotBlank()) { "AI Limbs execution scope_id must not be blank" }
+        require(sourceTransportId.isNotBlank()) { "AI Limbs source transport id must not be blank" }
     }
 }
 

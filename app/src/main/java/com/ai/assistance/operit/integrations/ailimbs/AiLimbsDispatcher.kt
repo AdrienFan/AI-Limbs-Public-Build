@@ -246,7 +246,7 @@ class AiLimbsDispatcher(
                 hostToolName = name,
                 parameters = parameters,
                 source =
-                    policyEngine.session.transport.wireValue +
+                    policyEngine.session.sourceTransportId +
                         ":" +
                         policyEngine.session.scopeId,
                 operation = operation
@@ -359,7 +359,7 @@ class AiLimbsDispatcher(
             .put("permission_enforcement", "Unified ALLOW / ASK / FORBID policy")
             .put("policy_version", AiLimbsExecutionPolicyDescriptor.policyVersion)
             .put("session_scope", policyEngine.session.scopeId)
-            .put("transport", policyEngine.session.transport.wireValue)
+            .put("transport", policyEngine.session.sourceTransportId)
             .put("transport_neutral", true)
 
     private fun lanerChatStatus(): JSONObject {
