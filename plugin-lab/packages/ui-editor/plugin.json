@@ -1,0 +1,55 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.system.ui_editor",
+  "version": "0.1.0",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
+  "display": {
+    "name": "UI 编辑器",
+    "description": "编辑 AI Limbs 页面布局与界面元素；v0.1.0 首先支持工具箱卡片拖拽排序。"
+  },
+  "roles": [
+    "system_plugin"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.uieditor.UiEditorEntry"
+    }
+  },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": [
+      "host.ui.layout@1"
+    ]
+  },
+  "provides": {
+    "capabilities": [],
+    "services": [],
+    "providers": [
+      "plugin.system.ui_editor.page"
+    ],
+    "extensions": [
+      {
+        "point": "ai_limbs.ui.home_tile",
+        "id": "plugin.system.ui_editor.tile",
+        "api": 1
+      },
+      {
+        "point": "ai_limbs.ui.screen",
+        "id": "plugin.system.ui_editor.screen",
+        "api": 2
+      }
+    ]
+  }
+}
