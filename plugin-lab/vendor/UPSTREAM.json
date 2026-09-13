@@ -1,0 +1,16 @@
+{
+  "shizuku": {
+    "source": "Android Download/Shizuku-master/Shizuku-master",
+    "readme_sha256": "36a4b42e7ea8d11566391fdb14c95bb9a8a37bd5cf0703ee0a3339eea350d5bd",
+    "revision": "unversioned user supplied source"
+  },
+  "shizuku_api": {
+    "repository": "https://github.com/RikkaApps/Shizuku-API",
+    "commit": "a27f6e4151ba7b39965ca47edb2bf0aeed7102e5"
+  },
+  "adaptations": [
+    "Internal Host-only server using upstream Service and Binder protocol",
+    "ADB pairing/client port with private package names and no credential logging",
+    "No official app name, icon, applicationId or permission declarations"
+  ]
+}

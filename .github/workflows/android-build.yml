@@ -22,6 +22,7 @@ on:
           - laner-access-manager
           - log-center
           - ui-editor
+          - permission-service
 
 concurrency:
   group: plugin-lab-alt-${{ github.ref }}-${{ inputs.target }}
@@ -744,4 +745,61 @@ jobs:
             plugin-lab/plugins/ui-editor/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ui-editor/plugin.json
           if-no-files-found: error
+          retention-days: 14
+
+
+  permission_service:
+    if: inputs.target == 'permission-service'
+    name: Build AI Limbs Permission Service v0.1.0
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+      - name: Install Android toolchain
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-34" "platforms;android-36" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.31.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+      - name: Build plugin and internal server
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :permission-service-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Sign installable plugin
+        env:
+          AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+        run: python3 tools/plugin_lab/package_permission_service.py
+      - name: Upload installable plugin
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: permission-service-v0.1.0-${{ github.run_number }}
+          path: |
+            dist/AI-Limbs-Permission-Service-v0.1.0.ailp
+            dist/AI-Limbs-Permission-Service-v0.1.0.ailp.sha256
+          if-no-files-found: error
+          retention-days: 14
+      - name: Upload build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: permission-service-diagnostics-${{ github.run_number }}
+          path: |
+            plugin-lab/plugins/permission-service/build/reports/**
+            plugin-lab/runtime/permission-server/build/reports/**
+          if-no-files-found: ignore
           retention-days: 14

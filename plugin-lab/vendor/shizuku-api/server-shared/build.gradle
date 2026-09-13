@@ -1,0 +1,26 @@
+// Adapted build for AI Limbs; see ../UPSTREAM.md.
+plugins {
+    id('com.android.library')
+    id('dev.rikka.tools.refine') version '4.4.0'
+}
+android {
+    namespace 'rikka.shizuku.server'
+    compileSdk 36
+    defaultConfig { minSdk 26 }
+    buildFeatures { buildConfig false; aidl true }
+    compileOptions {
+        sourceCompatibility JavaVersion.VERSION_21
+        targetCompatibility JavaVersion.VERSION_21
+    }
+}
+dependencies {
+    implementation 'androidx.annotation:annotation:1.9.1'
+    api project(':ail-permission-aidl')
+    api project(':ail-permission-shared')
+    api project(':ail-permission-rish')
+    implementation 'androidx.core:core:1.16.0'
+    implementation 'dev.rikka.rikkax.parcelablelist:parcelablelist:2.0.1'
+    implementation 'dev.rikka.tools.refine:runtime:4.4.0'
+    implementation 'dev.rikka.hidden:compat:4.4.0'
+    compileOnly 'dev.rikka.hidden:stub:4.4.0'
+}

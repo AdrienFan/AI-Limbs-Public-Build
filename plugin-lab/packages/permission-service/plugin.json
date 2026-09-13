@@ -1,0 +1,59 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.system.permission_service",
+  "version": "0.1.0",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
+  "display": {
+    "name": "AI Limbs 权限服务",
+    "description": "在工具箱中配对、启动、停止和管理 AI Limbs 独立 Android 权限服务。需要支持 host.privileged.runtime@1 的基座（build20 起）。"
+  },
+  "roles": [
+    "system_plugin"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.permission.PermissionEntry"
+    }
+  },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": [
+      "host.privileged.runtime@1"
+    ]
+  },
+  "provides": {
+    "capabilities": [
+      "plugin.permission_service.status",
+      "plugin.permission_service.start",
+      "plugin.permission_service.stop"
+    ],
+    "services": [],
+    "providers": [
+      "plugin.system.permission_service.page"
+    ],
+    "extensions": [
+      {
+        "point": "ai_limbs.ui.home_tile",
+        "id": "plugin.system.permission_service.tile",
+        "api": 1
+      },
+      {
+        "point": "ai_limbs.ui.screen",
+        "id": "plugin.system.permission_service.screen",
+        "api": 2
+      }
+    ]
+  }
+}

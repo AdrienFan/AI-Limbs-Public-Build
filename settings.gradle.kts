@@ -68,3 +68,23 @@ include(":log-center-plugin")
 project(":log-center-plugin").projectDir = file("plugin-lab/plugins/log-center")
 include(":ui-editor-plugin")
 project(":ui-editor-plugin").projectDir = file("plugin-lab/plugins/ui-editor")
+
+include(":ail-permission-aidl")
+project(":ail-permission-aidl").projectDir = file("plugin-lab/vendor/shizuku-api/aidl")
+
+include(":ail-permission-shared")
+project(":ail-permission-shared").projectDir = file("plugin-lab/vendor/shizuku-api/shared")
+
+include(":ail-permission-api")
+project(":ail-permission-api").projectDir = file("plugin-lab/vendor/shizuku-api/api")
+
+include(":ail-permission-rish")
+project(":ail-permission-rish").projectDir = file("plugin-lab/vendor/shizuku-api/rish")
+
+include(":ail-permission-server-shared")
+project(":ail-permission-server-shared").projectDir = file("plugin-lab/vendor/shizuku-api/server-shared")
+
+include(":permission-server")
+project(":permission-server").projectDir = file("plugin-lab/runtime/permission-server")
+include(":permission-service-plugin")
+project(":permission-service-plugin").projectDir = file("plugin-lab/plugins/permission-service")

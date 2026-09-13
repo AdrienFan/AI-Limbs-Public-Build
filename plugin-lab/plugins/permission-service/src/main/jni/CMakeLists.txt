@@ -1,0 +1,7 @@
+cmake_minimum_required(VERSION 3.31)
+project(ail_permission_pairing)
+set(CMAKE_CXX_STANDARD 17)
+find_package(boringssl REQUIRED CONFIG)
+find_package(cxx REQUIRED CONFIG)
+add_library(ail_adb SHARED adb_pairing.cpp misc.cpp)
+target_link_libraries(ail_adb log boringssl::crypto_static cxx::cxx)
