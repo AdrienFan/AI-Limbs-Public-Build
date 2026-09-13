@@ -469,7 +469,7 @@ class DebuggerShellExecutor(private val context: Context) : ShellExecutor {
                             false
                         }
 
-                if (isCachedAlive) {
+                if (isCachedAlive && cached.asBinder() == connection.binder) {
                     return cached
                 } else {
                     AppLogger.d(TAG, "Cached Shizuku service is dead, removing from cache")

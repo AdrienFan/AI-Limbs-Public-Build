@@ -68,6 +68,7 @@ object AiLimbsHostPrimitiveCatalog {
         HostPrimitiveDefinition(45, "host.peripheral.pointer@1", "Pointer / Mouse", "向绑定的系统显示/环境会话发送移动、按键、滚轮、点击与触摸指针事件。", "指针输入必须绑定明确的系统环境会话；Android Accessibility/UI Automation 继续由 host.ui.automation@1 独立负责。", HostPrimitiveMaturity.TARGET_CONFIRMED, HostPrimitiveExposure.DECLARED, false),
         HostPrimitiveDefinition(46, "host.ui.presentation@1", "Plugin Page Presentation", "允许当前插件页面请求普通、竖屏沉浸全屏或横屏沉浸全屏显示模式。", "Host 只管理当前插件页面的 AI Limbs 外壳、Android system bars 与屏幕方向；插件仍完全拥有自己的页面内容和业务 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(47, "host.interaction.cycle@1", "Interaction Cycle", "读取、设置或手动重置 AI Limbs 外部交互周期。", "周期计时、软过期、手动刷新、系统接入提示与 receipt 边界均由 AI Limbs 基座执行。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, false),
+        HostPrimitiveDefinition(49, "host.privileged.runtime@1", "Privileged Runtime", "管理独立权限后端的启动许可、状态、停止与显式选择。", "Host 校验插件身份及 Binder 来源，业务配对和启动由权限服务插件负责；不向插件暴露原始 Binder。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(48, "host.ui.layout@1", "UI Layout Editing", "开启、结束、查询或恢复 AI Limbs 可编辑页面的用户布局。", "Host 拥有真实页面、编辑会话与布局持久化；插件只能请求标准 surface/mode，不直接操作 View、NavController 或其他插件 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
     )
 

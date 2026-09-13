@@ -8,6 +8,7 @@ import android.os.Looper
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.util.AppLogger
 import rikka.shizuku.Shizuku
+import com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
 
 internal data class ShizukuConnectionInfo(val uid: Int, val binder: IBinder)
 
@@ -67,6 +68,13 @@ class ShizukuAuthorizer {
             }
         }
 
+        internal fun onPrivilegeBackendChanged() {
+            cachedConnection = null
+            lastServiceErrorMessage = ""
+            lastPermissionErrorMessage = ""
+            notifyStateChanged()
+        }
+
         private fun isSuiBackendAvailable(): Boolean {
             return try {
                 if (Shizuku.pingBinder()) {
@@ -92,6 +100,7 @@ class ShizukuAuthorizer {
          * @return 是否已安装Shizuku或可用Sui后端
          */
         fun isShizukuInstalled(context: Context): Boolean {
+            if (PrivilegeRuntime.isSelected()) return true
             return try {
                 val packageInfo = context.packageManager.getPackageInfo(SHIZUKU_PACKAGE_NAME, 0)
                 val versionName = packageInfo.versionName
@@ -156,6 +165,11 @@ class ShizukuAuthorizer {
         }
 
         internal fun getOrResolveShizukuConnection(): ShizukuConnectionInfo? {
+            if (PrivilegeRuntime.isSelected()) {
+                val connection = PrivilegeRuntime.connection()
+                lastServiceErrorMessage = if (connection == null) "AI Limbs 权限服务未连接，请在工具箱中启动" else ""
+                return connection
+            }
             getCachedConnection()?.let { return it }
 
             try {
@@ -230,6 +244,11 @@ class ShizukuAuthorizer {
          * @return 是否有权限
          */
         fun hasShizukuPermission(): Boolean {
+            if (PrivilegeRuntime.isSelected()) {
+                val granted = PrivilegeRuntime.connection() != null
+                lastPermissionErrorMessage = if (granted) "" else "AI Limbs 权限服务未连接"
+                return granted
+            }
             try {
                 if (getOrResolveShizukuConnection() == null) {
                     lastPermissionErrorMessage = "Shizuku service not running: $lastServiceErrorMessage"
@@ -408,6 +427,7 @@ class ShizukuAuthorizer {
          * @return Shizuku启动指南
          */
         fun getShizukuStartupInstructions(context: Context): String {
+            if (PrivilegeRuntime.isSelected()) return "请打开工具箱中的 AI Limbs 权限服务，配对并启动服务。"
             return context.getString(R.string.shizuku_start_service_intro) +
                     context.getString(R.string.shizuku_step1_ensure_installed) +
                     context.getString(R.string.shizuku_step2_adb_command) +

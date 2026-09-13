@@ -157,6 +157,12 @@
             android:multiprocess="false"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
             
+        <provider
+            android:name="com.ai.assistance.operit.core.tools.system.privilege.PrivilegeProvider"
+            android:authorities="${applicationId}.privilege"
+            android:exported="true"
+            android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
+
         <!-- FileProvider for APK installation -->
         <provider
             android:name="androidx.core.content.FileProvider"

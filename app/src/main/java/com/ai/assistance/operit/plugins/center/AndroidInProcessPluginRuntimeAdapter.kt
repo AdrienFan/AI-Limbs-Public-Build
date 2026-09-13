@@ -23,6 +23,8 @@ import com.ai.limbs.plugin.runtime.InProcessServiceBinding
 import com.ai.limbs.plugin.runtime.InProcessServiceDirectory
 import dalvik.system.DexClassLoader
 import java.io.File
+import java.util.zip.ZipFile
+import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -51,7 +53,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         val loader = DexClassLoader(
             entryFile.absolutePath,
             optimizedDir.absolutePath,
-            null,
+            prepareNativeLibraries(entryFile, context.cacheDir)?.absolutePath,
             context.appContext.classLoader
         )
         val entry = try {
@@ -86,7 +88,12 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 try {
                     handle.stop()
                 } finally {
-                    runtimeScope.cancel()
+                    try {
+                        com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
+                            .revokeOwner(context.appContext, context.manifest.pluginId)
+                    } finally {
+                        runtimeScope.cancel()
+                    }
                 }
             }
         }
@@ -124,6 +131,39 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 "INPROCESS_RUNTIME_WRITABLE",
                 "Privileged runtime APK remains writable: ${file.name}"
             )
+        }
+    }
+
+    private fun prepareNativeLibraries(apk: File, cache: File): File? {
+        val digest = MessageDigest.getInstance("SHA-256")
+        apk.inputStream().use { input ->
+            val buffer = ByteArray(65536)
+            while (true) {
+                val count = input.read(buffer)
+                if (count < 0) break
+                digest.update(buffer, 0, count)
+            }
+        }
+        val key = digest.digest().joinToString("") { "%02x".format(it) }
+        ZipFile(apk).use { zip ->
+            val entries = Build.SUPPORTED_ABIS.asSequence().map { abi ->
+                val prefix = "lib/$abi/"
+                zip.entries().asSequence().filter {
+                    !it.isDirectory && it.name.startsWith(prefix) &&
+                        it.name.endsWith(".so") && !it.name.removePrefix(prefix).contains("/")
+                }.toList()
+            }.firstOrNull { it.isNotEmpty() } ?: return null
+            val directory = File(cache, "native/$key").apply { check(mkdirs() || isDirectory) }
+            for (entry in entries) {
+                val target = File(directory, entry.name.substringAfterLast('/'))
+                if (!target.exists()) {
+                    val staged = File(directory, target.name + ".part")
+                    zip.getInputStream(entry).use { input -> staged.outputStream().use { input.copyTo(it) } }
+                    check(staged.setReadOnly())
+                    check(staged.renameTo(target))
+                }
+            }
+            return directory
         }
     }
 

@@ -70,6 +70,9 @@ internal class PluginHostCapabilityRegistry(
         "host.ui.presentation@1" to HostCapability("host.ui.presentation@1") { ownerPluginId, parameters ->
             invokePagePresentation(ownerPluginId, parameters)
         },
+        "host.privileged.runtime@1" to HostCapability("host.privileged.runtime@1") { ownerPluginId, parameters ->
+            invokeSystemHostFromPlugin(ownerPluginId, "host.privileged.runtime@1", parameters)
+        },
         "host.ui.layout@1" to HostCapability("host.ui.layout@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.ui.layout@1", parameters)
         },
