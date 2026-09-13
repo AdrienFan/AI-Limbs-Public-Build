@@ -59,6 +59,8 @@ include(":rdc-extension")
 project(":rdc-extension").projectDir = file("plugin-lab/extensions/rdc")
 include(":triggercmd-extension")
 project(":triggercmd-extension").projectDir = file("plugin-lab/extensions/triggercmd")
+include(":sentinelx-extension")
+project(":sentinelx-extension").projectDir = file("plugin-lab/extensions/sentinelx")
 
 include(":laner-access-manager-plugin")
 project(":laner-access-manager-plugin").projectDir = file("plugin-lab/plugins/laner-access-manager")

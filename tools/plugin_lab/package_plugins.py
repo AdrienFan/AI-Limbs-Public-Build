@@ -153,6 +153,7 @@ PARENTS = [
 CHILDREN = [
     ("rdc-provider.ailx", ROOT / "plugin-lab/packages/rdc/extension.json", find_apk("plugin-lab/extensions/rdc/build/outputs/apk/debug"), "payload/extension.apk"),
     ("triggercmd-provider.ailx", ROOT / "plugin-lab/packages/triggercmd/extension.json", find_apk("plugin-lab/extensions/triggercmd/build/outputs/apk/debug"), "payload/extension.apk"),
+    ("sentinelx-provider.ailx", ROOT / "plugin-lab/packages/sentinelx/extension.json", find_apk("plugin-lab/extensions/sentinelx/build/outputs/apk/debug"), "payload/extension.apk"),
     ("ubuntu-system.ailx", ROOT / "plugin-lab/packages/ubuntu-system/extension.json", find_apk("plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug"), "payload/extension.apk"),
 ]
 

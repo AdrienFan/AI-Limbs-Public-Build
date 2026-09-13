@@ -16,6 +16,7 @@ on:
           - ubuntu-terminal
           - rdc
           - triggercmd
+          - sentinelx
           - ubuntu-system
           - system-environment
           - laner-access-manager
@@ -34,7 +35,7 @@ env:
 jobs:
   build:
     if: inputs.target == 'all'
-    name: Build Seven Plugin Payloads
+    name: Build Eight Plugin Payloads
     runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
@@ -112,6 +113,12 @@ jobs:
           set -euo pipefail
           ./gradlew :triggercmd-extension:assembleDebug --stacktrace --no-daemon
 
+      - name: Build 8 - SentinelX child extension payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          ./gradlew :sentinelx-extension:assembleDebug --stacktrace --no-daemon
+
       - name: Upload Android reports
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -122,7 +129,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Upload seven plugin payload APKs
+      - name: Upload eight plugin payload APKs
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -135,6 +142,7 @@ jobs:
             plugin-lab/plugins/ubuntu-terminal/build/outputs/apk/debug/*.apk
             plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
             plugin-lab/extensions/triggercmd/build/outputs/apk/debug/*.apk
+            plugin-lab/extensions/sentinelx/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 14
 
@@ -428,6 +436,54 @@ jobs:
           path: |
             plugin-lab/extensions/triggercmd/build/outputs/apk/debug/*.apk
             plugin-lab/packages/triggercmd/extension.json
+          if-no-files-found: error
+          retention-days: 14
+
+  sentinelx:
+    if: inputs.target == 'sentinelx'
+    name: Build SentinelX v0.1.0 child extension only
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-36" \
+            "build-tools;35.0.0"
+      - name: Configure Android SDK
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Build SentinelX child extension payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :sentinelx-extension:assembleDebug --stacktrace --no-daemon
+      - name: Upload SentinelX child extension payload
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: sentinelx-extension-v0.1.0-${{ github.run_number }}
+          path: |
+            plugin-lab/extensions/sentinelx/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/sentinelx/extension.json
           if-no-files-found: error
           retention-days: 14
 

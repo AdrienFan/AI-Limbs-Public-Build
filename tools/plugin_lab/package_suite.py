@@ -16,6 +16,7 @@ ITEMS = [
     ("plugin-lab/packages/rdc/extension.json", "rdc-provider.ailx", "Child-Extensions"),
     ("plugin-lab/packages/ubuntu-system/extension.json", "ubuntu-system.ailx", "Child-Extensions"),
     ("plugin-lab/packages/triggercmd/extension.json", "triggercmd-provider.ailx", "Child-Extensions"),
+    ("plugin-lab/packages/sentinelx/extension.json", "sentinelx-provider.ailx", "Child-Extensions"),
 ]
 def load_meta(path: str):
     root = json.loads((ROOT / path).read_text(encoding="utf-8"))

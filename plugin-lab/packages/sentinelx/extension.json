@@ -1,0 +1,23 @@
+{
+  "format": "AIL_EXTENSION_V1",
+  "schema_version": 1,
+  "extension_id": "ai_limbs.bridge.sentinelx",
+  "version": "0.1.0",
+  "roles": ["system_extension"],
+  "display": {
+    "name": "SentinelX",
+    "description": "AI Limbs SentinelX Bridge Provider。"
+  },
+  "target": {
+    "plugin_id": "plugin.system.bridge",
+    "extension_point": "ai_limbs.bridge.provider",
+    "api": 4
+  },
+  "runtime": {
+    "kind": "android_child",
+    "entry": "payload/extension.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.extensions.sentinelx.SentinelXExtensionEntry"
+    }
+  }
+}
