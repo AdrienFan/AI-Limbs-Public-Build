@@ -12,6 +12,9 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCyclePoli
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.system.KernelDynamicNavigationJsonServiceV1
 import com.ai.assistance.operit.widget.ToolPkgDesktopWidgetHost
+import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
+import com.ai.assistance.operit.ui.main.screens.Screen
+import com.ai.assistance.operit.ui.features.toolbox.layout.ToolboxLayoutController
 import java.io.File
 import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
@@ -49,6 +52,7 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             "host.extension.routing@1" -> invokeExtensionRouting(op, parameters)
             "host.plugin.runtime@1" -> invokePluginRuntime(op, parameters)
             "host.authorization@1" -> evaluateAuthorization(ownerPluginId, parameters)
+            "host.ui.layout@1" -> invokeUiLayout(op, parameters)
             "host.interaction.cycle@1" -> invokeInteractionCycle(op, parameters)
             "kernel.plugin.trust@1" -> invokeTrust(op, parameters)
             else -> throw PluginInstallException(
@@ -358,6 +362,68 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             .put("inspection_only", true)
     }
 
+
+    private fun invokeUiLayout(operation: String, parameters: JSONObject): JSONObject {
+        val controller = ToolboxLayoutController.get(appContext)
+        return when (operation) {
+            "status" -> uiLayoutState(controller)
+            "start" -> {
+                val surface = parameters.optString("surface", ToolboxLayoutController.TOOLBOX_SURFACE)
+                    .trim().lowercase()
+                val mode = parameters.optString("mode", ToolboxLayoutController.LAYOUT_MODE)
+                    .trim().lowercase()
+                try {
+                    controller.start(surface, mode)
+                } catch (error: IllegalArgumentException) {
+                    throw PluginInstallException("UI_LAYOUT_TARGET_UNSUPPORTED", error.message ?: "Unsupported UI layout target", error)
+                }
+                val navigate = parameters.optBoolean("navigate", true)
+                if (navigate && surface == ToolboxLayoutController.TOOLBOX_SURFACE) {
+                    val routeId = ScreenRouteRegistry.routeIdOf(Screen.Toolbox)
+                    val intent = ToolPkgDesktopWidgetHost
+                        .buildLaunchIntent(appContext, routeId, "{}")
+                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                    appContext.startActivity(intent)
+                }
+                uiLayoutState(controller)
+                    .put("started", true)
+                    .put("navigated", navigate)
+            }
+            "finish" -> {
+                controller.finish()
+                uiLayoutState(controller).put("finished", true)
+            }
+            "reset" -> {
+                val surface = parameters.optString("surface", ToolboxLayoutController.TOOLBOX_SURFACE)
+                    .trim().lowercase()
+                try {
+                    controller.reset(surface)
+                } catch (error: IllegalArgumentException) {
+                    throw PluginInstallException("UI_LAYOUT_TARGET_UNSUPPORTED", error.message ?: "Unsupported UI layout target", error)
+                }
+                uiLayoutState(controller).put("reset", true)
+            }
+            else -> unsupported("host.ui.layout@1", operation)
+        }
+    }
+
+    private fun uiLayoutState(controller: ToolboxLayoutController): JSONObject {
+        val session = controller.editSession.value
+        return JSONObject()
+            .put(
+                "available_surfaces",
+                JSONArray().put(
+                    JSONObject()
+                        .put("surface", ToolboxLayoutController.TOOLBOX_SURFACE)
+                        .put("modes", JSONArray().put(ToolboxLayoutController.LAYOUT_MODE))
+                )
+            )
+            .put("active", session != null)
+            .put("surface", session?.surface ?: JSONObject.NULL)
+            .put("mode", session?.mode ?: JSONObject.NULL)
+            .put("toolbox_order", JSONArray(controller.toolboxOrder.value))
+    }
+
     private fun invokeInteractionCycle(operation: String, parameters: JSONObject): JSONObject {
         val policy = AiLimbsInteractionCyclePolicy(appContext)
         return when (operation) {
@@ -512,6 +578,10 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             "host.plugin.runtime@1/mount",
             "host.plugin.runtime@1/stop",
             "host.authorization@1/evaluate",
+            "host.ui.layout@1/status",
+            "host.ui.layout@1/start",
+            "host.ui.layout@1/finish",
+            "host.ui.layout@1/reset",
             "host.interaction.cycle@1/status",
             "host.interaction.cycle@1/set_timeout",
             "host.interaction.cycle@1/reset",
