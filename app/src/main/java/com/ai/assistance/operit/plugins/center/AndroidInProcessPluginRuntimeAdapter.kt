@@ -50,7 +50,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         val entryClass = runtimeEntryClass(context)
         val optimizedDir = File(context.cacheDir, "dex/${context.manifest.version}").apply { mkdirs() }
         val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val loader = DexClassLoader(
+        val loader = PluginIsolatingDexClassLoader(
             entryFile.absolutePath,
             optimizedDir.absolutePath,
             prepareNativeLibraries(entryFile, context.cacheDir)?.absolutePath,
@@ -96,6 +96,46 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                     }
                 }
             }
+        }
+    }
+
+    /**
+     * Trusted in-process plugins normally delegate to the host first so shared AndroidX,
+     * Compose and AI Limbs runtime types keep a single class identity. Some third-party
+     * libraries, however, are not safe to share across versions. BouncyCastle is one of
+     * them: the host currently carries 1.78 while Permission Service carries 1.80.
+     *
+     * Load only those isolated library namespaces from the plugin APK first. Everything
+     * else keeps the standard parent-first DexClassLoader behaviour.
+     */
+    private class PluginIsolatingDexClassLoader(
+        dexPath: String,
+        optimizedDirectory: String,
+        librarySearchPath: String?,
+        parent: ClassLoader
+    ) : DexClassLoader(dexPath, optimizedDirectory, librarySearchPath, parent) {
+        override fun loadClass(name: String, resolve: Boolean): Class<*> {
+            synchronized(getClassLoadingLock(name)) {
+                findLoadedClass(name)?.let { loaded ->
+                    if (resolve) resolveClass(loaded)
+                    return loaded
+                }
+
+                if (CHILD_FIRST_PACKAGE_PREFIXES.any { name.startsWith(it) }) {
+                    try {
+                        val pluginClass = findClass(name)
+                        if (resolve) resolveClass(pluginClass)
+                        return pluginClass
+                    } catch (_: ClassNotFoundException) {
+                        // The plugin does not bundle this class; preserve normal parent fallback.
+                    }
+                }
+                return super.loadClass(name, resolve)
+            }
+        }
+
+        companion object {
+            private val CHILD_FIRST_PACKAGE_PREFIXES = arrayOf("org.bouncycastle.")
         }
     }
 
