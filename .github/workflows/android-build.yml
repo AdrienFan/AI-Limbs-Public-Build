@@ -750,7 +750,7 @@ jobs:
 
   permission_service:
     if: inputs.target == 'permission-service'
-    name: Build AI Limbs Permission Service v0.1.1
+    name: Build AI Limbs Permission Service LEV Probe
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -787,10 +787,10 @@ jobs:
       - name: Upload installable plugin
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: permission-service-v0.1.1-${{ github.run_number }}
+          name: permission-service-v0.1.2-levprobe.1-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-Permission-Service-v0.1.1.ailp
-            dist/AI-Limbs-Permission-Service-v0.1.1.ailp.sha256
+            dist/AI-Limbs-Permission-Service-v0.1.2-levprobe.1.ailp
+            dist/AI-Limbs-Permission-Service-v0.1.2-levprobe.1.ailp.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Upload build diagnostics
