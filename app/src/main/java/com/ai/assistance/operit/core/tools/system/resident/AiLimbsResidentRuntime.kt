@@ -24,7 +24,7 @@ import org.json.JSONObject
 /** Host-owned controller for the independent AI Limbs resident process. */
 internal object AiLimbsResidentRuntime {
     const val PROCESS_NAME = "ail_resident"
-    private const val RESIDENT_PROTOCOL_VERSION = 2
+    private const val RESIDENT_PROTOCOL_VERSION = 3
 
     private const val TAG = "AiLimbsResident"
     private const val PREFS = "ai_limbs_resident_runtime_v1"
@@ -169,7 +169,6 @@ internal object AiLimbsResidentRuntime {
         }
         metaFile().delete()
         stopRequestFile().delete()
-        releaseStaleWakeLock(executor)
 
         val result = executor.executeCommand(launchCommand())
         if (!result.success) {
@@ -241,7 +240,6 @@ internal object AiLimbsResidentRuntime {
         }
 
         if (!probe.running) {
-            executor?.let { releaseStaleWakeLock(it) }
             metaFile().delete()
             stopRequestFile().delete()
             clearError()
@@ -255,9 +253,14 @@ internal object AiLimbsResidentRuntime {
     private suspend fun status(probe: LocalProbe = localProbe()): JSONObject =
         withContext(Dispatchers.IO) {
             val guardian = readKeyValues(guardianFile())
+            val hostWake = readKeyValues(hostWakeLockStateFile())
+            val hostPid = hostWake["pid"]?.toIntOrNull()
+            val hostWakeHeld =
+                hostWake["held"] == "true" &&
+                    hostPid == Process.myPid()
             JSONObject()
                 .put("available", true)
-                .put("api", 2)
+                .put("api", 3)
                 .put("mode", "lockscreen_continuous")
                 .put("enabled", isEnabled())
                 .put("running", probe.running)
@@ -270,8 +273,12 @@ internal object AiLimbsResidentRuntime {
                 .put("session_id", probe.sessionId ?: JSONObject.NULL)
                 .put("started_wall_ms", probe.startedWallMs ?: JSONObject.NULL)
                 .put("last_heartbeat", lastHeartbeat() ?: JSONObject.NULL)
-                .put("continuous_work", probe.running && guardian["wake_lock"] == "held" && guardian["last_host_touch_ok"] == "true")
-                .put("cpu_wake_lock", guardian["wake_lock"] ?: JSONObject.NULL)
+                .put("continuous_work", probe.running && hostWakeHeld)
+                .put("cpu_wake_lock", if (hostWakeHeld) "held" else "not_held")
+                .put("cpu_wake_lock_backend", "host_service_power_manager")
+                .put("host_pid", hostPid ?: JSONObject.NULL)
+                .put("host_wake_lock_reason", hostWake["reason"] ?: JSONObject.NULL)
+                .put("host_wake_lock_detail", hostWake["detail"] ?: JSONObject.NULL)
                 .put("host_guardian", guardian["host_guardian"] ?: JSONObject.NULL)
                 .put("last_host_touch_wall_ms", guardian["last_host_touch_wall_ms"]?.toLongOrNull() ?: JSONObject.NULL)
                 .put("last_host_touch_ok", guardian["last_host_touch_ok"]?.toBooleanStrictOrNull() ?: JSONObject.NULL)
@@ -363,15 +370,9 @@ internal object AiLimbsResidentRuntime {
     private fun metaFile(): File = File(stateDir(), "resident.meta")
     private fun heartbeatFile(): File = File(stateDir(), "heartbeat.log")
     private fun guardianFile(): File = File(stateDir(), "guardian.state")
+    private fun hostWakeLockStateFile(): File = File(stateDir(), "host_wake_lock.state")
     private fun stopRequestFile(): File = File(stateDir(), "stop.request")
     private fun shellLogPath(): String = "/data/local/tmp/ail_resident_${Process.myUid()}.log"
-
-    private suspend fun releaseStaleWakeLock(executor: ShellExecutor) {
-        val command =
-            "/system/bin/run-as ${quote(app.packageName)} /system/bin/cmd power " +
-                "set-wakelock release PARTIAL_WAKE_LOCK >/dev/null 2>&1 || true"
-        runCatching { executor.executeCommand(command) }
-    }
 
 
     private fun notifyHostResidentDisabled() {

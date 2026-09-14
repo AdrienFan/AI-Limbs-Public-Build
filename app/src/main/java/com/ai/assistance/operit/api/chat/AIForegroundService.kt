@@ -21,6 +21,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.Process
+import android.os.PowerManager
 import android.provider.Settings
 import android.view.Gravity
 import android.view.View
@@ -75,6 +76,7 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlin.system.exitProcess
+import java.io.File
 import java.io.FileInputStream
 import java.io.InputStream
 import java.util.concurrent.ConcurrentHashMap
@@ -122,6 +124,7 @@ class AIForegroundService : Service() {
             "com.ai.assistance.operit.action.REFRESH_PLUGIN_NOTIFICATION"
         private const val REQUEST_CODE_VOICE_FLOATING = 9005
         private const val NOTIFICATION_WATCHDOG_INTERVAL_MS = 15_000L
+        private const val RESIDENT_WAKE_LOCK_TAG = "AI-Limbs:ResidentHost"
 
         private const val ACTION_TOGGLE_WAKE_LISTENING = "com.ai.assistance.operit.action.TOGGLE_WAKE_LISTENING"
         private const val REQUEST_CODE_TOGGLE_WAKE_LISTENING = 9006
@@ -760,6 +763,7 @@ class AIForegroundService : Service() {
     private val backgroundSurvivalManager by lazy {
         AiLimbsBackgroundSurvivalManager(applicationContext)
     }
+    private var residentWakeLock: PowerManager.WakeLock? = null
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private var keepAliveOverlayView: View? = null
@@ -1055,6 +1059,105 @@ class AIForegroundService : Service() {
         stopSelf()
     }
 
+    private fun syncResidentCpuWakeLock(reason: String) {
+        if (AiLimbsResidentRuntime.isEnabledForHost()) {
+            acquireResidentCpuWakeLock(reason)
+        } else {
+            releaseResidentCpuWakeLock(reason)
+        }
+    }
+
+    private fun acquireResidentCpuWakeLock(reason: String) {
+        try {
+            val lock =
+                residentWakeLock
+                    ?: (getSystemService(Context.POWER_SERVICE) as PowerManager)
+                        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, RESIDENT_WAKE_LOCK_TAG)
+                        .also {
+                            it.setReferenceCounted(false)
+                            residentWakeLock = it
+                        }
+            if (!lock.isHeld) {
+                lock.acquire()
+                AppLogger.i(TAG, "Resident host PARTIAL_WAKE_LOCK acquired: reason=$reason")
+            }
+            publishResidentWakeLockState(
+                held = lock.isHeld,
+                reason = reason,
+                detail =
+                    if (lock.isHeld) {
+                        "Android PowerManager PARTIAL_WAKE_LOCK"
+                    } else {
+                        "acquire returned without hold"
+                    }
+            )
+        } catch (error: Throwable) {
+            publishResidentWakeLockState(
+                held = false,
+                reason = reason,
+                detail = "${error.javaClass.simpleName}: ${error.message}"
+            )
+            AppLogger.e(TAG, "Resident host PARTIAL_WAKE_LOCK acquire failed: reason=$reason", error)
+        }
+    }
+
+    private fun releaseResidentCpuWakeLock(reason: String) {
+        var detail = "already released"
+        try {
+            residentWakeLock?.let { lock ->
+                if (lock.isHeld) {
+                    lock.release()
+                    detail = "released"
+                    AppLogger.i(TAG, "Resident host PARTIAL_WAKE_LOCK released: reason=$reason")
+                }
+            }
+        } catch (error: Throwable) {
+            detail = "${error.javaClass.simpleName}: ${error.message}"
+            AppLogger.w(TAG, "Resident host PARTIAL_WAKE_LOCK release failed: reason=$reason", error)
+        } finally {
+            publishResidentWakeLockState(
+                held = residentWakeLock?.isHeld == true,
+                reason = reason,
+                detail = detail
+            )
+        }
+    }
+
+    private fun publishResidentWakeLockState(
+        held: Boolean,
+        reason: String,
+        detail: String
+    ) {
+        runCatching {
+            val stateDir = File(filesDir, "ai_limbs/resident")
+            check(stateDir.mkdirs() || stateDir.isDirectory)
+            val target = File(stateDir, "host_wake_lock.state")
+            val temp = File(stateDir, "host_wake_lock.state.tmp")
+            temp.writeText(
+                buildString {
+                    appendLine("held=$held")
+                    appendLine("pid=${Process.myPid()}")
+                    appendLine("uid=${Process.myUid()}")
+                    appendLine("tag=$RESIDENT_WAKE_LOCK_TAG")
+                    appendLine("reason=${sanitizeResidentWakeLockState(reason)}")
+                    appendLine("detail=${sanitizeResidentWakeLockState(detail)}")
+                    appendLine("updated_wall_ms=${System.currentTimeMillis()}")
+                }
+            )
+            check(
+                temp.renameTo(target) || run {
+                    target.delete()
+                    temp.renameTo(target)
+                }
+            )
+        }.onFailure { error ->
+            AppLogger.w(TAG, "Could not publish Resident host wake-lock state", error)
+        }
+    }
+
+    private fun sanitizeResidentWakeLockState(value: String): String =
+        value.replace('\n', ' ').replace('\r', ' ').take(1200)
+
     override fun onCreate() {
         super.onCreate()
         isRunning.set(true)
@@ -1070,6 +1173,7 @@ class AIForegroundService : Service() {
             microphone = false,
             force = true
         )
+        syncResidentCpuWakeLock("service_create")
         startNotificationWatchdog()
         observePluginForegroundNotification()
         observeRuntimeTaskViewPreference()
@@ -1221,6 +1325,7 @@ class AIForegroundService : Service() {
             )
         }
         if (intent?.action == ACTION_EXIT_APP) {
+            releaseResidentCpuWakeLock("exit_app")
             isRunning.set(false)
             stopNotificationWatchdog()
             updateAiBusyState(false)
@@ -1278,10 +1383,12 @@ class AIForegroundService : Service() {
         }
 
         if (intent?.action == ACTION_RESIDENT_KEEPALIVE) {
+            syncResidentCpuWakeLock("resident_keepalive")
             return START_STICKY
         }
 
         if (intent?.action == ACTION_RESIDENT_STATE_CHANGED) {
+            syncResidentCpuWakeLock("resident_state_changed")
             stopSelfIfIdle(ignoreAppForeground = true)
             return persistentStartMode()
         }
@@ -1313,6 +1420,9 @@ class AIForegroundService : Service() {
         }
 
         if (intent?.action == ACTION_START_OR_REFRESH_EXTERNAL_HTTP || intent == null) {
+            if (intent == null) {
+                syncResidentCpuWakeLock("sticky_restart")
+            }
             startOrRefreshExternalHttpServer()
             return persistentStartMode()
         }
@@ -1421,6 +1531,7 @@ class AIForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        releaseResidentCpuWakeLock("service_destroy")
         val stoppedPort = externalHttpCurrentPort ?: externalHttpStateFlow.value.port
         runCatching {
             externalHttpServer?.stopServer()

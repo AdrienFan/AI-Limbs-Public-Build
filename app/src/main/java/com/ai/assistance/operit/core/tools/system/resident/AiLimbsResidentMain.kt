@@ -8,14 +8,16 @@ import java.util.UUID
 /**
  * AI Limbs lock-screen resident guardian.
  *
- * The process is born outside the normal AMS app cgroup. While the user enables the single
- * Resident switch it keeps a partial CPU wake lease and periodically touches the normal host
- * foreground service so Bridge / Dispatcher work remains schedulable while the screen is locked.
+ * The Resident process is born outside the normal AMS app cgroup. It does not fake a wake lock
+ * through `cmd power`; instead the normal AI Limbs foreground service owns a real Android
+ * PARTIAL_WAKE_LOCK. Resident continuously verifies that host lease and immediately revives the
+ * host when the process or lease disappears.
  */
 object AiLimbsResidentMain {
-    private const val PROTOCOL_VERSION = 2
+    private const val PROTOCOL_VERSION = 3
     private const val HEARTBEAT_INTERVAL_MS = 60_000L
-    private const val HOST_TOUCH_INTERVAL_MS = 10_000L
+    private const val HOST_TOUCH_HEALTHY_INTERVAL_MS = 60_000L
+    private const val HOST_TOUCH_RETRY_INTERVAL_MS = 1_000L
     private const val LOOP_TICK_MS = 1_000L
     private const val HEARTBEAT_MAX_BYTES = 128L * 1024L
     private const val ACTION_RESIDENT_KEEPALIVE =
@@ -42,6 +44,7 @@ object AiLimbsResidentMain {
         val metaFile = File(stateDir, "resident.meta")
         val heartbeatFile = File(stateDir, "heartbeat.log")
         val guardianFile = File(stateDir, "guardian.state")
+        val hostWakeLockFile = File(stateDir, "host_wake_lock.state")
         val stopRequestFile = File(stateDir, "stop.request")
 
         stopRequestFile.delete()
@@ -58,26 +61,37 @@ object AiLimbsResidentMain {
                 appendLine("started_elapsed_ms=$startedElapsedMs")
                 appendLine("started_uptime_ms=$startedUptimeMs")
                 appendLine("heartbeat_interval_ms=$HEARTBEAT_INTERVAL_MS")
-                appendLine("host_touch_interval_ms=$HOST_TOUCH_INTERVAL_MS")
+                appendLine("host_touch_healthy_interval_ms=$HOST_TOUCH_HEALTHY_INTERVAL_MS")
+                appendLine("host_touch_retry_interval_ms=$HOST_TOUCH_RETRY_INTERVAL_MS")
             }
         )
 
-        var wakeLockHeld = false
-        var wakeLockDetail = "not_acquired"
+        var hostWakeHeld = false
+        var hostWakePid: Int? = null
+        var hostWakeDetail = "not_reported"
         var hostTouchSeq = 0L
         var lastHostTouchWallMs = 0L
         var lastHostTouchExit = -1
         var lastHostTouchOk = false
         var lastHostTouchDetail = "not_started"
 
+        fun refreshHostWakeState(): Boolean {
+            val probe = probeHostWakeLock(hostWakeLockFile, packageName)
+            hostWakeHeld = probe.held
+            hostWakePid = probe.pid
+            hostWakeDetail = probe.detail
+            return probe.held
+        }
+
         fun publishGuardianState(state: String) {
             writeAtomic(
                 guardianFile,
                 buildString {
                     appendLine("state=$state")
-                    appendLine("wake_lock=${if (wakeLockHeld) "held" else "not_held"}")
-                    appendLine("wake_lock_backend=cmd_power")
-                    appendLine("wake_lock_detail=${sanitize(wakeLockDetail)}")
+                    appendLine("wake_lock=${if (hostWakeHeld) "held" else "not_held"}")
+                    appendLine("wake_lock_backend=host_service_power_manager")
+                    appendLine("wake_lock_detail=${sanitize(hostWakeDetail)}")
+                    appendLine("host_pid=${hostWakePid ?: -1}")
                     appendLine("host_guardian=active")
                     appendLine("host_touch_seq=$hostTouchSeq")
                     appendLine("last_host_touch_wall_ms=$lastHostTouchWallMs")
@@ -90,7 +104,6 @@ object AiLimbsResidentMain {
 
         Runtime.getRuntime().addShutdownHook(
             Thread {
-                runCatching { releaseCpuWakeLock() }
                 runCatching {
                     val current = readKeyValues(metaFile)["pid"]?.toIntOrNull()
                     if (current == pid) metaFile.delete()
@@ -101,27 +114,33 @@ object AiLimbsResidentMain {
         println("AIL_RESIDENT_READY pid=$pid uid=$uid session=$sessionId protocol=$PROTOCOL_VERSION")
 
         try {
-            val wakeResult = acquireCpuWakeLock()
-            wakeLockHeld = wakeResult.ok
-            wakeLockDetail = wakeResult.detail
-            publishGuardianState(if (wakeLockHeld) "running" else "degraded")
-
             var heartbeatSeq = 0L
             var nextHeartbeatElapsed = SystemClock.elapsedRealtime()
-            var nextHostTouchElapsed = SystemClock.elapsedRealtime()
+            var nextHostTouchElapsed = 0L
 
             while (!stopRequestFile.exists()) {
                 val nowElapsed = SystemClock.elapsedRealtime()
+                val hostHealthy = refreshHostWakeState()
 
-                if (nowElapsed >= nextHostTouchElapsed) {
+                if (!hostHealthy || nowElapsed >= nextHostTouchElapsed) {
                     hostTouchSeq += 1
                     val result = touchHost(packageName)
                     lastHostTouchWallMs = System.currentTimeMillis()
                     lastHostTouchExit = result.exitCode
                     lastHostTouchOk = result.ok
                     lastHostTouchDetail = result.detail
-                    publishGuardianState(if (wakeLockHeld && result.ok) "running" else "degraded")
-                    nextHostTouchElapsed = nowElapsed + HOST_TOUCH_INTERVAL_MS
+
+                    val wakeHealthyAfterTouch = refreshHostWakeState()
+                    publishGuardianState(
+                        if (result.ok && wakeHealthyAfterTouch) "running" else "degraded"
+                    )
+                    nextHostTouchElapsed =
+                        nowElapsed +
+                            if (result.ok && wakeHealthyAfterTouch) {
+                                HOST_TOUCH_HEALTHY_INTERVAL_MS
+                            } else {
+                                HOST_TOUCH_RETRY_INTERVAL_MS
+                            }
                 }
 
                 if (nowElapsed >= nextHeartbeatElapsed) {
@@ -130,7 +149,8 @@ object AiLimbsResidentMain {
                         heartbeatFile,
                         "session=$sessionId seq=$heartbeatSeq wall_ms=${System.currentTimeMillis()} " +
                             "elapsed_ms=${SystemClock.elapsedRealtime()} uptime_ms=${SystemClock.uptimeMillis()} " +
-                            "pid=$pid uid=$uid wake_lock=$wakeLockHeld host_touch_ok=$lastHostTouchOk"
+                            "pid=$pid uid=$uid wake_lock=$hostWakeHeld host_pid=${hostWakePid ?: -1} " +
+                            "host_touch_ok=$lastHostTouchOk"
                     )
                     nextHeartbeatElapsed = nowElapsed + HEARTBEAT_INTERVAL_MS
                 }
@@ -143,9 +163,7 @@ object AiLimbsResidentMain {
                 }
             }
         } finally {
-            val releaseResult = releaseCpuWakeLock()
-            wakeLockHeld = false
-            wakeLockDetail = releaseResult.detail
+            refreshHostWakeState()
             publishGuardianState("stopped")
             stopRequestFile.delete()
             val current = readKeyValues(metaFile)["pid"]?.toIntOrNull()
@@ -169,38 +187,51 @@ object AiLimbsResidentMain {
         )
     }
 
-    private fun acquireCpuWakeLock(): CommandResult {
-        // Clear a stale lease left by an abnormal previous resident before acquiring our lease.
-        runCommand(
-            listOf(
-                "/system/bin/cmd",
-                "power",
-                "set-wakelock",
-                "release",
-                "PARTIAL_WAKE_LOCK"
-            )
-        )
-        return runCommand(
-            listOf(
-                "/system/bin/cmd",
-                "power",
-                "set-wakelock",
-                "acquire",
-                "PARTIAL_WAKE_LOCK"
-            )
-        )
-    }
+    private fun probeHostWakeLock(file: File, packageName: String): HostWakeProbe {
+        val state = readKeyValues(file)
+        val declaredHeld = state["held"] == "true"
+        val pid = state["pid"]?.toIntOrNull()
 
-    private fun releaseCpuWakeLock(): CommandResult =
-        runCommand(
-            listOf(
-                "/system/bin/cmd",
-                "power",
-                "set-wakelock",
-                "release",
-                "PARTIAL_WAKE_LOCK"
-            )
-        )
+        if (!declaredHeld || pid == null || pid <= 0) {
+            return HostWakeProbe(false, pid, "host lease not held")
+        }
+
+        val procDir = File("/proc/$pid")
+        if (!procDir.exists()) {
+            return HostWakeProbe(false, pid, "host pid is gone")
+        }
+
+        val statusUid =
+            runCatching {
+                File(procDir, "status")
+                    .readLines()
+                    .firstOrNull { it.startsWith("Uid:") }
+                    ?.substringAfter(':')
+                    ?.trim()
+                    ?.split(Regex("\\s+"))
+                    ?.firstOrNull()
+                    ?.toIntOrNull()
+            }.getOrNull()
+        if (statusUid != null && statusUid != Process.myUid()) {
+            return HostWakeProbe(false, pid, "host pid uid mismatch: $statusUid")
+        }
+
+        val cmdline =
+            runCatching {
+                File(procDir, "cmdline").readText().replace('\u0000', ' ').trim()
+            }.getOrNull()
+        if (!cmdline.isNullOrBlank() && packageName !in cmdline) {
+            return HostWakeProbe(false, pid, "host pid command mismatch")
+        }
+
+        val detail =
+            buildString {
+                append("host PowerManager lease held")
+                state["tag"]?.takeIf { it.isNotBlank() }?.let { append(" tag=$it") }
+                state["reason"]?.takeIf { it.isNotBlank() }?.let { append(" reason=$it") }
+            }
+        return HostWakeProbe(true, pid, detail)
+    }
 
     private fun runCommand(command: List<String>): CommandResult {
         return try {
@@ -210,7 +241,9 @@ object AiLimbsResidentMain {
             val looksFailed =
                 output.contains("Exception occurred", ignoreCase = true) ||
                     output.contains("SecurityException", ignoreCase = true) ||
-                    output.lineSequence().any { it.trimStart().startsWith("Error:", ignoreCase = true) }
+                    output.lineSequence().any {
+                        it.trimStart().startsWith("Error:", ignoreCase = true)
+                    }
             CommandResult(
                 ok = exitCode == 0 && !looksFailed,
                 exitCode = exitCode,
@@ -251,6 +284,12 @@ object AiLimbsResidentMain {
 
     private fun sanitize(value: String): String =
         value.replace('\n', ' ').replace('\r', ' ').take(1200)
+
+    private data class HostWakeProbe(
+        val held: Boolean,
+        val pid: Int?,
+        val detail: String
+    )
 
     private data class CommandResult(
         val ok: Boolean,
