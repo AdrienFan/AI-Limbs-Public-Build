@@ -53,6 +53,7 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             "host.plugin.runtime@1" -> invokePluginRuntime(op, parameters)
             "host.authorization@1" -> evaluateAuthorization(ownerPluginId, parameters)
             "host.privileged.runtime@1" -> com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime.invoke(appContext, ownerPluginId, op, parameters)
+            "host.resident.runtime@1" -> com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime.invoke(appContext, ownerPluginId, op, parameters)
             "host.ui.layout@1" -> invokeUiLayout(op, parameters)
             "host.interaction.cycle@1" -> invokeInteractionCycle(op, parameters)
             "kernel.plugin.trust@1" -> invokeTrust(op, parameters)
@@ -584,6 +585,10 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             "host.privileged.runtime@1/prepare",
             "host.privileged.runtime@1/stop",
             "host.privileged.runtime@1/select",
+            "host.resident.runtime@1/status",
+            "host.resident.runtime@1/set_enabled",
+            "host.resident.runtime@1/start",
+            "host.resident.runtime@1/stop",
             "host.ui.layout@1/status",
             "host.ui.layout@1/start",
             "host.ui.layout@1/finish",

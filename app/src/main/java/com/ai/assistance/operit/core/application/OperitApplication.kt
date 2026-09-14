@@ -32,6 +32,8 @@ import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookPluginRegistry
 import com.ai.assistance.operit.core.config.SystemPromptConfig
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
+import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
+import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
 import com.ai.assistance.operit.core.workflow.WorkflowSchedulerInitializer
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupPreferences
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupScheduler
@@ -237,6 +239,14 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         // 初始化AndroidShellExecutor上下文
         AndroidShellExecutor.setContext(applicationContext)
         AppLogger.d(TAG, "【启动计时】AndroidShellExecutor初始化完成 - ${System.currentTimeMillis() - startTime}ms")
+
+        // Resident is a separate app-UID process. The permission backend is only its bootstrap.
+        AiLimbsResidentRuntime.initialize(applicationContext)
+        ShizukuAuthorizer.addStateChangeListener {
+            AiLimbsResidentRuntime.scheduleEnsureStarted(applicationContext)
+        }
+        AiLimbsResidentRuntime.scheduleEnsureStarted(applicationContext)
+        AppLogger.d(TAG, "【启动计时】AI Limbs Resident Runtime 已初始化 - ${System.currentTimeMillis() - startTime}ms")
 
         // 初始化 Shower 虚拟屏客户端的 ShellRunner 环境
         ShowerEnvironment.shellRunner = OperitShowerShellRunner

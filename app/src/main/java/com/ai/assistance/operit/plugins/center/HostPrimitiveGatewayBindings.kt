@@ -80,6 +80,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.custom_access_prompt@1" to ops(document("read", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("write", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("snapshots", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("restore", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)),
         "host.work_manual@1" to ops(document("read", AiLimbsDocumentId.WORK_MANUAL), document("write", AiLimbsDocumentId.WORK_MANUAL), document("snapshots", AiLimbsDocumentId.WORK_MANUAL), document("restore", AiLimbsDocumentId.WORK_MANUAL)),
         "host.privileged.runtime@1" to ops(kernel("status"), kernel("pair"), kernel("prepare"), kernel("stop"), kernel("select")),
+        "host.resident.runtime@1" to ops(kernel("status"), kernel("set_enabled"), kernel("start"), kernel("stop")),
         "host.ui.layout@1" to ops(kernel("status"), kernel("start"), kernel("finish"), kernel("reset")),
         "host.interaction.cycle@1" to ops(kernel("status"), kernel("set_timeout"), kernel("reset")),
     )
