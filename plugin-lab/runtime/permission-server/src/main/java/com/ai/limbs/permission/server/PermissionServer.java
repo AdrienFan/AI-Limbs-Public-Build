@@ -10,6 +10,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Parcel;
 import android.os.RemoteException;
+import android.os.SystemClock;
 import android.system.Os;
 import android.util.Log;
 import java.util.List;
@@ -28,6 +29,8 @@ import rikka.shizuku.server.api.IContentProviderUtils;
  */
 public final class PermissionServer extends Service<UserServiceManager, ClientManager<ConfigManager>, ConfigManager> {
     private static final String TAG = "AIL.PermissionServer";
+    private static final String LEV_PROBE_FILE = "/data/local/tmp/ail_permission_lev_probe.csv";
+    private static final long LEV_PROBE_INTERVAL_MS = 60_000L;
     private static final PrintStream STARTUP_LOG =
             new PrintStream(new FileOutputStream(FileDescriptor.err), true);
     private static int hostUid;
@@ -83,9 +86,40 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         System.setProperty("ail.permission.rish.disabled", "true");
         Looper.prepareMainLooper();
         PermissionServer server = new PermissionServer();
+        startLevProbe();
         report("Binder service initialized; waiting for Host handoff", null);
         server.handler.post(server::handoff);
         Looper.loop();
+    }
+
+    private static void startLevProbe() {
+        try (PrintStream output = new PrintStream(new FileOutputStream(LEV_PROBE_FILE, false), true)) {
+            output.println("seq,wall_ms,elapsed_ms,uptime_ms,pid,uid");
+        } catch (Throwable error) {
+            report("LEV probe init failed", error);
+            return;
+        }
+
+        Thread probe = new Thread(() -> {
+            long sequence = 0;
+            while (!Thread.currentThread().isInterrupted()) {
+                try (PrintStream output = new PrintStream(new FileOutputStream(LEV_PROBE_FILE, true), true)) {
+                    output.println(sequence++ + "," + System.currentTimeMillis() + ","
+                            + SystemClock.elapsedRealtime() + "," + SystemClock.uptimeMillis() + ","
+                            + Os.getpid() + "," + Os.getuid());
+                } catch (Throwable error) {
+                    report("LEV probe write failed", error);
+                }
+                try {
+                    Thread.sleep(LEV_PROBE_INTERVAL_MS);
+                } catch (InterruptedException interrupted) {
+                    Thread.currentThread().interrupt();
+                }
+            }
+        }, "AIL-LEV-Probe");
+        probe.setDaemon(true);
+        probe.start();
+        report("LEV probe active: 60s interval, no WakeLock", null);
     }
 
     private void handoff() {
