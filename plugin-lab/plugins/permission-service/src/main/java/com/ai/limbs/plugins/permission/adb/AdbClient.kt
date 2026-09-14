@@ -41,7 +41,8 @@ class AdbClient(private val host: String, private val port: Int, private val key
     private val outputStream get() = if (useTls) tlsOutputStream else plainOutputStream
 
     fun connect() {
-        socket = Socket().apply { connect(java.net.InetSocketAddress(host, port), 10000); soTimeout = 15000 }
+        val targetPort = port
+        socket = Socket().apply { connect(java.net.InetSocketAddress(host, targetPort), 10000); soTimeout = 15000 }
         socket.tcpNoDelay = true
         plainInputStream = DataInputStream(socket.getInputStream())
         plainOutputStream = DataOutputStream(socket.getOutputStream())
