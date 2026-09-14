@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.core.tools.system.resident
 
 import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Process
 import android.system.Os
@@ -23,6 +24,7 @@ import org.json.JSONObject
 /** Host-owned controller for the independent AI Limbs resident process. */
 internal object AiLimbsResidentRuntime {
     const val PROCESS_NAME = "ail_resident"
+    private const val RESIDENT_PROTOCOL_VERSION = 2
 
     private const val TAG = "AiLimbsResident"
     private const val PREFS = "ai_limbs_resident_runtime_v1"
@@ -31,6 +33,10 @@ internal object AiLimbsResidentRuntime {
     private const val PLUGIN_CENTER_OWNER = "ai_limbs.system.plugin_center"
     private const val MAIN_CLASS =
         "com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentMain"
+    private const val HOST_SERVICE_CLASS =
+        "com.ai.assistance.operit.api.chat.AIForegroundService"
+    private const val ACTION_RESIDENT_STATE_CHANGED =
+        "com.ai.assistance.operit.action.RESIDENT_STATE_CHANGED"
 
     private lateinit var app: Context
     private lateinit var prefs: SharedPreferences
@@ -79,6 +85,9 @@ internal object AiLimbsResidentRuntime {
     private fun isEnabled(): Boolean =
         prefs.getBoolean(KEY_ENABLED, false)
 
+    internal fun isEnabledForHost(): Boolean =
+        ::prefs.isInitialized && prefs.getBoolean(KEY_ENABLED, false)
+
     private suspend fun ensureStartedIfEnabled(context: Context): JSONObject {
         initialize(context)
         if (!isEnabled()) return status()
@@ -89,7 +98,13 @@ internal object AiLimbsResidentRuntime {
         check(prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()) {
             "Could not persist resident setting"
         }
-        if (enabled) startLocked() else stopLocked()
+        if (enabled) {
+            startLocked()
+        } else {
+            val result = stopLocked()
+            notifyHostResidentDisabled()
+            result
+        }
     }
 
     private suspend fun start(): JSONObject = lifecycleMutex.withLock {
@@ -101,10 +116,41 @@ internal object AiLimbsResidentRuntime {
     }
 
     private suspend fun startLocked(): JSONObject {
-        val existing = localProbe()
-        if (existing.running) {
+        var existing = localProbe()
+        if (existing.running && existing.protocolVersion == RESIDENT_PROTOCOL_VERSION) {
             clearError()
             return status(existing)
+        }
+
+        if (existing.running && existing.protocolVersion != RESIDENT_PROTOCOL_VERSION) {
+            AppLogger.i(
+                TAG,
+                "Replacing resident protocol ${existing.protocolVersion} with $RESIDENT_PROTOCOL_VERSION"
+            )
+            existing.pid?.let { stalePid ->
+                runCatching { Process.killProcess(stalePid) }
+                for (attempt in 0 until 12) {
+                    delay(100L)
+                    if (!pidExists(stalePid)) return@let
+                }
+            }
+            existing = localProbe()
+            if (existing.running && existing.pid != null && permissionBackendReady()) {
+                debuggerExecutorOrNull()?.let { executor ->
+                    val fallback = "/system/bin/run-as ${quote(app.packageName)} " +
+                        "/system/bin/kill -9 ${existing.pid}"
+                    executor.executeCommand(fallback)
+                    for (attempt in 0 until 12) {
+                        delay(100L)
+                        existing = localProbe()
+                        if (!existing.running) return@let
+                    }
+                }
+            }
+            if (existing.running) {
+                recordError("旧版 Resident 仍在运行，无法安全切换到协议 $RESIDENT_PROTOCOL_VERSION")
+                return status(existing)
+            }
         }
 
         if (!permissionBackendReady()) {
@@ -122,6 +168,8 @@ internal object AiLimbsResidentRuntime {
             "Could not prepare resident state directory"
         }
         metaFile().delete()
+        stopRequestFile().delete()
+        releaseStaleWakeLock(executor)
 
         val result = executor.executeCommand(launchCommand())
         if (!result.success) {
@@ -158,8 +206,11 @@ internal object AiLimbsResidentRuntime {
         var probe = localProbe()
         val pid = probe.pid
         if (probe.running && pid != null) {
-            runCatching { Process.killProcess(pid) }
-            for (attempt in 0 until 12) {
+            runCatching {
+                check(stateDir().mkdirs() || stateDir().isDirectory)
+                stopRequestFile().writeText(System.currentTimeMillis().toString())
+            }
+            for (attempt in 0 until 40) {
                 delay(100L)
                 probe = localProbe()
                 if (!probe.running) break
@@ -167,21 +218,32 @@ internal object AiLimbsResidentRuntime {
         }
 
         probe = localProbe()
-        if (probe.running && probe.pid != null && permissionBackendReady()) {
-            debuggerExecutorOrNull()?.let { executor ->
-                val fallback = "/system/bin/run-as ${quote(app.packageName)} " +
-                    "/system/bin/kill -9 ${probe.pid}"
-                executor.executeCommand(fallback)
-                for (attempt in 0 until 8) {
-                    delay(100L)
-                    probe = localProbe()
-                    if (!probe.running) break
-                }
+        if (probe.running && probe.pid != null) {
+            runCatching { Process.killProcess(probe.pid) }
+            for (attempt in 0 until 12) {
+                delay(100L)
+                probe = localProbe()
+                if (!probe.running) break
+            }
+        }
+
+        val executor = if (permissionBackendReady()) debuggerExecutorOrNull() else null
+        probe = localProbe()
+        if (probe.running && probe.pid != null && executor != null) {
+            val fallback = "/system/bin/run-as ${quote(app.packageName)} " +
+                "/system/bin/kill -9 ${probe.pid}"
+            executor.executeCommand(fallback)
+            for (attempt in 0 until 8) {
+                delay(100L)
+                probe = localProbe()
+                if (!probe.running) break
             }
         }
 
         if (!probe.running) {
+            executor?.let { releaseStaleWakeLock(it) }
             metaFile().delete()
+            stopRequestFile().delete()
             clearError()
             AppLogger.i(TAG, "Resident stopped")
         } else {
@@ -192,19 +254,28 @@ internal object AiLimbsResidentRuntime {
 
     private suspend fun status(probe: LocalProbe = localProbe()): JSONObject =
         withContext(Dispatchers.IO) {
+            val guardian = readKeyValues(guardianFile())
             JSONObject()
                 .put("available", true)
-                .put("api", 1)
+                .put("api", 2)
+                .put("mode", "lockscreen_continuous")
                 .put("enabled", isEnabled())
                 .put("running", probe.running)
                 .put("pid", probe.pid ?: JSONObject.NULL)
                 .put("uid", probe.uid ?: JSONObject.NULL)
                 .put("ppid", probe.ppid ?: JSONObject.NULL)
+                .put("protocol_version", probe.protocolVersion ?: JSONObject.NULL)
                 .put("oom_score_adj", probe.oomScoreAdj ?: JSONObject.NULL)
                 .put("cgroup", probe.cgroup ?: JSONObject.NULL)
                 .put("session_id", probe.sessionId ?: JSONObject.NULL)
                 .put("started_wall_ms", probe.startedWallMs ?: JSONObject.NULL)
                 .put("last_heartbeat", lastHeartbeat() ?: JSONObject.NULL)
+                .put("continuous_work", probe.running && guardian["wake_lock"] == "held" && guardian["last_host_touch_ok"] == "true")
+                .put("cpu_wake_lock", guardian["wake_lock"] ?: JSONObject.NULL)
+                .put("host_guardian", guardian["host_guardian"] ?: JSONObject.NULL)
+                .put("last_host_touch_wall_ms", guardian["last_host_touch_wall_ms"]?.toLongOrNull() ?: JSONObject.NULL)
+                .put("last_host_touch_ok", guardian["last_host_touch_ok"]?.toBooleanStrictOrNull() ?: JSONObject.NULL)
+                .put("guardian_state", guardian["state"] ?: JSONObject.NULL)
                 .put("backend", if (PrivilegeRuntime.isSelected()) "ai_limbs" else "shizuku")
                 .put("backend_ready", permissionBackendReady())
                 .put("last_error", prefs.getString(KEY_LAST_ERROR, null) ?: JSONObject.NULL)
@@ -224,7 +295,7 @@ internal object AiLimbsResidentRuntime {
         val inner =
             "export CLASSPATH=${quote(app.applicationInfo.sourceDir)}; " +
                 "exec /system/bin/app_process /system/bin --nice-name=$PROCESS_NAME " +
-                "$MAIN_CLASS ${quote(stateDir().absolutePath)}"
+                "$MAIN_CLASS ${quote(stateDir().absolutePath)} ${quote(app.packageName)}"
         val asApp =
             "exec /system/bin/run-as ${quote(app.packageName)} /system/bin/sh -c ${quote(inner)}"
         return "trap '' HUP; rm -f ${quote(shellLogPath())}; " +
@@ -253,6 +324,7 @@ internal object AiLimbsResidentRuntime {
             running = true,
             pid = pid,
             uid = uid,
+            protocolVersion = meta["protocol_version"]?.toIntOrNull() ?: 1,
             ppid = status["PPid"]?.trim()?.toIntOrNull(),
             oomScoreAdj = readProcText(pid, "oom_score_adj")?.trim()?.toIntOrNull(),
             cgroup = readProcText(pid, "cgroup")?.trim()?.replace('\n', ';'),
@@ -290,7 +362,28 @@ internal object AiLimbsResidentRuntime {
     private fun stateDir(): File = File(app.filesDir, "ai_limbs/resident")
     private fun metaFile(): File = File(stateDir(), "resident.meta")
     private fun heartbeatFile(): File = File(stateDir(), "heartbeat.log")
+    private fun guardianFile(): File = File(stateDir(), "guardian.state")
+    private fun stopRequestFile(): File = File(stateDir(), "stop.request")
     private fun shellLogPath(): String = "/data/local/tmp/ail_resident_${Process.myUid()}.log"
+
+    private suspend fun releaseStaleWakeLock(executor: ShellExecutor) {
+        val command =
+            "/system/bin/run-as ${quote(app.packageName)} /system/bin/cmd power " +
+                "set-wakelock release PARTIAL_WAKE_LOCK >/dev/null 2>&1 || true"
+        runCatching { executor.executeCommand(command) }
+    }
+
+
+    private fun notifyHostResidentDisabled() {
+        runCatching {
+            app.startService(
+                Intent(ACTION_RESIDENT_STATE_CHANGED)
+                    .setClassName(app.packageName, HOST_SERVICE_CLASS)
+            )
+        }.onFailure { error ->
+            AppLogger.w(TAG, "Could not refresh host service after disabling Resident", error)
+        }
+    }
 
     private fun recordError(message: String) {
         val clean = message.trim().take(4000).ifBlank { "Unknown resident runtime error" }
@@ -309,6 +402,7 @@ internal object AiLimbsResidentRuntime {
         val running: Boolean = false,
         val pid: Int? = null,
         val uid: Int? = null,
+        val protocolVersion: Int? = null,
         val ppid: Int? = null,
         val oomScoreAdj: Int? = null,
         val cgroup: String? = null,

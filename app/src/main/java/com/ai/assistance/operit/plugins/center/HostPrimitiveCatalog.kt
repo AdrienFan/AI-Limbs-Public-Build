@@ -69,7 +69,7 @@ object AiLimbsHostPrimitiveCatalog {
         HostPrimitiveDefinition(46, "host.ui.presentation@1", "Plugin Page Presentation", "允许当前插件页面请求普通、竖屏沉浸全屏或横屏沉浸全屏显示模式。", "Host 只管理当前插件页面的 AI Limbs 外壳、Android system bars 与屏幕方向；插件仍完全拥有自己的页面内容和业务 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(47, "host.interaction.cycle@1", "Interaction Cycle", "读取、设置或手动重置 AI Limbs 外部交互周期。", "周期计时、软过期、手动刷新、系统接入提示与 receipt 边界均由 AI Limbs 基座执行。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, false),
         HostPrimitiveDefinition(49, "host.privileged.runtime@1", "Privileged Runtime", "管理独立权限后端的启动许可、状态、停止与显式选择。", "Host 校验插件身份及 Binder 来源，业务配对和启动由权限服务插件负责；不向插件暴露原始 Binder。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
-        HostPrimitiveDefinition(50, "host.resident.runtime@1", "AI Limbs Resident Runtime", "管理 AI Limbs 自身独立 Resident 进程的状态、启用、启动与停止。", "Host 持有 Resident 策略与状态；权限服务只提供首次 DEBUGGER 点火能力，Resident 以 AI Limbs UID 独立运行且不向插件暴露 Shell 或 Binder。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, false),
+        HostPrimitiveDefinition(50, "host.resident.runtime@1", "AI Limbs Resident Runtime", "用一个常驻开关管理 AI Limbs 锁屏持续工作模式及其独立 Resident 进程。", "开启即同时请求 Resident 常驻、CPU 持续运行与宿主工作守护；权限服务只提供首次 DEBUGGER 点火能力，Resident 不向插件暴露 Shell 或 Binder。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, false),
         HostPrimitiveDefinition(48, "host.ui.layout@1", "UI Layout Editing", "开启、结束、查询或恢复 AI Limbs 可编辑页面的用户布局。", "Host 拥有真实页面、编辑会话与布局持久化；插件只能请求标准 surface/mode，不直接操作 View、NavController 或其他插件 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
     )
 

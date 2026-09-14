@@ -40,6 +40,7 @@ import com.ai.assistance.operit.core.application.OperitApplication
 import com.ai.assistance.operit.core.chat.AIMessageManager
 import com.ai.assistance.operit.core.application.ActivityLifecycleManager
 import com.ai.assistance.operit.core.application.AiLimbsBackgroundSurvivalManager
+import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiConfig
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.integrations.http.ExternalChatHttpServer
@@ -146,6 +147,10 @@ class AIForegroundService : Service() {
 
         private const val ACTION_FOREGROUND_NOTIFICATION_DISMISSED =
             "com.ai.assistance.operit.action.AI_LIMBS_FOREGROUND_NOTIFICATION_DISMISSED"
+        const val ACTION_RESIDENT_KEEPALIVE =
+            "com.ai.assistance.operit.action.RESIDENT_KEEPALIVE"
+        const val ACTION_RESIDENT_STATE_CHANGED =
+            "com.ai.assistance.operit.action.RESIDENT_STATE_CHANGED"
 
         @Volatile
         private var lastRequestedImeVisible: Boolean = false
@@ -1013,12 +1018,14 @@ class AIForegroundService : Service() {
         return isAiBusy ||
             alwaysListeningEnabled ||
             backgroundKeepAliveEnabled ||
+            AiLimbsResidentRuntime.isEnabledForHost() ||
             externalHttpEnabled ||
             PluginPlatformKernel.hasForegroundNotification
     }
 
     private fun persistentStartMode(): Int =
         if (
+            AiLimbsResidentRuntime.isEnabledForHost() ||
             PluginPlatformKernel.hasForegroundNotification ||
             externalHttpStateFlow.value.isRunning ||
             isExternalHttpEnabledNow()
@@ -1207,10 +1214,12 @@ class AIForegroundService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        AppLogger.d(
-            TAG,
-            "onStartCommand action=${intent?.action ?: "<null>"}, startId=$startId, persistentMode=${persistentStartMode()}"
-        )
+        if (intent?.action != ACTION_RESIDENT_KEEPALIVE) {
+            AppLogger.d(
+                TAG,
+                "onStartCommand action=${intent?.action ?: "<null>"}, startId=$startId, persistentMode=${persistentStartMode()}"
+            )
+        }
         if (intent?.action == ACTION_EXIT_APP) {
             isRunning.set(false)
             stopNotificationWatchdog()
@@ -1266,6 +1275,15 @@ class AIForegroundService : Service() {
             Process.killProcess(Process.myPid())
             exitProcess(0)
             return START_NOT_STICKY
+        }
+
+        if (intent?.action == ACTION_RESIDENT_KEEPALIVE) {
+            return START_STICKY
+        }
+
+        if (intent?.action == ACTION_RESIDENT_STATE_CHANGED) {
+            stopSelfIfIdle(ignoreAppForeground = true)
+            return persistentStartMode()
         }
 
         if (intent?.action == ACTION_FOREGROUND_NOTIFICATION_DISMISSED) {
