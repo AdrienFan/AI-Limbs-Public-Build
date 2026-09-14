@@ -8,7 +8,6 @@ import android.widget.Toast
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.text.KeyboardOptions
-import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Security
@@ -56,7 +55,7 @@ private fun Content(host: InProcessPluginHost, controller: PermissionController)
             catch (error: CancellationException) { throw error }
             catch (error: Exception) {
                 host.logger.e("PermissionService", "Operation failed: " + error.message)
-                Toast.makeText(context, error.message ?: "操作失败，请查看日志", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, error.message ?: "操作失败，请查看日志中心", Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -150,14 +149,6 @@ private fun Content(host: InProcessPluginHost, controller: PermissionController)
                     }
                 }
                 Text("服务仅供 AI Limbs 使用。设备重启后需重新启动；各插件仍按 AI Limbs 授权执行。", style = MaterialTheme.typography.bodySmall)
-            }
-        }
-        Card(Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("运行日志", style = MaterialTheme.typography.titleMedium)
-                SelectionContainer {
-                    Text(state.logs.ifBlank { "暂无运行日志" }, style = MaterialTheme.typography.bodySmall)
-                }
             }
         }
         Text("v0.1.0 · 基于 Shizuku 开源技术，采用 Apache-2.0 许可。", style = MaterialTheme.typography.bodySmall)

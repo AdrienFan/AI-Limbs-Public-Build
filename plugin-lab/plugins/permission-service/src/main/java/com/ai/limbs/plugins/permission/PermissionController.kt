@@ -19,9 +19,6 @@ import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 import java.util.concurrent.TimeUnit
 import java.util.zip.ZipFile
 
@@ -30,8 +27,7 @@ internal data class PermissionState(
     val backend: String = "",
     val uid: Int = -1,
     val busy: Boolean = false,
-    val message: String = "正在读取状态",
-    val logs: String = ""
+    val message: String = "正在读取状态"
 )
 
 internal class PermissionController(private val host: InProcessPluginHost) {
@@ -45,7 +41,6 @@ internal class PermissionController(private val host: InProcessPluginHost) {
             )
         ), "AI-Limbs@Android")
     }
-    private val logFile = File(host.dataDir, "permission-service.log")
 
     private suspend fun invoke(operation: String, params: JSONObject = JSONObject()): JSONObject {
         val result = JSONObject(host.invokeHostCapability(
@@ -66,13 +61,8 @@ internal class PermissionController(private val host: InProcessPluginHost) {
     }
 
     private fun log(message: String) {
-        val line = SimpleDateFormat("HH:mm:ss", Locale.ROOT).format(Date()) + " " + message
-        val joined = (mutableState.value.logs + "\n" + line).trim().takeLast(24000)
-        mutableState.value = mutableState.value.copy(logs = joined)
+        // The centralized modular Log Center is the single user-facing log surface.
         host.logger.i("PermissionService", message)
-        host.dataDir.mkdirs()
-        // A bounded diagnostic file; pairing codes, keys and launch tokens are never logged.
-        logFile.writeText(joined)
     }
 
     private suspend fun action(title: String, block: suspend () -> Unit) {
@@ -88,7 +78,7 @@ internal class PermissionController(private val host: InProcessPluginHost) {
             throw error
         } catch (error: Exception) {
             log(title + "失败：" + (error.message ?: error.javaClass.simpleName))
-            mutableState.value = mutableState.value.copy(message = title + "失败，请查看日志")
+            mutableState.value = mutableState.value.copy(message = title + "失败，请查看日志中心")
             throw error
         } finally {
             mutableState.value = mutableState.value.copy(busy = false)
@@ -123,7 +113,7 @@ internal class PermissionController(private val host: InProcessPluginHost) {
     private fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
     private fun launchCommand(apk: String, log: String, permit: JSONObject): String =
-        "CLASSPATH=" + quote(apk) + " /system/bin/nohup /system/bin/app_process /system/bin --nice-name=ail_permission_server " +
+        "CLASSPATH=" + quote(apk) + " /system/bin/setsid -d /system/bin/app_process /system/bin --nice-name=ail_permission_server " +
             "com.ai.limbs.permission.server.PermissionServer " +
             listOf(permit.getString("package_name"), permit.getInt("host_uid").toString(),
                 permit.getInt("user_id").toString(), permit.getString("token")).joinToString(" ") { quote(it) } +
@@ -169,7 +159,7 @@ internal class PermissionController(private val host: InProcessPluginHost) {
                 activated = awaitConnection()
                 val diagnostic = shell(adb, "tail -c 12000 " + quote(serverLog)).trim()
                 if (diagnostic.isNotEmpty()) log(diagnostic.replace(permit.getString("token"), "[redacted]"))
-                check(activated) { "服务端未连接到基座，启动日志已收集" }
+                check(activated) { "服务端未连接到基座，请查看日志中心" }
             }
             invoke("select", JSONObject().put("backend", "ai_limbs"))
             refresh()
@@ -223,7 +213,4 @@ internal class PermissionController(private val host: InProcessPluginHost) {
         host.logger.i("PermissionService", "Plugin unmounted; Host revokes the runtime")
     }
 
-    fun readSavedLog() {
-        if (logFile.isFile) mutableState.value = mutableState.value.copy(logs = logFile.inputStream().use { String(it.readBytes().takeLast(24000).toByteArray()) })
-    }
 }
