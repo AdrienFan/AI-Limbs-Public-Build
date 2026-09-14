@@ -9,11 +9,11 @@ android {
     compileSdk = 36
     ndkVersion = "27.0.12077973"
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.permission.v010"
+        applicationId = "com.ai.limbs.payload.permission.v011"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0"
+        versionCode = 2
+        versionName = "0.1.1"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
     }

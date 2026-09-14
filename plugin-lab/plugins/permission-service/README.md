@@ -1,6 +1,6 @@
-# AI Limbs 权限服务 v0.1.0
+# AI Limbs 权限服务 v0.1.1
 
-需要基座 build20 或更新版本，以及插件中心授予 host.privileged.runtime@1。插件位于工具箱，运行时不依赖 Ubuntu 或官方 Shizuku 应用。
+需要基座 build21 或更新版本，以及插件中心授予 host.privileged.runtime@1。插件位于工具箱，运行时不依赖 Ubuntu 或官方 Shizuku 应用。
 
 ## 使用
 
@@ -9,7 +9,7 @@
 3. 建议分屏保持配对窗口打开，在插件内输入配对端口与配对码。
 4. 配对成功后使用无线调试主页上的连接端口启动；两个端口不可混用。
 5. 服务连接成功后显式选中 AI Limbs 后端。既有 Android 执行器通过 DEBUGGER 权限级别使用它；用户原有权限级别选择保持不变。
-6. root 设备也可以明确选择 root 启动。停止、切换到外部 Shizuku/Sui 及日志查看均在页面中。
+6. root 设备也可以明确选择 root 启动。停止和后端切换在权限服务页面中，诊断日志统一在日志中心查看。
 
 设备重启后需要重新启动服务。无线配对仅支持 Android 11+，此版本原生库为 arm64-v8a。更换或损坏配对密钥时应明确重置后重新配对，不会静默生成替代身份。
 
@@ -23,7 +23,7 @@ host.privileged.runtime@1 提供 status / pair / prepare / stop / select。scope
 
 服务每 10 秒与 Host 确认连接，允许有限的宿主进程重启宽限。token 撤销时退出，连续无法连接时退出。外部 Shizuku 的包名、Provider、进程和授权数据保持独立。
 
-v0.1.0 不提供其他 Android 应用授权、Rish 或外部 UserService；现有外部 Shizuku/Sui 后端仍可通过明确选择使用。
+v0.1.1 不提供其他 Android 应用授权、Rish 或外部 UserService；现有外部 Shizuku/Sui 后端仍可通过明确选择使用。
 
 ## 构建与打包
 
@@ -31,8 +31,14 @@ v0.1.0 不提供其他 Android 应用授权、Rish 或外部 UserService；现�
 
 permission-service-plugin:assembleDebug 自动构建 permission-server 的 release APK 并作为 asset 打入插件；随后使用既有父插件 Ed25519 密钥签名生成 .ailp，校验签名及内容摘要。
 
-基座独立构建为 build20，插件版本为 0.1.0。上游来源与修改见 THIRD_PARTY_NOTICES.md、vendor/UPSTREAM.json 和 vendor/shizuku-api/UPSTREAM.md。
+当前修复沿用基座 build21，插件版本为 0.1.1。上游来源与修改见 THIRD_PARTY_NOTICES.md、vendor/UPSTREAM.json 和 vendor/shizuku-api/UPSTREAM.md。
+
+## v0.1.1 启动修复
+
+legacy ADB shell 使用临时 PTY。父 shell 执行后台命令后立即退出，后台进程可能在 setsid 前收到 SIGHUP。启动器现在先在父 shell 忽略 HUP，再启动 setsid 子进程；进入新会话后写入 AIL_SERVER_SESSION_READY 标记，并 exec 服务端。
+
+服务端直接向重定向的标准错误文件描述符写入启动阶段和异常，避免仅使用 Android Log 导致 server.log 为空。诊断依然由插件转入日志中心，并脱敏启动令牌。
 
 ## 验证状态
 
-已做源码结构与接入链审查。云端构建结果和真机安装、配对、ADB/root 激活、服务停止与断连后的行为尚待验证；不得将源码完成表述为真机成功。
+旧插件的约 15 秒回连超时已在真机重现；同一个服务端 APK 的前台诊断可到达 Host 并正确拒绝无效令牌。当前修复完成源码和差异检查，未本地运行 Gradle；新版云编译与安装后的激活、断开 ADB 后存活、停止和重启行为待验证。不得把源码检查通过表述为新版真机验证通过。

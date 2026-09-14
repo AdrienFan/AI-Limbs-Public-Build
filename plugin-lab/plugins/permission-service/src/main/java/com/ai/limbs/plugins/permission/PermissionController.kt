@@ -14,7 +14,6 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 import java.io.File
@@ -112,12 +111,26 @@ internal class PermissionController(private val host: InProcessPluginHost) {
 
     private fun quote(value: String): String = "'" + value.replace("'", "'\\''") + "'"
 
-    private fun launchCommand(apk: String, log: String, permit: JSONObject): String =
-        "CLASSPATH=" + quote(apk) + " /system/bin/setsid -d /system/bin/app_process /system/bin --nice-name=ail_permission_server " +
+    private fun launchCommand(apk: String, log: String, permit: JSONObject): String {
+        val server = "/system/bin/app_process /system/bin --nice-name=ail_permission_server " +
             "com.ai.limbs.permission.server.PermissionServer " +
             listOf(permit.getString("package_name"), permit.getInt("host_uid").toString(),
-                permit.getInt("user_id").toString(), permit.getString("token")).joinToString(" ") { quote(it) } +
+                permit.getInt("user_id").toString(), permit.getString("token")).joinToString(" ") { quote(it) }
+        // Legacy ADB shell uses a PTY. Ignore HUP BEFORE forking: the parent shell can
+        // exit and hang up the PTY before its background child has entered setsid().
+        // Changing nohup/setsid in the child alone leaves that startup race open.
+        // The inner shell runs after setsid, so this marker proves session detachment.
+        val detached = "echo AIL_SERVER_SESSION_READY; exec " + server
+        return "trap '' HUP; CLASSPATH=" + quote(apk) +
+            " /system/bin/setsid /system/bin/sh -c " + quote(detached) +
             " > " + quote(log) + " 2>&1 < /dev/null &"
+    }
+
+    private fun recordDiagnostic(diagnostic: String, permit: JSONObject) {
+        val redacted = diagnostic.trim().replace(permit.getString("token"), "[redacted]")
+        log(if (redacted.isEmpty()) "服务端尚未写入启动阶段日志；请检查后台进程是否成功创建"
+            else "服务端启动日志：\n" + redacted)
+    }
 
     private fun shell(client: AdbClient, command: String): String {
         val output = StringBuilder()
@@ -155,10 +168,11 @@ internal class PermissionController(private val host: InProcessPluginHost) {
                 val ready = shell(adb, "chmod 444 " + quote("$remote.part") +
                     " && mv -f " + quote("$remote.part") + " " + quote(remote) + " && echo AIL_READY")
                 check(ready.contains("AIL_READY")) { "无法安装服务端文件" }
-                shell(adb, launchCommand(remote, serverLog, permit))
+                log("ADB 已连接，服务端文件校验通过；正在创建独立后台进程")
+                val launchOutput = shell(adb, launchCommand(remote, serverLog, permit))
+                if (launchOutput.isNotBlank()) recordDiagnostic(launchOutput, permit)
                 activated = awaitConnection()
-                val diagnostic = shell(adb, "tail -c 12000 " + quote(serverLog)).trim()
-                if (diagnostic.isNotEmpty()) log(diagnostic.replace(permit.getString("token"), "[redacted]"))
+                recordDiagnostic(shell(adb, "tail -c 12000 " + quote(serverLog)), permit)
                 check(activated) { "服务端未连接到基座，请查看日志中心" }
             }
             invoke("select", JSONObject().put("backend", "ai_limbs"))
@@ -181,13 +195,22 @@ internal class PermissionController(private val host: InProcessPluginHost) {
             check(process.waitFor(15, TimeUnit.SECONDS)) { process.destroyForcibly(); "root 启动超时" }
             check(process.exitValue() == 0) { "root 授权未成功" }
             activated = awaitConnection()
-            if (serverLog.isFile) log(serverLog.readText().takeLast(12000).replace(permit.getString("token"), "[redacted]"))
+            recordDiagnostic(readLogTail(serverLog), permit)
             check(activated) { "root 服务端未连接" }
             invoke("select", JSONObject().put("backend", "ai_limbs"))
             refresh()
             log("root 权限服务启动成功")
         } finally { if (!activated) withContext(NonCancellable) { invoke("stop") } }
     }
+
+    private fun readLogTail(file: File): String =
+        java.io.RandomAccessFile(file, "r").use { input ->
+            val count = minOf(input.length(), 12000L).toInt()
+            input.seek(input.length() - count)
+            val bytes = ByteArray(count)
+            input.readFully(bytes)
+            String(bytes, Charsets.UTF_8)
+        }
 
     private suspend fun awaitConnection(): Boolean {
         repeat(30) {

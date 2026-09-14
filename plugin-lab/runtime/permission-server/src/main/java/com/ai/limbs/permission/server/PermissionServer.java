@@ -13,6 +13,9 @@ import android.os.RemoteException;
 import android.system.Os;
 import android.util.Log;
 import java.util.List;
+import java.io.FileDescriptor;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
 import moe.shizuku.server.IShizukuApplication;
 import rikka.hidden.compat.ActivityManagerApis;
 import rikka.hidden.compat.PackageManagerApis;
@@ -25,6 +28,8 @@ import rikka.shizuku.server.api.IContentProviderUtils;
  */
 public final class PermissionServer extends Service<UserServiceManager, ClientManager<ConfigManager>, ConfigManager> {
     private static final String TAG = "AIL.PermissionServer";
+    private static final PrintStream STARTUP_LOG =
+            new PrintStream(new FileOutputStream(FileDescriptor.err), true);
     private static int hostUid;
     private static int userId;
     private static String packageName;
@@ -34,7 +39,34 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
     private boolean acceptedOnce;
     private int missedHandoffs;
 
-    public static void main(String[] args) throws Exception {
+    public static void main(String[] args) {
+        // app_process/RuntimeInit routes Android Log to logcat, not server.log.
+        // Keep the redirected OS stderr explicitly so startup failures reach Log Center.
+        Thread.setDefaultUncaughtExceptionHandler((thread, error) -> {
+            report("Uncaught failure in " + thread.getName(), error);
+            System.exit(1);
+        });
+        try {
+            report("Java entry reached, uid=" + Os.getuid() + ", pid=" + Os.getpid(), null);
+            runServer(args);
+        } catch (Throwable error) {
+            report("Permission server startup failed", error);
+            System.exit(1);
+        }
+    }
+
+    private static void report(String message, Throwable error) {
+        // Do not print startup arguments or the launch token.
+        PrintStream output = STARTUP_LOG;
+        output.println(TAG + ": " + message);
+        if (error != null) error.printStackTrace(output);
+        // Do not close FileDescriptor.err; it belongs to the process.
+        output.flush();
+        if (error == null) Log.i(TAG, message);
+        else Log.e(TAG, message, error);
+    }
+
+    private static void runServer(String[] args) throws Exception {
         if (Os.getuid() != 2000 && Os.getuid() != 0) throw new SecurityException("ADB or root activation required");
         if (args.length != 4) throw new IllegalArgumentException("Expected package, uid, user, token");
         packageName = args[0];
@@ -45,11 +77,13 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         ApplicationInfo app = PackageManagerApis.getApplicationInfoNoThrow(packageName, 0, userId);
         if (app == null || app.uid != hostUid) throw new SecurityException("Host package/UID mismatch");
         authority = packageName + ".privilege";
+        report("Host identity verified; preparing Binder service", null);
         // This internal backend rejects the Rish transaction range below, so do not
         // initialize Rish JNI when constructing the shared Shizuku Service base.
         System.setProperty("ail.permission.rish.disabled", "true");
         Looper.prepareMainLooper();
         PermissionServer server = new PermissionServer();
+        report("Binder service initialized; waiting for Host handoff", null);
         server.handler.post(server::handoff);
         Looper.loop();
     }
@@ -57,6 +91,7 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
     private void handoff() {
         IContentProvider provider = null;
         try {
+            if (!acceptedOnce) report("Requesting Host Provider", null);
             provider = ActivityManagerApis.getContentProviderExternal(authority, userId, null, authority);
             if (provider == null) throw new IllegalStateException("Host Provider unavailable");
             Bundle extras = new Bundle();
@@ -64,19 +99,20 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
             extras.putBinder("binder", this);
             Bundle reply = IContentProviderUtils.callCompat(provider, null, authority, "attach", null, extras);
             if (reply == null || !reply.getBoolean("accepted")) {
-                Log.w(TAG, "Launch permission revoked or expired; exiting");
+                report("Launch permission revoked or expired; exiting", null);
                 System.exit(0);
             }
+            if (!acceptedOnce) report("Host accepted permission service", null);
             acceptedOnce = true;
             missedHandoffs = 0;
         } catch (Throwable error) {
-            Log.e(TAG, "Host handoff failed", error);
+            report("Host handoff failed", error);
             // Bounded lifecycle grace permits a Host process restart, never a different backend.
             if (++missedHandoffs >= (acceptedOnce ? 6 : 3)) System.exit(1);
         } finally {
             if (provider != null) {
                 try { ActivityManagerApis.removeContentProviderExternal(authority, null); }
-                catch (Throwable error) { Log.w(TAG, "Provider release failed", error); }
+                catch (Throwable error) { report("Provider release failed", error); }
             }
         }
         handler.postDelayed(this::handoff, 10000);

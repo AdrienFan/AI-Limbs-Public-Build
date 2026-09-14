@@ -47,7 +47,7 @@ def main():
                        check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         dist = ROOT / "dist"
         dist.mkdir(exist_ok=True)
-        out = dist / "AI-Limbs-Permission-Service-v0.1.0.ailp"
+        out = dist / ("AI-Limbs-Permission-Service-v" + manifest["version"] + ".ailp")
         with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as package:
             package.writestr("plugin.json", encoded)
             package.write(apk, "payload/plugin.apk")

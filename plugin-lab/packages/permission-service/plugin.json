@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.permission_service",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "AI Limbs 权限服务",
-    "description": "在工具箱中配对、启动、停止和管理 AI Limbs 独立 Android 权限服务。需要支持 host.privileged.runtime@1 的基座（build20 起）。"
+    "description": "在工具箱中配对、启动、停止和管理 AI Limbs 独立 Android 权限服务。使用 build21 或更新基座，包含插件依赖隔离支持。"
   },
   "roles": [
     "system_plugin"
