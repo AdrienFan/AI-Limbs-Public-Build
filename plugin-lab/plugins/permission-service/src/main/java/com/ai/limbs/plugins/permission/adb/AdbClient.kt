@@ -40,6 +40,15 @@ class AdbClient(private val host: String, private val port: Int, private val key
     private val inputStream get() = if (useTls) tlsInputStream else plainInputStream
     private val outputStream get() = if (useTls) tlsOutputStream else plainOutputStream
 
+    private var nextLocalId = 1
+
+    @Synchronized
+    private fun allocateLocalId(): Int {
+        val id = nextLocalId
+        nextLocalId = if (nextLocalId == Int.MAX_VALUE) 1 else nextLocalId + 1
+        return id
+    }
+
     fun connect() {
         val targetPort = port
         socket = Socket().apply { connect(java.net.InetSocketAddress(host, targetPort), 10000); soTimeout = 15000 }
@@ -82,14 +91,14 @@ class AdbClient(private val host: String, private val port: Int, private val key
     }
 
     fun shellCommand(command: String, listener: ((ByteArray) -> Unit)?) {
-        val localId = 1
+        val localId = allocateLocalId()
         write(A_OPEN, localId, 0, "shell:$command")
 
-        var message = read()
+        var message = readFor(localId)
         when (message.command) {
             A_OKAY -> {
                 while (true) {
-                    message = read()
+                    message = readFor(localId)
                     val remoteId = message.arg0
                     if (message.command == A_WRTE) {
                         if (message.data_length > 0) {
@@ -116,9 +125,9 @@ class AdbClient(private val host: String, private val port: Int, private val key
 
     /** ADB SYNC SEND. The path is chosen by our controller, never supplied by external callers. */
     fun push(file: java.io.File, remotePath: String) {
-        val localId = 2
+        val localId = allocateLocalId()
         write(A_OPEN, localId, 0, "sync:")
-        val opened = read()
+        val opened = readFor(localId)
         check(opened.command == A_OKAY) { "ADB sync open failed" }
         val remoteId = opened.arg0
         fun send(bytes: ByteArray) {
@@ -127,7 +136,7 @@ class AdbClient(private val host: String, private val port: Int, private val key
             while (offset < bytes.size) {
                 val count = minOf(4096, bytes.size - offset)
                 write(A_WRTE, localId, remoteId, bytes.copyOfRange(offset, offset + count))
-                val ack = read()
+                val ack = readFor(localId)
                 check(ack.command == A_OKAY && ack.arg0 == remoteId && ack.arg1 == localId) { "ADB sync write failed" }
                 offset += count
             }
@@ -151,7 +160,7 @@ class AdbClient(private val host: String, private val port: Int, private val key
             .put("DONE".toByteArray()).putInt((System.currentTimeMillis() / 1000).toInt()).array())
         val result = java.io.ByteArrayOutputStream()
         while (result.size() < 8) {
-            val message = read()
+            val message = readFor(localId)
             check(message.command == A_WRTE && message.arg0 == remoteId) { "ADB sync response missing" }
             result.write(requireNotNull(message.data))
             write(A_OKAY, localId, remoteId)
@@ -159,7 +168,7 @@ class AdbClient(private val host: String, private val port: Int, private val key
         val response = result.toByteArray()
         check(String(response, 0, 4, Charsets.US_ASCII) == "OKAY") { "ADB file transfer rejected" }
         write(A_CLSE, localId, remoteId)
-        val closed = read()
+        val closed = readFor(localId)
         check(closed.command == A_CLSE) { "ADB sync did not close" }
     }
 
@@ -171,6 +180,18 @@ class AdbClient(private val host: String, private val port: Int, private val key
         outputStream.write(message.toByteArray())
         outputStream.flush()
         Log.d(TAG, "write ${message.toStringShort()}")
+    }
+
+    private fun readFor(localId: Int): AdbMessage {
+        while (true) {
+            val message = read()
+            if ((message.command == A_OKAY || message.command == A_WRTE || message.command == A_CLSE) &&
+                message.arg1 != localId) {
+                Log.d(TAG, "ignore stale stream frame for localId=${message.arg1}, waiting for localId=$localId")
+                continue
+            }
+            return message
+        }
     }
 
     private fun read(): AdbMessage {
