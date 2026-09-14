@@ -38,8 +38,8 @@ internal object ResidentCoreWire {
     fun request(operation: String, sessionId: String? = null): JSONObject {
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
-            socket.soTimeout = TIMEOUT_MS
             socket.connect(LocalSocketAddress(socketName(), LocalSocketAddress.Namespace.ABSTRACT))
+            socket.soTimeout = TIMEOUT_MS
             val peer = socket.peerCredentials
             check(peer.uid == Process.myUid()) { "Core peer UID mismatch" }
             write(socket, JSONObject()

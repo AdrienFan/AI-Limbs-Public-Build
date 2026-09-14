@@ -34,6 +34,7 @@ object AiLimbsResidentMain {
         check(stateDir.mkdirs() || stateDir.isDirectory) {
             "Could not create resident state directory: ${stateDir.absolutePath}"
         }
+        val guardianLease = ResidentRuntimeLease.acquire(stateDir, "guardian")
 
         val pid = Process.myPid()
         val uid = Process.myUid()
@@ -168,6 +169,7 @@ object AiLimbsResidentMain {
             stopRequestFile.delete()
             val current = readKeyValues(metaFile)["pid"]?.toIntOrNull()
             if (current == pid) metaFile.delete()
+            guardianLease.close()
         }
     }
 
