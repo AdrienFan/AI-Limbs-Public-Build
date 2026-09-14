@@ -94,3 +94,9 @@
 # Reactor BlockHound integration with Netty
 -dontwarn reactor.blockhound.integration.BlockHoundIntegration
 -dontwarn io.netty.util.internal.Hidden$NettyBlockHoundIntegration
+
+
+# app_process locates the diagnostic entry point by its stable JVM name.
+-keep class com.ai.assistance.operit.core.tools.system.resident.ResidentCoreMain {
+    public static void main(java.lang.String[]);
+}

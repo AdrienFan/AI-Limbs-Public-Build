@@ -11,8 +11,10 @@ import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -72,6 +74,13 @@ internal object AiLimbsResidentRuntime {
         }
         return when (operation) {
             "status" -> status()
+            "core_status" -> ResidentCoreController.status(app)
+            "core_probe" -> lifecycleMutex.withLock {
+                check(permissionBackendReady()) { "AI Limbs permission backend is not ready" }
+                val executor = checkNotNull(debuggerExecutorOrNull()) { "DEBUGGER Shell is unavailable" }
+                ResidentCoreController.probe(app, executor)
+            }
+            "core_stop" -> lifecycleMutex.withLock { ResidentCoreController.stop(app) }
             "set_enabled" -> {
                 require(args.has("enabled")) { "enabled is required" }
                 setEnabled(args.getBoolean("enabled"))
@@ -101,9 +110,11 @@ internal object AiLimbsResidentRuntime {
         if (enabled) {
             startLocked()
         } else {
-            val result = stopLocked()
-            notifyHostResidentDisabled()
-            result
+            try {
+                stopLocked()
+            } finally {
+                notifyHostResidentDisabled()
+            }
         }
     }
 
@@ -201,7 +212,17 @@ internal object AiLimbsResidentRuntime {
         return status(localProbe())
     }
 
-    private suspend fun stopLocked(): JSONObject {
+    private suspend fun stopLocked(): JSONObject = withContext(NonCancellable) {
+        // A diagnostic failure must not prevent the existing Guardian shutdown.
+        val coreStopError = try {
+            ResidentCoreController.stop(app)
+            null
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            AppLogger.w(TAG, "Resident Core stop was not confirmed", error)
+            error.toString()
+        }
         var probe = localProbe()
         val pid = probe.pid
         if (probe.running && pid != null) {
@@ -247,7 +268,8 @@ internal object AiLimbsResidentRuntime {
         } else {
             recordError("Resident process is still alive after stop request")
         }
-        return status(probe)
+        if (coreStopError != null) recordError("Resident Core stop not confirmed: $coreStopError")
+        status(probe).put("core_stop_error", coreStopError ?: JSONObject.NULL)
     }
 
     private suspend fun status(probe: LocalProbe = localProbe()): JSONObject =
@@ -262,6 +284,9 @@ internal object AiLimbsResidentRuntime {
                 .put("available", true)
                 .put("api", 3)
                 .put("mode", "lockscreen_continuous")
+                .put("runtime_phase", "guardian")
+                .put("runtime_owner", "android_host")
+                .put("plugins_migrated", false)
                 .put("enabled", isEnabled())
                 .put("running", probe.running)
                 .put("pid", probe.pid ?: JSONObject.NULL)
@@ -273,7 +298,10 @@ internal object AiLimbsResidentRuntime {
                 .put("session_id", probe.sessionId ?: JSONObject.NULL)
                 .put("started_wall_ms", probe.startedWallMs ?: JSONObject.NULL)
                 .put("last_heartbeat", lastHeartbeat() ?: JSONObject.NULL)
-                .put("continuous_work", probe.running && hostWakeHeld)
+                // A held client token is not proof that PowerManager honors the wake lock.
+                .put("continuous_work", false)
+                .put("continuous_work_state", "unverified")
+                .put("cpu_wake_effective", JSONObject.NULL)
                 .put("cpu_wake_lock", if (hostWakeHeld) "held" else "not_held")
                 .put("cpu_wake_lock_backend", "host_service_power_manager")
                 .put("host_pid", hostPid ?: JSONObject.NULL)

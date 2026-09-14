@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
+import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
 import com.ai.assistance.operit.plugins.system.KernelPluginPlatformControlV1
 import com.ai.assistance.operit.plugins.system.KernelSystemHostGatewayV1
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginDelegatedCapabilityInvokerV2
@@ -11,6 +12,7 @@ import com.ai.assistance.operit.plugins.system.KernelSystemPluginServicePublishe
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
 import com.ai.assistance.operit.util.AppLogger
+import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -27,6 +29,8 @@ import kotlinx.coroutines.launch
 internal object PluginPlatformKernel {
     private const val TAG = "PluginPlatformKernel"
     private val lifecycleLock = Any()
+    // Keep ownership for the process lifetime: initialized registries survive shutdown().
+    private var runtimeOwnerLease: ResidentRuntimeLease? = null
 
     @Volatile private var initialized = false
     @Volatile private var started = false
@@ -201,6 +205,11 @@ internal object PluginPlatformKernel {
         synchronized(lifecycleLock) {
             if (initialized) return
             val appContext = context.applicationContext
+            if (runtimeOwnerLease == null) {
+                runtimeOwnerLease = ResidentRuntimeLease.acquire(
+                    File(appContext.filesDir, "ai_limbs/runtime_owner"), "plugin_kernel"
+                )
+            }
             val surfacePolicy = HostSurfacePolicy(appContext)
             val adminSecurity = AdminSecurityManager(appContext)
             val usageStore = PluginUsageStore(appContext)
