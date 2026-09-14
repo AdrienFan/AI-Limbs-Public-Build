@@ -43,18 +43,29 @@ public abstract class Service<
     protected static final Logger LOGGER = new Logger("Service");
 
     public Service() {
-        RishConfig.init(ShizukuApiConstants.BINDER_DESCRIPTOR, 30000);
+        // AI Limbs' internal permission runtime intentionally does not expose Rish.
+        // Skip its JNI initialization in that process so an uninstalled server APK
+        // does not need an external librish.so beside it. Upstream behavior remains
+        // unchanged unless this process-local property is explicitly enabled.
+        boolean rishDisabled = Boolean.getBoolean("ail.permission.rish.disabled");
+        if (!rishDisabled) {
+            RishConfig.init(ShizukuApiConstants.BINDER_DESCRIPTOR, 30000);
+        }
 
         userServiceManager = onCreateUserServiceManager();
         configManager = onCreateConfigManager();
         clientManager = onCreateClientManager();
-        rishService = new RishService() {
+        if (rishDisabled) {
+            rishService = null;
+        } else {
+            rishService = new RishService() {
 
-            @Override
-            public void enforceCallingPermission(String func) {
-                Service.this.enforceCallingPermission(func);
-            }
-        };
+                @Override
+                public void enforceCallingPermission(String func) {
+                    Service.this.enforceCallingPermission(func);
+                }
+            };
+        }
     }
 
     public abstract UserServiceMgr onCreateUserServiceManager();
@@ -339,7 +350,7 @@ public abstract class Service<
             attachApplication(IShizukuApplication.Stub.asInterface(binder), args);
             reply.writeNoException();
             return true;
-        } else if (rishService.onTransact(code, data, reply, flags)) {
+        } else if (rishService != null && rishService.onTransact(code, data, reply, flags)) {
             return true;
         }
         return super.onTransact(code, data, reply, flags);

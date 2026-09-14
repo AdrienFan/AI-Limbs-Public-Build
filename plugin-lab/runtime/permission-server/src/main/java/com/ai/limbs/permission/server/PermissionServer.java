@@ -45,6 +45,9 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         ApplicationInfo app = PackageManagerApis.getApplicationInfoNoThrow(packageName, 0, userId);
         if (app == null || app.uid != hostUid) throw new SecurityException("Host package/UID mismatch");
         authority = packageName + ".privilege";
+        // This internal backend rejects the Rish transaction range below, so do not
+        // initialize Rish JNI when constructing the shared Shizuku Service base.
+        System.setProperty("ail.permission.rish.disabled", "true");
         Looper.prepareMainLooper();
         PermissionServer server = new PermissionServer();
         server.handler.post(server::handoff);
