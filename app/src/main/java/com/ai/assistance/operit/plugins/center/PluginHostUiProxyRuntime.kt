@@ -37,6 +37,12 @@ internal class PluginHostUiProxyRuntime(
         parameters: JSONObject
     ): JSONObject = residentClient.invokeUiCapability(ownerPluginId, screenId, capabilityId, parameters)
 
+    suspend fun installPluginCenterRendererFromUri(
+        uriText: String,
+        originalName: String
+    ): com.ai.assistance.operit.plugins.system.SystemPluginValidationResult =
+        residentClient.installPluginCenterRendererFromUri(uriText, originalName)
+
     fun setActiveScreen(screenId: String?) = residentClient.setActiveScreen(screenId)
 
     fun setPresentationMode(ownerPluginId: String, screenId: String, mode: PluginPagePresentationMode) =

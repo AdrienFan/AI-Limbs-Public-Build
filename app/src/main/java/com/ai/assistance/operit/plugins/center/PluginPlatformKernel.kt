@@ -236,7 +236,7 @@ internal object PluginPlatformKernel {
 
 
     /** Neutral JSON-only presentation state exported from BUSINESS Core to Host UI_PROXY. */
-    internal fun residentUiProxySnapshot(): JSONObject {
+    internal suspend fun residentUiProxySnapshot(): JSONObject {
         requireInitialized()
         check(runtimeRole == PluginRuntimeRole.BUSINESS && residentPluginServicesPrepared) {
             "Resident UI snapshot requires prepared BUSINESS plugin services"
@@ -278,6 +278,28 @@ internal object PluginPlatformKernel {
                 }
             }
         }
+        val pluginPresentations = JSONArray().apply {
+            managerInstance.snapshots()
+                .filter { snapshot ->
+                    val state = snapshot.persistentState
+                    state?.enabled == true && state.lastState == PluginLifecycleState.ACTIVE &&
+                        snapshot.mountedVersion == state.activeVersion && snapshot.activeManifest?.runtime?.kind == "android_inprocess"
+                }
+                .sortedBy { it.pluginId }
+                .forEach { snapshot ->
+                    val manifest = snapshot.activeManifest ?: return@forEach
+                    val config = manifest.runtime.configJson?.let(::JSONObject) ?: JSONObject()
+                    val presentationEntry = config.optString("presentation_entry_class").trim()
+                    val runtimeEntry = manifest.runtime.entry?.trim().orEmpty()
+                    if (presentationEntry.isNotEmpty() && runtimeEntry.isNotEmpty()) {
+                        put(JSONObject()
+                            .put("plugin_id", snapshot.pluginId)
+                            .put("version", snapshot.mountedVersion)
+                            .put("runtime_entry", runtimeEntry)
+                            .put("presentation_entry_class", presentationEntry))
+                    }
+                }
+        }
         val childSnapshots = JSONArray().apply { childExtensionRuntimeInstance.loggingSnapshots().forEach { put(childSnapshotJson(it)) } }
         val childBackups = JSONArray().apply { childExtensionRuntimeInstance.loggingBackupSnapshots().forEach { put(childBackupJson(it)) } }
         val childUi = JSONArray().apply {
@@ -305,6 +327,8 @@ internal object PluginPlatformKernel {
         return JSONObject().put("schema", 1).put("runtime_role", "business")
             .put("business_runtime_restored", businessRuntimeRestored).put("tiles", tiles).put("screens", screens)
             .put("theme", theme ?: JSONObject.NULL).put("presentations", presentations).put("providers", providers)
+            .put("plugin_presentations", pluginPresentations)
+            .put("child_presentations", childExtensionRuntimeInstance.residentPresentationDescriptors())
             .put("children", childSnapshots).put("child_backups", childBackups).put("child_ui_contributions", childUi)
             .put("navigation_surfaces", navigationSurfaces).put("navigation_bindings", navigationBindings)
             .put("developer_mode", surfacePolicyInstance.developerMode)
@@ -386,6 +410,62 @@ internal object PluginPlatformKernel {
                 val authorization = managerInstance.activeAuthorization(request.getString("plugin_id").trim())
                 capabilityRegistryInstance.invokeDelegated(authorization.pluginId, authorization.grantedScopes,
                     request.getString("capability_id"), request.optJSONObject("parameters") ?: JSONObject())
+            }
+            "presentation_host_capability" -> {
+                val owner = request.getString("owner_plugin_id").trim()
+                val authorization = managerInstance.activeAuthorization(owner)
+                val invoker = capabilityRegistryInstance.create(authorization.pluginId, authorization.grantedScopes)
+                invoker.invoke(
+                    request.getString("capability_id").trim().lowercase(),
+                    request.optJSONObject("parameters") ?: JSONObject()
+                )
+            }
+            "presentation_plugin_capability" -> {
+                val owner = request.getString("owner_plugin_id").trim()
+                val capabilityId = request.getString("capability_id").trim().lowercase()
+                capabilityRegistryInstance.requireOwnedCapability(owner, capabilityId)
+                val authorization = managerInstance.activeAuthorization(owner)
+                capabilityRegistryInstance.invokeDelegated(
+                    authorization.pluginId, authorization.grantedScopes, capabilityId,
+                    request.optJSONObject("parameters") ?: JSONObject()
+                )
+            }
+            "presentation_child_capability" -> {
+                val extensionId = request.getString("extension_id").trim()
+                val capabilityId = request.getString("capability_id").trim().lowercase()
+                val child = childExtensionRuntimeInstance.loggingSnapshots().firstOrNull {
+                    it.extensionId == extensionId && it.enabled && it.lifecycle == com.ai.limbs.plugin.runtime.ChildExtensionLifecycle.ACTIVE
+                } ?: throw PluginInstallException(
+                    "CHILD_PRESENTATION_OWNER_INACTIVE",
+                    "Child presentation owner is not ACTIVE: $extensionId"
+                )
+                val expectedParent = request.optString("parent_plugin_id").trim()
+                if (expectedParent.isNotEmpty()) {
+                    check(child.target.parentPluginId == expectedParent) { "Child presentation parent mismatch" }
+                }
+                capabilityRegistryInstance.invokeOwnedUiDirect(
+                    extensionId,
+                    capabilityId,
+                    request.optJSONObject("parameters") ?: JSONObject()
+                )
+            }
+            "presentation_child_command" -> {
+                val extensionId = request.getString("extension_id").trim()
+                val child = childExtensionRuntimeInstance.loggingSnapshots().firstOrNull {
+                    it.extensionId == extensionId && it.enabled && it.lifecycle == com.ai.limbs.plugin.runtime.ChildExtensionLifecycle.ACTIVE
+                } ?: throw PluginInstallException(
+                    "CHILD_PRESENTATION_OWNER_INACTIVE",
+                    "Child presentation owner is not ACTIVE: $extensionId"
+                )
+                val expectedParent = request.optString("parent_plugin_id").trim()
+                if (expectedParent.isNotEmpty()) {
+                    check(child.target.parentPluginId == expectedParent) { "Child presentation parent mismatch" }
+                }
+                childExtensionRuntimeInstance.invokePresentationCommand(
+                    extensionId = extensionId,
+                    command = request.getString("presentation_command"),
+                    parameters = request.optJSONObject("parameters") ?: JSONObject()
+                )
             }
             "plugin_platform" -> {
                 when (request.getString("operation")) {
@@ -533,7 +613,8 @@ internal object PluginPlatformKernel {
                 usageStore,
                 uiRegistry,
                 pagePresentationRegistry,
-                loggingService
+                loggingService,
+                role
             )
             val contributions = PluginContributionRegistry()
             surfacePolicy.register(

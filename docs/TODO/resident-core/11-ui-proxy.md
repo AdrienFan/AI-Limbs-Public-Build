@@ -1,6 +1,6 @@
 # Step 9 · Core ↔ Host UI Proxy 与 Android Component Proxy
 
-状态：源码代理边界已建立；未编译、未部署、未进行 Host 重建 / ActivityResult / 插件页面 / 真机交互验收。
+状态：源码代理边界与 Host presentation 封板加固已完成；未编译、未部署、未进行 Host 重建 / ActivityResult / 插件页面 / 真机交互验收。
 
 ## 本阶段目标
 
@@ -28,6 +28,10 @@ Host 重建不恢复 `PluginManager`、Parent/Child business runtime、Capabilit
 `events` 当前是 revision + snapshot 的 fail-soft polling，不是假装存在跨进程 Java callback。这样 Host 进程消失时 Core 不持有 Host callback/Binder wrapper，也不会因为一个失效 callback 阻塞业务 owner。
 
 Host client 遇到瞬时 LocalSocket 失败不会退出 UI proxy；它保留最后一份内存镜像，750 ms 后重新 attach，并用完整 snapshot 校正 revision。Core session 变化仍由 session 校验 fail closed，不允许静默接到另一个 owner。
+
+封板加固后，Host attachment 不只绑定 Core `session_id`，还绑定 Host 进程随机 `host_instance_id` 与 Core 单调分配的 `host_generation`。新 Host attach 会 retire 上一个 Host instance；旧 Host 不能重新 attach，也不能继续发送 command / component result。这样同一个 Core session 内也不会出现旧 Host 与新 Host 同时操作 presentation 的 ABA 竞态。
+
+UI proxy server 的 accept 与单连接处理已拆开并发执行。原因是 Core command 可能同步等待 Host component result；若 server 串行处理 socket，`component_poll` / `component_result` 会被正在等待它们的 command 自己堵住，形成协议自锁。并发 client handler 允许业务 command 等待期间 Host 继续 poll / 回传 component result。
 
 ## Core-owned UI descriptor / state
 
@@ -121,9 +125,21 @@ Core 到 Host 的 Intent 只允许中性 spec：action、data URI、MIME、packa
 
 ActivityResult 默认 rendezvous timeout 为 120 秒；普通 component request 为 15 秒。若 Host 在一个已启动的 ActivityResult 中途死亡，请求 fail closed / timeout，不自动 replay，避免重建 Host 后重复拉起相机、文件选择器或其他有副作用 Activity。用户可在新 Host 上重新触发动作。
 
+Component request 的 claim 也绑定 `host_instance_id`。当新 Host attach 时，旧 Host 已 claim 但未完成的 request 不再一直等待原 15 / 120 秒 deadline，而是立即以 `HOST_INSTANCE_REPLACED` 结束；旧 Host 之后送回的异步 ActivityResult 会因为 instance / generation 不匹配被拒绝。Host 侧一次性 launcher 还按 Core 下发的 deadline 自动 unregister，避免 Core 已超时后 framework launcher 长期残留。
+
 ### Window
 
 真实 `Window` 只存 Host 的 `WeakReference`。Core 只得到随机 `window_lease_id`；后续 window flag request 携带 lease id。Host 重建后旧 lease 自然失效，Core 永远拿不到 window token / Binder。
+
+Window lease 现在还绑定取得 lease 时的真实当前 Window。若 Activity 已重建或前台 Window 已变化，旧 lease 返回 `WINDOW_LEASE_STALE`；不得在 lease 失效后 fallback 到“当前新 Activity 的 Window”，避免旧业务请求误改新页面。
+
+## Parent / Child Host presentation 与 Ubuntu 设置
+
+插件大仓配套提交 `c86002c` 把需要真实 Android View / Compose 的插件页面拆成 Host-only presentation entry。Core 只发布可验证的 presentation descriptor；Host 用 admitted runtime archive 装载 presentation class，但不 mount 业务 entry。System Environment Center 只接受 `kind=system_environment_presentation` 且 `extension_id == ownerPluginId`、parent / point / apiVersion 全匹配的 child presentation。
+
+Ubuntu presentation 使用 `TerminalUiController`，Resident Host 页面不调用 `TerminalManager.getInstance()`，也不实例化 FTP / SSH / Source / Cache / chroot 业务 manager。高级设置页面抽成 `TerminalSettingsController`：字体、虚拟键盘等纯 presentation preference 留 Host；cache/reset、FTP、SSH、软件源、shared tmp、chroot 通过 child 私有 presentation-command endpoint 回到 Core。该 endpoint 不进入 AI capability catalog，并跟 `ActiveChild` owner 一起 pin / retire；partial mount 与 stop cleanup 仍遵守 Step 8 fail-closed 规则。
+
+SSH 配置日志同时做了脱敏：不再打印完整 JSON / 密码 / private-key passphrase；并补齐原先遗漏的端口转发与 KeepAlive 持久化字段。
 
 ## 本阶段没有声称完成的内容
 

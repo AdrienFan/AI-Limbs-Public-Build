@@ -14,7 +14,7 @@ import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal enum class HostGatewayRouteKind { HOST_TOOL, CORE_CAPABILITY, MANAGED_DOCUMENT, LOGGING, KERNEL, UNBOUND }
+internal enum class HostGatewayRouteKind { HOST_TOOL, CORE_CAPABILITY, MANAGED_DOCUMENT, LOGGING, KERNEL, COMPONENT_PROXY, UNBOUND }
 
 internal data class HostGatewayOperationBinding(
     val operation: String,
@@ -28,6 +28,8 @@ internal object HostPrimitiveGatewayBindings {
     private fun document(operation: String, target: AiLimbsDocumentId) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.MANAGED_DOCUMENT, target.stableId)
     private fun logging(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.LOGGING)
     private fun kernel(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.KERNEL)
+    private fun component(operation: String, legacyTarget: String? = null) =
+        HostGatewayOperationBinding(operation, HostGatewayRouteKind.COMPONENT_PROXY, legacyTarget)
     private fun pending(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.UNBOUND)
     private fun ops(vararg items: HostGatewayOperationBinding) = items.associateBy { it.operation }
 
@@ -54,7 +56,14 @@ internal object HostPrimitiveGatewayBindings {
         "host.permission@1" to ops(pending("check"), pending("request")),
         "host.audio.capture@1" to ops(pending("start"), pending("read"), pending("stop")),
         "host.audio.playback@1" to ops(tool("play", "music_play"), tool("pause", "music_pause"), tool("resume", "music_resume"), tool("stop", "music_stop"), tool("seek", "music_seek"), tool("volume", "music_set_volume")),
-        "host.android.component@1" to ops(tool("invoke", "execute_intent"), tool("broadcast", "send_broadcast")),
+        "host.android.component@1" to ops(
+            component("invoke", "execute_intent"),
+            component("broadcast", "send_broadcast"),
+            component("activity_result"),
+            component("activity_presence"),
+            component("window_lease"),
+            component("window_flags")
+        ),
         "host.event@1" to ops(pending("snapshot"), pending("subscribe"), pending("unsubscribe")),
         "host.device.state@1" to ops(tool("snapshot", "device_info")),
         "host.scheduler@1" to ops(pending("schedule_once"), pending("schedule_periodic"), pending("cancel"), pending("list")),
@@ -96,11 +105,12 @@ internal object HostPrimitiveGatewayBindings {
 
 internal class SystemHostPrimitiveExecutor(
     context: Context,
-    private val loggingService: HostLoggingService
+    private val loggingService: HostLoggingService,
+    private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 ) {
     private val appContext = context.applicationContext
     private val toolHandler = AIToolHandler.getInstance(appContext)
-    private val kernelAdapter = KernelHostPrimitiveAdapter(appContext)
+    private val kernelAdapter = KernelHostPrimitiveAdapter(appContext, runtimeRole)
     private val documents = AiLimbsDocumentProvider(appContext)
 
     init {
@@ -122,6 +132,8 @@ internal class SystemHostPrimitiveExecutor(
             )
             HostGatewayRouteKind.LOGGING -> true
             HostGatewayRouteKind.KERNEL -> kernelAdapter.isAvailable(primitiveId, binding.operation)
+            HostGatewayRouteKind.COMPONENT_PROXY ->
+                runtimeRole == PluginRuntimeRole.BUSINESS || binding.target?.let { it in toolHandler.getAllToolNames() } == true
             HostGatewayRouteKind.UNBOUND -> false
         }
     }
@@ -173,8 +185,84 @@ internal class SystemHostPrimitiveExecutor(
             )
             HostGatewayRouteKind.LOGGING -> loggingService.invoke(ownerPluginId, normalizedOperation, parameters)
             HostGatewayRouteKind.KERNEL -> kernelAdapter.invoke(ownerPluginId, normalizedId, normalizedOperation, JSONObject(parameters.toString()))
+            HostGatewayRouteKind.COMPONENT_PROXY -> {
+                if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+                    invokeResidentComponentProxy(normalizedOperation, parameters)
+                } else {
+                    val target = binding.target ?: throw PluginInstallException(
+                        "HOST_PRIMITIVE_OPERATION_NOT_BOUND",
+                        "Component proxy operation requires Resident Core: $normalizedId/$normalizedOperation"
+                    )
+                    invokeHostTool(ownerPluginId, target, parameters)
+                }
+            }
             HostGatewayRouteKind.UNBOUND -> error("unreachable")
         }
+    }
+
+    private fun invokeResidentComponentProxy(operation: String, parameters: JSONObject): JSONObject {
+        val brokerKind = when (operation) {
+            "activity_result" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_ACTIVITY_RESULT
+            "activity_presence" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_ACTIVITY_PRESENCE
+            "window_lease" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_WINDOW_LEASE
+            "window_flags" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_WINDOW_FLAGS
+            "broadcast" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_SEND_BROADCAST
+            "invoke" -> when (parameters.optString("type", "activity").trim().lowercase()) {
+                "activity", "" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_START_ACTIVITY
+                "broadcast" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_SEND_BROADCAST
+                "service" -> com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_START_SERVICE
+                else -> throw PluginInstallException("HOST_COMPONENT_TYPE_INVALID", "Unsupported Android component type")
+            }
+            else -> throw PluginInstallException("HOST_COMPONENT_OPERATION_INVALID", "Unsupported component operation: $operation")
+        }
+        val payload = when (brokerKind) {
+            com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_ACTIVITY_PRESENCE,
+            com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_WINDOW_LEASE,
+            com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_WINDOW_FLAGS -> JSONObject(parameters.toString())
+            else -> neutralIntentPayload(parameters)
+        }
+        return com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy.request(brokerKind, payload)
+    }
+
+    private fun neutralIntentPayload(parameters: JSONObject): JSONObject {
+        val payload = JSONObject()
+        fun text(source: String, target: String) {
+            parameters.optString(source).trim().takeIf { it.isNotEmpty() }?.let { payload.put(target, it) }
+        }
+        text("action", "action")
+        if (parameters.has("data_uri")) text("data_uri", "data_uri") else text("uri", "data_uri")
+        if (parameters.has("package_name")) text("package_name", "package_name") else text("package", "package_name")
+        if (parameters.has("mime_type")) text("mime_type", "mime_type") else text("mime", "mime_type")
+        val componentName = parameters.optString("component").trim()
+        if (componentName.isNotEmpty()) {
+            val parts = componentName.split('/', limit = 2)
+            require(parts.size == 2 && parts[0].isNotBlank() && parts[1].isNotBlank()) { "Invalid component name" }
+            payload.put("component_package", parts[0].trim()).put("component_class", parts[1].trim())
+        } else {
+            text("component_package", "component_package")
+            text("component_class", "component_class")
+        }
+        parameters.optJSONArray("categories")?.let { payload.put("categories", JSONArray(it.toString())) }
+        if (parameters.has("flags")) {
+            val raw = parameters.opt("flags")
+            val flags = when (raw) {
+                is Number -> raw.toInt()
+                is JSONArray -> (0 until raw.length()).fold(0) { acc, index -> acc or raw.getInt(index) }
+                is String -> runCatching {
+                    val array = JSONArray(raw)
+                    (0 until array.length()).fold(0) { acc, index -> acc or array.getInt(index) }
+                }.getOrElse { raw.toIntOrNull() ?: 0 }
+                else -> 0
+            }
+            payload.put("flags", flags)
+        }
+        val extras = when (val raw = parameters.opt("extras")) {
+            is JSONObject -> JSONObject(raw.toString())
+            is String -> raw.trim().takeIf { it.isNotEmpty() }?.let(::JSONObject)
+            else -> null
+        }
+        extras?.let { payload.put("extras", it) }
+        return payload
     }
 
     private suspend fun invokeHostTool(ownerPluginId: String, toolName: String, parameters: JSONObject): JSONObject =

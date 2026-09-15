@@ -22,7 +22,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Kernel-only adapters behind Host Gateway V1. No business-specific ABI is added here. */
-internal class KernelHostPrimitiveAdapter(context: Context) {
+internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST) {
     private val appContext = context.applicationContext
     private val gatewayBindings = ConcurrentHashMap<String, ExtensionBindingHandle>()
 
@@ -185,10 +185,28 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
             routeArgs.put("focusKind", focusKind)
             routeArgs.put("focusId", focusId)
         }
-        appContext.startActivity(
-            ToolPkgDesktopWidgetHost.buildLaunchIntent(appContext, routeId, routeArgs.toString())
-        )
+        launchHostRoute(routeId, routeArgs.toString())
         return result.put("route_id", routeId)
+    }
+
+    private fun launchHostRoute(routeId: String, routeArgsJson: String) {
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+            val flags = android.content.Intent.FLAG_ACTIVITY_NEW_TASK or
+                android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP or
+                android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP
+            com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy.request(
+                com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_START_ACTIVITY,
+                JSONObject()
+                    .put("component_package", appContext.packageName)
+                    .put("component_class", "com.ai.assistance.operit.ui.main.MainActivity")
+                    .put("flags", flags)
+                    .put("extras", JSONObject()
+                        .put(ToolPkgDesktopWidgetHost.EXTRA_OPEN_ROUTE_ID, routeId)
+                        .put(ToolPkgDesktopWidgetHost.EXTRA_OPEN_ROUTE_ARGS_JSON, routeArgsJson))
+            )
+            return
+        }
+        appContext.startActivity(ToolPkgDesktopWidgetHost.buildLaunchIntent(appContext, routeId, routeArgsJson))
     }
 
     private suspend fun invokeCapability(ownerPluginId: String, parameters: JSONObject): JSONObject {
@@ -382,10 +400,7 @@ internal class KernelHostPrimitiveAdapter(context: Context) {
                 val navigate = parameters.optBoolean("navigate", true)
                 if (navigate && surface == ToolboxLayoutController.TOOLBOX_SURFACE) {
                     val routeId = ScreenRouteRegistry.routeIdOf(Screen.Toolbox)
-                    val intent = ToolPkgDesktopWidgetHost
-                        .buildLaunchIntent(appContext, routeId, "{}")
-                        .addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
-                    appContext.startActivity(intent)
+                    launchHostRoute(routeId, "{}")
                 }
                 uiLayoutState(controller)
                     .put("started", true)

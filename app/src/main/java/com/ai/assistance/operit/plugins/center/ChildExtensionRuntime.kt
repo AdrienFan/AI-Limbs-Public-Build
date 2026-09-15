@@ -64,6 +64,7 @@ private data class ExtensionManifest(
     val target: ChildExtensionTarget,
     val entry: String,
     val entryClass: String,
+    val presentationEntryClass: String?,
     val requestedCapabilities: Set<String>,
     val roles: Set<String>,
     val integrity: ExtensionIntegritySpec,
@@ -99,12 +100,18 @@ private data class LoadedChildRuntime(
     val nativeLibraryDir: File?
 )
 
+private data class OwnedPresentationCommandHandler(
+    val token: String,
+    val handler: ChildPresentationCommandHandler
+)
+
 private data class ActiveChild(
     // Non-null for a fully mounted child. A failed partial mount may still own capability /
-    // discovery / binding / coroutine resources and is deliberately pinned here until cleanup.
+    // discovery / binding / presentation-command / coroutine resources and is deliberately pinned here until cleanup.
     val handle: ChildExtensionHandle?,
     val bindingHandle: AutoCloseable?,
     val discoveryHandle: AutoCloseable?,
+    val presentationCommandHandle: AutoCloseable?,
     val capabilityHandles: List<AutoCloseable>,
     val scope: CoroutineScope
 )
@@ -131,6 +138,7 @@ internal class ChildExtensionRuntime(
     // to the ClassLoader that opened them, so child disable/enable must remount on the same loader.
     private val loadedRuntimes = ConcurrentHashMap<String, LoadedChildRuntime>()
     private val active = ConcurrentHashMap<String, ActiveChild>()
+    private val presentationCommandHandlers = ConcurrentHashMap<String, OwnedPresentationCommandHandler>()
     private val mutableSnapshots = MutableStateFlow<List<ChildExtensionSnapshot>>(emptyList())
     private val mutableBackupSnapshots = MutableStateFlow<List<ChildExtensionBackupSnapshot>>(emptyList())
 
@@ -374,6 +382,31 @@ internal class ChildExtensionRuntime(
     internal fun loggingBackupSnapshots(): List<ChildExtensionBackupSnapshot> = mutableBackupSnapshots.value.toList()
     internal fun loggingUiContributions(): List<ChildUiContributionSnapshot> = mutableUiContributions.value.toList()
 
+    /** Neutral descriptors for Host-only child presentation code. Business ownership stays here. */
+    internal fun residentPresentationDescriptors(): JSONArray = JSONArray().apply {
+        records.values
+            .filter { record ->
+                record.enabled &&
+                    record.lifecycle == ChildExtensionLifecycle.ACTIVE &&
+                    active.containsKey(record.manifest.extensionId) &&
+                    !record.manifest.presentationEntryClass.isNullOrBlank()
+            }
+            .sortedBy { it.manifest.extensionId }
+            .forEach { record ->
+                val manifest = record.manifest
+                put(
+                    JSONObject()
+                        .put("extension_id", manifest.extensionId)
+                        .put("version", manifest.version)
+                        .put("parent_plugin_id", manifest.target.parentPluginId)
+                        .put("point", manifest.target.point)
+                        .put("api_version", manifest.target.apiVersion)
+                        .put("runtime_entry", manifest.entry)
+                        .put("presentation_entry_class", manifest.presentationEntryClass)
+                )
+            }
+    }
+
     private fun snapshotsInternal(): StateFlow<List<ChildExtensionSnapshot>> = mutableSnapshots.asStateFlow()
 
     private fun snapshotsForPointInternal(point: String): StateFlow<List<ChildExtensionSnapshot>> =
@@ -490,6 +523,7 @@ internal class ChildExtensionRuntime(
         val childScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
         var bindingHandle: AutoCloseable? = null
         var discoveryHandle: AutoCloseable? = null
+        var presentationCommandHandle: AutoCloseable? = null
         val childCapabilityHandles = mutableListOf<AutoCloseable>()
         var mountedHandle: ChildExtensionHandle? = null
         try {
@@ -537,6 +571,26 @@ internal class ChildExtensionRuntime(
                     )
                     val registration = registerChildCapability(extensionId, ownedSpec)
                     childCapabilityHandles += registration
+                    return registration
+                }
+
+                override fun registerPresentationCommandHandler(
+                    handler: ChildPresentationCommandHandler
+                ): AutoCloseable {
+                    check(presentationCommandHandle == null) {
+                        "Child extension may register only one presentation command handler"
+                    }
+                    val token = UUID.randomUUID().toString()
+                    val candidate = OwnedPresentationCommandHandler(token, handler)
+                    check(presentationCommandHandlers.putIfAbsent(extensionId, candidate) == null) {
+                        "Child presentation command handler is already active: $extensionId"
+                    }
+                    val registration = AutoCloseable {
+                        presentationCommandHandlers.computeIfPresent(extensionId) { _, current ->
+                            if (current.token == token) null else current
+                        }
+                    }
+                    presentationCommandHandle = registration
                     return registration
                 }
 
@@ -627,6 +681,7 @@ internal class ChildExtensionRuntime(
                 mountedHandle,
                 bindingHandle,
                 discoveryHandle,
+                presentationCommandHandle,
                 childCapabilityHandles.toList(),
                 childScope
             )
@@ -643,6 +698,7 @@ internal class ChildExtensionRuntime(
                 mountedHandle,
                 bindingHandle,
                 discoveryHandle,
+                presentationCommandHandle,
                 childCapabilityHandles.toList(),
                 childScope
             )
@@ -757,6 +813,8 @@ internal class ChildExtensionRuntime(
             try { handle?.close() }
             catch (error: Exception) { failures += error }
         }
+        // Close presentation ingress first so no new Host UI command can enter while business resources retire.
+        close(mounted.presentationCommandHandle)
         mounted.capabilityHandles.asReversed().forEach(::close)
         close(mounted.discoveryHandle)
         close(mounted.bindingHandle)
@@ -802,6 +860,30 @@ internal class ChildExtensionRuntime(
     private fun publishUiContributions() {
         mutableUiContributions.value = uiContributions.values
             .sortedWith(compareBy({ it.target.parentPluginId }, { it.screenId }, { it.componentId }, { it.slotId }, { it.extensionId }, { it.contributionId }))
+    }
+
+    internal suspend fun invokePresentationCommand(
+        extensionId: String,
+        command: String,
+        parameters: JSONObject
+    ): JSONObject = lifecycleLock(extensionId).withLock {
+        val normalizedCommand = command.trim().lowercase()
+        require(normalizedCommand.matches(Regex("[a-z0-9][a-z0-9_.-]{0,127}"))) {
+            "Invalid child presentation command: $command"
+        }
+        val record = records[extensionId]
+            ?: throw PluginInstallException("CHILD_PRESENTATION_OWNER_UNKNOWN", "Unknown child: $extensionId")
+        check(record.enabled && record.lifecycle == ChildExtensionLifecycle.ACTIVE && active.containsKey(extensionId)) {
+            "Child presentation owner is not ACTIVE: $extensionId"
+        }
+        val registered = presentationCommandHandlers[extensionId]
+            ?: throw PluginInstallException(
+                "CHILD_PRESENTATION_COMMAND_UNAVAILABLE",
+                "Child has no active presentation command handler: $extensionId"
+            )
+        val raw = registered.handler.invoke(normalizedCommand, parameters.toString())
+        recordUse(extensionId)
+        runCatching { JSONObject(raw) }.getOrElse { JSONObject().put("result_json", raw) }
     }
 
     private fun lifecycleLock(extensionId: String): Mutex =
@@ -878,7 +960,10 @@ internal class ChildExtensionRuntime(
         val runtime = root.getJSONObject("runtime")
         require(runtime.getString("kind") == "android_child") { "Child runtime.kind must be android_child" }
         val entry = safePath(runtime.getString("entry")); require(entry.lowercase().endsWith(".apk")) { "Child runtime entry must be APK" }
-        val entryClass = runtime.getJSONObject("config").getString("entry_class").trim(); require(CLASS_PATTERN.matches(entryClass)) { "Invalid entry_class" }
+        val runtimeConfig = runtime.getJSONObject("config")
+        val entryClass = runtimeConfig.getString("entry_class").trim(); require(CLASS_PATTERN.matches(entryClass)) { "Invalid entry_class" }
+        val presentationEntryClass = runtimeConfig.optString("presentation_entry_class").trim().ifBlank { null }
+        presentationEntryClass?.let { require(CLASS_PATTERN.matches(it)) { "Invalid presentation_entry_class" } }
         val requested = root.optJSONObject("permissions")?.optJSONArray("host_capabilities")?.strings() ?: emptySet()
         requested.forEach { require(HOST_CAPABILITY_ID_PATTERN.matches(it)) { "Invalid host capability id: $it" } }
         val roles = root.optJSONArray("roles")?.strings() ?: emptySet()
@@ -914,7 +999,7 @@ internal class ChildExtensionRuntime(
 
         return ExtensionManifest(
             id, version, name, description, ChildExtensionTarget(parent, point, api),
-            entry, entryClass, requested, roles,
+            entry, entryClass, presentationEntryClass, requested, roles,
             ExtensionIntegritySpec(integrityAlgorithm, integrityEntries),
             ExtensionSignatureSpec(signatureAlgorithm, signerId, signatureEntry),
             raw

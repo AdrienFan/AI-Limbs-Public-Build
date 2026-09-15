@@ -32,11 +32,12 @@ internal class PluginHostCapabilityRegistry(
     private val usageStore: PluginUsageStore? = null,
     private val uiRegistry: PluginUiRegistry? = null,
     private val pagePresentationRegistry: PluginPagePresentationRegistry? = null,
-    private val loggingService: HostLoggingService? = context?.let { HostLoggingService(it, PluginStore.fromContext(it)) }
+    private val loggingService: HostLoggingService? = context?.let { HostLoggingService(it, PluginStore.fromContext(it)) },
+    private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 ) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
-    internal constructor() : this(null, null, null, null, null, null)
+    internal constructor() : this(null, null, null, null, null, null, PluginRuntimeRole.LEGACY_HOST)
     private val appContext = context?.applicationContext
-    private val systemExecutor = context?.let { SystemHostPrimitiveExecutor(it, requireNotNull(loggingService)) }
+    private val systemExecutor = context?.let { SystemHostPrimitiveExecutor(it, requireNotNull(loggingService), runtimeRole) }
 
     private data class OwnedCapability(
         val token: String,
@@ -240,6 +241,31 @@ internal class PluginHostCapabilityRegistry(
                 "UI capability is not owned by $ownerPluginId: $capabilityId"
             )
         }
+    }
+
+    /**
+     * Explicit Host UI path for an already-active owner. This intentionally does not enter AI/Bridge
+     * policy receipts: the caller is a signed presentation entry and ownership is checked again here.
+     */
+    internal suspend fun invokeOwnedUiDirect(
+        ownerPluginId: String,
+        capabilityId: String,
+        parameters: JSONObject = JSONObject()
+    ): JSONObject {
+        val normalized = capabilityId.trim().lowercase()
+        val entry = capabilities.entries.firstOrNull { (id, candidate) ->
+            id == normalized || candidate.spec.invokeAliases.any { it.trim().lowercase() == normalized }
+        } ?: throw PluginInstallException(
+            "CAPABILITY_NOT_ACTIVE",
+            "Capability is not active: $capabilityId"
+        )
+        if (entry.value.ownerPluginId != ownerPluginId.trim()) {
+            throw PluginInstallException(
+                "UI_CAPABILITY_OWNER_MISMATCH",
+                "UI capability is not owned by $ownerPluginId: $capabilityId"
+            )
+        }
+        return executePluginDirect(entry.key, parameters)
     }
 
     suspend fun invokePlugin(capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject {

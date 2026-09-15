@@ -34,6 +34,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.center.PluginHostUiProxyRuntimeHolder
 import com.ai.assistance.operit.plugins.system.SystemPluginPackageValidator
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolException
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
@@ -156,8 +157,13 @@ fun PluginBootstrapScreen(onInstalled: () -> Unit = {}) {
                             busy = true
                             scope.launch {
                                 try {
-                                    withContext(Dispatchers.IO) {
-                                        PluginPlatformKernel.systemPlugins.installFirstTrustedFromUri(uri.toString(), name)
+                                    val proxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+                                    if (proxy != null) {
+                                        proxy.installPluginCenterRendererFromUri(uri.toString(), name)
+                                    } else {
+                                        withContext(Dispatchers.IO) {
+                                            PluginPlatformKernel.systemPlugins.installFirstTrustedFromUri(uri.toString(), name)
+                                        }
                                     }
                                     onInstalled()
                                 } catch (error: SystemPluginProtocolException) {

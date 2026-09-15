@@ -72,6 +72,9 @@ internal class ResidentUiProxyClient(
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val started = AtomicBoolean(false)
     private val revision = AtomicLong(-1L)
+    private val hostInstanceId = UUID.randomUUID().toString()
+    private val hostGeneration = AtomicLong(0L)
+    private val hostAttachLock = Any()
     private val lastSnapshot = AtomicReference(JSONObject())
     private val providerDirectory = ResidentProviderDirectory(this)
     private val childControl = ResidentChildControl(this)
@@ -80,6 +83,8 @@ internal class ResidentUiProxyClient(
     @Volatile private var developerMode = false
     @Volatile private var developerDiscovery = false
     private val componentExecutor = ResidentHostComponentExecutor(appContext, this)
+    private val childPresentationRuntime = ResidentChildPresentationRuntime(appContext, this, providerDirectory)
+    private val presentationRuntime = ResidentPluginPresentationRuntime(appContext, this, providerDirectory)
 
     private lateinit var systemPluginController: SystemPluginController
 
@@ -107,12 +112,21 @@ internal class ResidentUiProxyClient(
                     throw error
                 } catch (error: Throwable) {
                     revision.set(-1L)
+                    hostGeneration.set(0L)
                     com.ai.assistance.operit.util.AppLogger.w(TAG, "Resident UI proxy temporarily disconnected", error)
                     delay(RETRY_MS)
                 }
             }
         }
     }
+
+    suspend fun installPluginCenterRendererFromUri(
+        uriText: String,
+        originalName: String
+    ): com.ai.assistance.operit.plugins.system.SystemPluginValidationResult =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            systemPluginController.installFirstTrustedFromUri(uriText, originalName)
+        }
 
     fun updateAttachment() {
         // Session identity is checked by PluginHostUiProxyRuntime before this call. A refreshed attach
@@ -121,11 +135,11 @@ internal class ResidentUiProxyClient(
 
     suspend fun command(payload: JSONObject): JSONObject =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            ResidentUiProxyWire.request("command", sessionId(), JSONObject(payload.toString()))
+            wireRequest("command", JSONObject(payload.toString()))
         }
 
     fun commandBlocking(payload: JSONObject): JSONObject =
-        ResidentUiProxyWire.request("command", sessionId(), JSONObject(payload.toString()))
+        wireRequest("command", JSONObject(payload.toString()))
 
     suspend fun invokeUiCapability(
         ownerPluginId: String,
@@ -174,11 +188,37 @@ internal class ResidentUiProxyClient(
         "UI proxy attachment has no Resident Core session"
     }
 
-    private fun refresh(force: Boolean) {
+    private fun ensureHostGeneration(): Long = synchronized(hostAttachLock) {
+        val current = hostGeneration.get()
+        if (current > 0L) return@synchronized current
+        val attached = ResidentUiProxyWire.request(
+            operation = "attach",
+            sessionId = sessionId(),
+            hostInstanceId = hostInstanceId,
+            hostGeneration = -1L
+        )
+        val generation = attached.getLong("host_generation")
+        check(generation > 0L) { "Resident UI proxy returned invalid Host generation" }
+        hostGeneration.set(generation)
+        generation
+    }
+
+    private fun wireRequest(operation: String, payload: JSONObject = JSONObject()): JSONObject {
+        val generation = ensureHostGeneration()
+        return ResidentUiProxyWire.request(
+            operation = operation,
+            sessionId = sessionId(),
+            hostInstanceId = hostInstanceId,
+            hostGeneration = generation,
+            payload = JSONObject(payload.toString())
+        )
+    }
+
+    private suspend fun refresh(force: Boolean) {
         val result = if (force) {
-            ResidentUiProxyWire.request("snapshot", sessionId())
+            wireRequest("snapshot")
         } else {
-            ResidentUiProxyWire.request("events", sessionId(), JSONObject().put("since_revision", revision.get()))
+            wireRequest("events", JSONObject().put("since_revision", revision.get()))
         }
         val nextRevision = result.optLong("revision", revision.get())
         revision.set(nextRevision)
@@ -188,7 +228,7 @@ internal class ResidentUiProxyClient(
         applySnapshot(snapshot)
     }
 
-    private fun applySnapshot(snapshot: JSONObject) {
+    private suspend fun applySnapshot(snapshot: JSONObject) {
         val tiles = snapshot.getJSONArray("tiles").objects().map { item ->
             PluginHomeTileSpec(
                 ownerPluginId = item.getString("owner_plugin_id"), id = item.getString("id"),
@@ -240,6 +280,10 @@ internal class ResidentUiProxyClient(
             snapshot.getJSONArray("children"), snapshot.getJSONArray("child_backups"),
             snapshot.getJSONArray("child_ui_contributions")
         )
+        // Child presentation providers must exist before parent presentation entries reconcile so
+        // a parent such as System Environment Center can observe its Host-local Ubuntu display.
+        childPresentationRuntime.reconcile(snapshot.optJSONArray("child_presentations") ?: JSONArray())
+        presentationRuntime.reconcile(snapshot.optJSONArray("plugin_presentations") ?: JSONArray())
         developerMode = snapshot.optBoolean("developer_mode", false)
         developerDiscovery = snapshot.optBoolean("developer_discovery_enabled", false)
         val primitives = mutableListOf<SystemHostPrimitiveDescriptor>()
@@ -279,7 +323,7 @@ internal class ResidentUiProxyClient(
     }
 
     internal fun componentRequest(operation: String, payload: JSONObject): JSONObject =
-        ResidentUiProxyWire.request(operation, sessionId(), payload)
+        wireRequest(operation, payload)
 
     internal fun completeComponentAsync(requestId: String, result: JSONObject) {
         scope.launch {
@@ -369,10 +413,14 @@ private object ResidentPresentationLocalServicePublisher : SystemPluginServicePu
     ): AutoCloseable = AutoCloseable { }
 }
 
-private class ResidentProviderDirectory(
+internal class ResidentProviderDirectory(
     private val client: ResidentUiProxyClient
 ) : SystemPluginProviderDirectoryV2 {
+    private data class LocalOwned(val token: String, val binding: SystemPluginProviderBindingV2)
+
     private val state = MutableStateFlow<Map<String, SystemPluginProviderBindingV2>>(emptyMap())
+    private val remote = AtomicReference<Map<String, SystemPluginProviderBindingV2>>(emptyMap())
+    private val localPages = ConcurrentHashMap<String, LocalOwned>()
     private val proxies = ConcurrentHashMap<String, ResidentUiStateProviderProxy>()
 
     fun update(array: JSONArray) {
@@ -388,7 +436,47 @@ private class ResidentProviderDirectory(
             next[id] = SystemPluginProviderBindingV2(owner, id, item.optJSONObject("metadata")?.stringMap().orEmpty(), proxy)
         }
         proxies.keys.retainAll(next.keys)
-        state.value = next
+        remote.set(next)
+        publish()
+    }
+
+    fun registerLocalPageProvider(
+        ownerPluginId: String,
+        id: String,
+        provider: com.ai.limbs.plugin.runtime.InProcessPageProvider,
+        metadata: Map<String, String>
+    ): AutoCloseable = registerLocalPresentationProvider(ownerPluginId, id, provider, metadata)
+
+    fun registerLocalPresentationProvider(
+        ownerId: String,
+        id: String,
+        payload: Any,
+        metadata: Map<String, String>
+    ): AutoCloseable {
+        val normalized = id.trim()
+        require(ownerId.isNotBlank() && normalized.isNotEmpty())
+        check(normalized !in remote.get()) { "Host-local presentation provider conflicts with Core provider: $normalized" }
+        val token = UUID.randomUUID().toString()
+        val candidate = LocalOwned(token, SystemPluginProviderBindingV2(ownerId, normalized, metadata.toMap(), payload))
+        check(localPages.putIfAbsent(normalized, candidate) == null) { "Host-local presentation provider already registered: $normalized" }
+        publish()
+        return AutoCloseable {
+            var removed = false
+            localPages.computeIfPresent(normalized) { _, current ->
+                if (current.token == token) { removed = true; null } else current
+            }
+            if (removed) publish()
+        }
+    }
+
+    private fun publish() {
+        val merged = linkedMapOf<String, SystemPluginProviderBindingV2>()
+        remote.get().toSortedMap().forEach { (id, binding) -> merged[id] = binding }
+        localPages.toSortedMap().forEach { (id, owned) ->
+            check(id !in merged) { "Host-local presentation provider conflicts with Core provider: $id" }
+            merged[id] = owned.binding
+        }
+        state.value = merged
     }
 
     override fun resolve(id: String): SystemPluginProviderBindingV2? = state.value[id.trim()]
@@ -494,7 +582,12 @@ private class ResidentHostComponentExecutor(
         result.optJSONArray("requests")?.objects().orEmpty().forEach { request ->
             val id = request.getString("request_id")
             val outcome: JSONObject? = try {
-                execute(id, request.getString("kind"), request.optJSONObject("payload") ?: JSONObject())
+                execute(
+                    id,
+                    request.getString("kind"),
+                    request.optJSONObject("payload") ?: JSONObject(),
+                    request.optLong("deadline_elapsed_ms", 0L)
+                )
             } catch (error: Throwable) {
                 JSONObject().put("ok", false).put("error", error.toString().take(1024))
             }
@@ -510,7 +603,12 @@ private class ResidentHostComponentExecutor(
     }
 
     /** null means an asynchronous ActivityResult was launched and will complete later. */
-    private fun execute(requestId: String, kind: String, payload: JSONObject): JSONObject? {
+    private fun execute(
+        requestId: String,
+        kind: String,
+        payload: JSONObject,
+        deadlineElapsedMs: Long
+    ): JSONObject? {
         return when (kind) {
         ResidentComponentProxyBroker.KIND_ACTIVITY_PRESENCE -> {
             val activity = ActivityLifecycleManager.getCurrentActivity()
@@ -525,9 +623,20 @@ private class ResidentHostComponentExecutor(
             JSONObject().put("ok", true).put("window_lease_id", leaseId)
         }
         ResidentComponentProxyBroker.KIND_WINDOW_FLAGS -> {
-            val leaseId = payload.optString("window_lease_id")
-            val window = windowLeases[leaseId]?.get() ?: ActivityLifecycleManager.getCurrentActivity()?.window
-                ?: return JSONObject().put("ok", false).put("error", "WINDOW_LEASE_UNAVAILABLE")
+            val leaseId = payload.optString("window_lease_id").trim()
+            val currentWindow = ActivityLifecycleManager.getCurrentActivity()?.window
+                ?: return JSONObject().put("ok", false).put("error", "NO_FOREGROUND_ACTIVITY")
+            val window = if (leaseId.isNotBlank()) {
+                val leased = windowLeases[leaseId]?.get()
+                    ?: return JSONObject().put("ok", false).put("error", "WINDOW_LEASE_UNAVAILABLE")
+                if (leased !== currentWindow) {
+                    windowLeases.remove(leaseId)
+                    return JSONObject().put("ok", false).put("error", "WINDOW_LEASE_STALE")
+                }
+                leased
+            } else {
+                currentWindow
+            }
             val addFlags = payload.optInt("add_flags", 0)
             val clearFlags = payload.optInt("clear_flags", 0)
             runOnUiThread {
@@ -543,12 +652,27 @@ private class ResidentHostComponentExecutor(
             runOnUiThread { activity.startActivity(intent) }
             JSONObject().put("ok", true)
         }
-        ResidentComponentProxyBroker.KIND_ACTIVITY_RESULT -> launchActivityResult(requestId, payload)
+        ResidentComponentProxyBroker.KIND_SEND_BROADCAST -> {
+            appContext.sendBroadcast(buildNeutralIntent(payload))
+            JSONObject().put("ok", true)
+        }
+        ResidentComponentProxyBroker.KIND_START_SERVICE -> {
+            val intent = buildNeutralIntent(payload)
+            require(intent.component != null) { "Service component must be explicit" }
+            val started = appContext.startService(intent)
+            JSONObject().put("ok", true).put("component", started?.flattenToString() ?: JSONObject.NULL)
+        }
+        ResidentComponentProxyBroker.KIND_ACTIVITY_RESULT ->
+            launchActivityResult(requestId, payload, deadlineElapsedMs)
         else -> JSONObject().put("ok", false).put("error", "UNKNOWN_COMPONENT_KIND")
         }
     }
 
-    private fun launchActivityResult(requestId: String, payload: JSONObject): JSONObject? {
+    private fun launchActivityResult(
+        requestId: String,
+        payload: JSONObject,
+        deadlineElapsedMs: Long
+    ): JSONObject? {
         val activity = ActivityLifecycleManager.getCurrentActivity() as? ComponentActivity
             ?: return JSONObject().put("ok", false).put("error", "NO_COMPONENT_ACTIVITY")
         val intent = buildNeutralIntent(payload)
@@ -566,6 +690,10 @@ private class ResidentHostComponentExecutor(
             launcherRef.set(launcher)
             try {
                 launcher.launch(intent)
+                val remainingMs = (deadlineElapsedMs - android.os.SystemClock.elapsedRealtime()).coerceAtLeast(1L)
+                activity.window.decorView.postDelayed({
+                    launcherRef.getAndSet(null)?.unregister()
+                }, remainingMs)
             } catch (error: Throwable) {
                 launcherRef.getAndSet(null)?.unregister()
                 throw error

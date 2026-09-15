@@ -11,6 +11,7 @@ import java.io.DataOutputStream
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.Executors
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
@@ -56,8 +57,11 @@ internal object ResidentUiProxyWire {
     fun request(
         operation: String,
         sessionId: String,
+        hostInstanceId: String,
+        hostGeneration: Long,
         payload: JSONObject = JSONObject()
     ): JSONObject {
+        require(hostInstanceId.length in 1..64) { "Invalid UI proxy Host instance ID" }
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
             // Android 16 real-device invariant: connect before assigning soTimeout.
@@ -71,6 +75,8 @@ internal object ResidentUiProxyWire {
                     .put("protocol", VERSION)
                     .put("request_id", requestId)
                     .put("session_id", sessionId)
+                    .put("host_instance_id", hostInstanceId)
+                    .put("host_generation", hostGeneration)
                     .put("operation", operation)
                     .put("payload", JSONObject(payload.toString()))
             )
@@ -80,7 +86,11 @@ internal object ResidentUiProxyWire {
             check(response.getString("session_id") == sessionId) { "UI proxy Core session changed" }
             check(response.getInt("core_uid") == peer.uid) { "UI proxy Core UID mismatch" }
             check(response.getInt("core_pid") == peer.pid) { "UI proxy Core PID mismatch" }
-            check(response.getBoolean("success")) { response.optString("error", "UI proxy request failed") }
+            val success = response.getBoolean("success")
+            if (success) {
+                check(response.getString("host_instance_id") == hostInstanceId) { "UI proxy Host instance changed" }
+            }
+            check(success) { response.optString("error", "UI proxy request failed") }
             return response.optJSONObject("result") ?: JSONObject()
         }
     }
@@ -103,7 +113,7 @@ internal data class ResidentComponentProxyRequest(
 internal class ResidentComponentProxyBroker {
     private data class Pending(
         val request: ResidentComponentProxyRequest,
-        val claimed: AtomicBoolean = AtomicBoolean(false),
+        val claimedByHost: AtomicReference<String?> = AtomicReference(null),
         val result: AtomicReference<JSONObject?> = AtomicReference(null),
         val latch: CountDownLatch = CountDownLatch(1)
     )
@@ -139,12 +149,13 @@ internal class ResidentComponentProxyBroker {
         }
     }
 
-    fun poll(maxItems: Int = 8): JSONArray {
+    fun poll(hostInstanceId: String, maxItems: Int = 8): JSONArray {
+        require(hostInstanceId.isNotBlank()) { "Host instance ID is required for component polling" }
         val now = android.os.SystemClock.elapsedRealtime()
         val result = JSONArray()
         pending.values
             .asSequence()
-            .filter { it.request.deadlineElapsedMs > now && it.claimed.compareAndSet(false, true) }
+            .filter { it.request.deadlineElapsedMs > now && it.claimedByHost.compareAndSet(null, hostInstanceId) }
             .take(maxItems.coerceIn(1, 32))
             .forEach { entry ->
                 val request = entry.request
@@ -159,24 +170,45 @@ internal class ResidentComponentProxyBroker {
         return result
     }
 
-    fun complete(requestId: String, result: JSONObject) {
-        val entry = pending[requestId] ?: return
-        if (entry.result.compareAndSet(null, JSONObject(result.toString()))) {
-            entry.latch.countDown()
+    fun complete(hostInstanceId: String, requestId: String, result: JSONObject): Boolean {
+        val entry = pending[requestId] ?: return false
+        if (entry.claimedByHost.get() != hostInstanceId) return false
+        if (!entry.result.compareAndSet(null, JSONObject(result.toString()))) return false
+        entry.latch.countDown()
+        return true
+    }
+
+    fun cancelClaims(hostInstanceId: String, reason: String) {
+        if (hostInstanceId.isBlank()) return
+        pending.values.forEach { entry ->
+            if (entry.claimedByHost.get() == hostInstanceId &&
+                entry.result.compareAndSet(null, JSONObject().put("ok", false).put("error", reason))) {
+                entry.latch.countDown()
+            }
+        }
+    }
+
+    fun cancelAll(reason: String) {
+        pending.values.forEach { entry ->
+            if (entry.result.compareAndSet(null, JSONObject().put("ok", false).put("error", reason))) {
+                entry.latch.countDown()
+            }
         }
     }
 
     companion object {
         const val KIND_ACTIVITY_RESULT = "activity_result"
         const val KIND_START_ACTIVITY = "start_activity"
+        const val KIND_SEND_BROADCAST = "send_broadcast"
+        const val KIND_START_SERVICE = "start_service"
         const val KIND_WINDOW_FLAGS = "window_flags"
         const val KIND_WINDOW_LEASE = "window_lease"
         const val KIND_ACTIVITY_PRESENCE = "activity_presence"
         private const val DEFAULT_TIMEOUT_MS = 15_000L
         private const val ACTIVITY_RESULT_TIMEOUT_MS = 120_000L
         val SUPPORTED_KINDS = setOf(
-            KIND_ACTIVITY_RESULT, KIND_START_ACTIVITY, KIND_WINDOW_FLAGS,
-            KIND_WINDOW_LEASE, KIND_ACTIVITY_PRESENCE
+            KIND_ACTIVITY_RESULT, KIND_START_ACTIVITY, KIND_SEND_BROADCAST, KIND_START_SERVICE,
+            KIND_WINDOW_FLAGS, KIND_WINDOW_LEASE, KIND_ACTIVITY_PRESENCE
         )
     }
 }
@@ -211,7 +243,13 @@ internal class ResidentUiProxyServer(
 ) : AutoCloseable {
     private val running = AtomicBoolean(false)
     private val revision = AtomicLong(0L)
+    private val activeHostInstanceId = AtomicReference<String?>(null)
+    private val retiredHostInstanceIds = ConcurrentHashMap.newKeySet<String>()
+    private val hostGeneration = AtomicLong(0L)
     private val lastSnapshotText = AtomicReference<String?>(null)
+    private val clients = Executors.newCachedThreadPool { runnable ->
+        Thread(runnable, "resident-ui-proxy-client").apply { isDaemon = true }
+    }
     private var server: LocalServerSocket? = null
     private var thread: Thread? = null
 
@@ -229,54 +267,96 @@ internal class ResidentUiProxyServer(
     private fun serve(socket: LocalServerSocket) {
         while (running.get()) {
             val client = try { socket.accept() } catch (_: Throwable) { break }
-            client.use { local ->
-                var requestId = ""
-                try {
-                    local.soTimeout = ResidentUiProxyWire.TIMEOUT_MS
-                    val peer = local.peerCredentials
-                    check(peer.uid == Process.myUid()) { "UI proxy client UID mismatch" }
-                    val request = ResidentUiProxyWire.read(local)
-                    requestId = request.getString("request_id")
-                    require(requestId.length in 1..64) { "Invalid UI proxy request ID" }
-                    require(request.getInt("protocol") == ResidentUiProxyWire.VERSION)
-                    check(request.getString("session_id") == sessionId) { "Stale UI proxy Core session" }
-                    val operation = request.getString("operation")
-                    val payload = request.optJSONObject("payload") ?: JSONObject()
-                    val result = when (operation) {
-                        "snapshot" -> snapshotResult(force = true, sinceRevision = -1L)
-                        "events" -> snapshotResult(
-                            force = false,
-                            sinceRevision = payload.optLong("since_revision", -1L)
-                        )
-                        "command" -> runBlocking(Dispatchers.IO) {
-                            PluginPlatformKernel.dispatchResidentUiProxyCommand(JSONObject(payload.toString()))
-                        }
-                        "component_poll" -> JSONObject().put("requests", componentBroker.poll(payload.optInt("max_items", 8)))
-                        "component_result" -> {
-                            val componentRequestId = payload.getString("request_id")
-                            componentBroker.complete(
-                                componentRequestId,
-                                payload.optJSONObject("result") ?: JSONObject().put("ok", false)
-                            )
-                            JSONObject().put("accepted", true)
-                        }
-                        else -> error("Unsupported UI proxy operation: $operation")
+            try {
+                clients.execute { handleClient(client) }
+            } catch (error: Throwable) {
+                runCatching { client.close() }
+                if (running.get()) throw error
+            }
+        }
+    }
+
+    private fun handleClient(local: LocalSocket) {
+        local.use { socket ->
+            var requestId = ""
+            try {
+                socket.soTimeout = ResidentUiProxyWire.TIMEOUT_MS
+                val peer = socket.peerCredentials
+                check(peer.uid == Process.myUid()) { "UI proxy client UID mismatch" }
+                val request = ResidentUiProxyWire.read(socket)
+                requestId = request.getString("request_id")
+                require(requestId.length in 1..64) { "Invalid UI proxy request ID" }
+                require(request.getInt("protocol") == ResidentUiProxyWire.VERSION)
+                check(request.getString("session_id") == sessionId) { "Stale UI proxy Core session" }
+                val hostInstanceId = request.getString("host_instance_id").trim()
+                require(hostInstanceId.length in 1..64) { "Invalid UI proxy Host instance ID" }
+                val operation = request.getString("operation")
+                val payload = request.optJSONObject("payload") ?: JSONObject()
+                if (operation != "attach") {
+                    check(activeHostInstanceId.get() == hostInstanceId) { "Stale UI proxy Host instance" }
+                    check(request.getLong("host_generation") == hostGeneration.get()) {
+                        "Stale UI proxy Host generation"
                     }
-                    ResidentUiProxyWire.write(local, response(requestId, true, result, null))
-                } catch (error: Throwable) {
-                    runCatching {
-                        ResidentUiProxyWire.write(
-                            local,
-                            response(requestId.take(64), false, null, error.toString().take(1024))
-                        )
+                }
+                val result = when (operation) {
+                    "attach" -> attachHost(hostInstanceId)
+                    "snapshot" -> snapshotResult(force = true, sinceRevision = -1L)
+                    "events" -> snapshotResult(
+                        force = false,
+                        sinceRevision = payload.optLong("since_revision", -1L)
+                    )
+                    "command" -> runBlocking(Dispatchers.IO) {
+                        PluginPlatformKernel.dispatchResidentUiProxyCommand(JSONObject(payload.toString()))
                     }
+                    "component_poll" -> JSONObject().put(
+                        "requests",
+                        componentBroker.poll(hostInstanceId, payload.optInt("max_items", 8))
+                    )
+                    "component_result" -> {
+                        val componentRequestId = payload.getString("request_id")
+                        val accepted = componentBroker.complete(
+                            hostInstanceId,
+                            componentRequestId,
+                            payload.optJSONObject("result") ?: JSONObject().put("ok", false)
+                        )
+                        check(accepted) { "Stale or unknown Host component result: $componentRequestId" }
+                        JSONObject().put("accepted", true)
+                    }
+                    else -> error("Unsupported UI proxy operation: $operation")
+                }
+                ResidentUiProxyWire.write(socket, response(requestId, true, result, null))
+            } catch (error: Throwable) {
+                runCatching {
+                    ResidentUiProxyWire.write(
+                        socket,
+                        response(requestId.take(64), false, null, error.toString().take(1024))
+                    )
                 }
             }
         }
     }
 
+    private fun attachHost(hostInstanceId: String): JSONObject = synchronized(this) {
+        val previous = activeHostInstanceId.get()
+        if (previous == hostInstanceId) {
+            return@synchronized JSONObject()
+                .put("host_generation", hostGeneration.get())
+                .put("replaced_host", false)
+        }
+        check(hostInstanceId !in retiredHostInstanceIds) { "Retired UI proxy Host instance cannot reattach" }
+        activeHostInstanceId.set(hostInstanceId)
+        val generation = hostGeneration.incrementAndGet()
+        if (!previous.isNullOrBlank()) {
+            retiredHostInstanceIds += previous
+            componentBroker.cancelClaims(previous, "HOST_INSTANCE_REPLACED")
+        }
+        JSONObject()
+            .put("host_generation", generation)
+            .put("replaced_host", !previous.isNullOrBlank())
+    }
+
     private fun snapshotResult(force: Boolean, sinceRevision: Long): JSONObject {
-        val snapshot = PluginPlatformKernel.residentUiProxySnapshot()
+        val snapshot = runBlocking(Dispatchers.IO) { PluginPlatformKernel.residentUiProxySnapshot() }
         val text = snapshot.toString()
         val previous = lastSnapshotText.getAndSet(text)
         if (previous != text) revision.incrementAndGet()
@@ -293,6 +373,8 @@ internal class ResidentUiProxyServer(
             .put("protocol", ResidentUiProxyWire.VERSION)
             .put("request_id", requestId)
             .put("session_id", sessionId)
+            .put("host_instance_id", activeHostInstanceId.get() ?: JSONObject.NULL)
+            .put("host_generation", hostGeneration.get())
             .put("core_pid", Process.myPid())
             .put("core_uid", Process.myUid())
             .put("success", success)
@@ -301,8 +383,10 @@ internal class ResidentUiProxyServer(
 
     override fun close() {
         if (!running.compareAndSet(true, false)) return
+        componentBroker.cancelAll("HOST_COMPONENT_PROXY_CLOSED")
         ResidentHostComponentProxy.unbind(componentBroker)
         runCatching { server?.close() }
+        clients.shutdownNow()
         runCatching { thread?.join(1_000L) }
         server = null
         thread = null
