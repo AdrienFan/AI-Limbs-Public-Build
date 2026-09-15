@@ -22,4 +22,4 @@ build24 的独立 Guardian 仍使用 App UID。PPID=1、oom_score_adj=-1000、�
 
 2026-09-15：继续编写后续迁移，不再把 build25 安装验证作为源码工作的前置门槛。本轮暂不编译。候选分支已包含 ac9373b 的 Android 16 Socket 初始化顺序与 Guardian 唯一实例锁修复，后续改动必须保留。
 
-当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)。业务迁移、界面代理、特权后端交接仍未接通；不能将生命周期整改或 Core 诊断入口计为整个运行时已迁移。
+当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md) 和 [权限后端交接协议](03-backend-handoff.md)。已补退出生命周期与权限后端交接基础；业务迁移、界面代理及 Resident ON/OFF 编排仍未接通。不能将这些基础设施或 Core 诊断入口计为整个运行时已迁移。

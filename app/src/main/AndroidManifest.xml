@@ -163,6 +163,11 @@
             android:exported="true"
             android:permission="android.permission.INTERACT_ACROSS_USERS_FULL" />
 
+        <!-- Private bootstrap transport between the app UID's Host and Resident Core. -->
+        <receiver
+            android:name="com.ai.assistance.operit.core.tools.system.resident.ResidentCoreBootstrapReceiver"
+            android:exported="false" />
+
         <!-- FileProvider for APK installation -->
         <provider
             android:name="androidx.core.content.FileProvider"

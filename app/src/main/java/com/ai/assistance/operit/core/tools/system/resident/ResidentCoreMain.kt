@@ -46,6 +46,7 @@ object ResidentCoreMain {
         ResidentRuntimeLease.acquire(directory, "bootstrap").use {
             check(File(directory, "launch.request").readText() == launchId) { "Core launch cancelled" }
             val sessionId = UUID.randomUUID().toString()
+            val backend = ResidentBackendBinding(context, launchId, sessionId)
             val startedElapsed = SystemClock.elapsedRealtime()
             val startedUptime = SystemClock.uptimeMillis()
             val server = LocalServerSocket(ResidentCoreWire.socketName())
@@ -71,8 +72,11 @@ object ResidentCoreMain {
                     .put("runtime_owner", "android_host")
                     .put("plugins_migrated", false)
                     .put("continuous_work", false)
+                    .put("backend", backend.snapshot())
             }
+            var userStop = false
             try {
+                Thread({ backend.connect() }, "resident-backend-bind").apply { isDaemon = true; start() }
                 println("AIL_RESIDENT_CORE_READY " + snapshot())
                 var stopping = false
                 while (!stopping) {
@@ -95,14 +99,15 @@ object ResidentCoreMain {
                                 }
                             }
                             val operation = request.getString("operation")
-                            require(operation == "status" || operation == "stop") {
+                            require(operation == "status" || operation == "stop" || operation == "prepare_handoff") {
                                 "Unsupported core operation"
                             }
-                            if (operation == "stop") {
+                            if (operation != "status") {
                                 check(request.getString("session_id") == sessionId) {
-                                    "Stop requires the current session"
+                                    "Core mutation requires the current session"
                                 }
                             }
+                            if (operation == "prepare_handoff") backend.prepareHandoffAsync()
                             val response = JSONObject()
                                 .put("protocol", ResidentCoreWire.VERSION)
                                 .put("request_id", requestId)
@@ -111,6 +116,7 @@ object ResidentCoreMain {
                                 .put("result", snapshot().put("stop_requested", operation == "stop"))
                             ResidentCoreWire.write(socket, response)
                             stopping = operation == "stop"
+                            userStop = stopping
                         } catch (error: Exception) {
                             System.err.println("Resident Core rejected request: " + error)
                             // Protocol failures remain explicit; a malformed request never executes work.
@@ -128,8 +134,34 @@ object ResidentCoreMain {
                     }
                 }
             } finally {
-                server.close()
-                Runtime.getRuntime().removeShutdownHook(shutdownHook)
+                // A frozen backend can block a Binder call indefinitely. Keep Core stop bounded;
+                // process death is also observed by the server's lifetime Binder.
+                val cleanup = java.util.concurrent.atomic.AtomicReference<JSONObject?>(null)
+                val closing = Thread({
+                    try {
+                        backend.close(returnToHost = userStop)
+                        cleanup.set(JSONObject().put("backend_release_confirmed", true))
+                    } catch (error: Exception) {
+                        cleanup.set(JSONObject().put("backend_release_confirmed", false)
+                            .put("backend_release_error", error.toString().take(512)))
+                    }
+                }, "resident-backend-close").apply { isDaemon = true; start() }
+                try {
+                    closing.join(2_000L)
+                    val outcome = cleanup.get() ?: JSONObject()
+                        .put("backend_release_confirmed", false)
+                        .put("backend_release_error", "Backend release did not acknowledge within 2000ms")
+                    outcome.put("session_id", sessionId).put("pid", Process.myPid())
+                    val staged = File(directory, "shutdown.result.tmp")
+                    staged.writeText(outcome.toString())
+                    check(staged.renameTo(File(directory, "shutdown.result.json"))) { "Cannot save Core shutdown result" }
+                } catch (error: Exception) {
+                    System.err.println("Core shutdown result could not be saved: $error")
+                }
+                finally {
+                    server.close()
+                    Runtime.getRuntime().removeShutdownHook(shutdownHook)
+                }
             }
         }
     }

@@ -488,8 +488,23 @@ internal object PluginPlatformKernel {
     }
 
     suspend fun shutdown(): Unit = withContext(NonCancellable) {
+        shutdownOwner(null)
+    }
+
+    internal suspend fun shutdownForResidentHandoff(
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff
+    ): Unit = withContext(NonCancellable) {
+        shutdownOwner(handoff)
+    }
+
+    private suspend fun shutdownOwner(
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff?
+    ): Unit {
         runtimeLifecycleMutex.withLock {
             if (!initialized || lifecyclePhase == "stopped") return@withLock
+            handoff?.verify(checkNotNull(
+                com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime.connection()
+            ) { "Permission backend is disconnected before runtime handoff" })
             started = false
             lifecyclePhase = "stopping"
             val failures = mutableListOf<Throwable>()
@@ -501,7 +516,7 @@ internal object PluginPlatformKernel {
             // Stop children before parents so child handles cannot continue calling a revoked
             // parent provider. Attempt every owner, but never turn a failure into "stopped".
             retire { childExtensionRuntimeInstance.stop() }
-            retire { managerInstance.shutdown() }
+            retire { managerInstance.shutdown(handoff) }
             retire { systemPluginControllerInstance.shutdown() }
             retire { notificationHostInstance.clear() }
             if (failures.isNotEmpty()) {

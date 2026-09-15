@@ -85,13 +85,19 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             throw error
         }
         return object : PluginRuntimeHandle {
-            override suspend fun stop() {
+            override suspend fun stop() = retire(null)
+
+            override suspend fun stopForResidentHandoff(
+                handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff
+            ) = retire(handoff)
+
+            private suspend fun retire(handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff?) {
                 try {
                     handle.stop()
                 } finally {
                     try {
                         com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
-                            .revokeOwner(context.appContext, context.manifest.pluginId)
+                            .revokeOwner(context.appContext, context.manifest.pluginId, handoff)
                     } finally {
                         runtimeScope.cancel()
                     }

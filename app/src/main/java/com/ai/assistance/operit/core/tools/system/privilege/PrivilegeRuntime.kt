@@ -46,6 +46,20 @@ internal object PrivilegeRuntime {
         return ShizukuConnectionInfo(serverUid, current)
     }
 
+    /** Called by the private bootstrap offer after validating the Core launch/session/UID/PID. */
+    @Synchronized internal fun exportResidentConnection(): Bundle {
+        check(selected) { "Resident requires the selected AI Limbs permission backend" }
+        val current = checkNotNull(connection()) { "Permission backend is not connected" }
+        val launchToken = checkNotNull(prefs.getString("launch_token", null)) {
+            "Permission backend launch permission was revoked"
+        }
+        return Bundle().apply {
+            putBinder("backend", current.binder)
+            putInt("backend_uid", current.uid)
+            putString("backend_token", launchToken)
+        }
+    }
+
     @Synchronized fun invoke(context: Context, owner: String, operation: String, args: JSONObject): JSONObject {
         initialize(context)
         require(owner == OWNER) { "Only the permission service owner can manage its runtime" }
@@ -89,8 +103,16 @@ internal object PrivilegeRuntime {
     }
 
     /** Kernel teardown cannot depend on an already-revoked plugin scope. */
-    fun revokeOwner(context: Context, owner: String) {
+    fun revokeOwner(
+        context: Context, owner: String,
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff? = null
+    ) {
         if (owner != OWNER) return
+        if (handoff != null) {
+            handoff.verify(checkNotNull(connection()) { "Cannot retain a disconnected permission backend" })
+            AppLogger.i(TAG, "Permission backend retained for the acknowledged Resident handoff")
+            return
+        }
         invoke(context, owner, "stop", JSONObject())
     }
 
@@ -100,6 +122,18 @@ internal object PrivilegeRuntime {
         if (token != expected) return false
         if (!prefs.getBoolean("active", false) &&
             System.currentTimeMillis() > prefs.getLong("launch_deadline", 0L)) return false
+        return attachConnection(callingUid, incoming, persistActive = true)
+    }
+
+    /** The private bootstrap exchange already verified this transfer. Never rewrite Host preferences
+     * from the second process: a stale SharedPreferences cache could resurrect a revoked token. */
+    @Synchronized internal fun adoptResidentConnection(context: Context, uid: Int, incoming: IBinder) {
+        initialize(context)
+        require(uid == 0 || uid == 2000) { "Resident backend requires root or adb" }
+        check(attachConnection(uid, incoming, persistActive = false))
+    }
+
+    private fun attachConnection(callingUid: Int, incoming: IBinder, persistActive: Boolean): Boolean {
         if (binder == incoming && incoming.isBinderAlive) return true
         val service = IShizukuService.Stub.asInterface(incoming)
         val uid = service.uid
@@ -124,7 +158,7 @@ internal object PrivilegeRuntime {
         binder = incoming
         death = recipient
         serverUid = uid
-        check(prefs.edit().putBoolean("active", true).commit())
+        if (persistActive) check(prefs.edit().putBoolean("active", true).commit())
         AppLogger.i(TAG, "Permission server connected, uid=$uid")
         ShizukuAuthorizer.onPrivilegeBackendChanged()
         return true

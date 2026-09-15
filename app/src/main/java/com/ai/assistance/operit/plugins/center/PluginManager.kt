@@ -180,8 +180,8 @@ internal class PluginManager(
         reconcileBackupPolicyLocked()
     }
 
-    suspend fun shutdown() = locked {
-        shutdownLocked()
+    suspend fun shutdown(handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff? = null) = locked {
+        shutdownLocked(handoff)
     }
 
     suspend fun snapshots(): List<PluginSnapshot> = locked {
@@ -688,12 +688,12 @@ internal class PluginManager(
         }
     }
 
-    private suspend fun shutdownLocked() {
+    private suspend fun shutdownLocked(handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff?) {
         val failures = mutableListOf<Throwable>()
         val mountedPluginIds = activeMounts.keys.toList().sortedDescending()
         mountedPluginIds.forEach { pluginId ->
             val previousState = stateRepository.read(pluginId)
-            val stopResult = unmountLocked(pluginId)
+            val stopResult = unmountLocked(pluginId, handoff)
             if (stopResult != null && !stopResult.stoppedCleanly) {
                 failures += PluginInstallException(
                     stopResult.errorCode ?: "RUNTIME_STOP_FAILED",
@@ -825,7 +825,10 @@ internal class PluginManager(
             throw error
         }
     }
-    private suspend fun unmountLocked(pluginId: String): PluginRuntimeStopResult? {
+    private suspend fun unmountLocked(
+        pluginId: String,
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff? = null
+    ): PluginRuntimeStopResult? {
         val mount = activeMounts[pluginId] ?: return null
         stateRepository.read(pluginId)?.let { state ->
             stateRepository.write(
@@ -835,7 +838,7 @@ internal class PluginManager(
                 )
             )
         }
-        val result = runtimeHost.stop(mount.runtime)
+        val result = runtimeHost.stop(mount.runtime, handoff)
         if (result.stoppedCleanly) {
             activeMounts.remove(pluginId, mount)
         } else {

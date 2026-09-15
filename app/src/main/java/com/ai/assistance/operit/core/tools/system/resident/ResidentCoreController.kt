@@ -105,11 +105,52 @@ internal object ResidentCoreController {
         repeat(40) {
             delay(100L)
             if (leaseIsFree(context) && !pidExists(pid)) {
-                return@withContext JSONObject().put("stopped", true).put("pid", pid)
+                val result = JSONObject().put("stopped", true).put("pid", pid)
+                    .put("backend_release_confirmed", JSONObject.NULL)
+                val report = File(directory(context), "shutdown.result.json")
+                try {
+                    if (report.isFile && report.length() in 1L..4096L) {
+                        val outcome = JSONObject(report.readText())
+                        if (outcome.getInt("pid") == pid && outcome.getString("session_id") == state.getString("session_id")) {
+                            result.put("backend_release_confirmed", outcome.getBoolean("backend_release_confirmed"))
+                            if (outcome.has("backend_release_error")) result.put("backend_release_error", outcome.getString("backend_release_error"))
+                        }
+                    }
+                } catch (error: Exception) {
+                    // PID exit and lease release are already confirmed; report metadata failure
+                    // separately instead of misreporting a still-running Core.
+                    result.put("shutdown_report_error", error.toString().take(512))
+                }
+                return@withContext result
             }
         }
         error("Core accepted stop but process exit has not been confirmed")
     }
+
+    /** Prepare only. Old Host retirement and process exit must precede Core kernel activation. */
+    suspend fun prepareHandoff(context: Context, executor: ShellExecutor): ResidentPermissionHandoff =
+        withContext(Dispatchers.IO) {
+            var state = probe(context, executor)
+            val session = state.getString("session_id")
+            val deadline = SystemClock.elapsedRealtime() + 6_000L
+            while (state.getJSONObject("backend").getString("state") == "connecting" &&
+                SystemClock.elapsedRealtime() < deadline) {
+                delay(100L)
+                state = ResidentCoreWire.request("status", session)
+            }
+            val backend = state.getJSONObject("backend")
+            check(backend.getString("state") == "ready" || backend.getString("state") == "prepared") {
+                "Core permission backend is not ready for handoff: $backend"
+            }
+            var prepared = ResidentCoreWire.request("prepare_handoff", session)
+            val prepareDeadline = SystemClock.elapsedRealtime() + 6_000L
+            while (prepared.getJSONObject("backend").getString("state") == "preparing" &&
+                SystemClock.elapsedRealtime() < prepareDeadline) {
+                delay(100L)
+                prepared = ResidentCoreWire.request("status", session)
+            }
+            ResidentPermissionHandoff.fromPreparedCore(prepared)
+        }
 
     private fun directory(context: Context): File =
         File(context.filesDir, "ai_limbs/resident_core")

@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
+import com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff
 import java.io.File
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.NonCancellable
@@ -46,6 +47,7 @@ internal data class PluginRuntimeAdapterContext(
 
 internal interface PluginRuntimeHandle {
     suspend fun stop()
+    suspend fun stopForResidentHandoff(handoff: ResidentPermissionHandoff) = stop()
 }
 
 /**
@@ -107,10 +109,12 @@ internal class PluginRuntimeHost(
         }
     }
 
-    suspend fun stop(runtime: HostedPluginRuntime): PluginRuntimeStopResult {
+    suspend fun stop(runtime: HostedPluginRuntime, handoff: ResidentPermissionHandoff? = null): PluginRuntimeStopResult {
         runtime.scope.revokeAll()
         return try {
-            withTimeout(timeouts.stopTimeoutMs) { runtime.handle.stop() }
+            withTimeout(timeouts.stopTimeoutMs) {
+                if (handoff == null) runtime.handle.stop() else runtime.handle.stopForResidentHandoff(handoff)
+            }
             runtime.scope.requireCleanRevocation()
             PluginRuntimeStopResult(PluginRuntimeStopOutcome.STOPPED)
         } catch (error: TimeoutCancellationException) {
