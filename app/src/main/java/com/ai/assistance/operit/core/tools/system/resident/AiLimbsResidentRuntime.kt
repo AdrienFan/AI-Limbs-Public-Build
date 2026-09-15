@@ -755,7 +755,7 @@ internal object AiLimbsResidentRuntime {
     } catch (error: ErrnoException) {
         when (error.errno) {
             OsConstants.ESRCH -> false
-            OsConstants.EPERM -> true
+            OsConstants.EPERM, OsConstants.EACCES -> true
             else -> throw error
         }
     }
