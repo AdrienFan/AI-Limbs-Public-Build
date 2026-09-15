@@ -325,7 +325,11 @@ internal object ResidentCoreController {
         Os.kill(pid, 0)
         true
     } catch (error: ErrnoException) {
-        if (error.errno == OsConstants.ESRCH) false else throw error
+        when (error.errno) {
+            OsConstants.ESRCH -> false
+            OsConstants.EPERM -> true
+            else -> throw error
+        }
     }
 
     private fun readLogTail(file: File): String {

@@ -6,7 +6,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Process
+import android.system.ErrnoException
 import android.system.Os
+import android.system.OsConstants
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
@@ -648,11 +650,18 @@ internal object AiLimbsResidentRuntime {
         val meta = readKeyValues(metaFile())
         val pid = meta["pid"]?.toIntOrNull() ?: return LocalProbe()
         val expectedUid = meta["uid"]?.toIntOrNull() ?: Process.myUid()
-        if (expectedUid != Process.myUid() || !pidExists(pid)) return LocalProbe()
+        if (expectedUid != Process.myUid()) return LocalProbe()
+
+        // guardian.lock is the process-ownership fact. The detached Guardian runs
+        // in runas_app while Host runs in untrusted_app, so signal/proc checks are
+        // only secondary identity diagnostics and must tolerate SELinux EPERM.
+        if (guardianLeaseIsFree() || !pidExists(pid)) return LocalProbe()
 
         val cmdline = readProcText(pid, "cmdline")?.replace('\u0000', ' ')?.trim().orEmpty()
         val comm = readProcText(pid, "comm")?.trim().orEmpty()
-        if (PROCESS_NAME !in cmdline && PROCESS_NAME !in comm && MAIN_CLASS !in cmdline) {
+        val processIdentityVisible = cmdline.isNotEmpty() || comm.isNotEmpty()
+        if (processIdentityVisible &&
+            PROCESS_NAME !in cmdline && PROCESS_NAME !in comm && MAIN_CLASS !in cmdline) {
             return LocalProbe()
         }
 
@@ -740,11 +749,16 @@ internal object AiLimbsResidentRuntime {
         return false
     }
 
-    private fun pidExists(pid: Int): Boolean =
-        runCatching {
-            Os.kill(pid, 0)
-            true
-        }.getOrDefault(false)
+    private fun pidExists(pid: Int): Boolean = try {
+        Os.kill(pid, 0)
+        true
+    } catch (error: ErrnoException) {
+        when (error.errno) {
+            OsConstants.ESRCH -> false
+            OsConstants.EPERM -> true
+            else -> throw error
+        }
+    }
 
     private fun readProcText(pid: Int, name: String): String? =
         runCatching { File("/proc/$pid/$name").readText() }.getOrNull()
