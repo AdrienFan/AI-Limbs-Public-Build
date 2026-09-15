@@ -16,6 +16,8 @@ import java.util.List;
 import java.io.FileDescriptor;
 import java.io.FileOutputStream;
 import java.io.PrintStream;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import moe.shizuku.server.IShizukuApplication;
 import rikka.hidden.compat.ActivityManagerApis;
 import rikka.hidden.compat.PackageManagerApis;
@@ -36,6 +38,15 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
     private static String authority;
     private static String token;
     private final Handler handler = new Handler(Looper.getMainLooper());
+    // ContentProvider calls can block while Host is frozen. Keep them off the server's main
+    // Looper so an explicit release/shutdown can always be processed independently.
+    private final ExecutorService hostHandoffExecutor = Executors.newSingleThreadExecutor();
+    private final Runnable handoffTask = () -> hostHandoffExecutor.execute(this::handoff);
+    private final ResidentOwner residentOwner = new ResidentOwner(
+        token, handler, () -> scheduleHostHandoff(0L), () -> {
+            report("Resident ownership ended; stopping permission backend", null);
+            System.exit(0);
+        });
     private boolean acceptedOnce;
     private int missedHandoffs;
 
@@ -84,11 +95,12 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         Looper.prepareMainLooper();
         PermissionServer server = new PermissionServer();
         report("Binder service initialized; waiting for Host handoff", null);
-        server.handler.post(server::handoff);
+        server.scheduleHostHandoff(0L);
         Looper.loop();
     }
 
     private void handoff() {
+        if (residentOwner.ownsRuntime()) return;
         IContentProvider provider = null;
         try {
             if (!acceptedOnce) report("Requesting Host Provider", null);
@@ -98,24 +110,35 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
             extras.putString("token", token);
             extras.putBinder("binder", this);
             Bundle reply = IContentProviderUtils.callCompat(provider, null, authority, "attach", null, extras);
-            if (reply == null || !reply.getBoolean("accepted")) {
-                report("Launch permission revoked or expired; exiting", null);
-                System.exit(0);
-            }
-            if (!acceptedOnce) report("Host accepted permission service", null);
-            acceptedOnce = true;
-            missedHandoffs = 0;
+            // Core may claim ownership while this provider call is still in flight. An old
+            // Host result cannot revoke the newly established independent lifetime.
+            residentOwner.applyHostResult(() -> {
+                if (reply == null || !reply.getBoolean("accepted")) {
+                    report("Launch permission revoked or expired; exiting", null);
+                    System.exit(0);
+                }
+                if (!acceptedOnce) report("Host accepted permission service", null);
+                acceptedOnce = true;
+                missedHandoffs = 0;
+            });
         } catch (Throwable error) {
-            report("Host handoff failed", error);
-            // Bounded lifecycle grace permits a Host process restart, never a different backend.
-            if (++missedHandoffs >= (acceptedOnce ? 6 : 3)) System.exit(1);
+            residentOwner.applyHostResult(() -> {
+                report("Host handoff failed", error);
+                // Bounded lifecycle grace permits a Host process restart, never a different backend.
+                if (++missedHandoffs >= (acceptedOnce ? 6 : 3)) System.exit(1);
+            });
         } finally {
             if (provider != null) {
                 try { ActivityManagerApis.removeContentProviderExternal(authority, null); }
                 catch (Throwable error) { report("Provider release failed", error); }
             }
         }
-        handler.postDelayed(this::handoff, 10000);
+        scheduleHostHandoff(10000L);
+    }
+
+    private void scheduleHostHandoff(long delayMillis) {
+        handler.removeCallbacks(handoffTask);
+        if (!residentOwner.ownsRuntime()) handler.postDelayed(handoffTask, delayMillis);
     }
 
     @Override public UserServiceManager onCreateUserServiceManager() {
@@ -178,6 +201,7 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
         if (code != IBinder.INTERFACE_TRANSACTION && Binder.getCallingUid() != hostUid)
             throw new SecurityException("Only the verified AI Limbs Host UID is accepted");
         if (code >= 30000 && code < 40000) throw new UnsupportedOperationException("Rish is not included");
+        if (code == ResidentOwner.TRANSACTION) return residentOwner.transact(data, reply, flags);
         return super.onTransact(code, data, reply, flags);
     }
 }
