@@ -203,7 +203,7 @@ class TerminalManager private constructor(
         when (event.trim().lowercase()) {
             "attach", "heartbeat" -> {
                 pruneResidentUiLeases(now)
-                if (normalized !in residentUiLeases && residentUiLeases.size >= MAX_RESIDENT_UI_LEASES) {
+                if (!residentUiLeases.containsKey(normalized) && residentUiLeases.size >= MAX_RESIDENT_UI_LEASES) {
                     error("Too many Resident Ubuntu UI leases")
                 }
                 residentUiLeases[normalized] = now

@@ -27,6 +27,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -103,7 +104,7 @@ fun TerminalScreen(
     // 使用 NavHost 处理所有导航
     NavHost(
         navController = navController,
-        startDestination = if (startDestination != null) startDestination!! else TerminalRoutes.TERMINAL_HOME_ROUTE
+        startDestination = startDestination ?: TerminalRoutes.TERMINAL_HOME_ROUTE
     ) {
 
         composable(TerminalRoutes.TERMINAL_HOME_ROUTE) {
