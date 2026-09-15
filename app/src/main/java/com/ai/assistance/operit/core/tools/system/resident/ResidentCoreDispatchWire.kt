@@ -44,8 +44,9 @@ internal object ResidentCoreDispatchWire {
     }
 
     /** Client-side request. Unlike ResidentCoreWire, structured dispatch failures are returned. */
-    fun request(coreSessionId: String, operation: String, payload: JSONObject = JSONObject()): JSONObject {
+    fun request(coreSessionId: String, expectedCorePid: Int, operation: String, payload: JSONObject = JSONObject()): JSONObject {
         require(coreSessionId.length in 1..64) { "Invalid Resident Core session id" }
+        require(expectedCorePid > 0 && expectedCorePid != Process.myPid()) { "Invalid expected Resident Core PID" }
         require(operation.length in 1..64) { "Invalid Resident Dispatcher operation" }
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
@@ -54,6 +55,7 @@ internal object ResidentCoreDispatchWire {
             socket.soTimeout = TIMEOUT_MS
             val peer = socket.peerCredentials
             check(peer.uid == Process.myUid()) { "Resident Dispatcher peer UID mismatch" }
+            check(peer.pid == expectedCorePid) { "Resident Dispatcher peer does not match takeover fence Core PID" }
             write(
                 socket,
                 JSONObject()

@@ -51,6 +51,7 @@ object ResidentCoreMain {
             val backend = ResidentBackendBinding(context, launchId, sessionId)
             val dispatcherServer = ResidentCoreDispatcherServer(context, sessionId)
             val uiProxyServer = ResidentUiProxyServer(context, sessionId)
+            val continuousResources = ResidentCoreContinuousResources(context, sessionId)
             val startedElapsed = SystemClock.elapsedRealtime()
             val startedUptime = SystemClock.uptimeMillis()
             val server = LocalServerSocket(ResidentCoreWire.socketName())
@@ -104,6 +105,7 @@ object ResidentCoreMain {
                     .put("backend", backend.snapshot())
                     .put("dispatcher", dispatcherServer.snapshot())
                     .put("ui_proxy", uiProxyServer.attachmentSnapshot())
+                    .put("continuous_resources", continuousResources.snapshot())
                     .put("takeover_fence", ResidentBusinessTakeoverFence.snapshot(context) ?: JSONObject.NULL)
             }
 
@@ -155,7 +157,17 @@ object ResidentCoreMain {
                                             "Permission backend must be prepared before business takeover"
                                         }
                                         check(activationThread.get() == null) { "Business activation is already armed" }
-                                        runtime.armBusinessTakeover(context, sessionId, peer.pid)
+                                        try {
+                                            continuousResources.acquireForBusiness()
+                                            runtime.armBusinessTakeover(context, sessionId, peer.pid)
+                                        } catch (error: Throwable) {
+                                            val release =
+                                                continuousResources.release("activate_business_rejected")
+                                            if (!release.optBoolean("release_confirmed", false)) {
+                                                runCatching { server.close() }
+                                            }
+                                            throw error
+                                        }
                                         val worker = Thread({
                                             try {
                                                 runtime.activateBusiness(
@@ -173,13 +185,33 @@ object ResidentCoreMain {
                                                 activationThread.compareAndSet(Thread.currentThread(), null)
                                             }
                                         }, "resident-business-activation").apply { isDaemon = false }
-                                        check(activationThread.compareAndSet(null, worker)) {
-                                            "Business activation worker changed unexpectedly"
+                                        try {
+                                            check(activationThread.compareAndSet(null, worker)) {
+                                                "Business activation worker changed unexpectedly"
+                                            }
+                                            worker.start()
+                                        } catch (error: Throwable) {
+                                            activationThread.compareAndSet(worker, null)
+                                            runCatching {
+                                                runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
+                                            }
+                                            val release =
+                                                continuousResources.release("activation_worker_arm_failed")
+                                            if (!release.optBoolean("release_confirmed", false)) {
+                                                runCatching { server.close() }
+                                            }
+                                            throw error
                                         }
-                                        worker.start()
                                     }
                                     "cancel_business_activation" -> {
                                         runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
+                                        val release = continuousResources.release("business_takeover_cancelled")
+                                        if (!release.optBoolean("release_confirmed", false)) {
+                                            runCatching { server.close() }
+                                        }
+                                        check(release.getBoolean("release_confirmed")) {
+                                            "Resident continuous resources did not release after takeover cancellation: $release"
+                                        }
                                     }
                                     "quiesce_business" -> {
                                         runtime.beginBusinessQuiesce()
@@ -238,6 +270,13 @@ object ResidentCoreMain {
                         runtime.fail(error)
                         System.err.println("Resident Core stop barrier failed: $error")
                     }
+                    val resourceRelease = continuousResources.release(
+                        if (userStop) "resident_off" else "core_exit"
+                    )
+                    if (!resourceRelease.optBoolean("release_confirmed", false)) {
+                        exitCode = 1
+                        System.err.println("Resident continuous resource release was not clean: $resourceRelease")
+                    }
 
                     val cleanup = AtomicReference<JSONObject?>(null)
                     val closing = Thread({
@@ -262,6 +301,9 @@ object ResidentCoreMain {
                         outcome
                             .put("session_id", sessionId)
                             .put("pid", Process.myPid())
+                            .put("continuous_resource_release_confirmed",
+                                resourceRelease.optBoolean("release_confirmed", false))
+                            .put("continuous_resource_release", resourceRelease)
                             .put("phase", runtimeState.getString("phase"))
                             .put("business_phase", runtimeState.getString("business_phase"))
                             .put("runtime_skeleton_ready", runtimeState.getBoolean("runtime_skeleton_ready"))

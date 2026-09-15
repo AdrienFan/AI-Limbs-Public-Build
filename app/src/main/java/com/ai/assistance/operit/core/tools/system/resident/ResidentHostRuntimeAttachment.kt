@@ -37,8 +37,8 @@ internal data class ResidentHostRuntimeAttachment(
  *
  * A reachable Resident Core with business ownership forces UI_PROXY. A takeover fence also forces
  * UI_PROXY even when Core is temporarily unavailable, so Host restart can never become a silent
- * LEGACY_HOST fallback. A detached Core with no fence is still compatible with the transitional
- * LEGACY_HOST path until the Resident ON/OFF state machine is wired in a later step.
+ * LEGACY_HOST fallback. LEGACY_HOST is allowed only when no takeover ownership/fence remains after
+ * an explicit OFF/detached state transition.
  */
 internal object ResidentHostRuntimeResolver {
     suspend fun resolve(context: Context): ResidentHostRuntimeAttachment {
@@ -86,6 +86,7 @@ internal object ResidentHostRuntimeResolver {
         }
 
         val buildMatches = core.optBoolean("build_matches", false)
+        val coreConsistent = core.optBoolean("consistent", false)
         val corePid = core.optInt("pid").takeIf { it > 0 }
         val coreSession = core.optString("session_id").takeIf { it.isNotBlank() }
         val owner = core.optString("runtime_owner")
@@ -101,6 +102,7 @@ internal object ResidentHostRuntimeResolver {
 
         if (businessAttached) {
             val validOwner = buildMatches &&
+                coreConsistent &&
                 owner == "resident_core" &&
                 core.optString("phase") == "running" &&
                 businessPhase == "running" &&
@@ -141,6 +143,7 @@ internal object ResidentHostRuntimeResolver {
         )
         if (handoffPending || fence != null) {
             val validPending = buildMatches &&
+                coreConsistent &&
                 fenceMatchesCore &&
                 fenceState == "armed" &&
                 (handoffPending || businessPhase == "detached")
@@ -149,6 +152,7 @@ internal object ResidentHostRuntimeResolver {
                 reason = when {
                     validPending -> "resident_core_takeover_pending"
                     !buildMatches -> "resident_core_build_mismatch_during_takeover"
+                    !coreConsistent -> "resident_core_snapshot_inconsistent_during_takeover"
                     !fenceMatchesCore -> "resident_core_takeover_fence_identity_mismatch"
                     fenceState == "failed" -> "resident_core_takeover_failed_without_fallback"
                     else -> "resident_core_takeover_state_inconsistent"

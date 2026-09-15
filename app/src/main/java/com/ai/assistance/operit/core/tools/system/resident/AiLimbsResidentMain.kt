@@ -8,13 +8,12 @@ import java.util.UUID
 /**
  * AI Limbs lock-screen resident guardian.
  *
- * The Resident process is born outside the normal AMS app cgroup. It does not fake a wake lock
- * through `cmd power`; instead the normal AI Limbs foreground service owns a real Android
- * PARTIAL_WAKE_LOCK. Resident continuously verifies that host lease and immediately revives the
- * host when the process or lease disappears.
+ * The Guardian process is only a liveness/restart helper. Continuous CPU/network ownership belongs
+ * to the Resident Core session, never to the Host shell or to Guardian PID/oom metadata. Guardian
+ * only verifies the Android Host shell identity and revives that UI/framework shell when needed.
  */
 object AiLimbsResidentMain {
-    private const val PROTOCOL_VERSION = 3
+    private const val PROTOCOL_VERSION = 4
     private const val HEARTBEAT_INTERVAL_MS = 60_000L
     private const val HOST_TOUCH_HEALTHY_INTERVAL_MS = 60_000L
     private const val HOST_TOUCH_RETRY_INTERVAL_MS = 1_000L
@@ -45,7 +44,7 @@ object AiLimbsResidentMain {
         val metaFile = File(stateDir, "resident.meta")
         val heartbeatFile = File(stateDir, "heartbeat.log")
         val guardianFile = File(stateDir, "guardian.state")
-        val hostWakeLockFile = File(stateDir, "host_wake_lock.state")
+        val hostShellStateFile = File(stateDir, "host_shell.state")
         val stopRequestFile = File(stateDir, "stop.request")
 
         stopRequestFile.delete()
@@ -67,21 +66,21 @@ object AiLimbsResidentMain {
             }
         )
 
-        var hostWakeHeld = false
-        var hostWakePid: Int? = null
-        var hostWakeDetail = "not_reported"
+        var hostShellAlive = false
+        var hostShellPid: Int? = null
+        var hostShellDetail = "not_reported"
         var hostTouchSeq = 0L
         var lastHostTouchWallMs = 0L
         var lastHostTouchExit = -1
         var lastHostTouchOk = false
         var lastHostTouchDetail = "not_started"
 
-        fun refreshHostWakeState(): Boolean {
-            val probe = probeHostWakeLock(hostWakeLockFile, packageName)
-            hostWakeHeld = probe.held
-            hostWakePid = probe.pid
-            hostWakeDetail = probe.detail
-            return probe.held
+        fun refreshHostShellState(): Boolean {
+            val probe = probeHostShell(hostShellStateFile, packageName)
+            hostShellAlive = probe.alive
+            hostShellPid = probe.pid
+            hostShellDetail = probe.detail
+            return probe.alive
         }
 
         fun publishGuardianState(state: String) {
@@ -89,10 +88,9 @@ object AiLimbsResidentMain {
                 guardianFile,
                 buildString {
                     appendLine("state=$state")
-                    appendLine("wake_lock=${if (hostWakeHeld) "held" else "not_held"}")
-                    appendLine("wake_lock_backend=host_service_power_manager")
-                    appendLine("wake_lock_detail=${sanitize(hostWakeDetail)}")
-                    appendLine("host_pid=${hostWakePid ?: -1}")
+                    appendLine("host_shell_alive=$hostShellAlive")
+                    appendLine("host_pid=${hostShellPid ?: -1}")
+                    appendLine("host_shell_detail=${sanitize(hostShellDetail)}")
                     appendLine("host_guardian=active")
                     appendLine("host_touch_seq=$hostTouchSeq")
                     appendLine("last_host_touch_wall_ms=$lastHostTouchWallMs")
@@ -121,7 +119,7 @@ object AiLimbsResidentMain {
 
             while (!stopRequestFile.exists()) {
                 val nowElapsed = SystemClock.elapsedRealtime()
-                val hostHealthy = refreshHostWakeState()
+                val hostHealthy = refreshHostShellState()
 
                 if (!hostHealthy || nowElapsed >= nextHostTouchElapsed) {
                     hostTouchSeq += 1
@@ -131,13 +129,13 @@ object AiLimbsResidentMain {
                     lastHostTouchOk = result.ok
                     lastHostTouchDetail = result.detail
 
-                    val wakeHealthyAfterTouch = refreshHostWakeState()
+                    val shellHealthyAfterTouch = refreshHostShellState()
                     publishGuardianState(
-                        if (result.ok && wakeHealthyAfterTouch) "running" else "degraded"
+                        if (result.ok && shellHealthyAfterTouch) "running" else "degraded"
                     )
                     nextHostTouchElapsed =
                         nowElapsed +
-                            if (result.ok && wakeHealthyAfterTouch) {
+                            if (result.ok && shellHealthyAfterTouch) {
                                 HOST_TOUCH_HEALTHY_INTERVAL_MS
                             } else {
                                 HOST_TOUCH_RETRY_INTERVAL_MS
@@ -150,7 +148,7 @@ object AiLimbsResidentMain {
                         heartbeatFile,
                         "session=$sessionId seq=$heartbeatSeq wall_ms=${System.currentTimeMillis()} " +
                             "elapsed_ms=${SystemClock.elapsedRealtime()} uptime_ms=${SystemClock.uptimeMillis()} " +
-                            "pid=$pid uid=$uid wake_lock=$hostWakeHeld host_pid=${hostWakePid ?: -1} " +
+                            "pid=$pid uid=$uid host_shell_alive=$hostShellAlive host_pid=${hostShellPid ?: -1} " +
                             "host_touch_ok=$lastHostTouchOk"
                     )
                     nextHeartbeatElapsed = nowElapsed + HEARTBEAT_INTERVAL_MS
@@ -164,7 +162,7 @@ object AiLimbsResidentMain {
                 }
             }
         } finally {
-            refreshHostWakeState()
+            refreshHostShellState()
             publishGuardianState("stopped")
             stopRequestFile.delete()
             val current = readKeyValues(metaFile)["pid"]?.toIntOrNull()
@@ -189,18 +187,18 @@ object AiLimbsResidentMain {
         )
     }
 
-    private fun probeHostWakeLock(file: File, packageName: String): HostWakeProbe {
+    private fun probeHostShell(file: File, packageName: String): HostShellProbe {
         val state = readKeyValues(file)
-        val declaredHeld = state["held"] == "true"
+        val declaredRunning = state["state"] == "running"
         val pid = state["pid"]?.toIntOrNull()
 
-        if (!declaredHeld || pid == null || pid <= 0) {
-            return HostWakeProbe(false, pid, "host lease not held")
+        if (!declaredRunning || pid == null || pid <= 0) {
+            return HostShellProbe(false, pid, "host shell state is not running")
         }
 
         val procDir = File("/proc/$pid")
         if (!procDir.exists()) {
-            return HostWakeProbe(false, pid, "host pid is gone")
+            return HostShellProbe(false, pid, "host shell pid is gone")
         }
 
         val statusUid =
@@ -215,7 +213,7 @@ object AiLimbsResidentMain {
                     ?.toIntOrNull()
             }.getOrNull()
         if (statusUid != null && statusUid != Process.myUid()) {
-            return HostWakeProbe(false, pid, "host pid uid mismatch: $statusUid")
+            return HostShellProbe(false, pid, "host shell uid mismatch: $statusUid")
         }
 
         val cmdline =
@@ -223,16 +221,16 @@ object AiLimbsResidentMain {
                 File(procDir, "cmdline").readText().replace('\u0000', ' ').trim()
             }.getOrNull()
         if (!cmdline.isNullOrBlank() && packageName !in cmdline) {
-            return HostWakeProbe(false, pid, "host pid command mismatch")
+            return HostShellProbe(false, pid, "host shell command mismatch")
         }
 
         val detail =
             buildString {
-                append("host PowerManager lease held")
-                state["tag"]?.takeIf { it.isNotBlank() }?.let { append(" tag=$it") }
-                state["reason"]?.takeIf { it.isNotBlank() }?.let { append(" reason=$it") }
+                append("host shell alive")
+                state["role"]?.takeIf { it.isNotBlank() }?.let { append(" role=$it") }
+                state["detail"]?.takeIf { it.isNotBlank() }?.let { append(" detail=$it") }
             }
-        return HostWakeProbe(true, pid, detail)
+        return HostShellProbe(true, pid, detail)
     }
 
     private fun runCommand(command: List<String>): CommandResult {
@@ -287,8 +285,8 @@ object AiLimbsResidentMain {
     private fun sanitize(value: String): String =
         value.replace('\n', ' ').replace('\r', ' ').take(1200)
 
-    private data class HostWakeProbe(
-        val held: Boolean,
+    private data class HostShellProbe(
+        val alive: Boolean,
         val pid: Int?,
         val detail: String
     )

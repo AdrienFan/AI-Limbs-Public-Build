@@ -1060,46 +1060,13 @@ class AIForegroundService : Service() {
         stopSelf()
     }
 
+    /**
+     * Resident continuous CPU ownership belongs to the Core session.
+     * Host never acquires a Resident WakeLock; this path only releases a legacy token that may
+     * still exist during migration or an interrupted handoff.
+     */
     private fun syncResidentCpuWakeLock(reason: String) {
-        if (AiLimbsResidentRuntime.isEnabledForHost()) {
-            acquireResidentCpuWakeLock(reason)
-        } else {
-            releaseResidentCpuWakeLock(reason)
-        }
-    }
-
-    private fun acquireResidentCpuWakeLock(reason: String) {
-        try {
-            val lock =
-                residentWakeLock
-                    ?: (getSystemService(Context.POWER_SERVICE) as PowerManager)
-                        .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, RESIDENT_WAKE_LOCK_TAG)
-                        .also {
-                            it.setReferenceCounted(false)
-                            residentWakeLock = it
-                        }
-            if (!lock.isHeld) {
-                lock.acquire()
-                AppLogger.i(TAG, "Resident host PARTIAL_WAKE_LOCK acquired: reason=$reason")
-            }
-            publishResidentWakeLockState(
-                held = lock.isHeld,
-                reason = reason,
-                detail =
-                    if (lock.isHeld) {
-                        "Android PowerManager PARTIAL_WAKE_LOCK"
-                    } else {
-                        "acquire returned without hold"
-                    }
-            )
-        } catch (error: Throwable) {
-            publishResidentWakeLockState(
-                held = false,
-                reason = reason,
-                detail = "${error.javaClass.simpleName}: ${error.message}"
-            )
-            AppLogger.e(TAG, "Resident host PARTIAL_WAKE_LOCK acquire failed: reason=$reason", error)
-        }
+        releaseResidentCpuWakeLock("host_not_cpu_owner:$reason")
     }
 
     private fun releaseResidentCpuWakeLock(reason: String) {
@@ -1109,12 +1076,12 @@ class AIForegroundService : Service() {
                 if (lock.isHeld) {
                     lock.release()
                     detail = "released"
-                    AppLogger.i(TAG, "Resident host PARTIAL_WAKE_LOCK released: reason=$reason")
+                    AppLogger.i(TAG, "Resident Host transition PARTIAL_WAKE_LOCK released: reason=$reason")
                 }
             }
         } catch (error: Throwable) {
             detail = "${error.javaClass.simpleName}: ${error.message}"
-            AppLogger.w(TAG, "Resident host PARTIAL_WAKE_LOCK release failed: reason=$reason", error)
+            AppLogger.w(TAG, "Resident Host transition PARTIAL_WAKE_LOCK release failed: reason=$reason", error)
         } finally {
             publishResidentWakeLockState(
                 held = residentWakeLock?.isHeld == true,
@@ -1152,12 +1119,39 @@ class AIForegroundService : Service() {
                 }
             )
         }.onFailure { error ->
-            AppLogger.w(TAG, "Could not publish Resident host wake-lock state", error)
+            AppLogger.w(TAG, "Could not publish Resident Host transition wake-lock state", error)
         }
     }
 
     private fun sanitizeResidentWakeLockState(value: String): String =
         value.replace('\n', ' ').replace('\r', ' ').take(1200)
+
+    private fun publishResidentHostShellState(state: String, detail: String) {
+        runCatching {
+            val stateDir = File(filesDir, "ai_limbs/resident")
+            check(stateDir.mkdirs() || stateDir.isDirectory)
+            val target = File(stateDir, "host_shell.state")
+            val temp = File(stateDir, "host_shell.state.tmp")
+            temp.writeText(
+                buildString {
+                    appendLine("state=${sanitizeResidentWakeLockState(state)}")
+                    appendLine("pid=${Process.myPid()}")
+                    appendLine("uid=${Process.myUid()}")
+                    appendLine("role=${if (residentUiProxyShell) "ui_proxy" else "legacy_host"}")
+                    appendLine("detail=${sanitizeResidentWakeLockState(detail)}")
+                    appendLine("updated_wall_ms=${System.currentTimeMillis()}")
+                }
+            )
+            check(
+                temp.renameTo(target) || run {
+                    target.delete()
+                    temp.renameTo(target)
+                }
+            )
+        }.onFailure { error ->
+            AppLogger.w(TAG, "Could not publish Resident Host shell state", error)
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
@@ -1184,7 +1178,10 @@ class AIForegroundService : Service() {
                     reason = "resident_ui_proxy_create",
                     force = true
                 )
-                syncResidentCpuWakeLock("resident_ui_proxy_create")
+                // Resident continuous CPU ownership moved to the Core session. UI_PROXY only
+                // keeps the Android framework shell/foreground-service surface alive.
+                releaseResidentCpuWakeLock("resident_ui_proxy_core_owned")
+                publishResidentHostShellState("running", "resident_ui_proxy")
                 AppLogger.i(
                     TAG,
                     "Resident Host is ${operitApplication.residentHostRuntimeModeName()}; " +
@@ -1193,6 +1190,7 @@ class AIForegroundService : Service() {
             } else {
                 isRunning.set(false)
                 releaseResidentCpuWakeLock("resident_ui_proxy_disabled")
+                publishResidentHostShellState("stopping", "resident_disabled")
                 stopSelf()
             }
             return
@@ -1216,6 +1214,7 @@ class AIForegroundService : Service() {
         observeChatRuntimeStats()
         startWakeMonitoring()
         startExternalHttpMonitoring()
+        publishResidentHostShellState("running", "legacy_host")
         AppLogger.d(TAG, "AI 前台服务已启动。")
     }
 
@@ -1355,14 +1354,14 @@ class AIForegroundService : Service() {
     private fun handleResidentUiProxyStart(intent: Intent?): Int {
         return when (intent?.action) {
             null, ACTION_RESIDENT_KEEPALIVE -> {
-                syncResidentCpuWakeLock("resident_ui_proxy_keepalive")
+                publishResidentHostShellState("running", "resident_ui_proxy_keepalive")
                 if (AiLimbsResidentRuntime.isEnabledForHost()) START_STICKY else {
                     stopSelf()
                     START_NOT_STICKY
                 }
             }
             ACTION_RESIDENT_STATE_CHANGED -> {
-                syncResidentCpuWakeLock("resident_ui_proxy_state_changed")
+                publishResidentHostShellState("running", "resident_ui_proxy_state_changed")
                 if (AiLimbsResidentRuntime.isEnabledForHost()) {
                     START_STICKY
                 } else {
@@ -1453,7 +1452,9 @@ class AIForegroundService : Service() {
         }
 
         if (intent?.action == ACTION_RESIDENT_KEEPALIVE) {
+            // Host shell keepalive never owns Resident continuous CPU wake.
             syncResidentCpuWakeLock("resident_keepalive")
+            publishResidentHostShellState("running", "legacy_host_keepalive")
             return START_STICKY
         }
 
@@ -1601,6 +1602,7 @@ class AIForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        publishResidentHostShellState("stopped", "service_destroy")
         releaseResidentCpuWakeLock("service_destroy")
         if (residentUiProxyShell) {
             isRunning.set(false)

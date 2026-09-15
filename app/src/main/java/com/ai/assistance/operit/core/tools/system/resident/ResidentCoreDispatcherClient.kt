@@ -26,6 +26,7 @@ internal class ResidentCoreDispatcherClient private constructor(
             return@withContext AiLimbsIngressResult(ownership.errorPayload(), null)
         }
         val coreSession = checkNotNull(ownership.coreSession)
+        val corePid = checkNotNull(ownership.corePid)
         val request = JSONObject()
             .put("source_id", ingressSession.sourceId)
             .put("execution_session", JSONObject()
@@ -36,7 +37,7 @@ internal class ResidentCoreDispatcherClient private constructor(
             .put("args", JSONObject(args.toString()))
 
         val response = runCatching {
-            ResidentCoreDispatchWire.request(coreSession, "invoke", request)
+            ResidentCoreDispatchWire.request(coreSession, corePid, "invoke", request)
         }.getOrElse { error ->
             return@withContext AiLimbsIngressResult(
                 JSONObject()
@@ -73,7 +74,7 @@ internal class ResidentCoreDispatcherClient private constructor(
             ownership.error ?: "Resident Core Dispatcher is not ready for bootstrap rearm."
         }
         val response =
-            ResidentCoreDispatchWire.request(checkNotNull(ownership.coreSession), "rearm_bootstrap")
+            ResidentCoreDispatchWire.request(checkNotNull(ownership.coreSession), checkNotNull(ownership.corePid), "rearm_bootstrap")
         check(response.optBoolean("success", false)) {
             response.optString("error", "Resident Core rejected bootstrap rearm.")
         }
@@ -82,27 +83,28 @@ internal class ResidentCoreDispatcherClient private constructor(
     private fun currentOwnership(): Ownership {
         val fenceResult = runCatching { ResidentBusinessTakeoverFence.snapshot(appContext) }
         if (fenceResult.isFailure) {
-            return Ownership(false, null, "RESIDENT_CORE_FENCE_INVALID", fenceResult.exceptionOrNull().toString())
+            return Ownership(false, null, null, "RESIDENT_CORE_FENCE_INVALID", fenceResult.exceptionOrNull().toString())
         }
         val fence = fenceResult.getOrNull()
-            ?: return Ownership(false, null, "RESIDENT_CORE_OWNERSHIP_LOST", "Resident takeover fence disappeared; Host-local fallback is forbidden until an explicit role transition.")
+            ?: return Ownership(false, null, null, "RESIDENT_CORE_OWNERSHIP_LOST", "Resident takeover fence disappeared; Host-local fallback is forbidden until an explicit role transition.")
         val corePid = fence.optInt("core_pid", -1)
         if (corePid <= 0 || corePid == Process.myPid()) {
-            return Ownership(false, null, "RESIDENT_CORE_FENCE_IDENTITY_INVALID", "Resident takeover fence does not identify another Core process.")
+            return Ownership(false, null, null, "RESIDENT_CORE_FENCE_IDENTITY_INVALID", "Resident takeover fence does not identify another Core process.")
         }
         val state = fence.optString("state")
         val coreSession = fence.optString("core_session").takeIf { it.length in 1..64 }
         return when {
-            state == "owned" && coreSession != null -> Ownership(true, coreSession, null, null)
-            state == "armed" -> Ownership(false, coreSession, "RESIDENT_CORE_TAKEOVER_PENDING", "Resident Core takeover is still pending.")
-            state == "failed" -> Ownership(false, coreSession, "RESIDENT_CORE_TAKEOVER_FAILED", fence.optString("error", "Resident Core takeover failed."))
-            else -> Ownership(false, coreSession, "RESIDENT_CORE_TAKEOVER_STATE_INVALID", "Resident takeover fence state is inconsistent: $state")
+            state == "owned" && coreSession != null -> Ownership(true, coreSession, corePid, null, null)
+            state == "armed" -> Ownership(false, coreSession, corePid, "RESIDENT_CORE_TAKEOVER_PENDING", "Resident Core takeover is still pending.")
+            state == "failed" -> Ownership(false, coreSession, corePid, "RESIDENT_CORE_TAKEOVER_FAILED", fence.optString("error", "Resident Core takeover failed."))
+            else -> Ownership(false, coreSession, corePid, "RESIDENT_CORE_TAKEOVER_STATE_INVALID", "Resident takeover fence state is inconsistent: $state")
         }
     }
 
     private data class Ownership(
         val ready: Boolean,
         val coreSession: String?,
+        val corePid: Int?,
         val errorCode: String?,
         val error: String?
     ) {

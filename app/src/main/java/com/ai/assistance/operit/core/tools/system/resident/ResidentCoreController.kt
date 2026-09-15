@@ -24,12 +24,29 @@ internal object ResidentCoreController {
 
     suspend fun status(context: Context): JSONObject = withContext(Dispatchers.IO) {
         try {
-            ResidentCoreWire.request("status")
-                .also { it.put("build_matches", it.getInt("build_code") == BuildConfig.VERSION_CODE) }
+            ResidentCoreWire.request("status").also { state ->
+                val buildMatches = state.getInt("build_code") == BuildConfig.VERSION_CODE
+                state.put("build_matches", buildMatches)
+                    .put("process_alive", true)
+                if (!buildMatches) {
+                    state.put("consistent", false)
+                        .put("consistency_error", "Resident Core build does not match the installed Host build")
+                } else {
+                    val consistencyError =
+                        runCatching { requireSnapshotConsistent(state) }.exceptionOrNull()
+                    state.put("consistent", consistencyError == null)
+                    if (consistencyError != null) {
+                        state.put("consistency_error", consistencyError.toString().take(1024))
+                    }
+                }
+            }
         } catch (error: IOException) {
+            val stopped = leaseIsFree(context)
             JSONObject()
                 .put("available", false)
-                .put("phase", if (leaseIsFree(context)) "stopped" else "unresponsive_or_starting")
+                .put("consistent", false)
+                .put("process_alive", !stopped)
+                .put("phase", if (stopped) "stopped" else "unresponsive_or_starting")
                 .put("continuous_work", false)
                 .put("error", error.toString().take(512))
         }
@@ -111,11 +128,18 @@ internal object ResidentCoreController {
                     .put("backend_release_confirmed", JSONObject.NULL)
                 val report = File(directory(context), "shutdown.result.json")
                 try {
-                    if (report.isFile && report.length() in 1L..4096L) {
+                    if (report.isFile && report.length() in 1L..16384L) {
                         val outcome = JSONObject(report.readText())
                         if (outcome.getInt("pid") == pid && outcome.getString("session_id") == state.getString("session_id")) {
                             result.put("backend_release_confirmed", outcome.getBoolean("backend_release_confirmed"))
                             if (outcome.has("backend_release_error")) result.put("backend_release_error", outcome.getString("backend_release_error"))
+                            if (outcome.has("continuous_resource_release_confirmed")) {
+                                result.put("continuous_resource_release_confirmed",
+                                    outcome.getBoolean("continuous_resource_release_confirmed"))
+                            }
+                            if (outcome.has("continuous_resource_release")) {
+                                result.put("continuous_resource_release", outcome.getJSONObject("continuous_resource_release"))
+                            }
                         }
                     }
                 } catch (error: Exception) {
@@ -194,10 +218,19 @@ internal object ResidentCoreController {
         check(state.getString("phase") == "running") {
             "Core IPC is reachable but runtime phase is not running: ${state.getString("phase")}"
         }
+        requireSnapshotConsistent(state)
         val runtime = state.getJSONObject("core_runtime")
         check(runtime.getBoolean("runtime_skeleton_ready") && runtime.getBoolean("main_looper_ready")) {
             "Core runtime reported running before its main-Looper startup barrier completed"
         }
+    }
+
+    /**
+     * Validate ownership identity independently from whether Dispatcher admission is currently open.
+     * During OFF, QUIESCING/DRAINED is a valid Core-owned state with running=false/accepting=false.
+     */
+    private fun requireSnapshotConsistent(state: JSONObject) {
+        val runtime = state.getJSONObject("core_runtime")
         check(state.getBoolean("business_attached") == runtime.getBoolean("business_attached")) {
             "Core business ownership snapshot is inconsistent"
         }
@@ -216,23 +249,50 @@ internal object ResidentCoreController {
                 runtime.getBoolean("ubuntu_control_ready")) {
                 "Core claims business ownership before Kernel / Bridge / plugin services / Ubuntu are prepared"
             }
-            val dispatcher = state.getJSONObject("dispatcher")
-            check(dispatcher.getBoolean("running") &&
-                dispatcher.getString("dispatcher_owner") == "resident_core" &&
-                dispatcher.getInt("owner_pid") == state.getInt("pid")) {
-                "Core claims business ownership without the authoritative Dispatcher: $dispatcher"
+            val resources = state.getJSONObject("continuous_resources")
+            check(resources.getString("state") == "active" &&
+                resources.getString("owner") == "resident_core" &&
+                resources.getString("owner_session") == state.getString("session_id") &&
+                resources.getInt("owner_pid") == state.getInt("pid") &&
+                resources.getBoolean("cpu_wake_requested") &&
+                resources.getBoolean("cpu_wake_token_held") &&
+                resources.getBoolean("network_callback_registered")) {
+                "Core claims business ownership without session-bound CPU/network resources: $resources"
             }
-            val policyRuntime = dispatcher.getJSONObject("runtime")
-            check(policyRuntime.getString("policy_owner") == "resident_core" &&
+
+            val dispatcher = state.getJSONObject("dispatcher")
+            check(dispatcher.getString("dispatcher_owner") == "resident_core" &&
+                dispatcher.getInt("owner_pid") == state.getInt("pid")) {
+                "Core business owner lost the authoritative Dispatcher identity: $dispatcher"
+            }
+            val businessPhase = state.getString("business_phase")
+            when (businessPhase) {
+                "running" -> check(dispatcher.getBoolean("running") && dispatcher.getBoolean("accepting")) {
+                    "Core RUNNING business must have an accepting Dispatcher: $dispatcher"
+                }
+                "quiescing", "drained", "quiesce_failed" ->
+                    check(!dispatcher.getBoolean("accepting")) {
+                        "Core $businessPhase business must not accept new Dispatcher work: $dispatcher"
+                    }
+                else -> Unit
+            }
+            if (businessPhase == "drained") {
+                check(dispatcher.getBoolean("drained")) {
+                    "Core DRAINED business must report a drained Dispatcher: $dispatcher"
+                }
+            }
+            val policyRuntime = dispatcher.optJSONObject("runtime")
+            check(policyRuntime != null &&
+                policyRuntime.getString("policy_owner") == "resident_core" &&
                 policyRuntime.getInt("owner_pid") == state.getInt("pid")) {
-                "Core Dispatcher does not own the policy plane: $policyRuntime"
+                "Core Dispatcher does not own the policy plane: $dispatcher"
             }
         }
         check(state.getBoolean("plugins_migrated") == runtime.getBoolean("plugin_services_prepared")) {
             "Core plugin migration marker is inconsistent with the business runtime"
         }
         check(!state.getBoolean("continuous_work")) {
-            "Core must not claim continuous work before the power/freezer stage is validated"
+            "Core must not claim continuous work before real-device power/freezer validation"
         }
     }
 

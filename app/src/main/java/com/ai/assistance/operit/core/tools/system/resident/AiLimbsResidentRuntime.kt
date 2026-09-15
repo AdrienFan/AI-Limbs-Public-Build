@@ -30,7 +30,7 @@ import org.json.JSONObject
 /** Host-owned controller for the independent AI Limbs resident process. */
 internal object AiLimbsResidentRuntime {
     const val PROCESS_NAME = "ail_resident"
-    private const val RESIDENT_PROTOCOL_VERSION = 3
+    private const val RESIDENT_PROTOCOL_VERSION = 4
 
     private const val TAG = "AiLimbsResident"
     private const val PREFS = "ai_limbs_resident_runtime_v1"
@@ -338,6 +338,15 @@ internal object AiLimbsResidentRuntime {
         }
         val cleanBackendRelease =
             coreStopResult?.optBoolean("backend_release_confirmed", false) == true
+        val cleanContinuousResourceRelease =
+            coreStopResult?.optBoolean("continuous_resource_release_confirmed", false) == true
+        if (coreWasAvailable && coreStopResult != null && !cleanContinuousResourceRelease) {
+            degraded += "Core CPU/network resources were not cleanly released before process exit"
+        }
+        if (forcedCoreStop) {
+            degraded +=
+                "Core CPU/network token cleanup relied on process death; device-level release must be verified"
+        }
         val backendReturnMode = when {
             !needsBackendReturn -> "not_required"
             backendReturn == null -> "backend_lost_or_unreachable"
@@ -407,7 +416,9 @@ internal object AiLimbsResidentRuntime {
         }
         if (ResidentBusinessTakeoverFence.snapshot(app) != null) failures += "Resident takeover fence remains after OFF"
         if (ResidentPolicyStateHandoff.snapshot(app) != null) failures += "Resident policy handoff remains after OFF"
-        if (!waitForHostWakeRelease()) failures += "Host Resident PARTIAL_WAKE_LOCK did not release"
+        if (!waitForHostTransitionWakeRelease()) {
+            failures += "Host transition PARTIAL_WAKE_LOCK did not release"
+        }
 
         if (failures.isEmpty()) {
             clearError()
@@ -440,10 +451,20 @@ internal object AiLimbsResidentRuntime {
     private suspend fun status(probe: LocalProbe = localProbe()): JSONObject =
         withContext(Dispatchers.IO) {
             val guardian = readKeyValues(guardianFile())
+            val hostShell = readKeyValues(hostShellStateFile())
+            val hostShellPid = hostShell["pid"]?.toIntOrNull()
+            val hostShellAlive =
+                hostShell["state"] == "running" &&
+                    hostShellPid != null &&
+                    hostShellPid > 0 &&
+                    pidExists(hostShellPid)
             val hostWake = readKeyValues(hostWakeLockStateFile())
-            val hostPid = hostWake["pid"]?.toIntOrNull()
+            val hostWakePid = hostWake["pid"]?.toIntOrNull()
             val hostWakeHeld =
-                hostWake["held"] == "true" && hostPid == Process.myPid() && pidExists(hostPid)
+                hostWake["held"] == "true" &&
+                    hostWakePid != null &&
+                    hostWakePid > 0 &&
+                    pidExists(hostWakePid)
             val core = ResidentCoreController.status(app)
             val fence = ResidentBusinessTakeoverFence.snapshot(app)
             val policyHandoff = ResidentPolicyStateHandoff.snapshot(app)
@@ -451,7 +472,10 @@ internal object AiLimbsResidentRuntime {
             val hostRole = hostKernel.optString("runtime_role", "legacy_host")
             val enabled = isEnabled()
             val coreAvailable = core.optBoolean("available", false)
-            val coreOwned = coreAvailable && core.optBoolean("business_attached", false)
+            val coreProcessAlive = core.optBoolean("process_alive", coreAvailable)
+            val coreConsistent = coreAvailable && core.optBoolean("consistent", false)
+            val coreOwned =
+                coreConsistent && core.optBoolean("business_attached", false)
             val fenceState = fence?.optString("state")
             val permissionBackendOwnership = permissionBackendOwnershipSnapshot()
             val permissionOwner = permissionBackendOwnership?.optString("runtime_owner")
@@ -462,6 +486,15 @@ internal object AiLimbsResidentRuntime {
                     uiProxy.optBoolean("server_running", false) &&
                     uiProxy.optBoolean("host_attached", false) &&
                     uiProxy.optLong("host_generation", 0L) > 0L
+            val continuousResources = core.optJSONObject("continuous_resources")
+            val cpuWakeTokenHeld =
+                continuousResources?.optBoolean("cpu_wake_token_held", false) == true
+            val networkCallbackRegistered =
+                continuousResources?.optBoolean("network_callback_registered", false) == true
+            val networkAvailable =
+                continuousResources?.optBoolean("network_available", false) == true
+            val networkValidated =
+                continuousResources?.optBoolean("network_validated", false) == true
             val lastError = prefs.getString(KEY_LAST_ERROR, null)
             val offFactsClean =
                 !probe.running &&
@@ -474,6 +507,8 @@ internal object AiLimbsResidentRuntime {
                 !enabled && offFactsClean -> "off"
                 !enabled -> "stopping"
                 lastError != null ||
+                    (coreAvailable && !coreConsistent) ||
+                    (fenceState == "owned" && !coreAvailable) ||
                     fenceState == "failed" ||
                     core.optString("business_phase") == "failed" ||
                     core.optString("business_phase") == "quiesce_failed" -> "failed"
@@ -503,27 +538,54 @@ internal object AiLimbsResidentRuntime {
                 .put("plugins_migrated", core.optBoolean("plugin_services_prepared", false))
                 .put("enabled", enabled)
                 .put("running", probe.running)
+                .put("guardian_process_alive", probe.running)
+                .put("guardian_pid", probe.pid ?: JSONObject.NULL)
+                .put("guardian_session_id", probe.sessionId ?: JSONObject.NULL)
                 .put("core_running", coreAvailable)
+                .put("core_reachable", coreAvailable)
+                .put("core_consistent", coreConsistent)
+                .put("core_consistency_error",
+                    if (core.has("consistency_error")) core.opt("consistency_error") else JSONObject.NULL)
                 .put("host_attach_complete", hostAttachComplete)
                 .put("host_attach", uiProxy ?: JSONObject.NULL)
                 .put("pid", probe.pid ?: JSONObject.NULL)
                 .put("uid", probe.uid ?: JSONObject.NULL)
                 .put("ppid", probe.ppid ?: JSONObject.NULL)
                 .put("protocol_version", probe.protocolVersion ?: JSONObject.NULL)
-                .put("oom_score_adj", probe.oomScoreAdj ?: JSONObject.NULL)
+                .put("oom_score_adj_diagnostic_only", probe.oomScoreAdj ?: JSONObject.NULL)
                 .put("cgroup", probe.cgroup ?: JSONObject.NULL)
                 .put("session_id", probe.sessionId ?: JSONObject.NULL)
                 .put("started_wall_ms", probe.startedWallMs ?: JSONObject.NULL)
                 .put("last_heartbeat", lastHeartbeat() ?: JSONObject.NULL)
-                // Wake-lock effectiveness against Samsung freezer/LEV is still a later real-device gate.
+                // Process liveness, token ownership, Android network state and real continuous work
+                // are deliberately separate facts. None of the first three prove freezer/LEV success.
                 .put("continuous_work", false)
                 .put("continuous_work_state", "unverified")
+                .put("process_alive", coreProcessAlive)
+                .put("core_process_alive", coreProcessAlive)
+                .put("cpu_wake_owner",
+                    continuousResources?.optString("owner", "none") ?: "none")
+                .put("cpu_wake_token_held", cpuWakeTokenHeld)
                 .put("cpu_wake_effective", JSONObject.NULL)
-                .put("cpu_wake_lock", if (hostWakeHeld) "held" else "not_held")
-                .put("cpu_wake_lock_backend", "host_service_power_manager")
-                .put("host_pid", hostPid ?: JSONObject.NULL)
-                .put("host_wake_lock_reason", hostWake["reason"] ?: JSONObject.NULL)
-                .put("host_wake_lock_detail", hostWake["detail"] ?: JSONObject.NULL)
+                .put("cpu_wake_evidence",
+                    continuousResources?.optString("cpu_wake_evidence", "none") ?: "none")
+                .put("network_owner",
+                    continuousResources?.optString("owner", "none") ?: "none")
+                .put("network_callback_registered", networkCallbackRegistered)
+                .put("network_available", networkAvailable)
+                .put("network_internet_capability",
+                    continuousResources?.optBoolean("network_internet_capability", false) == true)
+                .put("network_validated", networkValidated)
+                .put("network_real_io_verified", false)
+                .put("network_effective", JSONObject.NULL)
+                .put("continuous_resources", continuousResources ?: JSONObject.NULL)
+                .put("host_shell_alive", hostShellAlive)
+                .put("host_pid", hostShellPid ?: JSONObject.NULL)
+                .put("host_shell_role", hostShell["role"] ?: JSONObject.NULL)
+                .put("host_shell_detail", hostShell["detail"] ?: JSONObject.NULL)
+                // LEGACY_HOST may transiently hold this during handoff only. UI_PROXY must not.
+                .put("host_transition_wake_lock_held", hostWakeHeld)
+                .put("host_transition_wake_pid", hostWakePid ?: JSONObject.NULL)
                 .put("host_guardian", guardian["host_guardian"] ?: JSONObject.NULL)
                 .put("last_host_touch_wall_ms", guardian["last_host_touch_wall_ms"]?.toLongOrNull() ?: JSONObject.NULL)
                 .put("last_host_touch_ok", guardian["last_host_touch_ok"]?.toBooleanStrictOrNull() ?: JSONObject.NULL)
@@ -617,6 +679,8 @@ internal object AiLimbsResidentRuntime {
     private fun heartbeatFile(): File = File(stateDir(), "heartbeat.log")
     private fun guardianFile(): File = File(stateDir(), "guardian.state")
     private fun hostWakeLockStateFile(): File = File(stateDir(), "host_wake_lock.state")
+
+    private fun hostShellStateFile(): File = File(stateDir(), "host_shell.state")
     private fun stopRequestFile(): File = File(stateDir(), "stop.request")
     private fun shellLogPath(): String = "/data/local/tmp/ail_resident_${Process.myUid()}.log"
 
@@ -666,7 +730,8 @@ internal object AiLimbsResidentRuntime {
         return true
     }
 
-    private suspend fun waitForHostWakeRelease(timeoutMs: Long = 2_000L): Boolean {
+    /** Transitional LEGACY_HOST handoff wake token only; never a continuous-work success signal. */
+    private suspend fun waitForHostTransitionWakeRelease(timeoutMs: Long = 2_000L): Boolean {
         val deadline = android.os.SystemClock.elapsedRealtime() + timeoutMs
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             val state = readKeyValues(hostWakeLockStateFile())
