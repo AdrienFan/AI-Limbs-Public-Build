@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.tools.system.resident
 
 import android.os.Process
 import android.os.SystemClock
+import com.ai.assistance.operit.BuildConfig
 import java.io.File
 import java.util.UUID
 
@@ -26,10 +27,17 @@ object AiLimbsResidentMain {
 
     @JvmStatic
     fun main(args: Array<String>) {
-        require(args.size >= 2) { "Resident state directory and package name are required" }
+        require(args.size >= 4) {
+            "Resident state directory, package name, build code and source APK are required"
+        }
 
         val stateDir = File(args[0])
         val packageName = args[1]
+        val expectedBuildCode = args[2].toInt()
+        val sourceApk = args[3]
+        check(expectedBuildCode == BuildConfig.VERSION_CODE) {
+            "Resident launch build does not match loaded code"
+        }
         check(stateDir.mkdirs() || stateDir.isDirectory) {
             "Could not create resident state directory: ${stateDir.absolutePath}"
         }
@@ -52,6 +60,8 @@ object AiLimbsResidentMain {
             metaFile,
             buildString {
                 appendLine("protocol_version=$PROTOCOL_VERSION")
+                appendLine("build_code=${BuildConfig.VERSION_CODE}")
+                appendLine("source_apk=$sourceApk")
                 appendLine("pid=$pid")
                 appendLine("uid=$uid")
                 appendLine("session_id=$sessionId")
@@ -88,6 +98,8 @@ object AiLimbsResidentMain {
                 guardianFile,
                 buildString {
                     appendLine("state=$state")
+                    appendLine("build_code=${BuildConfig.VERSION_CODE}")
+                    appendLine("source_apk=${sanitize(sourceApk)}")
                     appendLine("host_shell_alive=$hostShellAlive")
                     appendLine("host_pid=${hostShellPid ?: -1}")
                     appendLine("host_shell_detail=${sanitize(hostShellDetail)}")
@@ -110,7 +122,10 @@ object AiLimbsResidentMain {
             }
         )
 
-        println("AIL_RESIDENT_READY pid=$pid uid=$uid session=$sessionId protocol=$PROTOCOL_VERSION")
+        println(
+            "AIL_RESIDENT_READY pid=$pid uid=$uid session=$sessionId protocol=$PROTOCOL_VERSION " +
+                "build=${BuildConfig.VERSION_CODE}"
+        )
 
         try {
             var heartbeatSeq = 0L

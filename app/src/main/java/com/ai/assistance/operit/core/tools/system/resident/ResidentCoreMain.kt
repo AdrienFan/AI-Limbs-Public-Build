@@ -80,6 +80,7 @@ object ResidentCoreMain {
                     .put("available", runtimeState.getString("phase") == "running")
                     .put("phase", runtimeState.getString("phase"))
                     .put("build_code", BuildConfig.VERSION_CODE)
+                    .put("source_apk", context.applicationInfo.sourceDir)
                     .put("pid", Process.myPid())
                     .put("uid", Process.myUid())
                     .put("session_id", sessionId)

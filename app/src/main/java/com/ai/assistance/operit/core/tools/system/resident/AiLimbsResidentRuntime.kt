@@ -7,6 +7,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Process
 import android.system.Os
+import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
@@ -172,15 +173,16 @@ internal object AiLimbsResidentRuntime {
 
     private suspend fun ensureGuardianStartedLocked(): JSONObject {
         var existing = localProbe()
-        if (existing.running && existing.protocolVersion == RESIDENT_PROTOCOL_VERSION) {
+        if (guardianMatchesInstalledBuild(existing)) {
             clearError()
             return status(existing)
         }
 
-        if (existing.running && existing.protocolVersion != RESIDENT_PROTOCOL_VERSION) {
+        if (existing.running) {
             AppLogger.i(
                 TAG,
-                "Replacing resident protocol ${existing.protocolVersion} with $RESIDENT_PROTOCOL_VERSION"
+                "Replacing stale Resident pid=${existing.pid} protocol=${existing.protocolVersion} " +
+                    "build=${existing.buildCode} source=${existing.sourceApk}"
             )
             existing.pid?.let { stalePid ->
                 runCatching { Process.killProcess(stalePid) }
@@ -203,7 +205,9 @@ internal object AiLimbsResidentRuntime {
                 }
             }
             if (existing.running) {
-                recordError("旧版 Resident 仍在运行，无法安全切换到协议 $RESIDENT_PROTOCOL_VERSION")
+                recordError(
+                    "旧版或旧安装 Resident 仍在运行，无法安全切换到当前 build=${BuildConfig.VERSION_CODE}"
+                )
                 return status(existing)
             }
         }
@@ -552,6 +556,9 @@ internal object AiLimbsResidentRuntime {
                 .put("uid", probe.uid ?: JSONObject.NULL)
                 .put("ppid", probe.ppid ?: JSONObject.NULL)
                 .put("protocol_version", probe.protocolVersion ?: JSONObject.NULL)
+                .put("guardian_build_code", probe.buildCode ?: JSONObject.NULL)
+                .put("guardian_source_apk", probe.sourceApk ?: JSONObject.NULL)
+                .put("guardian_build_matches", guardianMatchesInstalledBuild(probe))
                 .put("oom_score_adj_diagnostic_only", probe.oomScoreAdj ?: JSONObject.NULL)
                 .put("cgroup", probe.cgroup ?: JSONObject.NULL)
                 .put("session_id", probe.sessionId ?: JSONObject.NULL)
@@ -610,7 +617,8 @@ internal object AiLimbsResidentRuntime {
         val inner =
             "export CLASSPATH=${quote(app.applicationInfo.sourceDir)}; " +
                 "exec /system/bin/app_process /system/bin --nice-name=$PROCESS_NAME " +
-                "$MAIN_CLASS ${quote(stateDir().absolutePath)} ${quote(app.packageName)}"
+                "$MAIN_CLASS ${quote(stateDir().absolutePath)} ${quote(app.packageName)} " +
+                "${quote(BuildConfig.VERSION_CODE.toString())} ${quote(app.applicationInfo.sourceDir)}"
         val asApp =
             "exec /system/bin/run-as ${quote(app.packageName)} /system/bin/sh -c ${quote(inner)}"
         return "trap '' HUP; rm -f ${quote(shellLogPath())}; " +
@@ -640,6 +648,8 @@ internal object AiLimbsResidentRuntime {
             pid = pid,
             uid = uid,
             protocolVersion = meta["protocol_version"]?.toIntOrNull() ?: 1,
+            buildCode = meta["build_code"]?.toIntOrNull(),
+            sourceApk = meta["source_apk"],
             ppid = status["PPid"]?.trim()?.toIntOrNull(),
             oomScoreAdj = readProcText(pid, "oom_score_adj")?.trim()?.toIntOrNull(),
             cgroup = readProcText(pid, "cgroup")?.trim()?.replace('\n', ';'),
@@ -647,6 +657,12 @@ internal object AiLimbsResidentRuntime {
             startedWallMs = meta["started_wall_ms"]?.toLongOrNull()
         )
     }
+
+    private fun guardianMatchesInstalledBuild(probe: LocalProbe): Boolean =
+        probe.running &&
+            probe.protocolVersion == RESIDENT_PROTOCOL_VERSION &&
+            probe.buildCode == BuildConfig.VERSION_CODE &&
+            probe.sourceApk == app.applicationInfo.sourceDir
 
     private fun pidExists(pid: Int): Boolean =
         runCatching {
@@ -785,6 +801,8 @@ internal object AiLimbsResidentRuntime {
         val pid: Int? = null,
         val uid: Int? = null,
         val protocolVersion: Int? = null,
+        val buildCode: Int? = null,
+        val sourceApk: String? = null,
         val ppid: Int? = null,
         val oomScoreAdj: Int? = null,
         val cgroup: String? = null,

@@ -25,8 +25,13 @@ internal object ResidentCoreController {
     suspend fun status(context: Context): JSONObject = withContext(Dispatchers.IO) {
         try {
             ResidentCoreWire.request("status").also { state ->
-                val buildMatches = state.getInt("build_code") == BuildConfig.VERSION_CODE
-                state.put("build_matches", buildMatches)
+                val buildCodeMatches = state.getInt("build_code") == BuildConfig.VERSION_CODE
+                val sourceApkMatches =
+                    state.optString("source_apk", "") == context.applicationInfo.sourceDir
+                val buildMatches = buildCodeMatches && sourceApkMatches
+                state.put("build_code_matches", buildCodeMatches)
+                    .put("source_apk_matches", sourceApkMatches)
+                    .put("build_matches", buildMatches)
                     .put("process_alive", true)
                 if (!buildMatches) {
                     state.put("consistent", false)
@@ -53,13 +58,21 @@ internal object ResidentCoreController {
     }
 
     suspend fun probe(context: Context, executor: ShellExecutor): JSONObject = withContext(Dispatchers.IO) {
-        val existing = status(context)
+        var existing = status(context)
         if (existing.getBoolean("available")) {
-            check(existing.getBoolean("build_matches")) {
-                "Stop the previous Core build before probing the installed build"
+            if (!existing.getBoolean("build_matches")) {
+                check(!existing.optBoolean("business_attached", false)) {
+                    "Previous Core build still owns business; explicit OFF recovery is required"
+                }
+                stop(context)
+                existing = status(context)
+                check(!existing.getBoolean("available") && existing.getString("phase") == "stopped") {
+                    "Previous Core build did not retire before probing the installed build"
+                }
+            } else {
+                requireRuntimeSkeletonRunning(existing)
+                return@withContext existing
             }
-            requireRuntimeSkeletonRunning(existing)
-            return@withContext existing
         }
         check(existing.getString("phase") == "stopped") {
             "Core owns its lease but IPC is not ready; stop it before another probe"
