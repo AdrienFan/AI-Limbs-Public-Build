@@ -108,6 +108,7 @@ private data class ActiveChild(
 
 internal class ChildExtensionRuntime(
     private val appContext: Context,
+    private val runtimeRole: PluginRuntimeRole,
     private val pluginStore: PluginStore,
     private val contributions: PluginContributionRegistry,
     private val capabilityRegistry: PluginHostCapabilityRegistry

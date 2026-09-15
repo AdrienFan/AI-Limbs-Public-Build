@@ -4,6 +4,7 @@ import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
 import com.ai.assistance.operit.plugins.center.PluginInstallException
+import com.ai.assistance.operit.plugins.center.PluginRuntimeRole
 import com.ai.assistance.operit.plugins.center.SemanticVersion
 import com.ai.assistance.operit.plugins.center.SystemPluginUiRegistry
 import com.ai.assistance.operit.util.AppLogger
@@ -26,6 +27,7 @@ internal data class SystemPluginMaintenanceSnapshot(
 
 internal class SystemPluginController(
     context: Context,
+    private val runtimeRole: PluginRuntimeRole,
     private val uiRegistry: SystemPluginUiRegistry,
     private val hostFactory: (String, String) -> SystemPluginHostV1
 ) {
@@ -51,6 +53,7 @@ internal class SystemPluginController(
     }
 
     suspend fun restore() {
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) return
         val version = readStateVersion() ?: return
         val packageFile = packageFile(version)
         if (!packageFile.isFile) return
@@ -229,6 +232,9 @@ internal class SystemPluginController(
     }
 
     private fun mountPackage(packageFile: File, originalName: String) {
+        check(runtimeRole != PluginRuntimeRole.BUSINESS) {
+            "BUSINESS runtime must not mount the UI-bearing Plugin Center"
+        }
         val validation = SystemPluginPackageValidator.validateForPluginCenterBootstrap(packageFile, originalName)
         val manifest = validation.manifest
         checkRuntimeSupported(manifest)

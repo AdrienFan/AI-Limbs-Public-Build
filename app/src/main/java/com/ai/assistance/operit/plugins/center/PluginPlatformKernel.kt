@@ -42,9 +42,11 @@ internal object PluginPlatformKernel {
     @Volatile private var started = false
     @Volatile private var lifecyclePhase = "uninitialized"
     @Volatile private var lifecycleError: String? = null
+    private var runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 
     internal fun lifecycleSnapshot(): org.json.JSONObject = org.json.JSONObject()
         .put("phase", lifecyclePhase)
+        .put("runtime_role", runtimeRole.name.lowercase())
         .put("initialized", initialized)
         .put("started", started)
         .put("pid", android.os.Process.myPid())
@@ -217,10 +219,20 @@ internal object PluginPlatformKernel {
 
     fun initialize(
         context: Context,
-        secretBroker: PluginSecretBroker = NoApprovedPluginSecretBroker
+        secretBroker: PluginSecretBroker = NoApprovedPluginSecretBroker,
+        role: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
     ) {
         synchronized(lifecycleLock) {
-            if (initialized) return
+            if (initialized) {
+                check(runtimeRole == role) {
+                    "Plugin kernel already initialized as $runtimeRole, requested $role"
+                }
+                return
+            }
+            check(role != PluginRuntimeRole.UI_PROXY) {
+                "UI_PROXY is a Host-shell role and must not initialize PluginPlatformKernel"
+            }
+            runtimeRole = role
             val appContext = context.applicationContext
             if (runtimeOwnerLease == null) {
                 runtimeOwnerLease = ResidentRuntimeLease.acquire(
@@ -233,7 +245,7 @@ internal object PluginPlatformKernel {
             val inactivityPolicy = PluginInactivityPolicyStore(appContext)
             val backupPolicy = PluginBackupPolicyStore(appContext)
             val uiRegistry = PluginUiRegistry()
-            val systemUiRegistry = SystemPluginUiRegistry()
+            val systemUiRegistry = SystemPluginUiRegistry(runtimeRole)
             val dynamicNavigationRegistry = DynamicNavigationSurfaceRegistry(appContext)
             val pagePresentationRegistry = PluginPagePresentationRegistry()
             val pluginStore = PluginStore.fromContext(appContext)
@@ -378,6 +390,7 @@ internal object PluginPlatformKernel {
             )
             val childExtensionRuntime = ChildExtensionRuntime(
                 appContext = appContext,
+                runtimeRole = runtimeRole,
                 pluginStore = pluginStore,
                 contributions = contributions,
                 capabilityRegistry = capabilityRegistry
@@ -386,6 +399,7 @@ internal object PluginPlatformKernel {
             val backupStore = PluginBackupStore(pluginStore)
             val manager = PluginManager(
                 appContext = appContext,
+                runtimeRole = runtimeRole,
                 store = pluginStore,
                 trustVerifier = StrictPluginTrustVerifier,
                 runtimeAdapters = runtimeAdapters,
@@ -397,7 +411,7 @@ internal object PluginPlatformKernel {
                 inactivityPolicy = inactivityPolicy,
                 backupStore = backupStore,
                 backupPolicy = backupPolicy,
-                runtimeHost = PluginRuntimeHost(),
+                runtimeHost = PluginRuntimeHost(runtimeRole),
                 pluginContextFactory = pluginContextFactory,
                 identityRegistry = officialIdentities,
                 packageVerifier = PluginPackageVerifier(officialIdentities)
@@ -425,6 +439,7 @@ internal object PluginPlatformKernel {
             childExtensionRuntimeInstance = childExtensionRuntime
             val systemPluginController = com.ai.assistance.operit.plugins.system.SystemPluginController(
                 context = appContext,
+                runtimeRole = runtimeRole,
                 uiRegistry = systemUiRegistry,
                 hostFactory = { pluginId, role -> createAdmittedSystemHost(pluginId, role) }
             )
@@ -432,7 +447,7 @@ internal object PluginPlatformKernel {
             systemPluginControllerInstance = systemPluginController
             initialized = true
             lifecyclePhase = "initialized"
-            AppLogger.i(TAG, "AI Limbs Plugin Platform kernel initialized: ${manager.store.rootDir.absolutePath}")
+            AppLogger.i(TAG, "AI Limbs Plugin Platform kernel initialized role=$runtimeRole: ${manager.store.rootDir.absolutePath}")
         }
     }
 
@@ -446,11 +461,13 @@ internal object PluginPlatformKernel {
         lifecycleError = null
         try {
             childExtensionRuntimeInstance.start()
-            systemPluginControllerInstance.restore()
+            if (runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
+                systemPluginControllerInstance.restore()
+            }
             managerInstance.restoreEnabledPlugins()
             managerInstance.reconcileInactivityPolicy()
             managerInstance.reconcileBackupPolicy()
-            AppLogger.i(TAG, "AI Limbs Plugin Platform restored system Plugin Center before enabled plugins")
+            AppLogger.i(TAG, "AI Limbs Plugin Platform started role=$runtimeRole; business plugins restored")
         } catch (error: CancellationException) {
             lifecyclePhase = "start_failed"
             lifecycleError = error.toString().take(2048)

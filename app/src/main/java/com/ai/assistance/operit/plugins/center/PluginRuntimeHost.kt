@@ -34,7 +34,17 @@ internal data class PluginRuntimeStopResult(
 }
 
 /** Kernel-only adapter context. Never hand this object to an external plugin payload. */
+internal enum class PluginRuntimeRole {
+    /** Transitional compatibility mode: the Android Host still owns business and UI. */
+    LEGACY_HOST,
+    /** Resident Core role: owns plugin business lifecycle and never owns Android UI objects. */
+    BUSINESS,
+    /** Android Host shell role: owns UI proxies only and must not mount plugin business runtimes. */
+    UI_PROXY
+}
+
 internal data class PluginRuntimeAdapterContext(
+    val runtimeRole: PluginRuntimeRole,
     val appContext: Context,
     val manifest: PluginManifest,
     val versionDir: File,
@@ -70,19 +80,31 @@ internal data class HostedPluginRuntime(
 )
 
 internal class PluginRuntimeHost(
+    private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST,
     private val timeouts: PluginRuntimeTimeouts = PluginRuntimeTimeouts()
 ) {
     suspend fun mount(
         adapter: PluginRuntimeAdapter,
         context: PluginRuntimeAdapterContext,
         scope: PluginMountScope
-    ): HostedPluginRuntime = mount(adapter.kind, scope) { adapter.mount(context) }
+    ): HostedPluginRuntime {
+        check(runtimeRole != PluginRuntimeRole.UI_PROXY) {
+            "UI_PROXY must not mount plugin business runtimes"
+        }
+        check(context.runtimeRole == runtimeRole) {
+            "Runtime role mismatch: host=$runtimeRole context=${context.runtimeRole}"
+        }
+        return mount(adapter.kind, scope) { adapter.mount(context) }
+    }
 
     internal suspend fun mount(
         kind: String,
         scope: PluginMountScope,
         operation: suspend () -> PluginRuntimeHandle
     ): HostedPluginRuntime {
+        check(runtimeRole != PluginRuntimeRole.UI_PROXY) {
+            "UI_PROXY must not mount plugin business runtimes"
+        }
         var handle: PluginRuntimeHandle? = null
         try {
             handle = withTimeout(timeouts.mountTimeoutMs) { operation() }

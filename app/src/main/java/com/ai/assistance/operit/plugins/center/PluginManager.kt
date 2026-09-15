@@ -46,6 +46,7 @@ internal data class PluginActiveAuthorization(
 
 internal class PluginManager(
     private val appContext: Context,
+    private val runtimeRole: PluginRuntimeRole,
     val store: PluginStore,
     private val trustVerifier: PluginTrustVerifier,
     val runtimeAdapters: PluginRuntimeAdapterRegistry,
@@ -787,6 +788,7 @@ internal class PluginManager(
                     adapter = adapter,
                     context =
                         PluginRuntimeAdapterContext(
+                            runtimeRole = runtimeRole,
                             appContext = appContext,
                             manifest = manifest,
                             versionDir = versionDir,

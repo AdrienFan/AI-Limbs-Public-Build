@@ -17,7 +17,9 @@ import kotlinx.coroutines.flow.asStateFlow
  * Plugin Center and is the single authority that understands ordinary plugin UI component schemas.
  * New composite controls therefore replace/update Plugin Center instead of adding Host render code.
  */
-internal class SystemPluginUiRegistry {
+internal class SystemPluginUiRegistry(
+    private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
+) {
     private data class Owned(
         val token: String,
         val ownerPluginId: String,
@@ -72,6 +74,7 @@ internal class SystemPluginUiRegistry {
         mutablePageSlotRenderer.asStateFlow()
 
     fun registerToolboxEntry(ownerPluginId: String, entry: SystemToolboxEntryV1): AutoCloseable {
+        requireUiRuntime()
         val id = entry.id.trim()
         if (id.isEmpty()) throw PluginInstallException("SYSTEM_UI_ENTRY_ID_EMPTY", "System UI entry id is empty")
         val token = UUID.randomUUID().toString()
@@ -96,6 +99,7 @@ internal class SystemPluginUiRegistry {
         ownerPluginId: String,
         renderer: SystemPluginUiRendererV2
     ): AutoCloseable {
+        requireUiRuntime()
         // Defense in depth: SystemUiHostV2 already admits only system.role=plugin_center, but the
         // registry also pins the exact owner identity so a future system-plugin role cannot inherit
         // ordinary-plugin UI language ownership by accident.
@@ -125,6 +129,7 @@ internal class SystemPluginUiRegistry {
         ownerPluginId: String,
         renderer: SystemPageAccessoryRendererV1
     ): AutoCloseable {
+        requireUiRuntime()
         requirePluginCenterUiOwner(ownerPluginId)
         val token = UUID.randomUUID().toString()
         synchronized(accessoryRendererLock) {
@@ -151,6 +156,7 @@ internal class SystemPluginUiRegistry {
         ownerPluginId: String,
         renderer: SystemPageSlotRendererV1
     ): AutoCloseable {
+        requireUiRuntime()
         requirePluginCenterUiOwner(ownerPluginId)
         val token = UUID.randomUUID().toString()
         synchronized(pageSlotRendererLock) {
@@ -182,6 +188,15 @@ internal class SystemPluginUiRegistry {
         synchronized(rendererLock) { ownedRenderer?.ownerPluginId == ownerPluginId }
 
     fun hasPluginCenterEntry(): Boolean = entries.values.any { it.ownerPluginId == PLUGIN_CENTER_OWNER_ID }
+
+    private fun requireUiRuntime() {
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+            throw PluginInstallException(
+                "SYSTEM_UI_RUNTIME_FORBIDDEN",
+                "BUSINESS runtime cannot own Android View/Compose UI registrations"
+            )
+        }
+    }
 
     private fun requirePluginCenterUiOwner(ownerPluginId: String) {
         if (ownerPluginId.trim() != PLUGIN_CENTER_OWNER_ID) {

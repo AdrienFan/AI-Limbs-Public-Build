@@ -283,8 +283,12 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override val dataDir: File = context.dataDir
         override val cacheDir: File = context.cacheDir
         override val logger = HostRuntimeLoggerFactory.plugin(pluginId)
-        override fun createPluginContext(baseContext: Context): Context =
-            createRuntimeContext(baseContext, runtimeEntryFile, runtimeClassLoader)
+        override fun createPluginContext(baseContext: Context): Context {
+            check(context.runtimeRole != PluginRuntimeRole.BUSINESS) {
+                "BUSINESS runtime cannot create plugin Android UI Contexts"
+            }
+            return createRuntimeContext(baseContext, runtimeEntryFile, runtimeClassLoader)
+        }
         override fun createRuntimeContext(
             baseContext: Context,
             runtimeEntryFile: File,
