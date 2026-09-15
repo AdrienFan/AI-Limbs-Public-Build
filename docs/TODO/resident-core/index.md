@@ -1,7 +1,7 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
-branch: feat/resident-core-bootstrap
-status: bootstrap-candidate
+branch: feat/resident-runtime-build26
+status: runtime-migration-in-progress
 ---
 
 # Resident Core 分阶段迁移
@@ -20,4 +20,6 @@ build24 的独立 Guardian 仍使用 App UID。PPID=1、oom_score_adj=-1000、�
 4. 权限与持续运行：独立检验进程冻结、实际 suspend、网络、Android 组件权限和进程归属；需要特权的设备按已授权后端能力实施，不能假设同 UID 天然豁免
 5. 真机验收：长时间锁屏持续外部调用，关闭 Resident 后核对核心退出和 CPU/网络资源释放
 
-在第 1 阶段安装验证之前，不启用自动业务迁移。后续阶段尚未完成。
+2026-09-15：继续编写后续迁移，不再把 build25 安装验证作为源码工作的前置门槛。本轮暂不编译。候选分支已包含 ac9373b 的 Android 16 Socket 初始化顺序与 Guardian 唯一实例锁修复，后续改动必须保留。
+
+当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)。业务迁移、界面代理、特权后端交接仍未接通；不能将生命周期整改或 Core 诊断入口计为整个运行时已迁移。

@@ -23,8 +23,11 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -150,13 +153,24 @@ internal class ChildExtensionRuntime(
     }
 
     suspend fun stop() {
-        active.keys.toList().forEach { stopChild(it) }
+        val failures = mutableListOf<Throwable>()
+        active.keys.toList().forEach { id ->
+            try { stopChild(id) }
+            catch (error: kotlinx.coroutines.TimeoutCancellationException) { failures += error }
+            catch (error: CancellationException) { throw error }
+            catch (error: Exception) { failures += error }
+        }
         points.clear()
         // Defense in depth: normal child stop paths already revoke overlays, but service shutdown
         // also clears the registry explicitly so no stale contribution can survive an unusual state.
         uiContributions.clear()
         publishUiContributions()
         publishSnapshots()
+        if (failures.isNotEmpty()) {
+            val failure = IllegalStateException("Child runtime retirement failed; ${active.size} handle(s) remain")
+            failures.forEach(failure::addSuppressed)
+            throw failure
+        }
     }
 
     private fun publishPoint(
@@ -665,12 +679,35 @@ internal class ChildExtensionRuntime(
         // Contributions are bound to the child lifecycle. Remove them even when no ActiveChild handle
         // remains (for example after a partial mount failure) so stale UI can never outlive the .ailx.
         removeUiContributionsForExtension(extensionId)
-        val mounted = active.remove(extensionId) ?: return
-        mounted.capabilityHandles.asReversed().forEach { handle -> runCatching { handle.close() } }
-        runCatching { mounted.discoveryHandle?.close() }
-        runCatching { mounted.bindingHandle?.close() }
-        runCatching { mounted.handle.stop() }
-        mounted.scope.cancel()
+        val mounted = active[extensionId] ?: return
+        val failures = mutableListOf<Throwable>()
+        fun close(handle: AutoCloseable?) {
+            try { handle?.close() }
+            catch (error: Exception) { failures += error }
+        }
+        mounted.capabilityHandles.asReversed().forEach(::close)
+        close(mounted.discoveryHandle)
+        close(mounted.bindingHandle)
+        try {
+            withTimeout(5_000L) { mounted.handle.stop() }
+        } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
+            failures += error
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            failures += error
+        } finally {
+            mounted.scope.cancel()
+        }
+        // A cancelled scope is not necessarily quiescent. Do not publish a clean stop until
+        // its children have completed; a failed stop keeps the owner handle pinned.
+        withTimeout(5_000L) { mounted.scope.coroutineContext[Job]?.join() }
+        if (failures.isNotEmpty()) {
+            val failure = IllegalStateException("Child did not retire cleanly: $extensionId")
+            failures.forEach(failure::addSuppressed)
+            throw failure
+        }
+        active.remove(extensionId, mounted)
     }
 
     private fun removeUiContributionsForExtension(extensionId: String) {

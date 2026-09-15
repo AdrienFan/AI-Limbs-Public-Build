@@ -18,6 +18,11 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.cancelAndJoin
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -29,11 +34,23 @@ import kotlinx.coroutines.launch
 internal object PluginPlatformKernel {
     private const val TAG = "PluginPlatformKernel"
     private val lifecycleLock = Any()
+    private val runtimeLifecycleMutex = Mutex()
     // Keep ownership for the process lifetime: initialized registries survive shutdown().
     private var runtimeOwnerLease: ResidentRuntimeLease? = null
 
     @Volatile private var initialized = false
     @Volatile private var started = false
+    @Volatile private var lifecyclePhase = "uninitialized"
+    @Volatile private var lifecycleError: String? = null
+
+    internal fun lifecycleSnapshot(): org.json.JSONObject = org.json.JSONObject()
+        .put("phase", lifecyclePhase)
+        .put("initialized", initialized)
+        .put("started", started)
+        .put("pid", android.os.Process.myPid())
+        .put("uid", android.os.Process.myUid())
+        .put("owner_lease_held", runtimeOwnerLease != null)
+        .put("last_error", lifecycleError ?: org.json.JSONObject.NULL)
 
     private lateinit var appContextInstance: Context
     private lateinit var managerInstance: PluginManager
@@ -414,15 +431,19 @@ internal object PluginPlatformKernel {
             systemPluginController.initialize()
             systemPluginControllerInstance = systemPluginController
             initialized = true
+            lifecyclePhase = "initialized"
             AppLogger.i(TAG, "AI Limbs Plugin Platform kernel initialized: ${manager.store.rootDir.absolutePath}")
         }
     }
 
-    suspend fun start() {
+    suspend fun start(): Unit = runtimeLifecycleMutex.withLock {
         requireInitialized()
-        synchronized(lifecycleLock) {
-            if (started) return
+        if (started) return@withLock
+        check(lifecyclePhase == "initialized" || lifecyclePhase == "stopped") {
+            "Kernel cannot start from $lifecyclePhase; retire the failed runtime first"
         }
+        lifecyclePhase = "starting"
+        lifecycleError = null
         try {
             childExtensionRuntimeInstance.start()
             systemPluginControllerInstance.restore()
@@ -431,14 +452,20 @@ internal object PluginPlatformKernel {
             managerInstance.reconcileBackupPolicy()
             AppLogger.i(TAG, "AI Limbs Plugin Platform restored system Plugin Center before enabled plugins")
         } catch (error: CancellationException) {
+            lifecyclePhase = "start_failed"
+            lifecycleError = error.toString().take(2048)
             throw error
         } catch (error: Throwable) {
+            lifecyclePhase = "start_failed"
+            lifecycleError = error.toString().take(2048)
             AppLogger.e(TAG, "Plugin restore encountered an error", error)
+            throw error
         }
         synchronized(lifecycleLock) {
             started = true
         }
         startInactivityMonitor()
+        lifecyclePhase = "running"
     }
 
     private fun startInactivityMonitor() {
@@ -460,22 +487,36 @@ internal object PluginPlatformKernel {
         }
     }
 
-    suspend fun shutdown() {
-        if (!initialized) return
-        synchronized(lifecycleLock) {
+    suspend fun shutdown(): Unit = withContext(NonCancellable) {
+        runtimeLifecycleMutex.withLock {
+            if (!initialized || lifecyclePhase == "stopped") return@withLock
             started = false
-        }
-        inactivityMonitorJob?.cancel()
-        inactivityMonitorJob = null
-        try {
-            managerInstance.shutdown()
-            systemPluginControllerInstance.shutdown()
-            notificationHostInstance.clear()
-            AppLogger.i(TAG, "AI Limbs Plugin Platform kernel shut down")
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Throwable) {
-            AppLogger.e(TAG, "Plugin shutdown encountered an error", error)
+            lifecyclePhase = "stopping"
+            val failures = mutableListOf<Throwable>()
+            suspend fun retire(action: suspend () -> Unit) {
+                try { action() }
+                catch (error: Exception) { failures += error }
+            }
+            retire { inactivityMonitorJob?.cancelAndJoin(); inactivityMonitorJob = null }
+            // Stop children before parents so child handles cannot continue calling a revoked
+            // parent provider. Attempt every owner, but never turn a failure into "stopped".
+            retire { childExtensionRuntimeInstance.stop() }
+            retire { managerInstance.shutdown() }
+            retire { systemPluginControllerInstance.shutdown() }
+            retire { notificationHostInstance.clear() }
+            if (failures.isNotEmpty()) {
+                lifecyclePhase = "stop_failed"
+                val failure = IllegalStateException("Plugin kernel retirement failed; process retains ownership")
+                failures.forEach(failure::addSuppressed)
+                lifecycleError = failures.joinToString("; ") { it.toString() }.take(2048)
+                AppLogger.e(TAG, "Plugin shutdown encountered an error", failure)
+                throw failure
+            }
+            lifecyclePhase = "stopped"
+            lifecycleError = null
+            // Registries and references still exist in this VM. Only process death releases
+            // runtimeOwnerLease; shutdown alone must never authorize another process to mount.
+            AppLogger.i(TAG, "AI Limbs Plugin Platform kernel retired; lease retained until process exit")
         }
     }
 

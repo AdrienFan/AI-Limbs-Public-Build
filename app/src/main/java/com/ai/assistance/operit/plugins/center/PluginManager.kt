@@ -689,10 +689,17 @@ internal class PluginManager(
     }
 
     private suspend fun shutdownLocked() {
+        val failures = mutableListOf<Throwable>()
         val mountedPluginIds = activeMounts.keys.toList().sortedDescending()
         mountedPluginIds.forEach { pluginId ->
             val previousState = stateRepository.read(pluginId)
             val stopResult = unmountLocked(pluginId)
+            if (stopResult != null && !stopResult.stoppedCleanly) {
+                failures += PluginInstallException(
+                    stopResult.errorCode ?: "RUNTIME_STOP_FAILED",
+                    "Cannot retire runtime owner: $pluginId: ${stopResult.message}"
+                )
+            }
             if (previousState != null && (stopResult == null || stopResult.stoppedCleanly)) {
                 stateRepository.write(
                     previousState.copy(
@@ -707,6 +714,14 @@ internal class PluginManager(
                     )
                 )
             }
+        }
+        if (failures.isNotEmpty()) {
+            val failure = PluginInstallException(
+                "RUNTIME_RETIREMENT_FAILED",
+                "${failures.size} plugin runtime(s) did not stop; ownership remains with this process"
+            )
+            failures.forEach(failure::addSuppressed)
+            throw failure
         }
     }
 

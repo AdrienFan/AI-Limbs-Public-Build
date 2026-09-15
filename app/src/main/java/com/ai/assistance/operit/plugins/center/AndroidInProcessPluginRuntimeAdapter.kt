@@ -28,6 +28,7 @@ import java.security.MessageDigest
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -95,6 +96,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                         runtimeScope.cancel()
                     }
                 }
+                // The outer runtime stop timeout includes completion of owned coroutine work.
+                runtimeScope.coroutineContext[Job]?.join()
             }
         }
     }

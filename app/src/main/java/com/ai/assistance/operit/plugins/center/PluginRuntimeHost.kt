@@ -111,6 +111,7 @@ internal class PluginRuntimeHost(
         runtime.scope.revokeAll()
         return try {
             withTimeout(timeouts.stopTimeoutMs) { runtime.handle.stop() }
+            runtime.scope.requireCleanRevocation()
             PluginRuntimeStopResult(PluginRuntimeStopOutcome.STOPPED)
         } catch (error: TimeoutCancellationException) {
             PluginRuntimeStopResult(

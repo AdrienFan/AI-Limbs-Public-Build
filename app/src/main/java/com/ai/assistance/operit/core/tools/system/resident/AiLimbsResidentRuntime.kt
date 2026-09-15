@@ -286,6 +286,7 @@ internal object AiLimbsResidentRuntime {
                 .put("mode", "lockscreen_continuous")
                 .put("runtime_phase", "guardian")
                 .put("runtime_owner", "android_host")
+                .put("host_kernel", com.ai.assistance.operit.plugins.center.PluginPlatformKernel.lifecycleSnapshot())
                 .put("plugins_migrated", false)
                 .put("enabled", isEnabled())
                 .put("running", probe.running)

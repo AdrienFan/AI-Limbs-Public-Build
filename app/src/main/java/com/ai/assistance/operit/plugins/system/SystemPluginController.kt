@@ -284,9 +284,10 @@ internal class SystemPluginController(
 
     private fun stopActive() {
         val session = activeSession ?: return
+        // A failed close is not proof that the system plugin has stopped. Keep the handle so
+        // retirement cannot report success and let another runtime mount a second instance.
+        session.handle.close()
         activeSession = null
-        runCatching { session.handle.close() }
-            .onFailure { AppLogger.w(TAG, "Plugin Center stop failed", it) }
     }
 
     private fun extractValidatedPackage(packageFile: File, destination: File) {

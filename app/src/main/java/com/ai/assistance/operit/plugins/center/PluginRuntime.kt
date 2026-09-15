@@ -232,6 +232,8 @@ class PluginMountScope internal constructor(
 ) {
     private val handles = ArrayDeque<AutoCloseable>()
     private var acceptingRegistrations = true
+    private val revocationFailures = mutableListOf<Throwable>()
+    private var pendingRevocations = 0
     internal val callerLease = PluginCallerLease()
 
     val registrar = PluginRegistrar(manifest, registry, extensionRouter, capabilityBinder, surfacePolicy) { handle ->
@@ -272,9 +274,30 @@ class PluginMountScope internal constructor(
             acceptingRegistrations = false
             buildList {
                 while (handles.isNotEmpty()) add(handles.removeLast())
+            }.also { pendingRevocations += it.size }
+        }
+        snapshot.forEach { handle ->
+            try { handle.close() }
+            catch (error: Exception) {
+                synchronized(this) { revocationFailures += error }
+                com.ai.assistance.operit.util.AppLogger.e(
+                    "PluginMountScope", "Owned resource failed to close", error
+                )
+            } finally {
+                synchronized(this) { pendingRevocations-- }
             }
         }
-        snapshot.forEach { runCatching { it.close() } }
+    }
+
+    internal fun requireCleanRevocation() {
+        val failures = synchronized(this) {
+            check(pendingRevocations == 0) { "Plugin resource revocation is still in progress" }
+            revocationFailures.toList()
+        }
+        if (failures.isEmpty()) return
+        val failure = IllegalStateException("${failures.size} plugin resource(s) failed to close")
+        failures.forEach(failure::addSuppressed)
+        throw failure
     }
 }
 
