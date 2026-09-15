@@ -5,9 +5,6 @@ import android.os.Handler
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
-import android.system.ErrnoException
-import android.system.Os
-import android.system.OsConstants
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.center.PluginRuntimeRole
@@ -169,7 +166,7 @@ internal class ResidentCoreBusinessRuntime {
         var leaseAdopted = false
         try {
             val deadline = SystemClock.elapsedRealtime() + timeoutMs
-            while (processExists(hostPid)) {
+            while (ResidentProcessLiveness.exists(hostPid)) {
                 check(!stopRequested) { "Business takeover cancelled while waiting for Host exit" }
                 check(SystemClock.elapsedRealtime() < deadline) {
                     "Host PID $hostPid did not exit before Resident Core takeover timeout"
@@ -435,13 +432,6 @@ internal class ResidentCoreBusinessRuntime {
             "Resident Core main Looper did not initialize Plugin Kernel within ${BUSINESS_INIT_TIMEOUT_MS}ms"
         }
         failure.get()?.let { throw it }
-    }
-
-    private fun processExists(pid: Int): Boolean = try {
-        Os.kill(pid, 0)
-        true
-    } catch (error: ErrnoException) {
-        if (error.errno == OsConstants.ESRCH) false else throw error
     }
 
     private companion object {

@@ -72,3 +72,7 @@ Resident 开关现在在源码层代表业务核心切换：ON 按 Core start �
 ## Step 11 当前边界
 
 持续 CPU / 网络资源现在绑定 Resident Core business session：Core 在 `activate_business` 时获取 `PARTIAL_WAKE_LOCK` token 与 default network callback，takeover cancel / normal exit / OFF 统一释放；真实 plugin / Bridge / Host Network Primitive 网络 I/O 在 Resident BUSINESS 下由 Core 执行。Host 不再 acquire Resident WakeLock，Host 侧仅保留旧 token / state 的兼容释放与诊断；Guardian 只根据 `host_shell.state` 判断是否需要冷拉 framework shell。总状态把 Core process liveness、Wake token、Android network availability / validation 与 `continuous_work` 分开报告；`continuous_work` 仍固定为 false / unverified，PID、`oom_score_adj=-1000`、WakeLock.isHeld、NetworkCallback 均不能作为 LEV / freezer 成功证据。Core status 新增 ownership consistency，business owner 与 CPU/network session owner、Dispatcher、Policy 任一不一致即 fail closed；资源释放失败保留 residual owner / degraded 诊断。owner、stop、death-recipient、UI component generation、no-fallback 与 Step 7 `scope_id` transport-only 规则已完成源码总审计。该结论仍为源码级，未编译、未安装、未做长锁屏真实 Bridge→Ubuntu / plugin 调用。
+
+## build31 启动故障修复
+
+[Core 调用身份与跨域存活判断修复](14-build31-context-identity.md)：从 build30 工作树修正应用 Context 的系统调用归属，统一五处 SELinux 存活判断并补齐请求异常堆栈。候选版本为 build31/code104；按用户指令只提交云构建，不执行本地编译，尚未真机验收。

@@ -88,6 +88,9 @@ object ResidentCoreMain {
                     .put("package_name", packageName)
                     .put("context_ready", true)
                     .put("resource_package", contextState.resourcePackage)
+                    .put("op_package_name", contextState.opPackageName)
+                    .put("attribution_package_name", contextState.attributionPackageName ?: JSONObject.NULL)
+                    .put("attribution_uid", contextState.attributionUid ?: JSONObject.NULL)
                     .put("elapsed_ms", elapsed)
                     .put("uptime_ms", uptime)
                     .put("suspend_ms", (elapsed - uptime).coerceAtLeast(0L))
@@ -127,6 +130,7 @@ object ResidentCoreMain {
                         server.accept().use { socket ->
                             socket.soTimeout = ResidentCoreWire.TIMEOUT_MS
                             var requestId = ""
+                            var operation = "unparsed"
                             try {
                                 val peer = socket.peerCredentials
                                 check(peer.uid == Process.myUid()) { "Core client UID mismatch" }
@@ -139,7 +143,7 @@ object ResidentCoreMain {
                                 if (!request.isNull("session_id")) {
                                     check(request.getString("session_id") == sessionId) { "Stale core session" }
                                 }
-                                val operation = request.getString("operation")
+                                operation = request.getString("operation")
                                 require(operation == "status" || operation == "stop" ||
                                     operation == "prepare_handoff" || operation == "activate_business" ||
                                     operation == "cancel_business_activation" || operation == "quiesce_business") {
@@ -181,6 +185,7 @@ object ResidentCoreMain {
                                             } catch (error: Throwable) {
                                                 runtime.fail(error)
                                                 System.err.println("Resident Core business activation failed: $error")
+                                                error.printStackTrace(System.err)
                                                 runCatching { server.close() }
                                             } finally {
                                                 activationThread.compareAndSet(Thread.currentThread(), null)
@@ -238,7 +243,8 @@ object ResidentCoreMain {
                                 stopping = operation == "stop"
                                 userStop = stopping
                             } catch (error: Exception) {
-                                System.err.println("Resident Core rejected request: $error")
+                                System.err.println("Resident Core rejected request operation=$operation request_id=$requestId: $error")
+                                error.printStackTrace(System.err)
                                 try {
                                     ResidentCoreWire.write(socket, JSONObject()
                                         .put("protocol", ResidentCoreWire.VERSION)
@@ -248,6 +254,7 @@ object ResidentCoreMain {
                                         .put("error", error.toString().take(512)))
                                 } catch (writeError: Exception) {
                                     System.err.println("Resident Core response failed: $writeError")
+                                    writeError.printStackTrace(System.err)
                                 }
                             }
                         }
@@ -256,6 +263,7 @@ object ResidentCoreMain {
                     exitCode = 1
                     if (runtime.snapshot().getString("phase") != "failed") runtime.fail(error)
                     System.err.println("Resident Core runtime failed: $error")
+                    error.printStackTrace(System.err)
                 } finally {
                     runtime.requestStop()
                     activationThread.get()?.let { worker ->
@@ -270,6 +278,7 @@ object ResidentCoreMain {
                         exitCode = 1
                         runtime.fail(error)
                         System.err.println("Resident Core stop barrier failed: $error")
+                        error.printStackTrace(System.err)
                     }
                     val resourceRelease = continuousResources.release(
                         if (userStop) "resident_off" else "core_exit"
@@ -321,6 +330,7 @@ object ResidentCoreMain {
                         }
                     } catch (error: Exception) {
                         System.err.println("Core shutdown result could not be saved: $error")
+                        error.printStackTrace(System.err)
                     } finally {
                         runCatching { server.close() }
                         runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
@@ -337,6 +347,7 @@ object ResidentCoreMain {
             } catch (error: Throwable) {
                 runtime.fail(error)
                 System.err.println("Resident Core main Looper failed: $error")
+                error.printStackTrace(System.err)
                 runCatching { server.close() }
                 try { controlThread.join(1_000L) }
                 catch (_: InterruptedException) { Thread.currentThread().interrupt() }

@@ -2,9 +2,6 @@ package com.ai.assistance.operit.core.tools.system.resident
 
 import android.content.Context
 import android.os.SystemClock
-import android.system.ErrnoException
-import android.system.Os
-import android.system.OsConstants
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import java.io.File
@@ -147,7 +144,7 @@ internal object ResidentCoreController {
         ResidentCoreWire.request("stop", state.getString("session_id"))
         repeat(40) {
             delay(100L)
-            if (leaseIsFree(context) && !pidExists(pid)) {
+            if (leaseIsFree(context) && !ResidentProcessLiveness.exists(pid)) {
                 val result = JSONObject().put("stopped", true).put("pid", pid)
                     .put("backend_release_confirmed", JSONObject.NULL)
                 val report = File(directory(context), "shutdown.result.json")
@@ -330,17 +327,6 @@ internal object ResidentCoreController {
         val lease = ResidentRuntimeLease.tryAcquire(directory(context), "bootstrap") ?: return false
         lease.close()
         return true
-    }
-
-    private fun pidExists(pid: Int): Boolean = try {
-        Os.kill(pid, 0)
-        true
-    } catch (error: ErrnoException) {
-        when (error.errno) {
-            OsConstants.ESRCH -> false
-            OsConstants.EPERM, OsConstants.EACCES -> true
-            else -> throw error
-        }
     }
 
     private fun readLogTail(file: File): String {

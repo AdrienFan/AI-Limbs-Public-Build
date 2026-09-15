@@ -79,22 +79,25 @@ internal class ResidentCoreContinuousResources(
             PowerManager.PARTIAL_WAKE_LOCK,
             "AI-Limbs:ResidentCore"
         ).apply { setReferenceCounted(false) }
+        var acquisitionStage = "acquire_wake_lock"
         try {
             newWake.acquire()
             check(newWake.isHeld) { "Resident Core PARTIAL_WAKE_LOCK token was not held after acquire" }
             wakeLock = newWake
 
+            acquisitionStage = "register_network_callback"
             connectivityManager.registerDefaultNetworkCallback(networkCallback)
             callbackRegistered = true
             active = true
             acquiredElapsedMs = SystemClock.elapsedRealtime()
+            acquisitionStage = "read_active_network"
             activeNetwork = connectivityManager.activeNetwork
             activeNetwork?.let(::updateCapabilitiesLocked) ?: clearCapabilitiesLocked()
             lastNetworkEventElapsedMs = SystemClock.elapsedRealtime()
             snapshotLocked()
         } catch (error: Throwable) {
             val cleanupErrors = mutableListOf<String>()
-            lastError = error.toString().take(1024)
+            lastError = "$acquisitionStage: $error".take(1024)
             if (callbackRegistered) {
                 val callbackReleased = runCatching {
                     connectivityManager.unregisterNetworkCallback(networkCallback)
@@ -115,7 +118,10 @@ internal class ResidentCoreContinuousResources(
             if (cleanupErrors.isNotEmpty()) {
                 lastError = (lastError + "; " + cleanupErrors.joinToString("; ")).take(1024)
             }
-            throw error
+            // Preserve the cause and failing framework operation for the Core request diagnostic.
+            throw IllegalStateException(
+                "Resident continuous resources failed at $acquisitionStage: $error", error
+            )
         }
     }
 

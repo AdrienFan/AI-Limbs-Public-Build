@@ -6,9 +6,6 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Process
-import android.system.ErrnoException
-import android.system.Os
-import android.system.OsConstants
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
@@ -190,7 +187,7 @@ internal object AiLimbsResidentRuntime {
                 runCatching { Process.killProcess(stalePid) }
                 for (attempt in 0 until 12) {
                     delay(100L)
-                    if (!pidExists(stalePid)) return@let
+                    if (!ResidentProcessLiveness.exists(stalePid)) return@let
                 }
             }
             existing = localProbe()
@@ -332,12 +329,12 @@ internal object AiLimbsResidentRuntime {
                 runCatching { Process.killProcess(pid) }
                 val deadline = android.os.SystemClock.elapsedRealtime() + CORE_FORCE_STOP_TIMEOUT_MS
                 while (
-                    (pidExists(pid) || !ResidentCoreController.bootstrapLeaseIsFree(app)) &&
+                    (ResidentProcessLiveness.exists(pid) || !ResidentCoreController.bootstrapLeaseIsFree(app)) &&
                     android.os.SystemClock.elapsedRealtime() < deadline
                 ) {
                     delay(50L)
                 }
-                forcedCoreStop = !pidExists(pid) && ResidentCoreController.bootstrapLeaseIsFree(app)
+                forcedCoreStop = !ResidentProcessLiveness.exists(pid) && ResidentCoreController.bootstrapLeaseIsFree(app)
                 if (forcedCoreStop) degraded += "Core process required forced termination"
                 else failures += "Core process/lease remained after forced OFF"
             } else if (coreWasAvailable) {
@@ -481,14 +478,14 @@ internal object AiLimbsResidentRuntime {
                 hostShell["state"] == "running" &&
                     hostShellPid != null &&
                     hostShellPid > 0 &&
-                    pidExists(hostShellPid)
+                    ResidentProcessLiveness.exists(hostShellPid)
             val hostWake = readKeyValues(hostWakeLockStateFile())
             val hostWakePid = hostWake["pid"]?.toIntOrNull()
             val hostWakeHeld =
                 hostWake["held"] == "true" &&
                     hostWakePid != null &&
                     hostWakePid > 0 &&
-                    pidExists(hostWakePid)
+                    ResidentProcessLiveness.exists(hostWakePid)
             val core = ResidentCoreController.status(app)
             val fence = ResidentBusinessTakeoverFence.snapshot(app)
             val policyHandoff = ResidentPolicyStateHandoff.snapshot(app)
@@ -655,7 +652,7 @@ internal object AiLimbsResidentRuntime {
         // guardian.lock is the process-ownership fact. The detached Guardian runs
         // in runas_app while Host runs in untrusted_app, so signal/proc checks are
         // only secondary identity diagnostics and must tolerate SELinux EPERM.
-        if (guardianLeaseIsFree() || !pidExists(pid)) return LocalProbe()
+        if (guardianLeaseIsFree() || !ResidentProcessLiveness.exists(pid)) return LocalProbe()
 
         val cmdline = readProcText(pid, "cmdline")?.replace('\u0000', ' ')?.trim().orEmpty()
         val comm = readProcText(pid, "comm")?.trim().orEmpty()
@@ -749,17 +746,6 @@ internal object AiLimbsResidentRuntime {
         return false
     }
 
-    private fun pidExists(pid: Int): Boolean = try {
-        Os.kill(pid, 0)
-        true
-    } catch (error: ErrnoException) {
-        when (error.errno) {
-            OsConstants.ESRCH -> false
-            OsConstants.EPERM, OsConstants.EACCES -> true
-            else -> throw error
-        }
-    }
-
     private fun readProcText(pid: Int, name: String): String? =
         runCatching { File("/proc/$pid/$name").readText() }.getOrNull()
 
@@ -789,7 +775,6 @@ internal object AiLimbsResidentRuntime {
     private fun hostShellStateFile(): File = File(stateDir(), "host_shell.state")
     private fun stopRequestFile(): File = File(stateDir(), "stop.request")
     private fun shellLogPath(): String = "/data/local/tmp/ail_resident_${Process.myUid()}.log"
-
 
     private fun persistEnabled(enabled: Boolean) {
         check(prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()) {
@@ -842,7 +827,7 @@ internal object AiLimbsResidentRuntime {
         while (android.os.SystemClock.elapsedRealtime() < deadline) {
             val state = readKeyValues(hostWakeLockStateFile())
             val pid = state["pid"]?.toIntOrNull()
-            val heldByCurrentHost = state["held"] == "true" && pid == Process.myPid() && pidExists(pid)
+            val heldByCurrentHost = state["held"] == "true" && pid == Process.myPid() && ResidentProcessLiveness.exists(pid)
             if (!heldByCurrentHost) return true
             delay(50L)
         }
