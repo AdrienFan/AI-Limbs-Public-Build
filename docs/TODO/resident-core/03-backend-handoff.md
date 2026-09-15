@@ -21,8 +21,8 @@ Core 增加内部 prepare_handoff 命令，仍需 socket 的同 UID 和当前会
 ## 尚未完成
 
 1. Resident ON/OFF 尚未调用 prepareHandoff / shutdownForResidentHandoff；正常用户开关行为未迁移。
-2. Core 尚未启动 Plugin Kernel；claimRuntimeOwnership 尚无业务启动调用点。Bridge、Dispatcher、插件和 Ubuntu 仍由 Host 管理。
-3. 还需真正运行 Core 主 Looper、隔离业务 Application 初始化、完成 Host 退出与新所有者获取文件锁的编排。
+2. Step 4 已增加 Core owner-only Plugin Kernel 启动与 `claimRuntimeOwnership` 调用点；它尚未接入 Resident ON/OFF，且不会在本阶段恢复普通插件、子插件、Bridge、Dispatcher 或 Ubuntu。
+3. Step 3/4 已补 Core 主 Looper、独立 Context 与“Host 退出后再获取 `plugin_kernel`”编排；仍需编译/真机验证，并在下一阶段让重启 Host 进入 UI_PROXY attach-only。
 4. 插件 View/Compose、ActivityResult 与 Android 组件必须明确代理契约，不能跨进程传 Java 对象或恢复两个完整插件实例。
 5. 本项没有新增 CPU 唤醒资源，没有解决 UID 冻结或网络策略；不得据此宣称所有品牌锁屏持续可用。
 

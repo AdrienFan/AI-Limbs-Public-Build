@@ -14,6 +14,9 @@ internal class ResidentPermissionHandoff private constructor(
     private val corePid: Int,
     private val coreSession: String
 ) {
+    internal fun coreSessionId(): String = coreSession
+    internal fun coreProcessId(): Int = corePid
+
     fun verify(current: ShizukuConnectionInfo) {
         check(PrivilegeRuntime.isSelected()) { "AI Limbs permission backend was deselected during handoff" }
         check(current.binder == backend && current.binder.isBinderAlive) { "Handoff permission backend changed" }

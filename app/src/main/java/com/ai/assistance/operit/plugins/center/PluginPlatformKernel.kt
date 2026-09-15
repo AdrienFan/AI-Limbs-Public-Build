@@ -2,6 +2,7 @@ package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
 import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
+import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.plugins.system.KernelPluginPlatformControlV1
 import com.ai.assistance.operit.plugins.system.KernelSystemHostGatewayV1
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginDelegatedCapabilityInvokerV2
@@ -42,6 +43,7 @@ internal object PluginPlatformKernel {
     @Volatile private var started = false
     @Volatile private var lifecyclePhase = "uninitialized"
     @Volatile private var lifecycleError: String? = null
+    @Volatile private var businessRuntimeRestored = false
     private var runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 
     internal fun lifecycleSnapshot(): org.json.JSONObject = org.json.JSONObject()
@@ -52,6 +54,7 @@ internal object PluginPlatformKernel {
         .put("pid", android.os.Process.myPid())
         .put("uid", android.os.Process.myUid())
         .put("owner_lease_held", runtimeOwnerLease != null)
+        .put("business_runtime_restored", businessRuntimeRestored)
         .put("last_error", lifecycleError ?: org.json.JSONObject.NULL)
 
     private lateinit var appContextInstance: Context
@@ -220,22 +223,35 @@ internal object PluginPlatformKernel {
     fun initialize(
         context: Context,
         secretBroker: PluginSecretBroker = NoApprovedPluginSecretBroker,
-        role: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
+        role: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST,
+        ownerLease: ResidentRuntimeLease? = null
     ) {
         synchronized(lifecycleLock) {
             if (initialized) {
                 check(runtimeRole == role) {
                     "Plugin kernel already initialized as $runtimeRole, requested $role"
                 }
+                check(ownerLease == null || runtimeOwnerLease === ownerLease) {
+                    "Plugin kernel owner lease changed after initialization"
+                }
                 return
             }
             check(role != PluginRuntimeRole.UI_PROXY) {
                 "UI_PROXY is a Host-shell role and must not initialize PluginPlatformKernel"
             }
+            check(role == PluginRuntimeRole.BUSINESS || ownerLease == null) {
+                "Only BUSINESS may adopt a pre-acquired plugin_kernel lease"
+            }
+            check(role != PluginRuntimeRole.BUSINESS || ownerLease != null) {
+                "BUSINESS must acquire plugin_kernel before PluginPlatformKernel initialization"
+            }
             runtimeRole = role
             val appContext = context.applicationContext
             if (runtimeOwnerLease == null) {
-                runtimeOwnerLease = ResidentRuntimeLease.acquire(
+                if (role == PluginRuntimeRole.LEGACY_HOST) {
+                    ResidentBusinessTakeoverFence.assertLegacyHostStartAllowed(appContext)
+                }
+                runtimeOwnerLease = ownerLease ?: ResidentRuntimeLease.acquire(
                     File(appContext.filesDir, "ai_limbs/runtime_owner"), "plugin_kernel"
                 )
             }
@@ -451,23 +467,40 @@ internal object PluginPlatformKernel {
         }
     }
 
-    suspend fun start(): Unit = runtimeLifecycleMutex.withLock {
+    suspend fun start(): Unit = startInternal(restoreBusinessRuntime = true)
+
+    /**
+     * Establish only the unique Plugin Kernel owner. No plugin or child runtime is restored here.
+     * Resident Step 4 uses this entry so later stages can move Bridge, Dispatcher and plugin services
+     * without claiming they were already migrated by the owner handoff.
+     */
+    internal suspend fun startOwnerOnly(): Unit = startInternal(restoreBusinessRuntime = false)
+
+    private suspend fun startInternal(restoreBusinessRuntime: Boolean): Unit = runtimeLifecycleMutex.withLock {
         requireInitialized()
-        if (started) return@withLock
+        if (started) {
+            check(!restoreBusinessRuntime || businessRuntimeRestored) {
+                "Plugin Kernel is owner-only; business runtime restoration belongs to a later migration stage"
+            }
+            return@withLock
+        }
         check(lifecyclePhase == "initialized" || lifecyclePhase == "stopped") {
             "Kernel cannot start from $lifecyclePhase; retire the failed runtime first"
         }
         lifecyclePhase = "starting"
         lifecycleError = null
+        businessRuntimeRestored = false
         try {
-            childExtensionRuntimeInstance.start()
-            if (runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
-                systemPluginControllerInstance.restore()
+            if (restoreBusinessRuntime) {
+                childExtensionRuntimeInstance.start()
+                if (runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
+                    systemPluginControllerInstance.restore()
+                }
+                managerInstance.restoreEnabledPlugins()
+                managerInstance.reconcileInactivityPolicy()
+                managerInstance.reconcileBackupPolicy()
+                businessRuntimeRestored = true
             }
-            managerInstance.restoreEnabledPlugins()
-            managerInstance.reconcileInactivityPolicy()
-            managerInstance.reconcileBackupPolicy()
-            AppLogger.i(TAG, "AI Limbs Plugin Platform started role=$runtimeRole; business plugins restored")
         } catch (error: CancellationException) {
             lifecyclePhase = "start_failed"
             lifecycleError = error.toString().take(2048)
@@ -481,8 +514,12 @@ internal object PluginPlatformKernel {
         synchronized(lifecycleLock) {
             started = true
         }
-        startInactivityMonitor()
+        if (businessRuntimeRestored) startInactivityMonitor()
         lifecyclePhase = "running"
+        AppLogger.i(
+            TAG,
+            "AI Limbs Plugin Platform started role=$runtimeRole businessRuntimeRestored=$businessRuntimeRestored"
+        )
     }
 
     private fun startInactivityMonitor() {
@@ -530,11 +567,13 @@ internal object PluginPlatformKernel {
                 catch (error: Exception) { failures += error }
             }
             retire { inactivityMonitorJob?.cancelAndJoin(); inactivityMonitorJob = null }
-            // Stop children before parents so child handles cannot continue calling a revoked
-            // parent provider. Attempt every owner, but never turn a failure into "stopped".
-            retire { childExtensionRuntimeInstance.stop() }
-            retire { managerInstance.shutdown(handoff) }
-            retire { systemPluginControllerInstance.shutdown() }
+            if (businessRuntimeRestored) {
+                // Stop children before parents so child handles cannot continue calling a revoked
+                // parent provider. Attempt every owner, but never turn a failure into stopped.
+                retire { childExtensionRuntimeInstance.stop() }
+                retire { managerInstance.shutdown(handoff) }
+                retire { systemPluginControllerInstance.shutdown() }
+            }
             retire { notificationHostInstance.clear() }
             if (failures.isNotEmpty()) {
                 lifecyclePhase = "stop_failed"
@@ -546,6 +585,7 @@ internal object PluginPlatformKernel {
             }
             lifecyclePhase = "stopped"
             lifecycleError = null
+            businessRuntimeRestored = false
             // Registries and references still exist in this VM. Only process death releases
             // runtimeOwnerLease; shutdown alone must never authorize another process to mount.
             AppLogger.i(TAG, "AI Limbs Plugin Platform kernel retired; lease retained until process exit")

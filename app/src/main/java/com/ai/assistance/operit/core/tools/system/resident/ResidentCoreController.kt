@@ -133,6 +133,9 @@ internal object ResidentCoreController {
     suspend fun prepareHandoff(context: Context, executor: ShellExecutor): ResidentPermissionHandoff =
         withContext(Dispatchers.IO) {
             var state = probe(context, executor)
+            check(!state.getBoolean("business_attached")) {
+                "Resident Core already owns the Plugin Kernel; a second handoff is forbidden"
+            }
             val session = state.getString("session_id")
             val deadline = SystemClock.elapsedRealtime() + 6_000L
             while (state.getJSONObject("backend").getString("state") == "connecting" &&
@@ -154,6 +157,18 @@ internal object ResidentCoreController {
             ResidentPermissionHandoff.fromPreparedCore(prepared)
         }
 
+    suspend fun armBusinessTakeover(coreSession: String): JSONObject = withContext(Dispatchers.IO) {
+        val armed = ResidentCoreWire.request("activate_business", coreSession)
+        check(armed.getString("business_phase") == "waiting_for_host_exit") {
+            "Core did not arm Plugin Kernel takeover: $armed"
+        }
+        armed
+    }
+
+    suspend fun cancelBusinessTakeover(coreSession: String): JSONObject = withContext(Dispatchers.IO) {
+        ResidentCoreWire.request("cancel_business_activation", coreSession)
+    }
+
     private fun requireRuntimeSkeletonRunning(state: JSONObject) {
         check(state.getString("phase") == "running") {
             "Core IPC is reachable but runtime phase is not running: ${state.getString("phase")}"
@@ -162,11 +177,17 @@ internal object ResidentCoreController {
         check(runtime.getBoolean("runtime_skeleton_ready") && runtime.getBoolean("main_looper_ready")) {
             "Core runtime reported running before its main-Looper startup barrier completed"
         }
-        check(!state.getBoolean("business_attached") && !runtime.getBoolean("business_attached")) {
-            "Step 3 Core must not claim business ownership"
+        check(state.getBoolean("business_attached") == runtime.getBoolean("business_attached")) {
+            "Core business ownership snapshot is inconsistent"
+        }
+        if (state.getBoolean("business_attached")) {
+            check(state.getString("runtime_owner") == "resident_core" &&
+                runtime.getBoolean("plugin_kernel_started")) {
+                "Core claims business ownership without a running Plugin Kernel"
+            }
         }
         check(!state.getBoolean("plugins_migrated") && !state.getBoolean("continuous_work")) {
-            "Step 3 Core must not claim migrated plugins or continuous work"
+            "Core must not claim later-stage plugin migration or continuous work yet"
         }
     }
 

@@ -10,7 +10,7 @@ status: runtime-migration-in-progress
 
 build24 的独立 Guardian 仍使用 App UID。PPID=1、oom_score_adj=-1000、进程存活和 WakeLock.isHeld 都不能证明 CPU 实际保持唤醒，也不能证明该 UID 不受冻结或网络策略限制。
 
-本阶段 build25 提供独立 app_process Context 与同 UID IPC 验证入口、进程运行时所有权保护，以及真实状态字段。它不迁移插件，不自动用验证进程接管业务，不宣称锁屏连续工作已完成。验证入口仅接受 status/stop；没有任意命令、任意能力执行或新的门禁旁路。
+build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 迁移源码已继续加入真实 Core 生命周期、权限后端 handoff 和 Plugin Kernel 唯一 owner 交接。Core 私有 IPC 只接受受限生命周期操作（status/stop/prepare_handoff/activate_business/cancel_business_activation），不提供任意命令、任意能力执行或新的门禁旁路。
 
 ## 阶段
 
@@ -22,7 +22,7 @@ build24 的独立 Guardian 仍使用 App UID。PPID=1、oom_score_adj=-1000、�
 
 2026-09-15：继续编写后续迁移，不再把 build25 安装验证作为源码工作的前置门槛。本轮暂不编译。候选分支已包含 ac9373b 的 Android 16 Socket 初始化顺序与 Guardian 唯一实例锁修复，后续改动必须保留。
 
-当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md) 和 [Resident Core 独立业务进程骨架](05-core-process-skeleton.md)。已补退出生命周期、权限后端交接、BUSINESS/UI_PROXY 角色边界，以及 Core 独立 Context/main Looper/真实生命周期骨架；Core 尚未取得业务 owner，Host attach、跨进程 UI 代理及 Resident ON/OFF 编排仍未接通。不能将 Core phase=running 解释为插件已迁移或锁屏持续工作已成立。
+当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md) 和 [Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md)。Core 已具备独立 Looper 与 owner-only BUSINESS Kernel 接管链；Host attach、Bridge/Dispatcher、插件/Ubuntu、跨进程 UI 代理及 Resident ON/OFF 编排仍未接通。不能把“Core 成为 Plugin Kernel owner”误记为全部业务已迁移或锁屏持续工作已完成。
 
 ## 迁移不变量（Step 1 冻结边界）
 
