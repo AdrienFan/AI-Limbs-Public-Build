@@ -355,6 +355,16 @@ internal class ResidentUiProxyServer(
             .put("replaced_host", !previous.isNullOrBlank())
     }
 
+    fun attachmentSnapshot(): JSONObject {
+        val hostInstanceId = activeHostInstanceId.get()
+        val generation = hostGeneration.get()
+        return JSONObject()
+            .put("server_running", running.get())
+            .put("host_attached", running.get() && !hostInstanceId.isNullOrBlank() && generation > 0L)
+            .put("host_instance_id", hostInstanceId ?: JSONObject.NULL)
+            .put("host_generation", generation)
+    }
+
     private fun snapshotResult(force: Boolean, sinceRevision: Long): JSONObject {
         val snapshot = runBlocking(Dispatchers.IO) { PluginPlatformKernel.residentUiProxySnapshot() }
         val text = snapshot.toString()

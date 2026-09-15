@@ -154,6 +154,9 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
     }
 
     fun initializeMainApplication() {
+        // Resident desired-state/control belongs to the Android Host shell in both LEGACY_HOST and
+        // UI_PROXY roles. Initialize it before role resolution; this does not start plugin business.
+        AiLimbsResidentRuntime.initialize(applicationContext)
         synchronized(mainInitializationLock) {
             if (mainApplicationInitialized) {
                 if (hostRuntimeAttachment?.usesUiProxy == true) {
@@ -276,7 +279,6 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         AppLogger.d(TAG, "【启动计时】AndroidShellExecutor初始化完成 - ${System.currentTimeMillis() - startTime}ms")
 
         // Resident is a separate app-UID process. The permission backend is only its bootstrap.
-        AiLimbsResidentRuntime.initialize(applicationContext)
         ShizukuAuthorizer.addStateChangeListener {
             AiLimbsResidentRuntime.scheduleEnsureStarted(applicationContext)
         }

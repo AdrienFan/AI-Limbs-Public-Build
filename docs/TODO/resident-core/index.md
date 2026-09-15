@@ -10,7 +10,7 @@ status: runtime-migration-in-progress
 
 build24 的独立 Guardian 仍使用 App UID。PPID=1、oom_score_adj=-1000、进程存活和 WakeLock.isHeld 都不能证明 CPU 实际保持唤醒，也不能证明该 UID 不受冻结或网络策略限制。
 
-build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 迁移源码已继续加入真实 Core 生命周期、权限后端 handoff 和 Plugin Kernel 唯一 owner 交接。Core 私有 IPC 只接受受限生命周期操作（status/stop/prepare_handoff/activate_business/cancel_business_activation），不提供任意命令、任意能力执行或新的门禁旁路。
+build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 迁移源码已继续加入真实 Core 生命周期、权限后端 handoff 和 Plugin Kernel 唯一 owner 交接。Core 私有 IPC 只接受受限生命周期操作（status/stop/prepare_handoff/activate_business/cancel_business_activation/quiesce_business），不提供任意命令、任意能力执行或新的门禁旁路。
 
 ## 阶段
 
@@ -22,7 +22,7 @@ build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 �
 
 2026-09-15：继续编写后续迁移，不再把 build25 安装验证作为源码工作的前置门槛。本轮暂不编译。候选分支已包含 ac9373b 的 Android 16 Socket 初始化顺序与 Guardian 唯一实例锁修复，后续改动必须保留。
 
-当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md)、[Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md)、[Host attach-only / UI Shell](07-host-ui-shell.md)、[Core-owned Interaction Cycle / Policy / Dispatcher](08-core-policy-dispatcher.md)、[Core-owned Bridge ingress](09-core-bridge-ingress.md)、[Core-owned plugin services / Ubuntu](10-core-plugin-services.md) 和 [Core ↔ Host UI Proxy / Component Proxy](11-ui-proxy.md)。Core 已具备独立 Looper、owner-only BUSINESS Kernel、唯一门禁 / Policy / Dispatcher、Bridge 数据面、普通 Parent/Child plugin、Capability Registry、enabled Ubuntu 控制面，以及源码级 UI descriptor/state ↔ Host UI_PROXY 镜像与 command/component proxy。Host 重启只进入 UI_PROXY，不恢复第二套插件业务。Resident ON/OFF 编排、历史 Android component 调用点全面迁移、CPU/网络持续工作与真机验收仍未完成；不能把“UI Proxy 协议已建立”误记为锁屏持续工作已经通过。
+当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md)、[Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md)、[Host attach-only / UI Shell](07-host-ui-shell.md)、[Core-owned Interaction Cycle / Policy / Dispatcher](08-core-policy-dispatcher.md)、[Core-owned Bridge ingress](09-core-bridge-ingress.md)、[Core-owned plugin services / Ubuntu](10-core-plugin-services.md) 、[Core ↔ Host UI Proxy / Component Proxy](11-ui-proxy.md) 和 [权限后端交接 + Resident ON/OFF 总状态机](12-resident-on-off-state-machine.md)。Core 已具备独立 Looper、owner-only BUSINESS Kernel、唯一门禁 / Policy / Dispatcher、Bridge 数据面、普通 Parent/Child plugin、Capability Registry、enabled Ubuntu 控制面，以及源码级 UI descriptor/state ↔ Host UI_PROXY 镜像与 command/component proxy。Host 重启只进入 UI_PROXY，不恢复第二套插件业务。Resident ON/OFF 与 permission backend ownership 已在源码层形成闭环；历史 Android component 调用点全面迁移、CPU/网络持续工作与真机验收仍未完成；不能把“UI Proxy 协议已建立”误记为锁屏持续工作已经通过。
 
 ## 迁移不变量（Step 1 冻结边界）
 
@@ -61,4 +61,9 @@ Bridge 数据面现在按定向 BUSINESS restore 接入 Core：只恢复 `plugin
 
 ## Step 9 当前边界
 
-Core 与 Host 现在有独立 `ResidentUiProxyWire`：Host 通过 revision snapshot 镜像 Core-owned screen/tile/theme/presentation/UI-state/child contribution/navigation 状态，并把 capability/provider/child/Plugin Center 管理动作作为 command 返回 Core；Host 只挂 UI-only Plugin Center renderer / Parent-Child presentation，不恢复 PluginManager、业务 Child Runtime、Capability Registry、Bridge、Dispatcher 或 Ubuntu。Host attachment 绑定 Core session + `host_instance_id` + 单调 `host_generation`，新 Host 会 retire 旧实例并回收其 component claims；UI server 可并发处理业务 command 与 component poll/result，避免同步 component rendezvous 自锁。Android Component Proxy 的 ActivityResult 有 deadline 清理，旧 Window lease 不得串到新 Activity。Ubuntu 完整终端与高级设置在 Host 只持 presentation controller，业务 mutation 通过 Core 私有 child presentation-command endpoint 执行。历史 Host Primitive / Host Tool 的所有 Android component 调用点尚未在本阶段全部迁到新 gateway。Resident ON/OFF、统一资源释放、LEV/freezer/CPU/网络持续运行和真机验收仍属后续阶段。
+Core 与 Host 现在有独立 `ResidentUiProxyWire`：Host 通过 revision snapshot 镜像 Core-owned screen/tile/theme/presentation/UI-state/child contribution/navigation 状态，并把 capability/provider/child/Plugin Center 管理动作作为 command 返回 Core；Host 只挂 UI-only Plugin Center renderer / Parent-Child presentation，不恢复 PluginManager、业务 Child Runtime、Capability Registry、Bridge、Dispatcher 或 Ubuntu。Host attachment 绑定 Core session + `host_instance_id` + 单调 `host_generation`，新 Host 会 retire 旧实例并回收其 component claims；UI server 可并发处理业务 command 与 component poll/result，避免同步 component rendezvous 自锁。Android Component Proxy 的 ActivityResult 有 deadline 清理，旧 Window lease 不得串到新 Activity。Ubuntu 完整终端与高级设置在 Host 只持 presentation controller，业务 mutation 通过 Core 私有 child presentation-command endpoint 执行。历史 Host Primitive / Host Tool 的所有 Android component 调用点尚未在本阶段全部迁到新 gateway。Step 10 已接通 Resident ON/OFF、permission backend return 与统一资源释放；LEV/freezer/CPU/网络持续运行和真机验收仍属后续阶段。
+
+
+## Step 10 当前边界
+
+Resident 开关现在在源码层代表业务核心切换：ON 按 Core start → backend prepare → Host ingress freeze/drain → Host runtime retirement → Core claim → Guardian 冷拉 Host → UI_PROXY generation attach 完成；只有 Core business owner 与 Host attach 都成立才报告 `on`，中间明确为 `host_attach_pending`。OFF 按 stop admission → Dispatcher drain → Core shutdown → permission backend return-to-host → ownership confirmation → fence/lease/Guardian cleanup → 冷启动普通 Host。Core 异常死亡时 permission backend 回到 UI_PROXY recovery/control plane而不恢复 Host business；backend 本身丢失时允许 degraded OFF，避免用户被锁死。该结论仍为源码级，未编译、未安装、未进行真机 ON/OFF 或锁屏验收。

@@ -764,6 +764,7 @@ class AIForegroundService : Service() {
         AiLimbsBackgroundSurvivalManager(applicationContext)
     }
     private var residentWakeLock: PowerManager.WakeLock? = null
+    @Volatile private var residentUiProxyShell: Boolean = false
 
     private val mainHandler by lazy { Handler(Looper.getMainLooper()) }
     private var keepAliveOverlayView: View? = null
@@ -1165,13 +1166,35 @@ class AIForegroundService : Service() {
         val operitApplication = application as OperitApplication
         operitApplication.initializeMainApplication()
         if (operitApplication.isResidentUiProxyMode()) {
-            isRunning.set(false)
-            AppLogger.i(
-                TAG,
-                "Resident Host is ${operitApplication.residentHostRuntimeModeName()}; " +
-                    "AIForegroundService business runtime will not start in the UI shell"
-            )
-            stopSelf()
+            residentUiProxyShell = true
+            if (AiLimbsResidentRuntime.isEnabledForHost()) {
+                isRunning.set(true)
+                createNotificationChannel()
+                val policy = backgroundSurvivalManager.buildPolicy(
+                    persistentBackgroundRequested = true,
+                    dataSync = true,
+                    specialUse = false,
+                    microphone = false
+                )
+                backgroundSurvivalManager.applyForeground(
+                    service = this,
+                    notificationId = NOTIFICATION_ID,
+                    notification = createResidentHostNotification(),
+                    policy = policy,
+                    reason = "resident_ui_proxy_create",
+                    force = true
+                )
+                syncResidentCpuWakeLock("resident_ui_proxy_create")
+                AppLogger.i(
+                    TAG,
+                    "Resident Host is ${operitApplication.residentHostRuntimeModeName()}; " +
+                        "running framework-only Resident survival shell without AI business runtime"
+                )
+            } else {
+                isRunning.set(false)
+                releaseResidentCpuWakeLock("resident_ui_proxy_disabled")
+                stopSelf()
+            }
             return
         }
         wakeListeningSuspendedForIme = lastRequestedImeVisible
@@ -1329,7 +1352,42 @@ class AIForegroundService : Service() {
         }
     }
 
+    private fun handleResidentUiProxyStart(intent: Intent?): Int {
+        return when (intent?.action) {
+            null, ACTION_RESIDENT_KEEPALIVE -> {
+                syncResidentCpuWakeLock("resident_ui_proxy_keepalive")
+                if (AiLimbsResidentRuntime.isEnabledForHost()) START_STICKY else {
+                    stopSelf()
+                    START_NOT_STICKY
+                }
+            }
+            ACTION_RESIDENT_STATE_CHANGED -> {
+                syncResidentCpuWakeLock("resident_ui_proxy_state_changed")
+                if (AiLimbsResidentRuntime.isEnabledForHost()) {
+                    START_STICKY
+                } else {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                        @Suppress("DEPRECATION")
+                        stopForeground(Service.STOP_FOREGROUND_REMOVE)
+                    } else {
+                        @Suppress("DEPRECATION")
+                        stopForeground(true)
+                    }
+                    stopSelf()
+                    START_NOT_STICKY
+                }
+            }
+            else -> {
+                AppLogger.w(TAG, "Ignoring business service action in Resident UI proxy shell: ${intent.action}")
+                if (AiLimbsResidentRuntime.isEnabledForHost()) START_STICKY else START_NOT_STICKY
+            }
+        }
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        if (residentUiProxyShell) {
+            return handleResidentUiProxyStart(intent)
+        }
         if (intent?.action != ACTION_RESIDENT_KEEPALIVE) {
             AppLogger.d(
                 TAG,
@@ -1544,6 +1602,12 @@ class AIForegroundService : Service() {
 
     override fun onDestroy() {
         releaseResidentCpuWakeLock("service_destroy")
+        if (residentUiProxyShell) {
+            isRunning.set(false)
+            AppLogger.d(TAG, "Resident UI proxy survival shell destroyed")
+            super.onDestroy()
+            return
+        }
         val stoppedPort = externalHttpCurrentPort ?: externalHttpStateFlow.value.port
         runCatching {
             externalHttpServer?.stopServer()
@@ -2183,6 +2247,19 @@ class AIForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
     }
+
+    private fun createResidentHostNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.service_ai_limbs_running))
+            .setContentText("Resident Core presentation host")
+            .setSmallIcon(R.drawable.ic_ai_limbs_notification)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setContentIntent(mainContentPendingIntent())
+            .build()
 
     private fun createNotification(): Notification {
         val externalHttpSnapshot = externalHttpStateFlow.value

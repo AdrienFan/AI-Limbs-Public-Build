@@ -165,6 +165,27 @@ internal object ResidentCoreController {
         armed
     }
 
+    suspend fun quiesceBusiness(context: Context): JSONObject =
+        withContext(Dispatchers.IO + NonCancellable) {
+            val state = status(context)
+            if (!state.optBoolean("available", false) || !state.optBoolean("business_attached", false)) {
+                return@withContext JSONObject()
+                    .put("drain_required", false)
+                    .put("drain_success", true)
+                    .put("phase", state.optString("phase", "stopped"))
+            }
+            val session = state.getString("session_id")
+            val quiesced = ResidentCoreWire.request("quiesce_business", session)
+            val dispatcher = quiesced.getJSONObject("dispatcher")
+            val businessPhase = quiesced.getString("business_phase")
+            JSONObject()
+                .put("drain_required", true)
+                .put("drain_success", businessPhase == "drained" && dispatcher.optBoolean("drained", false))
+                .put("business_phase", businessPhase)
+                .put("dispatcher", dispatcher)
+                .put("core_session", session)
+        }
+
     suspend fun cancelBusinessTakeover(coreSession: String): JSONObject = withContext(Dispatchers.IO) {
         ResidentCoreWire.request("cancel_business_activation", coreSession)
     }
@@ -214,6 +235,9 @@ internal object ResidentCoreController {
             "Core must not claim continuous work before the power/freezer stage is validated"
         }
     }
+
+    internal fun bootstrapLeaseIsFree(context: Context): Boolean =
+        leaseIsFree(context)
 
     private fun directory(context: Context): File =
         File(context.filesDir, "ai_limbs/resident_core")

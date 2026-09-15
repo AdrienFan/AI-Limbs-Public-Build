@@ -103,6 +103,7 @@ object ResidentCoreMain {
                     .put("core_runtime", runtimeState)
                     .put("backend", backend.snapshot())
                     .put("dispatcher", dispatcherServer.snapshot())
+                    .put("ui_proxy", uiProxyServer.attachmentSnapshot())
                     .put("takeover_fence", ResidentBusinessTakeoverFence.snapshot(context) ?: JSONObject.NULL)
             }
 
@@ -138,7 +139,7 @@ object ResidentCoreMain {
                                 val operation = request.getString("operation")
                                 require(operation == "status" || operation == "stop" ||
                                     operation == "prepare_handoff" || operation == "activate_business" ||
-                                    operation == "cancel_business_activation") {
+                                    operation == "cancel_business_activation" || operation == "quiesce_business") {
                                     "Unsupported core operation"
                                 }
                                 if (operation != "status") {
@@ -179,6 +180,17 @@ object ResidentCoreMain {
                                     }
                                     "cancel_business_activation" -> {
                                         runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
+                                    }
+                                    "quiesce_business" -> {
+                                        runtime.beginBusinessQuiesce()
+                                        val drain = dispatcherServer.quiesceAndDrain()
+                                        if (drain.optBoolean("drain_success", false)) {
+                                            runtime.markBusinessDrained()
+                                        } else {
+                                            runtime.markBusinessQuiesceFailed(
+                                                drain.optString("last_error", "Resident Dispatcher drain failed")
+                                            )
+                                        }
                                     }
                                     "stop" -> runtime.requestStop()
                                 }

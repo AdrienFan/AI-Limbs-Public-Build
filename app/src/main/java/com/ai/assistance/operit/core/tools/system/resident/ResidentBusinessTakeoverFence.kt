@@ -3,6 +3,7 @@ package com.ai.assistance.operit.core.tools.system.resident
 import android.content.Context
 import android.os.Process
 import android.system.Os
+import android.system.OsConstants
 import java.io.File
 import org.json.JSONObject
 
@@ -77,6 +78,25 @@ internal object ResidentBusinessTakeoverFence {
 
     fun snapshot(context: Context): JSONObject? =
         file(context).takeIf { it.isFile }?.let(::readBounded)
+
+    fun clearAfterVerifiedOwnerLoss(context: Context) {
+        val target = file(context)
+        if (!target.isFile) return
+        val current = readBounded(target)
+        val corePid = current.optInt("core_pid", -1)
+        check(corePid > 0 && !processExists(corePid)) {
+            "Refusing to clear takeover fence while recorded Core PID is still alive"
+        }
+        check(target.delete()) { "Could not clear stale Resident takeover fence" }
+    }
+
+    private fun processExists(pid: Int): Boolean =
+        try {
+            Os.kill(pid, 0)
+            true
+        } catch (error: android.system.ErrnoException) {
+            if (error.errno == OsConstants.ESRCH) false else throw error
+        }
 
     private fun requireCurrent(context: Context, coreSession: String): JSONObject {
         val current = readBounded(file(context))

@@ -38,6 +38,9 @@ internal enum class ResidentCoreBusinessPhase {
     STARTING_BRIDGE,
     STARTING_PLUGIN_SERVICES,
     RUNNING,
+    QUIESCING,
+    DRAINED,
+    QUIESCE_FAILED,
     CANCELLED,
     STOPPED,
     FAILED
@@ -279,6 +282,41 @@ internal class ResidentCoreBusinessRuntime {
             }
             runCatching { ResidentBusinessTakeoverFence.markFailed(context, coreSession, error) }
             throw error
+        }
+    }
+
+    fun beginBusinessQuiesce() {
+        synchronized(lock) {
+            check(businessAttached) { "Resident Core cannot quiesce before business ownership is attached" }
+            check(
+                businessPhase == ResidentCoreBusinessPhase.RUNNING ||
+                    businessPhase == ResidentCoreBusinessPhase.QUIESCING ||
+                    businessPhase == ResidentCoreBusinessPhase.DRAINED
+            ) { "Resident Core cannot quiesce business from $businessPhase" }
+            if (businessPhase == ResidentCoreBusinessPhase.RUNNING) {
+                businessPhase = ResidentCoreBusinessPhase.QUIESCING
+            }
+        }
+    }
+
+    fun markBusinessDrained() {
+        synchronized(lock) {
+            check(businessAttached &&
+                (businessPhase == ResidentCoreBusinessPhase.QUIESCING ||
+                    businessPhase == ResidentCoreBusinessPhase.DRAINED)) {
+                "Resident Core cannot publish drained business from $businessPhase"
+            }
+            if (businessPhase == ResidentCoreBusinessPhase.DRAINED) return@synchronized
+            businessPhase = ResidentCoreBusinessPhase.DRAINED
+            businessError = null
+        }
+    }
+
+    fun markBusinessQuiesceFailed(detail: String) {
+        synchronized(lock) {
+            check(businessAttached) { "Resident Core quiesce failure requires an attached business owner" }
+            businessPhase = ResidentCoreBusinessPhase.QUIESCE_FAILED
+            businessError = detail.take(1024)
         }
     }
 

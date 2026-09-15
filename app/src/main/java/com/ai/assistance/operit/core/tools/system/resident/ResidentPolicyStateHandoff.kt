@@ -3,6 +3,7 @@ package com.ai.assistance.operit.core.tools.system.resident
 import android.content.Context
 import android.os.Process
 import android.system.Os
+import android.system.OsConstants
 import java.io.File
 import org.json.JSONObject
 
@@ -67,6 +68,35 @@ internal object ResidentPolicyStateHandoff {
         check(envelope.getInt("core_pid") == Process.myPid()) { "Policy handoff Core PID mismatch" }
         check(target.delete()) { "Could not clear Resident policy handoff state" }
     }
+
+    fun snapshot(context: Context): JSONObject? =
+        file(context).takeIf { it.isFile }?.let(::readBounded)?.let { envelope ->
+            JSONObject()
+                .put("schema", envelope.optInt("schema"))
+                .put("core_session", envelope.optString("core_session"))
+                .put("core_pid", envelope.optInt("core_pid"))
+                .put("host_pid", envelope.optInt("host_pid"))
+                .put("updated_wall_ms", envelope.optLong("updated_wall_ms"))
+        }
+
+    fun clearAfterVerifiedOwnerLoss(context: Context) {
+        val target = file(context)
+        if (!target.isFile) return
+        val envelope = readBounded(target)
+        val corePid = envelope.optInt("core_pid", -1)
+        check(corePid > 0 && !processExists(corePid)) {
+            "Refusing to clear policy handoff while recorded Core PID is still alive"
+        }
+        check(target.delete()) { "Could not clear stale Resident policy handoff state" }
+    }
+
+    private fun processExists(pid: Int): Boolean =
+        try {
+            Os.kill(pid, 0)
+            true
+        } catch (error: android.system.ErrnoException) {
+            if (error.errno == OsConstants.ESRCH) false else throw error
+        }
 
     private fun write(context: Context, value: JSONObject) {
         val target = file(context)

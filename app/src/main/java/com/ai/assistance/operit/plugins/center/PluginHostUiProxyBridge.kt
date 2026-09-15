@@ -308,7 +308,7 @@ internal class ResidentUiProxyClient(
         val ui = KernelSystemUiHostV1(pluginId, role, runtime.systemUiRegistry)
         return KernelSystemPluginHostV2(
             SystemPluginProtocolV1.HOST_ABI,
-            ResidentSystemHostGateway(this),
+            ResidentSystemHostGateway(appContext, this),
             ResidentPluginPlatformControl(this),
             ResidentSystemJsonService(this, "plugin_admin"),
             ResidentSystemJsonService(this, "admin_security"),
@@ -382,6 +382,7 @@ private class ResidentPluginPlatformControl(
 }
 
 private class ResidentSystemHostGateway(
+    private val appContext: Context,
     private val client: ResidentUiProxyClient
 ) : SystemHostGatewayV1 {
     override fun listHostPrimitives(): List<SystemHostPrimitiveDescriptor> = client.hostPrimitives()
@@ -396,11 +397,38 @@ private class ResidentSystemHostGateway(
             if (operationKnown) null else "HOST_OPERATION_UNKNOWN", if (operationKnown) null else "Unknown Host Primitive operation"
         )
     }
-    override suspend fun invokeHostPrimitive(id: String, parameters: JSONObject): JSONObject =
-        client.command(JSONObject().put("command", "host_primitive").put("id", id).put("parameters", JSONObject(parameters.toString())))
-    override suspend fun invokeHostPrimitive(id: String, operation: String, parameters: JSONObject): JSONObject =
-        client.command(JSONObject().put("command", "host_primitive").put("id", id).put("host_operation", operation)
-            .put("parameters", JSONObject(parameters.toString())))
+    override suspend fun invokeHostPrimitive(id: String, parameters: JSONObject): JSONObject {
+        val normalized = id.trim().lowercase()
+        check(normalized != RESIDENT_RUNTIME_ID) {
+            "Resident runtime requires an explicit lifecycle operation"
+        }
+        return client.command(
+            JSONObject().put("command", "host_primitive").put("id", normalized)
+                .put("parameters", JSONObject(parameters.toString()))
+        )
+    }
+
+    override suspend fun invokeHostPrimitive(id: String, operation: String, parameters: JSONObject): JSONObject {
+        val normalized = id.trim().lowercase()
+        if (normalized == RESIDENT_RUNTIME_ID) {
+            // Resident lifecycle is an Android-Host control plane. Routing this back into BUSINESS
+            // Core would make the managed process responsible for stopping/replacing itself.
+            return com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime.invoke(
+                appContext,
+                com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID,
+                operation,
+                JSONObject(parameters.toString())
+            )
+        }
+        return client.command(
+            JSONObject().put("command", "host_primitive").put("id", normalized)
+                .put("host_operation", operation).put("parameters", JSONObject(parameters.toString()))
+        )
+    }
+
+    private companion object {
+        const val RESIDENT_RUNTIME_ID = "host.resident.runtime@1"
+    }
 }
 
 /**

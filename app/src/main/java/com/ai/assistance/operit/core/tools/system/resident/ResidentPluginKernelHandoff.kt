@@ -8,11 +8,12 @@ import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import kotlin.system.exitProcess
 
 /**
- * Host-side one-way Plugin Kernel ownership handoff. Not wired to Resident ON/OFF yet.
+ * Host-side Resident ON ownership transaction.
  *
- * Success is intentionally terminal for the old Host process: Core is armed first, the existing
- * kernel retires with the prepared permission retention permit, and only then does this process
- * exit so its process-held plugin_kernel lease can be acquired by Core.
+ * Core prepares the permission backend first. Host ingress is then frozen and drained before the
+ * policy snapshot is staged, takeover is armed and the Host Plugin Kernel is retired. Any failure
+ * after backend prepare rolls the transaction back by unfreezing Host policy and stopping Core so
+ * the prepared permission backend is explicitly released back to Host.
  */
 internal object ResidentPluginKernelHandoff {
     suspend fun execute(context: Context, executor: ShellExecutor): Nothing {
@@ -28,9 +29,13 @@ internal object ResidentPluginKernelHandoff {
         val handoff = ResidentCoreController.prepareHandoff(app, executor)
         val coreSession = handoff.coreSessionId()
         val hostPid = Process.myPid()
-        val policyState = AiLimbsInteractionCycleRuntime.freezeAndExportForResidentHandoff(app)
+        var policyFrozen = false
+        var policyStaged = false
+        var takeoverArmed = false
 
         try {
+            val policyState = AiLimbsInteractionCycleRuntime.freezeAndExportForResidentHandoff(app)
+            policyFrozen = true
             ResidentPolicyStateHandoff.stage(
                 context = app,
                 coreSession = coreSession,
@@ -38,7 +43,9 @@ internal object ResidentPluginKernelHandoff {
                 hostPid = hostPid,
                 policyState = policyState
             )
+            policyStaged = true
             val armed = ResidentCoreController.armBusinessTakeover(coreSession)
+            takeoverArmed = true
             check(armed.getString("business_phase") == "waiting_for_host_exit") {
                 "Resident Core did not arm business takeover"
             }
@@ -55,9 +62,19 @@ internal object ResidentPluginKernelHandoff {
                 "Host must retain plugin_kernel lease until process exit"
             }
         } catch (error: Throwable) {
-            runCatching { ResidentPolicyStateHandoff.clearByHost(app, coreSession, hostPid) }
-            runCatching { ResidentCoreController.cancelBusinessTakeover(coreSession) }
-            AiLimbsInteractionCycleRuntime.cancelResidentHandoffFreeze(app)
+            if (policyStaged) {
+                runCatching { ResidentPolicyStateHandoff.clearByHost(app, coreSession, hostPid) }
+            }
+            if (takeoverArmed) {
+                runCatching { ResidentCoreController.cancelBusinessTakeover(coreSession) }
+            }
+            if (policyFrozen) {
+                runCatching { AiLimbsInteractionCycleRuntime.cancelResidentHandoffFreeze(app) }
+            }
+            // prepare_handoff establishes a Core lifetime on the permission backend before Host
+            // retirement. If anything later fails, stopping Core is the rollback transaction that
+            // releases that prepared lifetime back to the still-running Host control plane.
+            runCatching { ResidentCoreController.stop(app) }
             throw error
         }
 

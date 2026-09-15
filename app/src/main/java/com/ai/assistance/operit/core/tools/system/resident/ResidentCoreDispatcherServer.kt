@@ -19,6 +19,8 @@ internal class ResidentCoreDispatcherServer(
     private val appContext = context.applicationContext
     private val lock = Any()
     private val running = AtomicBoolean(false)
+    private val accepting = AtomicBoolean(false)
+    private val drained = AtomicBoolean(false)
     private val serverRef = AtomicReference<LocalServerSocket?>(null)
     private val acceptThreadRef = AtomicReference<Thread?>(null)
     private var workers: ExecutorService? = null
@@ -44,6 +46,8 @@ internal class ResidentCoreDispatcherServer(
         runtime = createdRuntime
         workers = pool
         serverRef.set(server)
+        drained.set(false)
+        accepting.set(true)
         running.set(true)
         val acceptThread = Thread({ acceptLoop(server, pool) }, "resident-dispatch-accept").apply {
             isDaemon = true
@@ -52,40 +56,66 @@ internal class ResidentCoreDispatcherServer(
         acceptThreadRef.set(acceptThread)
     }
 
-    fun stop() {
+    /**
+     * Close admission first, then wait for already accepted Dispatcher work to finish.
+     * The runtime object remains available for diagnostics until final Core stop.
+     */
+    fun quiesceAndDrain(): JSONObject {
         var pool: ExecutorService? = null
         var acceptThread: Thread? = null
-        var hadResources = false
+        var server: LocalServerSocket? = null
         synchronized(lock) {
-            val server = serverRef.getAndSet(null)
+            if (drained.get()) return snapshot().put("drain_success", true)
+            accepting.set(false)
+            running.set(false)
+            server = serverRef.getAndSet(null)
             pool = workers
             workers = null
             acceptThread = acceptThreadRef.getAndSet(null)
-            hadResources = running.getAndSet(false) || server != null || pool != null || acceptThread != null
-            if (hadResources) runCatching { server?.close() }
+            runCatching { server?.close() }
         }
-        if (!hadResources) return
-        val poolToStop = pool
-        val acceptThreadToJoin = acceptThread
-        try { acceptThreadToJoin?.join(1_000L) }
-        catch (_: InterruptedException) { Thread.currentThread().interrupt() }
-        poolToStop?.shutdown()
+
+        var success = true
         try {
-            if (poolToStop != null && !poolToStop.awaitTermination(DISPATCH_DRAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
-                poolToStop.shutdownNow()
+            acceptThread?.join(1_000L)
+        } catch (_: InterruptedException) {
+            Thread.currentThread().interrupt()
+            success = false
+        }
+
+        pool?.shutdown()
+        try {
+            if (pool != null && !pool!!.awaitTermination(DISPATCH_DRAIN_TIMEOUT_MS, TimeUnit.MILLISECONDS)) {
+                pool!!.shutdownNow()
+                success = pool!!.awaitTermination(DISPATCH_FORCE_STOP_TIMEOUT_MS, TimeUnit.MILLISECONDS)
             }
         } catch (_: InterruptedException) {
-            poolToStop?.shutdownNow()
+            pool?.shutdownNow()
             Thread.currentThread().interrupt()
-        } finally {
-            runtime = null
+            success = false
         }
+
+        drained.set(success)
+        if (!success) {
+            lastError = "Resident Dispatcher drain timed out; remaining work was force-cancelled"
+        }
+        return snapshot()
+            .put("drain_success", success)
+            .put("drain_timeout_ms", DISPATCH_DRAIN_TIMEOUT_MS)
+    }
+
+    fun stop() {
+        runCatching { quiesceAndDrain() }
+            .onFailure { lastError = it.toString().take(1024) }
+        runtime = null
     }
 
     fun snapshot(): JSONObject = JSONObject()
         .put("running", running.get())
-        .put("dispatcher_owner", if (running.get()) "resident_core" else JSONObject.NULL)
-        .put("owner_pid", if (running.get()) Process.myPid() else JSONObject.NULL)
+        .put("accepting", accepting.get())
+        .put("drained", drained.get())
+        .put("dispatcher_owner", if (runtime != null) "resident_core" else JSONObject.NULL)
+        .put("owner_pid", if (runtime != null) Process.myPid() else JSONObject.NULL)
         .put("last_error", lastError ?: JSONObject.NULL)
         .put("runtime", runtime?.snapshot() ?: JSONObject.NULL)
 
@@ -151,5 +181,6 @@ internal class ResidentCoreDispatcherServer(
     private companion object {
         const val MAX_CONCURRENT_DISPATCH = 4
         const val DISPATCH_DRAIN_TIMEOUT_MS = 5_000L
+        const val DISPATCH_FORCE_STOP_TIMEOUT_MS = 1_000L
     }
 }

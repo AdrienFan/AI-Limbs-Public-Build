@@ -2,8 +2,10 @@ package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
 import android.os.Process
+import android.os.SystemClock
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreProcessIdentity
+import kotlinx.coroutines.delay
 import org.json.JSONObject
 
 /** Persisted package configuration consumed by the authoritative AI Limbs interaction cycle. */
@@ -172,6 +174,8 @@ internal class AiLimbsInteractionCycleController(
                 .getOrDefault(AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS))
     }
 
+    fun activeInvocationCount(): Int = synchronized(stateLock) { activeInvocations }
+
     fun exportHandoffState(): JSONObject = synchronized(stateLock) {
         refreshExpiry(clockMs())
         check(activeInvocations == 0) {
@@ -289,15 +293,25 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
             .put("access_gate", accessGate.snapshot())
     }
 
-    fun freezeAndExportHandoffState(): JSONObject = synchronized(stateLock) {
+    fun beginResidentHandoffFreeze() = synchronized(stateLock) {
         check(!residentHandoffFrozen) { "Resident policy handoff is already frozen" }
-        val exported = JSONObject()
+        // Close ingress first. Existing invocations retain their leases and may drain naturally;
+        // every later beginInvocation is rejected with RESIDENT_POLICY_HANDOFF_PENDING.
+        residentHandoffFrozen = true
+    }
+
+    fun activeInvocationCount(): Int = controller.activeInvocationCount()
+
+    fun exportFrozenHandoffState(): JSONObject = synchronized(stateLock) {
+        check(residentHandoffFrozen) { "Resident policy handoff must be frozen before export" }
+        check(controller.activeInvocationCount() == 0) {
+            "Interaction Cycle handoff export attempted before invocation drain completed"
+        }
+        JSONObject()
             .put("controller", controller.exportHandoffState())
             .put("current_generation", currentGeneration)
             .put("bootstrap_delivered_generation", bootstrapDeliveredGeneration ?: JSONObject.NULL)
             .put("access_gate", accessGate.freezeAndExportHandoffState())
-        residentHandoffFrozen = true
-        exported
     }
 
     fun cancelResidentHandoffFreeze() = synchronized(stateLock) {
@@ -350,8 +364,26 @@ internal object AiLimbsInteractionCycleRuntime {
             }
         }
 
-    fun freezeAndExportForResidentHandoff(context: Context): JSONObject =
-        state(context.applicationContext).freezeAndExportHandoffState()
+    suspend fun freezeAndExportForResidentHandoff(
+        context: Context,
+        timeoutMs: Long = RESIDENT_HANDOFF_DRAIN_TIMEOUT_MS
+    ): JSONObject {
+        val current = state(context.applicationContext)
+        current.beginResidentHandoffFreeze()
+        try {
+            val deadline = SystemClock.elapsedRealtime() + timeoutMs
+            while (current.activeInvocationCount() > 0 && SystemClock.elapsedRealtime() < deadline) {
+                delay(50L)
+            }
+            check(current.activeInvocationCount() == 0) {
+                "Resident Host ingress drain timed out with ${current.activeInvocationCount()} active invocations"
+            }
+            return current.exportFrozenHandoffState()
+        } catch (error: Throwable) {
+            current.cancelResidentHandoffFreeze()
+            throw error
+        }
+    }
 
     fun cancelResidentHandoffFreeze(context: Context) {
         runtime?.cancelResidentHandoffFreeze()
@@ -370,4 +402,6 @@ internal object AiLimbsInteractionCycleRuntime {
 
     fun reset(context: Context): AiLimbsInteractionCycleResetResult =
         state(context.applicationContext).resetInteractionCycle()
+
+    private const val RESIDENT_HANDOFF_DRAIN_TIMEOUT_MS = 10_000L
 }
