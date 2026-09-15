@@ -23,6 +23,7 @@ final class ResidentOwner {
     private final Runnable stopServer;
     private Lease owner;
     private boolean terminating;
+    private boolean returningToHost;
 
     private final class Lease implements IBinder.DeathRecipient {
         final IBinder lifetime;
@@ -38,11 +39,13 @@ final class ResidentOwner {
             synchronized (lock) {
                 if (owner != this) return;
                 owner = null;
-                terminating = true;
+                returningToHost = true;
             }
-            // A lost active Core must not silently resume the Host business runtime.
-            // Execute outside the lock, without waiting for a possibly blocked Host provider.
-            stopServer.run();
+            // Step 9 guarantees that a UI_PROXY Host cannot recreate business in-place. Therefore
+            // returning the Binder restores only the recovery/control plane; it does not silently
+            // resume Host business. This keeps Resident OFF operable after an unexpected Core death
+            // and avoids a Core/Host permission-backend ownership vacuum.
+            resumeHost.run();
         }
     }
 
@@ -60,6 +63,12 @@ final class ResidentOwner {
     void applyHostResult(Runnable action) {
         synchronized (lock) {
             if (owner == null && !terminating) action.run();
+        }
+    }
+
+    void markHostAttached() {
+        synchronized (lock) {
+            if (owner == null && !terminating) returningToHost = false;
         }
     }
 
@@ -100,6 +109,7 @@ final class ResidentOwner {
                             throw error;
                         }
                     }
+                    returningToHost = false;
                     if (operation == 1) owner.active = true;
                 } else {
                     int destination = data.readInt();
@@ -110,8 +120,10 @@ final class ResidentOwner {
                     owner = null;
                     unlink(previous);
                     if (destination == 1) {
+                        returningToHost = true;
                         afterReply = resumeHost;
                     } else {
+                        returningToHost = false;
                         terminating = true;
                         afterReply = stopServer;
                     }
@@ -141,12 +153,17 @@ final class ResidentOwner {
 
     private String snapshotLocked() {
         try {
+            String runtimeOwner = terminating
+                ? "stopping"
+                : owner != null
+                    ? (owner.active ? "resident_core" : "handoff_prepared")
+                    : returningToHost ? "returning_to_host" : "android_host";
             return new JSONObject()
                 .put("protocol", VERSION)
                 .put("instance_id", instanceId)
                 .put("pid", Os.getpid())
                 .put("uid", Os.getuid())
-                .put("runtime_owner", terminating ? "stopping" : owner == null ? "android_host" : owner.active ? "resident_core" : "handoff_prepared")
+                .put("runtime_owner", runtimeOwner)
                 .put("core_pid", owner == null ? JSONObject.NULL : owner.pid)
                 .put("core_session", owner == null ? JSONObject.NULL : owner.session)
                 .put("core_lifetime_alive", owner != null && owner.lifetime.isBinderAlive())

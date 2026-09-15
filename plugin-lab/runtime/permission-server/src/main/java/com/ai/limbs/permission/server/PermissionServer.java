@@ -118,6 +118,7 @@ public final class PermissionServer extends Service<UserServiceManager, ClientMa
                     System.exit(0);
                 }
                 if (!acceptedOnce) report("Host accepted permission service", null);
+                residentOwner.markHostAttached();
                 acceptedOnce = true;
                 missedHandoffs = 0;
             });
