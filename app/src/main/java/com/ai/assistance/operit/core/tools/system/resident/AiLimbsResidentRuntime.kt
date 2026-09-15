@@ -223,8 +223,26 @@ internal object AiLimbsResidentRuntime {
             return status(existing)
         }
 
+        // guardian.lock is the process-ownership fact. resident.meta is diagnostic
+        // metadata and may be missing after an interrupted update.
+        if (!guardianLeaseIsFree()) {
+            delay(250L)
+            existing = localProbe()
+            if (guardianMatchesInstalledBuild(existing)) {
+                clearError()
+                return status(existing)
+            }
+            if (!retireUntrackedGuardianLocked(executor)) {
+                recordError("Resident guardian lease is held but no trusted current Guardian could be recovered")
+                return status(localProbe())
+            }
+        }
+
         check(stateDir().mkdirs() || stateDir().isDirectory) {
             "Could not prepare resident state directory"
+        }
+        check(guardianLeaseIsFree()) {
+            "Resident guardian lease is still held before launch"
         }
         metaFile().delete()
         stopRequestFile().delete()
@@ -663,6 +681,64 @@ internal object AiLimbsResidentRuntime {
             probe.protocolVersion == RESIDENT_PROTOCOL_VERSION &&
             probe.buildCode == BuildConfig.VERSION_CODE &&
             probe.sourceApk == app.applicationInfo.sourceDir
+
+    private fun guardianLeaseIsFree(): Boolean {
+        val lease = ResidentRuntimeLease.tryAcquire(stateDir(), "guardian") ?: return false
+        lease.close()
+        return true
+    }
+
+    private suspend fun retireUntrackedGuardianLocked(executor: ShellExecutor): Boolean {
+        if (guardianLeaseIsFree()) return true
+
+        val processList = executor.executeCommand("/system/bin/ps -A -o PID,UID,NAME")
+        if (!processList.success) {
+            AppLogger.w(
+                TAG,
+                "Could not enumerate untracked Resident Guardian: " +
+                    processList.stderr.ifBlank { processList.stdout }
+            )
+            return false
+        }
+
+        val stalePids = processList.stdout.lineSequence().mapNotNull { line ->
+            val fields = line.trim().split(Regex("\s+"))
+            if (fields.size < 3) return@mapNotNull null
+            val pid = fields[0].toIntOrNull() ?: return@mapNotNull null
+            val uid = fields[1].toIntOrNull() ?: return@mapNotNull null
+            val name = fields.drop(2).joinToString(" ")
+            pid.takeIf { uid == Process.myUid() && name == PROCESS_NAME }
+        }.distinct().toList()
+
+        if (stalePids.isEmpty()) {
+            AppLogger.w(TAG, "Guardian lease is held but no same-UID $PROCESS_NAME process is visible")
+            return false
+        }
+
+        AppLogger.i(TAG, "Retiring untracked Resident Guardian pid(s)=$stalePids")
+        stalePids.forEach { stalePid ->
+            val killCommand =
+                "/system/bin/run-as ${quote(app.packageName)} /system/bin/kill -9 $stalePid"
+            val result = executor.executeCommand(killCommand)
+            if (!result.success) {
+                AppLogger.w(
+                    TAG,
+                    "Failed to retire untracked Resident pid=$stalePid: " +
+                        result.stderr.ifBlank { result.stdout }
+                )
+            }
+        }
+
+        for (attempt in 0 until 30) {
+            delay(100L)
+            if (guardianLeaseIsFree()) {
+                metaFile().delete()
+                guardianFile().delete()
+                return true
+            }
+        }
+        return false
+    }
 
     private fun pidExists(pid: Int): Boolean =
         runCatching {
