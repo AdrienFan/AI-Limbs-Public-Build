@@ -56,6 +56,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK
         shell: bash
@@ -168,6 +170,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -216,6 +220,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -264,6 +270,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -313,6 +321,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK
         shell: bash
@@ -365,6 +375,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -413,6 +425,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -461,6 +475,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -509,6 +525,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -559,6 +577,8 @@ jobs:
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
 
       - name: Install Android SDK
         shell: bash
@@ -624,6 +644,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -673,6 +695,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -722,6 +746,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
