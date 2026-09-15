@@ -354,11 +354,10 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerProvider(id: String, payload: Any, metadata: Map<String, String>) {
-            if (context.runtimeRole == PluginRuntimeRole.BUSINESS &&
-                (payload is InProcessPageProvider || payload is InProcessUiStateProvider)) {
-                // Stable SDK type is the authority here, not an open-ended metadata string:
-                // PageProvider and UiStateProvider are presentation channels. Core mounts the
-                // plugin's business entry but Host/UI proxy owns their rendering and event surface.
+            if (context.runtimeRole == PluginRuntimeRole.BUSINESS && payload is InProcessPageProvider) {
+                // A PageProvider manufactures a real Android View from Context and therefore cannot
+                // cross the process boundary. Keep it out of Core. UiStateProvider is different: its
+                // JSON StateFlow + perform(event) contract stays in Core and is mirrored by Step 9.
                 return
             }
             context.payloadContext.registrar.registerProvider(id, payload, metadata)
@@ -414,7 +413,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerHomeTile(tile: InProcessHomeTile) {
-            if (context.runtimeRole == PluginRuntimeRole.BUSINESS) return
+            // HomeTile is neutral metadata only. BUSINESS records it as Core state; Host UI_PROXY
+            // receives a JSON mirror and never receives this plugin object.
             context.payloadContext.registrar.registerExtension(
                 PluginExtensionPoints.UI_HOME_TILE,
                 tile.id,
@@ -429,7 +429,8 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerScreen(screen: InProcessScreen) {
-            if (context.runtimeRole == PluginRuntimeRole.BUSINESS) return
+            // InProcessScreen contains IDs/text/opaque document JSON only, so Core may own the
+            // descriptor while Host UI_PROXY renders a mirror. No Compose/View/Context crosses.
             // Do not parse component JSON here.  android_inprocess plugins and declarative plugins
             // must cross the same opaque ui.screen@2 boundary so future component types never create
             // another Host runtime dependency.

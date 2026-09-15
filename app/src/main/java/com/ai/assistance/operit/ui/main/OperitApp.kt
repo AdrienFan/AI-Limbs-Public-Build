@@ -33,6 +33,7 @@ import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.packTool.PackageManager
 import com.ai.assistance.operit.plugins.center.PluginPagePresentationMode
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.center.PluginHostUiProxyRuntimeHolder
 import com.ai.assistance.operit.data.announcement.RemoteAnnouncementDisplay
 import com.ai.assistance.operit.data.announcement.RemoteAnnouncementRepository
 import com.ai.assistance.operit.data.mcp.MCPRepository
@@ -153,10 +154,19 @@ fun OperitApp(
     )
     // Presentation is a lease owned by the plugin screen that is visible right now.
     // Changing routes releases the old lease and prevents background plugins from pre-arming fullscreen.
-    DisposableEffect(currentPluginScreenId) {
-        PluginPlatformKernel.pagePresentationRegistry.setActiveScreen(currentPluginScreenId)
+    val residentUiProxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+    DisposableEffect(currentPluginScreenId, residentUiProxy) {
+        if (residentUiProxy != null) {
+            residentUiProxy.setActiveScreen(currentPluginScreenId)
+        } else {
+            PluginPlatformKernel.pagePresentationRegistry.setActiveScreen(currentPluginScreenId)
+        }
         onDispose {
-            PluginPlatformKernel.pagePresentationRegistry.setActiveScreen(null)
+            if (residentUiProxy != null) {
+                residentUiProxy.setActiveScreen(null)
+            } else {
+                PluginPlatformKernel.pagePresentationRegistry.setActiveScreen(null)
+            }
         }
     }
     // 当前导航栈中仍存活的路由 screenKey（路由级 ViewModelStore 清理依据：
@@ -380,11 +390,19 @@ fun OperitApp(
     )
     BackHandler(enabled = isImmersivePluginPage && currentPagePresentation != null) {
         currentPagePresentation?.let { presentation ->
-            PluginPlatformKernel.pagePresentationRegistry.set(
-                ownerPluginId = presentation.ownerPluginId,
-                screenId = presentation.screenId,
-                mode = PluginPagePresentationMode.NORMAL
-            )
+            if (residentUiProxy != null) {
+                residentUiProxy.setPresentationMode(
+                    ownerPluginId = presentation.ownerPluginId,
+                    screenId = presentation.screenId,
+                    mode = PluginPagePresentationMode.NORMAL
+                )
+            } else {
+                PluginPlatformKernel.pagePresentationRegistry.set(
+                    ownerPluginId = presentation.ownerPluginId,
+                    screenId = presentation.screenId,
+                    mode = PluginPagePresentationMode.NORMAL
+                )
+            }
         }
     }
 

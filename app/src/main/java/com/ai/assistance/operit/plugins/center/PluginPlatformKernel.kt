@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
 import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.plugins.system.KernelPluginPlatformControlV1
@@ -27,6 +28,8 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * Stable host-side plugin platform kernel. It owns plugin runtime, policy, storage and registries.
@@ -231,6 +234,236 @@ internal object PluginPlatformKernel {
         )
     }
 
+
+    /** Neutral JSON-only presentation state exported from BUSINESS Core to Host UI_PROXY. */
+    internal fun residentUiProxySnapshot(): JSONObject {
+        requireInitialized()
+        check(runtimeRole == PluginRuntimeRole.BUSINESS && residentPluginServicesPrepared) {
+            "Resident UI snapshot requires prepared BUSINESS plugin services"
+        }
+        val tiles = JSONArray().apply {
+            uiRegistryInstance.homeTiles.value.forEach { tile ->
+                put(JSONObject().put("owner_plugin_id", tile.ownerPluginId).put("id", tile.id)
+                    .put("title", tile.title).put("description", tile.description).put("screen_id", tile.screenId))
+            }
+        }
+        val screens = JSONArray().apply {
+            uiRegistryInstance.activeScreens.value.forEach { screen ->
+                put(JSONObject().put("owner_plugin_id", screen.ownerPluginId).put("id", screen.id)
+                    .put("title", screen.title).put("description", screen.description ?: JSONObject.NULL)
+                    .put("schema_id", screen.schemaId).put("document_json", screen.documentJson))
+            }
+        }
+        val theme = uiRegistryInstance.activeTheme.value?.let { value ->
+            JSONObject().put("owner_plugin_id", value.ownerPluginId).put("id", value.id)
+                .put("mode", value.mode.name.lowercase()).put("pure_black", value.pureBlack)
+                .put("colors", JSONObject(value.colors)).put("background_gradient", JSONArray(value.backgroundGradient))
+        }
+        val presentations = JSONArray().apply {
+            pagePresentationRegistryInstance.requests.value.values.sortedBy { it.screenId }.forEach { request ->
+                put(JSONObject().put("owner_plugin_id", request.ownerPluginId).put("screen_id", request.screenId)
+                    .put("mode", request.mode.name.lowercase()))
+            }
+        }
+        val providers = JSONArray().apply {
+            contributionsInstance.listAll().filter { it.kind == PluginContributionKind.PROVIDER }.sortedBy { it.id }.forEach { record ->
+                when (val payload = record.payload) {
+                    is com.ai.limbs.plugin.runtime.InProcessUiStateProvider -> put(
+                        JSONObject().put("owner_plugin_id", record.ownerPluginId).put("id", record.id)
+                            .put("kind", "ui_state").put("metadata", JSONObject(record.metadata))
+                            .put("state_json", payload.stateJson.value ?: JSONObject.NULL)
+                    )
+                    is com.ai.limbs.plugin.runtime.InProcessPageProvider -> Unit // View/Context ABI: never exported.
+                    else -> Unit
+                }
+            }
+        }
+        val childSnapshots = JSONArray().apply { childExtensionRuntimeInstance.loggingSnapshots().forEach { put(childSnapshotJson(it)) } }
+        val childBackups = JSONArray().apply { childExtensionRuntimeInstance.loggingBackupSnapshots().forEach { put(childBackupJson(it)) } }
+        val childUi = JSONArray().apply {
+            childExtensionRuntimeInstance.loggingUiContributions().forEach { contribution ->
+                put(JSONObject().put("extension_id", contribution.extensionId)
+                    .put("parent_plugin_id", contribution.target.parentPluginId).put("point", contribution.target.point)
+                    .put("api_version", contribution.target.apiVersion).put("screen_id", contribution.screenId)
+                    .put("component_id", contribution.componentId).put("slot_id", contribution.slotId)
+                    .put("contribution_id", contribution.contributionId)
+                    .put("document_json", contribution.provider.documentJson.value ?: JSONObject.NULL))
+            }
+        }
+        val navigationSurfaces = JSONArray().apply {
+            dynamicNavigationRegistryInstance.surfaces.value.forEach { surface ->
+                put(JSONObject().put("id", surface.id).put("title", surface.title).put("icon_key", surface.iconKey)
+                    .put("order", surface.order).put("created_at", surface.createdAt))
+            }
+        }
+        val navigationBindings = JSONArray().apply {
+            dynamicNavigationRegistryInstance.bindings.value.forEach { binding ->
+                put(JSONObject().put("surface_id", binding.surfaceId).put("owner_plugin_id", binding.ownerPluginId)
+                    .put("tile_id", binding.tileId).put("screen_id", binding.screenId))
+            }
+        }
+        return JSONObject().put("schema", 1).put("runtime_role", "business")
+            .put("business_runtime_restored", businessRuntimeRestored).put("tiles", tiles).put("screens", screens)
+            .put("theme", theme ?: JSONObject.NULL).put("presentations", presentations).put("providers", providers)
+            .put("children", childSnapshots).put("child_backups", childBackups).put("child_ui_contributions", childUi)
+            .put("navigation_surfaces", navigationSurfaces).put("navigation_bindings", navigationBindings)
+            .put("developer_mode", surfacePolicyInstance.developerMode)
+            .put("developer_discovery_enabled", surfacePolicyInstance.developerDiscoveryEnabled)
+            .put("host_primitives", hostPrimitiveSnapshotJson())
+    }
+
+    internal suspend fun dispatchResidentUiProxyCommand(request: JSONObject): JSONObject {
+        requireInitialized()
+        check(runtimeRole == PluginRuntimeRole.BUSINESS && residentPluginServicesPrepared) {
+            "Resident UI command requires prepared BUSINESS plugin services"
+        }
+        return when (val command = request.getString("command")) {
+            "set_active_screen" -> {
+                val screenId = request.optString("screen_id").trim().ifBlank { null }
+                if (screenId != null) {
+                    check(uiRegistryInstance.screen(screenId) != null) { "UI proxy reported an unknown active screen: $screenId" }
+                }
+                pagePresentationRegistryInstance.setActiveScreen(screenId)
+                JSONObject().put("ok", true)
+            }
+            "set_presentation_mode" -> {
+                val owner = request.getString("owner_plugin_id").trim()
+                val screenId = request.getString("screen_id").trim()
+                val screen = uiRegistryInstance.screen(screenId)
+                    ?: throw PluginInstallException("UI_SCREEN_UNKNOWN", "Core screen is not active: $screenId")
+                check(screen.ownerPluginId == owner) { "UI presentation owner mismatch" }
+                check(pagePresentationRegistryInstance.isActiveScreen(screenId)) { "UI presentation screen is not foreground" }
+                pagePresentationRegistryInstance.set(
+                    owner,
+                    screenId,
+                    PluginPagePresentationMode.parse(request.getString("mode"))
+                )
+                JSONObject().put("ok", true)
+            }
+            "invoke_ui_capability" -> {
+                val owner = request.getString("owner_plugin_id").trim()
+                val screenId = request.getString("screen_id").trim()
+                val capabilityId = request.getString("capability_id").trim().lowercase()
+                val screen = uiRegistryInstance.screen(screenId)
+                    ?: throw PluginInstallException("UI_SCREEN_UNKNOWN", "Core screen is not active: $screenId")
+                check(screen.ownerPluginId == owner) { "UI screen owner mismatch" }
+                AiLimbsExecutionAuthorization.withExplicitUiAction(owner, screenId, capabilityId) {
+                    capabilityRegistryInstance.requireOwnedCapability(owner, capabilityId)
+                    val authorization = managerInstance.activeAuthorization(owner)
+                    capabilityRegistryInstance.invokeDelegated(authorization.pluginId, authorization.grantedScopes, capabilityId,
+                        request.optJSONObject("parameters") ?: JSONObject())
+                }
+            }
+            "ui_provider_event" -> {
+                val id = request.getString("provider_id").trim()
+                val owner = request.getString("owner_plugin_id").trim()
+                val record = contributionsInstance.find(PluginContributionKind.PROVIDER, id)
+                    ?: throw PluginInstallException("UI_PROVIDER_UNKNOWN", "UI state provider is not active: $id")
+                check(record.ownerPluginId == owner) { "UI provider owner mismatch" }
+                val provider = record.payload as? com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+                    ?: throw PluginInstallException("UI_PROVIDER_NOT_PROXYABLE", "Provider is not a JSON UI state channel: $id")
+                JSONObject().put("result_json", provider.perform(request.getString("event_id"), request.optString("payload_json", "{}")))
+            }
+            "child_ui_event" -> {
+                val extensionId = request.getString("extension_id").trim()
+                val contributionId = request.getString("contribution_id").trim()
+                val contribution = childExtensionRuntimeInstance.loggingUiContributions().firstOrNull {
+                    it.extensionId == extensionId && it.contributionId == contributionId
+                } ?: throw PluginInstallException("CHILD_UI_CONTRIBUTION_UNKNOWN", "Child UI contribution is not active")
+                JSONObject().put("result_json", contribution.provider.perform(request.getString("event_id"), request.optString("payload_json", "{}")))
+            }
+            "system_json" -> {
+                val host = createAdmittedSystemHost(com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID, SystemPluginProtocolV1.ROLE_PLUGIN_CENTER)
+                val service = when (request.getString("service")) {
+                    "plugin_admin" -> host.pluginAdmin
+                    "admin_security" -> host.adminSecurity
+                    "navigation" -> host.navigation
+                    else -> throw PluginInstallException("UI_PROXY_SYSTEM_SERVICE_FORBIDDEN", "Unsupported Core system JSON service")
+                }
+                service.call(request.getString("operation"), request.optJSONObject("parameters") ?: JSONObject())
+            }
+            "delegated_capability" -> {
+                val authorization = managerInstance.activeAuthorization(request.getString("plugin_id").trim())
+                capabilityRegistryInstance.invokeDelegated(authorization.pluginId, authorization.grantedScopes,
+                    request.getString("capability_id"), request.optJSONObject("parameters") ?: JSONObject())
+            }
+            "plugin_platform" -> {
+                when (request.getString("operation")) {
+                    "set_developer_mode" -> surfacePolicyInstance.setDeveloperMode(request.getBoolean("enabled"))
+                    "set_developer_discovery" -> surfacePolicyInstance.setDeveloperDiscoveryEnabled(request.getBoolean("enabled"))
+                    "set_host_primitive_allowed" -> {
+                        val id = request.getString("primitive_id")
+                        val primitive = AiLimbsHostPrimitiveCatalog.find(id)
+                            ?: throw PluginInstallException("HOST_PRIMITIVE_UNKNOWN", "Unknown Host Primitive: $id")
+                        check(primitive.requestableScope && primitive.exposure == HostPrimitiveExposure.BOUND) { "Host Primitive is not user-toggleable: $id" }
+                        surfacePolicyInstance.setScopeAllowed(primitive.id, request.getBoolean("allowed"))
+                        managerInstance.reconcileHostSurfacePolicy()
+                    }
+                    else -> throw PluginInstallException("UI_PROXY_PLATFORM_OPERATION_UNKNOWN", "Unsupported plugin platform operation")
+                }
+                JSONObject().put("ok", true)
+            }
+            "host_primitive" -> {
+                val owner = com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID
+                val id = request.getString("id")
+                val params = request.optJSONObject("parameters") ?: JSONObject()
+                if (request.has("host_operation") && !request.isNull("host_operation"))
+                    capabilityRegistryInstance.invokeSystemHost(owner, id, request.getString("host_operation"), params)
+                else capabilityRegistryInstance.invokeSystemHost(owner, id, params)
+            }
+            "child_control" -> dispatchResidentChildControl(request)
+            else -> throw PluginInstallException("UI_PROXY_COMMAND_UNKNOWN", "Unsupported Resident UI command: $command")
+        }
+    }
+
+    private suspend fun dispatchResidentChildControl(request: JSONObject): JSONObject {
+        val id = request.optString("extension_id").trim()
+        val controller = childExtensionRuntimeInstance.bound(com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID, emptySet())
+        return when (request.getString("operation")) {
+            "uninstall" -> JSONObject().put("removed", controller.uninstall(id))
+            "set_enabled" -> childSnapshotJson(controller.setEnabled(id, request.getBoolean("enabled")))
+            "backup" -> childBackupJson(controller.backup(id))
+            "restore_backup" -> childSnapshotJson(controller.restoreBackup(id))
+            "delete_backup" -> JSONObject().put("deleted", controller.deleteBackup(id))
+            "set_auto_backup_policy" -> {
+                controller.setAutoBackupPolicy(request.getBoolean("enabled"), request.optLong("high_frequency_use_count", 10L))
+                JSONObject().put("ok", true)
+            }
+            "export_backups" -> {
+                val ids = buildList {
+                    val array = request.optJSONArray("extension_ids") ?: JSONArray()
+                    for (index in 0 until array.length()) add(array.getString(index))
+                }
+                JSONObject().put("exported", JSONArray(childExtensionRuntimeInstance.exportBackups(ids, request.getString("tree_uri"))))
+            }
+            else -> throw PluginInstallException("UI_PROXY_CHILD_OPERATION_UNKNOWN", "Unsupported child control operation")
+        }
+    }
+
+    private fun childSnapshotJson(value: com.ai.limbs.plugin.runtime.ChildExtensionSnapshot): JSONObject = JSONObject()
+        .put("extension_id", value.extensionId).put("version", value.version).put("display_name", value.displayName)
+        .put("description", value.description ?: JSONObject.NULL).put("parent_plugin_id", value.target.parentPluginId)
+        .put("point", value.target.point).put("api_version", value.target.apiVersion).put("lifecycle", value.lifecycle.name.lowercase())
+        .put("enabled", value.enabled).put("roles", JSONArray(value.roles.toList().sorted())).put("use_count", value.useCount)
+        .put("last_error", value.lastError ?: JSONObject.NULL)
+
+    private fun childBackupJson(value: com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot): JSONObject = JSONObject()
+        .put("extension_id", value.extensionId).put("version", value.version).put("display_name", value.displayName)
+        .put("description", value.description ?: JSONObject.NULL).put("parent_plugin_id", value.target.parentPluginId)
+        .put("point", value.target.point).put("api_version", value.target.apiVersion).put("roles", JSONArray(value.roles.toList().sorted()))
+        .put("package_sha256", value.packageSha256).put("backed_up_at", value.backedUpAtEpochMs).put("was_enabled", value.wasEnabled)
+        .put("installed", value.installed).put("installed_version", value.installedVersion ?: JSONObject.NULL)
+
+    private fun hostPrimitiveSnapshotJson(): JSONArray = JSONArray().apply {
+        AiLimbsHostPrimitiveCatalog.all.forEach { definition ->
+            val allowed = if (definition.requestableScope && definition.exposure == HostPrimitiveExposure.BOUND) surfacePolicyInstance.isScopeAllowed(definition.id) else null
+            put(JSONObject().put("number", definition.number).put("id", definition.id).put("title", definition.title)
+                .put("description", definition.description).put("boundary", definition.boundary).put("maturity", definition.maturity.name)
+                .put("exposure", definition.exposure.name).put("requestable_scope", definition.requestableScope)
+                .put("policy_allowed", allowed ?: JSONObject.NULL).put("callable", capabilityRegistryInstance.isHostCallable(definition.id))
+                .put("operations", JSONArray(capabilityRegistryInstance.systemHostOperations(definition.id))))
+        }
+    }
 
     fun dispatchNotificationAction(bindingId: String, actionId: String): Boolean {
         if (!initialized) return false

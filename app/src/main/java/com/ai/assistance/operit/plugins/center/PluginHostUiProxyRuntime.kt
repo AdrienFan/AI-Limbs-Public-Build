@@ -9,8 +9,8 @@ import org.json.JSONObject
  *
  * This runtime owns only UI-side registries and presentation state. It deliberately has no
  * PluginManager, runtime adapters, ChildExtensionRuntime, capability registry, Bridge or Dispatcher.
- * Step 9 will feed these registries neutral snapshots/events from the BUSINESS owner. Until then
- * they are an empty, safe shell rather than a second copy of plugin business code.
+ * Step 9 feeds these registries neutral snapshots/events from the BUSINESS owner and mounts only
+ * Plugin Center's Host-side renderer. No plugin business runtime is restored in this process.
  */
 internal class PluginHostUiProxyRuntime(
     context: Context,
@@ -24,6 +24,23 @@ internal class PluginHostUiProxyRuntime(
     val systemUiRegistry = SystemPluginUiRegistry(runtimeRole)
     val dynamicNavigationRegistry = DynamicNavigationSurfaceRegistry(context.applicationContext)
     val pagePresentationRegistry = PluginPagePresentationRegistry()
+    private val residentClient = ResidentUiProxyClient(context.applicationContext, this)
+
+    init {
+        residentClient.start()
+    }
+
+    suspend fun invokeUiCapability(
+        ownerPluginId: String,
+        screenId: String,
+        capabilityId: String,
+        parameters: JSONObject
+    ): JSONObject = residentClient.invokeUiCapability(ownerPluginId, screenId, capabilityId, parameters)
+
+    fun setActiveScreen(screenId: String?) = residentClient.setActiveScreen(screenId)
+
+    fun setPresentationMode(ownerPluginId: String, screenId: String, mode: PluginPagePresentationMode) =
+        residentClient.setPresentationMode(ownerPluginId, screenId, mode)
 
     fun updateAttachment(next: ResidentHostRuntimeAttachment) {
         check(next.usesUiProxy) { "UI proxy cannot transition to LEGACY_HOST in-process" }
@@ -35,6 +52,7 @@ internal class PluginHostUiProxyRuntime(
             }
         }
         attachment = next
+        residentClient.updateAttachment()
     }
 
     fun snapshot(): JSONObject = attachment.snapshot()

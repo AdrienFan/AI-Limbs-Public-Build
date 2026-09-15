@@ -371,6 +371,8 @@ internal class ChildExtensionRuntime(
     }
 
     internal fun loggingSnapshots(): List<ChildExtensionSnapshot> = mutableSnapshots.value.toList()
+    internal fun loggingBackupSnapshots(): List<ChildExtensionBackupSnapshot> = mutableBackupSnapshots.value.toList()
+    internal fun loggingUiContributions(): List<ChildUiContributionSnapshot> = mutableUiContributions.value.toList()
 
     private fun snapshotsInternal(): StateFlow<List<ChildExtensionSnapshot>> = mutableSnapshots.asStateFlow()
 
@@ -561,11 +563,9 @@ internal class ChildExtensionRuntime(
                     contributionId: String,
                     provider: InProcessUiContributionProvider
                 ): AutoCloseable {
-                    if (runtimeRole == PluginRuntimeRole.BUSINESS) {
-                        // Presentation belongs to the Host UI proxy. The transport/business half of
-                        // a provider remains active in Core without publishing Android UI objects.
-                        return AutoCloseable { }
-                    }
+                    // The provider object remains inside the owning process. In BUSINESS, Step 9
+                    // mirrors only documentJson and routes perform(event) back to this object; the
+                    // provider itself is never serialized to Host.
                     // Child code may choose only the local target names. Parent identity and extension
                     // point come from the verified manifest and therefore cannot be spoofed here.
                     val normalizedScreen = screenId.trim().lowercase()

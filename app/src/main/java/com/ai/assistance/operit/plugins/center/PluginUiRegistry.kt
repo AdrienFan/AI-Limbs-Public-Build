@@ -132,6 +132,28 @@ internal class PluginUiRegistry {
         }
     }
 
+    /** UI_PROXY-only mirror replacement. No Host registration ownership is created. */
+    @Synchronized
+    internal fun replaceFromResidentProxy(
+        homeTiles: List<PluginHomeTileSpec>,
+        activeScreens: List<PluginScreenSpec>,
+        activeTheme: PluginThemeSpec?
+    ) {
+        tiles.clear()
+        homeTiles.forEach { spec -> tiles[spec.id] = Owned("resident-proxy:${spec.ownerPluginId}:${spec.id}", spec.ownerPluginId, spec) }
+        screens.clear()
+        activeScreens.forEach { spec ->
+            require(spec.documentJson.toByteArray().size <= MAX_SCREEN_DOCUMENT_BYTES) { "Resident UI document exceeds Host bound: ${spec.id}" }
+            screens[spec.id] = Owned("resident-proxy:${spec.ownerPluginId}:${spec.id}", spec.ownerPluginId, spec)
+        }
+        synchronized(themeLock) {
+            activeThemeOwned = activeTheme?.let { Owned("resident-proxy:${it.ownerPluginId}:${it.id}", it.ownerPluginId, it) }
+            mutableActiveTheme.value = activeTheme
+        }
+        publishTiles()
+        publishScreens()
+    }
+
     private fun publishTiles() {
         mutableHomeTiles.value = tiles.values.map { it.value }.sortedBy { it.title.lowercase() }
     }

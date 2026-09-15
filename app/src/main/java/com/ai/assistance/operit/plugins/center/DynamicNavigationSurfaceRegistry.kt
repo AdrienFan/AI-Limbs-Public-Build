@@ -102,6 +102,15 @@ internal class DynamicNavigationSurfaceRegistry(context: Context) {
         publishBindings(mutableBindings.value.filterNot { it.surfaceId == id && it.tileId == tile })
     }
 
+    /** UI_PROXY mirror update. Deliberately does not persist Host SharedPreferences. */
+    internal fun replaceFromResidentProxy(
+        surfaces: List<DynamicNavigationSurfaceSpec>,
+        bindings: List<DynamicNavigationBinding>
+    ) = synchronized(lock) {
+        mutableSurfaces.value = surfaces.sortedWith(compareBy<DynamicNavigationSurfaceSpec> { it.order }.thenBy { it.createdAt })
+        mutableBindings.value = bindings.toList()
+    }
+
     private fun publishSurfaces(value: List<DynamicNavigationSurfaceSpec>) {
         val sorted = value.sortedWith(compareBy<DynamicNavigationSurfaceSpec> { it.order }.thenBy { it.createdAt })
         prefs.edit().putString(KEY_SURFACES, JSONArray().apply {

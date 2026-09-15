@@ -62,6 +62,12 @@ internal class PluginPagePresentationRegistry {
 
     fun get(screenId: String): PluginPagePresentationRequest? = mutableRequests.value[screenId]
 
+    /** Host UI_PROXY mirror of Core-owned page presentation requests. */
+    @Synchronized
+    internal fun replaceFromResidentProxy(requests: List<PluginPagePresentationRequest>) {
+        mutableRequests.value = requests.associateBy { it.screenId }
+    }
+
     @Synchronized
     fun clearOwner(ownerPluginId: String) {
         val filtered = mutableRequests.value.filterValues { it.ownerPluginId != ownerPluginId }

@@ -50,6 +50,7 @@ object ResidentCoreMain {
             val sessionId = UUID.randomUUID().toString()
             val backend = ResidentBackendBinding(context, launchId, sessionId)
             val dispatcherServer = ResidentCoreDispatcherServer(context, sessionId)
+            val uiProxyServer = ResidentUiProxyServer(context, sessionId)
             val startedElapsed = SystemClock.elapsedRealtime()
             val startedUptime = SystemClock.uptimeMillis()
             val server = LocalServerSocket(ResidentCoreWire.socketName())
@@ -110,6 +111,7 @@ object ResidentCoreMain {
                 var exitCode = 0
                 try {
                     runtime.start()
+                    uiProxyServer.start()
                     Thread({ backend.connect() }, "resident-backend-bind").apply {
                         isDaemon = true
                         start()
@@ -215,6 +217,7 @@ object ResidentCoreMain {
                         try { worker.join(3_000L) }
                         catch (_: InterruptedException) { Thread.currentThread().interrupt() }
                     }
+                    uiProxyServer.close()
                     dispatcherServer.stop()
                     try {
                         runtime.stop()

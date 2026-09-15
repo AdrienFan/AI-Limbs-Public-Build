@@ -33,6 +33,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.center.PluginHostUiProxyRuntimeHolder
 import com.ai.assistance.operit.plugins.system.SystemPluginUiActionsV2
 import com.ai.assistance.operit.plugins.system.SystemPluginUiSurfaceV2
 import kotlinx.coroutines.delay
@@ -173,22 +174,29 @@ fun PluginDeclarativeScreen(
             actions = SystemPluginUiActionsV2 { capabilityId, parameters ->
                 // Bind capability execution to the Host-trusted screen owner. Plugin Center receives
                 // no arbitrary plugin-id parameter, so a component cannot impersonate another plugin.
-                AiLimbsExecutionAuthorization.withExplicitUiAction(
-                    ownerPluginId = screen.ownerPluginId,
-                    screenId = screen.id,
-                    capabilityId = capabilityId
-                ) {
-                    PluginPlatformKernel.capabilities.requireOwnedCapability(
-                        screen.ownerPluginId,
-                        capabilityId
-                    )
-                    val authorization = PluginPlatformKernel.manager.activeAuthorization(screen.ownerPluginId)
-                    PluginPlatformKernel.capabilities.invokeDelegated(
-                        ownerPluginId = authorization.pluginId,
-                        grantedScopes = authorization.grantedScopes,
+                val proxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+                if (proxy != null) {
+                    proxy.invokeUiCapability(
+                        ownerPluginId = screen.ownerPluginId,
+                        screenId = screen.id,
                         capabilityId = capabilityId,
                         parameters = org.json.JSONObject(parameters.toString())
                     )
+                } else {
+                    AiLimbsExecutionAuthorization.withExplicitUiAction(
+                        ownerPluginId = screen.ownerPluginId,
+                        screenId = screen.id,
+                        capabilityId = capabilityId
+                    ) {
+                        PluginPlatformKernel.capabilities.requireOwnedCapability(screen.ownerPluginId, capabilityId)
+                        val authorization = PluginPlatformKernel.manager.activeAuthorization(screen.ownerPluginId)
+                        PluginPlatformKernel.capabilities.invokeDelegated(
+                            ownerPluginId = authorization.pluginId,
+                            grantedScopes = authorization.grantedScopes,
+                            capabilityId = capabilityId,
+                            parameters = org.json.JSONObject(parameters.toString())
+                        )
+                    }
                 }
             }
         )
