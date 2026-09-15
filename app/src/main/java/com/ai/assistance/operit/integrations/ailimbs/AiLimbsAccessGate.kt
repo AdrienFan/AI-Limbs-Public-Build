@@ -179,6 +179,7 @@ class AiLimbsAccessGate(context: Context) {
     private var customPromptReceiptVersion: String? = null
     private var workManualReceiptVersion: String? = null
     private var residentHandoffFrozen = false
+    private var releasedForCurrentCycle = false
     private val subsystemDiscoveryLedger = AiLimbsSubsystemDiscoveryLedger()
 
     private val customPromptReadTools =
@@ -211,6 +212,7 @@ class AiLimbsAccessGate(context: Context) {
             check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
             customPromptReceiptVersion = null
             workManualReceiptVersion = null
+            releasedForCurrentCycle = false
             subsystemDiscoveryLedger.resetForContextBoundary()
             workModeGate.reset()
         }
@@ -223,6 +225,14 @@ class AiLimbsAccessGate(context: Context) {
 
     internal fun endInteractionCycleInvocation() = subsystemDiscoveryLedger.endInvocation()
 
+    internal fun releaseForCurrentCycle() = synchronized(stateLock) {
+        check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
+        releasedForCurrentCycle = true
+    }
+
+    internal fun isReleasedForCurrentCycle(): Boolean =
+        synchronized(stateLock) { releasedForCurrentCycle }
+
     internal fun workGateState(): AiLimbsWorkGateState = workModeGate.state()
 
     internal fun snapshot(): JSONObject {
@@ -233,6 +243,7 @@ class AiLimbsAccessGate(context: Context) {
             .put("work_gate_state", workModeGate.state().name)
             .put("custom_access_prompt_receipt", receiptState.first)
             .put("work_manual_receipt", receiptState.second)
+            .put("released_for_current_cycle", isReleasedForCurrentCycle())
             .put("resident_handoff_frozen", synchronized(stateLock) { residentHandoffFrozen })
     }
 
@@ -245,6 +256,7 @@ class AiLimbsAccessGate(context: Context) {
             .put("receipts", receipts)
             .put("work_mode", workModeGate.exportHandoffState())
             .put("subsystem_discovery", subsystemDiscoveryLedger.exportHandoffState())
+            .put("released_for_current_cycle", releasedForCurrentCycle)
         residentHandoffFrozen = true
         exported
     }
@@ -263,6 +275,7 @@ class AiLimbsAccessGate(context: Context) {
             ?.toString()?.takeIf { it.isNotBlank() }
         workModeGate.restoreHandoffState(state.getJSONObject("work_mode"))
         subsystemDiscoveryLedger.restoreHandoffState(state.getJSONObject("subsystem_discovery"))
+        releasedForCurrentCycle = state.optBoolean("released_for_current_cycle", false)
         residentHandoffFrozen = false
     }
 
@@ -280,12 +293,16 @@ class AiLimbsAccessGate(context: Context) {
         extensionId: String
     ): AiLimbsSubsystemDiscoveryDecision = synchronized(stateLock) {
         check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
-        subsystemDiscoveryLedger.decision(extensionId)
+        if (releasedForCurrentCycle) {
+            AiLimbsSubsystemDiscoveryDecision.ALLOW
+        } else {
+            subsystemDiscoveryLedger.decision(extensionId)
+        }
     }
 
     internal fun claimNormalExecution(): Boolean = synchronized(stateLock) {
         check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
-        workModeGate.claimNormalExecution()
+        releasedForCurrentCycle || workModeGate.claimNormalExecution()
     }
 
     internal suspend fun missingWorkManual(): AiLimbsMissingReceipt? =
@@ -294,6 +311,7 @@ class AiLimbsAccessGate(context: Context) {
     internal suspend fun firstMissing(
         requiredReceipts: Set<AiLimbsRequiredReceipt>
     ): AiLimbsMissingReceipt? {
+        if (isReleasedForCurrentCycle()) return null
         if (AiLimbsRequiredReceipt.CUSTOM_ACCESS_PROMPT in requiredReceipts) {
             val reference = documents.documentReference(AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)
             val ready =

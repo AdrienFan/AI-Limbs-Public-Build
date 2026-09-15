@@ -472,6 +472,17 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                     .put("reset_applied_immediately", reset.appliedImmediately)
                     .put("cycle_started_at_ms", reset.cycleStartedAtMs)
             }
+            "release_gate" -> {
+                val password = required(parameters, "admin_password")
+                if (!PluginPlatformKernel.adminSecurity.verifyPassword(password)) {
+                    return JSONObject().put("gate_released", false).put("authorized", false)
+                }
+                val generation = AiLimbsInteractionCycleRuntime.releaseGate(appContext)
+                policy.snapshot().toJson()
+                    .put("gate_released", true)
+                    .put("authorized", true)
+                    .put("generation", generation)
+            }
             "close" -> {
                 val password = required(parameters, "admin_password")
                 if (!PluginPlatformKernel.adminSecurity.verifyPassword(password)) {
@@ -627,6 +638,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.interaction.cycle@1/status",
             "host.interaction.cycle@1/set_timeout",
             "host.interaction.cycle@1/reset",
+            "host.interaction.cycle@1/release_gate",
             "host.interaction.cycle@1/close",
             "kernel.plugin.trust@1/status",
             "kernel.plugin.trust@1/verify_package",

@@ -306,6 +306,13 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
         reset
     }
 
+    fun releaseGateForCurrentCycle(): Long = synchronized(stateLock) {
+        check(!residentHandoffFrozen)
+        accessGate.releaseForCurrentCycle()
+        bootstrapDeliveredGeneration = currentGeneration
+        currentGeneration
+    }
+
     fun closeInteractionCycle(): AiLimbsInteractionCycleCloseResult = synchronized(stateLock) {
         check(!residentHandoffFrozen)
         val close = controller.closeCurrentCycle()
@@ -322,6 +329,7 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     fun currentGeneration(): Long = synchronized(stateLock) { currentGeneration }
 
     fun claimBootstrap(generation: Long): Boolean = synchronized(stateLock) {
+        if (accessGate.isReleasedForCurrentCycle()) return@synchronized false
         if (bootstrapDeliveredGeneration == generation) return@synchronized false
         bootstrapDeliveredGeneration = generation
         true
@@ -460,6 +468,9 @@ internal object AiLimbsInteractionCycleRuntime {
 
     fun reset(context: Context): AiLimbsInteractionCycleResetResult =
         state(context.applicationContext).resetInteractionCycle()
+
+    fun releaseGate(context: Context): Long =
+        state(context.applicationContext).releaseGateForCurrentCycle()
 
     fun close(context: Context): AiLimbsInteractionCycleCloseResult =
         state(context.applicationContext).closeInteractionCycle()
