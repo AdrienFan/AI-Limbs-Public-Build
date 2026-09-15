@@ -373,7 +373,7 @@ interface InProcessPluginHost : InProcessPluginUiHost {
         metadata: Map<String, String> = emptyMap()
     )
 
-    override suspend fun invokeHostCapability(id: String, parametersJson: String = "{}"): String
+    override suspend fun invokeHostCapability(id: String, parametersJson: String): String
 }
 
 enum class ChildExtensionLifecycle {
