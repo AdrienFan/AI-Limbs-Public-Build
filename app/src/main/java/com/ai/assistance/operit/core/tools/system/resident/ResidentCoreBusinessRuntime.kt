@@ -8,6 +8,7 @@ import android.os.SystemClock
 import android.system.ErrnoException
 import android.system.Os
 import android.system.OsConstants
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.center.PluginRuntimeRole
 import java.io.File
@@ -147,6 +148,7 @@ internal class ResidentCoreBusinessRuntime {
         coreSession: String,
         backend: ResidentBackendBinding,
         hostPid: Int,
+        onBusinessOwnerReady: () -> Unit = {},
         timeoutMs: Long = BUSINESS_TAKEOVER_TIMEOUT_MS
     ) {
         synchronized(lock) {
@@ -180,6 +182,11 @@ internal class ResidentCoreBusinessRuntime {
                 if (lease == null) Thread.sleep(50L)
             }
 
+            // Host is gone and the unique owner lease is held. Transfer gate/generation/receipt
+            // authority before any Core policy object or Dispatcher can be created.
+            val policyState = ResidentPolicyStateHandoff.consume(context, coreSession, hostPid)
+            AiLimbsInteractionCycleRuntime.restoreFromResidentHandoff(context, policyState)
+
             synchronized(lock) { businessPhase = ResidentCoreBusinessPhase.STARTING_KERNEL }
             runOnMain {
                 PluginPlatformKernel.initialize(
@@ -203,6 +210,10 @@ internal class ResidentCoreBusinessRuntime {
             }
 
             backend.claimRuntimeOwnership()
+            // The policy/Dispatcher plane is part of business ownership. Do not publish an owned
+            // fence until it is bound and ready; otherwise a restarted Host could attach to a Core
+            // that owns Plugin Kernel but has no authoritative ingress.
+            onBusinessOwnerReady()
             ResidentBusinessTakeoverFence.markOwned(context, coreSession)
             synchronized(lock) {
                 businessAttached = true

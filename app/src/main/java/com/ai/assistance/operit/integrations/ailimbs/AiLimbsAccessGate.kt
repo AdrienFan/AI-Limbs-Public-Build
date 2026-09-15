@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal data class AiLimbsMissingReceipt(
@@ -52,6 +53,22 @@ internal class AiLimbsSubsystemDiscoveryLedger {
         phases.clear()
     }
 
+    fun exportHandoffState(): JSONObject = synchronized(stateLock) {
+        // The old Host dies at the ownership boundary. Any DELIVERING entry therefore becomes
+        // delivered rather than being replayed by the new Core authority.
+        JSONObject().put("delivered_extensions", JSONArray(phases.keys.toList()))
+    }
+
+    fun restoreHandoffState(state: JSONObject) = synchronized(stateLock) {
+        phases.clear()
+        activeExternalInvocations = 0
+        val delivered = state.optJSONArray("delivered_extensions") ?: JSONArray()
+        for (index in 0 until delivered.length()) {
+            val id = delivered.optString(index).trim().lowercase()
+            if (id.isNotBlank()) phases[id] = Phase.DELIVERED
+        }
+    }
+
     fun decision(extensionId: String): AiLimbsSubsystemDiscoveryDecision = synchronized(stateLock) {
         val normalized = extensionId.trim().lowercase()
         require(normalized.isNotBlank()) { "Subsystem extension id must not be blank" }
@@ -82,6 +99,24 @@ internal class AiLimbsWorkModeGate {
     }
 
     fun state(): AiLimbsWorkGateState = synchronized(stateLock) { stateLocked() }
+
+    fun exportHandoffState(): JSONObject = synchronized(stateLock) {
+        JSONObject()
+            .put("work_selected", workSelected)
+            .put("non_work_permit", nonWorkPermit)
+            .put("work_unlocked", workUnlocked)
+    }
+
+    fun restoreHandoffState(state: JSONObject) = synchronized(stateLock) {
+        val selected = state.optBoolean("work_selected", false)
+        val nonWork = state.optBoolean("non_work_permit", false)
+        val unlocked = state.optBoolean("work_unlocked", false)
+        check(!(selected && nonWork)) { "Invalid work-mode handoff: WORK and NON_WORK both selected" }
+        check(!unlocked || selected) { "Invalid work-mode handoff: unlocked without WORK selection" }
+        workSelected = selected
+        nonWorkPermit = nonWork
+        workUnlocked = unlocked
+    }
 
     fun select(mode: AiLimbsWorkMode): AiLimbsWorkGateState =
         synchronized(stateLock) {
@@ -129,8 +164,9 @@ internal class AiLimbsWorkModeGate {
 }
 
 /**
- * Receipt ledger owned by one explicit AI Limbs execution session.
+ * Receipt ledger owned by the authoritative AI Limbs policy runtime.
  *
+ * All execution sessions share this ledger through the process-wide Interaction Cycle authority.
  * The execution policy engine is the only component that turns a missing receipt into a decision.
  * Realtime transport reconnects do not reset this ledger; an actual model-context boundary calls
  * ai_limbs.policy.session.reset.
@@ -142,6 +178,7 @@ class AiLimbsAccessGate(context: Context) {
 
     private var customPromptReceiptVersion: String? = null
     private var workManualReceiptVersion: String? = null
+    private var residentHandoffFrozen = false
     private val subsystemDiscoveryLedger = AiLimbsSubsystemDiscoveryLedger()
 
     private val customPromptReadTools =
@@ -171,32 +208,85 @@ class AiLimbsAccessGate(context: Context) {
 
     fun resetForContextBoundary() {
         synchronized(stateLock) {
+            check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
             customPromptReceiptVersion = null
             workManualReceiptVersion = null
+            subsystemDiscoveryLedger.resetForContextBoundary()
+            workModeGate.reset()
         }
-        subsystemDiscoveryLedger.resetForContextBoundary()
-        workModeGate.reset()
     }
 
-    internal fun beginInteractionCycleInvocation() = subsystemDiscoveryLedger.beginInvocation()
+    internal fun beginInteractionCycleInvocation() = synchronized(stateLock) {
+        check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
+        subsystemDiscoveryLedger.beginInvocation()
+    }
 
     internal fun endInteractionCycleInvocation() = subsystemDiscoveryLedger.endInvocation()
 
     internal fun workGateState(): AiLimbsWorkGateState = workModeGate.state()
 
-    internal suspend fun selectWorkMode(mode: AiLimbsWorkMode): AiLimbsWorkGateState {
-        val before = workModeGate.state()
-        if (mode == AiLimbsWorkMode.WORK && before != AiLimbsWorkGateState.WORK_UNLOCKED) {
-            synchronized(stateLock) { workManualReceiptVersion = null }
+    internal fun snapshot(): JSONObject {
+        val receiptState = synchronized(stateLock) {
+            Pair(customPromptReceiptVersion != null, workManualReceiptVersion != null)
         }
-        return workModeGate.select(mode)
+        return JSONObject()
+            .put("work_gate_state", workModeGate.state().name)
+            .put("custom_access_prompt_receipt", receiptState.first)
+            .put("work_manual_receipt", receiptState.second)
+            .put("resident_handoff_frozen", synchronized(stateLock) { residentHandoffFrozen })
     }
+
+    internal fun freezeAndExportHandoffState(): JSONObject = synchronized(stateLock) {
+        check(!residentHandoffFrozen) { "Access Gate Resident handoff is already frozen" }
+        val receipts = JSONObject()
+            .put("custom_prompt_version", customPromptReceiptVersion ?: JSONObject.NULL)
+            .put("work_manual_version", workManualReceiptVersion ?: JSONObject.NULL)
+        val exported = JSONObject()
+            .put("receipts", receipts)
+            .put("work_mode", workModeGate.exportHandoffState())
+            .put("subsystem_discovery", subsystemDiscoveryLedger.exportHandoffState())
+        residentHandoffFrozen = true
+        exported
+    }
+
+    internal fun cancelResidentHandoffFreeze() = synchronized(stateLock) {
+        residentHandoffFrozen = false
+    }
+
+    internal fun restoreHandoffState(state: JSONObject) = synchronized(stateLock) {
+        val receipts = state.getJSONObject("receipts")
+        customPromptReceiptVersion = receipts.opt("custom_prompt_version")
+            .takeUnless { it == null || it == JSONObject.NULL }
+            ?.toString()?.takeIf { it.isNotBlank() }
+        workManualReceiptVersion = receipts.opt("work_manual_version")
+            .takeUnless { it == null || it == JSONObject.NULL }
+            ?.toString()?.takeIf { it.isNotBlank() }
+        workModeGate.restoreHandoffState(state.getJSONObject("work_mode"))
+        subsystemDiscoveryLedger.restoreHandoffState(state.getJSONObject("subsystem_discovery"))
+        residentHandoffFrozen = false
+    }
+
+    internal suspend fun selectWorkMode(mode: AiLimbsWorkMode): AiLimbsWorkGateState =
+        synchronized(stateLock) {
+            check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
+            val before = workModeGate.state()
+            if (mode == AiLimbsWorkMode.WORK && before != AiLimbsWorkGateState.WORK_UNLOCKED) {
+                workManualReceiptVersion = null
+            }
+            workModeGate.select(mode)
+        }
 
     internal fun subsystemDiscoveryDecision(
         extensionId: String
-    ): AiLimbsSubsystemDiscoveryDecision = subsystemDiscoveryLedger.decision(extensionId)
+    ): AiLimbsSubsystemDiscoveryDecision = synchronized(stateLock) {
+        check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
+        subsystemDiscoveryLedger.decision(extensionId)
+    }
 
-    internal fun claimNormalExecution(): Boolean = workModeGate.claimNormalExecution()
+    internal fun claimNormalExecution(): Boolean = synchronized(stateLock) {
+        check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
+        workModeGate.claimNormalExecution()
+    }
 
     internal suspend fun missingWorkManual(): AiLimbsMissingReceipt? =
         firstMissing(setOf(AiLimbsRequiredReceipt.WORK_MANUAL))
@@ -243,6 +333,7 @@ class AiLimbsAccessGate(context: Context) {
         if (version.isBlank()) return
 
         synchronized(stateLock) {
+            check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
             when (invocation.canonicalName) {
                 in customPromptReadTools -> customPromptReceiptVersion = version
                 in workManualReadTools -> {

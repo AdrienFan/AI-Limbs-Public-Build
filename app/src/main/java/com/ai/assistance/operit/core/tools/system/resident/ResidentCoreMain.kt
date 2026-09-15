@@ -49,6 +49,7 @@ object ResidentCoreMain {
             runtime.initialize(context)
             val sessionId = UUID.randomUUID().toString()
             val backend = ResidentBackendBinding(context, launchId, sessionId)
+            val dispatcherServer = ResidentCoreDispatcherServer(context, sessionId)
             val startedElapsed = SystemClock.elapsedRealtime()
             val startedUptime = SystemClock.uptimeMillis()
             val server = LocalServerSocket(ResidentCoreWire.socketName())
@@ -94,6 +95,7 @@ object ResidentCoreMain {
                     .put("continuous_work", false)
                     .put("core_runtime", runtimeState)
                     .put("backend", backend.snapshot())
+                    .put("dispatcher", dispatcherServer.snapshot())
                     .put("takeover_fence", ResidentBusinessTakeoverFence.snapshot(context) ?: JSONObject.NULL)
             }
 
@@ -147,7 +149,13 @@ object ResidentCoreMain {
                                         runtime.armBusinessTakeover(context, sessionId, peer.pid)
                                         val worker = Thread({
                                             try {
-                                                runtime.activateBusiness(context, sessionId, backend, peer.pid)
+                                                runtime.activateBusiness(
+                                                    context = context,
+                                                    coreSession = sessionId,
+                                                    backend = backend,
+                                                    hostPid = peer.pid,
+                                                    onBusinessOwnerReady = dispatcherServer::start
+                                                )
                                             } catch (error: Throwable) {
                                                 runtime.fail(error)
                                                 System.err.println("Resident Core business activation failed: $error")
@@ -201,6 +209,7 @@ object ResidentCoreMain {
                         try { worker.join(3_000L) }
                         catch (_: InterruptedException) { Thread.currentThread().interrupt() }
                     }
+                    dispatcherServer.stop()
                     try {
                         runtime.stop()
                     } catch (error: Throwable) {
@@ -222,6 +231,7 @@ object ResidentCoreMain {
                     try {
                         closing.join(2_000L)
                         if (userStop) {
+                            ResidentPolicyStateHandoff.clearForExplicitCoreStop(context, sessionId)
                             ResidentBusinessTakeoverFence.clearForExplicitCoreStop(context, sessionId)
                         }
                         val outcome = cleanup.get() ?: JSONObject()

@@ -1,9 +1,12 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
+import android.os.Process
+import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
+import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreProcessIdentity
 import org.json.JSONObject
 
-/** Persisted Host-owned configuration for the AI Limbs interaction cycle. */
+/** Persisted package configuration consumed by the authoritative AI Limbs interaction cycle. */
 class AiLimbsInteractionCyclePolicyStore(context: Context) {
     private val prefs = context.applicationContext.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
@@ -57,7 +60,7 @@ data class AiLimbsInteractionCyclePolicySnapshot(
         .put("source", source)
 }
 
-/** Host policy facade used by the kernel primitive and interaction-cycle runtime. */
+/** Policy facade used by the authoritative interaction-cycle runtime and its management primitive. */
 class AiLimbsInteractionCyclePolicy(context: Context) {
     private val store = AiLimbsInteractionCyclePolicyStore(context)
 
@@ -80,7 +83,8 @@ class AiLimbsInteractionCyclePolicy(context: Context) {
 internal data class AiLimbsInteractionCycleLease(
     val generation: Long,
     val startedNewCycle: Boolean,
-    val admitted: Boolean = true
+    val admitted: Boolean = true,
+    val blockedReason: String? = null
 )
 
 internal data class AiLimbsInteractionCycleResetResult(
@@ -90,7 +94,7 @@ internal data class AiLimbsInteractionCycleResetResult(
 )
 
 /**
- * One Host-owned interaction clock shared by all external Bridge providers/transports.
+ * One authoritative interaction clock shared by all external Bridge providers/transports.
  *
  * Timeout is elapsed cycle time, not inactivity time. Expiry is soft: active work continues. A new
  * generation is created only at a later ingress boundary after all active invocations have finished.
@@ -156,6 +160,44 @@ internal class AiLimbsInteractionCycleController(
         }
     }
 
+    fun snapshot(): JSONObject = synchronized(stateLock) {
+        JSONObject()
+            .put("generation", generation)
+            .put("cycle_started_at_ms", cycleStartedAtMs)
+            .put("active_invocations", activeInvocations)
+            .put("expired_pending", expiredPending)
+            .put("manual_reset_pending", manualResetStartedAtMs != null)
+            .put("manual_reset_started_at_ms", manualResetStartedAtMs ?: JSONObject.NULL)
+            .put("timeout_ms", runCatching { timeoutProvider() }
+                .getOrDefault(AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS))
+    }
+
+    fun exportHandoffState(): JSONObject = synchronized(stateLock) {
+        refreshExpiry(clockMs())
+        check(activeInvocations == 0) {
+            "Interaction Cycle handoff requires zero active invocations; found $activeInvocations"
+        }
+        check(manualResetStartedAtMs == null) {
+            "Interaction Cycle handoff cannot race a pending manual reset"
+        }
+        JSONObject()
+            .put("generation", generation)
+            .put("cycle_started_at_ms", cycleStartedAtMs)
+            .put("expired_pending", expiredPending)
+    }
+
+    fun restoreHandoffState(state: JSONObject) = synchronized(stateLock) {
+        check(activeInvocations == 0) { "Cannot restore Interaction Cycle with active invocations" }
+        val restoredGeneration = state.getLong("generation")
+        val restoredStartedAt = state.getLong("cycle_started_at_ms")
+        require(restoredGeneration > 0L) { "Invalid restored Interaction Cycle generation" }
+        require(restoredStartedAt > 0L) { "Invalid restored Interaction Cycle start time" }
+        generation = restoredGeneration
+        cycleStartedAtMs = restoredStartedAt
+        expiredPending = state.optBoolean("expired_pending", false)
+        manualResetStartedAtMs = null
+    }
+
     private fun refreshExpiry(now: Long) {
         if (expiredPending) return
         val timeoutMs = runCatching { timeoutProvider() }
@@ -167,7 +209,7 @@ internal class AiLimbsInteractionCycleController(
     }
 }
 
-/** Process-wide Host state for external AI Limbs ingress. */
+/** Process-wide authoritative state for external AI Limbs ingress. */
 internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     private val appContext = context.applicationContext
     val accessGate = AiLimbsAccessGate(appContext)
@@ -177,8 +219,17 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     private val stateLock = Any()
     private var currentGeneration = 1L
     private var bootstrapDeliveredGeneration: Long? = null
+    private var residentHandoffFrozen = false
 
     fun beginInvocation(): AiLimbsInteractionCycleLease = synchronized(stateLock) {
+        if (residentHandoffFrozen) {
+            return@synchronized AiLimbsInteractionCycleLease(
+                generation = currentGeneration,
+                startedNewCycle = false,
+                admitted = false,
+                blockedReason = "RESIDENT_POLICY_HANDOFF_PENDING"
+            )
+        }
         val lease = controller.beginInvocation()
         if (!lease.admitted) return@synchronized lease
         if (lease.startedNewCycle) applyContextBoundary(lease.generation)
@@ -194,6 +245,7 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     }
 
     fun resetInteractionCycle(): AiLimbsInteractionCycleResetResult = synchronized(stateLock) {
+        check(!residentHandoffFrozen)
         val reset = controller.resetFromNow()
         if (reset.appliedImmediately) applyContextBoundary(reset.generation)
         reset
@@ -215,6 +267,7 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
 
     fun rearmBootstrap(generation: Long) {
         synchronized(stateLock) {
+            check(!residentHandoffFrozen)
             if (bootstrapDeliveredGeneration == generation) {
                 bootstrapDeliveredGeneration = null
             }
@@ -223,20 +276,96 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
 
     fun rearmCurrentBootstrap() {
         synchronized(stateLock) {
+            check(!residentHandoffFrozen)
             bootstrapDeliveredGeneration = null
         }
     }
+
+    fun snapshot(): JSONObject = synchronized(stateLock) {
+        controller.snapshot()
+            .put("current_generation", currentGeneration)
+            .put("bootstrap_delivered_generation", bootstrapDeliveredGeneration ?: JSONObject.NULL)
+            .put("resident_handoff_frozen", residentHandoffFrozen)
+            .put("access_gate", accessGate.snapshot())
+    }
+
+    fun freezeAndExportHandoffState(): JSONObject = synchronized(stateLock) {
+        check(!residentHandoffFrozen) { "Resident policy handoff is already frozen" }
+        val exported = JSONObject()
+            .put("controller", controller.exportHandoffState())
+            .put("current_generation", currentGeneration)
+            .put("bootstrap_delivered_generation", bootstrapDeliveredGeneration ?: JSONObject.NULL)
+            .put("access_gate", accessGate.freezeAndExportHandoffState())
+        residentHandoffFrozen = true
+        exported
+    }
+
+    fun cancelResidentHandoffFreeze() = synchronized(stateLock) {
+        accessGate.cancelResidentHandoffFreeze()
+        residentHandoffFrozen = false
+    }
+
+    fun restoreHandoffState(state: JSONObject) = synchronized(stateLock) {
+        controller.restoreHandoffState(state.getJSONObject("controller"))
+        val restoredGeneration = state.getLong("current_generation")
+        check(restoredGeneration == state.getJSONObject("controller").getLong("generation")) {
+            "Interaction Cycle handoff generation is inconsistent"
+        }
+        currentGeneration = restoredGeneration
+        bootstrapDeliveredGeneration = state.optLong("bootstrap_delivered_generation", -1L)
+            .takeIf { it > 0L }
+        residentHandoffFrozen = false
+        accessGate.restoreHandoffState(state.getJSONObject("access_gate"))
+    }
 }
 
-/** Bridge providers never own or reset this Host runtime. */
+/** Bridge providers never own or reset this runtime; BUSINESS ownership decides its process. */
 internal object AiLimbsInteractionCycleRuntime {
     private val stateLock = Any()
     @Volatile private var runtime: AiLimbsInteractionCycleRuntimeState? = null
 
     fun state(context: Context): AiLimbsInteractionCycleRuntimeState =
         runtime ?: synchronized(stateLock) {
-            runtime ?: AiLimbsInteractionCycleRuntimeState(context.applicationContext)
-                .also { runtime = it }
+            runtime ?: run {
+                val appContext = context.applicationContext
+                val fence = runCatching { ResidentBusinessTakeoverFence.snapshot(appContext) }
+                    .getOrElse { error ->
+                        throw IllegalStateException(
+                            "Cannot establish AI Limbs policy authority with an invalid Resident takeover fence",
+                            error
+                        )
+                    }
+                if (fence != null) {
+                    val currentProcessIsBoundCore =
+                        fence.optInt("core_pid", -1) == Process.myPid() &&
+                            ResidentCoreProcessIdentity.isCurrentProcessCore()
+                    if (!currentProcessIsBoundCore) {
+                        error(
+                            "Resident Core owns the AI Limbs Interaction Cycle/Policy plane; " +
+                                "Host-local authority is forbidden for core_pid=${fence.optInt("core_pid", -1)}"
+                        )
+                    }
+                }
+                AiLimbsInteractionCycleRuntimeState(appContext).also { runtime = it }
+            }
+        }
+
+    fun freezeAndExportForResidentHandoff(context: Context): JSONObject =
+        state(context.applicationContext).freezeAndExportHandoffState()
+
+    fun cancelResidentHandoffFreeze(context: Context) {
+        runtime?.cancelResidentHandoffFreeze()
+    }
+
+    fun restoreFromResidentHandoff(context: Context, handoffState: JSONObject): AiLimbsInteractionCycleRuntimeState =
+        synchronized(stateLock) {
+            check(runtime == null) {
+                "Resident Core policy authority was initialized before Interaction Cycle handoff restore"
+            }
+            val restored = AiLimbsInteractionCycleRuntimeState(context.applicationContext)
+            restored.restoreHandoffState(handoffState)
+            runtime = restored
+            restored
         }
 
     fun reset(context: Context): AiLimbsInteractionCycleResetResult =

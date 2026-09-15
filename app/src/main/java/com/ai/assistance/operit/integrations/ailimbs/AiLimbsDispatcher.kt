@@ -349,18 +349,25 @@ class AiLimbsDispatcher(
                 )
             )
 
-    private fun dispatcherStatus(): JSONObject =
-        ok()
+    private fun dispatcherStatus(): JSONObject {
+        val kernelRole = PluginPlatformKernel.lifecycleSnapshot().optString("runtime_role")
+        val authority = if (kernelRole == "business") "resident_core" else "legacy_host"
+        return ok()
             .put("module", "AI Limbs Tool Dispatcher")
             .put(
                 "route",
                 "Transport -> AiLimbsExecutionPolicyEngine -> AiLimbsDispatcher -> Core | HostTool"
             )
+            .put("dispatcher_owner", authority)
+            .put("policy_owner", authority)
+            .put("owner_pid", android.os.Process.myPid())
+            .put("interaction_cycle_generation", AiLimbsInteractionCycleRuntime.state(appContext).currentGeneration())
             .put("permission_enforcement", "Unified ALLOW / ASK / FORBID policy")
             .put("policy_version", AiLimbsExecutionPolicyDescriptor.policyVersion)
             .put("session_scope", policyEngine.session.scopeId)
             .put("transport", policyEngine.session.sourceTransportId)
             .put("transport_neutral", true)
+    }
 
     private fun lanerChatStatus(): JSONObject {
         // A remote status query is itself verified agent activity. Renew presence before snapshotting

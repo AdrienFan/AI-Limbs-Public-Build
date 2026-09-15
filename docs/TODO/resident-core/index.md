@@ -22,7 +22,7 @@ build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 �
 
 2026-09-15：继续编写后续迁移，不再把 build25 安装验证作为源码工作的前置门槛。本轮暂不编译。候选分支已包含 ac9373b 的 Android 16 Socket 初始化顺序与 Guardian 唯一实例锁修复，后续改动必须保留。
 
-当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md)、[Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md) 和 [Host attach-only / UI Shell](07-host-ui-shell.md)。Core 已具备独立 Looper 与 owner-only BUSINESS Kernel 接管链；Host 重启已能根据 Core / takeover fence 进入 UI_PROXY，并禁止第二套 Plugin Kernel 和主要 Host 业务启动链。Bridge/Dispatcher、插件/Ubuntu、跨进程 UI 状态事件代理及 Resident ON/OFF 编排仍未接通。不能把“Host 进入 UI shell”误记为插件 UI 已完成代理或锁屏持续工作已完成。
+当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md)、[Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md)、[Host attach-only / UI Shell](07-host-ui-shell.md) 和 [Core-owned Interaction Cycle / Policy / Dispatcher](08-core-policy-dispatcher.md)。Core 已具备独立 Looper、owner-only BUSINESS Kernel 接管链与源码级 Core-owned Interaction Cycle / Policy / Dispatcher；Host 重启已能根据 Core / takeover fence 进入 UI_PROXY，并禁止第二套 Plugin Kernel、门禁状态与本地 Dispatcher authority。Bridge provider、普通插件 / Ubuntu、跨进程 UI 状态事件代理及 Resident ON/OFF 编排仍未接通。不能把“Core 已拥有 brainstem”误记为完整插件运行时、Bridge provider 或锁屏持续工作已完成。
 
 ## 迁移不变量（Step 1 冻结边界）
 
@@ -45,3 +45,7 @@ build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 �
 ## Step 5 当前边界
 
 重启 Host 在 Core 已成为业务 owner、handoff pending 或 takeover fence 阻止 fallback 时，只进入 UI_PROXY；不会初始化 Plugin Kernel，也不会启动 AIForegroundService、FloatingChatService 或 MCP/plugin loading。UI_PROXY 当前只提供安全的 UI registry 空壳；真正的 Core→Host UI 状态 / 事件同步与 Android component proxy 仍属于后续步骤。
+
+## Step 6 当前边界
+
+Interaction Cycle、Access Gate receipts、WORK / NON_WORK、Policy Engine 与 Dispatcher 的源码 authority 已交给 Resident Core：Host handoff 会冻结并一次性交接 generation / receipts / bootstrap 状态，Core 恢复同一周期后才启动独立 Dispatcher 数据面并发布 `owned` fence；takeover 后 Host ingress 只能经明确 Core IPC 代理，失败时 fail closed，不允许静默重建 Host-local Policy / Dispatcher。该结论仍为源码级，未编译、未部署、未进行 Host 重启或锁屏真机验收；Bridge provider、普通插件 / Ubuntu、UI proxy 事件契约和 Resident ON/OFF 总状态机仍属后续步骤。

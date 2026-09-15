@@ -185,6 +185,17 @@ internal object ResidentCoreController {
                 runtime.getBoolean("plugin_kernel_started")) {
                 "Core claims business ownership without a running Plugin Kernel"
             }
+            val dispatcher = state.getJSONObject("dispatcher")
+            check(dispatcher.getBoolean("running") &&
+                dispatcher.getString("dispatcher_owner") == "resident_core" &&
+                dispatcher.getInt("owner_pid") == state.getInt("pid")) {
+                "Core claims business ownership without the authoritative Dispatcher: $dispatcher"
+            }
+            val policyRuntime = dispatcher.getJSONObject("runtime")
+            check(policyRuntime.getString("policy_owner") == "resident_core" &&
+                policyRuntime.getInt("owner_pid") == state.getInt("pid")) {
+                "Core Dispatcher does not own the policy plane: $policyRuntime"
+            }
         }
         check(!state.getBoolean("plugins_migrated") && !state.getBoolean("continuous_work")) {
             "Core must not claim later-stage plugin migration or continuous work yet"

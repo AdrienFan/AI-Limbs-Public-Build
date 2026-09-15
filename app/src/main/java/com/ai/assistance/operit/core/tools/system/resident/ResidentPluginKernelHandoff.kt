@@ -3,6 +3,7 @@ package com.ai.assistance.operit.core.tools.system.resident
 import android.content.Context
 import android.os.Process
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import kotlin.system.exitProcess
 
@@ -25,15 +26,26 @@ internal object ResidentPluginKernelHandoff {
         }
 
         val handoff = ResidentCoreController.prepareHandoff(app, executor)
-        val armed = ResidentCoreController.armBusinessTakeover(handoff.coreSessionId())
-        check(armed.getString("business_phase") == "waiting_for_host_exit") {
-            "Resident Core did not arm business takeover"
-        }
-        check(armed.getInt("expected_host_pid") == Process.myPid()) {
-            "Resident Core armed takeover for a different Host process"
-        }
+        val coreSession = handoff.coreSessionId()
+        val hostPid = Process.myPid()
+        val policyState = AiLimbsInteractionCycleRuntime.freezeAndExportForResidentHandoff(app)
 
         try {
+            ResidentPolicyStateHandoff.stage(
+                context = app,
+                coreSession = coreSession,
+                corePid = handoff.coreProcessId(),
+                hostPid = hostPid,
+                policyState = policyState
+            )
+            val armed = ResidentCoreController.armBusinessTakeover(coreSession)
+            check(armed.getString("business_phase") == "waiting_for_host_exit") {
+                "Resident Core did not arm business takeover"
+            }
+            check(armed.getInt("expected_host_pid") == hostPid) {
+                "Resident Core armed takeover for a different Host process"
+            }
+
             PluginPlatformKernel.shutdownForResidentHandoff(handoff)
             val retired = PluginPlatformKernel.lifecycleSnapshot()
             check(retired.getString("phase") == "stopped" && !retired.getBoolean("started")) {
@@ -43,7 +55,9 @@ internal object ResidentPluginKernelHandoff {
                 "Host must retain plugin_kernel lease until process exit"
             }
         } catch (error: Throwable) {
-            runCatching { ResidentCoreController.cancelBusinessTakeover(handoff.coreSessionId()) }
+            runCatching { ResidentPolicyStateHandoff.clearByHost(app, coreSession, hostPid) }
+            runCatching { ResidentCoreController.cancelBusinessTakeover(coreSession) }
+            AiLimbsInteractionCycleRuntime.cancelResidentHandoffFreeze(app)
             throw error
         }
 

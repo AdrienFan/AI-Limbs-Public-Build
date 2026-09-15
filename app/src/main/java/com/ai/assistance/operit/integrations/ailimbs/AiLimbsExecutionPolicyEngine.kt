@@ -39,7 +39,7 @@ class AiLimbsExecutionPolicyEngine(
     private val handler = AIToolHandler.getInstance(appContext)
     private val permissionSystem = ToolPermissionSystem.getInstance(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
-    private val receipts = sharedAccessGate ?: AiLimbsAccessGate(appContext)
+    private val receipts = sharedAccessGate ?: AiLimbsInteractionCycleRuntime.state(appContext).accessGate
 
     internal fun normalize(tool: String, args: JSONObject): AiLimbsNormalizedInvocation {
         val registration =
@@ -352,15 +352,21 @@ class AiLimbsExecutionPolicyEngine(
             .put("cycle_started_at_ms", reset.cycleStartedAtMs)
     }
 
-    fun describePolicy(): JSONObject =
-        JSONObject()
+    fun describePolicy(): JSONObject {
+        val kernelRole = PluginPlatformKernel.lifecycleSnapshot().optString("runtime_role")
+        val authority = if (kernelRole == "business") "resident_core" else "legacy_host"
+        return JSONObject()
             .put("success", true)
             .put("module", "AI Limbs Execution Policy Engine")
+            .put("policy_owner", authority)
+            .put("owner_pid", android.os.Process.myPid())
+            .put("interaction_cycle", AiLimbsInteractionCycleRuntime.state(appContext).snapshot())
             .put("transport_neutral", true)
             .put("session_scope", session.scopeId)
             .put("transport", session.sourceTransportId)
             .put("bootstrap_version", AiLimbsSystemAccessPrompt.version)
             .put("policy", AiLimbsExecutionPolicyDescriptor.summaryJson())
+    }
 
     fun transportInvocation(name: String, parameters: JSONObject): JSONObject =
         when (session.transport) {

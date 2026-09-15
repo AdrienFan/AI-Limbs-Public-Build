@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
+import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreDispatcherClient
 import java.util.concurrent.atomic.AtomicBoolean
 import org.json.JSONObject
 
@@ -19,7 +20,15 @@ data class AiLimbsIngressResult(
 )
 
 internal data class AiLimbsIngressRuntime(
-    val execute: suspend (String, JSONObject) -> JSONObject
+    val execute: suspend (String, JSONObject) -> JSONObject,
+    val authoritativeInvoke: (suspend (String, JSONObject) -> AiLimbsIngressResult)? = null,
+    val authoritativeBootstrapRearm: (() -> Unit)? = null
+)
+
+private data class AiLimbsIngressBackend(
+    val runtime: AiLimbsIngressRuntime,
+    val readAccessBootstrap: suspend () -> String,
+    val cycleRuntime: AiLimbsInteractionCycleRuntimeState?
 )
 
 private fun createIngressRuntime(
@@ -33,6 +42,35 @@ private fun createIngressRuntime(
         sharedAccessGate
     )
     return AiLimbsIngressRuntime(execute = executor::execute)
+}
+
+private fun createDefaultIngressBackend(
+    context: Context,
+    ingressSession: AiLimbsIngressSession
+): AiLimbsIngressBackend {
+    val appContext = context.applicationContext
+    val coreClient = ResidentCoreDispatcherClient.forExternalCoreOrNull(appContext, ingressSession)
+    if (coreClient != null) {
+        return AiLimbsIngressBackend(
+            runtime = AiLimbsIngressRuntime(
+                execute = { _, _ -> error("Host-local Dispatcher is disabled while Resident Core owns policy") },
+                authoritativeInvoke = coreClient::invoke,
+                authoritativeBootstrapRearm = coreClient::rearmBootstrapBlocking
+            ),
+            readAccessBootstrap = { error("Access Bootstrap is owned by Resident Core") },
+            cycleRuntime = null
+        )
+    }
+    val sharedCycleRuntime = AiLimbsInteractionCycleRuntime.state(appContext)
+    return AiLimbsIngressBackend(
+        runtime = createIngressRuntime(
+            appContext,
+            ingressSession.executionSession,
+            sharedCycleRuntime.accessGate
+        ),
+        readAccessBootstrap = AiLimbsAccessContextService(appContext)::readAccessContext,
+        cycleRuntime = sharedCycleRuntime
+    )
 }
 
 /**
@@ -61,6 +99,16 @@ class AiLimbsIngressGateway internal constructor(
     )
 
     private constructor(
+        ingressSession: AiLimbsIngressSession,
+        backend: AiLimbsIngressBackend
+    ) : this(
+        ingressSession = ingressSession,
+        runtime = backend.runtime,
+        readAccessBootstrap = backend.readAccessBootstrap,
+        cycleRuntime = backend.cycleRuntime
+    )
+
+    private constructor(
         context: Context,
         ingressSession: AiLimbsIngressSession,
         sharedCycleRuntime: AiLimbsInteractionCycleRuntimeState
@@ -79,16 +127,28 @@ class AiLimbsIngressGateway internal constructor(
         context: Context,
         ingressSession: AiLimbsIngressSession
     ) : this(
-        context,
         ingressSession,
-        AiLimbsInteractionCycleRuntime.state(context.applicationContext)
+        createDefaultIngressBackend(context, ingressSession)
     )
+
+    internal companion object {
+        fun authoritativeCore(
+            context: Context,
+            ingressSession: AiLimbsIngressSession,
+            sharedCycleRuntime: AiLimbsInteractionCycleRuntimeState
+        ): AiLimbsIngressGateway =
+            AiLimbsIngressGateway(context.applicationContext, ingressSession, sharedCycleRuntime)
+    }
 
     private suspend fun executeRawWithinSession(tool: String, args: JSONObject): JSONObject =
         runtime.execute(tool, args)
 
-    suspend fun invoke(tool: String, args: JSONObject): AiLimbsIngressResult =
-        invoke { executeRawWithinSession(tool, args) }
+    suspend fun invoke(tool: String, args: JSONObject): AiLimbsIngressResult {
+        runtime.authoritativeInvoke?.let { invokeRemote ->
+            return invokeRemote(tool, args)
+        }
+        return invoke { executeRawWithinSession(tool, args) }
+    }
 
     internal suspend fun invokePayload(tool: String, args: JSONObject): JSONObject {
         val result = invoke(tool, args)
@@ -100,11 +160,12 @@ class AiLimbsIngressGateway internal constructor(
     private suspend fun invoke(execute: suspend () -> JSONObject): AiLimbsIngressResult {
         val lease = cycleRuntime?.beginInvocation()
         if (lease != null && !lease.admitted) {
+            val errorCode = lease.blockedReason ?: "INTERACTION_CYCLE_RESET_PENDING"
             return AiLimbsIngressResult(
                 payload = JSONObject()
                     .put("success", false)
-                    .put("error_code", "INTERACTION_CYCLE_RESET_PENDING")
-                    .put("type", "INTERACTION_CYCLE_RESET_PENDING")
+                    .put("error_code", errorCode)
+                    .put("type", errorCode)
                     .put("scope", "interaction_cycle")
                     .put("retry_original_capability", true)
                     .put("target_generation", lease.generation),
@@ -131,6 +192,10 @@ class AiLimbsIngressGateway internal constructor(
     }
 
     fun resetAccessBootstrap() {
+        runtime.authoritativeBootstrapRearm?.let { rearmRemote ->
+            rearmRemote()
+            return
+        }
         val shared = cycleRuntime
         if (shared != null) {
             shared.rearmCurrentBootstrap()
