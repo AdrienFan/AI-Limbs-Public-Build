@@ -21,7 +21,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -29,8 +29,8 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 internal class PermissionPage(
-    private val host: InProcessPluginHost,
-    private val controller: PermissionController
+    private val host: InProcessPluginUiHost,
+    private val controller: PermissionPageController
 ) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
         ComposeView(host.createPluginContext(context)).apply {
@@ -40,7 +40,7 @@ internal class PermissionPage(
 }
 
 @Composable
-private fun Content(host: InProcessPluginHost, controller: PermissionController) {
+private fun Content(host: InProcessPluginUiHost, controller: PermissionPageController) {
     val state by controller.state.collectAsState()
     val context = LocalContext.current
     var pairPort by remember { mutableStateOf("") }

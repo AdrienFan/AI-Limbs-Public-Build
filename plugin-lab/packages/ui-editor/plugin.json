@@ -21,7 +21,8 @@
     "kind": "android_inprocess",
     "entry": "payload/plugin.apk",
     "config": {
-      "entry_class": "com.ai.limbs.plugins.uieditor.UiEditorEntry"
+      "entry_class": "com.ai.limbs.plugins.uieditor.UiEditorEntry",
+      "presentation_entry_class": "com.ai.limbs.plugins.uieditor.UiEditorPresentationEntry"
     }
   },
   "dependencies": {

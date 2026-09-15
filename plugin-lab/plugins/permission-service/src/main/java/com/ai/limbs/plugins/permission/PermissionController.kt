@@ -29,10 +29,10 @@ internal data class PermissionState(
     val message: String = "正在读取状态"
 )
 
-internal class PermissionController(private val host: InProcessPluginHost) {
+internal class PermissionController(private val host: InProcessPluginHost) : PermissionPageController {
     private val gate = Mutex()
     private val mutableState = MutableStateFlow(PermissionState())
-    val state = mutableState.asStateFlow()
+    override val state = mutableState.asStateFlow()
     private val key by lazy {
         AdbKey(PreferenceAdbKeyStore(
             host.applicationContext.getSharedPreferences(
@@ -49,7 +49,7 @@ internal class PermissionController(private val host: InProcessPluginHost) {
         return result
     }
 
-    suspend fun refresh(): JSONObject {
+    override suspend fun refresh(): JSONObject {
         val result = invoke("status")
         mutableState.value = mutableState.value.copy(
             running = result.getBoolean("running"), backend = result.getString("backend"),
@@ -84,7 +84,7 @@ internal class PermissionController(private val host: InProcessPluginHost) {
         }
     }
 
-    suspend fun pair(port: Int, code: String) = action("配对") {
+    override suspend fun pair(port: Int, code: String) = action("配对") {
         require(Build.VERSION.SDK_INT >= 30) { "无线调试配对需要 Android 11 或更高版本" }
         require(port in 1..65535) { "配对端口无效" }
         require(code.matches(Regex("[0-9]{6}"))) { "请输入六位配对码" }
@@ -141,7 +141,7 @@ internal class PermissionController(private val host: InProcessPluginHost) {
         return output.toString()
     }
 
-    suspend fun startAdb(port: Int) = action("启动权限服务") {
+    override suspend fun startAdb(port: Int) = action("启动权限服务") {
         require(port in 1..65535) { "连接端口无效" }
         val permit = invoke("prepare")
         val directory = "/data/local/tmp/ail-permission-" + permit.getInt("host_uid")
@@ -183,7 +183,7 @@ internal class PermissionController(private val host: InProcessPluginHost) {
         }
     }
 
-    suspend fun startRoot() = action("以 root 启动权限服务") {
+    override suspend fun startRoot() = action("以 root 启动权限服务") {
         val permit = invoke("prepare")
         var activated = false
         try {
@@ -220,13 +220,13 @@ internal class PermissionController(private val host: InProcessPluginHost) {
         return false
     }
 
-    suspend fun stop() = action("停止权限服务") {
+    override suspend fun stop() = action("停止权限服务") {
         invoke("stop")
         refresh()
         log("权限服务已停止")
     }
 
-    suspend fun select(backend: String) = action("选择执行后端") {
+    override suspend fun select(backend: String) = action("选择执行后端") {
         invoke("select", JSONObject().put("backend", backend))
         refresh()
         log(if (backend == "ai_limbs") "已选择 AI Limbs 权限服务" else "已选择外部 Shizuku / Sui")

@@ -19,6 +19,7 @@ import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal object UbuntuSubsystemCapabilities {
@@ -34,7 +35,7 @@ internal object UbuntuSubsystemCapabilities {
             description = "读取 系统环境中心内置 Ubuntu 子系统持有 Runtime 的生命周期、空闲策略与当前使用者状态。",
             keywords = listOf("Ubuntu", "Linux", "状态", "生命周期", "runtime"),
             effect = InProcessCapabilityEffect.READ_ONLY
-        ) { status(terminal) },
+        ) { p -> status(terminal, p) },
         spec(
             id = "plugin.ubuntu.start",
             invokeAliases = listOf("plugin.system_environment.start"),
@@ -42,7 +43,7 @@ internal object UbuntuSubsystemCapabilities {
             description = "启动 系统环境中心内置 Ubuntu 子系统持有的本地 Runtime。AI 调用不会触发前台开发环境提示。",
             keywords = listOf("Ubuntu", "Linux", "启动", "开机", "runtime"),
             effect = InProcessCapabilityEffect.STATE_CHANGE
-        ) { start(terminal) },
+        ) { p -> start(terminal, p) },
         spec(
             id = "plugin.ubuntu.stop",
             invokeAliases = listOf("plugin.system_environment.stop"),
@@ -50,7 +51,7 @@ internal object UbuntuSubsystemCapabilities {
             description = "停止 Ubuntu Runtime；若前台 UI 或其他隐藏 AI 操作仍在使用则拒绝。",
             keywords = listOf("Ubuntu", "Linux", "停止", "关机", "并发保护"),
             effect = InProcessCapabilityEffect.STATE_CHANGE
-        ) { stop(terminal) },
+        ) { p -> stop(terminal, p) },
         spec(
             id = "plugin.ubuntu.idle.get",
             invokeAliases = listOf("plugin.system_environment.idle.get"),
@@ -72,6 +73,13 @@ internal object UbuntuSubsystemCapabilities {
             suggested = """{"mode":"MINUTES_30"}""",
             effect = InProcessCapabilityEffect.STATE_CHANGE
         ) { p -> idleSet(terminal, p) },
+        spec(
+            id = "plugin.ubuntu.development.prepare",
+            name = "准备 Ubuntu 开发环境引导",
+            description = "把内置 AI Limbs 开发环境安装脚本准备到当前 Ubuntu；主要供系统环境页面使用。",
+            keywords = listOf("Ubuntu", "开发环境", "bootstrap"),
+            effect = InProcessCapabilityEffect.STATE_CHANGE
+        ) { developmentPrepare(terminal) },
         spec(
             id = "plugin.ubuntu.session.create",
             invokeAliases = listOf("plugin.system_environment.session.create"),
@@ -199,10 +207,32 @@ internal object UbuntuSubsystemCapabilities {
         default: String? = null
     ) = InProcessCapabilityParameterSpec(name, type, description, required, default)
 
-    private fun status(terminal: TerminalManager): JSONObject {
+    private fun status(terminal: TerminalManager, parameters: JSONObject): JSONObject {
+        val residentUiLeaseId = parameters.optString("_resident_ui_lease_id").trim()
+        val residentUiEvent = parameters.optString("_resident_ui_event").trim()
+        if (residentUiLeaseId.isNotEmpty() && residentUiEvent.isNotEmpty()) {
+            terminal.updateResidentUiLease(residentUiLeaseId, residentUiEvent)
+        }
         val runtime = terminal.currentUbuntuRuntimeState()
         val idle = terminal.currentUbuntuIdlePolicy()
         val usage = terminal.currentUbuntuUsageState()
+        val terminalState = terminal.terminalState.value
+        val shared = terminal.sharedHiddenTerminalState.value
+        val sessions = JSONArray()
+        terminalState.sessions.forEach { session ->
+            sessions.put(
+                JSONObject()
+                    .put("id", session.id)
+                    .put("title", session.title)
+                    .put("terminal_type", session.terminalType.name)
+                    .put("background", session.isBackground)
+                    .put("current_directory", session.currentDirectory)
+                    .put("interactive", session.isInteractiveMode)
+                    .put("interactive_prompt", session.interactivePrompt)
+                    .put("init_state", session.initState.name)
+                    .put("fullscreen", session.isFullscreen)
+            )
+        }
         return ok()
             .put("state", runtime.phase.name)
             .put("detail", runtime.detail)
@@ -214,15 +244,39 @@ internal object UbuntuSubsystemCapabilities {
             .put("hidden_ai_operations", usage.hiddenAiOperations)
             .put("participant_count", usage.participantCount)
             .put("runtime_owner", "plugin")
+            .put("current_session_id", terminalState.currentSessionId ?: JSONObject.NULL)
+            .put("sessions", sessions)
+            .put(
+                "shared_hidden",
+                JSONObject()
+                    .put("operation_id", shared.operationId ?: JSONObject.NULL)
+                    .put("command", shared.command)
+                    .put("output", shared.output)
+                    .put("active", shared.isActive)
+                    .put("active_operation_count", shared.activeOperationCount)
+                    .put("exit_code", shared.exitCode ?: JSONObject.NULL)
+                    .put("error", shared.error ?: JSONObject.NULL)
+                    .put("updated_at_millis", shared.updatedAtMillis)
+            )
     }
 
-    private suspend fun start(terminal: TerminalManager): JSONObject {
-        val state = terminal.startUbuntu(offerDevelopmentPrompt = false)
+    private suspend fun developmentPrepare(terminal: TerminalManager): JSONObject =
+        ok().put("prepared", terminal.prepareDevelopmentEnvironmentInstaller())
+
+    private suspend fun start(terminal: TerminalManager, parameters: JSONObject): JSONObject {
+        val state = terminal.startUbuntu(
+            offerDevelopmentPrompt = parameters.optBoolean("_resident_ui_request", false)
+        )
         return stateJson(state.phase == UbuntuRuntimePhase.RUNNING, state.phase.name, state.detail, state.error)
     }
 
-    private suspend fun stop(terminal: TerminalManager): JSONObject {
-        val state = terminal.stopUbuntu(UbuntuStopRequester.AI_TOOL)
+    private suspend fun stop(terminal: TerminalManager, parameters: JSONObject): JSONObject {
+        val requester = if (parameters.optBoolean("_resident_ui_request", false)) {
+            UbuntuStopRequester.USER_INTERFACE
+        } else {
+            UbuntuStopRequester.AI_TOOL
+        }
+        val state = terminal.stopUbuntu(requester)
         return stateJson(state.phase == UbuntuRuntimePhase.STOPPED, state.phase.name, state.detail, state.error)
     }
 

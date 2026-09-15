@@ -23,32 +23,35 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
-import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalUiController
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.type.TerminalType
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.rememberTerminalEnv
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.SettingsScreen
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.TerminalSettingsController
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.StandardDevelopmentEnvironmentCard
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.TerminalHome
 import java.io.File
 import kotlinx.coroutines.launch
 
 internal class UbuntuSubsystemPageProvider(
-    private val host: InProcessPluginHost,
-    private val terminal: TerminalManager,
-    private val nativeLibraryDir: File
+    private val host: InProcessPluginUiHost,
+    private val terminal: TerminalUiController,
+    private val nativeLibraryDir: File,
+    private val settingsControllerFactory: ((Context) -> TerminalSettingsController)? = null
 ) : InProcessPageProvider {
     override fun createView(
         context: Context,
         @Suppress("UNUSED_PARAMETER") sharedUi: InProcessSharedUiHost
     ): View {
-        return ComposeView(createUiContext(context)).apply {
+        val uiContext = createUiContext(context)
+        return ComposeView(uiContext).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
-                    UbuntuDisplay(terminal)
+                    UbuntuDisplay(terminal, settingsControllerFactory)
                 }
             }
         }
@@ -79,7 +82,7 @@ private enum class UbuntuDisplayRoute { TERMINAL, SETTINGS }
 
 @Composable
 private fun UbuntuConfigurationPanel(
-    terminal: TerminalManager,
+    terminal: TerminalUiController,
     onRequestDisplay: () -> Unit
 ) {
     val context = LocalContext.current
@@ -117,8 +120,14 @@ private fun UbuntuConfigurationPanel(
 }
 
 @Composable
-private fun UbuntuDisplay(terminal: TerminalManager) {
+private fun UbuntuDisplay(
+    terminal: TerminalUiController,
+    settingsControllerFactory: ((Context) -> TerminalSettingsController)?
+) {
     val context = LocalContext.current
+    val residentSettings = remember(context, settingsControllerFactory) {
+        lazy(LazyThreadSafetyMode.NONE) { settingsControllerFactory?.invoke(context) }
+    }
     val activity = remember(context) { context.findActivity() }
     val originalSoftInputMode = remember(activity) { activity?.manifestSoftInputMode() }
     var route by remember { mutableStateOf(UbuntuDisplayRoute.TERMINAL) }
@@ -147,8 +156,36 @@ private fun UbuntuDisplay(terminal: TerminalManager) {
             useLocalImeHandling = true,
             onNavigateToSettings = { route = UbuntuDisplayRoute.SETTINGS }
         )
-        UbuntuDisplayRoute.SETTINGS -> SettingsScreen(
-            onBack = { route = UbuntuDisplayRoute.TERMINAL }
+        UbuntuDisplayRoute.SETTINGS -> {
+            when {
+                terminal.localBusinessSettingsAvailable ->
+                    SettingsScreen(onBack = { route = UbuntuDisplayRoute.TERMINAL })
+                settingsControllerFactory != null ->
+                    SettingsScreen(
+                        onBack = { route = UbuntuDisplayRoute.TERMINAL },
+                        controller = requireNotNull(residentSettings.value)
+                    )
+                else -> ResidentSafeSettingsScreen(onBack = { route = UbuntuDisplayRoute.TERMINAL })
+            }
+        }
+    }
+}
+
+@Composable
+private fun ResidentSafeSettingsScreen(onBack: () -> Unit) {
+    androidx.compose.foundation.layout.Column(
+        modifier = androidx.compose.ui.Modifier.fillMaxSize().padding(16.dp),
+        verticalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(12.dp)
+    ) {
+        androidx.compose.material3.OutlinedButton(onClick = onBack) {
+            androidx.compose.material3.Text("返回")
+        }
+        androidx.compose.material3.Text(
+            "Ubuntu 设置",
+            style = androidx.compose.material3.MaterialTheme.typography.headlineSmall
+        )
+        androidx.compose.material3.Text(
+            "Resident 模式下终端业务由 Core 独占。SSH、软件源、FTP 和 chroot 等业务设置不会在 Host 启动第二套 SettingsViewModel；这些项目需要通过 Core 代理修改。"
         )
     }
 }

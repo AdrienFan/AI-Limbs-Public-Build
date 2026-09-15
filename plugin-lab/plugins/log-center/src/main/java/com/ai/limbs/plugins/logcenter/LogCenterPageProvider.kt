@@ -45,12 +45,12 @@ import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import kotlinx.coroutines.launch
 
 internal class LogCenterPageProvider(
-    private val host: InProcessPluginHost
+    private val host: InProcessPluginUiHost
 ) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
         ComposeView(host.createPluginContext(context)).apply {
@@ -65,7 +65,7 @@ internal class LogCenterPageProvider(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LogCenterPage(host: InProcessPluginHost) {
+private fun LogCenterPage(host: InProcessPluginUiHost) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val client = remember(host) { LogCenterClient(host) }

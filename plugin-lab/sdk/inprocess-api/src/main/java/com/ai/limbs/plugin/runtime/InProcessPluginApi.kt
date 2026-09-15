@@ -14,6 +14,66 @@ fun interface InProcessPluginHandle {
     suspend fun stop()
 }
 
+/**
+ * Presentation-only entry loaded by the Android Host while BUSINESS runtime remains in Resident Core.
+ * It may create local View/Compose providers, but it has no API to publish capabilities/services or
+ * start plugin business lifecycle. The entry class is declared by signed runtime.config.
+ */
+interface InProcessPluginPresentationEntry {
+    suspend fun mount(host: InProcessPluginPresentationHost): InProcessPluginPresentationHandle
+}
+
+fun interface InProcessPluginPresentationHandle {
+    suspend fun stop()
+}
+
+/**
+ * Presentation-only child entry loaded by Android Host while the admitted ChildExtensionEntry stays
+ * mounted only in Resident Core. The Host object intentionally has no native runtime, capability
+ * publication, business binding, discovery publication, or child lifecycle administration surface.
+ */
+interface ChildExtensionPresentationEntry {
+    suspend fun mount(host: ChildExtensionPresentationHost): ChildExtensionPresentationHandle
+}
+
+fun interface ChildExtensionPresentationHandle {
+    suspend fun stop()
+}
+
+/** Core-owned handler exposed only to the matching Host presentation half; never enters capability catalog. */
+fun interface ChildPresentationCommandHandler {
+    suspend fun invoke(command: String, parametersJson: String): String
+}
+
+interface ChildExtensionPresentationHost {
+    val applicationContext: Context
+    val extensionId: String
+    val version: String
+    val target: ChildExtensionTarget
+    val scope: CoroutineScope
+    val dataDir: File
+    val cacheDir: File
+    val logger: InProcessRuntimeLogger
+    /** Exact verified admitted child runtime APK; presentation code may read packaged resources only. */
+    val runtimeEntryFile: File
+    val providers: InProcessProviderDirectory
+
+    fun createExtensionContext(baseContext: Context): Context = baseContext
+
+    /** Host-local object publication only. The payload never crosses Resident UI wire. */
+    fun registerPresentationProvider(
+        id: String,
+        payload: Any,
+        metadata: Map<String, String> = emptyMap()
+    ): AutoCloseable
+
+    /** Executes an already-active capability owned by this exact child in Resident Core. */
+    suspend fun invokeChildCapability(id: String, parametersJson: String = "{}"): String
+
+    /** Invokes the active child's private presentation command handler; not visible to AI/Bridge discovery. */
+    suspend fun invokePresentationCommand(command: String, parametersJson: String = "{}"): String
+}
+
 fun interface InProcessCapabilityExecutor {
     suspend fun invoke(parametersJson: String): String
 }
@@ -229,7 +289,7 @@ interface InProcessRuntimeLogger {
     fun e(tag: String, message: String, error: Throwable): Int
 }
 
-interface InProcessPluginHost {
+interface InProcessPluginUiHost {
     val applicationContext: Context
     val pluginId: String
     val version: String
@@ -237,12 +297,33 @@ interface InProcessPluginHost {
     val dataDir: File
     val cacheDir: File
     val logger: InProcessRuntimeLogger
-    /** Exact mounted runtime payload (for example payload/plugin.apk). */
+    /** Exact verified runtime payload; presentation code may read packaged resources only. */
     val runtimeEntryFile: File
+    val providers: InProcessProviderDirectory
+
+    fun createPluginContext(baseContext: Context): Context = baseContext
+
+    /** Executes only through the Core-owned authorization/capability path. */
+    suspend fun invokeHostCapability(id: String, parametersJson: String = "{}"): String
+}
+
+interface InProcessPluginPresentationHost : InProcessPluginUiHost {
+    /** Host-local View provider registration. The payload never crosses the process boundary. */
+    fun registerPageProvider(
+        id: String,
+        provider: InProcessPageProvider,
+        metadata: Map<String, String> = emptyMap()
+    ): AutoCloseable
+
+    /** Invokes a Core-owned plugin capability as this exact plugin identity. */
+    suspend fun invokePluginCapability(id: String, parametersJson: String = "{}"): String
+}
+
+interface InProcessPluginHost : InProcessPluginUiHost {
     /** Host-owned executable substrate; apiVersion=0 means unavailable. */
     val nativeRuntime: InProcessNativeRuntime
         get() = InProcessNativeRuntime.UNAVAILABLE
-    val providers: InProcessProviderDirectory
+    override val providers: InProcessProviderDirectory
     val services: InProcessServiceDirectory
     val childExtensions: InProcessChildExtensionRuntime
         get() = InProcessChildExtensionRuntime.UNAVAILABLE
@@ -251,7 +332,7 @@ interface InProcessPluginHost {
      * Builds a UI Context backed by this trusted runtime APK's Resources/ClassLoader while retaining
      * the supplied Activity/window context. Ordinary non-inprocess plugins never receive this host.
      */
-    fun createPluginContext(baseContext: Context): Context = baseContext
+    override fun createPluginContext(baseContext: Context): Context = baseContext
 
     /** Builds a resource Context for a verified child runtime APK. */
     fun createRuntimeContext(
@@ -292,7 +373,7 @@ interface InProcessPluginHost {
         metadata: Map<String, String> = emptyMap()
     )
 
-    suspend fun invokeHostCapability(id: String, parametersJson: String = "{}"): String
+    override suspend fun invokeHostCapability(id: String, parametersJson: String = "{}"): String
 }
 
 enum class ChildExtensionLifecycle {
@@ -456,6 +537,10 @@ interface ChildExtensionHost {
     /** Publishes a capability owned by this verified child extension instance. */
     fun registerCapability(spec: InProcessCapabilitySpec): AutoCloseable =
         error("Child capability publication is not supported by this host")
+
+    /** Registers one Core-owned private command endpoint for this child's Host presentation half. */
+    fun registerPresentationCommandHandler(handler: ChildPresentationCommandHandler): AutoCloseable =
+        error("Child presentation command publication is not supported by this host")
 
     /**
      * Publishes child-owned AI ingress knowledge. Host binds the real extension identity and decides

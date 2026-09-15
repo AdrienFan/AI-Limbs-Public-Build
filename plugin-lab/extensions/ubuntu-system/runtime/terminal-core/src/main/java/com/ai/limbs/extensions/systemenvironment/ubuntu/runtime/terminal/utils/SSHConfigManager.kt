@@ -31,7 +31,7 @@ class SSHConfigManager(context: Context) {
      */
     suspend fun getConfig(): SSHConfig? = withContext(Dispatchers.IO) {
         val configJson = prefs.getString(KEY_CONFIG, null)
-        Log.d(TAG, "getConfig: configJson = $configJson")
+        Log.d(TAG, "getConfig: config present=${configJson != null}")
 
         if (configJson == null) {
             Log.d(TAG, "getConfig: No config found")
@@ -56,14 +56,14 @@ class SSHConfigManager(context: Context) {
         Log.d(TAG, "saveConfig: Saving config for ${config.username}@${config.host}:${config.port}")
         val json = toJson(config)
         val jsonString = json.toString()
-        Log.d(TAG, "saveConfig: JSON = $jsonString")
+        Log.d(TAG, "saveConfig: serialized SSH config without logging secrets")
 
         val success = prefs.edit().putString(KEY_CONFIG, jsonString).commit()
         Log.d(TAG, "saveConfig: Save result = $success")
 
         // 验证保存
         val savedJson = prefs.getString(KEY_CONFIG, null)
-        Log.d(TAG, "saveConfig: Verification read = $savedJson")
+        Log.d(TAG, "saveConfig: verification present=${savedJson != null}")
     }
 
     /**
@@ -111,7 +111,12 @@ class SSHConfigManager(context: Context) {
             remoteTunnelPort = json.optInt("remoteTunnelPort", 8888),
             localSshPort = json.optInt("localSshPort", 8022),
             localSshUsername = json.optString("localSshUsername", "root"),
-            localSshPassword = json.optString("localSshPassword", "")
+            localSshPassword = json.optString("localSshPassword", ""),
+            enablePortForwarding = json.optBoolean("enablePortForwarding", true),
+            localForwardPort = json.optInt("localForwardPort", 8751),
+            remoteForwardPort = json.optInt("remoteForwardPort", 8752),
+            enableKeepAlive = json.optBoolean("enableKeepAlive", true),
+            keepAliveInterval = json.optInt("keepAliveInterval", 30)
         )
     }
 
@@ -130,6 +135,11 @@ class SSHConfigManager(context: Context) {
         json.put("localSshPort", config.localSshPort)
         json.put("localSshUsername", config.localSshUsername)
         json.put("localSshPassword", config.localSshPassword)
+        json.put("enablePortForwarding", config.enablePortForwarding)
+        json.put("localForwardPort", config.localForwardPort)
+        json.put("remoteForwardPort", config.remoteForwardPort)
+        json.put("enableKeepAlive", config.enableKeepAlive)
+        json.put("keepAliveInterval", config.keepAliveInterval)
         return json
     }
 }

@@ -58,7 +58,6 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.ca
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalEnv
-import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.utils.TerminalFontConfigManager
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.utils.VirtualKeyAction
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.utils.VirtualKeyboardButtonConfig
@@ -87,8 +86,8 @@ fun TerminalHome(
     onNavigateToSettings: () -> Unit,
 ) {
     val context = LocalContext.current
-    val terminalManager = remember(context) { TerminalManager.getInstance(context) }
-    val sharedHiddenState by terminalManager.sharedHiddenTerminalState.collectAsState()
+    val terminalController = env.terminalController
+    val sharedHiddenState by terminalController.sharedHiddenTerminalState.collectAsState()
     var sharedTerminalTabOpen by remember { mutableStateOf(false) }
     var sharedTerminalTabSelected by remember { mutableStateOf(false) }
     val keyboardController = LocalSoftwareKeyboardController.current
@@ -122,10 +121,10 @@ fun TerminalHome(
         onDispose { }
     }
 
-    DisposableEffect(terminalManager) {
-        terminalManager.registerUbuntuUiClient()
+    DisposableEffect(terminalController) {
+        terminalController.registerUbuntuUiClient()
         onDispose {
-            terminalManager.unregisterUbuntuUiClient()
+            terminalController.unregisterUbuntuUiClient()
         }
     }
 

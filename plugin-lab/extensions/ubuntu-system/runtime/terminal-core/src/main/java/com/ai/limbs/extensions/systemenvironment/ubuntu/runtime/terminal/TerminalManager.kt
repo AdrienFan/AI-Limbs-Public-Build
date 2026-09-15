@@ -135,6 +135,7 @@ class TerminalManager private constructor(
     private val aiLimbsDevelopmentPromptAllowed = AtomicBoolean(false)
     private val aiLimbsDevelopmentPromptOffered = AtomicBoolean(false)
     private val activeUbuntuUiClients = AtomicInteger(0)
+    private val residentUiLeases = ConcurrentHashMap<String, Long>()
     private val _ubuntuUsageState = MutableStateFlow(UbuntuUsageState())
     val ubuntuUsageState: StateFlow<UbuntuUsageState> = _ubuntuUsageState.asStateFlow()
     private val _sharedHiddenTerminalState = MutableStateFlow(SharedHiddenTerminalState())
@@ -175,6 +176,8 @@ class TerminalManager private constructor(
         private const val KEY_UBUNTU_IDLE_MODE = "ubuntu_idle_mode"
         private const val KEY_UBUNTU_IDLE_CUSTOM_MINUTES = "ubuntu_idle_custom_minutes"
         private const val ACTIVE_WORK_RECHECK_MS = 1_000L
+        private const val RESIDENT_UI_LEASE_TTL_MS = 1_750L
+        private const val MAX_RESIDENT_UI_LEASES = 8
         private const val MAX_SHARED_COMMAND_CHARS = 12_000
         private const val MAX_SHARED_OUTPUT_CHARS = 64_000
     }
@@ -184,11 +187,41 @@ class TerminalManager private constructor(
     fun currentUbuntuIdlePolicy(): UbuntuIdlePolicy = _ubuntuIdlePolicy.value
 
     fun currentUbuntuUsageState(): UbuntuUsageState {
-        val current = _ubuntuUsageState.value
+        val current = _ubuntuUsageState.value.copy(userInterfaceClients = currentUiClientCount())
         return if (isAiLimbsBootstrapActive() && current.hiddenAiOperations == 0) {
             current.copy(hiddenAiOperations = 1)
         } else {
             current
+        }
+    }
+
+    /** Short-lived Host UI lease; stale Host death disappears without requiring a cleanup RPC. */
+    fun updateResidentUiLease(leaseId: String, event: String) {
+        val normalized = leaseId.trim()
+        require(normalized.length in 8..128) { "Invalid Resident UI lease id" }
+        val now = System.currentTimeMillis()
+        when (event.trim().lowercase()) {
+            "attach", "heartbeat" -> {
+                pruneResidentUiLeases(now)
+                if (normalized !in residentUiLeases && residentUiLeases.size >= MAX_RESIDENT_UI_LEASES) {
+                    error("Too many Resident Ubuntu UI leases")
+                }
+                residentUiLeases[normalized] = now
+            }
+            "detach" -> residentUiLeases.remove(normalized)
+            else -> error("Unsupported Resident UI lease event: $event")
+        }
+        publishUbuntuUsageState()
+    }
+
+    private fun currentUiClientCount(now: Long = System.currentTimeMillis()): Int {
+        pruneResidentUiLeases(now)
+        return activeUbuntuUiClients.get() + residentUiLeases.size
+    }
+
+    private fun pruneResidentUiLeases(now: Long) {
+        residentUiLeases.entries.removeIf { (_, heartbeatAt) ->
+            now - heartbeatAt > RESIDENT_UI_LEASE_TTL_MS
         }
     }
 
@@ -360,7 +393,7 @@ class TerminalManager private constructor(
     }
 
     private fun stopConflictFor(requester: UbuntuStopRequester): String? {
-        val uiClients = activeUbuntuUiClients.get()
+        val uiClients = currentUiClientCount()
         val hiddenOperations = activeHiddenUbuntuOperations.get() + if (isAiLimbsBootstrapActive()) 1 else 0
         val hasOtherParticipant =
             when (requester) {
@@ -378,7 +411,7 @@ class TerminalManager private constructor(
 
     private fun publishUbuntuUsageState() {
         _ubuntuUsageState.value = UbuntuUsageState(
-            userInterfaceClients = activeUbuntuUiClients.get(),
+            userInterfaceClients = currentUiClientCount(),
             hiddenAiOperations = activeHiddenUbuntuOperations.get()
         )
     }

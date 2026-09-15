@@ -3,11 +3,13 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.Pty
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.LocalTerminalUiController
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalRuntimeAssets
 
 internal class UbuntuSubsystem private constructor(
     val pageProvider: UbuntuSubsystemPageProvider,
     internal val terminal: TerminalManager,
+    internal val runtimeContext: android.content.Context,
     private val hostListenerSync: UbuntuSubsystemHostListenerSync,
     private val processCapability: UbuntuSubsystemProcessCapability,
 ) {
@@ -33,7 +35,7 @@ internal class UbuntuSubsystem private constructor(
             val hostListenerSync = UbuntuSubsystemHostListenerSync(host)
             val pageProvider = UbuntuSubsystemPageProvider(
                 host = host,
-                terminal = terminal,
+                terminal = LocalTerminalUiController(terminal),
                 nativeLibraryDir = nativeRuntime.directory,
             )
 
@@ -45,6 +47,7 @@ internal class UbuntuSubsystem private constructor(
             return UbuntuSubsystem(
                 pageProvider = pageProvider,
                 terminal = terminal,
+                runtimeContext = runtimeContext,
                 hostListenerSync = hostListenerSync,
                 processCapability = processCapability,
             )

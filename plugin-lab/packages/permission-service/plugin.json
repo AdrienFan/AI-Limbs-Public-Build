@@ -21,7 +21,8 @@
     "kind": "android_inprocess",
     "entry": "payload/plugin.apk",
     "config": {
-      "entry_class": "com.ai.limbs.plugins.permission.PermissionEntry"
+      "entry_class": "com.ai.limbs.plugins.permission.PermissionEntry",
+      "presentation_entry_class": "com.ai.limbs.plugins.permission.PermissionPresentationEntry"
     }
   },
   "dependencies": {
@@ -41,7 +42,8 @@
     ],
     "services": [],
     "providers": [
-      "plugin.system.permission_service.page"
+      "plugin.system.permission_service.page",
+      "plugin.system.permission_service.ui"
     ],
     "extensions": [
       {

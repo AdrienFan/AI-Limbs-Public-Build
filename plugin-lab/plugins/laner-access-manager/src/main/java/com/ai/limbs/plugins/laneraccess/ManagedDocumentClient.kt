@@ -1,6 +1,6 @@
 package com.ai.limbs.plugins.laneraccess
 
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import org.json.JSONObject
 
 internal enum class ManagedDocumentKind(
@@ -35,7 +35,7 @@ internal data class ManagedDocumentState(
 )
 
 internal class ManagedDocumentClient(
-    private val host: InProcessPluginHost
+    private val host: InProcessPluginUiHost
 ) {
     suspend fun load(kind: ManagedDocumentKind): ManagedDocumentState {
         val readState = invoke(kind, "read")

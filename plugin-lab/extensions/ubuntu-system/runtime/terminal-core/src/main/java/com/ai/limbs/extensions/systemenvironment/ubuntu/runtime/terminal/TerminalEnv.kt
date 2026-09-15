@@ -12,7 +12,6 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.Te
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdlePolicy
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimeState
-import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuStopRequester
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -28,7 +27,7 @@ class TerminalEnv(
     terminalEmulatorState: State<AnsiTerminalEmulator>,
     ubuntuRuntimeState: State<UbuntuRuntimeState>,
     ubuntuIdlePolicyState: State<UbuntuIdlePolicy>,
-    private val terminalManager: TerminalManager,
+    internal val terminalController: TerminalUiController,
     val forceShowSetup: Boolean = false
 ) {
     val sessions by sessionsState
@@ -49,35 +48,35 @@ class TerminalEnv(
         // 允许空输入（用于交互式场景发送回车）
         if (isCommand) {
             // 命令模式：也允许空命令（用于 SSH 等交互场景）
-            terminalManager.coroutineScope.launch {
-                terminalManager.sendCommand(inputText)
+            terminalController.coroutineScope.launch {
+                terminalController.sendCommand(inputText)
             }
             if (inputText == command) {
                 command = ""
             }
         } else {
             // 输入模式：允许空输入（例如 ssh-keygen 直接回车使用默认路径）
-            terminalManager.sendInput(inputText)
+            terminalController.sendInput(inputText)
         }
     }
 
     fun onSetup(commands: List<String>) {
         val fullCommand = commands.joinToString(separator = " && ")
-        terminalManager.coroutineScope.launch {
-            terminalManager.sendCommand(fullCommand)
+        terminalController.coroutineScope.launch {
+            terminalController.sendCommand(fullCommand)
         }
     }
 
-    fun onInterrupt() = terminalManager.sendInterruptSignal()
+    fun onInterrupt() = terminalController.sendInterruptSignal()
     fun onStartUbuntu() {
-        terminalManager.coroutineScope.launch {
-            terminalManager.startUbuntu(offerDevelopmentPrompt = true)
+        terminalController.coroutineScope.launch {
+            terminalController.startUbuntu(offerDevelopmentPrompt = true)
         }
     }
 
     fun onStopUbuntu(onBlocked: (String) -> Unit = {}) {
-        terminalManager.coroutineScope.launch {
-            val state = terminalManager.stopUbuntu(UbuntuStopRequester.USER_INTERFACE)
+        terminalController.coroutineScope.launch {
+            val state = terminalController.stopUbuntu()
             if (state.phase != UbuntuRuntimePhase.STOPPED) {
                 state.error?.takeIf { it.isNotBlank() }?.let { message ->
                     withContext(Dispatchers.Main) {
@@ -89,39 +88,40 @@ class TerminalEnv(
     }
 
     fun onUbuntuIdlePolicyChange(policy: UbuntuIdlePolicy) {
-        terminalManager.updateUbuntuIdlePolicy(policy)
+        terminalController.updateUbuntuIdlePolicy(policy)
     }
 
     fun onNewSession() {
         // 在terminalManager的协程作用域中异步创建会话
-        terminalManager.coroutineScope.launch {
+        terminalController.coroutineScope.launch {
             try {
-                terminalManager.createNewSession()
+                terminalController.createNewSession()
                 Log.d("TerminalEnv", "New session created successfully")
             } catch (e: Exception) {
                 Log.e("TerminalEnv", "Failed to create new session", e)
             }
         }
     }
-    fun onSwitchSession(sessionId: String) = terminalManager.switchToSession(sessionId)
-    fun onCloseSession(sessionId: String) = terminalManager.closeSession(sessionId)
+    fun onSwitchSession(sessionId: String) = terminalController.switchToSession(sessionId)
+    fun onCloseSession(sessionId: String) = terminalController.closeSession(sessionId)
 
-    fun saveScrollOffset(sessionId: String, scrollOffset: Float) = terminalManager.saveScrollOffset(sessionId, scrollOffset)
-    fun getScrollOffset(sessionId: String): Float = terminalManager.getScrollOffset(sessionId)
+    fun saveScrollOffset(sessionId: String, scrollOffset: Float) = terminalController.saveScrollOffset(sessionId, scrollOffset)
+    fun getScrollOffset(sessionId: String): Float = terminalController.getScrollOffset(sessionId)
 }
 
 @Composable
-fun rememberTerminalEnv(terminalManager: TerminalManager, forceShowSetup: Boolean = false): TerminalEnv {
-    val sessionsState = terminalManager.sessions.collectAsState(initial = emptyList())
-    val currentSessionIdState = terminalManager.currentSessionId.collectAsState(initial = null)
-    val currentDirectoryState = terminalManager.currentDirectory.collectAsState(initial = "$ ")
-    val isFullscreenState = terminalManager.isFullscreen.collectAsState(initial = false)
+fun rememberTerminalEnv(terminalController: TerminalUiController, forceShowSetup: Boolean = false): TerminalEnv {
+    val terminalState = terminalController.terminalState.collectAsState()
+    val sessionsState = androidx.compose.runtime.derivedStateOf { terminalState.value.sessions }
+    val currentSessionIdState = androidx.compose.runtime.derivedStateOf { terminalState.value.currentSessionId }
+    val currentDirectoryState = androidx.compose.runtime.derivedStateOf { terminalState.value.currentSession?.currentDirectory ?: "$ " }
+    val isFullscreenState = androidx.compose.runtime.derivedStateOf { terminalState.value.currentSession?.isFullscreen ?: false }
     val placeholderEmulator = remember { AnsiTerminalEmulator(screenWidth = 1, screenHeight = 1, historySize = 0) }
-    val terminalEmulatorState = terminalManager.terminalEmulator.collectAsState(initial = placeholderEmulator)
-    val ubuntuRuntimeState = terminalManager.ubuntuRuntimeState.collectAsState()
-    val ubuntuIdlePolicyState = terminalManager.ubuntuIdlePolicy.collectAsState()
+    val terminalEmulatorState = androidx.compose.runtime.derivedStateOf { terminalState.value.currentSession?.ansiParser ?: placeholderEmulator }
+    val ubuntuRuntimeState = terminalController.ubuntuRuntimeState.collectAsState()
+    val ubuntuIdlePolicyState = terminalController.ubuntuIdlePolicy.collectAsState()
 
-    return remember(terminalManager, forceShowSetup) {
+    return remember(terminalController, forceShowSetup) {
         TerminalEnv(
             sessionsState = sessionsState,
             currentSessionIdState = currentSessionIdState,
@@ -130,7 +130,7 @@ fun rememberTerminalEnv(terminalManager: TerminalManager, forceShowSetup: Boolea
             terminalEmulatorState = terminalEmulatorState,
             ubuntuRuntimeState = ubuntuRuntimeState,
             ubuntuIdlePolicyState = ubuntuIdlePolicyState,
-            terminalManager = terminalManager,
+            terminalController = terminalController,
             forceShowSetup = forceShowSetup
         )
     }

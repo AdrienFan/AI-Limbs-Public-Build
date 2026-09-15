@@ -1,6 +1,6 @@
 package com.ai.limbs.plugins.uieditor
 
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import org.json.JSONObject
 
 data class UiLayoutStatus(
@@ -10,7 +10,7 @@ data class UiLayoutStatus(
     val toolboxOrderCount: Int
 )
 
-internal class UiEditorClient(private val host: InProcessPluginHost) {
+internal class UiEditorClient(private val host: InProcessPluginUiHost) {
     suspend fun status(): UiLayoutStatus = parse(invoke("status"))
 
     suspend fun startToolboxLayout(): UiLayoutStatus = parse(

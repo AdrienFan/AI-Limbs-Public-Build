@@ -57,28 +57,34 @@ object SettingsTheme {
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun SettingsScreen(
-    onBack: () -> Unit
+    onBack: () -> Unit,
+    controller: TerminalSettingsController? = null
 ) {
     val context = LocalContext.current
-    val viewModel: SettingsViewModel = viewModel { SettingsViewModel(context) }
+    val settings: TerminalSettingsController = if (controller != null) {
+        controller
+    } else {
+        val localViewModel: SettingsViewModel = viewModel { SettingsViewModel(context) }
+        remember(localViewModel) { LocalTerminalSettingsController(localViewModel) }
+    }
 
-    val cacheSize by viewModel.cacheSize.collectAsState()
-    val updateStatus by viewModel.updateStatus.collectAsState()
-    val isCalculatingCache by viewModel.isCalculatingCache.collectAsState()
+    val cacheSize by settings.cacheSize.collectAsState()
+    val updateStatus by settings.updateStatus.collectAsState()
+    val isCalculatingCache by settings.isCalculatingCache.collectAsState()
 
     // FTP服务器相关状态
-    val ftpServerStatus by viewModel.ftpServerStatus.collectAsState()
-    val isFtpServerRunning by viewModel.isFtpServerRunning.collectAsState()
-    val isManagingFtpServer by viewModel.isManagingFtpServer.collectAsState()
+    val ftpServerStatus by settings.ftpServerStatus.collectAsState()
+    val isFtpServerRunning by settings.isFtpServerRunning.collectAsState()
+    val isManagingFtpServer by settings.isManagingFtpServer.collectAsState()
 
     // 更新相关状态
-    val hasUpdateAvailable by viewModel.hasUpdateAvailable.collectAsState()
+    val hasUpdateAvailable by settings.hasUpdateAvailable.collectAsState()
 
     // 源管理相关状态
-    val sourceConfigs by viewModel.sourceConfigs.collectAsState()
+    val sourceConfigs by settings.sourceConfigs.collectAsState()
     var showSourceDialogFor by remember { mutableStateOf<PackageManagerType?>(null) }
 
-    val virtualKeyboardLayout by viewModel.virtualKeyboardLayout.collectAsState()
+    val virtualKeyboardLayout by settings.virtualKeyboardLayout.collectAsState()
     var showVirtualKeyboardDialog by remember { mutableStateOf(false) }
 
     // 字体配置相关状态
@@ -93,19 +99,19 @@ fun SettingsScreen(
     var showTargetFpsDialog by remember { mutableStateOf(false) }
 
     // SSH配置相关状态（单一配置）
-    val sshConfig by viewModel.sshConfig.collectAsState()
-    val sshEnabled by viewModel.sshEnabled.collectAsState()
+    val sshConfig by settings.sshConfig.collectAsState()
+    val sshEnabled by settings.sshEnabled.collectAsState()
     var showSshToolsMissingDialog by remember { mutableStateOf(false) }
     var showOpensshMissingDialog by remember { mutableStateOf(false) }
 
     // 共享tmp设置状态
-    val sharedTmpEnabled by viewModel.sharedTmpEnabled.collectAsState()
+    val sharedTmpEnabled by settings.sharedTmpEnabled.collectAsState()
 
-    val chrootEnabled by viewModel.chrootEnabled.collectAsState()
-    val chrootMountStatus by viewModel.chrootMountStatus.collectAsState()
-    val chrootMountDetails by viewModel.chrootMountDetails.collectAsState()
-    val isInspectingChrootMounts by viewModel.isInspectingChrootMounts.collectAsState()
-    val isUnmountingChrootMounts by viewModel.isUnmountingChrootMounts.collectAsState()
+    val chrootEnabled by settings.chrootEnabled.collectAsState()
+    val chrootMountStatus by settings.chrootMountStatus.collectAsState()
+    val chrootMountDetails by settings.chrootMountDetails.collectAsState()
+    val isInspectingChrootMounts by settings.isInspectingChrootMounts.collectAsState()
+    val isUnmountingChrootMounts by settings.isUnmountingChrootMounts.collectAsState()
 
     var showClearCacheDialog by remember { mutableStateOf(false) }
 
@@ -116,12 +122,12 @@ fun SettingsScreen(
     }
 
     // 当 ViewModel 通知显示对话框时，更新本地状态
-    val showSshToolsMissingDialogState by viewModel.showSshToolsMissingDialog.collectAsState()
+    val showSshToolsMissingDialogState by settings.showSshToolsMissingDialog.collectAsState()
     LaunchedEffect(showSshToolsMissingDialogState) {
         showSshToolsMissingDialog = showSshToolsMissingDialogState
     }
 
-    val showOpensshMissingDialogState by viewModel.showOpensshMissingDialog.collectAsState()
+    val showOpensshMissingDialogState by settings.showOpensshMissingDialog.collectAsState()
     LaunchedEffect(showOpensshMissingDialogState) {
         showOpensshMissingDialog = showOpensshMissingDialogState
     }
@@ -178,7 +184,7 @@ fun SettingsScreen(
                     ) {
                         if (isFtpServerRunning) {
                             Button(
-                                onClick = { viewModel.stopFtpServer() },
+                                onClick = { settings.stopFtpServer() },
                                 enabled = !isManagingFtpServer,
                                 colors = ButtonDefaults.buttonColors(containerColor = SettingsTheme.errorColor),
                                 modifier = Modifier.weight(1f)
@@ -197,7 +203,7 @@ fun SettingsScreen(
                             }
                         } else {
                             Button(
-                                onClick = { viewModel.startFtpServer() },
+                                onClick = { settings.startFtpServer() },
                                 enabled = !isManagingFtpServer,
                                 colors = ButtonDefaults.buttonColors(containerColor = SettingsTheme.primaryColor),
                                 modifier = Modifier.weight(1f)
@@ -262,7 +268,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { viewModel.getCacheSize() },
+                            onClick = { settings.getCacheSize() },
                             enabled = !isCalculatingCache,
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.outlinedButtonColors(
@@ -330,7 +336,7 @@ fun SettingsScreen(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         OutlinedButton(
-                            onClick = { viewModel.openGitHubRepo() },
+                            onClick = { settings.openGitHubRepo() },
                             enabled = true,
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.outlinedButtonColors(
@@ -346,9 +352,9 @@ fun SettingsScreen(
                         Button(
                             onClick = {
                                 if (hasUpdateAvailable) {
-                                    viewModel.openGitHubReleases()
+                                    settings.openGitHubReleases()
                                 } else {
-                                    viewModel.checkForUpdates()
+                                    settings.checkForUpdates()
                                 }
                             },
                             enabled = true,
@@ -420,7 +426,7 @@ fun SettingsScreen(
                         Switch(
                             checked = sshEnabled,
                             onCheckedChange = { enabled ->
-                                viewModel.setSSHEnabled(enabled)
+                                settings.setSSHEnabled(enabled)
                             },
                             enabled = sshConfig != null,
                             colors = SwitchDefaults.colors(
@@ -448,10 +454,10 @@ fun SettingsScreen(
                     SSHConfigScreen(
                         config = sshConfig,
                         onSave = { config ->
-                            viewModel.saveSSHConfig(config)
+                            settings.saveSSHConfig(config)
                         },
                         onDelete = {
-                            viewModel.deleteSSHConfig()
+                            settings.deleteSSHConfig()
                         }
                     )
                 }
@@ -491,7 +497,7 @@ fun SettingsScreen(
                         Switch(
                             checked = sharedTmpEnabled,
                             onCheckedChange = { enabled ->
-                                viewModel.setSharedTmpEnabled(enabled)
+                                settings.setSharedTmpEnabled(enabled)
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = SettingsTheme.primaryColor,
@@ -543,7 +549,7 @@ fun SettingsScreen(
                         Switch(
                             checked = chrootEnabled,
                             onCheckedChange = { enabled ->
-                                viewModel.setChrootEnabled(enabled)
+                                settings.setChrootEnabled(enabled)
                             },
                             colors = SwitchDefaults.colors(
                                 checkedThumbColor = SettingsTheme.primaryColor,
@@ -573,7 +579,7 @@ fun SettingsScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
                             OutlinedButton(
-                                onClick = { viewModel.inspectChrootMounts() },
+                                onClick = { settings.inspectChrootMounts() },
                                 enabled = !isInspectingChrootMounts && !isUnmountingChrootMounts,
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.outlinedButtonColors(
@@ -595,7 +601,7 @@ fun SettingsScreen(
                             }
 
                             Button(
-                                onClick = { viewModel.unmountChrootMounts() },
+                                onClick = { settings.unmountChrootMounts() },
                                 enabled = !isInspectingChrootMounts && !isUnmountingChrootMounts,
                                 colors = ButtonDefaults.buttonColors(containerColor = SettingsTheme.errorColor),
                                 modifier = Modifier.weight(1f)
@@ -765,7 +771,7 @@ fun SettingsScreen(
 
     if (showSshToolsMissingDialog) {
         AlertDialog(
-            onDismissRequest = { viewModel.onSshToolsMissingDialogDismissed() },
+            onDismissRequest = { settings.onSshToolsMissingDialogDismissed() },
             title = {
                 Text(
                     text = context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.ssh_tools_missing_title),
@@ -782,7 +788,7 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.onSshToolsMissingDialogDismissed()
+                        settings.onSshToolsMissingDialogDismissed()
                         onBack() // 返回上一页，方便用户去环境配置
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SettingsTheme.primaryColor)
@@ -792,7 +798,7 @@ fun SettingsScreen(
             },
             dismissButton = {
                 OutlinedButton(
-                    onClick = { viewModel.onSshToolsMissingDialogDismissed() }
+                    onClick = { settings.onSshToolsMissingDialogDismissed() }
                 ) {
                     Text(context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.dialog_cancel))
                 }
@@ -803,7 +809,7 @@ fun SettingsScreen(
 
     if (showOpensshMissingDialog) {
         AlertDialog(
-            onDismissRequest = { viewModel.onOpensshMissingDialogDismissed() },
+            onDismissRequest = { settings.onOpensshMissingDialogDismissed() },
             title = {
                 Text(
                     text = context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.openssh_missing_title),
@@ -857,7 +863,7 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.onOpensshMissingDialogDismissed()
+                        settings.onOpensshMissingDialogDismissed()
                         onBack() // 返回上一页，方便用户去环境配置
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SettingsTheme.primaryColor)
@@ -867,7 +873,7 @@ fun SettingsScreen(
             },
             dismissButton = {
                 OutlinedButton(
-                    onClick = { viewModel.onOpensshMissingDialogDismissed() }
+                    onClick = { settings.onOpensshMissingDialogDismissed() }
                 ) {
                     Text(context.getString(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.cancel))
                 }
@@ -1133,7 +1139,7 @@ fun SettingsScreen(
             confirmButton = {
                 Button(
                     onClick = {
-                        viewModel.clearCache()
+                        settings.clearCache()
                         showClearCacheDialog = false
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SettingsTheme.errorColor)
@@ -1161,7 +1167,7 @@ fun SettingsScreen(
             initialLayout = virtualKeyboardLayout,
             onDismiss = { showVirtualKeyboardDialog = false },
             onConfirm = { layout ->
-                viewModel.saveVirtualKeyboardLayout(layout)
+                settings.saveVirtualKeyboardLayout(layout)
                 showVirtualKeyboardDialog = false
             }
         )
@@ -1177,14 +1183,14 @@ fun SettingsScreen(
                 config = config,
                 onDismiss = { showSourceDialogFor = null },
                 onSourceSelected = { sourceId ->
-                    viewModel.updateSource(pm, sourceId)
+                    settings.updateSource(pm, sourceId)
                     showSourceDialogFor = null
                 },
                 onAddCustomSource = { name, url, isHttps ->
-                    viewModel.addCustomSource(pm, name, url, isHttps)
+                    settings.addCustomSource(pm, name, url, isHttps)
                 },
                 onDeleteCustomSource = { sourceId ->
-                    viewModel.deleteCustomSource(pm, sourceId)
+                    settings.deleteCustomSource(pm, sourceId)
                 }
             )
         }

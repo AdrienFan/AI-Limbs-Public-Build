@@ -42,7 +42,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -50,7 +50,7 @@ import java.util.Locale
 import kotlinx.coroutines.launch
 
 internal class LanerAccessManagerPageProvider(
-    private val host: InProcessPluginHost
+    private val host: InProcessPluginUiHost
 ) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
         ComposeView(host.createPluginContext(context)).apply {
@@ -70,7 +70,7 @@ private data class RestoreRequest(
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun LanerAccessManagerPage(host: InProcessPluginHost) {
+private fun LanerAccessManagerPage(host: InProcessPluginUiHost) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val client = remember(host) { ManagedDocumentClient(host) }

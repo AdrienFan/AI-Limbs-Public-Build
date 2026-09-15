@@ -8,6 +8,11 @@ class PermissionEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
         require(host.pluginId == ID) { "Unexpected permission service owner" }
         val controller = PermissionController(host)
+        host.registerProvider(
+            "$ID.ui",
+            PermissionUiStateProvider(controller, host.scope),
+            mapOf("kind" to "ui_state")
+        )
         host.registerProvider("$ID.page", PermissionPage(host, controller),
             mapOf("kind" to "plugin_page", "screen_id" to "$ID.screen"))
         host.registerScreen(InProcessScreen(

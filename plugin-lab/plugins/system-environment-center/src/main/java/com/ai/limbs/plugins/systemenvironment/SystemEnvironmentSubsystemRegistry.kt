@@ -26,29 +26,47 @@ internal class SystemEnvironmentSubsystemRegistry {
     fun bind(binding: ChildExtensionBinding): AutoCloseable {
         val contribution = binding.payload as? SystemEnvironmentSubsystemContribution
             ?: error("System environment child published an incompatible contribution")
-        require(contribution.subsystemId == binding.extensionId) {
+        return bindPresentation(
+            extensionId = binding.extensionId,
+            version = binding.version,
+            displayName = binding.displayName,
+            contribution = contribution
+        )
+    }
+
+    /**
+     * Binds a Host-local presentation contribution. In Resident mode the object contains a real
+     * Android display adapter but runtime/capability members are RPC proxies back to Core.
+     */
+    fun bindPresentation(
+        extensionId: String,
+        version: String,
+        displayName: String,
+        contribution: SystemEnvironmentSubsystemContribution
+    ): AutoCloseable {
+        require(contribution.subsystemId == extensionId) {
             "Contribution subsystemId must match the attested extension identity"
         }
         require(contribution.capabilities.supportedCapabilityIds.isNotEmpty()) {
             "System environment child must publish at least one capability"
         }
         val mounted = MountedSystemEnvironment(
-            extensionId = binding.extensionId,
-            version = binding.version,
-            displayName = binding.displayName,
+            extensionId = extensionId,
+            version = version,
+            displayName = displayName,
             contribution = contribution
         )
-        check(mountedById.putIfAbsent(binding.extensionId, mounted) == null) {
-            "System environment child is already bound: ${binding.extensionId}"
+        check(mountedById.putIfAbsent(extensionId, mounted) == null) {
+            "System environment child is already bound: $extensionId"
         }
         publishMounted()
         if (mutableForegroundExtensionId.value == null) {
-            mutableForegroundExtensionId.value = binding.extensionId
+            mutableForegroundExtensionId.value = extensionId
         }
         return AutoCloseable {
-            if (mountedById.remove(binding.extensionId, mounted)) {
-                if (mutableForegroundExtensionId.value == binding.extensionId) {
-                    mutableForegroundExtensionId.value = null
+            if (mountedById.remove(extensionId, mounted)) {
+                if (mutableForegroundExtensionId.value == extensionId) {
+                    mutableForegroundExtensionId.value = mountedById.keys.sorted().firstOrNull()
                 }
                 publishMounted()
             }

@@ -52,7 +52,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiComponentIds
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentConfigurableDisplayAdapter
@@ -64,7 +64,7 @@ import kotlinx.coroutines.launch
 import org.json.JSONObject
 
 internal class SystemEnvironmentCenterPageProvider(
-    private val host: InProcessPluginHost,
+    private val host: InProcessPluginUiHost,
     private val registry: SystemEnvironmentSubsystemRegistry
 ) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
@@ -82,7 +82,7 @@ private enum class CenterRoute { DISPLAY, ENVIRONMENT_CONFIG }
 
 @Composable
 private fun SystemEnvironmentCenterPage(
-    host: InProcessPluginHost,
+    host: InProcessPluginUiHost,
     registry: SystemEnvironmentSubsystemRegistry,
     sharedUi: InProcessSharedUiHost
 ) {
@@ -116,7 +116,7 @@ private const val CHASSIS_PRESENTATION_CONTROL_VIEW_TAG =
 
 @Composable
 private fun SystemEnvironmentDisplayPage(
-    host: InProcessPluginHost,
+    host: InProcessPluginUiHost,
     current: MountedSystemEnvironment?,
     sharedUi: InProcessSharedUiHost,
     onOpenConfig: () -> Unit
@@ -159,7 +159,7 @@ private fun PageAccessorySuppressionLease(sharedUi: InProcessSharedUiHost) {
 
 @Composable
 private fun ActiveEnvironment(
-    host: InProcessPluginHost,
+    host: InProcessPluginUiHost,
     current: MountedSystemEnvironment,
     onOpenConfig: () -> Unit
 ) {
@@ -188,7 +188,7 @@ private fun ActiveEnvironment(
 
 private fun installChassisControlRebinder(
     root: View,
-    host: InProcessPluginHost,
+    host: InProcessPluginUiHost,
     current: MountedSystemEnvironment,
     onOpenConfig: () -> Unit
 ) {
@@ -219,7 +219,7 @@ private fun installChassisControlRebinder(
 
 private fun attachChassisControlsIfPresent(
     root: View,
-    host: InProcessPluginHost,
+    host: InProcessPluginUiHost,
     current: MountedSystemEnvironment,
     onOpenConfig: () -> Unit
 ) {
@@ -375,7 +375,7 @@ private fun ChassisRuntimeControls(
 
 @Composable
 private fun ChassisPresentationControl(
-    host: InProcessPluginHost,
+    host: InProcessPluginUiHost,
     current: MountedSystemEnvironment
 ) {
     val context = LocalContext.current
@@ -437,7 +437,7 @@ private fun PresentationDialogAction(label: String, action: () -> Unit) {
 }
 
 private suspend fun requestPresentationMode(
-    host: InProcessPluginHost,
+    host: InProcessPluginUiHost,
     context: Context,
     mode: String
 ) {

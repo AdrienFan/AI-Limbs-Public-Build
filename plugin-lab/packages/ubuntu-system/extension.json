@@ -19,7 +19,8 @@
     "kind": "android_child",
     "entry": "payload/extension.apk",
     "config": {
-      "entry_class": "com.ai.limbs.extensions.systemenvironment.ubuntu.UbuntuSystemExtensionEntry"
+      "entry_class": "com.ai.limbs.extensions.systemenvironment.ubuntu.UbuntuSystemExtensionEntry",
+      "presentation_entry_class": "com.ai.limbs.extensions.systemenvironment.ubuntu.UbuntuSystemPresentationEntry"
     }
   },
   "permissions": {

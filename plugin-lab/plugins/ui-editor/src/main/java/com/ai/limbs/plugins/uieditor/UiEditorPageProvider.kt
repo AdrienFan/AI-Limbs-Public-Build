@@ -37,12 +37,12 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import kotlinx.coroutines.launch
 
 internal class UiEditorPageProvider(
-    private val host: InProcessPluginHost
+    private val host: InProcessPluginUiHost
 ) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
         ComposeView(host.createPluginContext(context)).apply {
@@ -56,7 +56,7 @@ internal class UiEditorPageProvider(
 }
 
 @Composable
-private fun UiEditorPage(host: InProcessPluginHost) {
+private fun UiEditorPage(host: InProcessPluginUiHost) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val client = remember(host) { UiEditorClient(host) }

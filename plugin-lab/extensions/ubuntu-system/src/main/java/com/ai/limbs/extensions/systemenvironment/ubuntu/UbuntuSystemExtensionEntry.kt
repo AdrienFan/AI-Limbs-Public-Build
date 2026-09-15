@@ -5,6 +5,7 @@ import com.ai.limbs.plugin.runtime.ChildAiIngressDiscovery
 import com.ai.limbs.plugin.runtime.ChildExtensionEntry
 import com.ai.limbs.plugin.runtime.ChildExtensionHandle
 import com.ai.limbs.plugin.runtime.ChildExtensionHost
+import com.ai.limbs.plugin.runtime.ChildPresentationCommandHandler
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentCapabilityEndpoint
 import com.ai.limbs.systemenvironment.contract.SystemEnvironmentCapabilityIds
@@ -36,6 +37,9 @@ class UbuntuSystemExtensionEntry : ChildExtensionEntry {
         RuntimeLog.bind(host.logger)
         val adapter = UbuntuChildHostAdapter(host)
         val subsystem = UbuntuSubsystem.mount(adapter)
+        val presentationCommands = host.registerPresentationCommandHandler(
+            UbuntuPresentationCommandHandler(subsystem.runtimeContext, subsystem.terminal)
+        )
         val capabilitySpecs = adapter.capabilitySpecs()
         val supportedCapabilityNames = capabilitySpecs.values.flatMapTo(linkedSetOf()) { spec ->
             listOf(spec.id) + spec.invokeAliases
@@ -87,6 +91,7 @@ class UbuntuSystemExtensionEntry : ChildExtensionEntry {
         )
 
         return ChildExtensionHandle {
+            presentationCommands.close()
             subsystem.close()
             RuntimeLog.bind(null)
         }

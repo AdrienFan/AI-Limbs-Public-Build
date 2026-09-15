@@ -27,8 +27,6 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -42,7 +40,6 @@ import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalEnv
-import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.SetupScreen
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.ui.TerminalHome
@@ -65,9 +62,7 @@ fun TerminalScreen(
     val coroutineScope = rememberCoroutineScope()
     var startDestination by remember { mutableStateOf<String?>(null) }
 
-    val manager = remember { TerminalManager.getInstance(context) }
-    val terminalState by manager.terminalState.collectAsState()
-    val isTerminalReady = terminalState.currentSession?.isInitializing == false
+    val terminalController = env.terminalController
 
     // 更新检查器
     val updateChecker = remember { UpdateChecker(context) }
@@ -89,7 +84,8 @@ fun TerminalScreen(
     LaunchedEffect(Unit) {
         startDestination =
             if (
-                env.forceShowSetup &&
+                terminalController.localBusinessSettingsAvailable &&
+                    env.forceShowSetup &&
                     env.ubuntuRuntimeState.phase == UbuntuRuntimePhase.RUNNING
             ) {
                 TerminalRoutes.SETUP_ROUTE
@@ -121,31 +117,39 @@ fun TerminalScreen(
         }
 
         composable(TerminalRoutes.SETUP_ROUTE) {
-            SetupScreen(
-                onBack = {
-                    val sharedPreferences = context.getSharedPreferences("terminal_prefs", Context.MODE_PRIVATE)
-                    sharedPreferences.edit().putBoolean("is_first_launch", false).apply()
-                    navController.navigate(TerminalRoutes.TERMINAL_HOME_ROUTE) {
-                        popUpTo(TerminalRoutes.SETUP_ROUTE) { inclusive = true }
+            if (terminalController.localBusinessSettingsAvailable) {
+                SetupScreen(
+                    onBack = {
+                        val sharedPreferences = context.getSharedPreferences("terminal_prefs", Context.MODE_PRIVATE)
+                        sharedPreferences.edit().putBoolean("is_first_launch", false).apply()
+                        navController.navigate(TerminalRoutes.TERMINAL_HOME_ROUTE) {
+                            popUpTo(TerminalRoutes.SETUP_ROUTE) { inclusive = true }
+                        }
+                    },
+                    onSetup = { commands ->
+                        val sharedPreferences = context.getSharedPreferences("terminal_prefs", Context.MODE_PRIVATE)
+                        sharedPreferences.edit().putBoolean("is_first_launch", false).apply()
+                        env.onSetup(commands)
+                        navController.navigate(TerminalRoutes.TERMINAL_HOME_ROUTE) {
+                            popUpTo(TerminalRoutes.SETUP_ROUTE) { inclusive = true }
+                        }
                     }
-                },
-                onSetup = { commands ->
-                    val sharedPreferences = context.getSharedPreferences("terminal_prefs", Context.MODE_PRIVATE)
-                    sharedPreferences.edit().putBoolean("is_first_launch", false).apply()
-                    env.onSetup(commands)
-                    navController.navigate(TerminalRoutes.TERMINAL_HOME_ROUTE) {
-                        popUpTo(TerminalRoutes.SETUP_ROUTE) { inclusive = true }
-                    }
-                }
-            )
+                )
+            } else {
+                ResidentBusinessSettingsUnavailable()
+            }
         }
 
         composable(TerminalRoutes.SETTINGS_ROUTE) {
-            SettingsScreen(
-                onBack = {
-                    navController.popBackStack()
-                }
-            )
+            if (terminalController.localBusinessSettingsAvailable) {
+                SettingsScreen(
+                    onBack = {
+                        navController.popBackStack()
+                    }
+                )
+            } else {
+                ResidentBusinessSettingsUnavailable()
+            }
         }
     }
 
@@ -160,12 +164,24 @@ fun TerminalScreen(
 
     LaunchedEffect(env.forceShowSetup, env.ubuntuRuntimeState.phase) {
         if (
-            env.forceShowSetup &&
+            terminalController.localBusinessSettingsAvailable &&
+                env.forceShowSetup &&
                 env.ubuntuRuntimeState.phase == UbuntuRuntimePhase.RUNNING &&
                 navController.currentBackStackEntry?.destination?.route != TerminalRoutes.SETUP_ROUTE
         ) {
             navController.navigate(TerminalRoutes.SETUP_ROUTE)
         }
+    }
+}
+
+
+@Composable
+private fun ResidentBusinessSettingsUnavailable() {
+    Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Text(
+            text = "Resident 模式下 Ubuntu 业务设置由 Core 独占；Host 不启动本地 Setup/Settings 业务运行时。",
+            modifier = Modifier.padding(24.dp)
+        )
     }
 }
 

@@ -1,6 +1,6 @@
 package com.ai.limbs.plugins.logcenter
 
-import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import org.json.JSONObject
 
 data class LogSource(
@@ -24,7 +24,7 @@ data class LogReadResult(
     val characters: Int
 )
 
-internal class LogCenterClient(private val host: InProcessPluginHost) {
+internal class LogCenterClient(private val host: InProcessPluginUiHost) {
     suspend fun sources(): List<LogSource> {
         val root = invoke("sources")
         val array = root.getJSONArray("sources")
