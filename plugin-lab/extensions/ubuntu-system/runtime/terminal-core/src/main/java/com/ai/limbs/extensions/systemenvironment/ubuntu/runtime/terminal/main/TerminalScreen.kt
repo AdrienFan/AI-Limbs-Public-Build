@@ -155,10 +155,10 @@ fun TerminalScreen(
 
     // 当确定了目标页面后，导航到相应页面
     LaunchedEffect(startDestination) {
-        if (startDestination != null && navController.currentBackStackEntry?.destination?.route != startDestination) {
-            navController.navigate(startDestination!!) {
-                popUpTo(TerminalRoutes.TERMINAL_HOME_ROUTE) { inclusive = true }
-            }
+        val destination = startDestination ?: return@LaunchedEffect
+        if (navController.currentBackStackEntry?.destination?.route != destination) {
+            navController.popBackStack(TerminalRoutes.TERMINAL_HOME_ROUTE, inclusive = true)
+            navController.navigate(destination)
         }
     }
 
