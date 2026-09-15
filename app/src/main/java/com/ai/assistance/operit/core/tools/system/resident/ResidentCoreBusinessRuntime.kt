@@ -36,6 +36,7 @@ internal enum class ResidentCoreBusinessPhase {
     STARTING_KERNEL,
     CLAIMING_BACKEND,
     STARTING_BRIDGE,
+    STARTING_PLUGIN_SERVICES,
     RUNNING,
     CANCELLED,
     STOPPED,
@@ -61,6 +62,8 @@ internal class ResidentCoreBusinessRuntime {
     private var pluginKernelStarted = false
     private var bridgeIngressPrepared = false
     private var bridgePluginMounted = false
+    private var pluginServicesPrepared = false
+    private var ubuntuControlReady = false
     private var businessAttached = false
     @Volatile private var stopRequested = false
 
@@ -224,12 +227,28 @@ internal class ResidentCoreBusinessRuntime {
             check(bridgeKernel.getBoolean("resident_bridge_ingress_prepared")) {
                 "Resident Bridge ingress did not reach a prepared state: $bridgeKernel"
             }
+            check(!stopRequested) { "Business takeover cancelled before plugin service restore" }
             synchronized(lock) {
                 bridgeIngressPrepared = true
                 bridgePluginMounted = bridgeMounted
+                businessPhase = ResidentCoreBusinessPhase.STARTING_PLUGIN_SERVICES
             }
-            // Publish owned only after Core policy/Dispatcher and the configured Bridge transport
-            // plane are ready. A disabled/uninstalled Bridge is explicit configuration, not fallback.
+            val pluginReport = runBlocking(Dispatchers.IO) {
+                PluginPlatformKernel.startResidentPluginServices()
+            }
+            val serviceKernel = PluginPlatformKernel.lifecycleSnapshot()
+            check(serviceKernel.getBoolean("resident_plugin_services_prepared") &&
+                serviceKernel.getBoolean("business_runtime_restored") &&
+                serviceKernel.getBoolean("resident_ubuntu_control_ready")) {
+                "Resident plugin services / Ubuntu control did not become Core-owned: kernel=$serviceKernel report=$pluginReport"
+            }
+            check(!stopRequested) { "Business takeover cancelled before ownership publication" }
+            synchronized(lock) {
+                pluginServicesPrepared = true
+                ubuntuControlReady = true
+            }
+            // Publish owned only after policy/Dispatcher, Bridge, ordinary plugin services, child
+            // capabilities and configured Ubuntu control have all moved into the Core owner.
             ResidentBusinessTakeoverFence.markOwned(context, coreSession)
             synchronized(lock) {
                 businessAttached = true
@@ -252,6 +271,8 @@ internal class ResidentCoreBusinessRuntime {
                 pluginKernelStarted = PluginPlatformKernel.isStarted
                 bridgeIngressPrepared = false
                 bridgePluginMounted = false
+                pluginServicesPrepared = false
+                ubuntuControlReady = false
                 businessAttached = false
                 businessPhase = ResidentCoreBusinessPhase.FAILED
                 businessError = error.toString().take(1024)
@@ -280,6 +301,8 @@ internal class ResidentCoreBusinessRuntime {
                 pluginKernelStarted = false
                 bridgeIngressPrepared = false
                 bridgePluginMounted = false
+                pluginServicesPrepared = false
+                ubuntuControlReady = false
                 businessAttached = false
                 if (businessPhase != ResidentCoreBusinessPhase.CANCELLED &&
                     businessPhase != ResidentCoreBusinessPhase.FAILED) {
@@ -351,6 +374,8 @@ internal class ResidentCoreBusinessRuntime {
             .put("plugin_kernel_started", pluginKernelStarted)
             .put("bridge_ingress_prepared", bridgeIngressPrepared)
             .put("bridge_plugin_mounted", bridgePluginMounted)
+            .put("plugin_services_prepared", pluginServicesPrepared)
+            .put("ubuntu_control_ready", ubuntuControlReady)
             .put("plugin_kernel", if (PluginPlatformKernel.isInitialized)
                 PluginPlatformKernel.lifecycleSnapshot() else JSONObject.NULL)
             .put("last_error", lastError ?: JSONObject.NULL)

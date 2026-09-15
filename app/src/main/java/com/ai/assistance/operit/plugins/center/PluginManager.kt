@@ -617,6 +617,10 @@ internal class PluginManager(
                     mountLocked(pluginId, version)
                 } catch (error: Throwable) {
                     if (error is CancellationException) throw error
+                    if (error is PluginInstallException && error.code == "RUNTIME_MOUNT_CLEANUP_FAILED") {
+                        AppLogger.e(TAG, "Plugin restore left unreleased runtime resources: $pluginId $version", error)
+                        throw error
+                    }
                     AppLogger.e(TAG, "Plugin restore failed: $pluginId $version", error)
                 }
                 pending.remove(pluginId)
@@ -831,16 +835,30 @@ internal class PluginManager(
         } catch (error: Throwable) {
             activeMounts.remove(pluginId)
             mountScope.revokeAll()
-            if (error is CancellationException) throw error
+            val revokeFailure = runCatching { mountScope.requireCleanRevocation() }.exceptionOrNull()
+            if (error is CancellationException) {
+                revokeFailure?.let(error::addSuppressed)
+                throw error
+            }
+            val reportedError = when {
+                revokeFailure == null -> error
+                error is PluginInstallException && error.code == "RUNTIME_MOUNT_CLEANUP_FAILED" ->
+                    error.also { it.addSuppressed(revokeFailure) }
+                else -> PluginInstallException(
+                    "RUNTIME_MOUNT_CLEANUP_FAILED",
+                    "Plugin $pluginId failed to mount and owned resources did not revoke cleanly",
+                    error
+                ).also { it.addSuppressed(revokeFailure) }
+            }
             val latest = stateRepository.read(pluginId) ?: state
             stateRepository.write(
                 latest.copy(
                     lastState = PluginLifecycleState.FAILED,
-                    lastError = error.message,
+                    lastError = reportedError.message,
                     updatedAtEpochMs = System.currentTimeMillis()
                 )
             )
-            throw error
+            throw reportedError
         }
     }
     private suspend fun unmountLocked(
@@ -913,6 +931,14 @@ internal class PluginManager(
             }
         }
         for (dependency in manifest.dependencies.services) {
+            if (runtimeRole == PluginRuntimeRole.BUSINESS &&
+                dependency.serviceId in BUSINESS_OPTIONAL_PRESENTATION_SERVICES) {
+                // These services are implemented by the Host UI system plugin. A BUSINESS parent
+                // may declare them for its presentation half while treating them as optional at
+                // runtime (System Environment Center does exactly that). They must not prevent its
+                // non-UI service/child point from mounting in Resident Core.
+                continue
+            }
             val service = contributions.find(PluginContributionKind.SERVICE, dependency.serviceId)
                 ?: return "Required service is not available: ${dependency.serviceId}"
             dependency.minApi?.let { requiredApi ->
@@ -1072,5 +1098,8 @@ internal class PluginManager(
 
     companion object {
         private const val TAG = "PluginCenter"
+        private val BUSINESS_OPTIONAL_PRESENTATION_SERVICES = setOf(
+            "system.plugin_center.ui_accessories"
+        )
     }
 }

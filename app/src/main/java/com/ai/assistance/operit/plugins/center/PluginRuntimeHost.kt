@@ -111,17 +111,30 @@ internal class PluginRuntimeHost(
             scope.seal()
             return HostedPluginRuntime(kind = kind, handle = handle, scope = scope)
         } catch (error: TimeoutCancellationException) {
-            cleanupFailedMount(handle, scope)
-            throw PluginInstallException(
-                "RUNTIME_MOUNT_TIMEOUT",
-                "Runtime '$kind' did not mount within ${timeouts.mountTimeoutMs}ms",
+            val cleanupFailure = cleanupFailedMount(handle, scope)
+            val failure = PluginInstallException(
+                if (cleanupFailure == null) "RUNTIME_MOUNT_TIMEOUT" else "RUNTIME_MOUNT_CLEANUP_FAILED",
+                if (cleanupFailure == null) {
+                    "Runtime '$kind' did not mount within ${timeouts.mountTimeoutMs}ms"
+                } else {
+                    "Runtime '$kind' timed out and its partial mount did not revoke cleanly"
+                },
                 error
             )
+            cleanupFailure?.let(failure::addSuppressed)
+            throw failure
         } catch (error: CancellationException) {
-            cleanupFailedMount(handle, scope)
+            cleanupFailedMount(handle, scope)?.let(error::addSuppressed)
             throw error
         } catch (error: Throwable) {
-            cleanupFailedMount(handle, scope)
+            val cleanupFailure = cleanupFailedMount(handle, scope)
+            if (cleanupFailure != null) {
+                throw PluginInstallException(
+                    "RUNTIME_MOUNT_CLEANUP_FAILED",
+                    "Runtime '$kind' mount failed and its partial resources did not revoke cleanly",
+                    error
+                ).also { it.addSuppressed(cleanupFailure) }
+            }
             if (error is PluginInstallException) throw error
             throw PluginInstallException(
                 "RUNTIME_MOUNT_FAILED",
@@ -159,11 +172,16 @@ internal class PluginRuntimeHost(
     private suspend fun cleanupFailedMount(
         handle: PluginRuntimeHandle?,
         scope: PluginMountScope
-    ) {
+    ): Throwable? = withContext(NonCancellable) {
+        val failures = mutableListOf<Throwable>()
         scope.revokeAll()
-        if (handle == null) return
-        withContext(NonCancellable) {
+        runCatching { scope.requireCleanRevocation() }.exceptionOrNull()?.let(failures::add)
+        if (handle != null) {
             runCatching { withTimeout(timeouts.stopTimeoutMs) { handle.stop() } }
+                .exceptionOrNull()?.let(failures::add)
         }
+        if (failures.isEmpty()) null else IllegalStateException(
+            "Failed mount left ${failures.size} runtime resource cleanup error(s)"
+        ).also { failure -> failures.forEach(failure::addSuppressed) }
     }
 }

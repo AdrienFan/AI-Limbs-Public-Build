@@ -22,7 +22,7 @@ build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 �
 
 2026-09-15：继续编写后续迁移，不再把 build25 安装验证作为源码工作的前置门槛。本轮暂不编译。候选分支已包含 ac9373b 的 Android 16 Socket 初始化顺序与 Guardian 唯一实例锁修复，后续改动必须保留。
 
-当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md)、[Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md)、[Host attach-only / UI Shell](07-host-ui-shell.md)、[Core-owned Interaction Cycle / Policy / Dispatcher](08-core-policy-dispatcher.md) 和 [Core-owned Bridge ingress](09-core-bridge-ingress.md)。Core 已具备独立 Looper、owner-only BUSINESS Kernel、唯一门禁 / Policy / Dispatcher，以及针对 canonical Bridge parent + `ai_limbs.bridge.provider@4` children 的定向恢复链；Host 重启只进入 UI_PROXY，不再是 Bridge remote ingress 的必经节点。普通插件 / Ubuntu、跨进程 UI 状态事件代理及 Resident ON/OFF 编排仍未接通。不能把“Bridge 数据面已迁入 Core”误记为完整插件运行时、UI proxy 或锁屏持续工作已验收。
+当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md)、[Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md)、[Host attach-only / UI Shell](07-host-ui-shell.md)、[Core-owned Interaction Cycle / Policy / Dispatcher](08-core-policy-dispatcher.md)、[Core-owned Bridge ingress](09-core-bridge-ingress.md) 和 [Core-owned plugin services / Ubuntu](10-core-plugin-services.md)。Core 已具备独立 Looper、owner-only BUSINESS Kernel、唯一门禁 / Policy / Dispatcher、Bridge 数据面，以及普通 Parent/Child plugin、Capability Registry 和 enabled Ubuntu 控制面的源码级 Core owner 链；Host 重启只进入 UI_PROXY，不恢复第二套插件业务。跨进程 UI 状态事件 / Android component proxy、Resident ON/OFF 编排及 CPU/网络持续工作仍未接通或验收。不能把“插件与 Ubuntu 业务所有权已迁入 Core”误记为 UI proxy 或锁屏持续工作已经完成。
 
 ## 迁移不变量（Step 1 冻结边界）
 
@@ -52,4 +52,9 @@ Interaction Cycle、Access Gate receipts、WORK / NON_WORK、Policy Engine 与 D
 
 ## Step 7 当前边界
 
-Bridge 数据面现在按定向 BUSINESS restore 接入 Core：只恢复 `plugin.system.bridge` 与它现有 `ai_limbs.bridge.provider@4` point 下的 enabled child Provider；RDC、TRIGGERcmd、SentinelX 以及未来同合约 Provider 都继续只承担 transport，并沿原 `BridgeRemoteIngress -> core.bridge.remote.invoke` 进入 Core-owned Interaction Cycle / Policy / Dispatcher。Provider ABI 没有改变，transport `scope_id` 仍不是 Interaction Cycle。BUSINESS runtime 会抑制 Bridge/child 的 Android UI 与 Host notification presentation，避免为了 Bridge 后台调用重新拉起 Host。普通插件 / Ubuntu、真正 UI proxy、Resident ON/OFF 与 CPU / 网络持续运行仍属后续步骤。
+Bridge 数据面现在按定向 BUSINESS restore 接入 Core：只恢复 `plugin.system.bridge` 与它现有 `ai_limbs.bridge.provider@4` point 下的 enabled child Provider；RDC、TRIGGERcmd、SentinelX 以及未来同合约 Provider 都继续只承担 transport，并沿原 `BridgeRemoteIngress -> core.bridge.remote.invoke` 进入 Core-owned Interaction Cycle / Policy / Dispatcher。Provider ABI 没有改变，transport `scope_id` 仍不是 Interaction Cycle。BUSINESS runtime 会抑制 Bridge/child 的 Android UI 与 Host notification presentation，避免为了 Bridge 后台调用重新拉起 Host。Step 8 随后把普通插件 / Ubuntu 的业务生命周期接入同一个 Core owner；真正 UI proxy、Resident ON/OFF 与 CPU / 网络持续运行仍属后续步骤。
+
+
+## Step 8 当前边界
+
+普通 enabled HOT Parent Plugin、其 active point 下的 enabled Child Extension、统一 Capability Registry，以及 canonical Ubuntu 的 runtime / PTY / command/process/filesystem 控制面现在进入 Resident Core 的 BUSINESS restore。Core 只在这些业务状态准备完成后发布 `owned`；enabled Ubuntu 必须 ACTIVE 且关键 capability 存在。BUSINESS 下 screen/home tile/plugin_page provider/child UI contribution 继续属于 presentation 边界，不在 Core 中发布；Ubuntu 所需 archive application Context 被允许，但不引入 Activity/window token。Parent/Child stop、mount cleanup、scope join 或资源撤销失败都不能被视为 clean retirement，旧 owner 保持 pinned。Host 页面状态/事件与 Android component proxy、Resident ON/OFF、LEV/freezer/CPU/网络持续工作仍属后续阶段。

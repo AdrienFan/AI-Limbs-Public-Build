@@ -18,6 +18,8 @@ import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
 import com.ai.limbs.plugin.runtime.InProcessProviderDirectory
+import com.ai.limbs.plugin.runtime.InProcessPageProvider
+import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import com.ai.limbs.plugin.runtime.InProcessScreen
 import com.ai.limbs.plugin.runtime.InProcessServiceBinding
 import com.ai.limbs.plugin.runtime.InProcessServiceDirectory
@@ -352,6 +354,13 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerProvider(id: String, payload: Any, metadata: Map<String, String>) {
+            if (context.runtimeRole == PluginRuntimeRole.BUSINESS &&
+                (payload is InProcessPageProvider || payload is InProcessUiStateProvider)) {
+                // Stable SDK type is the authority here, not an open-ended metadata string:
+                // PageProvider and UiStateProvider are presentation channels. Core mounts the
+                // plugin's business entry but Host/UI proxy owns their rendering and event surface.
+                return
+            }
             context.payloadContext.registrar.registerProvider(id, payload, metadata)
         }
 

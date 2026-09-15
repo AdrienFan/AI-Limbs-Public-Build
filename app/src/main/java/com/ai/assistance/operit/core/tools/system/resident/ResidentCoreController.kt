@@ -183,11 +183,17 @@ internal object ResidentCoreController {
         check(state.getBoolean("bridge_ingress_prepared") == runtime.getBoolean("bridge_ingress_prepared")) {
             "Core Bridge ingress snapshot is inconsistent"
         }
+        check(state.getBoolean("plugin_services_prepared") == runtime.getBoolean("plugin_services_prepared") &&
+            state.getBoolean("ubuntu_control_ready") == runtime.getBoolean("ubuntu_control_ready")) {
+            "Core plugin service / Ubuntu ownership snapshot is inconsistent"
+        }
         if (state.getBoolean("business_attached")) {
             check(state.getString("runtime_owner") == "resident_core" &&
                 runtime.getBoolean("plugin_kernel_started") &&
-                runtime.getBoolean("bridge_ingress_prepared")) {
-                "Core claims business ownership before Plugin Kernel / Bridge ingress are prepared"
+                runtime.getBoolean("bridge_ingress_prepared") &&
+                runtime.getBoolean("plugin_services_prepared") &&
+                runtime.getBoolean("ubuntu_control_ready")) {
+                "Core claims business ownership before Kernel / Bridge / plugin services / Ubuntu are prepared"
             }
             val dispatcher = state.getJSONObject("dispatcher")
             check(dispatcher.getBoolean("running") &&
@@ -201,8 +207,11 @@ internal object ResidentCoreController {
                 "Core Dispatcher does not own the policy plane: $policyRuntime"
             }
         }
-        check(!state.getBoolean("plugins_migrated") && !state.getBoolean("continuous_work")) {
-            "Core must not claim later-stage plugin migration or continuous work yet"
+        check(state.getBoolean("plugins_migrated") == runtime.getBoolean("plugin_services_prepared")) {
+            "Core plugin migration marker is inconsistent with the business runtime"
+        }
+        check(!state.getBoolean("continuous_work")) {
+            "Core must not claim continuous work before the power/freezer stage is validated"
         }
     }
 

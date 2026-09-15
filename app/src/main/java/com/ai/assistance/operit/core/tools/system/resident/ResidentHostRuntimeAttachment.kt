@@ -136,7 +136,8 @@ internal object ResidentHostRuntimeResolver {
             "acquiring_owner",
             "starting_kernel",
             "claiming_backend",
-            "starting_bridge"
+            "starting_bridge",
+            "starting_plugin_services"
         )
         if (handoffPending || fence != null) {
             val validPending = buildMatches &&

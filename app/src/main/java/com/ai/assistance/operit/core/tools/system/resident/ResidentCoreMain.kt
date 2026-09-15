@@ -69,7 +69,8 @@ object ResidentCoreMain {
                         businessPhase == "acquiring_owner" ||
                         businessPhase == "starting_kernel" ||
                         businessPhase == "claiming_backend" ||
-                        businessPhase == "starting_bridge" -> "handoff_pending"
+                        businessPhase == "starting_bridge" ||
+                        businessPhase == "starting_plugin_services" -> "handoff_pending"
                     businessPhase == "failed" -> "unavailable"
                     else -> "android_host"
                 }
@@ -94,7 +95,9 @@ object ResidentCoreMain {
                     .put("plugin_kernel_started", runtimeState.getBoolean("plugin_kernel_started"))
                     .put("bridge_ingress_prepared", runtimeState.getBoolean("bridge_ingress_prepared"))
                     .put("bridge_plugin_mounted", runtimeState.getBoolean("bridge_plugin_mounted"))
-                    .put("plugins_migrated", false)
+                    .put("plugin_services_prepared", runtimeState.getBoolean("plugin_services_prepared"))
+                    .put("ubuntu_control_ready", runtimeState.getBoolean("ubuntu_control_ready"))
+                    .put("plugins_migrated", runtimeState.getBoolean("plugin_services_prepared"))
                     .put("continuous_work", false)
                     .put("core_runtime", runtimeState)
                     .put("backend", backend.snapshot())

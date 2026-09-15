@@ -47,7 +47,7 @@ BUSINESS runtime 对 Bridge 运行时使用以下约束：
 
 - `registerHomeTile` / `registerScreen` 在 Core 中只被抑制，不创建 Android UI surface；
 - child `publishUiContribution` 在 Core 中变为 presentation no-op；
-- child `createExtensionContext` 在 BUSINESS 下被禁止，防止 View / resource UI Context 偷渡进 Core；
+- Step 7 当时禁止 child `createExtensionContext`；Step 8 为 Ubuntu 等业务 runtime 将其收窄为“允许无 Activity/window token 的 archive application Context”，UI publication 仍被抑制；
 - `host.notification@1` 在 BUSINESS 下提供 inert contract，Bridge 可以保持原业务 ABI，但不会因为发布通知而启动 Android Host `AIForegroundService`。
 
 这些只是 presentation 隔离；Bridge manager、Provider contribution、网络 transport 和 remote ingress 仍留在 Core 业务面。真正 Core -> Host 的 UI 状态/事件同步仍属于后续 UI Proxy 阶段。

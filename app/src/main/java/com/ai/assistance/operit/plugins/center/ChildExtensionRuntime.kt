@@ -100,7 +100,9 @@ private data class LoadedChildRuntime(
 )
 
 private data class ActiveChild(
-    val handle: ChildExtensionHandle,
+    // Non-null for a fully mounted child. A failed partial mount may still own capability /
+    // discovery / binding / coroutine resources and is deliberately pinned here until cleanup.
+    val handle: ChildExtensionHandle?,
     val bindingHandle: AutoCloseable?,
     val discoveryHandle: AutoCloseable?,
     val capabilityHandles: List<AutoCloseable>,
@@ -417,6 +419,36 @@ internal class ChildExtensionRuntime(
         }
     }
 
+    /** Wait until every enabled child whose parent point is live has either mounted or failed. */
+    internal suspend fun awaitBusinessChildrenReady(timeoutMs: Long = 10_000L): JSONObject {
+        withTimeout(timeoutMs) {
+            mutableSnapshots.first { snapshots ->
+                val expected = snapshots.filter { it.enabled && points.containsKey(it.target.point) }
+                val terminalFailure = expected.firstOrNull {
+                    it.lifecycle == ChildExtensionLifecycle.FAILED ||
+                        it.lifecycle == ChildExtensionLifecycle.BLOCKED
+                }
+                check(terminalFailure == null) {
+                    "Enabled child ${terminalFailure?.extensionId} cannot become active on ${terminalFailure?.target?.point}: ${terminalFailure?.lastError}"
+                }
+                expected.all { it.lifecycle == ChildExtensionLifecycle.ACTIVE }
+            }
+        }
+        return businessRuntimeSnapshot()
+    }
+
+    internal fun businessRuntimeSnapshot(): JSONObject {
+        val snapshots = mutableSnapshots.value
+        val active = snapshots.filter { it.lifecycle == ChildExtensionLifecycle.ACTIVE }
+        val enabled = snapshots.filter { it.enabled }
+        return JSONObject()
+            .put("active_count", active.size)
+            .put("enabled_count", enabled.size)
+            .put("active_ids", JSONArray(active.map { it.extensionId }))
+            .put("failed_ids", JSONArray(enabled.filter { it.lifecycle == ChildExtensionLifecycle.FAILED }.map { it.extensionId }))
+            .put("blocked_ids", JSONArray(enabled.filter { it.lifecycle == ChildExtensionLifecycle.BLOCKED }.map { it.extensionId }))
+    }
+
     private suspend fun tryActivate(record: StoredExtension) {
         lifecycleLock(record.manifest.extensionId).withLock {
             tryActivateLocked(record)
@@ -457,6 +489,7 @@ internal class ChildExtensionRuntime(
         var bindingHandle: AutoCloseable? = null
         var discoveryHandle: AutoCloseable? = null
         val childCapabilityHandles = mutableListOf<AutoCloseable>()
+        var mountedHandle: ChildExtensionHandle? = null
         try {
             val apk = prepareRuntimeApk(record)
             val childDataDir = File(dataRoot, record.manifest.extensionId).apply { mkdirs() }
@@ -480,9 +513,10 @@ internal class ChildExtensionRuntime(
                 override val runtimeEntryFile = apk
                 override val nativeRuntime: InProcessNativeRuntime = this@ChildExtensionRuntime.nativeRuntime
                 override fun createExtensionContext(baseContext: android.content.Context): android.content.Context {
-                    check(runtimeRole != PluginRuntimeRole.BUSINESS) {
-                        "BUSINESS child runtime cannot create Android UI/resource Contexts"
-                    }
+                    // BUSINESS children still need their archive ClassLoader/resources for native and
+                    // subsystem runtimes (Ubuntu is the canonical case). This is an application-only
+                    // runtime Context: no Activity/window token is introduced here. UI publication
+                    // remains suppressed below and is owned by the Host UI proxy.
                     return createRuntimeContext(baseContext, apk, loader)
                 }
 
@@ -587,10 +621,10 @@ internal class ChildExtensionRuntime(
             }
             val instance = loader.loadClass(record.manifest.entryClass).getDeclaredConstructor().newInstance()
             val entry = instance as? ChildExtensionEntry ?: error("${record.manifest.entryClass} does not implement ChildExtensionEntry")
-            val handle = entry.mount(childHost)
+            mountedHandle = entry.mount(childHost)
             check(bindingHandle != null) { "Child extension mounted without publishing its binding" }
             active[record.manifest.extensionId] = ActiveChild(
-                handle,
+                mountedHandle,
                 bindingHandle,
                 discoveryHandle,
                 childCapabilityHandles.toList(),
@@ -599,13 +633,27 @@ internal class ChildExtensionRuntime(
             record.lifecycle = ChildExtensionLifecycle.ACTIVE
             record.lastError = null
         } catch (error: Throwable) {
-            childCapabilityHandles.asReversed().forEach { handle -> runCatching { handle.close() } }
-            runCatching { discoveryHandle?.close() }
-            runCatching { bindingHandle?.close() }
-            removeUiContributionsForExtension(record.manifest.extensionId)
-            childScope.cancel()
+            // A child can publish capabilities / discovery / binding before entry.mount() returns,
+            // and entry.mount() itself may return a handle before a post-mount invariant fails.
+            // Pin that partial owner in `active` first, then retire through the exact same fail-closed
+            // path as a normal child. If any close / stop / join fails, the owner remains addressable
+            // and a later stop can retry instead of leaving an untracked ghost capability.
+            val extensionId = record.manifest.extensionId
+            active[extensionId] = ActiveChild(
+                mountedHandle,
+                bindingHandle,
+                discoveryHandle,
+                childCapabilityHandles.toList(),
+                childScope
+            )
+            val cleanupFailure = runCatching { stopChildLocked(extensionId) }.exceptionOrNull()
             record.lifecycle = ChildExtensionLifecycle.FAILED
-            record.lastError = error.message ?: error::class.java.simpleName
+            record.lastError = if (cleanupFailure == null) {
+                error.message ?: error::class.java.simpleName
+            } else {
+                error.addSuppressed(cleanupFailure)
+                "${error.message ?: error::class.java.simpleName}; cleanup failed: ${cleanupFailure.message ?: cleanupFailure::class.java.simpleName}"
+            }
         }
         persistState(record)
     }
@@ -713,7 +761,9 @@ internal class ChildExtensionRuntime(
         close(mounted.discoveryHandle)
         close(mounted.bindingHandle)
         try {
-            withTimeout(5_000L) { mounted.handle.stop() }
+            mounted.handle?.let { handle ->
+                withTimeout(5_000L) { handle.stop() }
+            }
         } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
             failures += error
         } catch (error: CancellationException) {
@@ -724,8 +774,13 @@ internal class ChildExtensionRuntime(
             mounted.scope.cancel()
         }
         // A cancelled scope is not necessarily quiescent. Do not publish a clean stop until
-        // its children have completed; a failed stop keeps the owner handle pinned.
-        withTimeout(5_000L) { mounted.scope.coroutineContext[Job]?.join() }
+        // its children have completed; timeout is retained as a retirement failure and the active
+        // owner remains pinned instead of being silently forgotten.
+        try {
+            withTimeout(5_000L) { mounted.scope.coroutineContext[Job]?.join() }
+        } catch (error: kotlinx.coroutines.TimeoutCancellationException) {
+            failures += error
+        }
         if (failures.isNotEmpty()) {
             val failure = IllegalStateException("Child did not retire cleanly: $extensionId")
             failures.forEach(failure::addSuppressed)

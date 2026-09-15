@@ -47,6 +47,10 @@ internal object PluginPlatformKernel {
     @Volatile private var childRuntimeStarted = false
     @Volatile private var residentBridgeIngressPrepared = false
     @Volatile private var residentBridgePluginMounted = false
+    @Volatile private var residentPluginServicesPrepared = false
+    @Volatile private var residentUbuntuControlReady = false
+    @Volatile private var residentUbuntuConfigured = false
+    private var residentPluginRuntimeReport: org.json.JSONObject? = null
     private var runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 
     internal fun lifecycleSnapshot(): org.json.JSONObject {
@@ -73,6 +77,11 @@ internal object PluginPlatformKernel {
             .put("child_runtime_started", childRuntimeStarted)
             .put("resident_bridge_ingress_prepared", residentBridgeIngressPrepared)
             .put("resident_bridge_plugin_mounted", residentBridgePluginMounted)
+            .put("resident_plugin_services_prepared", residentPluginServicesPrepared)
+            .put("resident_ubuntu_configured", residentUbuntuConfigured)
+            .put("resident_ubuntu_control_ready", residentUbuntuControlReady)
+            .put("resident_plugin_runtime", residentPluginRuntimeReport ?: org.json.JSONObject.NULL)
+            .put("active_capabilities", if (initialized) org.json.JSONArray(capabilityRegistryInstance.activeIds().toList()) else org.json.JSONArray())
             .put("last_error", lifecycleError ?: org.json.JSONObject.NULL)
     }
 
@@ -586,6 +595,87 @@ internal object PluginPlatformKernel {
         }
     }
 
+    /**
+     * Restore the ordinary parent/child plugin business plane inside Resident Core. Presentation
+     * registrations stay suppressed; capability/service/provider state belongs to this process.
+     */
+    internal suspend fun startResidentPluginServices(): org.json.JSONObject = runtimeLifecycleMutex.withLock {
+        requireInitialized()
+        check(runtimeRole == PluginRuntimeRole.BUSINESS) {
+            "Resident plugin services require BUSINESS runtime"
+        }
+        check(started && residentBridgeIngressPrepared) {
+            "Resident plugin services require a running owner and prepared Bridge ingress"
+        }
+        if (residentPluginServicesPrepared) {
+            return@withLock checkNotNull(residentPluginRuntimeReport)
+        }
+        lifecyclePhase = "starting_plugin_services"
+        lifecycleError = null
+        try {
+            if (!childRuntimeStarted) {
+                childExtensionRuntimeInstance.start()
+                childRuntimeStarted = true
+            }
+            // Idempotent for the Bridge parent already mounted by Step 7. All other enabled HOT
+            // parent plugins are now restored under the same Core-owned manager/capability registry.
+            managerInstance.restoreEnabledPlugins()
+            val childReport = childExtensionRuntimeInstance.awaitBusinessChildrenReady()
+            managerInstance.reconcileInactivityPolicy()
+            managerInstance.reconcileBackupPolicy()
+
+            val pluginSnapshots = managerInstance.snapshots()
+            val activePlugins = pluginSnapshots.filter { it.mountedVersion != null }
+            val failedEnabled = pluginSnapshots.filter { snapshot ->
+                snapshot.persistentState?.let { state ->
+                    state.enabled && state.lastState == PluginLifecycleState.FAILED
+                } == true
+            }
+            val blockedEnabled = pluginSnapshots.filter { snapshot ->
+                snapshot.persistentState?.let { state ->
+                    state.enabled && state.lastState == PluginLifecycleState.BLOCKED
+                } == true
+            }
+            val ubuntu = childExtensionRuntimeInstance.loggingSnapshots()
+                .firstOrNull { it.extensionId == RESIDENT_UBUNTU_EXTENSION_ID }
+            residentUbuntuConfigured = ubuntu != null
+            val ubuntuRequired = ubuntu?.enabled == true
+            val ubuntuCapabilitiesReady =
+                capabilityRegistryInstance.activeIds().containsAll(RESIDENT_UBUNTU_REQUIRED_CAPABILITIES)
+            residentUbuntuControlReady = !ubuntuRequired ||
+                (ubuntu.lifecycle == com.ai.limbs.plugin.runtime.ChildExtensionLifecycle.ACTIVE && ubuntuCapabilitiesReady)
+            residentPluginRuntimeReport = org.json.JSONObject()
+                .put("active_parent_count", activePlugins.size)
+                .put("active_parent_ids", org.json.JSONArray(activePlugins.map { it.pluginId }))
+                .put("failed_enabled_parent_ids", org.json.JSONArray(failedEnabled.map { it.pluginId }))
+                .put("blocked_enabled_parent_ids", org.json.JSONArray(blockedEnabled.map { it.pluginId }))
+                .put("children", childReport)
+                .put("capability_count", capabilityRegistryInstance.activeIds().size)
+                .put("ubuntu_configured", residentUbuntuConfigured)
+                .put("ubuntu_required", ubuntuRequired)
+                .put("ubuntu_control_ready", residentUbuntuControlReady)
+            check(residentUbuntuControlReady) {
+                "Enabled Ubuntu subsystem did not become Core-owned: lifecycle=${ubuntu?.lifecycle} capabilities=$ubuntuCapabilitiesReady error=${ubuntu?.lastError}"
+            }
+
+            businessRuntimeRestored = true
+            residentPluginServicesPrepared = true
+            startInactivityMonitor()
+            lifecyclePhase = "running"
+            AppLogger.i(TAG, "Resident plugin services prepared: $residentPluginRuntimeReport")
+            checkNotNull(residentPluginRuntimeReport)
+        } catch (error: CancellationException) {
+            lifecyclePhase = "plugin_services_start_failed"
+            lifecycleError = error.toString().take(2048)
+            throw error
+        } catch (error: Throwable) {
+            lifecyclePhase = "plugin_services_start_failed"
+            lifecycleError = error.toString().take(2048)
+            AppLogger.e(TAG, "Resident plugin service restore failed", error)
+            throw error
+        }
+    }
+
     private fun startInactivityMonitor() {
         inactivityMonitorJob?.cancel()
         inactivityMonitorJob = monitorScope.launch {
@@ -639,7 +729,9 @@ internal object PluginPlatformKernel {
             if (businessRuntimeRestored || residentBridgePluginMounted || residentBridgeIngressPrepared) {
                 retire { managerInstance.shutdown(handoff) }
             }
-            if (businessRuntimeRestored) {
+            if (businessRuntimeRestored && runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
+                // Plugin Center is a Host UI system plugin. BUSINESS never restored it, so Core
+                // retirement must not manufacture a UI-system-plugin lifecycle on the way out.
                 retire { systemPluginControllerInstance.shutdown() }
             }
             retire { notificationHostInstance.clear() }
@@ -657,6 +749,10 @@ internal object PluginPlatformKernel {
             childRuntimeStarted = false
             residentBridgeIngressPrepared = false
             residentBridgePluginMounted = false
+            residentPluginServicesPrepared = false
+            residentUbuntuControlReady = false
+            residentUbuntuConfigured = false
+            residentPluginRuntimeReport = null
             // Registries and references still exist in this VM. Only process death releases
             // runtimeOwnerLease; shutdown alone must never authorize another process to mount.
             AppLogger.i(TAG, "AI Limbs Plugin Platform kernel retired; lease retained until process exit")
@@ -669,4 +765,9 @@ internal object PluginPlatformKernel {
 
     private const val RESIDENT_BRIDGE_PLUGIN_ID = "plugin.system.bridge"
     private const val RESIDENT_BRIDGE_PROVIDER_POINT = "ai_limbs.bridge.provider"
+    private const val RESIDENT_UBUNTU_EXTENSION_ID = "ai_limbs.system_environment.ubuntu"
+    private val RESIDENT_UBUNTU_REQUIRED_CAPABILITIES = setOf(
+        "plugin.ubuntu.command",
+        "plugin.ubuntu.process"
+    )
 }
