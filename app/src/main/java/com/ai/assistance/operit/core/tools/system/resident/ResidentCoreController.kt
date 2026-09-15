@@ -23,6 +23,17 @@ internal object ResidentCoreController {
         "com.ai.assistance.operit.core.tools.system.resident.ResidentCoreMain"
 
     suspend fun status(context: Context): JSONObject = withContext(Dispatchers.IO) {
+        // bootstrap.lock is the Core process-ownership fact. If the lease is free,
+        // there cannot be a live Core owner, so do not touch the Core IPC socket.
+        // This also avoids an unbounded LocalSocket.connect when no Core exists.
+        if (leaseIsFree(context)) {
+            return@withContext JSONObject()
+                .put("available", false)
+                .put("consistent", false)
+                .put("process_alive", false)
+                .put("phase", "stopped")
+                .put("continuous_work", false)
+        }
         try {
             ResidentCoreWire.request("status").also { state ->
                 val buildCodeMatches = state.getInt("build_code") == BuildConfig.VERSION_CODE
