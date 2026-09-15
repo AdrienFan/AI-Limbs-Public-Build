@@ -711,7 +711,7 @@ internal object AiLimbsResidentRuntime {
         }
 
         val stalePids = processList.stdout.lineSequence().mapNotNull { line ->
-            val fields = line.trim().split(Regex("\s+"))
+            val fields = line.trim().split(Regex("\\s+"))
             if (fields.size < 3) return@mapNotNull null
             val pid = fields[0].toIntOrNull() ?: return@mapNotNull null
             val uid = fields[1].toIntOrNull() ?: return@mapNotNull null
