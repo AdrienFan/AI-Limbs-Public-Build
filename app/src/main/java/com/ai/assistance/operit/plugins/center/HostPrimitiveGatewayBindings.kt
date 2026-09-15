@@ -91,7 +91,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.privileged.runtime@1" to ops(kernel("status"), kernel("pair"), kernel("prepare"), kernel("stop"), kernel("select")),
         "host.resident.runtime@1" to ops(kernel("status"), kernel("set_enabled"), kernel("start"), kernel("stop"), kernel("core_status"), kernel("core_probe"), kernel("core_stop")),
         "host.ui.layout@1" to ops(kernel("status"), kernel("start"), kernel("finish"), kernel("reset")),
-        "host.interaction.cycle@1" to ops(kernel("status"), kernel("set_timeout"), kernel("reset")),
+        "host.interaction.cycle@1" to ops(kernel("status"), kernel("set_timeout"), kernel("reset"), kernel("close")),
     )
 
     fun operations(primitiveId: String): Map<String, HostGatewayOperationBinding> =

@@ -95,6 +95,19 @@ internal data class AiLimbsInteractionCycleResetResult(
     val cycleStartedAtMs: Long
 )
 
+internal data class AiLimbsInteractionCycleCloseResult(
+    val generation: Long,
+    val nextGeneration: Long,
+    val appliedImmediately: Boolean
+)
+
+internal data class AiLimbsInteractionCycleBoundaryResult(
+    val generation: Long,
+    val cycleStartedAtMs: Long,
+    val resetApplied: Boolean = false,
+    val closeApplied: Boolean = false
+)
+
 /**
  * One authoritative interaction clock shared by all external Bridge providers/transports.
  *
@@ -111,15 +124,24 @@ internal class AiLimbsInteractionCycleController(
     private var activeInvocations = 0
     private var expiredPending = false
     private var manualResetStartedAtMs: Long? = null
+    private var manualClosePending = false
 
     fun beginInvocation(): AiLimbsInteractionCycleLease = synchronized(stateLock) {
         val now = clockMs()
-        if (manualResetStartedAtMs != null && activeInvocations > 0) {
+        if ((manualResetStartedAtMs != null || manualClosePending) && activeInvocations > 0) {
             return@synchronized AiLimbsInteractionCycleLease(
                 generation = generation + 1L,
                 startedNewCycle = false,
                 admitted = false
             )
+        }
+        if (manualClosePending && activeInvocations == 0) {
+            cycleStartedAtMs = now
+            generation += 1L
+            expiredPending = false
+            manualClosePending = false
+            activeInvocations += 1
+            return@synchronized AiLimbsInteractionCycleLease(generation, startedNewCycle = true)
         }
         if (manualResetStartedAtMs == null) refreshExpiry(now)
         val startedNewCycle = expiredPending && activeInvocations == 0
@@ -132,25 +154,39 @@ internal class AiLimbsInteractionCycleController(
         AiLimbsInteractionCycleLease(generation, startedNewCycle)
     }
 
-    fun endInvocation(): AiLimbsInteractionCycleResetResult? = synchronized(stateLock) {
+    fun endInvocation(): AiLimbsInteractionCycleBoundaryResult? = synchronized(stateLock) {
         check(activeInvocations > 0) { "AI Limbs interaction cycle invocation underflow" }
         activeInvocations -= 1
         val resetStartedAtMs = manualResetStartedAtMs
-        if (resetStartedAtMs != null && activeInvocations == 0) {
-            cycleStartedAtMs = resetStartedAtMs
-            generation += 1L
-            expiredPending = false
-            manualResetStartedAtMs = null
-            AiLimbsInteractionCycleResetResult(generation, true, cycleStartedAtMs)
-        } else {
-            if (resetStartedAtMs == null) refreshExpiry(clockMs())
-            null
+        when {
+            resetStartedAtMs != null && activeInvocations == 0 -> {
+                cycleStartedAtMs = resetStartedAtMs
+                generation += 1L
+                expiredPending = false
+                manualResetStartedAtMs = null
+                AiLimbsInteractionCycleBoundaryResult(
+                    generation = generation,
+                    cycleStartedAtMs = cycleStartedAtMs,
+                    resetApplied = true
+                )
+            }
+            manualClosePending && activeInvocations == 0 ->
+                AiLimbsInteractionCycleBoundaryResult(
+                    generation = generation,
+                    cycleStartedAtMs = cycleStartedAtMs,
+                    closeApplied = true
+                )
+            else -> {
+                if (resetStartedAtMs == null && !manualClosePending) refreshExpiry(clockMs())
+                null
+            }
         }
     }
 
     fun resetFromNow(): AiLimbsInteractionCycleResetResult = synchronized(stateLock) {
         val now = clockMs()
         expiredPending = false
+        manualClosePending = false
         if (activeInvocations == 0) {
             cycleStartedAtMs = now
             generation += 1L
@@ -162,6 +198,17 @@ internal class AiLimbsInteractionCycleController(
         }
     }
 
+    fun closeCurrentCycle(): AiLimbsInteractionCycleCloseResult = synchronized(stateLock) {
+        manualResetStartedAtMs = null
+        expiredPending = false
+        manualClosePending = true
+        AiLimbsInteractionCycleCloseResult(
+            generation = generation,
+            nextGeneration = generation + 1L,
+            appliedImmediately = activeInvocations == 0
+        )
+    }
+
     fun snapshot(): JSONObject = synchronized(stateLock) {
         JSONObject()
             .put("generation", generation)
@@ -170,6 +217,8 @@ internal class AiLimbsInteractionCycleController(
             .put("expired_pending", expiredPending)
             .put("manual_reset_pending", manualResetStartedAtMs != null)
             .put("manual_reset_started_at_ms", manualResetStartedAtMs ?: JSONObject.NULL)
+            .put("manual_close_pending", manualClosePending)
+            .put("closed_awaiting_next_ingress", manualClosePending && activeInvocations == 0)
             .put("timeout_ms", runCatching { timeoutProvider() }
                 .getOrDefault(AiLimbsInteractionCyclePolicyStore.DEFAULT_TIMEOUT_MS))
     }
@@ -188,6 +237,7 @@ internal class AiLimbsInteractionCycleController(
             .put("generation", generation)
             .put("cycle_started_at_ms", cycleStartedAtMs)
             .put("expired_pending", expiredPending)
+            .put("manual_close_pending", manualClosePending)
     }
 
     fun restoreHandoffState(state: JSONObject) = synchronized(stateLock) {
@@ -200,6 +250,7 @@ internal class AiLimbsInteractionCycleController(
         cycleStartedAtMs = restoredStartedAt
         expiredPending = state.optBoolean("expired_pending", false)
         manualResetStartedAtMs = null
+        manualClosePending = state.optBoolean("manual_close_pending", false)
     }
 
     private fun refreshExpiry(now: Long) {
@@ -243,9 +294,9 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     }
 
     fun endInvocation() = synchronized(stateLock) {
-        val completedReset = controller.endInvocation()
+        val completedBoundary = controller.endInvocation()
         accessGate.endInteractionCycleInvocation()
-        if (completedReset != null) applyContextBoundary(completedReset.generation)
+        if (completedBoundary != null) applyContextBoundary(completedBoundary.generation)
     }
 
     fun resetInteractionCycle(): AiLimbsInteractionCycleResetResult = synchronized(stateLock) {
@@ -253,6 +304,13 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
         val reset = controller.resetFromNow()
         if (reset.appliedImmediately) applyContextBoundary(reset.generation)
         reset
+    }
+
+    fun closeInteractionCycle(): AiLimbsInteractionCycleCloseResult = synchronized(stateLock) {
+        check(!residentHandoffFrozen)
+        val close = controller.closeCurrentCycle()
+        if (close.appliedImmediately) applyContextBoundary(close.generation)
+        close
     }
 
     private fun applyContextBoundary(generation: Long) {
@@ -402,6 +460,9 @@ internal object AiLimbsInteractionCycleRuntime {
 
     fun reset(context: Context): AiLimbsInteractionCycleResetResult =
         state(context.applicationContext).resetInteractionCycle()
+
+    fun close(context: Context): AiLimbsInteractionCycleCloseResult =
+        state(context.applicationContext).closeInteractionCycle()
 
     private const val RESIDENT_HANDOFF_DRAIN_TIMEOUT_MS = 10_000L
 }

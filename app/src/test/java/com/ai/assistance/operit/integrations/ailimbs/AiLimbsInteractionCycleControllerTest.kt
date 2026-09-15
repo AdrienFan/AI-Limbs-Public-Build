@@ -118,6 +118,70 @@ class AiLimbsInteractionCycleControllerTest {
         controller.endInvocation()
     }
 
+
+    @Test
+    fun `manual close starts the next cycle only on the next ingress`() {
+        var now = 0L
+        val controller = AiLimbsInteractionCycleController(
+            timeoutProvider = { 60_000L },
+            clockMs = { now }
+        )
+
+        assertEquals(1L, controller.beginInvocation().generation)
+        controller.endInvocation()
+
+        now = 50_000L
+        val close = controller.closeCurrentCycle()
+        assertTrue(close.appliedImmediately)
+        assertEquals(1L, close.generation)
+        assertEquals(2L, close.nextGeneration)
+        assertTrue(controller.snapshot().getBoolean("closed_awaiting_next_ingress"))
+
+        now = 200_000L
+        val next = controller.beginInvocation()
+        assertTrue(next.startedNewCycle)
+        assertEquals(2L, next.generation)
+        controller.endInvocation()
+
+        now = 259_999L
+        assertFalse(controller.beginInvocation().startedNewCycle)
+        controller.endInvocation()
+        now = 260_000L
+        assertTrue(controller.beginInvocation().startedNewCycle)
+        controller.endInvocation()
+    }
+
+    @Test
+    fun `manual close blocks later ingress until active work drains`() {
+        var now = 0L
+        val controller = AiLimbsInteractionCycleController(
+            timeoutProvider = { 60_000L },
+            clockMs = { now }
+        )
+
+        assertEquals(1L, controller.beginInvocation().generation)
+        now = 30_000L
+        val close = controller.closeCurrentCycle()
+        assertFalse(close.appliedImmediately)
+        assertEquals(2L, close.nextGeneration)
+
+        now = 40_000L
+        val blocked = controller.beginInvocation()
+        assertFalse(blocked.admitted)
+        assertEquals(2L, blocked.generation)
+
+        val completed = controller.endInvocation()
+        assertNotNull(completed)
+        assertTrue(completed!!.closeApplied)
+        assertEquals(1L, completed.generation)
+
+        now = 50_000L
+        val next = controller.beginInvocation()
+        assertTrue(next.startedNewCycle)
+        assertEquals(2L, next.generation)
+        controller.endInvocation()
+    }
+
     @Test
     fun `invalid configured timeout falls back to hard default`() {
         var now = 0L
