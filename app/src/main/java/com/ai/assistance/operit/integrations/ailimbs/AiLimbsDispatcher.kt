@@ -16,6 +16,7 @@ import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatManagedTurnRe
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatRequest
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
 import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
 import java.text.SimpleDateFormat
