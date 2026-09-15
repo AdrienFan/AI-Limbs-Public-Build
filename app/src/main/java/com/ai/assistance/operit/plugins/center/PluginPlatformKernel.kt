@@ -44,6 +44,9 @@ internal object PluginPlatformKernel {
     @Volatile private var lifecyclePhase = "uninitialized"
     @Volatile private var lifecycleError: String? = null
     @Volatile private var businessRuntimeRestored = false
+    @Volatile private var childRuntimeStarted = false
+    @Volatile private var residentBridgeIngressPrepared = false
+    @Volatile private var residentBridgePluginMounted = false
     private var runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 
     internal fun lifecycleSnapshot(): org.json.JSONObject {
@@ -67,6 +70,9 @@ internal object PluginPlatformKernel {
             .put("uid", android.os.Process.myUid())
             .put("owner_lease_held", runtimeOwnerLease != null)
             .put("business_runtime_restored", businessRuntimeRestored)
+            .put("child_runtime_started", childRuntimeStarted)
+            .put("resident_bridge_ingress_prepared", residentBridgeIngressPrepared)
+            .put("resident_bridge_plugin_mounted", residentBridgePluginMounted)
             .put("last_error", lifecycleError ?: org.json.JSONObject.NULL)
     }
 
@@ -302,7 +308,7 @@ internal object PluginPlatformKernel {
                     )
                 )
             )
-            val notificationHost = PluginNotificationHost(appContext, surfacePolicy)
+            val notificationHost = PluginNotificationHost(appContext, surfacePolicy, runtimeRole)
             val officialIdentities = OfficialPluginIdentityRegistry(appContext)
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
@@ -506,6 +512,7 @@ internal object PluginPlatformKernel {
         try {
             if (restoreBusinessRuntime) {
                 childExtensionRuntimeInstance.start()
+                childRuntimeStarted = true
                 if (runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
                     systemPluginControllerInstance.restore()
                 }
@@ -513,6 +520,11 @@ internal object PluginPlatformKernel {
                 managerInstance.reconcileInactivityPolicy()
                 managerInstance.reconcileBackupPolicy()
                 businessRuntimeRestored = true
+                if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+                    residentBridgeIngressPrepared = true
+                    residentBridgePluginMounted =
+                        managerInstance.snapshot(RESIDENT_BRIDGE_PLUGIN_ID).mountedVersion != null
+                }
             }
         } catch (error: CancellationException) {
             lifecyclePhase = "start_failed"
@@ -533,6 +545,45 @@ internal object PluginPlatformKernel {
             TAG,
             "AI Limbs Plugin Platform started role=$runtimeRole businessRuntimeRestored=$businessRuntimeRestored"
         )
+    }
+
+    internal suspend fun startResidentBridgeIngress(): Boolean = runtimeLifecycleMutex.withLock {
+        requireInitialized()
+        check(runtimeRole == PluginRuntimeRole.BUSINESS) {
+            "Resident Bridge ingress requires BUSINESS runtime"
+        }
+        check(started && !businessRuntimeRestored) {
+            "Resident Bridge ingress requires owner-only BUSINESS Kernel"
+        }
+        if (residentBridgeIngressPrepared) return@withLock residentBridgePluginMounted
+        lifecyclePhase = "starting_bridge_ingress"
+        lifecycleError = null
+        try {
+            if (!childRuntimeStarted) {
+                childExtensionRuntimeInstance.start()
+                childRuntimeStarted = true
+            }
+            residentBridgePluginMounted = managerInstance.restoreEnabledPlugin(RESIDENT_BRIDGE_PLUGIN_ID)
+            if (residentBridgePluginMounted) {
+                childExtensionRuntimeInstance.awaitEnabledPointReady(RESIDENT_BRIDGE_PROVIDER_POINT)
+            }
+            residentBridgeIngressPrepared = true
+            lifecyclePhase = "running"
+            AppLogger.i(
+                TAG,
+                "Resident Bridge ingress prepared mounted=$residentBridgePluginMounted"
+            )
+            residentBridgePluginMounted
+        } catch (error: CancellationException) {
+            lifecyclePhase = "bridge_start_failed"
+            lifecycleError = error.toString().take(2048)
+            throw error
+        } catch (error: Throwable) {
+            lifecyclePhase = "bridge_start_failed"
+            lifecycleError = error.toString().take(2048)
+            AppLogger.e(TAG, "Resident Bridge ingress restore failed", error)
+            throw error
+        }
     }
 
     private fun startInactivityMonitor() {
@@ -580,11 +631,15 @@ internal object PluginPlatformKernel {
                 catch (error: Exception) { failures += error }
             }
             retire { inactivityMonitorJob?.cancelAndJoin(); inactivityMonitorJob = null }
-            if (businessRuntimeRestored) {
-                // Stop children before parents so child handles cannot continue calling a revoked
-                // parent provider. Attempt every owner, but never turn a failure into stopped.
+            if (childRuntimeStarted) {
+                // Stop children before parents so transport handles cannot keep calling a retired
+                // Bridge parent. This also covers Step 7's partial BUSINESS restoration.
                 retire { childExtensionRuntimeInstance.stop() }
+            }
+            if (businessRuntimeRestored || residentBridgePluginMounted || residentBridgeIngressPrepared) {
                 retire { managerInstance.shutdown(handoff) }
+            }
+            if (businessRuntimeRestored) {
                 retire { systemPluginControllerInstance.shutdown() }
             }
             retire { notificationHostInstance.clear() }
@@ -599,6 +654,9 @@ internal object PluginPlatformKernel {
             lifecyclePhase = "stopped"
             lifecycleError = null
             businessRuntimeRestored = false
+            childRuntimeStarted = false
+            residentBridgeIngressPrepared = false
+            residentBridgePluginMounted = false
             // Registries and references still exist in this VM. Only process death releases
             // runtimeOwnerLease; shutdown alone must never authorize another process to mount.
             AppLogger.i(TAG, "AI Limbs Plugin Platform kernel retired; lease retained until process exit")
@@ -608,4 +666,7 @@ internal object PluginPlatformKernel {
     private fun requireInitialized() {
         check(initialized) { "AI Limbs Plugin Platform kernel is not initialized" }
     }
+
+    private const val RESIDENT_BRIDGE_PLUGIN_ID = "plugin.system.bridge"
+    private const val RESIDENT_BRIDGE_PROVIDER_POINT = "ai_limbs.bridge.provider"
 }

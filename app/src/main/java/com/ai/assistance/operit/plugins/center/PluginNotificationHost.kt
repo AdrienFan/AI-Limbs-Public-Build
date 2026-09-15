@@ -30,7 +30,8 @@ internal data class PluginForegroundNotificationSnapshot(
 
 internal class PluginNotificationHost(
     context: Context,
-    private val surfacePolicy: HostSurfacePolicy
+    private val surfacePolicy: HostSurfacePolicy,
+    private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 ) {
     private data class Binding(
         val ownerPluginId: String,
@@ -52,6 +53,28 @@ internal class PluginNotificationHost(
     fun bindingFor(ownerPluginId: String, requestedScopes: Set<String>): InProcessProviderBinding? {
         if (NOTIFICATION_SCOPE !in requestedScopes || !surfacePolicy.isAllowed(PluginSurfaceIds.HOST_NOTIFICATION)) {
             return null
+        }
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+            // Resident Core owns business lifetime, not Android notification UI. Keep the existing
+            // provider contract satisfiable without starting the Host foreground service. Step 9
+            // will proxy presentation state explicitly instead of reviving Host business runtime.
+            val inert = object : InProcessNotificationHost {
+                override fun publish(
+                    state: StateFlow<InProcessNotificationState?>,
+                    actionHandler: InProcessNotificationActionHandler
+                ): AutoCloseable = AutoCloseable { }
+            }
+            return InProcessProviderBinding(
+                ownerPluginId = HOST_OWNER_ID,
+                id = InProcessSystemIds.NOTIFICATION_HOST_PROVIDER,
+                metadata = mapOf(
+                    "api" to "1",
+                    "surface" to PluginSurfaceIds.HOST_NOTIFICATION,
+                    "runtime_role" to "business",
+                    "presentation" to "suppressed_until_ui_proxy"
+                ),
+                payload = inert
+            )
         }
         val scoped = object : InProcessNotificationHost {
             override fun publish(

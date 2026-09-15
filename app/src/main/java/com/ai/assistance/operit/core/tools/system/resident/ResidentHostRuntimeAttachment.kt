@@ -92,6 +92,7 @@ internal object ResidentHostRuntimeResolver {
         val businessPhase = core.optString("business_phase")
         val businessAttached = core.optBoolean("business_attached", false)
         val kernelStarted = core.optBoolean("plugin_kernel_started", false)
+        val bridgeIngressPrepared = core.optBoolean("bridge_ingress_prepared", false)
         val fenceMatchesCore = fence != null &&
             corePid != null &&
             coreSession != null &&
@@ -104,6 +105,7 @@ internal object ResidentHostRuntimeResolver {
                 core.optString("phase") == "running" &&
                 businessPhase == "running" &&
                 kernelStarted &&
+                bridgeIngressPrepared &&
                 fenceMatchesCore &&
                 fenceState == "owned"
             return if (validOwner) {
@@ -133,7 +135,8 @@ internal object ResidentHostRuntimeResolver {
             "waiting_for_host_exit",
             "acquiring_owner",
             "starting_kernel",
-            "claiming_backend"
+            "claiming_backend",
+            "starting_bridge"
         )
         if (handoffPending || fence != null) {
             val validPending = buildMatches &&

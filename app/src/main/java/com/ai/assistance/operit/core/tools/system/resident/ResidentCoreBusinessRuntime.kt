@@ -35,6 +35,7 @@ internal enum class ResidentCoreBusinessPhase {
     ACQUIRING_OWNER,
     STARTING_KERNEL,
     CLAIMING_BACKEND,
+    STARTING_BRIDGE,
     RUNNING,
     CANCELLED,
     STOPPED,
@@ -58,6 +59,8 @@ internal class ResidentCoreBusinessRuntime {
     private var businessError: String? = null
     private var expectedHostPid: Int? = null
     private var pluginKernelStarted = false
+    private var bridgeIngressPrepared = false
+    private var bridgePluginMounted = false
     private var businessAttached = false
     @Volatile private var stopRequested = false
 
@@ -210,10 +213,23 @@ internal class ResidentCoreBusinessRuntime {
             }
 
             backend.claimRuntimeOwnership()
-            // The policy/Dispatcher plane is part of business ownership. Do not publish an owned
-            // fence until it is bound and ready; otherwise a restarted Host could attach to a Core
-            // that owns Plugin Kernel but has no authoritative ingress.
+            // The policy/Dispatcher plane is part of business ownership. Bring it up before Bridge
+            // so a provider that becomes online immediately has a live Core-owned destination.
             onBusinessOwnerReady()
+            synchronized(lock) { businessPhase = ResidentCoreBusinessPhase.STARTING_BRIDGE }
+            val bridgeMounted = runBlocking(Dispatchers.IO) {
+                PluginPlatformKernel.startResidentBridgeIngress()
+            }
+            val bridgeKernel = PluginPlatformKernel.lifecycleSnapshot()
+            check(bridgeKernel.getBoolean("resident_bridge_ingress_prepared")) {
+                "Resident Bridge ingress did not reach a prepared state: $bridgeKernel"
+            }
+            synchronized(lock) {
+                bridgeIngressPrepared = true
+                bridgePluginMounted = bridgeMounted
+            }
+            // Publish owned only after Core policy/Dispatcher and the configured Bridge transport
+            // plane are ready. A disabled/uninstalled Bridge is explicit configuration, not fallback.
             ResidentBusinessTakeoverFence.markOwned(context, coreSession)
             synchronized(lock) {
                 businessAttached = true
@@ -234,6 +250,8 @@ internal class ResidentCoreBusinessRuntime {
             }
             synchronized(lock) {
                 pluginKernelStarted = PluginPlatformKernel.isStarted
+                bridgeIngressPrepared = false
+                bridgePluginMounted = false
                 businessAttached = false
                 businessPhase = ResidentCoreBusinessPhase.FAILED
                 businessError = error.toString().take(1024)
@@ -260,6 +278,8 @@ internal class ResidentCoreBusinessRuntime {
             runBlocking(Dispatchers.IO) { PluginPlatformKernel.shutdown() }
             synchronized(lock) {
                 pluginKernelStarted = false
+                bridgeIngressPrepared = false
+                bridgePluginMounted = false
                 businessAttached = false
                 if (businessPhase != ResidentCoreBusinessPhase.CANCELLED &&
                     businessPhase != ResidentCoreBusinessPhase.FAILED) {
@@ -329,6 +349,8 @@ internal class ResidentCoreBusinessRuntime {
             .put("expected_host_pid", expectedHostPid ?: JSONObject.NULL)
             .put("business_attached", businessAttached)
             .put("plugin_kernel_started", pluginKernelStarted)
+            .put("bridge_ingress_prepared", bridgeIngressPrepared)
+            .put("bridge_plugin_mounted", bridgePluginMounted)
             .put("plugin_kernel", if (PluginPlatformKernel.isInitialized)
                 PluginPlatformKernel.lifecycleSnapshot() else JSONObject.NULL)
             .put("last_error", lastError ?: JSONObject.NULL)

@@ -299,8 +299,8 @@ internal class PluginHostCapabilityRegistry(
         }
         val context = appContext
             ?: throw PluginInstallException(
-                "HOST_RUNTIME_UNAVAILABLE",
-                "Bridge remote ingress requires the Android Host runtime"
+                "BUSINESS_RUNTIME_UNAVAILABLE",
+                "Bridge remote ingress requires the AI Limbs business runtime"
             )
         val transportId = normalizeExternalBridgeTransportId(parameters.optString("transport"))
         val transport = AiLimbsExecutionTransport.EXTERNAL_BRIDGE
@@ -317,7 +317,8 @@ internal class PluginHostCapabilityRegistry(
         if (scopeId.isBlank()) {
             throw PluginInstallException("BRIDGE_SCOPE_REQUIRED", "Bridge remote scope_id is required")
         }
-        // Bridge scope identifies a transport session only; Host owns interaction-cycle lifetime.
+        // Bridge scope_id is transport-session metadata only. It MUST NOT create, reset or key
+        // an Interaction Cycle; the one authoritative cycle is owned by the current business core.
         val gatewayKey = "$ownerPluginId:$providerId:$transportId"
         val gateway = bridgeIngressGateways.computeIfAbsent(gatewayKey) {
             AiLimbsIngressGateway(

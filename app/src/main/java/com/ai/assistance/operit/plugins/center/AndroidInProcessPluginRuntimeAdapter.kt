@@ -405,6 +405,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerHomeTile(tile: InProcessHomeTile) {
+            if (context.runtimeRole == PluginRuntimeRole.BUSINESS) return
             context.payloadContext.registrar.registerExtension(
                 PluginExtensionPoints.UI_HOME_TILE,
                 tile.id,
@@ -419,6 +420,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         }
 
         override fun registerScreen(screen: InProcessScreen) {
+            if (context.runtimeRole == PluginRuntimeRole.BUSINESS) return
             // Do not parse component JSON here.  android_inprocess plugins and declarative plugins
             // must cross the same opaque ui.screen@2 boundary so future component types never create
             // another Host runtime dependency.

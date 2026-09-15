@@ -180,10 +180,14 @@ internal object ResidentCoreController {
         check(state.getBoolean("business_attached") == runtime.getBoolean("business_attached")) {
             "Core business ownership snapshot is inconsistent"
         }
+        check(state.getBoolean("bridge_ingress_prepared") == runtime.getBoolean("bridge_ingress_prepared")) {
+            "Core Bridge ingress snapshot is inconsistent"
+        }
         if (state.getBoolean("business_attached")) {
             check(state.getString("runtime_owner") == "resident_core" &&
-                runtime.getBoolean("plugin_kernel_started")) {
-                "Core claims business ownership without a running Plugin Kernel"
+                runtime.getBoolean("plugin_kernel_started") &&
+                runtime.getBoolean("bridge_ingress_prepared")) {
+                "Core claims business ownership before Plugin Kernel / Bridge ingress are prepared"
             }
             val dispatcher = state.getJSONObject("dispatcher")
             check(dispatcher.getBoolean("running") &&

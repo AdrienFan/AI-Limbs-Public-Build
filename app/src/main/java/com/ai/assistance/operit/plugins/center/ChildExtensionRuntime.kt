@@ -31,6 +31,7 @@ import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -403,6 +404,19 @@ internal class ChildExtensionRuntime(
         publishSnapshots()
     }
 
+    internal suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long = 5_000L) {
+        withTimeout(timeoutMs) {
+            snapshotsForPointInternal(point).first { snapshots ->
+                val enabled = snapshots.filter { it.enabled }
+                val failed = enabled.firstOrNull { it.lifecycle == ChildExtensionLifecycle.FAILED }
+                check(failed == null) {
+                    "Enabled child ${failed?.extensionId} failed on $point: ${failed?.lastError}"
+                }
+                enabled.all { it.lifecycle == ChildExtensionLifecycle.ACTIVE }
+            }
+        }
+    }
+
     private suspend fun tryActivate(record: StoredExtension) {
         lifecycleLock(record.manifest.extensionId).withLock {
             tryActivateLocked(record)
@@ -465,8 +479,12 @@ internal class ChildExtensionRuntime(
                 override val logger = HostRuntimeLoggerFactory.extension(record.manifest.extensionId)
                 override val runtimeEntryFile = apk
                 override val nativeRuntime: InProcessNativeRuntime = this@ChildExtensionRuntime.nativeRuntime
-                override fun createExtensionContext(baseContext: android.content.Context): android.content.Context =
-                    createRuntimeContext(baseContext, apk, loader)
+                override fun createExtensionContext(baseContext: android.content.Context): android.content.Context {
+                    check(runtimeRole != PluginRuntimeRole.BUSINESS) {
+                        "BUSINESS child runtime cannot create Android UI/resource Contexts"
+                    }
+                    return createRuntimeContext(baseContext, apk, loader)
+                }
 
                 override fun registerCapability(spec: InProcessCapabilitySpec): AutoCloseable {
                     val capabilityId = spec.id.trim().lowercase()
@@ -509,6 +527,11 @@ internal class ChildExtensionRuntime(
                     contributionId: String,
                     provider: InProcessUiContributionProvider
                 ): AutoCloseable {
+                    if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+                        // Presentation belongs to the Host UI proxy. The transport/business half of
+                        // a provider remains active in Core without publishing Android UI objects.
+                        return AutoCloseable { }
+                    }
                     // Child code may choose only the local target names. Parent identity and extension
                     // point come from the verified manifest and therefore cannot be spoofed here.
                     val normalizedScreen = screenId.trim().lowercase()

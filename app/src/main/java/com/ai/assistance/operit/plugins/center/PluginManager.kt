@@ -147,6 +147,22 @@ internal class PluginManager(
         restoreEnabledPluginsLocked()
     }
 
+    internal suspend fun restoreEnabledPlugin(pluginId: String): Boolean = locked {
+        val state = stateRepository.read(pluginId) ?: return@locked false
+        if (!state.enabled) return@locked false
+        val version = state.activeVersion
+            ?: throw PluginInstallException(
+                "PLUGIN_ACTIVE_VERSION_MISSING",
+                "Enabled plugin has no active version: $pluginId"
+            )
+        val manifest = stateRepository.readInstalledManifest(pluginId, version)
+        check(manifest.activationMode == PluginActivationMode.HOT) {
+            "Resident targeted restore requires HOT activation: $pluginId"
+        }
+        mountLocked(pluginId, version)
+        true
+    }
+
     suspend fun reconcileHostSurfacePolicy() = locked {
         reconcileHostSurfacePolicyLocked()
     }
