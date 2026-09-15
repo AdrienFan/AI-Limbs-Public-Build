@@ -41,6 +41,7 @@ internal object ResidentCoreController {
             check(existing.getBoolean("build_matches")) {
                 "Stop the previous Core build before probing the installed build"
             }
+            requireRuntimeSkeletonRunning(existing)
             return@withContext existing
         }
         check(existing.getString("phase") == "stopped") {
@@ -71,6 +72,7 @@ internal object ResidentCoreController {
                 if (state.getBoolean("available")) {
                     check(state.getBoolean("build_matches")) { "Core build mismatch" }
                     check(state.getString("launch_id") == launchId) { "Core launch identity mismatch" }
+                    requireRuntimeSkeletonRunning(state)
                     ready = true
                     return@withContext state
                 }
@@ -151,6 +153,22 @@ internal object ResidentCoreController {
             }
             ResidentPermissionHandoff.fromPreparedCore(prepared)
         }
+
+    private fun requireRuntimeSkeletonRunning(state: JSONObject) {
+        check(state.getString("phase") == "running") {
+            "Core IPC is reachable but runtime phase is not running: ${state.getString("phase")}"
+        }
+        val runtime = state.getJSONObject("core_runtime")
+        check(runtime.getBoolean("runtime_skeleton_ready") && runtime.getBoolean("main_looper_ready")) {
+            "Core runtime reported running before its main-Looper startup barrier completed"
+        }
+        check(!state.getBoolean("business_attached") && !runtime.getBoolean("business_attached")) {
+            "Step 3 Core must not claim business ownership"
+        }
+        check(!state.getBoolean("plugins_migrated") && !state.getBoolean("continuous_work")) {
+            "Step 3 Core must not claim migrated plugins or continuous work"
+        }
+    }
 
     private fun directory(context: Context): File =
         File(context.filesDir, "ai_limbs/resident_core")
