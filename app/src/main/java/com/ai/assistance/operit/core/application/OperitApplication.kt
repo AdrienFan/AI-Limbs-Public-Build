@@ -26,6 +26,7 @@ import com.ai.assistance.operit.core.chat.AIMessageManager
 import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.api.chat.library.MemoryAutoSaveScheduler
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.center.PluginHostUiProxyRuntimeHolder
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleEvent
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookParams
 import com.ai.assistance.operit.plugins.lifecycle.AppLifecycleHookPluginRegistry
@@ -34,6 +35,8 @@ import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
 import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
+import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeAttachment
+import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeResolver
 import com.ai.assistance.operit.core.workflow.WorkflowSchedulerInitializer
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupPreferences
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupScheduler
@@ -105,6 +108,13 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
     private val mainInitializationLock = Any()
     @Volatile
     private var mainApplicationInitialized = false
+    @Volatile
+    private var hostRuntimeAttachment: ResidentHostRuntimeAttachment? = null
+
+    internal fun isResidentUiProxyMode(): Boolean = hostRuntimeAttachment?.usesUiProxy == true
+    internal fun isResidentCoreAttached(): Boolean = hostRuntimeAttachment?.attachedToLiveCore == true
+    internal fun residentHostRuntimeModeName(): String =
+        hostRuntimeAttachment?.mode?.name?.lowercase() ?: "unresolved"
 
     // 懒加载数据库实例
     private val database by lazy { AppDatabase.getDatabase(this) }
@@ -146,14 +156,29 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
     fun initializeMainApplication() {
         synchronized(mainInitializationLock) {
             if (mainApplicationInitialized) {
+                if (hostRuntimeAttachment?.usesUiProxy == true) {
+                    val refreshed = runBlocking(Dispatchers.IO) {
+                        ResidentHostRuntimeResolver.resolve(applicationContext)
+                    }
+                    // Never downgrade a UI_PROXY process to LEGACY_HOST in-place. Resident OFF will
+                    // own the explicit role transition later; this refresh only advances/diagnoses attach.
+                    if (refreshed.usesUiProxy) {
+                        hostRuntimeAttachment = refreshed
+                        PluginHostUiProxyRuntimeHolder.attach(applicationContext, refreshed)
+                    }
+                }
                 return
             }
-            initializeMainApplicationLocked()
+            val attachment = runBlocking(Dispatchers.IO) {
+                ResidentHostRuntimeResolver.resolve(applicationContext)
+            }
+            hostRuntimeAttachment = attachment
+            initializeMainApplicationLocked(attachment)
             mainApplicationInitialized = true
         }
     }
 
-    private fun initializeMainApplicationLocked() {
+    private fun initializeMainApplicationLocked(attachment: ResidentHostRuntimeAttachment) {
         val startTime = System.currentTimeMillis()
 
         configureOpenMpEnvironment()
@@ -189,6 +214,16 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         // Initialize ActivityLifecycleManager to track the current activity
         ActivityLifecycleManager.initialize(this)
         AppLogger.d(TAG, "【启动计时】ActivityLifecycleManager初始化完成 - ${System.currentTimeMillis() - startTime}ms")
+
+        if (attachment.usesUiProxy) {
+            PluginHostUiProxyRuntimeHolder.attach(applicationContext, attachment)
+            AppLogger.w(
+                TAG,
+                "Resident Host attach-only mode=${attachment.mode} reason=${attachment.reason}; " +
+                    "business startup and Plugin Kernel restore are suppressed in this process"
+            )
+            return
+        }
 
         // Initialize AIMessageManager
         AIMessageManager.initialize(this)

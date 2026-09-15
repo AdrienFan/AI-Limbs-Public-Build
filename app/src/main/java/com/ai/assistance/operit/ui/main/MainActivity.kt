@@ -391,6 +391,16 @@ class MainActivity : ComponentActivity() {
 
     // ======== 启动插件加载 ========
     private fun startPluginLoading() {
+        val operitApplication = application as OperitApplication
+        if (operitApplication.isResidentUiProxyMode()) {
+            pluginLoadingState.hide()
+            AppLogger.d(
+                TAG,
+                "Resident Host is ${operitApplication.residentHostRuntimeModeName()}; " +
+                    "MCP/plugin loading remains business-owner responsibility"
+            )
+            return
+        }
         // 显示插件加载界面
         pluginLoadingState.show()
 

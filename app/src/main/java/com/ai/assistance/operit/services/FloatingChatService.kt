@@ -199,7 +199,17 @@ class FloatingChatService : Service(), FloatingWindowCallback {
 
     override fun onCreate() {
         super.onCreate()
-        (application as OperitApplication).initializeMainApplication()
+        val operitApplication = application as OperitApplication
+        operitApplication.initializeMainApplication()
+        if (operitApplication.isResidentUiProxyMode()) {
+            AppLogger.i(
+                TAG,
+                "Resident Host is ${operitApplication.residentHostRuntimeModeName()}; " +
+                    "FloatingChatService business runtime will not start in the UI shell"
+            )
+            stopSelf()
+            return
+        }
         AppLogger.d(TAG, "onCreate")
 
         instance = this

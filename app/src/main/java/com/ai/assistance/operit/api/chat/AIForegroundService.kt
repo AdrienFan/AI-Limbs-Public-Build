@@ -1160,8 +1160,20 @@ class AIForegroundService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        // Preserve the legacy recursion guard while main application startup decides Host role.
         isRunning.set(true)
-        (application as OperitApplication).initializeMainApplication()
+        val operitApplication = application as OperitApplication
+        operitApplication.initializeMainApplication()
+        if (operitApplication.isResidentUiProxyMode()) {
+            isRunning.set(false)
+            AppLogger.i(
+                TAG,
+                "Resident Host is ${operitApplication.residentHostRuntimeModeName()}; " +
+                    "AIForegroundService business runtime will not start in the UI shell"
+            )
+            stopSelf()
+            return
+        }
         wakeListeningSuspendedForIme = lastRequestedImeVisible
         AppLogger.d(TAG, "AI 前台服务创建。")
         chatRuntimeHolder

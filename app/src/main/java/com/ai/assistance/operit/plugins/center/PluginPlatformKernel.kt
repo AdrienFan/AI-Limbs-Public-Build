@@ -46,16 +46,29 @@ internal object PluginPlatformKernel {
     @Volatile private var businessRuntimeRestored = false
     private var runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 
-    internal fun lifecycleSnapshot(): org.json.JSONObject = org.json.JSONObject()
-        .put("phase", lifecyclePhase)
-        .put("runtime_role", runtimeRole.name.lowercase())
-        .put("initialized", initialized)
-        .put("started", started)
-        .put("pid", android.os.Process.myPid())
-        .put("uid", android.os.Process.myUid())
-        .put("owner_lease_held", runtimeOwnerLease != null)
-        .put("business_runtime_restored", businessRuntimeRestored)
-        .put("last_error", lifecycleError ?: org.json.JSONObject.NULL)
+    internal fun lifecycleSnapshot(): org.json.JSONObject {
+        if (!initialized) {
+            PluginHostUiProxyRuntimeHolder.currentOrNull()?.let { proxy ->
+                return proxy.snapshot()
+                    .put("phase", if (proxy.attachment.attachedToLiveCore) "ui_proxy_attached" else "ui_proxy_waiting")
+                    .put("initialized", false)
+                    .put("started", false)
+                    .put("pid", android.os.Process.myPid())
+                    .put("uid", android.os.Process.myUid())
+                    .put("last_error", org.json.JSONObject.NULL)
+            }
+        }
+        return org.json.JSONObject()
+            .put("phase", lifecyclePhase)
+            .put("runtime_role", runtimeRole.name.lowercase())
+            .put("initialized", initialized)
+            .put("started", started)
+            .put("pid", android.os.Process.myPid())
+            .put("uid", android.os.Process.myUid())
+            .put("owner_lease_held", runtimeOwnerLease != null)
+            .put("business_runtime_restored", businessRuntimeRestored)
+            .put("last_error", lifecycleError ?: org.json.JSONObject.NULL)
+    }
 
     private lateinit var appContextInstance: Context
     private lateinit var managerInstance: PluginManager
@@ -103,13 +116,13 @@ internal object PluginPlatformKernel {
     internal val localModelLoaders: LocalModelLoaderRegistry
         get() = requireInitialized().let { localModelLoadersInstance }
     internal val uiRegistry: PluginUiRegistry
-        get() = requireInitialized().let { uiRegistryInstance }
+        get() = if (initialized) uiRegistryInstance else PluginHostUiProxyRuntimeHolder.requireRuntime().uiRegistry
     internal val systemUiRegistry: SystemPluginUiRegistry
-        get() = requireInitialized().let { systemUiRegistryInstance }
+        get() = if (initialized) systemUiRegistryInstance else PluginHostUiProxyRuntimeHolder.requireRuntime().systemUiRegistry
     internal val dynamicNavigationRegistry: DynamicNavigationSurfaceRegistry
-        get() = requireInitialized().let { dynamicNavigationRegistryInstance }
+        get() = if (initialized) dynamicNavigationRegistryInstance else PluginHostUiProxyRuntimeHolder.requireRuntime().dynamicNavigationRegistry
     internal val pagePresentationRegistry: PluginPagePresentationRegistry
-        get() = requireInitialized().let { pagePresentationRegistryInstance }
+        get() = if (initialized) pagePresentationRegistryInstance else PluginHostUiProxyRuntimeHolder.requireRuntime().pagePresentationRegistry
     internal val systemPlugins: com.ai.assistance.operit.plugins.system.SystemPluginController
         get() = requireInitialized().let { systemPluginControllerInstance }
     internal val capabilities: PluginHostCapabilityRegistry

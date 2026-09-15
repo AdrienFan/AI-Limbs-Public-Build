@@ -22,7 +22,7 @@ build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 �
 
 2026-09-15：继续编写后续迁移，不再把 build25 安装验证作为源码工作的前置门槛。本轮暂不编译。候选分支已包含 ac9373b 的 Android 16 Socket 初始化顺序与 Guardian 唯一实例锁修复，后续改动必须保留。
 
-当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md) 和 [Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md)。Core 已具备独立 Looper 与 owner-only BUSINESS Kernel 接管链；Host attach、Bridge/Dispatcher、插件/Ubuntu、跨进程 UI 代理及 Resident ON/OFF 编排仍未接通。不能把“Core 成为 Plugin Kernel owner”误记为全部业务已迁移或锁屏持续工作已完成。
+当前源码进度见 [运行时退出与交接边界](02-runtime-retirement.md)、[权限后端交接协议](03-backend-handoff.md)、[业务运行时 / 界面运行时拆分](04-runtime-role-split.md)、[Resident Core 独立业务进程骨架](05-core-process-skeleton.md)、[Plugin Kernel 唯一所有权交接](06-plugin-kernel-takeover.md) 和 [Host attach-only / UI Shell](07-host-ui-shell.md)。Core 已具备独立 Looper 与 owner-only BUSINESS Kernel 接管链；Host 重启已能根据 Core / takeover fence 进入 UI_PROXY，并禁止第二套 Plugin Kernel 和主要 Host 业务启动链。Bridge/Dispatcher、插件/Ubuntu、跨进程 UI 状态事件代理及 Resident ON/OFF 编排仍未接通。不能把“Host 进入 UI shell”误记为插件 UI 已完成代理或锁屏持续工作已完成。
 
 ## 迁移不变量（Step 1 冻结边界）
 
@@ -40,3 +40,8 @@ build25 起点提供独立 app_process Context 与同 UID IPC；当前 build26 �
 10. **阶段提交纪律**：后续每一步只解决本阶段定义的边界，完成源码核查后单独提交；在阿伟明确要求统一构建前，不因为阶段完成自动编译、安装、晋升 Current 或修改 Plugin Center。
 
 本 Step 1 只冻结上述迁移边界，不修改业务代码、版本号、已安装状态或 Current 注册表。
+
+
+## Step 5 当前边界
+
+重启 Host 在 Core 已成为业务 owner、handoff pending 或 takeover fence 阻止 fallback 时，只进入 UI_PROXY；不会初始化 Plugin Kernel，也不会启动 AIForegroundService、FloatingChatService 或 MCP/plugin loading。UI_PROXY 当前只提供安全的 UI registry 空壳；真正的 Core→Host UI 状态 / 事件同步与 Android component proxy 仍属于后续步骤。
