@@ -50,6 +50,7 @@ internal object PluginPlatformKernel {
     @Volatile private var childRuntimeStarted = false
     @Volatile private var residentBridgeIngressPrepared = false
     @Volatile private var residentBridgePluginMounted = false
+    @Volatile private var residentBridgeRuntimeReadiness: JSONObject? = null
     @Volatile private var residentPluginServicesPrepared = false
     @Volatile private var residentUbuntuControlReady = false
     @Volatile private var residentUbuntuConfigured = false
@@ -80,6 +81,7 @@ internal object PluginPlatformKernel {
             .put("child_runtime_started", childRuntimeStarted)
             .put("resident_bridge_ingress_prepared", residentBridgeIngressPrepared)
             .put("resident_bridge_plugin_mounted", residentBridgePluginMounted)
+            .put("resident_bridge_readiness", residentBridgeRuntimeReadiness ?: JSONObject.NULL)
             .put("resident_plugin_services_prepared", residentPluginServicesPrepared)
             .put("resident_ubuntu_configured", residentUbuntuConfigured)
             .put("resident_ubuntu_control_ready", residentUbuntuControlReady)
@@ -844,9 +846,13 @@ internal object PluginPlatformKernel {
                 managerInstance.reconcileBackupPolicy()
                 businessRuntimeRestored = true
                 if (runtimeRole == PluginRuntimeRole.BUSINESS) {
-                    residentBridgeIngressPrepared = true
                     residentBridgePluginMounted =
                         managerInstance.snapshot(RESIDENT_BRIDGE_PLUGIN_ID).mountedVersion != null
+                    if (residentBridgePluginMounted) {
+                        childExtensionRuntimeInstance.awaitEnabledPointReady(RESIDENT_BRIDGE_PROVIDER_POINT)
+                        awaitResidentBridgeReady()
+                    }
+                    residentBridgeIngressPrepared = true
                 }
             }
         } catch (error: CancellationException) {
@@ -870,6 +876,32 @@ internal object PluginPlatformKernel {
         )
     }
 
+    /** Child ACTIVE proves a binder exists, not that any desired transport was started or is online. */
+    private suspend fun awaitResidentBridgeReady() {
+        val record = checkNotNull(contributionsInstance.find(
+            PluginContributionKind.PROVIDER, "plugin.bridge.runtime_readiness.v1"
+        )) { "Bridge runtime readiness provider is missing; update Bridge before Resident takeover" }
+        check(record.ownerPluginId == RESIDENT_BRIDGE_PLUGIN_ID) {
+            "Resident Bridge readiness is owned by an unexpected plugin"
+        }
+        val reader = record.payload as? com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+            ?: error("Bridge runtime readiness provider has an incompatible payload")
+        val deadline = android.os.SystemClock.elapsedRealtime() + 30_000L
+        while (true) {
+            val snapshot = JSONObject(reader.invoke("{}"))
+            check(snapshot.getInt("schema") == 1) { "Unsupported Bridge readiness schema" }
+            residentBridgeRuntimeReadiness = snapshot
+            check(!snapshot.getBoolean("fatal_error")) {
+                "Resident Bridge provider failed: ${snapshot.toString().take(1500)}"
+            }
+            if (snapshot.getBoolean("ready")) return
+            check(android.os.SystemClock.elapsedRealtime() < deadline) {
+                "Resident Bridge transport readiness timed out: ${snapshot.toString().take(1500)}"
+            }
+            delay(100L)
+        }
+    }
+
     internal suspend fun startResidentBridgeIngress(): Boolean = runtimeLifecycleMutex.withLock {
         requireInitialized()
         check(runtimeRole == PluginRuntimeRole.BUSINESS) {
@@ -889,6 +921,7 @@ internal object PluginPlatformKernel {
             residentBridgePluginMounted = managerInstance.restoreEnabledPlugin(RESIDENT_BRIDGE_PLUGIN_ID)
             if (residentBridgePluginMounted) {
                 childExtensionRuntimeInstance.awaitEnabledPointReady(RESIDENT_BRIDGE_PROVIDER_POINT)
+                awaitResidentBridgeReady()
             }
             residentBridgeIngressPrepared = true
             lifecyclePhase = "running"
@@ -1062,6 +1095,7 @@ internal object PluginPlatformKernel {
             businessRuntimeRestored = false
             childRuntimeStarted = false
             residentBridgeIngressPrepared = false
+            residentBridgeRuntimeReadiness = null
             residentBridgePluginMounted = false
             residentPluginServicesPrepared = false
             residentUbuntuControlReady = false

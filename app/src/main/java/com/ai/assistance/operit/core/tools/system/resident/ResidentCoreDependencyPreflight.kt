@@ -6,6 +6,7 @@ import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
 import com.ai.assistance.operit.data.preferences.initAndroidPermissionPreferences
 import com.ai.assistance.operit.plugins.center.PluginRuntimeClassLoaders
 import com.ai.assistance.operit.plugins.center.PluginStore
+import com.ai.assistance.operit.plugins.center.PluginStateRepository
 import com.ai.assistance.operit.plugins.center.PluginTrustKeyringV1
 import com.ai.assistance.operit.util.AppLogger
 import org.json.JSONArray
@@ -25,6 +26,7 @@ internal object ResidentCoreDependencyPreflight {
             "Resident Core dependency preflight requires the standalone application Context"
         }
 
+        val security = ResidentCoreSecurityBootstrap.initialize(appContext)
         OperitProcessContext.initialize(appContext)
         AppLogger.bindContext(appContext)
         check(OperitProcessContext.require().filesDir.canonicalFile == appContext.filesDir.canonicalFile) {
@@ -57,8 +59,23 @@ internal object ResidentCoreDependencyPreflight {
             "Plugin store resolved outside application filesDir"
         }
 
+        // Refuse an old Bridge before disconnecting the Host. The readiness contract is additive;
+        // older Bridge builds remain usable in ordinary Host mode but cannot prove Core takeover.
+        val bridgeId = "plugin.system.bridge"
+        val stateRepository = PluginStateRepository(store)
+        val bridge = stateRepository.read(bridgeId)
+        if (bridge?.enabled == true) {
+            val version = checkNotNull(bridge.activeVersion) { "Enabled Bridge has no active version" }
+            val manifest = stateRepository.readInstalledManifest(bridgeId, version)
+            check("plugin.bridge.runtime_readiness.v1" in manifest.provides.providers) {
+                "Resident requires Bridge 1.3.10 or newer with runtime readiness; update Bridge before enabling Resident"
+            }
+        }
+
         return JSONObject()
             .put("ready", true)
+            .put("security", security)
+            .put("bridge_readiness_contract_ready", true)
             .put("process_context_ready", true)
             .put("permission_preferences_ready", true)
             .put("preferred_permission_level", preferredPermission?.name ?: JSONObject.NULL)
