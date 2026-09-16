@@ -655,6 +655,7 @@ private class ResidentHostComponentExecutor(
 ) {
     private val windowLeases = ConcurrentHashMap<String, WeakReference<android.view.Window>>()
     private val permissionOverlay = PermissionRequestOverlay(appContext)
+    private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
 
     fun pollAndExecute() {
         val result = client.componentRequest("component_poll", JSONObject().put("max_items", 8))
@@ -930,16 +931,17 @@ private class ResidentHostComponentExecutor(
     }
 
     private fun runOnUiThread(block: () -> Unit) {
-        val activity = ActivityLifecycleManager.getCurrentActivity() ?: error("No foreground Activity")
+        // Permission overlays use the Host main Looper even when no Activity is foreground.
+        // Activity-specific operations already validate their Activity/window above.
         if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
             block()
             return
         }
         val latch = CountDownLatch(1)
         val failure = AtomicReference<Throwable?>(null)
-        activity.runOnUiThread {
+        check(mainHandler.post {
             try { block() } catch (error: Throwable) { failure.set(error) } finally { latch.countDown() }
-        }
+        }) { "Host main Looper rejected component request" }
         check(latch.await(3, TimeUnit.SECONDS)) { "Host UI thread did not execute component request" }
         failure.get()?.let { throw it }
     }

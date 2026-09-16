@@ -52,6 +52,7 @@ internal object PluginPlatformKernel {
     @Volatile private var residentBridgePluginMounted = false
     @Volatile private var residentBridgeRuntimeReadiness: JSONObject? = null
     @Volatile private var residentPluginServicesPrepared = false
+    @Volatile private var residentSubsystemsReady = false
     @Volatile private var residentUbuntuControlReady = false
     @Volatile private var residentUbuntuConfigured = false
     private var residentPluginRuntimeReport: org.json.JSONObject? = null
@@ -83,6 +84,7 @@ internal object PluginPlatformKernel {
             .put("resident_bridge_plugin_mounted", residentBridgePluginMounted)
             .put("resident_bridge_readiness", residentBridgeRuntimeReadiness ?: JSONObject.NULL)
             .put("resident_plugin_services_prepared", residentPluginServicesPrepared)
+            .put("resident_subsystems_ready", residentSubsystemsReady)
             .put("resident_ubuntu_configured", residentUbuntuConfigured)
             .put("resident_ubuntu_control_ready", residentUbuntuControlReady)
             .put("resident_plugin_runtime", residentPluginRuntimeReport ?: org.json.JSONObject.NULL)
@@ -902,7 +904,7 @@ internal object PluginPlatformKernel {
         )
     }
 
-    /** Child ACTIVE proves a binder exists, not that any desired transport was started or is online. */
+    /** Verify every desired ingress was handed to its provider; remote connection state is diagnostic. */
     private suspend fun awaitResidentBridgeReady() {
         val record = checkNotNull(contributionsInstance.find(
             PluginContributionKind.PROVIDER, "plugin.bridge.runtime_readiness.v1"
@@ -917,12 +919,41 @@ internal object PluginPlatformKernel {
             val snapshot = JSONObject(reader.invoke("{}"))
             check(snapshot.getInt("schema") == 1) { "Unsupported Bridge readiness schema" }
             residentBridgeRuntimeReadiness = snapshot
-            check(!snapshot.getBoolean("fatal_error")) {
-                "Resident Bridge provider failed: ${snapshot.toString().take(1500)}"
+            // A provider may be unconfigured, awaiting authorization or offline. Those are
+            // provider states, not failure of the Core-owned Dispatcher/Plugin Kernel. build38
+            // retired the entire business runtime when one STOPPED provider coexisted with two
+            // ONLINE providers. Validate the generic ingress handoff independently, and retain
+            // the original ready/fatal_error/phase fields without reporting false connectivity.
+            val providers = snapshot.getJSONArray("providers")
+            val providerIds = mutableSetOf<String>()
+            var desiredCount = 0
+            var requestedCount = 0
+            for (index in 0 until providers.length()) {
+                val provider = providers.getJSONObject(index)
+                val providerId = provider.getString("provider_id")
+                check(providerId.isNotBlank() && providerIds.add(providerId)) {
+                    "Invalid or duplicate Bridge provider identity: $providerId"
+                }
+                if (provider.getBoolean("desired_connected")) {
+                    check(provider.getBoolean("enabled")) { "Disabled Bridge provider is desired: $providerId" }
+                    desiredCount += 1
+                    if (provider.getBoolean("start_requested")) requestedCount += 1
+                }
             }
-            if (snapshot.getBoolean("ready")) return
+            check(providers.length() == snapshot.getInt("provider_count") &&
+                desiredCount == snapshot.getInt("desired_provider_count")) {
+                "Inconsistent Bridge runtime readiness inventory"
+            }
+            val ingressReady = snapshot.getBoolean("manager_ready") && requestedCount == desiredCount
+            snapshot.put("ingress_handoff_ready", ingressReady)
+            if (ingressReady) {
+                if (!snapshot.getBoolean("ready")) {
+                    AppLogger.w(TAG, "Bridge ingress handed off with provider connection states: ${snapshot.toString().take(1500)}")
+                }
+                return
+            }
             check(android.os.SystemClock.elapsedRealtime() < deadline) {
-                "Resident Bridge transport readiness timed out: ${snapshot.toString().take(1500)}"
+                "Resident Bridge ingress handoff timed out: ${snapshot.toString().take(1500)}"
             }
             delay(100L)
         }
@@ -1009,6 +1040,9 @@ internal object PluginPlatformKernel {
                     state.enabled && state.lastState == PluginLifecycleState.BLOCKED
                 } == true
             }
+            // All registered child extension points use the same mount/readiness contract.
+            // Ubuntu fields below remain diagnostics for existing status consumers only.
+            residentSubsystemsReady = true
             val ubuntu = childExtensionRuntimeInstance.loggingSnapshots()
                 .firstOrNull { it.extensionId == RESIDENT_UBUNTU_EXTENSION_ID }
             residentUbuntuConfigured = ubuntu != null
@@ -1023,13 +1057,11 @@ internal object PluginPlatformKernel {
                 .put("failed_enabled_parent_ids", org.json.JSONArray(failedEnabled.map { it.pluginId }))
                 .put("blocked_enabled_parent_ids", org.json.JSONArray(blockedEnabled.map { it.pluginId }))
                 .put("children", childReport)
+                .put("subsystems_ready", residentSubsystemsReady)
                 .put("capability_count", capabilityRegistryInstance.activeIds().size)
                 .put("ubuntu_configured", residentUbuntuConfigured)
                 .put("ubuntu_required", ubuntuRequired)
                 .put("ubuntu_control_ready", residentUbuntuControlReady)
-            check(residentUbuntuControlReady) {
-                "Enabled Ubuntu subsystem did not become Core-owned: lifecycle=${ubuntu?.lifecycle} capabilities=$ubuntuCapabilitiesReady error=${ubuntu?.lastError}"
-            }
 
             businessRuntimeRestored = true
             residentPluginServicesPrepared = true
@@ -1124,6 +1156,7 @@ internal object PluginPlatformKernel {
             residentBridgeRuntimeReadiness = null
             residentBridgePluginMounted = false
             residentPluginServicesPrepared = false
+            residentSubsystemsReady = false
             residentUbuntuControlReady = false
             residentUbuntuConfigured = false
             residentPluginRuntimeReport = null

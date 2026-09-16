@@ -249,16 +249,16 @@ internal class ResidentCoreBusinessRuntime {
             val serviceKernel = PluginPlatformKernel.lifecycleSnapshot()
             check(serviceKernel.getBoolean("resident_plugin_services_prepared") &&
                 serviceKernel.getBoolean("business_runtime_restored") &&
-                serviceKernel.getBoolean("resident_ubuntu_control_ready")) {
-                "Resident plugin services / Ubuntu control did not become Core-owned: kernel=$serviceKernel report=$pluginReport"
+                serviceKernel.getBoolean("resident_subsystems_ready")) {
+                "Resident plugin/subsystem services did not become Core-owned: kernel=$serviceKernel report=$pluginReport"
             }
             check(!stopRequested) { "Business takeover cancelled before ownership publication" }
             synchronized(lock) {
                 pluginServicesPrepared = true
-                ubuntuControlReady = true
+                ubuntuControlReady = serviceKernel.getBoolean("resident_ubuntu_control_ready")
             }
             // Publish owned only after policy/Dispatcher, Bridge, ordinary plugin services, child
-            // capabilities and configured Ubuntu control have all moved into the Core owner.
+            // capabilities across every registered subsystem have moved into the Core owner.
             ResidentBusinessTakeoverFence.markOwned(context, coreSession)
             synchronized(lock) {
                 businessAttached = true

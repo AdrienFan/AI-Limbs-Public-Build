@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.tools.system.resident
 
 import android.content.Context
 import com.ai.assistance.operit.core.application.OperitProcessContext
+import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
 import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
 import com.ai.assistance.operit.data.preferences.initAndroidPermissionPreferences
 import com.ai.assistance.operit.plugins.center.PluginRuntimeClassLoaders
@@ -36,6 +37,10 @@ internal object ResidentCoreDependencyPreflight {
         // The build31 real-device failure happened because this global existed only in Host
         // Application.onCreate(). Initialize it explicitly and force real DataStore reads here.
         initAndroidPermissionPreferences(appContext)
+        // app_process does not execute OperitApplication.onCreate(). Shell consumers in every
+        // bridge/subsystem must use this process Context and the normal selected backend.
+        AndroidShellExecutor.setContext(appContext)
+        AndroidShellExecutor.clearPreferredPermissionLevelCache()
         val preferredPermission = androidPermissionPreferences.getPreferredPermissionLevel()
         val rootMode = androidPermissionPreferences.getRootExecutionMode()
         val customSu = androidPermissionPreferences.getCustomSuCommand()
@@ -98,6 +103,7 @@ internal object ResidentCoreDependencyPreflight {
             .put("bridge_readiness_contract_ready", true)
             .put("process_context_ready", true)
             .put("permission_preferences_ready", true)
+            .put("android_shell_context_ready", true)
             .put("preferred_permission_level", preferredPermission?.name ?: JSONObject.NULL)
             .put("root_execution_mode", rootMode.name)
             .put("custom_su_configured", customSu.isNotBlank())

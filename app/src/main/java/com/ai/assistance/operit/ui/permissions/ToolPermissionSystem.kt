@@ -13,6 +13,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
+import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreProcessIdentity
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -85,7 +86,11 @@ class ToolPermissionSystem private constructor(private val context: Context) {
     
     // Permission request management
     private val mainHandler = Handler(Looper.getMainLooper())
-    private val permissionRequestOverlay = PermissionRequestOverlay(context)
+    private val isResidentCore = ResidentCoreProcessIdentity.isCurrentProcessCore()
+    private val permissionRequestOverlay by lazy {
+        check(!isResidentCore) { "Permission presentation belongs to the Android Host" }
+        PermissionRequestOverlay(context)
+    }
     private val permissionRequestMutex = Mutex()
     private var currentPermissionCallback: ((PermissionRequestResult) -> Unit)? = null
     private var permissionRequestInfo: Pair<AITool, String>? = null
@@ -98,7 +103,7 @@ class ToolPermissionSystem private constructor(private val context: Context) {
      */
     fun setColorScheme(colorScheme: ColorScheme?) {
         this.currentColorScheme = colorScheme
-        permissionRequestOverlay.setColorScheme(colorScheme)
+        if (!isResidentCore) permissionRequestOverlay.setColorScheme(colorScheme)
     }
     
     // Permission request state flow
@@ -229,16 +234,17 @@ class ToolPermissionSystem private constructor(private val context: Context) {
     /**
      * Request permission from the user to execute a tool.
      *
-     * Resident Core never owns Android presentation. When its Host component proxy is bound,
+     * Resident Core never owns Android presentation. Process identity selects the Host proxy;
      * the ASK challenge crosses that structured JSON boundary and the Android Host renders it.
-     * In the normal Android Host process there is no bound broker, so the local overlay remains
+     * An unavailable broker is a denied request, never permission to render inside Core.
+     * In the normal Android Host process, the local overlay remains
      * the presentation implementation.
      */
     private suspend fun requestPermission(tool: AITool): Boolean = permissionRequestMutex.withLock {
         val operationDescription = getOperationDescription(tool)
         AppLogger.d(TAG, "Requesting permission: ${tool.name}")
 
-        if (ResidentHostComponentProxy.isAvailable()) {
+        if (isResidentCore) {
             return@withLock requestPermissionViaResidentHost(tool, operationDescription)
         }
 
