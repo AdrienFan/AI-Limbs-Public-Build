@@ -153,6 +153,8 @@ class AIForegroundService : Service() {
             "com.ai.assistance.operit.action.AI_LIMBS_FOREGROUND_NOTIFICATION_DISMISSED"
         const val ACTION_RESIDENT_KEEPALIVE =
             "com.ai.assistance.operit.action.RESIDENT_KEEPALIVE"
+        const val ACTION_RESIDENT_CORE_RECOVERY =
+            "com.ai.assistance.operit.action.RESIDENT_CORE_RECOVERY"
         const val ACTION_RESIDENT_STATE_CHANGED =
             "com.ai.assistance.operit.action.RESIDENT_STATE_CHANGED"
 
@@ -1362,6 +1364,16 @@ class AIForegroundService : Service() {
                     START_NOT_STICKY
                 }
             }
+            ACTION_RESIDENT_CORE_RECOVERY -> {
+                publishResidentHostShellState("running", "resident_ui_proxy_core_recovery")
+                if (AiLimbsResidentRuntime.isEnabledForHost()) {
+                    AiLimbsResidentRuntime.scheduleCoreCrashRecovery(this)
+                    START_STICKY
+                } else {
+                    stopSelf()
+                    START_NOT_STICKY
+                }
+            }
             ACTION_RESIDENT_STATE_CHANGED -> {
                 publishResidentHostShellState("running", "resident_ui_proxy_state_changed")
                 if (AiLimbsResidentRuntime.isEnabledForHost()) {
@@ -1457,6 +1469,13 @@ class AIForegroundService : Service() {
             // Host shell keepalive never owns Resident continuous CPU wake.
             syncResidentCpuWakeLock("resident_keepalive")
             publishResidentHostShellState("running", "legacy_host_keepalive")
+            return START_STICKY
+        }
+
+        if (intent?.action == ACTION_RESIDENT_CORE_RECOVERY) {
+            // This can race the cold restart from UI_PROXY to LEGACY_HOST. Once recycled,
+            // only resume persisted Resident ON; never run UI_PROXY cleanup a second time.
+            AiLimbsResidentRuntime.scheduleEnsureStarted(this)
             return START_STICKY
         }
 

@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.ai.assistance.operit.BuildConfig
 import java.io.File
 import java.util.UUID
+import org.json.JSONObject
 
 /**
  * AI Limbs lock-screen resident guardian.
@@ -22,6 +23,9 @@ object AiLimbsResidentMain {
     private const val HEARTBEAT_MAX_BYTES = 128L * 1024L
     private const val ACTION_RESIDENT_KEEPALIVE =
         "com.ai.assistance.operit.action.RESIDENT_KEEPALIVE"
+    private const val ACTION_RESIDENT_CORE_RECOVERY =
+        "com.ai.assistance.operit.action.RESIDENT_CORE_RECOVERY"
+    private const val CORE_RECOVERY_RETRY_MS = 5_000L
     private const val HOST_SERVICE_CLASS =
         "com.ai.assistance.operit.api.chat.AIForegroundService"
 
@@ -84,6 +88,12 @@ object AiLimbsResidentMain {
         var lastHostTouchExit = -1
         var lastHostTouchOk = false
         var lastHostTouchDetail = "not_started"
+        var lastCoreRecoveryPid: Int? = null
+        var lastCoreRecoveryWallMs = 0L
+        var lastCoreRecoveryExit = -1
+        var lastCoreRecoveryOk = false
+        var lastCoreRecoveryDetail = "not_requested"
+        var nextCoreRecoveryElapsed = 0L
 
         fun refreshHostShellState(): Boolean {
             val probe = probeHostShell(hostShellStateFile, packageName)
@@ -109,6 +119,11 @@ object AiLimbsResidentMain {
                     appendLine("last_host_touch_exit=$lastHostTouchExit")
                     appendLine("last_host_touch_ok=$lastHostTouchOk")
                     appendLine("last_host_touch_detail=${sanitize(lastHostTouchDetail)}")
+                    appendLine("core_recovery_pid=${lastCoreRecoveryPid ?: -1}")
+                    appendLine("last_core_recovery_wall_ms=$lastCoreRecoveryWallMs")
+                    appendLine("last_core_recovery_exit=$lastCoreRecoveryExit")
+                    appendLine("last_core_recovery_ok=$lastCoreRecoveryOk")
+                    appendLine("last_core_recovery_detail=${sanitize(lastCoreRecoveryDetail)}")
                 }
             )
         }
@@ -157,6 +172,21 @@ object AiLimbsResidentMain {
                             }
                 }
 
+                val crashedCorePid = crashedOwnedCorePid(stateDir)
+                if (crashedCorePid == null) {
+                    lastCoreRecoveryPid = null
+                    nextCoreRecoveryElapsed = 0L
+                } else if (lastCoreRecoveryPid != crashedCorePid || nowElapsed >= nextCoreRecoveryElapsed) {
+                    lastCoreRecoveryPid = crashedCorePid
+                    val recovery = requestCoreRecovery(packageName)
+                    lastCoreRecoveryWallMs = System.currentTimeMillis()
+                    lastCoreRecoveryExit = recovery.exitCode
+                    lastCoreRecoveryOk = recovery.ok
+                    lastCoreRecoveryDetail = recovery.detail
+                    publishGuardianState(if (recovery.ok) "recovering_core" else "degraded")
+                    nextCoreRecoveryElapsed = nowElapsed + CORE_RECOVERY_RETRY_MS
+                }
+
                 if (nowElapsed >= nextHeartbeatElapsed) {
                     heartbeatSeq += 1
                     appendHeartbeat(
@@ -186,7 +216,13 @@ object AiLimbsResidentMain {
         }
     }
 
-    private fun touchHost(packageName: String): CommandResult {
+    private fun touchHost(packageName: String): CommandResult =
+        sendHostAction(packageName, ACTION_RESIDENT_KEEPALIVE)
+
+    private fun requestCoreRecovery(packageName: String): CommandResult =
+        sendHostAction(packageName, ACTION_RESIDENT_CORE_RECOVERY)
+
+    private fun sendHostAction(packageName: String, action: String): CommandResult {
         val component = "$packageName/$HOST_SERVICE_CLASS"
         return runCommand(
             listOf(
@@ -195,11 +231,23 @@ object AiLimbsResidentMain {
                 "--user",
                 "0",
                 "-a",
-                ACTION_RESIDENT_KEEPALIVE,
+                action,
                 "-n",
                 component
             )
         )
+    }
+
+    private fun crashedOwnedCorePid(stateDir: File): Int? {
+        val fenceFile = File(stateDir.parentFile, "runtime_owner/business_takeover.json")
+        val fence = runCatching {
+            if (!fenceFile.isFile || fenceFile.length() !in 1L..4096L) null
+            else JSONObject(fenceFile.readText())
+        }.getOrNull() ?: return null
+        if (fence.optString("state") != "owned") return null
+        val corePid = fence.optInt("core_pid", -1)
+        if (corePid <= 0 || ResidentProcessLiveness.exists(corePid)) return null
+        return corePid
     }
 
     private fun probeHostShell(file: File, packageName: String): HostShellProbe {

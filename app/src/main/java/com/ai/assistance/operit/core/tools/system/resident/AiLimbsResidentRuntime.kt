@@ -68,6 +68,19 @@ internal object AiLimbsResidentRuntime {
         }
     }
 
+    fun scheduleCoreCrashRecovery(context: Context) {
+        initialize(context)
+        if (!isEnabled()) return
+        scope.launch {
+            runCatching { recoverCrashedCoreIfNeeded() }
+                .onFailure {
+                    recordError(
+                        "Resident Core auto-recovery failed: ${it.message ?: it.javaClass.simpleName}"
+                    )
+                }
+        }
+    }
+
     suspend fun invoke(
         context: Context,
         ownerPluginId: String,
@@ -125,6 +138,55 @@ internal object AiLimbsResidentRuntime {
         persistEnabled(false)
         notifyHostResidentStateChanged()
         stopLocked()
+    }
+
+    /**
+     * Automatic level-1 recovery for an unexpected Resident Core process death.
+     *
+     * Reuse the existing verified OFF cleanup while preserving desired Resident=ON. The cold-restarted
+     * Host restores normal plugins as LEGACY_HOST, then scheduleEnsureStarted() performs the existing
+     * fully validated Resident ON ownership transaction again.
+     */
+    private suspend fun recoverCrashedCoreIfNeeded(): JSONObject = lifecycleMutex.withLock {
+        if (!isEnabled()) return@withLock status()
+
+        val attachment = ResidentHostRuntimeResolver.resolve(app)
+        if (attachment.mode != ResidentHostRuntimeMode.UI_PROXY_BLOCKED) return@withLock status()
+
+        val fence = ResidentBusinessTakeoverFence.snapshot(app) ?: return@withLock status()
+        if (fence.optString("state") != "owned") return@withLock status()
+
+        val crashedPid = fence.optInt("core_pid", -1)
+        if (crashedPid <= 0 || ResidentProcessLiveness.exists(crashedPid)) return@withLock status()
+
+        val core = ResidentCoreController.status(app)
+        if (core.optBoolean("available", false) || core.optBoolean("process_alive", false)) {
+            return@withLock status()
+        }
+        check(ResidentCoreController.bootstrapLeaseIsFree(app)) {
+            "Crashed Resident Core PID is gone but bootstrap lease is still held"
+        }
+        check(pluginKernelLeaseIsFree()) {
+            "Crashed Resident Core PID is gone but plugin_kernel lease is still held"
+        }
+
+        AppLogger.w(
+            TAG,
+            "Resident Core pid=$crashedPid died unexpectedly; recycling owner state while preserving desired ON"
+        )
+        val result = stopLocked()
+            .put("auto_core_recovery", true)
+            .put("crashed_core_pid", crashedPid)
+            .put("desired_state_preserved", isEnabled())
+
+        check(result.optBoolean("off_cleanup_confirmed", false)) {
+            "Automatic Core recovery cleanup was not confirmed: ${result.optJSONArray("off_cleanup_errors")}"
+        }
+        check(result.optBoolean("host_restart_scheduled", false)) {
+            "Automatic Core recovery cleanup completed but Host restart was not scheduled"
+        }
+        check(isEnabled()) { "Automatic Core recovery accidentally changed Resident desired state" }
+        result
     }
 
     /**
@@ -635,6 +697,11 @@ internal object AiLimbsResidentRuntime {
                 .put("host_guardian", guardian["host_guardian"] ?: JSONObject.NULL)
                 .put("last_host_touch_wall_ms", guardian["last_host_touch_wall_ms"]?.toLongOrNull() ?: JSONObject.NULL)
                 .put("last_host_touch_ok", guardian["last_host_touch_ok"]?.toBooleanStrictOrNull() ?: JSONObject.NULL)
+                .put("core_recovery_pid", guardian["core_recovery_pid"]?.toIntOrNull()?.takeIf { it > 0 } ?: JSONObject.NULL)
+                .put("last_core_recovery_wall_ms", guardian["last_core_recovery_wall_ms"]?.toLongOrNull() ?: JSONObject.NULL)
+                .put("last_core_recovery_exit", guardian["last_core_recovery_exit"]?.toIntOrNull() ?: JSONObject.NULL)
+                .put("last_core_recovery_ok", guardian["last_core_recovery_ok"]?.toBooleanStrictOrNull() ?: JSONObject.NULL)
+                .put("last_core_recovery_detail", guardian["last_core_recovery_detail"] ?: JSONObject.NULL)
                 .put("guardian_state", guardian["state"] ?: JSONObject.NULL)
                 .put("backend", if (PrivilegeRuntime.isSelected()) "ai_limbs" else "shizuku")
                 .put("backend_ready", permissionBackendReady())
