@@ -12,14 +12,18 @@ import org.json.JSONObject
 internal object ResidentCoreWire {
     const val VERSION = 1
     const val TIMEOUT_MS = 3_000
-    private const val MAX_FRAME_BYTES = 8 * 1024
+    // Resident status now includes bounded runtime diagnostics for Kernel/Bridge/plugin/Ubuntu ownership.
+    // The original 8 KiB ceiling was sized for the pre-migration bootstrap skeleton and can make a
+    // healthy Core look unreachable once BUSINESS state is attached. Keep this control plane bounded
+    // while leaving ample headroom; it remains far below UI_PROXY (4 MiB) and Dispatcher (8 MiB).
+    private const val MAX_FRAME_BYTES = 256 * 1024
 
     fun socketName(): String = "ai_limbs_core_" + Process.myUid()
 
     fun read(socket: LocalSocket): JSONObject {
         val input = DataInputStream(socket.inputStream)
         val length = input.readInt()
-        require(length in 1..MAX_FRAME_BYTES) { "Invalid core frame size" }
+        require(length in 1..MAX_FRAME_BYTES) { "Invalid core frame size: $length (max=$MAX_FRAME_BYTES)" }
         val bytes = ByteArray(length)
         input.readFully(bytes)
         return JSONObject(bytes.toString(Charsets.UTF_8))
@@ -27,7 +31,7 @@ internal object ResidentCoreWire {
 
     fun write(socket: LocalSocket, value: JSONObject) {
         val bytes = value.toString().toByteArray(Charsets.UTF_8)
-        require(bytes.size in 1..MAX_FRAME_BYTES) { "Core frame exceeds limit" }
+        require(bytes.size in 1..MAX_FRAME_BYTES) { "Core frame exceeds limit: ${bytes.size} bytes (max=$MAX_FRAME_BYTES)" }
         DataOutputStream(socket.outputStream).apply {
             writeInt(bytes.size)
             write(bytes)
