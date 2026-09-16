@@ -1,4 +1,4 @@
-// Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; dynamic catalog compatibility patch only.
+// Source: AI Limbs V0.6.4.7.8 @ 70438d99bb40c147cadc0a4a085deb90d15b347c; plugin-owned dynamic provider runtime; unique class names avoid host ABI shadowing.
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
@@ -18,21 +18,29 @@ import kotlinx.coroutines.launch
  * the provider currently selected for status/configuration/actions; selecting a
  * different provider never stops the other bridge runtimes.
  */
-class AiLimbsBridgeManager(
+class PluginBridgeManager(
     context: Context,
-    private val scope: CoroutineScope
+    private val scope: CoroutineScope,
+    private val remoteIngressFactory: BridgeRemoteIngressFactory
 ) {
     private val appContext = context.applicationContext
-    private val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+    private val registry = PluginBridgeProviderCatalog.createRegistry()
     private val preferences =
         appContext.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
     private var activeProfileValue =
         registry.requireProfile(initializeActiveProviderId(preferences, registry))
+    private val remoteIngressByProviderId = linkedMapOf<String, BridgeRemoteIngress>()
     private val providersById: MutableMap<String, AiLimbsBridgeProvider> =
         registry.profiles.associate { profile ->
-            profile.id to registry.create(profile, appContext, scope)
+            val capturingFactory = BridgeRemoteIngressFactory { transportId, providerId ->
+                remoteIngressFactory.create(transportId, providerId).also { ingress ->
+                    remoteIngressByProviderId[providerId] = ingress
+                }
+            }
+            profile.id to registry.create(profile, appContext, scope, capturingFactory)
         }.toMutableMap()
     private val providerStateJobs = mutableMapOf<String, Job>()
+    private val startedProviderIds = java.util.concurrent.ConcurrentHashMap.newKeySet<String>()
     private val stateFlow = MutableStateFlow(selectedProvider().state.value)
 
     @Volatile
@@ -69,6 +77,7 @@ class AiLimbsBridgeManager(
     fun startIfDesired() {
         providersById.values.forEach { provider ->
             if (provider.enabled && desiredConnected(provider.id)) {
+                beginIngressSession(provider)
                 provider.start()
             } else {
                 provider.markStopped()
@@ -122,6 +131,7 @@ class AiLimbsBridgeManager(
 
         val nextProvider = selectedProvider()
         if (nextProvider.enabled && desiredConnected(nextProvider.id) && !nextProvider.isRunning) {
+            beginIngressSession(nextProvider)
             nextProvider.start()
         }
     }
@@ -133,6 +143,7 @@ class AiLimbsBridgeManager(
     fun stopRuntime() {
         rePairAwaitingAuthorizationProviderId = null
         providersById.values.forEach(AiLimbsBridgeProvider::stopRuntime)
+        startedProviderIds.clear()
     }
 
     fun reconnect() = reconnectProvider(selectedProvider())
@@ -148,6 +159,7 @@ class AiLimbsBridgeManager(
     private fun connectProvider(provider: AiLimbsBridgeProvider) {
         check(provider.enabled) { "Bridge provider is disabled: ${provider.id}" }
         setDesiredConnected(provider.id, true)
+        beginIngressSession(provider)
         provider.start()
     }
 
@@ -165,6 +177,7 @@ class AiLimbsBridgeManager(
             rePairAwaitingAuthorizationProviderId = null
         }
         setDesiredConnected(provider.id, true)
+        beginIngressSession(provider)
         provider.reconnect()
     }
 
@@ -174,6 +187,7 @@ class AiLimbsBridgeManager(
             rePairAwaitingAuthorizationProviderId = null
         }
         setDesiredConnected(provider.id, true)
+        beginIngressSession(provider)
         provider.recover()
     }
 
@@ -182,6 +196,7 @@ class AiLimbsBridgeManager(
         rePairAwaitingAuthorizationProviderId = provider.id
         setDesiredConnected(provider.id, false)
         try {
+            beginIngressSession(provider)
             provider.rePair()
         } catch (e: Exception) {
             rePairAwaitingAuthorizationProviderId = null
@@ -191,6 +206,7 @@ class AiLimbsBridgeManager(
 
     private fun verifyProviderLiveness(provider: AiLimbsBridgeProvider) {
         if (provider.enabled && desiredConnected(provider.id) && !provider.isRunning) {
+            beginIngressSession(provider)
             provider.start()
         } else {
             provider.verifyLiveness()
@@ -200,16 +216,65 @@ class AiLimbsBridgeManager(
     internal fun onHostSignal(signal: AiLimbsBridgeHostSignal) {
         providersById.values.forEach { provider ->
             if (provider.enabled && desiredConnected(provider.id) && !provider.isRunning) {
+                beginIngressSession(provider)
                 provider.start()
             }
             provider.onHostSignal(signal)
         }
     }
 
+    /** Read-only report of every provider, independent of the provider selected in the UI. */
+    fun runtimeReadiness(): org.json.JSONObject {
+        val providers = org.json.JSONArray()
+        var required = 0
+        var started = 0
+        var online = 0
+        var fatal = false
+        providersById.values.forEach { provider ->
+            val desired = provider.enabled && desiredConnected(provider.id)
+            val phase = provider.state.value.phase
+            val startRequested = provider.id in startedProviderIds
+            val running = provider.isRunning
+            if (desired) {
+                required += 1
+                if (startRequested && phase != AiLimbsBridgePhase.STOPPED) started += 1
+                if (startRequested && running && phase == AiLimbsBridgePhase.ONLINE) online += 1
+                if (phase == AiLimbsBridgePhase.ERROR || phase == AiLimbsBridgePhase.RECOVERY_FAILED) {
+                    fatal = true
+                }
+            }
+            providers.put(org.json.JSONObject()
+                .put("provider_id", provider.id)
+                .put("enabled", provider.enabled)
+                .put("desired_connected", desired)
+                .put("start_requested", startRequested)
+                .put("running", running)
+                .put("phase", phase.name))
+        }
+        return org.json.JSONObject()
+            .put("schema", 1)
+            .put("manager_ready", true)
+            .put("provider_count", providersById.size)
+            .put("desired_provider_count", required)
+            .put("started_provider_count", started)
+            .put("online_provider_count", online)
+            .put("ready", !fatal && started == required)
+            .put("fatal_error", fatal)
+            .put("providers", providers)
+    }
+
     fun statusSummary(): String =
         providersById.values.joinToString(separator = " | ") { provider ->
             "${provider.id}=${provider.statusSummary}"
         }
+
+    private fun beginIngressSession(provider: AiLimbsBridgeProvider) {
+        val ingress = checkNotNull(remoteIngressByProviderId[provider.id]) {
+            "Bridge remote ingress is missing: ${provider.id}"
+        }
+        ingress.beginSession()
+        startedProviderIds.add(provider.id)
+    }
 
     private fun providerFor(providerId: String?): AiLimbsBridgeProvider {
         if (providerId.isNullOrBlank()) return selectedProvider()
@@ -259,7 +324,7 @@ class AiLimbsBridgeManager(
                 }
             }
         }
-        if (providerId == AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
+        if (providerId == PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
             publishRuntimeState(newState)
         }
         if (providerId == activeProfileValue.id) {
@@ -269,7 +334,7 @@ class AiLimbsBridgeManager(
 
     private fun publishSelectedState() {
         publishControlState(selectedProvider().state.value)
-        val primary = checkNotNull(providersById[AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID])
+        val primary = checkNotNull(providersById[PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID])
         publishRuntimeState(primary.state.value)
     }
 
@@ -283,7 +348,7 @@ class AiLimbsBridgeManager(
     }
 
     private fun publishRuntimeState(newState: AiLimbsBridgeState) {
-        val primaryProfile = registry.requireProfile(AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID)
+        val primaryProfile = registry.requireProfile(PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID)
         runtimeStateFlow.value = newState.copy(
             providerId = primaryProfile.id,
             providerLabel = primaryProfile.label
@@ -312,7 +377,7 @@ class AiLimbsBridgeManager(
         val controlState: StateFlow<AiLimbsBridgeState> = controlStateFlow.asStateFlow()
 
         fun persistActiveProvider(context: Context, profileId: String) {
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             val profile = registry.requireProfile(profileId)
             context.applicationContext
                 .getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
@@ -322,10 +387,10 @@ class AiLimbsBridgeManager(
         }
 
         fun availableProfiles(): List<BridgeProfile> =
-            AiLimbsBridgeProviderCatalog.createRegistry().profiles
+            PluginBridgeProviderCatalog.createRegistry().profiles
 
         fun activeProviderId(context: Context): String {
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             return initializeActiveProviderId(
                 context.applicationContext
                     .getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE),
@@ -337,7 +402,7 @@ class AiLimbsBridgeManager(
             context: Context,
             state: AiLimbsBridgeState
         ): List<BridgeAction> {
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             val profileId = state.providerId.takeIf { it.isNotBlank() } ?: activeProviderId(context)
             val profile = registry.requireProfile(profileId)
             if (!profile.enabled) return emptyList()
@@ -348,7 +413,7 @@ class AiLimbsBridgeManager(
             if (!ENABLED) return false
             val appContext = context.applicationContext
             val preferences = appContext.getSharedPreferences(PREF_FILE, Context.MODE_PRIVATE)
-            val registry = AiLimbsBridgeProviderCatalog.createRegistry()
+            val registry = PluginBridgeProviderCatalog.createRegistry()
             return registry.profiles.any { profile ->
                 profile.enabled && desiredConnected(preferences, profile.id)
             }
@@ -362,7 +427,7 @@ class AiLimbsBridgeManager(
             if (preferences.contains(key)) {
                 return preferences.getBoolean(key, false)
             }
-            if (profileId == AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
+            if (profileId == PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID) {
                 return if (preferences.contains(KEY_DESIRED_CONNECTED)) {
                     preferences.getBoolean(KEY_DESIRED_CONNECTED, true)
                 } else {
@@ -381,7 +446,7 @@ class AiLimbsBridgeManager(
         ): String {
             if (!preferences.contains(KEY_ACTIVE_PROVIDER)) {
                 val defaultProfile = registry.requireProfile(
-                    AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID
+                    PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID
                 )
                 preferences.edit()
                     .putString(KEY_ACTIVE_PROVIDER, defaultProfile.id)
@@ -393,7 +458,7 @@ class AiLimbsBridgeManager(
             if (!profileId.isNullOrBlank() && registry.profiles.any { it.id == profileId }) {
                 return profileId
             }
-            val fallback = registry.requireProfile(AiLimbsBridgeProviderCatalog.DEFAULT_PROFILE_ID)
+            val fallback = registry.requireProfile(PluginBridgeProviderCatalog.DEFAULT_PROFILE_ID)
             preferences.edit().putString(KEY_ACTIVE_PROVIDER, fallback.id).apply()
             return fallback.id
         }

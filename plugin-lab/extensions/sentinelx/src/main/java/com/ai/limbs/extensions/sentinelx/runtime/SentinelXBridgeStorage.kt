@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import androidx.security.crypto.EncryptedSharedPreferences
 import androidx.security.crypto.MasterKey
+import com.ai.limbs.extensions.sentinelx.SentinelXLogger
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.UUID
@@ -24,8 +25,10 @@ internal class SentinelXBridgeStorage(context: Context) {
         createSecretPreferences()
     }
 
+    @Volatile private var lastReadFailure: String? = null
+
     fun readConfig(): SentinelXBridgeConfig {
-        val tokenRead = runCatching { readTokenUnsafe() }
+        val tokenRead = readTokenResult()
         return SentinelXBridgeConfig(
             configured = tokenRead.getOrNull() != null,
             secureStorageAvailable = tokenRead.isSuccess,
@@ -37,7 +40,25 @@ internal class SentinelXBridgeStorage(context: Context) {
         )
     }
 
-    internal fun readToken(): String? = runCatching { readTokenUnsafe() }.getOrNull()
+    internal fun readToken(): String? = readTokenResult().getOrNull()
+
+    private fun readTokenResult(): Result<String?> =
+        runCatching { readTokenUnsafe() }
+            .onSuccess { lastReadFailure = null }
+            .onFailure { error ->
+                val signature = "${error.javaClass.name}:${error.cause?.javaClass?.name}"
+                if (lastReadFailure != signature) {
+                    lastReadFailure = signature
+                    // Report the original cause without ever logging token/preferences/key material.
+                    SentinelXLogger.e(
+                        "SentinelXStorage",
+                        "Credential read failed pid=${android.os.Process.myPid()} " +
+                            "uid=${android.os.Process.myUid()} " +
+                            "keystoreProviderPresent=${java.security.Security.getProvider("AndroidKeyStore") != null}",
+                        error
+                    )
+                }
+            }
 
     fun saveBinding(token: String, hubUrl: String, deviceName: String) {
         val normalizedToken = token.trim()
@@ -99,16 +120,24 @@ internal class SentinelXBridgeStorage(context: Context) {
     }
 
     private fun createSecretPreferences(): SharedPreferences {
-        val masterKey = MasterKey.Builder(appContext)
-            .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
-            .build()
-        return EncryptedSharedPreferences.create(
-            appContext,
-            SECRET_PREF_FILE,
-            masterKey,
-            EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
-            EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
-        )
+        val masterKey = try {
+            MasterKey.Builder(appContext)
+                .setKeyScheme(MasterKey.KeyScheme.AES256_GCM)
+                .build()
+        } catch (error: Exception) {
+            throw IllegalStateException("SentinelX secure storage failed at MasterKey initialization", error)
+        }
+        return try {
+            EncryptedSharedPreferences.create(
+                appContext,
+                SECRET_PREF_FILE,
+                masterKey,
+                EncryptedSharedPreferences.PrefKeyEncryptionScheme.AES256_SIV,
+                EncryptedSharedPreferences.PrefValueEncryptionScheme.AES256_GCM
+            )
+        } catch (error: Exception) {
+            throw IllegalStateException("SentinelX secure storage failed at encrypted preferences initialization", error)
+        }
     }
 
     private fun defaultDeviceName(): String =

@@ -126,6 +126,7 @@ internal class SentinelXBridgeProvider private constructor(
     override fun verifyLiveness() {
         val config = storage.readConfig()
         when {
+            !config.secureStorageAvailable -> update(AiLimbsBridgePhase.ERROR, "SentinelX 安全凭据存储不可用")
             !config.configured -> update(AiLimbsBridgePhase.PAIRING, "SentinelX 尚未授权")
             !client.isRunning && !stoppedByUser -> scheduleReconnect("Liveness 检测发现连接已断开")
         }
