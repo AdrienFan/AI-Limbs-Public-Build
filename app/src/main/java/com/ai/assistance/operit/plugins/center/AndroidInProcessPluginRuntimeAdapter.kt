@@ -53,20 +53,29 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         val entryClass = runtimeEntryClass(context)
         val optimizedDir = File(context.cacheDir, "dex/${context.manifest.version}").apply { mkdirs() }
         val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+        val runtimeParentLoader = if (context.runtimeRole == PluginRuntimeRole.BUSINESS) {
+            PluginRuntimeClassLoaders.businessAbi()
+        } else {
+            context.appContext.classLoader
+        }
         val loader = PluginIsolatingDexClassLoader(
             entryFile.absolutePath,
             optimizedDir.absolutePath,
             prepareNativeLibraries(entryFile, context.cacheDir)?.absolutePath,
-            context.appContext.classLoader
+            runtimeParentLoader
         )
         val entry = try {
             val type = loader.loadClass(entryClass)
-            val instance = type.getDeclaredConstructor().newInstance()
-            instance as? InProcessPluginEntry
-                ?: throw PluginInstallException(
+            if (!InProcessPluginEntry::class.java.isAssignableFrom(type)) {
+                throw PluginInstallException(
                     "INPROCESS_ENTRY_TYPE_INVALID",
-                    "$entryClass does not implement InProcessPluginEntry"
+                    "$entryClass does not implement the canonical InProcessPluginEntry " +
+                        "(entry_loader=${type.classLoader}, parent_loader=$runtimeParentLoader, " +
+                        "context_loader=${context.appContext.classLoader})"
                 )
+            }
+            val instance = type.getDeclaredConstructor().newInstance()
+            instance as InProcessPluginEntry
         } catch (error: PluginInstallException) {
             runtimeScope.cancel()
             throw error

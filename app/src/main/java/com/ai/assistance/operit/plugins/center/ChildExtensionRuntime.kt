@@ -673,8 +673,13 @@ internal class ChildExtensionRuntime(
                     ).toString()
                 }
             }
-            val instance = loader.loadClass(record.manifest.entryClass).getDeclaredConstructor().newInstance()
-            val entry = instance as? ChildExtensionEntry ?: error("${record.manifest.entryClass} does not implement ChildExtensionEntry")
+            val entryType = loader.loadClass(record.manifest.entryClass)
+            check(ChildExtensionEntry::class.java.isAssignableFrom(entryType)) {
+                "${record.manifest.entryClass} does not implement the canonical ChildExtensionEntry " +
+                    "(entry_loader=${entryType.classLoader}, parent_loader=${loader.parent}, " +
+                    "context_loader=${appContext.classLoader})"
+            }
+            val entry = entryType.getDeclaredConstructor().newInstance() as ChildExtensionEntry
             mountedHandle = entry.mount(childHost)
             check(bindingHandle != null) { "Child extension mounted without publishing its binding" }
             active[record.manifest.extensionId] = ActiveChild(
@@ -733,6 +738,11 @@ internal class ChildExtensionRuntime(
         ).apply { mkdirs() }
         val optimizedDir = File(runtimeDir, "dex").apply { mkdirs() }
         val nativeLibraryDir = prepareNativeLibraryDirectory(apk, runtimeDir)
+        val runtimeParentLoader = if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+            PluginRuntimeClassLoaders.businessAbi()
+        } else {
+            appContext.classLoader
+        }
         val created = LoadedChildRuntime(
             token = record.runtimeToken,
             apkDigest = apkDigest,
@@ -741,7 +751,7 @@ internal class ChildExtensionRuntime(
                 apk.absolutePath,
                 optimizedDir.absolutePath,
                 nativeLibraryDir?.absolutePath,
-                appContext.classLoader
+                runtimeParentLoader
             ),
             runtimeDir = runtimeDir,
             nativeLibraryDir = nativeLibraryDir

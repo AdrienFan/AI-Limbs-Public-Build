@@ -4,6 +4,7 @@ import android.content.Context
 import com.ai.assistance.operit.core.application.OperitProcessContext
 import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
 import com.ai.assistance.operit.data.preferences.initAndroidPermissionPreferences
+import com.ai.assistance.operit.plugins.center.PluginRuntimeClassLoaders
 import com.ai.assistance.operit.plugins.center.PluginStore
 import com.ai.assistance.operit.plugins.center.PluginTrustKeyringV1
 import com.ai.assistance.operit.util.AppLogger
@@ -45,6 +46,11 @@ internal object ResidentCoreDependencyPreflight {
             "Plugin trust keyring is not readable in Resident Core"
         }
 
+        // Code identity is independent from Android Context identity. Resident Core is launched by
+        // app_process, while its standalone ContextImpl owns a LoadedApk ClassLoader. Prove that the
+        // BUSINESS plugin ABI resolves through one canonical defining loader before Host retires.
+        val businessAbiLoader = PluginRuntimeClassLoaders.businessAbi()
+
         val store = PluginStore.fromContext(appContext)
         val installed = store.listPluginIds()
         check(store.rootDir.canonicalPath.startsWith(appContext.filesDir.canonicalPath + java.io.File.separator)) {
@@ -60,6 +66,9 @@ internal object ResidentCoreDependencyPreflight {
             .put("custom_su_configured", customSu.isNotBlank())
             .put("trust_keyring_ready", true)
             .put("trust_keyring_version", keyring.version)
+            .put("business_abi_loader_ready", true)
+            .put("business_abi_loader", businessAbiLoader.javaClass.name)
+            .put("context_loader_is_business_abi_loader", appContext.classLoader === businessAbiLoader)
             .put("plugin_store_ready", true)
             .put("installed_plugin_count", installed.size)
             .put("installed_plugin_ids", JSONArray(installed))
