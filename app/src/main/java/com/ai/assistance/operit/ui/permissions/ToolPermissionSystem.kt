@@ -12,6 +12,8 @@ import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
 import com.ai.assistance.operit.data.model.AITool
+import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
+import com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
@@ -21,7 +23,12 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.suspendCancellableCoroutine
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlin.coroutines.resume
 
 // Define DataStore
@@ -79,6 +86,7 @@ class ToolPermissionSystem private constructor(private val context: Context) {
     // Permission request management
     private val mainHandler = Handler(Looper.getMainLooper())
     private val permissionRequestOverlay = PermissionRequestOverlay(context)
+    private val permissionRequestMutex = Mutex()
     private var currentPermissionCallback: ((PermissionRequestResult) -> Unit)? = null
     private var permissionRequestInfo: Pair<AITool, String>? = null
     
@@ -219,56 +227,114 @@ class ToolPermissionSystem private constructor(private val context: Context) {
     }
     
     /**
-     * Request permission from the user to execute a tool
+     * Request permission from the user to execute a tool.
+     *
+     * Resident Core never owns Android presentation. When its Host component proxy is bound,
+     * the ASK challenge crosses that structured JSON boundary and the Android Host renders it.
+     * In the normal Android Host process there is no bound broker, so the local overlay remains
+     * the presentation implementation.
      */
-    private suspend fun requestPermission(tool: AITool): Boolean {
-        // Get operation description
+    private suspend fun requestPermission(tool: AITool): Boolean = permissionRequestMutex.withLock {
         val operationDescription = getOperationDescription(tool)
-        
         AppLogger.d(TAG, "Requesting permission: ${tool.name}")
-        
-        // Clear existing request
+
+        if (ResidentHostComponentProxy.isAvailable()) {
+            return@withLock requestPermissionViaResidentHost(tool, operationDescription)
+        }
+
+        requestPermissionLocally(tool, operationDescription)
+    }
+
+    private suspend fun requestPermissionViaResidentHost(
+        tool: AITool,
+        operationDescription: String
+    ): Boolean {
+        val parameters = JSONArray().apply {
+            tool.parameters.forEach { parameter ->
+                put(JSONObject().put("name", parameter.name).put("value", parameter.value))
+            }
+        }
+        val payload =
+            JSONObject()
+                .put("tool_name", tool.name)
+                .put("tool_description", tool.description)
+                .put("operation_description", operationDescription)
+                .put("parameters", parameters)
+
+        val result =
+            runCatching {
+                withContext(Dispatchers.IO) {
+                    ResidentHostComponentProxy.request(
+                        ResidentComponentProxyBroker.KIND_PERMISSION_REQUEST,
+                        payload,
+                        PERMISSION_REQUEST_TIMEOUT_MS
+                    )
+                }
+            }.onFailure { error ->
+                AppLogger.e(TAG, "Resident Host permission proxy failed for ${tool.name}", error)
+            }.getOrNull() ?: return false
+
+        if (!result.optBoolean("ok", false)) {
+            AppLogger.w(
+                TAG,
+                "Resident Host permission proxy denied ${tool.name}: ${result.optString("error")}"
+            )
+            return false
+        }
+
+        val decision =
+            runCatching { PermissionRequestResult.valueOf(result.getString("decision")) }
+                .getOrElse { error ->
+                    AppLogger.e(TAG, "Invalid Resident Host permission decision for ${tool.name}", error)
+                    return false
+                }
+
+        AppLogger.d(TAG, "Resident Host permission result received: $decision for ${tool.name}")
+        return when (decision) {
+            PermissionRequestResult.ALLOW -> true
+            PermissionRequestResult.DENY -> false
+            PermissionRequestResult.ALWAYS_ALLOW -> {
+                saveToolPermission(tool.name, PermissionLevel.ALLOW)
+                true
+            }
+        }
+    }
+
+    private suspend fun requestPermissionLocally(
+        tool: AITool,
+        operationDescription: String
+    ): Boolean {
         currentPermissionCallback = null
         permissionRequestInfo = null
         _permissionRequestState.value = null
-        
-        // Set up new request
+
         val requestInfo = Pair(tool, operationDescription)
         permissionRequestInfo = requestInfo
         _permissionRequestState.value = requestInfo
-        
         AppLogger.d(TAG, "Permission request state updated: ${tool.name}")
-        
+
         return withTimeoutOrNull(PERMISSION_REQUEST_TIMEOUT_MS) {
             suspendCancellableCoroutine { continuation ->
-                // Set callback
                 currentPermissionCallback = { result ->
                     AppLogger.d(TAG, "Permission result received: $result for ${tool.name}")
-                    // Clean up state
                     currentPermissionCallback = null
                     permissionRequestInfo = null
                     _permissionRequestState.value = null
-                    
-                    // Handle result
+
                     when (result) {
                         PermissionRequestResult.ALLOW -> continuation.resume(true)
                         PermissionRequestResult.DENY -> continuation.resume(false)
                         PermissionRequestResult.ALWAYS_ALLOW -> {
-                            // Save the permission and resume
-                            tool.let {
-                                val toolScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.IO)
-                                toolScope.launch {
-                                    saveToolPermission(it.name, PermissionLevel.ALLOW)
-                                }
+                            val toolScope = CoroutineScope(Dispatchers.IO)
+                            toolScope.launch {
+                                saveToolPermission(tool.name, PermissionLevel.ALLOW)
                             }
                             continuation.resume(true)
                         }
                     }
                 }
-                
-                // Start permission request on main thread
+
                 mainHandler.post {
-                    // Use overlay to show permission request
                     if (!permissionRequestOverlay.hasOverlayPermission()) {
                         AppLogger.w(TAG, "No overlay permission, requesting...")
                         permissionRequestOverlay.requestOverlayPermission()
@@ -281,7 +347,6 @@ class ToolPermissionSystem private constructor(private val context: Context) {
                 }
             }
         } ?: run {
-            // Timeout handling
             AppLogger.d(TAG, "Permission request timed out: ${tool.name}")
             currentPermissionCallback = null
             permissionRequestInfo = null
@@ -289,7 +354,7 @@ class ToolPermissionSystem private constructor(private val context: Context) {
             false
         }
     }
-    
+
     /**
      * Handle permission request result
      */

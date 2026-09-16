@@ -8,6 +8,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import com.ai.assistance.operit.core.application.ActivityLifecycleManager
+import com.ai.assistance.operit.data.model.AITool
+import com.ai.assistance.operit.data.model.ToolParameter
+import com.ai.assistance.operit.ui.permissions.PermissionRequestOverlay
 import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
 import com.ai.assistance.operit.core.tools.system.resident.ResidentUiProxyWire
 import com.ai.assistance.operit.plugins.system.KernelSelfMaintenanceJsonServiceV1
@@ -651,6 +654,7 @@ private class ResidentHostComponentExecutor(
     private val client: ResidentUiProxyClient
 ) {
     private val windowLeases = ConcurrentHashMap<String, WeakReference<android.view.Window>>()
+    private val permissionOverlay = PermissionRequestOverlay(appContext)
 
     fun pollAndExecute() {
         val result = client.componentRequest("component_poll", JSONObject().put("max_items", 8))
@@ -737,10 +741,70 @@ private class ResidentHostComponentExecutor(
             val started = appContext.startService(intent)
             JSONObject().put("ok", true).put("component", started?.flattenToString() ?: JSONObject.NULL)
         }
+        ResidentComponentProxyBroker.KIND_PERMISSION_REQUEST ->
+            launchPermissionRequest(requestId, payload)
         ResidentComponentProxyBroker.KIND_ACTIVITY_RESULT ->
             launchActivityResult(requestId, payload, deadlineElapsedMs)
         else -> JSONObject().put("ok", false).put("error", "UNKNOWN_COMPONENT_KIND")
         }
+    }
+
+    private fun launchPermissionRequest(
+        requestId: String,
+        payload: JSONObject
+    ): JSONObject? {
+        val parameters =
+            payload.optJSONArray("parameters")?.objects().orEmpty().map { item ->
+                ToolParameter(
+                    name = item.optString("name"),
+                    value = item.optString("value")
+                )
+            }
+        val tool =
+            AITool(
+                name = payload.getString("tool_name"),
+                parameters = parameters,
+                description = payload.optString("tool_description")
+            )
+        val operationDescription = payload.optString("operation_description", tool.name)
+
+        runOnUiThread {
+            try {
+                if (!permissionOverlay.hasOverlayPermission()) {
+                    client.completeComponentAsync(
+                        requestId,
+                        JSONObject()
+                            .put("ok", false)
+                            .put("decision", "DENY")
+                            .put("error", "OVERLAY_PERMISSION_REQUIRED")
+                    )
+                    return@runOnUiThread
+                }
+
+                permissionOverlay.show(tool, operationDescription) { decision ->
+                    client.completeComponentAsync(
+                        requestId,
+                        JSONObject()
+                            .put("ok", true)
+                            .put("decision", decision.name)
+                    )
+                }
+            } catch (error: Throwable) {
+                com.ai.assistance.operit.util.AppLogger.e(
+                    "ResidentHostComponentExecutor",
+                    "Host permission presentation failed for ${tool.name}",
+                    error
+                )
+                client.completeComponentAsync(
+                    requestId,
+                    JSONObject()
+                        .put("ok", false)
+                        .put("decision", "DENY")
+                        .put("error", error.toString().take(1024))
+                )
+            }
+        }
+        return null
     }
 
     private fun launchActivityResult(

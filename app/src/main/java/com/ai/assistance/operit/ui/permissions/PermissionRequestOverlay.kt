@@ -383,7 +383,11 @@ class PermissionRequestOverlay(private val context: Context) {
         operationDescription: String,
         onResult: (PermissionRequestResult) -> Unit
     ) {
-        if (overlayView != null) return
+        if (overlayView != null) {
+            AppLogger.w(TAG, "Permission overlay already active; denying overlapping request for ${tool.name}")
+            onResult(PermissionRequestResult.DENY)
+            return
+        }
 
         if (!hasOverlayPermission()) {
             AppLogger.e(TAG, "Cannot show overlay without permission")
@@ -391,64 +395,64 @@ class PermissionRequestOverlay(private val context: Context) {
             return
         }
 
-        windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
-
-        val params = WindowManager.LayoutParams().apply {
-            width = WindowManager.LayoutParams.MATCH_PARENT
-            height = WindowManager.LayoutParams.MATCH_PARENT
-            type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
-            } else {
-                WindowManager.LayoutParams.TYPE_PHONE
-            }
-            flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
-                    WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
-            format = android.graphics.PixelFormat.TRANSLUCENT
-            gravity = Gravity.TOP or Gravity.START
-        }
-
-        overlayView = ComposeView(context).apply {
-            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-            setContent {
-                PermissionRequestContent(
-                    toolName = tool.name,
-                    operationDescription = operationDescription,
-                    colorScheme = colorScheme,
-                    tool = tool,
-                    onAllow = {
-                        onResult(PermissionRequestResult.ALLOW)
-                        dismiss()
-                    },
-                    onDeny = {
-                        onResult(PermissionRequestResult.DENY)
-                        dismiss()
-                    },
-                    onAlwaysAllow = {
-                        onResult(PermissionRequestResult.ALWAYS_ALLOW)
-                        dismiss()
-                    }
-                )
-            }
-        }
-
-        lifecycleOwner = ServiceLifecycleOwner().apply {
-            handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
-            handleLifecycleEvent(Lifecycle.Event.ON_START)
-            handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
-        }
-
-        overlayView?.apply {
-            setViewTreeLifecycleOwner(lifecycleOwner)
-            setViewTreeViewModelStoreOwner(lifecycleOwner)
-            setViewTreeSavedStateRegistryOwner(lifecycleOwner)
-        }
-
         try {
+            windowManager = context.getSystemService(Context.WINDOW_SERVICE) as WindowManager
+
+            val params = WindowManager.LayoutParams().apply {
+                width = WindowManager.LayoutParams.MATCH_PARENT
+                height = WindowManager.LayoutParams.MATCH_PARENT
+                type = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                    WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY
+                } else {
+                    WindowManager.LayoutParams.TYPE_PHONE
+                }
+                flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN or
+                        WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS
+                format = android.graphics.PixelFormat.TRANSLUCENT
+                gravity = Gravity.TOP or Gravity.START
+            }
+
+            overlayView = ComposeView(context).apply {
+                setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
+                setContent {
+                    PermissionRequestContent(
+                        toolName = tool.name,
+                        operationDescription = operationDescription,
+                        colorScheme = colorScheme,
+                        tool = tool,
+                        onAllow = {
+                            onResult(PermissionRequestResult.ALLOW)
+                            dismiss()
+                        },
+                        onDeny = {
+                            onResult(PermissionRequestResult.DENY)
+                            dismiss()
+                        },
+                        onAlwaysAllow = {
+                            onResult(PermissionRequestResult.ALWAYS_ALLOW)
+                            dismiss()
+                        }
+                    )
+                }
+            }
+
+            lifecycleOwner = ServiceLifecycleOwner().apply {
+                handleLifecycleEvent(Lifecycle.Event.ON_CREATE)
+                handleLifecycleEvent(Lifecycle.Event.ON_START)
+                handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
+            }
+
+            overlayView?.apply {
+                setViewTreeLifecycleOwner(lifecycleOwner)
+                setViewTreeViewModelStoreOwner(lifecycleOwner)
+                setViewTreeSavedStateRegistryOwner(lifecycleOwner)
+            }
+
             windowManager?.addView(overlayView, params)
             AppLogger.d(TAG, "Overlay view added successfully")
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error adding overlay view", e)
+        } catch (error: Throwable) {
+            AppLogger.e(TAG, "Permission overlay presentation failed", error)
             onResult(PermissionRequestResult.DENY)
             dismiss()
         }
