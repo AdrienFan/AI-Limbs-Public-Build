@@ -92,8 +92,14 @@ internal object ResidentCoreController {
         requestFile.writeText(launchId)
         var ready = false
         try {
+            val nativeLibraryDir = context.applicationInfo.nativeLibraryDir?.trim().orEmpty()
+            check(nativeLibraryDir.isNotBlank() && File(nativeLibraryDir).isDirectory) {
+                "Resident Core native library directory is unavailable: $nativeLibraryDir"
+            }
             val inner = "export CLASSPATH=" + quote(context.applicationInfo.sourceDir) + "; " +
-                "exec /system/bin/app_process /system/bin --nice-name=ail_resident_core " +
+                "export LD_LIBRARY_PATH=" + quote(nativeLibraryDir) + ":\$LD_LIBRARY_PATH; " +
+                "exec /system/bin/app_process -Djava.library.path=\$LD_LIBRARY_PATH /system/bin " +
+                "--nice-name=ail_resident_core " +
                 MAIN_CLASS + " " + quote(context.packageName) + " " +
                 quote(directory.absolutePath) + " " + quote(launchId)
             val asApp = "exec /system/bin/run-as " + quote(context.packageName) +

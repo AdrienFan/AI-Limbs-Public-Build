@@ -53,6 +53,26 @@ internal object ResidentCoreDependencyPreflight {
         // BUSINESS plugin ABI resolves through one canonical defining loader before Host retires.
         val businessAbiLoader = PluginRuntimeClassLoaders.businessAbi()
 
+        // app_process does not inherit the APK's native search path from a normal Zygote-bound
+        // application process. Prove the installed native directory and the ToolPkg QuickJS JNI
+        // bridge before Host retirement so a loader regression rejects takeover safely.
+        val nativeLibraryDir = appContext.applicationInfo.nativeLibraryDir?.trim().orEmpty()
+        check(nativeLibraryDir.isNotBlank() && java.io.File(nativeLibraryDir).isDirectory) {
+            "Resident Core native library directory is unavailable: $nativeLibraryDir"
+        }
+        runCatching {
+            Class.forName(
+                "com.ai.assistance.operit.core.tools.javascript.QuickJsNativeBridge",
+                true,
+                ResidentCoreDependencyPreflight::class.java.classLoader
+            )
+        }.getOrElse { error ->
+            throw IllegalStateException(
+                "Resident Core JNI preflight failed for quickjsjni in $nativeLibraryDir",
+                error
+            )
+        }
+
         val store = PluginStore.fromContext(appContext)
         val installed = store.listPluginIds()
         check(store.rootDir.canonicalPath.startsWith(appContext.filesDir.canonicalPath + java.io.File.separator)) {
@@ -86,6 +106,9 @@ internal object ResidentCoreDependencyPreflight {
             .put("business_abi_loader_ready", true)
             .put("business_abi_loader", businessAbiLoader.javaClass.name)
             .put("context_loader_is_business_abi_loader", appContext.classLoader === businessAbiLoader)
+            .put("native_library_dir_ready", true)
+            .put("native_library_dir", nativeLibraryDir)
+            .put("quickjs_jni_ready", true)
             .put("plugin_store_ready", true)
             .put("installed_plugin_count", installed.size)
             .put("installed_plugin_ids", JSONArray(installed))

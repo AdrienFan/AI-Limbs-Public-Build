@@ -115,6 +115,10 @@ internal class ResidentUiProxyClient(
                 } catch (error: Throwable) {
                     revision.set(-1L)
                     hostGeneration.set(0L)
+                    // Never keep rendering the last Core-owned Bridge state after the Core socket
+                    // is unreachable. A stale ONLINE snapshot produces dead controls and false
+                    // connectivity; clearing it makes the Host notification fail closed.
+                    runtime.replaceForegroundNotification(null)
                     com.ai.assistance.operit.util.AppLogger.w(TAG, "Resident UI proxy temporarily disconnected", error)
                     delay(RETRY_MS)
                 }
