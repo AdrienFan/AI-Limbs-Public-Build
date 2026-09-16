@@ -1,7 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 /** Dynamic replacement for the V0.6.4.7.8 compile-time provider catalog. */
-object AiLimbsBridgeProviderCatalog {
+object PluginBridgeProviderCatalog {
     @Volatile private var factories: List<BridgeProviderFactory> = emptyList()
     fun replaceFactories(value: Collection<BridgeProviderFactory>) { factories = value.toList() }
     val DEFAULT_PROFILE_ID: String

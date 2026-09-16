@@ -1,8 +1,8 @@
 package com.ai.limbs.plugins.bridge
 
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeManager
+import com.ai.assistance.operit.integrations.ailimbs.PluginBridgeManager
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeState
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeProviderCatalog
+import com.ai.assistance.operit.integrations.ailimbs.PluginBridgeProviderCatalog
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
@@ -11,8 +11,9 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderControl
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelFieldKind
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelState
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderNotificationState
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngressFactory
 import com.ai.limbs.plugin.runtime.ChildExtensionBinder
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessNotificationAction
@@ -25,22 +26,17 @@ import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.currentCoroutineContext
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collect
-import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -55,6 +51,43 @@ class BridgePluginEntry : InProcessPluginEntry {
     }
 }
 
+private class HostBridgeRemoteIngress(
+    private val host: InProcessPluginHost,
+    override val transportId: String,
+    override val providerId: String
+) : BridgeRemoteIngress {
+    @Volatile
+    private var scopeId: String = newScopeId()
+
+    init {
+        require(transportId.isNotBlank()) { "Bridge transportId must not be blank" }
+        require(providerId.isNotBlank()) { "Bridge providerId must not be blank" }
+    }
+
+    override fun beginSession() {
+        scopeId = newScopeId()
+    }
+
+    override suspend fun invoke(tool: String, args: JSONObject): JSONObject {
+        require(tool.isNotBlank()) { "Bridge remote tool must not be blank" }
+        val currentScopeId = scopeId
+        val request = JSONObject()
+            .put("transport", transportId)
+            .put("provider_id", providerId)
+            .put("scope_id", currentScopeId)
+            .put("tool", tool)
+            .put("args", JSONObject(args.toString()))
+        return JSONObject(
+            host.invokeHostCapability(BRIDGE_REMOTE_INVOKE_CAPABILITY_ID, request.toString())
+        )
+    }
+
+    private fun newScopeId(): String =
+        "bridge-$transportId-$providerId-${UUID.randomUUID()}"
+}
+
+private const val BRIDGE_REMOTE_INVOKE_CAPABILITY_ID = "core.bridge.remote.invoke"
+
 private class BridgeRuntime(
     private val host: InProcessPluginHost
 ) {
@@ -66,6 +99,9 @@ private class BridgeRuntime(
     )
 
     private val contributions = ConcurrentHashMap<String, BridgeProviderContribution>()
+    private val remoteIngressFactory = BridgeRemoteIngressFactory { transportId, providerId ->
+        HostBridgeRemoteIngress(host, transportId, providerId)
+    }
     private val presentationScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val mutablePresentation = MutableStateFlow(BridgePresentationState())
     private val presentation = mutablePresentation.asStateFlow()
@@ -73,14 +109,15 @@ private class BridgeRuntime(
     private val panelProvider = BridgeDynamicPanelProvider()
     private val notificationProvider = BridgeNotificationPublisher()
     private var notificationHandle: AutoCloseable? = null
-    private var manager: AiLimbsBridgeManager? = null
+    @Volatile
+    private var manager: PluginBridgeManager? = null
     private var managerScope: CoroutineScope? = null
     private var pointHandle: AutoCloseable? = null
-    private var hubWatcher: Job? = null
-    @Volatile
-    private var activeHub: ExtensionHubService? = null
-    private var hubGeneration = 0L
+    private var pointGeneration = 0L
     private var stopped = false
+    private val hostLifecycle =
+        BridgeHostLifecycleController(host.applicationContext) { manager }
+
     fun mount() {
         try {
             val notificationHost =
@@ -91,6 +128,24 @@ private class BridgeRuntime(
                 InProcessNotificationActionHandler { actionId -> notificationProvider.perform(actionId) }
             )
             registerCapabilities()
+            // Private read-only lifecycle contract; never a second manager or an AI command entry.
+            host.registerProvider(
+                "plugin.bridge.runtime_readiness.v1",
+                InProcessCapabilityExecutor {
+                    synchronized(this@BridgeRuntime) {
+                        (manager?.runtimeReadiness() ?: JSONObject()
+                            .put("schema", 1)
+                            .put("manager_ready", false)
+                            .put("ready", contributions.isEmpty() && !stopped)
+                            .put("fatal_error", stopped)
+                            .put("provider_count", 0)
+                            .put("desired_provider_count", 0)
+                            .put("online_provider_count", 0)
+                            .put("providers", JSONArray())).toString()
+                    }
+                },
+                mapOf("kind" to "runtime_readiness", "schema" to "1")
+            )
             host.registerProvider(
                 PANEL_PROVIDER_ID,
                 panelProvider,
@@ -111,7 +166,7 @@ private class BridgeRuntime(
                             JSONArray()
                                 .put(JSONObject()
                                     .put("type", "child_extension_installer")
-                                    .put("label", "添加 Bridge Provider")
+                                    .put("label", "添加子插件")
                                     .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT))
                                 .put(JSONObject()
                                     .put("type", "child_extension_selector")
@@ -142,7 +197,6 @@ private class BridgeRuntime(
                                             )
                                         )
                                 )
-                                .put(JSONObject().put("type", "child_extension_list").put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT))
                         )
                         .toString()
                 )
@@ -150,76 +204,34 @@ private class BridgeRuntime(
             host.registerHomeTile(
                 InProcessHomeTile(TILE_ID, "Bridge", "可插拔 Bridge Provider", SCREEN_ID)
             )
-            startHubWatcher()
+            hostLifecycle.start()
+            publishExtensionPoint()
         } catch (error: Throwable) {
-            hubWatcher?.cancel()
-            hubWatcher = null
             pointHandle?.close()
             pointHandle = null
             notificationHandle?.close()
             notificationHandle = null
+            hostLifecycle.close()
             clearPresentation()
             throw error
         }
     }
 
-    private fun startHubWatcher() {
-        hubWatcher?.cancel()
-        hubWatcher = presentationScope.launch {
-            host.providers.observe(InProcessSystemIds.EXTENSION_HUB_PROVIDER).collectLatest { binding ->
-                val observedHub = binding?.payload as? ExtensionHubService
-                while (currentCoroutineContext().isActive) {
-                    val failure = runCatching { switchExtensionHub(observedHub) }.exceptionOrNull()
-                    if (failure == null) break
-                    if (failure is CancellationException) throw failure
-                    delay(HUB_ATTACH_RETRY_MS)
-                    val latestHub = host.providers
-                        .resolve(InProcessSystemIds.EXTENSION_HUB_PROVIDER)
-                        ?.payload as? ExtensionHubService
-                    if (latestHub !== observedHub) break
-                }
-            }
-        }
-    }
-
     @Synchronized
-    private fun switchExtensionHub(nextHub: ExtensionHubService?) {
-        if (stopped) return
-        if (activeHub === nextHub && (nextHub == null || pointHandle != null)) return
-
-        hubGeneration += 1L
-        val previousPoint = pointHandle
-        pointHandle = null
-        activeHub = null
-        try {
-            previousPoint?.close()
-        } finally {
-            clearContributionsLocked()
-        }
-        if (nextHub == null) return
-
-        activeHub = nextHub
-        val generation = hubGeneration
-        try {
-            pointHandle = nextHub.publishPoint(
-                ownerPluginId = host.pluginId,
-                point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
-                apiVersion = 3,
-                title = "Bridge Provider",
-                description = "AI Limbs remote Bridge provider contract",
-                allowedHostCapabilities = setOf("core.bridge.remote.invoke"),
-                binder = ChildExtensionBinder { binding ->
-                    bindContribution(generation, binding.extensionId, binding.payload)
-                }
-            )
-        } catch (error: Throwable) {
-            activeHub = null
-            hubGeneration += 1L
-            runCatching { clearContributionsLocked() }
-                .exceptionOrNull()
-                ?.let(error::addSuppressed)
-            throw error
-        }
+    private fun publishExtensionPoint() {
+        check(!stopped) { "Bridge runtime is already stopped" }
+        pointGeneration += 1L
+        val generation = pointGeneration
+        pointHandle = host.childExtensions.publishPoint(
+            point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
+            apiVersion = 4,
+            title = "Bridge Provider",
+            description = "AI Limbs remote Bridge provider contract",
+            allowedHostCapabilities = emptySet(),
+            binder = ChildExtensionBinder { binding ->
+                bindContribution(generation, binding.extensionId, binding.payload)
+            }
+        )
     }
 
     private fun bindContribution(
@@ -231,7 +243,7 @@ private class BridgeRuntime(
             ?: error("Bridge child extension did not publish BridgeProviderContribution")
         require(contribution.factory.profiles.isNotEmpty()) { "Bridge provider has no profiles" }
         synchronized(this) {
-            check(!stopped && generation == hubGeneration && activeHub != null) {
+            check(!stopped && generation == pointGeneration) {
                 "Bridge extension point is no longer active"
             }
             check(contributions.putIfAbsent(extensionId, contribution) == null) {
@@ -254,28 +266,20 @@ private class BridgeRuntime(
         }
     }
 
-    private fun clearContributionsLocked() {
-        if (contributions.isEmpty() && manager == null) return
-        contributions.clear()
-        rebuildManager()
-    }
-
     suspend fun stop() {
-        hubWatcher?.cancel()
-        hubWatcher = null
+        hostLifecycle.close()
         synchronized(this) {
             stopped = true
-            hubGeneration += 1L
+            pointGeneration += 1L
             val publishedPoint = pointHandle
             pointHandle = null
-            activeHub = null
             contributions.clear()
             runCatching { publishedPoint?.close() }
             manager?.stopRuntime()
             manager = null
             managerScope?.cancel()
             managerScope = null
-            AiLimbsBridgeProviderCatalog.replaceFactories(emptyList())
+            PluginBridgeProviderCatalog.replaceFactories(emptyList())
             clearPresentation()
         }
         notificationHandle?.close()
@@ -292,18 +296,24 @@ private class BridgeRuntime(
         val values = contributions.entries
             .sortedBy { it.key }
             .map { it.value }
-        AiLimbsBridgeProviderCatalog.replaceFactories(values.map { it.factory })
+        PluginBridgeProviderCatalog.replaceFactories(values.map { it.factory })
         if (values.isEmpty()) {
+            hostLifecycle.onManagerStateChanged("manager_cleared")
             clearPresentation()
             return
         }
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-        val nextManager = AiLimbsBridgeManager(host.applicationContext, scope)
+        val nextManager = PluginBridgeManager(host.applicationContext, scope, remoteIngressFactory)
         managerScope = scope
         manager = nextManager
+        nextManager.startIfDesired()
+        hostLifecycle.onManagerChanged("manager_rebuilt")
         publishPresentation(nextManager, nextManager.state.value)
         scope.launch {
             nextManager.state.collect { bridgeState ->
+                hostLifecycle.onManagerStateChanged(
+                    "bridge_state:${bridgeState.phase}"
+                )
                 publishPresentation(nextManager, bridgeState)
             }
         }
@@ -330,28 +340,51 @@ private class BridgeRuntime(
                     .toString()
             }
         )
+        host.registerCapability(
+            ACTION_CAPABILITY,
+            "执行 Bridge Provider 动作",
+            description = "对指定 Bridge Provider 执行 CONNECT/STOP/RECONNECT 等受状态约束的动作。",
+            executor = InProcessCapabilityExecutor { raw ->
+                val request = JSONObject(raw)
+                val actionName = request.getString("action").trim().uppercase()
+                val action = runCatching { BridgeAction.valueOf(actionName) }
+                    .getOrElse { error("Unknown Bridge action: $actionName") }
+                val providerId = request.optString("provider_id").trim().takeIf { it.isNotBlank() }
+                val currentManager = requireManager()
+                val target = providerId?.let { requestedProviderId ->
+                    contributions.entries.firstOrNull { (_, contribution) ->
+                        contribution.factory.profiles.any { profile -> profile.id == requestedProviderId }
+                    }
+                } ?: selectedEntry(currentManager)
+                check(currentManager.perform(action, providerId)) {
+                    "Bridge action $action is not available for provider ${providerId ?: currentManager.activeProfile.id}"
+                }
+                target?.let { recordUseCompat(it.key) }
+                publishPresentation(currentManager, currentManager.state.value)
+                JSONObject()
+                    .put("success", true)
+                    .put("action", action.name)
+                    .put("provider_id", providerId ?: currentManager.activeProfile.id)
+                    .toString()
+            }
+        )
     }
 
-    private fun selectedEntry(currentManager: AiLimbsBridgeManager): Map.Entry<String, BridgeProviderContribution>? {
+    private fun selectedEntry(currentManager: PluginBridgeManager): Map.Entry<String, BridgeProviderContribution>? {
         val profileId = currentManager.activeProfile.id
         return contributions.entries.firstOrNull { (_, contribution) ->
             contribution.factory.profiles.any { it.id == profileId }
         }
     }
 
-    private fun requireManager(): AiLimbsBridgeManager =
+    private fun requireManager(): PluginBridgeManager =
         manager ?: error("No Bridge Provider is active")
 
     private fun recordUseCompat(extensionId: String) {
-        val currentHub = activeHub ?: return
-        try {
-            currentHub.recordUse(extensionId)
-        } catch (_: LinkageError) {
-            // Usage accounting is optional when an older Extension Hub is still installed.
-        }
+        host.childExtensions.recordUse(extensionId)
     }
 
-    private fun liveControlFor(current: AiLimbsBridgeManager): BridgeProviderControl =
+    private fun liveControlFor(current: PluginBridgeManager): BridgeProviderControl =
         object : BridgeProviderControl {
             override val profile: BridgeProfile
                 get() = current.activeProfile
@@ -365,7 +398,7 @@ private class BridgeRuntime(
         }
 
     private fun snapshotControlFor(
-        current: AiLimbsBridgeManager,
+        current: PluginBridgeManager,
         bridgeState: AiLimbsBridgeState
     ): BridgeProviderControl {
         val capturedProfile = current.activeProfile
@@ -388,7 +421,7 @@ private class BridgeRuntime(
 
     @Synchronized
     private fun publishPresentation(
-        currentManager: AiLimbsBridgeManager,
+        currentManager: PluginBridgeManager,
         bridgeState: AiLimbsBridgeState
     ) {
         if (manager !== currentManager) return
@@ -398,11 +431,19 @@ private class BridgeRuntime(
         }
         val control = snapshotControlFor(currentManager, bridgeState)
         val panel = selected.value.panel.snapshot(host.applicationContext, control)
-        val notification = selected.value.notification
-            ?.snapshot(host.applicationContext, control)
-            ?.toInProcessState()
+        val revision = ++presentationRevision
+        val notification =
+            if (currentManager.shouldKeepAlive ||
+                currentManager.hasActivePairingTransaction
+            ) {
+                selected.value.notification
+                    ?.snapshot(host.applicationContext, control)
+                    ?.toInProcessState(revision, selected.key)
+            } else {
+                null
+            }
         mutablePresentation.value = BridgePresentationState(
-            revision = ++presentationRevision,
+            revision = revision,
             selectedExtensionId = selected.key,
             panel = panel,
             notification = notification
@@ -452,29 +493,51 @@ private class BridgeRuntime(
             .stateIn(presentationScope, SharingStarted.Eagerly, presentation.value.notification)
 
         suspend fun perform(actionId: String) {
+            val actionParts = actionId.split('|', limit = 3)
+            check(actionParts.size == 3) {
+                "Bridge notification action is malformed"
+            }
+            val expectedRevision =
+                actionParts[0].toLongOrNull()
+                    ?: error("Bridge notification action has no revision")
+            val expectedExtensionId = actionParts[1]
+            val providerActionId = actionParts[2]
+            val current = presentation.value
+            check(
+                current.revision == expectedRevision &&
+                    current.selectedExtensionId == expectedExtensionId
+            ) {
+                "Bridge notification action expired after provider switch"
+            }
             val currentManager = requireManager()
             val selected = selectedEntry(currentManager)
                 ?: error("Selected Bridge Provider contribution is missing")
+            check(selected.key == expectedExtensionId) {
+                "Bridge Provider changed before notification action dispatch"
+            }
             val notification = selected.value.notification
                 ?: error("Selected Bridge Provider has no notification contribution")
             recordUseCompat(selected.key)
             notification.perform(
                 host.applicationContext,
-                actionId,
+                providerActionId,
                 liveControlFor(currentManager)
             )
             publishPresentation(currentManager, currentManager.state.value)
         }
     }
 
-    private fun BridgeProviderNotificationState.toInProcessState() =
+    private fun BridgeProviderNotificationState.toInProcessState(
+        revision: Long,
+        extensionId: String
+    ) =
         InProcessNotificationState(
             title = title,
             summary = summary,
             statusLines = statusLines,
             actions = actions.map { action ->
                 InProcessNotificationAction(
-                    id = action.id,
+                    id = "$revision|$extensionId|${action.id}",
                     label = action.label,
                     priority = action.priority,
                     enabled = action.enabled
@@ -530,9 +593,9 @@ private class BridgeRuntime(
         private const val SCREEN_ID = BridgeProviderUiSlots.SCREEN_ID
         private const val TILE_ID = "plugin.system.bridge.tile"
         private const val SELECT_CAPABILITY = "plugin.bridge.select_provider"
+        private const val ACTION_CAPABILITY = "plugin.bridge.perform_action"
         private const val PANEL_PROVIDER_ID = "plugin.bridge.control_panel"
         // Component schema is versioned by Plugin Center; adding new controls must not change Host ABI.
         private const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"
-        private const val HUB_ATTACH_RETRY_MS = 1_000L
     }
 }

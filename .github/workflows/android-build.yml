@@ -23,6 +23,7 @@ on:
           - log-center
           - ui-editor
           - permission-service
+          - resident-bridge
 
 concurrency:
   group: plugin-lab-alt-${{ github.ref }}-${{ inputs.target }}
@@ -35,6 +36,57 @@ env:
   JAVA_VERSION: '21'
 
 jobs:
+
+  resident-bridge:
+    if: inputs.target == 'resident-bridge'
+    name: Build and sign Resident Bridge fixes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699
+        with:
+          packages: platform-tools
+      - name: Configure Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-34" "platforms;android-36" "build-tools;35.0.0"
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Build only Bridge and SentinelX
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :bridge-core-plugin:assembleDebug :sentinelx-extension:assembleDebug --stacktrace --no-daemon
+      - name: Sign installable parent and child packages
+        env:
+          AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+          AILIMBS_CHILD_EXTENSION_PRIVATE_PEM: ${{ secrets.AILIMBS_CHILD_EXTENSION_PRIVATE_PEM }}
+        run: python3 tools/plugin_lab/package_resident_bridge.py
+      - name: Upload installable packages
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
+        with:
+          name: resident-bridge-fixes-${{ github.run_number }}
+          path: |
+            dist/AI-Limbs-Bridge-v1.3.10.ailp
+            dist/AI-Limbs-Bridge-v1.3.10.ailp.sha256
+            dist/AI-Limbs-SentinelX-v0.1.2.ailx
+            dist/AI-Limbs-SentinelX-v0.1.2.ailx.sha256
+          if-no-files-found: error
+          retention-days: 14
   build:
     if: inputs.target == 'all'
     name: Build Eight Plugin Payloads
