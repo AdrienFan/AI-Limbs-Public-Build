@@ -12,6 +12,7 @@ import com.ai.assistance.operit.data.model.ToolParameterSchema
 import com.ai.assistance.operit.data.model.ToolPrompt
 import com.ai.assistance.operit.data.preferences.ResolvedCharacterCardToolAccess
 import com.ai.assistance.operit.data.skill.SkillRepository
+import com.ai.assistance.operit.util.AppLogger
 import java.util.Locale
 import org.json.JSONObject
 
@@ -70,6 +71,7 @@ data class ToolCatalogSearchResult(
  * and cached MCP schemas. It never starts Ubuntu or an MCP server merely to discover metadata.
  */
 object ToolCapabilityCatalog {
+    private const val TAG = "ToolCapabilityCatalog"
     private val RESERVED_TARGETS = setOf("search", "proxy", "package_proxy")
     private val ENGLISH_STOP_WORDS = setOf(
         "a", "an", "the", "by", "to", "for", "of", "with", "from", "on", "in", "at", "via"
@@ -144,12 +146,29 @@ object ToolCapabilityCatalog {
             roleCardToolAccess = roleCardToolAccess
         )
 
-        val availablePackages = packageManager.getAvailablePackages(forceRefreshPackages)
-        val packageNames =
-            if (includeDisabledPackages) {
+        // ToolPkg is an optional discovery source. A broken package/cache/runtime must never make
+        // native/core capabilities such as shell, press_key or plugin ingress undiscoverable.
+        val packageDiscovery = runCatching {
+            packageManager.getAvailablePackages(forceRefreshPackages)
+        }.onFailure { error ->
+            AppLogger.w(
+                TAG,
+                "Tool package catalog unavailable; continuing with native/core capabilities",
+                error
+            )
+        }
+        val availablePackages = packageDiscovery.getOrDefault(emptyMap())
+        val packageNames: Collection<String> =
+            if (packageDiscovery.isFailure) {
+                emptyList()
+            } else if (includeDisabledPackages) {
                 availablePackages.keys
             } else {
-                packageManager.getEnabledPackageNames()
+                runCatching { packageManager.getEnabledPackageNames() }
+                    .onFailure { error ->
+                        AppLogger.w(TAG, "Enabled ToolPkg discovery unavailable; skipping package entries", error)
+                    }
+                    .getOrDefault(emptyList())
             }
 
         packageNames
@@ -186,8 +205,11 @@ object ToolCapabilityCatalog {
             }
 
         val skillPackages =
-            SkillRepository.getInstance(context)
-                .getAiVisibleSkillPackages()
+            runCatching { SkillRepository.getInstance(context).getAiVisibleSkillPackages() }
+                .onFailure { error ->
+                    AppLogger.w(TAG, "Skill catalog unavailable; continuing without skill entries", error)
+                }
+                .getOrDefault(emptyMap())
                 .filterKeys { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
 
         skillPackages.forEach { (skillName, skillPackage) ->
@@ -202,32 +224,50 @@ object ToolCapabilityCatalog {
         }
 
         val mcpServers =
-            packageManager.getAvailableServerPackages()
-                .filterKeys { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
-        val mcpLocalServer = MCPLocalServer.getInstance(context)
-
-        mcpServers.forEach { (serverName, serverConfig) ->
-            val enabled = mcpLocalServer.isServerEnabled(serverName)
-            val cachedTools = mcpLocalServer.getCachedTools(serverName).orEmpty()
-            if (cachedTools.isEmpty()) {
-                addActivationEntry(
-                    entries = entries,
-                    displayName = serverName,
-                    description = serverConfig.description,
-                    keywordTag = "mcp",
-                    sourceKind = ToolCatalogSourceKind.ACTIVATION,
-                    sourceEnabled = enabled
-                )
-                return@forEach
+            if (packageDiscovery.isFailure) {
+                emptyMap()
+            } else {
+                runCatching { packageManager.getAvailableServerPackages() }
+                    .onFailure { error ->
+                        AppLogger.w(TAG, "MCP catalog unavailable; continuing without MCP entries", error)
+                    }
+                    .getOrDefault(emptyMap())
+            }.filterKeys { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
+        val mcpLocalServer =
+            if (mcpServers.isEmpty()) {
+                null
+            } else {
+                runCatching { MCPLocalServer.getInstance(context) }
+                    .onFailure { error ->
+                        AppLogger.w(TAG, "MCP local catalog unavailable; continuing without MCP entries", error)
+                    }
+                    .getOrNull()
             }
 
-            addCachedMcpToolEntries(
-                entries = entries,
-                serverName = serverName,
-                serverDescription = serverConfig.description,
-                cachedTools = cachedTools,
-                sourceEnabled = enabled
-            )
+        if (mcpLocalServer != null) {
+            mcpServers.forEach { (serverName, serverConfig) ->
+                val enabled = mcpLocalServer.isServerEnabled(serverName)
+                val cachedTools = mcpLocalServer.getCachedTools(serverName).orEmpty()
+                if (cachedTools.isEmpty()) {
+                    addActivationEntry(
+                        entries = entries,
+                        displayName = serverName,
+                        description = serverConfig.description,
+                        keywordTag = "mcp",
+                        sourceKind = ToolCatalogSourceKind.ACTIVATION,
+                        sourceEnabled = enabled
+                    )
+                    return@forEach
+                }
+
+                addCachedMcpToolEntries(
+                    entries = entries,
+                    serverName = serverName,
+                    serverDescription = serverConfig.description,
+                    cachedTools = cachedTools,
+                    sourceEnabled = enabled
+                )
+            }
         }
 
         return entries.values.toList()

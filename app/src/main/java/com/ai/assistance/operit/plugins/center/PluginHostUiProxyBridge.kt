@@ -32,6 +32,8 @@ import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionTarget
 import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
+import com.ai.limbs.plugin.runtime.InProcessNotificationAction
+import com.ai.limbs.plugin.runtime.InProcessNotificationState
 import com.ai.limbs.plugin.runtime.InProcessUiContributionProvider
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import java.lang.ref.WeakReference
@@ -177,6 +179,20 @@ internal class ResidentUiProxyClient(
         }
     }
 
+    fun dispatchNotificationAction(bindingId: String, actionId: String) {
+        scope.launch {
+            runCatching {
+                command(
+                    JSONObject().put("command", "notification_action")
+                        .put("binding_id", bindingId)
+                        .put("action_id", actionId)
+                )
+            }.onFailure {
+                com.ai.assistance.operit.util.AppLogger.w(TAG, "Core notification action failed: $actionId", it)
+            }
+        }
+    }
+
     fun providers(): SystemPluginProviderDirectoryV2 = providerDirectory
     fun children(): SystemPluginChildExtensionControlV2 = childControl
     fun hostPrimitives(): List<SystemHostPrimitiveDescriptor> = hostPrimitiveCache.get()
@@ -260,6 +276,33 @@ internal class ResidentUiProxyClient(
             )
         }
         runtime.pagePresentationRegistry.replaceFromResidentProxy(presentations)
+
+        val notification =
+            if (snapshot.isNull("notification")) {
+                null
+            } else {
+                snapshot.getJSONObject("notification").let { item ->
+                    val state = item.getJSONObject("state")
+                    PluginForegroundNotificationSnapshot(
+                        bindingId = item.getString("binding_id"),
+                        ownerPluginId = item.getString("owner_plugin_id"),
+                        state = InProcessNotificationState(
+                            title = state.getString("title"),
+                            summary = state.optString("summary", ""),
+                            statusLines = state.optJSONArray("status_lines")?.strings().orEmpty(),
+                            actions = state.optJSONArray("actions")?.objects().orEmpty().map { action ->
+                                InProcessNotificationAction(
+                                    id = action.getString("id"),
+                                    label = action.getString("label"),
+                                    priority = action.optInt("priority", 0),
+                                    enabled = action.optBoolean("enabled", true)
+                                )
+                            }
+                        )
+                    )
+                }
+            }
+        runtime.replaceForegroundNotification(notification)
 
         val navSurfaces = snapshot.getJSONArray("navigation_surfaces").objects().map { item ->
             DynamicNavigationSurfaceSpec(

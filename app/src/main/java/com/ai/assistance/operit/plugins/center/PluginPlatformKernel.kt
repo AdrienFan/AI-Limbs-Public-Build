@@ -326,6 +326,25 @@ internal object PluginPlatformKernel {
                     .put("tile_id", binding.tileId).put("screen_id", binding.screenId))
             }
         }
+        val notification = notificationHostInstance.foregroundState.value?.let { snapshot ->
+            val state = snapshot.state
+            JSONObject()
+                .put("binding_id", snapshot.bindingId)
+                .put("owner_plugin_id", snapshot.ownerPluginId)
+                .put("state", JSONObject()
+                    .put("title", state.title)
+                    .put("summary", state.summary)
+                    .put("status_lines", JSONArray(state.statusLines))
+                    .put("actions", JSONArray().apply {
+                        state.actions.forEach { action ->
+                            put(JSONObject()
+                                .put("id", action.id)
+                                .put("label", action.label)
+                                .put("priority", action.priority)
+                                .put("enabled", action.enabled))
+                        }
+                    }))
+        }
         return JSONObject().put("schema", 1).put("runtime_role", "business")
             .put("business_runtime_restored", businessRuntimeRestored).put("tiles", tiles).put("screens", screens)
             .put("theme", theme ?: JSONObject.NULL).put("presentations", presentations).put("providers", providers)
@@ -336,6 +355,7 @@ internal object PluginPlatformKernel {
             .put("developer_mode", surfacePolicyInstance.developerMode)
             .put("developer_discovery_enabled", surfacePolicyInstance.developerDiscoveryEnabled)
             .put("host_primitives", hostPrimitiveSnapshotJson())
+            .put("notification", notification ?: JSONObject.NULL)
     }
 
     internal suspend fun dispatchResidentUiProxyCommand(request: JSONObject): JSONObject {
@@ -344,6 +364,12 @@ internal object PluginPlatformKernel {
             "Resident UI command requires prepared BUSINESS plugin services"
         }
         return when (val command = request.getString("command")) {
+            "notification_action" -> {
+                val bindingId = request.getString("binding_id").trim()
+                val actionId = request.getString("action_id").trim()
+                check(bindingId.isNotEmpty() && actionId.isNotEmpty()) { "Notification action IDs are required" }
+                JSONObject().put("accepted", notificationHostInstance.dispatch(bindingId, actionId))
+            }
             "set_active_screen" -> {
                 val screenId = request.optString("screen_id").trim().ifBlank { null }
                 if (screenId != null) {

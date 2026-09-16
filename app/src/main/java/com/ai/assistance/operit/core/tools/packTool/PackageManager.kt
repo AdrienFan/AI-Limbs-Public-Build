@@ -530,10 +530,36 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         }
     }
 
+    // Resolve the app external-files root once. Resident app_process has a real app Context, but
+    // Android 16 StorageManager can still reject Context#getExternalFilesDir because Binder's
+    // calling-package attribution does not match the standalone process identity. Direct access to
+    // this app's own scoped /sdcard/Android/data directory is UID-gated and avoids that Binder call.
+    private val externalFilesBaseDir: File by lazy {
+        val frameworkResult = runCatching { context.getExternalFilesDir(null) }
+        frameworkResult.getOrNull()?.let { return@lazy it }
+
+        val packageName = context.packageName.trim()
+        check(packageName.isNotEmpty()) { "Cannot resolve app external-files path without package name" }
+        val fallback = File("/sdcard/Android/data/$packageName/files")
+        check(fallback.isDirectory || fallback.mkdirs()) {
+            "Unable to create app external-files fallback: ${fallback.absolutePath}"
+        }
+        val error = frameworkResult.exceptionOrNull()
+        val warningMessage =
+            "Framework external-files lookup unavailable; using scoped direct path ${fallback.absolutePath}; " +
+                "reason=${error?.message ?: error?.javaClass?.simpleName ?: "null_result"}"
+        if (error != null) {
+            AppLogger.w(TAG, warningMessage, error)
+        } else {
+            AppLogger.w(TAG, warningMessage)
+        }
+        fallback
+    }
+
     // Get the external packages directory
     private val externalPackagesDir: File
         get() {
-            val dir = File(context.getExternalFilesDir(null), PACKAGES_DIR)
+            val dir = File(externalFilesBaseDir, PACKAGES_DIR)
             if (!dir.exists()) {
                 dir.mkdirs()
             }
@@ -633,29 +659,36 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
 
             initializationScope.launch {
                 val initStart = System.currentTimeMillis()
+                var stage = "prepare"
                 try {
                     runtimeCachesReady = false
+                    stage = "cleanup_legacy_cache"
                     cleanupLegacyToolPkgAssetParseCache()
 
                     // Create packages directory if it doesn't exist
+                    stage = "external_packages_dir"
                     externalPackagesDir
 
                     // Load available packages info (metadata only) from assets and external storage
+                    stage = "load_available_packages"
                     loadAvailablePackages()
 
                     // Automatically import built-in packages that are enabled by default
+                    stage = "initialize_default_packages"
                     initializeDefaultPackages()
+                    stage = "reconcile_toolpkg_caches"
                     reconcileToolPkgCaches()
 
                     synchronized(initLock) {
                         isInitialized = true
                     }
+                    stage = "refresh_runtime_state"
                     refreshToolPkgRuntimeState(persistIfChanged = true)
                     logToolPkgInfo("initialization coroutine success, totalMs=${System.currentTimeMillis() - initStart}")
                     future.complete(Unit)
                 } catch (e: Exception) {
                     logToolPkgError(
-                        "initialization coroutine failed after ${System.currentTimeMillis() - initStart}ms, reason=${e.message ?: e.javaClass.simpleName}",
+                        "initialization coroutine failed stage=$stage after ${System.currentTimeMillis() - initStart}ms, reason=${e.message ?: e.javaClass.simpleName}",
                         e
                     )
                     future.completeExceptionally(e)
@@ -1741,29 +1774,41 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
      */
     private fun loadAvailablePackages(refreshExternalOnly: Boolean = false) {
         val loadStart = System.currentTimeMillis()
+        var stage = "asset_scan"
         logToolPkgInfo("loadAvailablePackages start")
-
-        val assetSnapshot =
-            if (refreshExternalOnly) {
-                val cachedSnapshot = assetPackageScanSnapshot
-                if (cachedSnapshot != null) {
-                    cachedSnapshot
+        try {
+            val assetSnapshot =
+                if (refreshExternalOnly) {
+                    val cachedSnapshot = assetPackageScanSnapshot
+                    if (cachedSnapshot != null) {
+                        stage = "asset_snapshot_cached"
+                        cachedSnapshot
+                    } else {
+                        stage = "asset_scan"
+                        scanAssetPackages().also { assetPackageScanSnapshot = it }
+                    }
                 } else {
+                    stage = "asset_scan"
                     scanAssetPackages().also { assetPackageScanSnapshot = it }
                 }
-            } else {
-                scanAssetPackages().also { assetPackageScanSnapshot = it }
-            }
 
-        val mergedSnapshot = scanExternalPackages(assetSnapshot)
-        applyPackageScanSnapshot(mergedSnapshot)
-        reconcileToolPkgCaches()
-        if (isInitialized) {
-            refreshToolPkgRuntimeState(persistIfChanged = true)
+            stage = "external_scan"
+            val mergedSnapshot = scanExternalPackages(assetSnapshot)
+            stage = "apply_snapshot"
+            applyPackageScanSnapshot(mergedSnapshot)
+            stage = "reconcile_cache"
+            reconcileToolPkgCaches()
+            if (isInitialized) {
+                stage = "refresh_runtime_state"
+                refreshToolPkgRuntimeState(persistIfChanged = true)
+            }
+            logToolPkgInfo(
+                "loadAvailablePackages finish, elapsedMs=${System.currentTimeMillis() - loadStart}, available=${mergedSnapshot.availablePackages.size}, containers=${mergedSnapshot.toolPkgContainers.size}, subpackages=${mergedSnapshot.toolPkgSubpackages.size}, errors=${mergedSnapshot.packageLoadErrors.size}"
+            )
+        } catch (error: Exception) {
+            logToolPkgError("loadAvailablePackages failed stage=$stage", error)
+            throw IllegalStateException("loadAvailablePackages failed stage=$stage", error)
         }
-        logToolPkgInfo(
-            "loadAvailablePackages finish, elapsedMs=${System.currentTimeMillis() - loadStart}, available=${mergedSnapshot.availablePackages.size}, containers=${mergedSnapshot.toolPkgContainers.size}, subpackages=${mergedSnapshot.toolPkgSubpackages.size}, errors=${mergedSnapshot.packageLoadErrors.size}"
-        )
     }
 
     private fun registerToolPkg(loadResult: ToolPkgLoadResult): Boolean {
@@ -3900,7 +3945,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     /** Finds the File object for a given package name in external storage. */
     private fun findPackageFile(packageName: String): File? {
         val normalizedPackageName = normalizePackageName(packageName)
-        val externalPackagesDir = File(context.getExternalFilesDir(null), PACKAGES_DIR)
+        val externalPackagesDir = File(externalFilesBaseDir, PACKAGES_DIR)
         if (!externalPackagesDir.exists()) return null
 
         val containerRuntime = toolPkgContainers[normalizedPackageName]

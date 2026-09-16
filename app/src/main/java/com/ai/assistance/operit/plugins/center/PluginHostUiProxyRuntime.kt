@@ -2,6 +2,9 @@ package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeAttachment
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import org.json.JSONObject
 
 /**
@@ -24,6 +27,8 @@ internal class PluginHostUiProxyRuntime(
     val systemUiRegistry = SystemPluginUiRegistry(runtimeRole)
     val dynamicNavigationRegistry = DynamicNavigationSurfaceRegistry(context.applicationContext)
     val pagePresentationRegistry = PluginPagePresentationRegistry()
+    private val foregroundNotificationFlow = MutableStateFlow<PluginForegroundNotificationSnapshot?>(null)
+    val foregroundNotification: StateFlow<PluginForegroundNotificationSnapshot?> = foregroundNotificationFlow.asStateFlow()
     private val residentClient = ResidentUiProxyClient(context.applicationContext, this)
 
     init {
@@ -47,6 +52,13 @@ internal class PluginHostUiProxyRuntime(
 
     fun setPresentationMode(ownerPluginId: String, screenId: String, mode: PluginPagePresentationMode) =
         residentClient.setPresentationMode(ownerPluginId, screenId, mode)
+
+    internal fun replaceForegroundNotification(snapshot: PluginForegroundNotificationSnapshot?) {
+        foregroundNotificationFlow.value = snapshot
+    }
+
+    fun dispatchNotificationAction(bindingId: String, actionId: String) =
+        residentClient.dispatchNotificationAction(bindingId, actionId)
 
     fun updateAttachment(next: ResidentHostRuntimeAttachment) {
         check(next.usesUiProxy) { "UI proxy cannot transition to LEGACY_HOST in-process" }

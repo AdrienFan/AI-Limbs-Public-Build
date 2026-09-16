@@ -49,6 +49,7 @@ import com.ai.assistance.operit.integrations.http.ExternalChatHttpState
 import com.ai.assistance.operit.plugins.center.PluginForegroundNotificationSnapshot
 import com.ai.assistance.operit.plugins.center.PluginNotificationActionReceiver
 import com.ai.assistance.operit.plugins.center.PluginNotificationHost
+import com.ai.assistance.operit.plugins.center.PluginHostUiProxyRuntimeHolder
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
@@ -1178,6 +1179,7 @@ class AIForegroundService : Service() {
                     reason = "resident_ui_proxy_create",
                     force = true
                 )
+                observeResidentProxyForegroundNotification()
                 // Resident continuous CPU ownership moved to the Core session. UI_PROXY only
                 // keeps the Android framework shell/foreground-service surface alive.
                 releaseResidentCpuWakeLock("resident_ui_proxy_core_owned")
@@ -2195,6 +2197,17 @@ class AIForegroundService : Service() {
         return cleaned
     }
 
+    private fun observeResidentProxyForegroundNotification() {
+        val proxy = PluginHostUiProxyRuntimeHolder.currentOrNull() ?: return
+        serviceScope.launch {
+            proxy.foregroundNotification.collect {
+                if (!residentUiProxyShell || !isRunning.get()) return@collect
+                val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+                manager.notify(NOTIFICATION_ID, createResidentHostNotification())
+            }
+        }
+    }
+
     private fun observePluginForegroundNotification() {
         serviceScope.launch {
             PluginPlatformKernel.foregroundNotification.collect { snapshot ->
@@ -2250,10 +2263,16 @@ class AIForegroundService : Service() {
         )
     }
 
-    private fun createResidentHostNotification(): Notification =
-        NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle(getString(R.string.service_ai_limbs_running))
-            .setContentText("Resident Core presentation host")
+    private fun createResidentHostNotification(): Notification {
+        val pluginSnapshot = PluginHostUiProxyRuntimeHolder.currentOrNull()?.foregroundNotification?.value
+        val pluginState = pluginSnapshot?.state
+        val contentText = pluginState?.summary
+            ?.takeIf { it.isNotBlank() }
+            ?: pluginState?.statusLines?.firstOrNull()
+            ?: "Resident Core presentation host"
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(pluginState?.title ?: getString(R.string.service_ai_limbs_running))
+            .setContentText(contentText)
             .setSmallIcon(R.drawable.ic_ai_limbs_notification)
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .setCategory(NotificationCompat.CATEGORY_SERVICE)
@@ -2261,7 +2280,31 @@ class AIForegroundService : Service() {
             .setOnlyAlertOnce(true)
             .setSilent(true)
             .setContentIntent(mainContentPendingIntent())
-            .build()
+
+        if (pluginSnapshot != null && pluginState != null) {
+            val expandedText = buildString {
+                pluginState.summary.takeIf { it.isNotBlank() }?.let(::append)
+                pluginState.statusLines.forEach { line ->
+                    if (isNotEmpty()) append('
+')
+                    append(line)
+                }
+            }
+            builder.setStyle(
+                NotificationCompat.BigTextStyle()
+                    .setBigContentTitle(pluginState.title)
+                    .bigText(expandedText)
+            )
+            pluginState.actions.take(2).forEach { action ->
+                builder.addAction(
+                    R.drawable.ic_ai_limbs_notification,
+                    action.label,
+                    pluginActionPendingIntent(pluginSnapshot, action.id)
+                )
+            }
+        }
+        return builder.build()
+    }
 
     private fun createNotification(): Notification {
         val externalHttpSnapshot = externalHttpStateFlow.value

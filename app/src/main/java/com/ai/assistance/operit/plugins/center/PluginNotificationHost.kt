@@ -55,14 +55,13 @@ internal class PluginNotificationHost(
             return null
         }
         if (runtimeRole == PluginRuntimeRole.BUSINESS) {
-            // Resident Core owns business lifetime, not Android notification UI. Keep the existing
-            // provider contract satisfiable without starting the Host foreground service. Step 9
-            // will proxy presentation state explicitly instead of reviving Host business runtime.
-            val inert = object : InProcessNotificationHost {
+            // Core owns notification state and action handlers; Host UI_PROXY owns Android rendering.
+            // Keeping the real binding here preserves Bridge control state without reviving Host business.
+            val proxied = object : InProcessNotificationHost {
                 override fun publish(
                     state: StateFlow<InProcessNotificationState?>,
                     actionHandler: InProcessNotificationActionHandler
-                ): AutoCloseable = AutoCloseable { }
+                ): AutoCloseable = publishScoped(ownerPluginId, state, actionHandler)
             }
             return InProcessProviderBinding(
                 ownerPluginId = HOST_OWNER_ID,
@@ -71,9 +70,9 @@ internal class PluginNotificationHost(
                     "api" to "1",
                     "surface" to PluginSurfaceIds.HOST_NOTIFICATION,
                     "runtime_role" to "business",
-                    "presentation" to "suppressed_until_ui_proxy"
+                    "presentation" to "ui_proxy"
                 ),
-                payload = inert
+                payload = proxied
             )
         }
         val scoped = object : InProcessNotificationHost {
@@ -154,10 +153,12 @@ internal class PluginNotificationHost(
                 }
                 .sortedWith(compareBy({ it.ownerPluginId }, { it.bindingId }))
                 .firstOrNull()
-        AIForegroundService.refreshPluginNotification(
-            appContext,
-            requireStart = foregroundStateFlow.value != null
-        )
+        if (runtimeRole != PluginRuntimeRole.BUSINESS) {
+            AIForegroundService.refreshPluginNotification(
+                appContext,
+                requireStart = foregroundStateFlow.value != null
+            )
+        }
     }
 
     private fun InProcessNotificationState.sanitize(): InProcessNotificationState {
@@ -201,6 +202,8 @@ class PluginNotificationActionReceiver : BroadcastReceiver() {
         if (bindingId.isBlank() || actionId.isBlank()) return
         if (PluginPlatformKernel.isInitialized) {
             PluginPlatformKernel.dispatchNotificationAction(bindingId, actionId)
+        } else {
+            PluginHostUiProxyRuntimeHolder.currentOrNull()?.dispatchNotificationAction(bindingId, actionId)
         }
     }
 }
