@@ -2285,8 +2285,7 @@ class AIForegroundService : Service() {
             val expandedText = buildString {
                 pluginState.summary.takeIf { it.isNotBlank() }?.let(::append)
                 pluginState.statusLines.forEach { line ->
-                    if (isNotEmpty()) append('
-')
+                    if (isNotEmpty()) append('\n')
                     append(line)
                 }
             }
