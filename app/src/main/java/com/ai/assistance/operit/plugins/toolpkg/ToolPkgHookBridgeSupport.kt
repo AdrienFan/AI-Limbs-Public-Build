@@ -1,6 +1,6 @@
 package com.ai.assistance.operit.plugins.toolpkg
 
-import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.core.application.OperitProcessContext
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.javascript.JsJavaBridgeDelegates
 import com.ai.assistance.operit.core.tools.javascript.extractJsExecutionErrorMessage
@@ -105,7 +105,7 @@ internal data class ToolPkgAiProviderRegistration(
 }
 
 internal fun toolPkgPackageManager(): PackageManager {
-    val application = OperitApplication.instance.applicationContext
+    val application = OperitProcessContext.require()
     return PackageManager.getInstance(application, AIToolHandler.getInstance(application))
 }
 

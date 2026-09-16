@@ -76,3 +76,8 @@ Resident 开关现在在源码层代表业务核心切换：ON 按 Core start �
 ## build31 启动故障修复
 
 [Core 调用身份与跨域存活判断修复](14-build31-context-identity.md)：从 build30 工作树修正应用 Context 的系统调用归属，统一五处 SELinux 存活判断并补齐请求异常堆栈。候选版本为 build31/code104；按用户指令只提交云构建，不执行本地编译，尚未真机验收。
+
+
+## build32 失败恢复与进程依赖预检
+
+[Core 进程依赖预检与 Resident 失败恢复](15-build32-process-init-and-recovery.md)：依据 build31 真机 `androidPermissionPreferences` 未初始化与 `failed` takeover fence 导致插件系统不可见的现场，补齐独立 Core 的进程 Context/权限偏好预检、Host-only singleton 清理、失败 stage 诊断和 Base 自有的 `UI_PROXY_BLOCKED` 显式 OFF 恢复入口。候选版本为 build32/code105；不允许静默 fallback，也不清插件数据。

@@ -36,6 +36,7 @@ import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
 import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeAttachment
+import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeMode
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeResolver
 import com.ai.assistance.operit.core.workflow.WorkflowSchedulerInitializer
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupPreferences
@@ -115,6 +116,12 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
     internal fun isResidentCoreAttached(): Boolean = hostRuntimeAttachment?.attachedToLiveCore == true
     internal fun residentHostRuntimeModeName(): String =
         hostRuntimeAttachment?.mode?.name?.lowercase() ?: "unresolved"
+    internal fun isResidentRecoveryRequired(): Boolean =
+        hostRuntimeAttachment?.mode == ResidentHostRuntimeMode.UI_PROXY_BLOCKED
+    internal fun residentRecoveryReason(): String =
+        hostRuntimeAttachment?.reason ?: "resident_runtime_unresolved"
+    internal fun residentRecoveryFenceState(): String? =
+        hostRuntimeAttachment?.fenceState
 
     // 懒加载数据库实例
     private val database by lazy { AppDatabase.getDatabase(this) }
@@ -134,6 +141,7 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         val startTime = System.currentTimeMillis()
         appStartupTimeMs = startTime
         instance = this
+        OperitProcessContext.initialize(applicationContext)
 
         // Workers and receivers can cold-start the process without creating an Activity.
         // Initialize process-wide preference dependencies before those entry points can run.

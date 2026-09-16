@@ -36,6 +36,7 @@ import androidx.lifecycle.lifecycleScope
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.api.chat.AIForegroundService
 import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.preferences.AgreementPreferences
@@ -56,9 +57,11 @@ import com.ai.assistance.operit.ui.common.displays.VirtualDisplayOverlay
 import com.ai.assistance.operit.util.AnrMonitor
 import com.ai.assistance.operit.util.LocaleUtils
 import java.util.*
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.ai.assistance.operit.data.mcp.MCPRepository
 import android.content.Intent
 import android.net.Uri
@@ -75,6 +78,13 @@ class MainActivity : ComponentActivity() {
 
     // ======== 屏幕方向变更状态 ========
     private var showOrientationChangeDialog by mutableStateOf(false)
+
+    // ======== Resident 紧急恢复状态（Base 自有，不依赖 Plugin Kernel） ========
+    private var showResidentRecoveryDialog by mutableStateOf(false)
+    private var residentRecoveryReason by mutableStateOf("")
+    private var residentRecoveryFenceState by mutableStateOf<String?>(null)
+    private var residentRecoveryInProgress by mutableStateOf(false)
+    private var residentRecoveryError by mutableStateOf<String?>(null)
 
     private var lastOrientation: Int? = null
 
@@ -197,7 +207,17 @@ class MainActivity : ComponentActivity() {
         handleIntent(intent)
         restoreRuntimeTaskViewVisibilityIfNeeded()
 
-        (application as OperitApplication).initializeMainApplication()
+        val operitApplication = application as OperitApplication
+        operitApplication.initializeMainApplication()
+        if (operitApplication.isResidentRecoveryRequired()) {
+            residentRecoveryReason = operitApplication.residentRecoveryReason()
+            residentRecoveryFenceState = operitApplication.residentRecoveryFenceState()
+            showResidentRecoveryDialog = true
+            AppLogger.w(
+                TAG,
+                "Resident recovery required: reason=$residentRecoveryReason fence=$residentRecoveryFenceState"
+            )
+        }
 
         // 语言设置已在Application中初始化，这里无需重复
 
@@ -373,6 +393,12 @@ class MainActivity : ComponentActivity() {
 
     // ======== 执行初始化检查 ========
     private fun performInitialChecks() {
+        val operitApplication = application as OperitApplication
+        if (operitApplication.isResidentRecoveryRequired()) {
+            pluginLoadingState.hide()
+            AppLogger.w(TAG, "Skipping normal startup checks while Resident recovery is required")
+            return
+        }
         lifecycleScope.launch {
             // 1. 检查通知权限（Android 13+）
             checkNotificationPermission()
@@ -709,6 +735,79 @@ class MainActivity : ComponentActivity() {
                         },
                         onDismiss = {
                             showOrientationChangeDialog = false
+                        }
+                    )
+                }
+
+                if (showResidentRecoveryDialog) {
+                    val diagnostic = buildString {
+                        append(stringResource(R.string.resident_recovery_message))
+                        if (residentRecoveryReason.isNotBlank()) {
+                            append("\n\n")
+                            append(stringResource(R.string.resident_recovery_reason, residentRecoveryReason))
+                        }
+                        residentRecoveryFenceState?.takeIf { it.isNotBlank() }?.let { fence ->
+                            append("\n")
+                            append(stringResource(R.string.resident_recovery_fence, fence))
+                        }
+                        residentRecoveryError?.takeIf { it.isNotBlank() }?.let { error ->
+                            append("\n\n")
+                            append(stringResource(R.string.resident_recovery_error, error))
+                        }
+                    }
+                    AlertDialog(
+                        onDismissRequest = {
+                            if (!residentRecoveryInProgress) showResidentRecoveryDialog = false
+                        },
+                        title = { Text(stringResource(R.string.resident_recovery_title)) },
+                        text = { Text(diagnostic) },
+                        confirmButton = {
+                            TextButton(
+                                enabled = !residentRecoveryInProgress,
+                                onClick = {
+                                    residentRecoveryInProgress = true
+                                    residentRecoveryError = null
+                                    lifecycleScope.launch {
+                                        try {
+                                            val result = withContext(Dispatchers.IO) {
+                                                AiLimbsResidentRuntime.recoverBlockedHost(this@MainActivity)
+                                            }
+                                            val cleanupConfirmed = result.optBoolean("off_cleanup_confirmed", false)
+                                            val restartScheduled = result.optBoolean("host_restart_scheduled", false)
+                                            if (!cleanupConfirmed) {
+                                                residentRecoveryError =
+                                                    result.optJSONArray("off_cleanup_errors")?.toString()
+                                                        ?: getString(R.string.resident_recovery_unknown_error)
+                                                residentRecoveryInProgress = false
+                                            } else if (!restartScheduled) {
+                                                residentRecoveryError = getString(R.string.resident_recovery_restart_failed)
+                                                residentRecoveryInProgress = false
+                                            }
+                                            // On success stopLocked() schedules a clean Host role restart and
+                                            // terminates this UI_PROXY process moments later. Keep the dialog
+                                            // locked until that restart happens.
+                                        } catch (error: Throwable) {
+                                            AppLogger.e(TAG, "Resident explicit recovery failed", error)
+                                            residentRecoveryError = error.message ?: error.javaClass.simpleName
+                                            residentRecoveryInProgress = false
+                                        }
+                                    }
+                                }
+                            ) {
+                                Text(
+                                    stringResource(
+                                        if (residentRecoveryInProgress) R.string.resident_recovery_running
+                                        else R.string.resident_recovery_confirm
+                                    )
+                                )
+                            }
+                        },
+                        dismissButton = {
+                            if (!residentRecoveryInProgress) {
+                                TextButton(onClick = { showResidentRecoveryDialog = false }) {
+                                    Text(stringResource(R.string.resident_recovery_later))
+                                }
+                            }
                         }
                     )
                 }

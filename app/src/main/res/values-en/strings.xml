@@ -8328,4 +8328,15 @@
     <string name="api_ingress_route_desc">Choose whether API models enter AI Limbs through the legacy path or the unified ingress. New model sessions use the current selection.</string>
     <string name="api_ingress_route_legacy">Legacy path</string>
     <string name="api_ingress_route_unified">Unified ingress</string>
+
+    <string name="resident_recovery_title">Resident mode needs recovery</string>
+    <string name="resident_recovery_message">The previous Resident takeover did not complete. Installed plugins are preserved, but the Host will not silently bypass the takeover fence. “Recover and disable Resident” verifies Core ownership is gone, cleans stale takeover state, and restarts the normal Host runtime.</string>
+    <string name="resident_recovery_reason">Reason: %1$s</string>
+    <string name="resident_recovery_fence">Takeover state: %1$s</string>
+    <string name="resident_recovery_error">Recovery failed: %1$s</string>
+    <string name="resident_recovery_unknown_error">Unknown recovery error</string>
+    <string name="resident_recovery_restart_failed">Takeover state was cleaned, but the Host restart could not be scheduled. Close and reopen AI Limbs.</string>
+    <string name="resident_recovery_confirm">Recover and disable Resident</string>
+    <string name="resident_recovery_running">Recovering…</string>
+    <string name="resident_recovery_later">Later</string>
 </resources>

@@ -3,6 +3,7 @@ package com.ai.assistance.operit.util
 import android.content.Context
 import android.util.Log
 import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.core.application.OperitProcessContext
 import java.io.File
 import java.io.FileWriter
 import java.io.IOException
@@ -99,11 +100,7 @@ object AppLogger {
         if (existing != null) return existing
 
         return try {
-            val appContext: Context = try {
-                OperitApplication.instance.applicationContext
-            } catch (_: Throwable) {
-                boundContext ?: return null
-            }
+            val appContext: Context = OperitProcessContext.currentOrNull() ?: boundContext ?: return null
             val dir = File(appContext.filesDir, LOG_DIR_NAME)
             if (!dir.exists()) {
                 dir.mkdirs()
@@ -121,11 +118,7 @@ object AppLogger {
         if (existing != null) return existing
 
         return try {
-            val appContext: Context = try {
-                OperitApplication.instance.applicationContext
-            } catch (_: Throwable) {
-                boundContext ?: return null
-            }
+            val appContext: Context = OperitProcessContext.currentOrNull() ?: boundContext ?: return null
             val dir = File(OperitPaths.operitRootDir(), PACKAGE_LOG_DIR_NAME)
             if (!dir.exists()) {
                 dir.mkdirs()
@@ -271,7 +264,7 @@ object AppLogger {
     @JvmStatic
     fun resetLogFile() {
         try {
-            val appContext: Context = OperitApplication.instance.applicationContext
+            val appContext: Context = OperitProcessContext.currentOrNull() ?: boundContext ?: return
             val dir = File(appContext.filesDir, LOG_DIR_NAME)
             val file = File(dir, LOG_FILE_NAME)
             if (file.exists()) {

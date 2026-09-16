@@ -8364,4 +8364,15 @@
     <string name="api_ingress_route_desc">选择 API 模型进入 AI Limbs 时使用原始路线或统一入口。新模型会话采用当前选择。</string>
     <string name="api_ingress_route_legacy">原始路线</string>
     <string name="api_ingress_route_unified">统一入口</string>
+
+    <string name="resident_recovery_title">常驻模式需要恢复</string>
+    <string name="resident_recovery_message">检测到上一次常驻接管未完成。已安装插件仍会保留，但当前 Host 不会静默绕过接管门禁。点击“恢复并关闭常驻”后，Base 将确认 Core 已退出、释放业务所有权并清理过期接管状态，然后重启回普通 Host 模式。</string>
+    <string name="resident_recovery_reason">原因：%1$s</string>
+    <string name="resident_recovery_fence">接管状态：%1$s</string>
+    <string name="resident_recovery_error">恢复失败：%1$s</string>
+    <string name="resident_recovery_unknown_error">未知恢复错误</string>
+    <string name="resident_recovery_restart_failed">接管状态已清理，但 Host 自动重启未能安排。请关闭并重新打开 AI Limbs。</string>
+    <string name="resident_recovery_confirm">恢复并关闭常驻</string>
+    <string name="resident_recovery_running">正在恢复…</string>
+    <string name="resident_recovery_later">稍后</string>
 </resources>

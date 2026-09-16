@@ -1,7 +1,7 @@
 package com.ai.assistance.operit.data.api
 
 import android.os.SystemClock
-import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.core.application.OperitProcessContext
 import com.ai.assistance.operit.data.preferences.GitHubAuthPreferences
 import com.ai.assistance.operit.data.preferences.GitHubUser
 import com.ai.assistance.operit.ui.features.packages.market.normalizeMarketArtifactId
@@ -511,7 +511,7 @@ class MarketStatsApiService {
 
     private val staticClient = STATIC_CLIENT
     private val dynamicClient = DYNAMIC_CLIENT
-    private val authPreferences = GitHubAuthPreferences.getInstance(OperitApplication.instance)
+    private val authPreferences = GitHubAuthPreferences.getInstance(OperitProcessContext.require())
 
     suspend fun getManifest(): Result<MarketV2ManifestResponse> =
         withContext(Dispatchers.IO) {

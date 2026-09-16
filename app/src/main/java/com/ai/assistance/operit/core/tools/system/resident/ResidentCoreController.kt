@@ -244,6 +244,10 @@ internal object ResidentCoreController {
         check(runtime.getBoolean("runtime_skeleton_ready") && runtime.getBoolean("main_looper_ready")) {
             "Core runtime reported running before its main-Looper startup barrier completed"
         }
+        check(runtime.optBoolean("business_preflight_ready", false) &&
+            state.optBoolean("business_preflight_ready", false)) {
+            "Core runtime is reachable but business dependency preflight is not ready: ${runtime.opt("business_preflight")}"
+        }
     }
 
     /**
@@ -252,6 +256,10 @@ internal object ResidentCoreController {
      */
     private fun requireSnapshotConsistent(state: JSONObject) {
         val runtime = state.getJSONObject("core_runtime")
+        check(state.optBoolean("business_preflight_ready", false) ==
+            runtime.optBoolean("business_preflight_ready", false)) {
+            "Core business dependency preflight snapshot is inconsistent"
+        }
         check(state.getBoolean("business_attached") == runtime.getBoolean("business_attached")) {
             "Core business ownership snapshot is inconsistent"
         }

@@ -1,7 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
-import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.core.application.OperitProcessContext
 import java.io.File
 import java.security.KeyFactory
 import java.security.MessageDigest
@@ -287,7 +287,7 @@ internal object PluginTrustKeyringV1 {
     private fun trustDir(context: Context): File = File(context.filesDir, "ai_limbs/trust")
 
     private fun applicationContext(): Context =
-        OperitApplication.instance.applicationContext
+        OperitProcessContext.require()
 
     private fun sha256(bytes: ByteArray): String =
         MessageDigest.getInstance("SHA-256").digest(bytes)

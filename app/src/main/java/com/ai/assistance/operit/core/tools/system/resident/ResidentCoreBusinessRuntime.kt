@@ -58,6 +58,8 @@ internal class ResidentCoreBusinessRuntime {
     private var mainLooperThread: String? = null
     private var lastError: String? = null
     private var businessError: String? = null
+    private var businessFailureStage: String? = null
+    private var dependencyPreflight: JSONObject? = null
     private var expectedHostPid: Int? = null
     private var pluginKernelStarted = false
     private var bridgeIngressPrepared = false
@@ -75,7 +77,14 @@ internal class ResidentCoreBusinessRuntime {
             check(context.applicationContext === context) {
                 "Resident Core requires its standalone application Context wrapper"
             }
+        }
+        val preflight = ResidentCoreDependencyPreflight.run(context)
+        check(preflight.optBoolean("ready", false)) {
+            "Resident Core dependency preflight did not report ready: $preflight"
+        }
+        synchronized(lock) {
             val mainLooper = checkNotNull(Looper.getMainLooper()) { "Resident Core main Looper is missing" }
+            dependencyPreflight = JSONObject(preflight.toString())
             handler = Handler(mainLooper)
             initializedElapsedMs = SystemClock.elapsedRealtime()
             phase = ResidentCoreLifecyclePhase.INITIALIZED
@@ -130,6 +139,7 @@ internal class ResidentCoreBusinessRuntime {
             expectedHostPid = hostPid
             stopRequested = false
             businessError = null
+            businessFailureStage = null
             businessPhase = ResidentCoreBusinessPhase.WAITING_FOR_HOST_EXIT
         }
     }
@@ -255,6 +265,7 @@ internal class ResidentCoreBusinessRuntime {
                 businessPhase = ResidentCoreBusinessPhase.RUNNING
             }
         } catch (error: Throwable) {
+            val failureStage = synchronized(lock) { businessPhase.name.lowercase() }
             val cancelled = synchronized(lock) {
                 stopRequested && (businessPhase == ResidentCoreBusinessPhase.CANCELLED ||
                     businessPhase == ResidentCoreBusinessPhase.STOPPED)
@@ -275,9 +286,10 @@ internal class ResidentCoreBusinessRuntime {
                 ubuntuControlReady = false
                 businessAttached = false
                 businessPhase = ResidentCoreBusinessPhase.FAILED
+                businessFailureStage = failureStage
                 businessError = error.toString().take(1024)
             }
-            runCatching { ResidentBusinessTakeoverFence.markFailed(context, coreSession, error) }
+            runCatching { ResidentBusinessTakeoverFence.markFailed(context, coreSession, failureStage, error) }
             throw error
         }
     }
@@ -404,6 +416,9 @@ internal class ResidentCoreBusinessRuntime {
             .put("started_elapsed_ms", startedElapsedMs ?: JSONObject.NULL)
             .put("stopped_elapsed_ms", stoppedElapsedMs ?: JSONObject.NULL)
             .put("business_phase", businessPhase.name.lowercase())
+            .put("business_preflight_ready", dependencyPreflight?.optBoolean("ready", false) == true)
+            .put("business_preflight", dependencyPreflight?.let { JSONObject(it.toString()) } ?: JSONObject.NULL)
+            .put("business_failure_stage", businessFailureStage ?: JSONObject.NULL)
             .put("expected_host_pid", expectedHostPid ?: JSONObject.NULL)
             .put("business_attached", businessAttached)
             .put("plugin_kernel_started", pluginKernelStarted)

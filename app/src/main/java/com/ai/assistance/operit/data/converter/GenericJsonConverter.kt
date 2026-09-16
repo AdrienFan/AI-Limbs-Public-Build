@@ -3,7 +3,7 @@ package com.ai.assistance.operit.data.converter
 import com.ai.assistance.operit.data.model.ChatHistory
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.R
-import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.core.application.OperitProcessContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.*
 import java.time.LocalDateTime
@@ -27,10 +27,10 @@ class GenericJsonConverter : ChatFormatConverter {
             when (element) {
                 is JsonArray -> parseArrayFormat(element)
                 is JsonObject -> parseObjectFormat(element)
-                else -> throw ConversionException(OperitApplication.instance.getString(R.string.generic_json_unsupported_format))
+                else -> throw ConversionException(OperitProcessContext.require().getString(R.string.generic_json_unsupported_format))
             }
         } catch (e: Exception) {
-            throw ConversionException(OperitApplication.instance.getString(R.string.generic_json_parse_failed, e.message ?: ""), e)
+            throw ConversionException(OperitProcessContext.require().getString(R.string.generic_json_parse_failed, e.message ?: ""), e)
         }
     }
     
@@ -67,7 +67,7 @@ class GenericJsonConverter : ChatFormatConverter {
                         messages = messages,
                         createdAt = LocalDateTime.now(),
                         updatedAt = LocalDateTime.now(),
-                        group = OperitApplication.instance.getString(R.string.generic_json_import_from)
+                        group = OperitProcessContext.require().getString(R.string.generic_json_import_from)
                     ))
                 } else {
                     emptyList()
@@ -155,7 +155,7 @@ class GenericJsonConverter : ChatFormatConverter {
                 messages = messages,
                 createdAt = LocalDateTime.now(),
                 updatedAt = LocalDateTime.now(),
-                group = OperitApplication.instance.getString(R.string.generic_json_import_from)
+                group = OperitProcessContext.require().getString(R.string.generic_json_import_from)
             )
         } catch (e: Exception) {
             return null

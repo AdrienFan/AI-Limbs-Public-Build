@@ -127,6 +127,28 @@ internal object AiLimbsResidentRuntime {
         stopLocked()
     }
 
+    /**
+     * Base-owned explicit recovery path for a Host that was forced into UI_PROXY_BLOCKED.
+     * This deliberately bypasses Plugin Center authorization because Plugin Kernel may be unavailable.
+     * Safety remains identical to ordinary OFF: Core/owner loss and the plugin_kernel lease are proven
+     * before stale takeover state is cleared. No plugin store or plugin data is modified.
+     */
+    internal suspend fun recoverBlockedHost(context: Context): JSONObject {
+        initialize(context)
+        return lifecycleMutex.withLock {
+            val attachment = ResidentHostRuntimeResolver.resolve(app)
+            check(attachment.mode == ResidentHostRuntimeMode.UI_PROXY_BLOCKED) {
+                "Resident recovery is only valid for UI_PROXY_BLOCKED, current=${attachment.mode}"
+            }
+            persistEnabled(false)
+            notifyHostResidentStateChanged()
+            stopLocked()
+                .put("explicit_recovery", true)
+                .put("recovery_reason", attachment.reason)
+                .put("recovery_fence_state", attachment.fenceState ?: JSONObject.NULL)
+        }
+    }
+
     private suspend fun startLocked(): JSONObject {
         val guardianStatus = ensureGuardianStartedLocked()
         val guardian = localProbe()

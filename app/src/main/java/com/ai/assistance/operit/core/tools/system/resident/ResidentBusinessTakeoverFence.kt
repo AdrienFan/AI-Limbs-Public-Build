@@ -37,7 +37,7 @@ internal object ResidentBusinessTakeoverFence {
             .put("updated_wall_ms", System.currentTimeMillis()))
     }
 
-    fun markFailed(context: Context, coreSession: String, error: Throwable) {
+    fun markFailed(context: Context, coreSession: String, stage: String, error: Throwable) {
         val current = runCatching { requireCurrent(context, coreSession) }.getOrElse {
             JSONObject()
                 .put("core_session", coreSession)
@@ -45,6 +45,7 @@ internal object ResidentBusinessTakeoverFence {
         }
         write(context, current
             .put("state", "failed")
+            .put("stage", stage.take(128))
             .put("error", error.toString().take(1024))
             .put("updated_wall_ms", System.currentTimeMillis()))
     }

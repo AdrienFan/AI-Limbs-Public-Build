@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.config
 
 import android.content.Context
 import android.os.Environment
+import com.ai.assistance.operit.core.application.OperitProcessContext
 import com.ai.assistance.operit.core.chat.hooks.PromptHookContext
 import com.ai.assistance.operit.core.chat.hooks.PromptHookRegistry
 import com.ai.assistance.operit.core.tools.climode.CliToolModeSupport
@@ -289,7 +290,7 @@ AVAILABLE_TOOLS_SECTION""".trimIndent()
     }
     val skillPackages = try {
         SkillRepository.getInstance(
-            com.ai.assistance.operit.core.application.OperitApplication.instance.applicationContext
+            OperitProcessContext.require()
         ).getAiVisibleSkillPackages().filterKeys { skillName ->
             allowedSkillNames?.contains(skillName) ?: true
         }

@@ -2,7 +2,7 @@ package com.ai.assistance.operit.ui.common.markdown
 
 import android.content.Context
 import android.graphics.Typeface
-import com.ai.assistance.operit.core.application.OperitApplication
+import com.ai.assistance.operit.core.application.OperitProcessContext
 
 private object MarkdownCodeTypefaceCache {
     @Volatile
@@ -27,5 +27,5 @@ internal fun getMarkdownCodeTypeface(context: Context): Typeface {
 }
 
 internal fun getMarkdownCodeTypeface(): Typeface {
-    return getMarkdownCodeTypeface(OperitApplication.instance.applicationContext)
+    return getMarkdownCodeTypeface(OperitProcessContext.require())
 }
