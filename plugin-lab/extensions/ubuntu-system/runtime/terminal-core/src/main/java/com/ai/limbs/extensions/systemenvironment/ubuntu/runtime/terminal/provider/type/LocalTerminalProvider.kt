@@ -8,8 +8,10 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.Pty
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalSession
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.filesystem.FileSystemProvider
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.filesystem.LocalFileSystemProvider
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.TimeoutCancellationException
 import kotlinx.coroutines.cancel
@@ -24,6 +26,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -43,6 +46,7 @@ class LocalTerminalProvider(
         val writer: java.io.BufferedWriter,
         val outputChannel: Channel<String>,
         val readJob: kotlinx.coroutines.Job,
+        val shellProcessGroupId: Long,
         val mutex: Mutex = Mutex(),
         val activeProcessGroupId: AtomicLong = AtomicLong(-1L)
     )
@@ -141,33 +145,34 @@ class LocalTerminalProvider(
                 )
             }
 
+        var commandStarted = false
         return try {
-            val result = withTimeout(timeoutMs) {
-                shell.mutex.withLock {
-                    val token = UUID.randomUUID().toString()
-                    Log.d(TAG, "Hidden exec command started: key=$executorKey token=$token timeoutMs=$timeoutMs chars=${command.length}")
-                    val wrappedCommand = buildHiddenExecEnvelope(command, token)
-                    withContext(Dispatchers.IO) {
-                        shell.writer.write(wrappedCommand)
-                        shell.writer.flush()
-                    }
-                    collectHiddenExecResult(shell, token, timeoutMs, onOutputSnapshot)
+            shell.mutex.withLock {
+                commandStarted = true
+                val token = UUID.randomUUID().toString()
+                Log.d(TAG, "Hidden exec command started: key=$executorKey token=$token timeoutMs=$timeoutMs chars=${command.length}")
+                val wrappedCommand = buildHiddenExecEnvelope(command, token)
+                withContext(Dispatchers.IO) {
+                    shell.writer.write(wrappedCommand)
+                    shell.writer.flush()
+                }
+                val result = collectHiddenExecResult(shell, token, timeoutMs, onOutputSnapshot)
+                if (result.state == HiddenExecResult.State.TIMEOUT) {
+                    closeHiddenExecShell(executorKey)
+                } else {
+                    shell.activeProcessGroupId.set(NO_ACTIVE_PROCESS_GROUP)
+                }
+                result
+            }
+        } catch (e: CancellationException) {
+            if (commandStarted) {
+                withContext(NonCancellable) {
+                    closeHiddenExecShell(executorKey)
                 }
             }
-            shell.activeProcessGroupId.set(NO_ACTIVE_PROCESS_GROUP)
-            result
-        } catch (e: TimeoutCancellationException) {
-            hiddenExecScope.launch {
-                closeHiddenExecShell(executorKey)
-            }
-            HiddenExecResult(
-                output = "",
-                exitCode = -1,
-                state = HiddenExecResult.State.TIMEOUT,
-                error = "Hidden exec command timed out after ${timeoutMs}ms"
-            )
+            throw e
         } catch (e: Exception) {
-            hiddenExecScope.launch {
+            if (commandStarted) {
                 closeHiddenExecShell(executorKey)
             }
             Log.e(TAG, "Failed to execute hidden command in shell: $executorKey", e)
@@ -252,7 +257,8 @@ class LocalTerminalProvider(
                 process = process,
                 writer = process.outputStream.bufferedWriter(Charsets.UTF_8),
                 outputChannel = outputChannel,
-                readJob = readJob
+                readJob = readJob,
+                shellProcessGroupId = process.pid()
             )
 
         val readyResult = awaitHiddenExecReady(shell)
@@ -362,12 +368,13 @@ class LocalTerminalProvider(
         }
 
         cancelHiddenExecCommand(rawOutput, token)
+        val settledRawOutput = collectHiddenExecTimeoutOutput(shell, token, rawOutput)
         return HiddenExecResult(
-            output = extractHiddenExecOutput(rawOutput, token),
+            output = extractHiddenExecOutput(settledRawOutput, token),
             exitCode = -1,
             state = HiddenExecResult.State.TIMEOUT,
             error = "Hidden exec command timed out after ${timeoutMs}ms",
-            rawOutputPreview = rawOutput.takeLast(1200)
+            rawOutputPreview = settledRawOutput.takeLast(1200)
         )
     }
 
@@ -513,11 +520,19 @@ class LocalTerminalProvider(
                     terminateHiddenExecProcessGroup(activeProcessGroupId)
                 }
                 runCatching { shell.writer.close() }
-                runCatching { shell.process.destroy() }
+                if (shell.shellProcessGroupId > 0L) {
+                    terminateHiddenExecProcessGroup(shell.shellProcessGroupId)
+                }
+                runCatching {
+                    if (!shell.process.waitFor(500L, TimeUnit.MILLISECONDS) && shell.process.isAlive) {
+                        shell.process.destroyForcibly()
+                        shell.process.waitFor(500L, TimeUnit.MILLISECONDS)
+                    }
+                }
                 runCatching { shell.readJob.cancel() }
                 runCatching { shell.outputChannel.close() }
             }
-            Log.d(TAG, "Closed hidden exec shell: $executorKey")
+            Log.d(TAG, "Closed hidden exec shell: $executorKey pgid=${shell.shellProcessGroupId}")
         }
     }
 
@@ -531,7 +546,7 @@ class LocalTerminalProvider(
     private fun buildHiddenExecStartupCommand(): Array<String> {
         val bash = File(binDir, "bash").absolutePath
         val startScript = "source \$HOME/common.sh && login_ubuntu '/bin/bash --noprofile --norc'"
-        return arrayOf(bash, "-c", startScript)
+        return arrayOf("/system/bin/setsid", bash, "-c", startScript)
     }
 
     private fun buildHiddenExecEnvelope(command: String, token: String): String {
