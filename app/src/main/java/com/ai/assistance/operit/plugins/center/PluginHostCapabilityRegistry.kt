@@ -280,7 +280,7 @@ internal class PluginHostCapabilityRegistry(
         ownerPluginId: String,
         grantedScopes: Set<String>,
         capabilityId: String,
-        parameters: JSONObject = JSONObject()
+        parameters: JSONObject
     ): JSONObject {
         val normalized = capabilityId.trim().lowercase()
         if (normalized.isBlank()) {

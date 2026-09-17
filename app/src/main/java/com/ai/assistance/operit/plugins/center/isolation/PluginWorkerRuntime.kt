@@ -417,7 +417,7 @@ internal class PluginWorkerRuntime(
                     is ExtensionHubService -> put(base.put("kind", "extension_hub"))
                     else -> throw PluginInstallException(
                         "WORKER_PROVIDER_NOT_PROXYABLE",
-                        "Provider ${record.id} has no structured cross-process contract: ${payload::class.java.name}"
+                        "Provider ${record.id} has no structured cross-process contract: ${payload?.let { it::class.java.name } ?: "null"}"
                     )
                 }
             }
