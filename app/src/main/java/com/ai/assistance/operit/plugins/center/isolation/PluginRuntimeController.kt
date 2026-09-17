@@ -13,6 +13,8 @@ import java.util.UUID
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import org.json.JSONObject
 
@@ -20,6 +22,11 @@ import org.json.JSONObject
 internal object PluginRuntimeController {
     private const val MAIN_CLASS =
         "com.ai.assistance.operit.plugins.center.isolation.PluginRuntimeMain"
+
+    // The supervisor and business adapters share one launch token and one worker. Serialize the
+    // whole lifecycle transaction, including readiness/cleanup, so concurrent callers cannot
+    // overwrite launch.request or stop a worker while another caller is attesting its launch.
+    private val lifecycleMutex = Mutex()
 
     suspend fun status(context: Context): JSONObject = withContext(Dispatchers.IO) {
         if (leaseIsFree(context)) {
@@ -71,11 +78,16 @@ internal object PluginRuntimeController {
         }
     }
 
-    suspend fun probe(context: Context): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun probe(context: Context): JSONObject = lifecycleMutex.withLock {
+        probeLocked(context)
+    }
+
+    private suspend fun probeLocked(context: Context): JSONObject = withContext(Dispatchers.IO) {
         var existing = status(context)
         if (existing.optBoolean("available", false)) {
             if (existing.optBoolean("consistent", false)) return@withContext existing
-            stop(context)
+            // probe already owns lifecycleMutex; do not re-enter the public stop operation.
+            stopLocked(context)
             existing = status(context)
         }
         if (existing.optString("phase") != "stopped") {
@@ -165,6 +177,10 @@ internal object PluginRuntimeController {
     }
 
     suspend fun stop(context: Context): JSONObject = withContext(Dispatchers.IO + NonCancellable) {
+        lifecycleMutex.withLock { stopLocked(context) }
+    }
+
+    private suspend fun stopLocked(context: Context): JSONObject = withContext(Dispatchers.IO + NonCancellable) {
         var state = status(context)
         if (state.optBoolean("available", false)) {
             val pid = state.getInt("pid")
