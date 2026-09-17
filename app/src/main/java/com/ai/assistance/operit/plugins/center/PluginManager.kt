@@ -44,6 +44,17 @@ internal data class PluginActiveAuthorization(
     val grantedScopes: Set<String>
 )
 
+internal data class PluginWorkerServiceAuthorization(
+    val caller: PluginActiveAuthorization,
+    val serviceId: String,
+    val requiredApi: Int
+)
+
+private data class PluginWorkerAuthorizationSnapshot(
+    val authorization: PluginActiveAuthorization,
+    val serviceMinApis: Map<String, Int>
+)
+
 internal class PluginManager(
     private val appContext: Context,
     private val runtimeRole: PluginRuntimeRole,
@@ -65,6 +76,7 @@ internal class PluginManager(
 ) {
     private val stateRepository = PluginStateRepository(store)
     private val activeMounts = ConcurrentHashMap<String, ActivePluginMount>()
+    private val workerAuthorizations = ConcurrentHashMap<String, PluginWorkerAuthorizationSnapshot>()
     private val mutex = Mutex()
 
     fun initialize() {
@@ -240,6 +252,64 @@ internal class PluginManager(
             roles = manifest.roles.toSet(),
             grantedScopes = metadata.grantedScopes.toSet()
         )
+    }
+
+    internal suspend fun workerAuthorization(pluginId: String, version: String): PluginActiveAuthorization {
+        val snapshot = workerAuthorizations[pluginId]
+            ?: throw PluginInstallException("PLUGIN_WORKER_NOT_AUTHORIZED", "Worker has no active Core authorization: $pluginId")
+        val authorization = snapshot.authorization
+        if (authorization.version != version) {
+            throw PluginInstallException("PLUGIN_WORKER_NOT_AUTHORIZED", "Worker version is not authorized: $pluginId $version")
+        }
+        return authorization
+    }
+
+    internal suspend fun workerServiceAuthorization(
+        pluginId: String,
+        version: String,
+        serviceId: String,
+        requestedMinApi: Int?
+    ): PluginWorkerServiceAuthorization {
+        val snapshot = workerAuthorizations[pluginId]
+            ?: throw PluginInstallException("PLUGIN_WORKER_NOT_AUTHORIZED", "Worker has no active Core authorization: $pluginId")
+        val authorization = snapshot.authorization
+        if (authorization.version != version) {
+            throw PluginInstallException("PLUGIN_WORKER_NOT_AUTHORIZED", "Worker version is not authorized: $pluginId $version")
+        }
+        val declaredMinApi = snapshot.serviceMinApis[serviceId]
+            ?: throw PluginInstallException("SERVICE_ACCESS_NOT_DECLARED", "$pluginId did not declare service dependency: $serviceId")
+        return PluginWorkerServiceAuthorization(
+            authorization,
+            serviceId,
+            maxOf(requestedMinApi ?: 0, declaredMinApi)
+        )
+    }
+
+    private fun publishWorkerAuthorization(manifest: PluginManifest, metadata: PluginInstallMetadata) {
+        if (runtimeRole != PluginRuntimeRole.BUSINESS ||
+            manifest.runtime.kind != OfficialPluginIdentityRegistry.RUNTIME_ANDROID_INPROCESS
+        ) return
+        val authorization = PluginActiveAuthorization(
+            pluginId = manifest.pluginId,
+            version = manifest.version,
+            roles = manifest.roles.toSet(),
+            grantedScopes = metadata.grantedScopes.toSet()
+        )
+        val serviceMinApis = manifest.dependencies.services.associate {
+            it.serviceId to (it.minApi ?: 0)
+        }
+        workerAuthorizations[manifest.pluginId] =
+            PluginWorkerAuthorizationSnapshot(authorization, serviceMinApis)
+    }
+
+    private fun revokeWorkerAuthorization(pluginId: String, version: String? = null) {
+        if (version == null) {
+            workerAuthorizations.remove(pluginId)
+            return
+        }
+        workerAuthorizations.computeIfPresent(pluginId) { _, snapshot ->
+            if (snapshot.authorization.version == version) null else snapshot
+        }
     }
 
     private suspend fun installLocked(
@@ -791,6 +861,7 @@ internal class PluginManager(
                 "Stored scope approval does not match the active manifest"
             )
         }
+        publishWorkerAuthorization(manifest, installMetadata)
         val mountScope = PluginMountScope(manifest, contributions, extensionRouter, capabilityBinder, surfacePolicy)
         try {
             val dataDir = store.dataDir(pluginId).apply { mkdirs() }
@@ -834,6 +905,7 @@ internal class PluginManager(
             return mount
         } catch (error: Throwable) {
             activeMounts.remove(pluginId)
+            revokeWorkerAuthorization(pluginId, version)
             mountScope.revokeAll()
             val revokeFailure = runCatching { mountScope.requireCleanRevocation() }.exceptionOrNull()
             if (error is CancellationException) {
@@ -877,6 +949,7 @@ internal class PluginManager(
         val result = runtimeHost.stop(mount.runtime, handoff)
         if (result.stoppedCleanly) {
             activeMounts.remove(pluginId, mount)
+            revokeWorkerAuthorization(pluginId, mount.version)
         } else {
             stateRepository.read(pluginId)?.let { state ->
                 stateRepository.write(

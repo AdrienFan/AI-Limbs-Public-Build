@@ -34,7 +34,7 @@ internal class PluginHostCapabilityRegistry(
     private val pagePresentationRegistry: PluginPagePresentationRegistry? = null,
     private val loggingService: HostLoggingService? = context?.let { HostLoggingService(it, PluginStore.fromContext(it)) },
     private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
-) : PluginCapabilityBinder, PluginCapabilityInvokerFactory {
+) : PluginCapabilityGateway, PluginCapabilityInvokerFactory {
     internal constructor() : this(null, null, null, null, null, null, PluginRuntimeRole.LEGACY_HOST)
     private val appContext = context?.applicationContext
     private val systemExecutor = context?.let { SystemHostPrimitiveExecutor(it, requireNotNull(loggingService), runtimeRole) }
@@ -276,7 +276,7 @@ internal class PluginHostCapabilityRegistry(
             .execute(normalized, JSONObject(parameters.toString()))
     }
 
-    internal suspend fun invokeDelegated(
+    override suspend fun invokeDelegated(
         ownerPluginId: String,
         grantedScopes: Set<String>,
         capabilityId: String,

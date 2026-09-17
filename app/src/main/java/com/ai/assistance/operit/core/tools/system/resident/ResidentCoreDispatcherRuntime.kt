@@ -50,6 +50,66 @@ internal class ResidentCoreDispatcherRuntime(
             .put("generation", cycleRuntime.currentGeneration())
     }
 
+    fun invokePluginDelegated(payload: JSONObject): JSONObject {
+        check(com.ai.assistance.operit.plugins.center.PluginPlatformKernel.isInitialized) {
+            "Plugin kernel is not initialized in Resident Core"
+        }
+        val pluginId = payload.getString("plugin_id").trim()
+        val version = payload.getString("version").trim()
+        val capabilityId = payload.getString("capability_id").trim()
+        require(pluginId.isNotBlank() && version.isNotBlank() && capabilityId.isNotBlank()) {
+            "Plugin worker delegation identity is incomplete"
+        }
+        val parameters = payload.optJSONObject("parameters") ?: JSONObject()
+        val authorization = runBlocking {
+            com.ai.assistance.operit.plugins.center.PluginPlatformKernel.manager
+                .workerAuthorization(pluginId, version)
+        }
+        val result = runBlocking {
+            com.ai.assistance.operit.plugins.center.PluginPlatformKernel.capabilities.invokeDelegated(
+                authorization.pluginId,
+                authorization.grantedScopes,
+                capabilityId,
+                JSONObject(parameters.toString())
+            )
+        }
+        return JSONObject()
+            .put("result", result)
+            .put("plugin_id", authorization.pluginId)
+            .put("version", authorization.version)
+            .put("dispatcher_owner", "resident_core")
+            .put("owner_pid", Process.myPid())
+            .put("core_session", coreSessionId)
+    }
+
+    fun describePluginService(payload: JSONObject): JSONObject {
+        val pluginId = payload.getString("plugin_id").trim()
+        val version = payload.getString("version").trim()
+        val serviceId = payload.getString("service_id").trim()
+        val minApi = if (payload.has("min_api") && !payload.isNull("min_api")) payload.getInt("min_api") else null
+        return runBlocking {
+            com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+                .describeWorkerService(pluginId, version, serviceId, minApi)
+        }
+    }
+
+    fun invokePluginService(payload: JSONObject): JSONObject {
+        val pluginId = payload.getString("plugin_id").trim()
+        val version = payload.getString("version").trim()
+        val serviceId = payload.getString("service_id").trim()
+        val operation = payload.getString("service_operation").trim()
+        val minApi = if (payload.has("min_api") && !payload.isNull("min_api")) payload.getInt("min_api") else null
+        val parameters = payload.optJSONObject("parameters") ?: JSONObject()
+        val result = runBlocking {
+            com.ai.assistance.operit.plugins.center.PluginPlatformKernel.invokeWorkerService(
+                pluginId, version, serviceId, minApi, operation, JSONObject(parameters.toString())
+            )
+        }
+        return JSONObject().put("result", result)
+            .put("plugin_id", pluginId).put("version", version)
+            .put("core_session", coreSessionId).put("owner_pid", Process.myPid())
+    }
+
     fun rearmBootstrap(): JSONObject {
         cycleRuntime.rearmCurrentBootstrap()
         return snapshot().put("bootstrap_rearmed", true)

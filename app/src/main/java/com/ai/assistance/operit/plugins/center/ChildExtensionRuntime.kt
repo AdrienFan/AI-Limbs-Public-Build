@@ -121,8 +121,8 @@ internal class ChildExtensionRuntime(
     private val runtimeRole: PluginRuntimeRole,
     private val pluginStore: PluginStore,
     private val contributions: PluginContributionRegistry,
-    private val capabilityRegistry: PluginHostCapabilityRegistry
-) {
+    private val capabilityRegistry: PluginCapabilityGateway
+) : ChildExtensionRuntimeOwner {
     private val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val root = File(appContext.filesDir, "ai_limbs/child_runtime")
     private val legacyRoot = File(pluginStore.dataDir(InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID), "extension_store")
@@ -152,7 +152,7 @@ internal class ChildExtensionRuntime(
     @Volatile private var autoBackupEnabled = false
     @Volatile private var highFrequencyUseCount = 10L
 
-    suspend fun start() {
+    override suspend fun start() {
         migrateLegacyStoreIfNeeded()
         root.mkdirs(); staging.mkdirs(); extensionsRoot.mkdirs(); dataRoot.mkdirs(); backupsRoot.mkdirs()
         staging.listFiles()?.forEach { it.deleteRecursively() }
@@ -164,7 +164,7 @@ internal class ChildExtensionRuntime(
         reconcileAutoBackup()
     }
 
-    suspend fun stop() {
+    override suspend fun stop() {
         val failures = mutableListOf<Throwable>()
         active.keys.toList().forEach { id ->
             try { stopChild(id) }
@@ -300,7 +300,7 @@ internal class ChildExtensionRuntime(
     }
 
     /** Exports Host-owned child backup packages to a user-authorized SAF directory. */
-    suspend fun exportBackups(extensionIds: Collection<String>, treeUriRaw: String): List<String> {
+    override suspend fun exportBackups(extensionIds: Collection<String>, treeUriRaw: String): List<String> {
         val selected = extensionIds.map(String::trim).filter(String::isNotEmpty).distinct().sorted()
         require(selected.isNotEmpty()) { "At least one child backup must be selected" }
         val treeUri = Uri.parse(treeUriRaw.trim().also { require(it.isNotEmpty()) { "tree_uri is required" } })
@@ -378,12 +378,12 @@ internal class ChildExtensionRuntime(
         }
     }
 
-    internal fun loggingSnapshots(): List<ChildExtensionSnapshot> = mutableSnapshots.value.toList()
-    internal fun loggingBackupSnapshots(): List<ChildExtensionBackupSnapshot> = mutableBackupSnapshots.value.toList()
-    internal fun loggingUiContributions(): List<ChildUiContributionSnapshot> = mutableUiContributions.value.toList()
+    override fun loggingSnapshots(): List<ChildExtensionSnapshot> = mutableSnapshots.value.toList()
+    override fun loggingBackupSnapshots(): List<ChildExtensionBackupSnapshot> = mutableBackupSnapshots.value.toList()
+    override fun loggingUiContributions(): List<ChildUiContributionSnapshot> = mutableUiContributions.value.toList()
 
     /** Neutral descriptors for Host-only child presentation code. Business ownership stays here. */
-    internal fun residentPresentationDescriptors(): JSONArray = JSONArray().apply {
+    override fun residentPresentationDescriptors(): JSONArray = JSONArray().apply {
         records.values
             .filter { record ->
                 record.enabled &&
@@ -441,7 +441,7 @@ internal class ChildExtensionRuntime(
         publishSnapshots()
     }
 
-    internal suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long = 5_000L) {
+    override suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long) {
         withTimeout(timeoutMs) {
             snapshotsForPointInternal(point).first { snapshots ->
                 val enabled = snapshots.filter { it.enabled }
@@ -455,7 +455,7 @@ internal class ChildExtensionRuntime(
     }
 
     /** Wait until every enabled child whose parent point is live has either mounted or failed. */
-    internal suspend fun awaitBusinessChildrenReady(timeoutMs: Long = 10_000L): JSONObject {
+    override suspend fun awaitBusinessChildrenReady(timeoutMs: Long): JSONObject {
         withTimeout(timeoutMs) {
             mutableSnapshots.first { snapshots ->
                 val expected = snapshots.filter { it.enabled && points.containsKey(it.target.point) }
@@ -872,7 +872,7 @@ internal class ChildExtensionRuntime(
             .sortedWith(compareBy({ it.target.parentPluginId }, { it.screenId }, { it.componentId }, { it.slotId }, { it.extensionId }, { it.contributionId }))
     }
 
-    internal suspend fun invokePresentationCommand(
+    override suspend fun invokePresentationCommand(
         extensionId: String,
         command: String,
         parameters: JSONObject
@@ -1178,7 +1178,7 @@ internal class ChildExtensionRuntime(
     private fun safeFile(root: File, relative: String): File { val r=root.canonicalFile; val f=File(r,safePath(relative)).canonicalFile; require(f.path.startsWith(r.path+File.separator)); return f }
     private fun sha256(file: File): String { val d=MessageDigest.getInstance("SHA-256"); file.inputStream().use { input -> val b=ByteArray(8192); while(true){val n=input.read(b); if(n<0)break; d.update(b,0,n)} }; return d.digest().joinToString(""){"%02x".format(it)} }
 
-    fun bound(ownerPluginId: String, grantedScopes: Set<String>): InProcessChildExtensionRuntime =
+    override fun bound(ownerPluginId: String, grantedScopes: Set<String>): InProcessChildExtensionRuntime =
         object : InProcessChildExtensionRuntime {
             override fun publishPoint(point: String, apiVersion: Int, title: String, description: String, allowedHostCapabilities: Set<String>, binder: ChildExtensionBinder): AutoCloseable =
                 this@ChildExtensionRuntime.publishPoint(ownerPluginId, grantedScopes, point, apiVersion, title, description, allowedHostCapabilities, binder)

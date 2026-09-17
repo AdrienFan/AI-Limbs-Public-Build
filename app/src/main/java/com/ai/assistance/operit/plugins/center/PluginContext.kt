@@ -344,7 +344,8 @@ internal class PluginContextFactory(
     private val eventBusHost: PluginEventBusHost,
     private val capabilityInvokerFactory: PluginCapabilityInvokerFactory,
     private val secretBroker: PluginSecretBroker,
-    private val surfacePolicy: HostSurfacePolicy
+    private val surfacePolicy: HostSurfacePolicy,
+    private val serviceResolverFactory: ((PluginManifest, Set<String>, PluginCallerLease) -> PluginServiceResolver)? = null
 ) {
     fun create(
         manifest: PluginManifest,
@@ -357,13 +358,14 @@ internal class PluginContextFactory(
             pluginId = manifest.pluginId,
             version = manifest.version,
             registrar = mountScope.registrar,
-            serviceResolver = ScopedPluginServiceResolver(
-                manifest = manifest,
-                grantedScopes = grantedScopes,
-                contributions = contributions,
-                surfacePolicy = surfacePolicy,
-                callerLease = mountScope.callerLease
-            ),
+            serviceResolver = serviceResolverFactory?.invoke(manifest, grantedScopes, mountScope.callerLease)
+                ?: ScopedPluginServiceResolver(
+                    manifest = manifest,
+                    grantedScopes = grantedScopes,
+                    contributions = contributions,
+                    surfacePolicy = surfacePolicy,
+                    callerLease = mountScope.callerLease
+                ),
             capabilityInvoker = capabilityInvokerFactory.create(manifest.pluginId, grantedScopes),
             eventBus = ScopedPluginEventBus(manifest.pluginId, eventBusHost, mountScope::trackOwned),
             dataDir = FilePluginSandboxDirectory(dataDir),

@@ -152,6 +152,18 @@ internal class ResidentCoreDispatcherServer(
                 val dispatcher = checkNotNull(runtime) { "Resident Dispatcher runtime is stopping" }
                 val result = when (val operation = request.getString("operation")) {
                     "invoke" -> dispatcher.invoke(request.optJSONObject("payload") ?: JSONObject())
+                    "plugin_delegate" -> {
+                        requirePluginWorkerPeer(peer.pid)
+                        dispatcher.invokePluginDelegated(request.optJSONObject("payload") ?: JSONObject())
+                    }
+                    "plugin_service_describe" -> {
+                        requirePluginWorkerPeer(peer.pid)
+                        dispatcher.describePluginService(request.optJSONObject("payload") ?: JSONObject())
+                    }
+                    "plugin_service_invoke" -> {
+                        requirePluginWorkerPeer(peer.pid)
+                        dispatcher.invokePluginService(request.optJSONObject("payload") ?: JSONObject())
+                    }
                     "rearm_bootstrap" -> dispatcher.rearmBootstrap()
                     "status" -> dispatcher.snapshot()
                     else -> error("Unsupported Resident Dispatcher operation: $operation")
@@ -167,6 +179,13 @@ internal class ResidentCoreDispatcherServer(
                     )
                 }
             }
+        }
+    }
+
+    private fun requirePluginWorkerPeer(pid: Int) {
+        check(com.ai.assistance.operit.plugins.center.isolation.PluginRuntimeController
+            .isAttestedWorkerPeer(appContext, pid, coreSessionId)) {
+            "Resident Dispatcher rejected an unattested plugin worker peer"
         }
     }
 

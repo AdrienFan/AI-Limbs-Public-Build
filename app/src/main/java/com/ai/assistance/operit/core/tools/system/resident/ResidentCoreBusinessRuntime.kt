@@ -8,6 +8,7 @@ import android.os.SystemClock
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.center.PluginRuntimeRole
+import com.ai.assistance.operit.plugins.center.isolation.PluginRuntimeSupervisor
 import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
@@ -67,6 +68,7 @@ internal class ResidentCoreBusinessRuntime {
     private var pluginServicesPrepared = false
     private var ubuntuControlReady = false
     private var businessAttached = false
+    private var pluginRuntimeSupervisor: PluginRuntimeSupervisor? = null
     @Volatile private var stopRequested = false
 
     fun initialize(context: Context) {
@@ -226,6 +228,13 @@ internal class ResidentCoreBusinessRuntime {
             }
 
             backend.claimRuntimeOwnership()
+            // Dynamic plugin code is moving behind its own process wall. The supervisor is Core-owned,
+            // but worker launch failure is deliberately non-fatal to Core: a plugin-layer failure must
+            // never collapse the authoritative Policy/Dispatcher process.
+            PluginRuntimeSupervisor(context).also { supervisor ->
+                synchronized(lock) { pluginRuntimeSupervisor = supervisor }
+                supervisor.start()
+            }
             // The policy/Dispatcher plane is part of business ownership. Bring it up before Bridge
             // so a provider that becomes online immediately has a live Core-owned destination.
             onBusinessOwnerReady()
@@ -275,6 +284,12 @@ internal class ResidentCoreBusinessRuntime {
                 return
             }
             if (!leaseAdopted) runCatching { lease?.close() }
+            val failedSupervisor = synchronized(lock) {
+                pluginRuntimeSupervisor.also { pluginRuntimeSupervisor = null }
+            }
+            if (failedSupervisor != null) {
+                runCatching { runBlocking(Dispatchers.IO) { failedSupervisor.stop() } }
+            }
             if (PluginPlatformKernel.isInitialized) {
                 runCatching { runBlocking(Dispatchers.IO) { PluginPlatformKernel.shutdown() } }
             }
@@ -357,6 +372,12 @@ internal class ResidentCoreBusinessRuntime {
                 }
             }
         }
+        val supervisorToStop = synchronized(lock) {
+            pluginRuntimeSupervisor.also { pluginRuntimeSupervisor = null }
+        }
+        if (supervisorToStop != null) {
+            runCatching { runBlocking(Dispatchers.IO) { supervisorToStop.stop() } }
+        }
 
         val stopped = CountDownLatch(1)
         val mainHandler = synchronized(lock) {
@@ -426,6 +447,7 @@ internal class ResidentCoreBusinessRuntime {
             .put("bridge_plugin_mounted", bridgePluginMounted)
             .put("plugin_services_prepared", pluginServicesPrepared)
             .put("ubuntu_control_ready", ubuntuControlReady)
+            .put("plugin_runtime_process", pluginRuntimeSupervisor?.snapshot() ?: JSONObject.NULL)
             .put("plugin_kernel", if (PluginPlatformKernel.isInitialized)
                 PluginPlatformKernel.lifecycleSnapshot() else JSONObject.NULL)
             .put("last_error", lastError ?: JSONObject.NULL)

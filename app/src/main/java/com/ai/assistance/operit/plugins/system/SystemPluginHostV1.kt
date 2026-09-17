@@ -13,7 +13,7 @@ import com.ai.assistance.operit.plugins.center.PluginHostCapabilityRegistry
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginManager
 import com.ai.assistance.operit.plugins.center.SystemPluginUiRegistry
-import com.ai.assistance.operit.plugins.center.ChildExtensionRuntime
+import com.ai.assistance.operit.plugins.center.ChildExtensionRuntimeOwner
 import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
@@ -528,7 +528,7 @@ internal class KernelSystemPluginDelegatedCapabilityInvokerV2(
 internal class KernelSystemPluginChildExtensionControlV2(
     private val admittedRole: String,
     private val runtime: InProcessChildExtensionRuntime,
-    private val runtimeOwner: ChildExtensionRuntime
+    private val runtimeOwner: ChildExtensionRuntimeOwner
 ) : SystemPluginChildExtensionControlV2 {
     init { requirePluginCenterRole(admittedRole) }
 

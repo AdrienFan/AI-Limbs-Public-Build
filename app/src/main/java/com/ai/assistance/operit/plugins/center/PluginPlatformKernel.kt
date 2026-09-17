@@ -13,6 +13,8 @@ import com.ai.assistance.operit.plugins.system.KernelSystemPluginChildExtensionC
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginServicePublisherV2
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
+import com.ai.assistance.operit.plugins.center.isolation.RemoteAndroidInProcessPluginRuntimeAdapter
+import com.ai.assistance.operit.plugins.center.isolation.RemoteChildExtensionRuntimeOwner
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -111,7 +113,7 @@ internal object PluginPlatformKernel {
     private lateinit var backupPolicyInstance: PluginBackupPolicyStore
     private lateinit var notificationHostInstance: PluginNotificationHost
     private lateinit var officialIdentitiesInstance: OfficialPluginIdentityRegistry
-    private lateinit var childExtensionRuntimeInstance: ChildExtensionRuntime
+    private lateinit var childExtensionRuntimeInstance: ChildExtensionRuntimeOwner
     private lateinit var systemPluginControllerInstance: com.ai.assistance.operit.plugins.system.SystemPluginController
     private val monitorScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     @Volatile private var inactivityMonitorJob: Job? = null
@@ -564,6 +566,59 @@ internal object PluginPlatformKernel {
         .put("package_sha256", value.packageSha256).put("backed_up_at", value.backedUpAtEpochMs).put("was_enabled", value.wasEnabled)
         .put("installed", value.installed).put("installed_version", value.installedVersion ?: JSONObject.NULL)
 
+    internal suspend fun describeWorkerService(
+        pluginId: String,
+        version: String,
+        serviceId: String,
+        requestedMinApi: Int?
+    ): JSONObject {
+        requireInitialized()
+        val access = managerInstance.workerServiceAuthorization(pluginId, version, serviceId, requestedMinApi)
+        val record = contributionsInstance.find(PluginContributionKind.SERVICE, access.serviceId)
+            ?: return JSONObject().put("available", false).put("service_id", access.serviceId)
+        val actualApi = record.apiVersion ?: 0
+        if (actualApi < access.requiredApi) {
+            return JSONObject().put("available", false).put("service_id", access.serviceId)
+                .put("actual_api", actualApi).put("required_api", access.requiredApi)
+        }
+        requireWorkerServiceCallable(access.serviceId, record.payload)
+        return JSONObject().put("available", true).put("service_id", access.serviceId)
+            .put("owner_plugin_id", record.ownerPluginId).put("api_version", actualApi)
+            .put("metadata", JSONObject(record.metadata))
+    }
+
+    internal suspend fun invokeWorkerService(
+        pluginId: String,
+        version: String,
+        serviceId: String,
+        requestedMinApi: Int?,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject {
+        requireInitialized()
+        val access = managerInstance.workerServiceAuthorization(pluginId, version, serviceId, requestedMinApi)
+        val record = contributionsInstance.find(PluginContributionKind.SERVICE, access.serviceId)
+            ?: throw PluginInstallException("SERVICE_UNAVAILABLE", "Service is not active: ${access.serviceId}")
+        val actualApi = record.apiVersion ?: 0
+        if (actualApi < access.requiredApi) {
+            throw PluginInstallException("SERVICE_API_TOO_OLD", "Service ${access.serviceId} does not satisfy API ${access.requiredApi}")
+        }
+        requireWorkerServiceCallable(access.serviceId, record.payload)
+        val caller = PluginServiceCaller(access.caller.pluginId, access.caller.roles, access.caller.grantedScopes)
+        val copy = JSONObject(parameters.toString())
+        return when (val endpoint = record.payload) {
+            is CallerAwarePluginServiceEndpoint -> endpoint.invoke(caller, operation, copy)
+            is PluginServiceEndpoint -> endpoint.invoke(operation, copy)
+            else -> error("unreachable")
+        }
+    }
+
+    private fun requireWorkerServiceCallable(serviceId: String, payload: Any?) {
+        if (payload !is CallerAwarePluginServiceEndpoint && payload !is PluginServiceEndpoint) {
+            throw PluginInstallException("SERVICE_NOT_CALLABLE", "Service $serviceId does not expose a controlled endpoint contract")
+        }
+    }
+
     private fun hostPrimitiveSnapshotJson(): JSONArray = JSONArray().apply {
         AiLimbsHostPrimitiveCatalog.all.forEach { definition ->
             val allowed = if (definition.requestableScope && definition.exposure == HostPrimitiveExposure.BOUND) surfacePolicyInstance.isScopeAllowed(definition.id) else null
@@ -666,7 +721,15 @@ internal object PluginPlatformKernel {
             val runtimeAdapters = PluginRuntimeAdapterRegistry().apply {
                 register(NoopPluginRuntimeAdapter)
                 register(DeclarativePluginRuntimeAdapter)
-                register(AndroidInProcessPluginRuntimeAdapter(contributions, notificationHost, officialIdentities) { childExtensionRuntimeInstance })
+                if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+                    register(RemoteAndroidInProcessPluginRuntimeAdapter())
+                } else {
+                    register(AndroidInProcessPluginRuntimeAdapter(
+                        contributions,
+                        { pluginId, scopes -> notificationHost.bindingFor(pluginId, scopes) },
+                        officialIdentities
+                    ) { childExtensionRuntimeInstance })
+                }
             }
             listOf(
                 Triple(PluginExtensionPoints.UI_HOME_TILE, "首页入口", "允许插件向 AI Limbs 首页添加入口"),
@@ -776,13 +839,22 @@ internal object PluginPlatformKernel {
                 secretBroker = secretBroker,
                 surfacePolicy = surfacePolicy
             )
-            val childExtensionRuntime = ChildExtensionRuntime(
-                appContext = appContext,
-                runtimeRole = runtimeRole,
-                pluginStore = pluginStore,
-                contributions = contributions,
-                capabilityRegistry = capabilityRegistry
-            )
+            val childExtensionRuntime: ChildExtensionRuntimeOwner =
+                if (runtimeRole == PluginRuntimeRole.BUSINESS) {
+                    RemoteChildExtensionRuntimeOwner(
+                        appContext,
+                        contributions,
+                        capabilityRegistry
+                    )
+                } else {
+                    ChildExtensionRuntime(
+                        appContext = appContext,
+                        runtimeRole = runtimeRole,
+                        pluginStore = pluginStore,
+                        contributions = contributions,
+                        capabilityRegistry = capabilityRegistry
+                    )
+                }
             loggingService.bindChildSourceProvider(childExtensionRuntime::loggingSnapshots)
             val backupStore = PluginBackupStore(pluginStore)
             val manager = PluginManager(

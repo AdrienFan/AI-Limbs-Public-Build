@@ -68,3 +68,13 @@ interface PluginCapabilityBinder {
         capability: PluginCapabilitySpec
     ): AutoCloseable
 }
+
+/** Narrow runtime gateway shared by the Core registry and isolated plugin worker proxies. */
+interface PluginCapabilityGateway : PluginCapabilityBinder {
+    suspend fun invokeDelegated(
+        ownerPluginId: String,
+        grantedScopes: Set<String>,
+        capabilityId: String,
+        parameters: JSONObject = JSONObject()
+    ): JSONObject
+}
