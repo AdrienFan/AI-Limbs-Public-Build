@@ -495,26 +495,35 @@ internal class ResidentProviderDirectory(
     private val client: ResidentUiProxyClient
 ) : SystemPluginProviderDirectoryV2 {
     private data class LocalOwned(val token: String, val binding: SystemPluginProviderBindingV2)
+    private data class RemoteMetadata(val ownerPluginId: String, val metadata: Map<String, String>)
 
     private val state = MutableStateFlow<Map<String, SystemPluginProviderBindingV2>>(emptyMap())
     private val remote = AtomicReference<Map<String, SystemPluginProviderBindingV2>>(emptyMap())
+    private val pageMetadata = AtomicReference<Map<String, RemoteMetadata>>(emptyMap())
     private val localPages = ConcurrentHashMap<String, LocalOwned>()
     private val proxies = ConcurrentHashMap<String, ResidentUiStateProviderProxy>()
 
     fun update(array: JSONArray) {
         val next = linkedMapOf<String, SystemPluginProviderBindingV2>()
+        val nextPageMetadata = linkedMapOf<String, RemoteMetadata>()
         array.objects().forEach { item ->
-            if (item.optString("kind") != "ui_state") return@forEach
             val id = item.getString("id")
             val owner = item.getString("owner_plugin_id")
-            val proxy = proxies.compute(id) { _, old ->
-                if (old != null && old.ownerPluginId == owner) old else ResidentUiStateProviderProxy(client, owner, id)
-            }!!
-            proxy.update(item.stringOrNull("state_json"))
-            next[id] = SystemPluginProviderBindingV2(owner, id, item.optJSONObject("metadata")?.stringMap().orEmpty(), proxy)
+            val metadata = item.optJSONObject("metadata")?.stringMap().orEmpty()
+            when (item.optString("kind")) {
+                "ui_state" -> {
+                    val proxy = proxies.compute(id) { _, old ->
+                        if (old != null && old.ownerPluginId == owner) old else ResidentUiStateProviderProxy(client, owner, id)
+                    }!!
+                    proxy.update(item.stringOrNull("state_json"))
+                    next[id] = SystemPluginProviderBindingV2(owner, id, metadata, proxy)
+                }
+                "page_metadata" -> nextPageMetadata[id] = RemoteMetadata(owner, metadata)
+            }
         }
         proxies.keys.retainAll(next.keys)
         remote.set(next)
+        pageMetadata.set(nextPageMetadata)
         publish()
     }
 
@@ -552,7 +561,18 @@ internal class ResidentProviderDirectory(
         remote.get().toSortedMap().forEach { (id, binding) -> merged[id] = binding }
         localPages.toSortedMap().forEach { (id, owned) ->
             check(id !in merged) { "Host-local presentation provider conflicts with Core provider: $id" }
-            merged[id] = owned.binding
+            val overlay = pageMetadata.get()[id]
+            if (overlay != null) {
+                check(overlay.ownerPluginId == owned.binding.ownerPluginId) {
+                    "Host-local presentation provider owner conflicts with Core metadata: $id"
+                }
+            }
+            merged[id] = SystemPluginProviderBindingV2(
+                owned.binding.ownerPluginId,
+                owned.binding.id,
+                overlay?.metadata.orEmpty() + owned.binding.metadata,
+                owned.binding.payload
+            )
         }
         state.value = merged
     }

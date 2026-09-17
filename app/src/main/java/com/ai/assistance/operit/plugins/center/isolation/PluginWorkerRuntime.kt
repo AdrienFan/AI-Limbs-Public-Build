@@ -2,6 +2,7 @@ package com.ai.assistance.operit.plugins.center.isolation
 
 import android.content.Context
 import com.ai.assistance.operit.plugins.center.AndroidInProcessPluginRuntimeAdapter
+import com.ai.assistance.operit.plugins.center.BusinessPageProviderMetadata
 import com.ai.assistance.operit.plugins.center.ChildExtensionRuntime
 import com.ai.assistance.operit.plugins.center.ExtensionPointDefinition
 import com.ai.assistance.operit.plugins.center.ExtensionPointRegistry
@@ -430,6 +431,7 @@ internal class PluginWorkerRuntime(
                     )
                     is InProcessCapabilityExecutor -> put(base.put("kind", "capability_executor"))
                     is InProcessPageProvider -> put(base.put("kind", "page_local"))
+                    BusinessPageProviderMetadata -> put(base.put("kind", "page_local"))
                     is ExtensionHubService -> put(base.put("kind", "extension_hub"))
                     else -> throw PluginInstallException(
                         "WORKER_PROVIDER_NOT_PROXYABLE",

@@ -38,6 +38,8 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import org.json.JSONObject
 
+internal object BusinessPageProviderMetadata
+
 internal class AndroidInProcessPluginRuntimeAdapter(
     private val contributions: PluginContributionRegistry,
     private val notificationBindingProvider: (String, Set<String>) -> InProcessProviderBinding?,
@@ -373,8 +375,13 @@ internal class AndroidInProcessPluginRuntimeAdapter(
         override fun registerProvider(id: String, payload: Any, metadata: Map<String, String>) {
             if (context.runtimeRole == PluginRuntimeRole.BUSINESS && payload is InProcessPageProvider) {
                 // A PageProvider manufactures a real Android View from Context and therefore cannot
-                // cross the process boundary. Keep it out of Core. UiStateProvider is different: its
-                // JSON StateFlow + perform(event) contract stays in Core and is mirrored by Step 9.
+                // cross the process boundary. Preserve only its neutral identity/metadata so a
+                // presentation process can merge those declarations into its Host-local provider.
+                context.payloadContext.registrar.registerProvider(
+                    id,
+                    BusinessPageProviderMetadata,
+                    metadata
+                )
                 return
             }
             context.payloadContext.registrar.registerProvider(id, payload, metadata)

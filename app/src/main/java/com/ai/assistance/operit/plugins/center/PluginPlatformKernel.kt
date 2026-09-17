@@ -15,6 +15,7 @@ import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
 import com.ai.assistance.operit.plugins.center.isolation.RemoteAndroidInProcessPluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.center.isolation.RemoteChildExtensionRuntimeOwner
+import com.ai.assistance.operit.plugins.center.isolation.RemotePageProviderMetadata
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -281,6 +282,10 @@ internal object PluginPlatformKernel {
                             .put("state_json", payload.stateJson.value ?: JSONObject.NULL)
                     )
                     is com.ai.limbs.plugin.runtime.InProcessPageProvider -> Unit // View/Context ABI: never exported.
+                    RemotePageProviderMetadata -> put(
+                        JSONObject().put("owner_plugin_id", record.ownerPluginId).put("id", record.id)
+                            .put("kind", "page_metadata").put("metadata", JSONObject(record.metadata))
+                    )
                     else -> Unit
                 }
             }
@@ -723,7 +728,11 @@ internal object PluginPlatformKernel {
                 register(NoopPluginRuntimeAdapter)
                 register(DeclarativePluginRuntimeAdapter)
                 if (runtimeRole == PluginRuntimeRole.BUSINESS) {
-                    register(RemoteAndroidInProcessPluginRuntimeAdapter())
+                    register(
+                        RemoteAndroidInProcessPluginRuntimeAdapter { pluginId, scopes ->
+                            notificationHost.bindingFor(pluginId, scopes)
+                        }
+                    )
                 } else {
                     register(AndroidInProcessPluginRuntimeAdapter(
                         contributions,

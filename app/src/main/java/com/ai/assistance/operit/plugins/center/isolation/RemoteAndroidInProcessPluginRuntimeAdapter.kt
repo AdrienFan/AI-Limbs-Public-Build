@@ -17,6 +17,11 @@ import com.ai.assistance.operit.plugins.center.PluginScreenSpec
 import com.ai.assistance.operit.plugins.center.PluginThemeMode
 import com.ai.assistance.operit.plugins.center.PluginThemeSpec
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessNotificationAction
+import com.ai.limbs.plugin.runtime.InProcessNotificationActionHandler
+import com.ai.limbs.plugin.runtime.InProcessNotificationHost
+import com.ai.limbs.plugin.runtime.InProcessNotificationState
+import com.ai.limbs.plugin.runtime.InProcessProviderBinding
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -37,20 +42,25 @@ import org.json.JSONObject
  * BUSINESS-only adapter that keeps every android_inprocess Dex/JNI payload out of Resident Core.
  * Core owns lifecycle, policy and proxy registrations; ail_plugin_runtime owns executable objects.
  */
-internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter {
+internal object RemotePageProviderMetadata
+
+internal class RemoteAndroidInProcessPluginRuntimeAdapter(
+    private val notificationBindingProvider: (String, Set<String>) -> InProcessProviderBinding?
+) : PluginRuntimeAdapter {
     override val kind: String = "android_inprocess"
 
     override suspend fun mount(context: PluginRuntimeAdapterContext): PluginRuntimeHandle {
         check(context.runtimeRole == PluginRuntimeRole.BUSINESS) {
             "Remote android_inprocess adapter is reserved for BUSINESS runtime"
         }
-        val proxy = MountedRemotePlugin(context)
+        val proxy = MountedRemotePlugin(context, notificationBindingProvider)
         proxy.mountAndRegister()
         return proxy
     }
 
     private class MountedRemotePlugin(
-        private val context: PluginRuntimeAdapterContext
+        private val context: PluginRuntimeAdapterContext,
+        private val notificationBindingProvider: (String, Set<String>) -> InProcessProviderBinding?
     ) : PluginRuntimeHandle {
         private val pluginId = context.manifest.pluginId
         private val version = context.manifest.version
@@ -60,16 +70,19 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter
         @Volatile private var closed = false
         private var providerRefreshJob: Job? = null
         private val uiProviders = linkedMapOf<String, RemoteUiStateProvider>()
+        private val notificationState = MutableStateFlow<InProcessNotificationState?>(null)
+        private var notificationHandle: AutoCloseable? = null
 
         suspend fun mountAndRegister() {
             val snapshot = ensureMounted(force = true)
             registerCapabilities(snapshot.optJSONArray("capabilities") ?: JSONArray())
             registerExtensions(snapshot.optJSONArray("extensions") ?: JSONArray())
             registerProviders(snapshot.optJSONArray("providers") ?: JSONArray())
+            updateNotification(snapshot.optJSONObject("notification"))
             providerRefreshJob = scope.launch {
                 while (isActive) {
                     delay(1_000L)
-                    runCatching { refreshUiProviders() }
+                    runCatching { refreshRemoteState() }
                 }
             }
         }
@@ -81,6 +94,9 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter
         private suspend fun stopRemote(ownerShutdown: Boolean) {
             closed = true
             providerRefreshJob?.cancel()
+            runCatching { notificationHandle?.close() }
+            notificationHandle = null
+            notificationState.value = null
             scope.cancel()
             val current = runCatching { PluginRuntimeController.status(context.appContext) }.getOrNull()
             val sid = sessionId
@@ -265,7 +281,12 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter
                         uiProviders[id] = provider
                         context.payloadContext.registrar.registerProvider(id, provider, metadata)
                     }
-                    "page_local", "worker_local" -> Unit
+                    "page_local" -> context.payloadContext.registrar.registerProvider(
+                        id,
+                        RemotePageProviderMetadata,
+                        metadata
+                    )
+                    "worker_local" -> Unit
                     else -> throw PluginInstallException(
                         "PLUGIN_WORKER_PROVIDER_UNSUPPORTED",
                         "Worker returned unsupported provider kind: ${d.getString("kind")}"
@@ -274,17 +295,61 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter
             }
         }
 
-        private suspend fun refreshUiProviders() {
+        private suspend fun refreshRemoteState() {
             if (closed) return
             val snapshot = ensureMounted()
-            if (uiProviders.isEmpty()) return
-            val descriptors = snapshot.optJSONArray("providers") ?: return
+            val descriptors = snapshot.optJSONArray("providers") ?: JSONArray()
             for (index in 0 until descriptors.length()) {
                 val d = descriptors.getJSONObject(index)
                 if (d.optString("kind") == "ui_state") {
                     uiProviders[d.getString("id")]?.update(d.optNullableString("state_json"))
                 }
             }
+            updateNotification(snapshot.optJSONObject("notification"))
+        }
+
+        private fun updateNotification(snapshot: JSONObject?) {
+            if (snapshot?.optBoolean("available", false) != true) {
+                notificationState.value = null
+                return
+            }
+            ensureNotificationRelay()
+            val actions = buildList {
+                val array = snapshot.optJSONArray("actions") ?: JSONArray()
+                for (index in 0 until array.length()) {
+                    val item = array.getJSONObject(index)
+                    add(InProcessNotificationAction(item.getString("id"), item.getString("label"), item.optInt("priority", 0), item.optBoolean("enabled", true)))
+                }
+            }
+            notificationState.value = InProcessNotificationState(
+                title = snapshot.getString("title"),
+                summary = snapshot.optString("summary", ""),
+                statusLines = snapshot.stringList("status_lines"),
+                actions = actions
+            )
+        }
+
+        private fun ensureNotificationRelay() {
+            if (notificationHandle != null) return
+            val binding = notificationBindingProvider(pluginId, context.payloadContext.permissions.grantedScopes) ?: return
+            val host = binding.payload as? InProcessNotificationHost
+                ?: throw PluginInstallException("PLUGIN_WORKER_NOTIFICATION_HOST_INVALID", "Core notification host has an incompatible payload")
+            notificationHandle = host.publish(
+                notificationState,
+                InProcessNotificationActionHandler { actionId ->
+                    ensureMounted()
+                    val sid = checkNotNull(sessionId)
+                    val result = PluginRuntimeWire.request(
+                        "notification_action",
+                        sid,
+                        JSONObject().put("plugin_id", pluginId).put("action_id", actionId),
+                        PluginRuntimeWire.BUSINESS_TIMEOUT_MS
+                    )
+                    check(result.getJSONObject("operation_result").optBoolean("accepted", false)) {
+                        "Worker rejected notification action: $pluginId/$actionId"
+                    }
+                }
+            )
         }
 
         private inner class RemoteUiStateProvider(
@@ -311,7 +376,7 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter
                         .put("payload_json", payloadJson),
                     PluginRuntimeWire.BUSINESS_TIMEOUT_MS
                 )
-                refreshUiProviders()
+                refreshRemoteState()
                 return result.getJSONObject("operation_result").getString("result_json")
             }
         }
