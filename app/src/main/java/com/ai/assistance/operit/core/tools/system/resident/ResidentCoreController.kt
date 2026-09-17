@@ -110,10 +110,12 @@ internal object ResidentCoreController {
                 quote(asApp) + " > /dev/null 2>&1 < /dev/null &"
             val result = executor.executeCommand(command)
             check(result.success) { "Core launch failed: " + result.stderr.take(1000) }
+            var lastStatus = existing
             val readyDeadline = SystemClock.elapsedRealtime() + 6_000L
             while (SystemClock.elapsedRealtime() < readyDeadline) {
                 delay(150L)
                 val state = status(context)
+                lastStatus = state
                 if (state.getBoolean("available")) {
                     check(state.getBoolean("build_matches")) { "Core build mismatch" }
                     check(state.getString("launch_id") == launchId) { "Core launch identity mismatch" }
@@ -122,7 +124,8 @@ internal object ResidentCoreController {
                     return@withContext state
                 }
             }
-            error("Core did not become ready. " + readLogTail(File(directory, "bootstrap.log")))
+            error("Core did not become ready. Last status: $lastStatus. " +
+                readLogTail(File(directory, "bootstrap.log")))
         } finally {
             // A delayed app_process must not start after a failed/cancelled probe.
             if (!ready) requestFile.delete()

@@ -1,8 +1,10 @@
 package com.ai.assistance.operit.core.tools.system.resident
 
+import android.system.Os
 import java.io.File
+import java.io.IOException
 
-/** Publishes the current Core control socket while preserving the legacy fixed endpoint. */
+/** Publishes the authoritative control endpoint for the current Core launch. */
 internal object ResidentCoreEndpoint {
     private const val FILE_NAME = "active.socket"
 
@@ -13,12 +15,22 @@ internal object ResidentCoreEndpoint {
     }
 
     fun candidates(directory: File): List<String> {
-        val active = runCatching {
-            val file = File(directory, FILE_NAME)
-            if (!file.isFile || file.length() !in 1L..128L) null
-            else file.readText().trim().takeIf(::isValid)
-        }.getOrNull()
-        return listOfNotNull(active, ResidentCoreWire.socketName()).distinct()
+        val file = File(directory, FILE_NAME)
+        if (file.isFile) {
+            if (file.length() !in 1L..128L) throw IOException("Invalid Core endpoint file size")
+            val active = file.readText().trim()
+            if (!isValid(active)) throw IOException("Invalid published Core endpoint")
+            // Once published, this is the only endpoint for the current owner. A stale fixed
+            // listener can still accept connections without serving them and exhaust readiness.
+            return listOf(active)
+        }
+        if (File(directory, "launch.request").isFile) {
+            // Core takes its lease before initializing and publishing the listener. Report that
+            // startup window immediately; status() will retry without connecting to an old socket.
+            throw IOException("Core launch is waiting for control endpoint publication")
+        }
+        // Existing older Core builds without endpoint publication still use the fixed address.
+        return listOf(ResidentCoreWire.socketName())
     }
 
     fun publish(directory: File, name: String) {
@@ -27,8 +39,8 @@ internal object ResidentCoreEndpoint {
         val staged = File(directory, "$FILE_NAME.tmp")
         val target = File(directory, FILE_NAME)
         staged.writeText(name)
-        if (target.exists()) check(target.delete()) { "Cannot replace Core socket endpoint" }
-        check(staged.renameTo(target)) { "Cannot publish Core socket endpoint" }
+        // Atomic replacement keeps readers from observing a missing endpoint during publication.
+        Os.rename(staged.absolutePath, target.absolutePath)
     }
 
     fun clear(directory: File) {
