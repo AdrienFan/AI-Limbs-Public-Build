@@ -784,7 +784,7 @@ internal class PluginManager(
         val mountedPluginIds = activeMounts.keys.toList().sortedDescending()
         mountedPluginIds.forEach { pluginId ->
             val previousState = stateRepository.read(pluginId)
-            val stopResult = unmountLocked(pluginId, handoff)
+            val stopResult = unmountLocked(pluginId, handoff, ownerShutdown = true)
             if (stopResult != null && !stopResult.stoppedCleanly) {
                 failures += PluginInstallException(
                     stopResult.errorCode ?: "RUNTIME_STOP_FAILED",
@@ -935,7 +935,8 @@ internal class PluginManager(
     }
     private suspend fun unmountLocked(
         pluginId: String,
-        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff? = null
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff? = null,
+        ownerShutdown: Boolean = false
     ): PluginRuntimeStopResult? {
         val mount = activeMounts[pluginId] ?: return null
         stateRepository.read(pluginId)?.let { state ->
@@ -946,7 +947,7 @@ internal class PluginManager(
                 )
             )
         }
-        val result = runtimeHost.stop(mount.runtime, handoff)
+        val result = runtimeHost.stop(mount.runtime, handoff, ownerShutdown)
         if (result.stoppedCleanly) {
             activeMounts.remove(pluginId, mount)
             revokeWorkerAuthorization(pluginId, mount.version)

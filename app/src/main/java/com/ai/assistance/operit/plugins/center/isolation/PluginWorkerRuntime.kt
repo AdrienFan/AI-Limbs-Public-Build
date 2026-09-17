@@ -143,7 +143,7 @@ internal class PluginWorkerRuntime(
         val failures = mutableListOf<Throwable>()
         runCatching { stopChildren() }.exceptionOrNull()?.let(failures::add)
         mounts.keys.toList().sortedDescending().forEach { pluginId ->
-            runCatching { stopPlugin(pluginId) }.exceptionOrNull()?.let(failures::add)
+            runCatching { stopPlugin(pluginId, ownerShutdown = true) }.exceptionOrNull()?.let(failures::add)
         }
         notificationRegistry.close()
         if (failures.isNotEmpty()) {
@@ -228,10 +228,10 @@ internal class PluginWorkerRuntime(
         }
     }
 
-    suspend fun stopPlugin(pluginId: String): JSONObject {
+    suspend fun stopPlugin(pluginId: String, ownerShutdown: Boolean = false): JSONObject {
         val mount = mounts.remove(pluginId)
             ?: return JSONObject().put("stopped", true).put("plugin_id", pluginId)
-        val result = runtimeHost.stop(mount.runtime)
+        val result = runtimeHost.stop(mount.runtime, ownerShutdown = ownerShutdown)
         mount.ownerBinding.close()
         notificationRegistry.clearOwner(pluginId)
         if (!result.stoppedCleanly) {

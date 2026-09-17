@@ -139,7 +139,10 @@ object PluginRuntimeMain {
                                 worker.mount(payload.getString("plugin_id"), payload.getString("version"))
                             }
                             "stop_plugin" -> runBlocking {
-                                worker.stopPlugin(payload.getString("plugin_id"))
+                                worker.stopPlugin(
+                                    payload.getString("plugin_id"),
+                                    ownerShutdown = payload.optBoolean("owner_shutdown", false)
+                                )
                             }
                             "snapshot_plugin" -> worker.snapshot(payload.getString("plugin_id"))
                             "invoke_capability" -> runBlocking {

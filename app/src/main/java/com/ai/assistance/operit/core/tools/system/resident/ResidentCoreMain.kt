@@ -294,7 +294,7 @@ object ResidentCoreMain {
                     val cleanup = AtomicReference<JSONObject?>(null)
                     val closing = Thread({
                         try {
-                            backend.close(returnToHost = userStop)
+                            backend.close(returnToHost = true)
                             cleanup.set(JSONObject().put("backend_release_confirmed", true))
                         } catch (error: Exception) {
                             cleanup.set(JSONObject().put("backend_release_confirmed", false)

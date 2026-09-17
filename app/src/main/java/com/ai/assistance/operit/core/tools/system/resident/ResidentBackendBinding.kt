@@ -49,10 +49,27 @@ internal class ResidentBackendBinding(
                 val death = IBinder.DeathRecipient {
                     synchronized(lock) {
                         if (server == incoming) {
-                            diagnostic.set(JSONObject().put("state", "disconnected")
-                                .put("connected", false).put("runtime_owner", "unavailable").toString())
-                            // No business runtime may silently continue on a different backend.
-                            if (preparationAttempted) android.os.Process.killProcess(android.os.Process.myPid())
+                            server = null
+                            serverToken = null
+                            recipient = null
+                            diagnostic.set(
+                                JSONObject()
+                                    .put("state", "degraded")
+                                    .put("connected", false)
+                                    .put(
+                                        "runtime_owner",
+                                        when {
+                                            ownsRuntime -> "resident_core"
+                                            prepared -> "handoff_prepared"
+                                            else -> "unavailable"
+                                        }
+                                    )
+                                    .put("permission_backend_available", false)
+                                    .put("degraded_reason", "permission_backend_died")
+                                    .toString()
+                            )
+                            // Backend loss degrades privileged capabilities only. Resident business
+                            // ownership must survive; no alternate backend is selected implicitly.
                         }
                     }
                 }

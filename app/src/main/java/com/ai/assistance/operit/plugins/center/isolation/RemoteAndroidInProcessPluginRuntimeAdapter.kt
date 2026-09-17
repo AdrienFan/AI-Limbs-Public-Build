@@ -74,7 +74,11 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter
             }
         }
 
-        override suspend fun stop() {
+        override suspend fun stop() = stopRemote(ownerShutdown = false)
+
+        override suspend fun stopForOwnerShutdown() = stopRemote(ownerShutdown = true)
+
+        private suspend fun stopRemote(ownerShutdown: Boolean) {
             closed = true
             providerRefreshJob?.cancel()
             scope.cancel()
@@ -88,7 +92,9 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter : PluginRuntimeAdapter
                     PluginRuntimeWire.request(
                         "stop_plugin",
                         sid,
-                        JSONObject().put("plugin_id", pluginId),
+                        JSONObject()
+                            .put("plugin_id", pluginId)
+                            .put("owner_shutdown", ownerShutdown),
                         PluginRuntimeWire.BUSINESS_TIMEOUT_MS
                     )
                 }.getOrElse { error ->

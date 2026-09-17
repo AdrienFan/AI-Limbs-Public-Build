@@ -57,6 +57,7 @@ internal data class PluginRuntimeAdapterContext(
 
 internal interface PluginRuntimeHandle {
     suspend fun stop()
+    suspend fun stopForOwnerShutdown() = stop()
     suspend fun stopForResidentHandoff(handoff: ResidentPermissionHandoff) = stop()
 }
 
@@ -144,11 +145,19 @@ internal class PluginRuntimeHost(
         }
     }
 
-    suspend fun stop(runtime: HostedPluginRuntime, handoff: ResidentPermissionHandoff? = null): PluginRuntimeStopResult {
+    suspend fun stop(
+        runtime: HostedPluginRuntime,
+        handoff: ResidentPermissionHandoff? = null,
+        ownerShutdown: Boolean = false
+    ): PluginRuntimeStopResult {
         runtime.scope.revokeAll()
         return try {
             withTimeout(timeouts.stopTimeoutMs) {
-                if (handoff == null) runtime.handle.stop() else runtime.handle.stopForResidentHandoff(handoff)
+                when {
+                    handoff != null -> runtime.handle.stopForResidentHandoff(handoff)
+                    ownerShutdown -> runtime.handle.stopForOwnerShutdown()
+                    else -> runtime.handle.stop()
+                }
             }
             runtime.scope.requireCleanRevocation()
             PluginRuntimeStopResult(PluginRuntimeStopOutcome.STOPPED)
