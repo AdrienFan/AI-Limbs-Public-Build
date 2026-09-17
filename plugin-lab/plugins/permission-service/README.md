@@ -1,4 +1,4 @@
-# AI Limbs 权限服务 v0.1.1
+# AI Limbs 权限服务 v0.1.2
 
 需要基座 build21 或更新版本，以及插件中心授予 host.privileged.runtime@1。插件位于工具箱，运行时不依赖 Ubuntu 或官方 Shizuku 应用。
 
@@ -23,7 +23,7 @@ host.privileged.runtime@1 提供 status / pair / prepare / stop / select。scope
 
 服务每 10 秒与 Host 确认连接，允许有限的宿主进程重启宽限。token 撤销时退出，连续无法连接时退出。外部 Shizuku 的包名、Provider、进程和授权数据保持独立。
 
-v0.1.1 不提供其他 Android 应用授权、Rish 或外部 UserService；现有外部 Shizuku/Sui 后端仍可通过明确选择使用。
+v0.1.2 不提供其他 Android 应用授权、Rish 或外部 UserService；现有外部 Shizuku/Sui 后端仍可通过明确选择使用。
 
 ## 构建与打包
 
@@ -31,7 +31,13 @@ v0.1.1 不提供其他 Android 应用授权、Rish 或外部 UserService；现�
 
 permission-service-plugin:assembleDebug 自动构建 permission-server 的 release APK 并作为 asset 打入插件；随后使用既有父插件 Ed25519 密钥签名生成 .ailp，校验签名及内容摘要。
 
-当前修复沿用基座 build21，插件版本为 0.1.1。上游来源与修改见 THIRD_PARTY_NOTICES.md、vendor/UPSTREAM.json 和 vendor/shizuku-api/UPSTREAM.md。
+当前修复沿用基座 build21，插件版本为 0.1.2。上游来源与修改见 THIRD_PARTY_NOTICES.md、vendor/UPSTREAM.json 和 vendor/shizuku-api/UPSTREAM.md。
+
+## v0.1.2 Resident 生命周期解耦
+
+- 权限服务异常退出时，不再要求 Resident Core 跟随退出。
+- Resident/Core 生命周期结束时，只释放 ownership 并归还 Host，不再停止独立权限服务 daemon。
+- 用户显式点击停止权限服务时，仍会正常停止服务。
 
 ## v0.1.1 启动修复
 

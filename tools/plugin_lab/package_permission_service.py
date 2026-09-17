@@ -54,6 +54,12 @@ def main():
             package.writestr("META-INF/AILIMBS.SIG", signature.read_bytes())
         digest = hashlib.sha256(out.read_bytes()).hexdigest()
         out.with_suffix(out.suffix + ".sha256").write_text(digest + "  " + out.name + "\n")
+        # Compatibility alias for the existing v0.1.1 workflow upload path. The signed manifest
+        # and APK metadata remain v0.1.2; this can be removed once the workflow file is updated.
+        if manifest["version"] == "0.1.2":
+            legacy = dist / "AI-Limbs-Permission-Service-v0.1.1.ailp"
+            legacy.write_bytes(out.read_bytes())
+            legacy.with_suffix(legacy.suffix + ".sha256").write_text(digest + "  " + legacy.name + "\n")
         print(out.name + " sha256=" + digest)
 
 if __name__ == "__main__":
