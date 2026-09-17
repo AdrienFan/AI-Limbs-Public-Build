@@ -1,5 +1,7 @@
 package com.ai.assistance.operit.core.tools.system.resident
 
+import android.content.Context
+import android.net.LocalServerSocket
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
@@ -33,6 +35,314 @@ object ResidentCoreMain {
             1
         }
         exitProcess(exitCode)
+    }
+
+    private class ControlLoopState(
+        val runtime: ResidentCoreBusinessRuntime,
+        val uiProxyServer: ResidentUiProxyServer,
+        val server: LocalServerSocket,
+        val dispatcherServer: ResidentCoreDispatcherServer,
+        val continuousResources: ResidentCoreContinuousResources,
+        val context: Context,
+        val sessionId: String,
+        val directory: File,
+        val activeSocketName: String,
+        val backend: ResidentBackendBinding,
+        val startedElapsed: Long,
+        val startedUptime: Long,
+        val launchId: String,
+        val packageName: String,
+        val contextState: ResidentCoreContextBootstrap.Result,
+        val shutdownHook: Thread
+    ) : Runnable {
+        val activationThread = AtomicReference<Thread?>(null)
+
+        fun snapshot(): JSONObject {
+            val elapsed = SystemClock.elapsedRealtime() - startedElapsed
+            val uptime = SystemClock.uptimeMillis() - startedUptime
+            val runtimeState = runtime.snapshot()
+            val businessPhase = runtimeState.getString("business_phase")
+            val businessAttached = runtimeState.getBoolean("business_attached")
+            val owner = when {
+                businessAttached -> "resident_core"
+                businessPhase == "waiting_for_host_exit" ||
+                    businessPhase == "acquiring_owner" ||
+                    businessPhase == "starting_kernel" ||
+                    businessPhase == "claiming_backend" ||
+                    businessPhase == "starting_bridge" ||
+                    businessPhase == "starting_plugin_services" -> "handoff_pending"
+                businessPhase == "failed" -> "unavailable"
+                else -> "android_host"
+            }
+            return JSONObject()
+                .put("available", runtimeState.getString("phase") == "running")
+                .put("phase", runtimeState.getString("phase"))
+                .put("build_code", BuildConfig.VERSION_CODE)
+                .put("source_apk", context.applicationInfo.sourceDir)
+                .put("pid", Process.myPid())
+                .put("uid", Process.myUid())
+                .put("session_id", sessionId)
+                .put("launch_id", launchId)
+                .put("control_socket", activeSocketName)
+                .put("package_name", packageName)
+                .put("context_ready", true)
+                .put("resource_package", contextState.resourcePackage)
+                .put("op_package_name", contextState.opPackageName)
+                .put("attribution_package_name", contextState.attributionPackageName ?: JSONObject.NULL)
+                .put("attribution_uid", contextState.attributionUid ?: JSONObject.NULL)
+                .put("elapsed_ms", elapsed)
+                .put("uptime_ms", uptime)
+                .put("suspend_ms", (elapsed - uptime).coerceAtLeast(0L))
+                .put("runtime_owner", owner)
+                .put("business_phase", businessPhase)
+                .put("business_preflight_ready", runtimeState.getBoolean("business_preflight_ready"))
+                .put("business_preflight", runtimeState.opt("business_preflight"))
+                .put("business_failure_stage", runtimeState.opt("business_failure_stage"))
+                .put("expected_host_pid", runtimeState.opt("expected_host_pid"))
+                .put("business_attached", businessAttached)
+                .put("plugin_kernel_started", runtimeState.getBoolean("plugin_kernel_started"))
+                .put("bridge_ingress_prepared", runtimeState.getBoolean("bridge_ingress_prepared"))
+                .put("bridge_plugin_mounted", runtimeState.getBoolean("bridge_plugin_mounted"))
+                .put("plugin_services_prepared", runtimeState.getBoolean("plugin_services_prepared"))
+                .put("ubuntu_control_ready", runtimeState.getBoolean("ubuntu_control_ready"))
+                .put("plugins_migrated", runtimeState.getBoolean("plugin_services_prepared"))
+                .put("continuous_work", false)
+                .put("core_runtime", runtimeState)
+                .put("backend", backend.snapshot())
+                .put("dispatcher", dispatcherServer.snapshot())
+                .put("ui_proxy", uiProxyServer.attachmentSnapshot())
+                .put("continuous_resources", continuousResources.snapshot())
+                .put("takeover_fence", ResidentBusinessTakeoverFence.snapshot(context) ?: JSONObject.NULL)
+        }
+
+
+        override fun run() {
+            var userStop = false
+            var exitCode = 0
+            try {
+                runtime.start()
+                uiProxyServer.start()
+                Thread({ backend.connect() }, "resident-backend-bind").apply {
+                    isDaemon = true
+                    start()
+                }
+                println("AIL_RESIDENT_CORE_RUNNING " + snapshot())
+
+                var stopping = false
+                while (!stopping) {
+                    server.accept().use { socket ->
+                        socket.soTimeout = ResidentCoreWire.TIMEOUT_MS
+                        var requestId = ""
+                        var operation = "unparsed"
+                        try {
+                            val peer = socket.peerCredentials
+                            check(peer.uid == Process.myUid()) { "Core client UID mismatch" }
+                            val request = ResidentCoreWire.read(socket)
+                            requestId = request.getString("request_id")
+                            require(requestId.length in 1..64) { "Invalid request ID" }
+                            require(request.getInt("protocol") == ResidentCoreWire.VERSION) {
+                                "Unsupported core protocol"
+                            }
+                            if (!request.isNull("session_id")) {
+                                check(request.getString("session_id") == sessionId) { "Stale core session" }
+                            }
+                            operation = request.getString("operation")
+                            require(operation == "status" || operation == "stop" ||
+                                operation == "prepare_handoff" || operation == "activate_business" ||
+                                operation == "cancel_business_activation" || operation == "quiesce_business") {
+                                "Unsupported core operation"
+                            }
+                            if (operation != "status") {
+                                check(request.getString("session_id") == sessionId) {
+                                    "Core mutation requires the current session"
+                                }
+                            }
+
+                            when (operation) {
+                                "prepare_handoff" -> backend.prepareHandoffAsync()
+                                "activate_business" -> {
+                                    check(backend.snapshot().getString("state") == "prepared") {
+                                        "Permission backend must be prepared before business takeover"
+                                    }
+                                    check(activationThread.get() == null) { "Business activation is already armed" }
+                                    try {
+                                        continuousResources.acquireForBusiness()
+                                        runtime.armBusinessTakeover(context, sessionId, peer.pid)
+                                    } catch (error: Throwable) {
+                                        val release =
+                                            continuousResources.release("activate_business_rejected")
+                                        if (!release.optBoolean("release_confirmed", false)) {
+                                            runCatching { server.close() }
+                                        }
+                                        throw error
+                                    }
+                                    val worker = Thread({
+                                        try {
+                                            runtime.activateBusiness(
+                                                context = context,
+                                                coreSession = sessionId,
+                                                backend = backend,
+                                                hostPid = peer.pid,
+                                                onBusinessOwnerReady = dispatcherServer::start
+                                            )
+                                        } catch (error: Throwable) {
+                                            runtime.fail(error)
+                                            System.err.println("Resident Core business activation failed: $error")
+                                            error.printStackTrace(System.err)
+                                            runCatching { server.close() }
+                                        } finally {
+                                            activationThread.compareAndSet(Thread.currentThread(), null)
+                                        }
+                                    }, "resident-business-activation").apply { isDaemon = false }
+                                    try {
+                                        check(activationThread.compareAndSet(null, worker)) {
+                                            "Business activation worker changed unexpectedly"
+                                        }
+                                        worker.start()
+                                    } catch (error: Throwable) {
+                                        activationThread.compareAndSet(worker, null)
+                                        runCatching {
+                                            runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
+                                        }
+                                        val release =
+                                            continuousResources.release("activation_worker_arm_failed")
+                                        if (!release.optBoolean("release_confirmed", false)) {
+                                            runCatching { server.close() }
+                                        }
+                                        throw error
+                                    }
+                                }
+                                "cancel_business_activation" -> {
+                                    runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
+                                    val release = continuousResources.release("business_takeover_cancelled")
+                                    if (!release.optBoolean("release_confirmed", false)) {
+                                        runCatching { server.close() }
+                                    }
+                                    check(release.getBoolean("release_confirmed")) {
+                                        "Resident continuous resources did not release after takeover cancellation: $release"
+                                    }
+                                }
+                                "quiesce_business" -> {
+                                    runtime.beginBusinessQuiesce()
+                                    val drain = dispatcherServer.quiesceAndDrain()
+                                    if (drain.optBoolean("drain_success", false)) {
+                                        runtime.markBusinessDrained()
+                                    } else {
+                                        runtime.markBusinessQuiesceFailed(
+                                            drain.optString("last_error", "Resident Dispatcher drain failed")
+                                        )
+                                    }
+                                }
+                                "stop" -> runtime.requestStop()
+                            }
+
+                            val response = JSONObject()
+                                .put("protocol", ResidentCoreWire.VERSION)
+                                .put("request_id", requestId)
+                                .put("session_id", sessionId)
+                                .put("success", true)
+                                .put("result", snapshot().put("stop_requested", operation == "stop"))
+                            ResidentCoreWire.write(socket, response)
+                            stopping = operation == "stop"
+                            userStop = stopping
+                        } catch (error: Exception) {
+                            System.err.println("Resident Core rejected request operation=$operation request_id=$requestId: $error")
+                            error.printStackTrace(System.err)
+                            try {
+                                ResidentCoreWire.write(socket, JSONObject()
+                                    .put("protocol", ResidentCoreWire.VERSION)
+                                    .put("request_id", requestId.take(64))
+                                    .put("session_id", sessionId)
+                                    .put("success", false)
+                                    .put("error", error.toString().take(512)))
+                            } catch (writeError: Exception) {
+                                System.err.println("Resident Core response failed: $writeError")
+                                writeError.printStackTrace(System.err)
+                            }
+                        }
+                    }
+                }
+            } catch (error: Throwable) {
+                exitCode = 1
+                if (runtime.snapshot().getString("phase") != "failed") runtime.fail(error)
+                System.err.println("Resident Core runtime failed: $error")
+                error.printStackTrace(System.err)
+            } finally {
+                runtime.requestStop()
+                activationThread.get()?.let { worker ->
+                    try { worker.join(3_000L) }
+                    catch (_: InterruptedException) { Thread.currentThread().interrupt() }
+                }
+                uiProxyServer.close()
+                dispatcherServer.stop()
+                try {
+                    runtime.stop()
+                } catch (error: Throwable) {
+                    exitCode = 1
+                    runtime.fail(error)
+                    System.err.println("Resident Core stop barrier failed: $error")
+                    error.printStackTrace(System.err)
+                }
+                val resourceRelease = continuousResources.release(
+                    if (userStop) "resident_off" else "core_exit"
+                )
+                if (!resourceRelease.optBoolean("release_confirmed", false)) {
+                    exitCode = 1
+                    System.err.println("Resident continuous resource release was not clean: $resourceRelease")
+                }
+
+                val cleanup = AtomicReference<JSONObject?>(null)
+                val closing = Thread({
+                    try {
+                        backend.close(returnToHost = true)
+                        cleanup.set(JSONObject().put("backend_release_confirmed", true))
+                    } catch (error: Exception) {
+                        cleanup.set(JSONObject().put("backend_release_confirmed", false)
+                            .put("backend_release_error", error.toString().take(512)))
+                    }
+                }, "resident-backend-close").apply { isDaemon = true; start() }
+                try {
+                    closing.join(2_000L)
+                    if (userStop) {
+                        ResidentPolicyStateHandoff.clearForExplicitCoreStop(context, sessionId)
+                        ResidentBusinessTakeoverFence.clearForExplicitCoreStop(context, sessionId)
+                    }
+                    val outcome = cleanup.get() ?: JSONObject()
+                        .put("backend_release_confirmed", false)
+                        .put("backend_release_error", "Backend release did not acknowledge within 2000ms")
+                    val runtimeState = runtime.snapshot()
+                    outcome
+                        .put("session_id", sessionId)
+                        .put("pid", Process.myPid())
+                        .put("continuous_resource_release_confirmed",
+                            resourceRelease.optBoolean("release_confirmed", false))
+                        .put("continuous_resource_release", resourceRelease)
+                        .put("phase", runtimeState.getString("phase"))
+                        .put("business_phase", runtimeState.getString("business_phase"))
+                        .put("runtime_skeleton_ready", runtimeState.getBoolean("runtime_skeleton_ready"))
+                    if (!runtimeState.isNull("last_error")) {
+                        outcome.put("runtime_error", runtimeState.getString("last_error"))
+                    }
+                    if (!runtimeState.isNull("business_error")) {
+                        outcome.put("business_error", runtimeState.getString("business_error"))
+                    }
+                    val staged = File(directory, "shutdown.result.tmp")
+                    staged.writeText(outcome.toString())
+                    check(staged.renameTo(File(directory, "shutdown.result.json"))) {
+                        "Cannot save Core shutdown result"
+                    }
+                } catch (error: Exception) {
+                    System.err.println("Core shutdown result could not be saved: $error")
+                    error.printStackTrace(System.err)
+                } finally {
+                    runCatching { server.close() }
+                    ResidentCoreEndpoint.clearIfOwned(directory, activeSocketName)
+                    runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
+                }
+                exitProcess(exitCode)
+            }
+
+        }
     }
 
     private fun serve(packageName: String, directory: File, launchId: String) {
@@ -70,294 +380,29 @@ object ResidentCoreMain {
                 runCatching { server.close() }
                 ResidentCoreEndpoint.clearIfOwned(directory, activeSocketName)
             }
-            val activationThread = AtomicReference<Thread?>(null)
             Runtime.getRuntime().addShutdownHook(shutdownHook)
 
-            fun snapshot(): JSONObject {
-                val elapsed = SystemClock.elapsedRealtime() - startedElapsed
-                val uptime = SystemClock.uptimeMillis() - startedUptime
-                val runtimeState = runtime.snapshot()
-                val businessPhase = runtimeState.getString("business_phase")
-                val businessAttached = runtimeState.getBoolean("business_attached")
-                val owner = when {
-                    businessAttached -> "resident_core"
-                    businessPhase == "waiting_for_host_exit" ||
-                        businessPhase == "acquiring_owner" ||
-                        businessPhase == "starting_kernel" ||
-                        businessPhase == "claiming_backend" ||
-                        businessPhase == "starting_bridge" ||
-                        businessPhase == "starting_plugin_services" -> "handoff_pending"
-                    businessPhase == "failed" -> "unavailable"
-                    else -> "android_host"
-                }
-                return JSONObject()
-                    .put("available", runtimeState.getString("phase") == "running")
-                    .put("phase", runtimeState.getString("phase"))
-                    .put("build_code", BuildConfig.VERSION_CODE)
-                    .put("source_apk", context.applicationInfo.sourceDir)
-                    .put("pid", Process.myPid())
-                    .put("uid", Process.myUid())
-                    .put("session_id", sessionId)
-                    .put("launch_id", launchId)
-                    .put("control_socket", activeSocketName)
-                    .put("package_name", packageName)
-                    .put("context_ready", true)
-                    .put("resource_package", contextState.resourcePackage)
-                    .put("op_package_name", contextState.opPackageName)
-                    .put("attribution_package_name", contextState.attributionPackageName ?: JSONObject.NULL)
-                    .put("attribution_uid", contextState.attributionUid ?: JSONObject.NULL)
-                    .put("elapsed_ms", elapsed)
-                    .put("uptime_ms", uptime)
-                    .put("suspend_ms", (elapsed - uptime).coerceAtLeast(0L))
-                    .put("runtime_owner", owner)
-                    .put("business_phase", businessPhase)
-                    .put("business_preflight_ready", runtimeState.getBoolean("business_preflight_ready"))
-                    .put("business_preflight", runtimeState.opt("business_preflight"))
-                    .put("business_failure_stage", runtimeState.opt("business_failure_stage"))
-                    .put("expected_host_pid", runtimeState.opt("expected_host_pid"))
-                    .put("business_attached", businessAttached)
-                    .put("plugin_kernel_started", runtimeState.getBoolean("plugin_kernel_started"))
-                    .put("bridge_ingress_prepared", runtimeState.getBoolean("bridge_ingress_prepared"))
-                    .put("bridge_plugin_mounted", runtimeState.getBoolean("bridge_plugin_mounted"))
-                    .put("plugin_services_prepared", runtimeState.getBoolean("plugin_services_prepared"))
-                    .put("ubuntu_control_ready", runtimeState.getBoolean("ubuntu_control_ready"))
-                    .put("plugins_migrated", runtimeState.getBoolean("plugin_services_prepared"))
-                    .put("continuous_work", false)
-                    .put("core_runtime", runtimeState)
-                    .put("backend", backend.snapshot())
-                    .put("dispatcher", dispatcherServer.snapshot())
-                    .put("ui_proxy", uiProxyServer.attachmentSnapshot())
-                    .put("continuous_resources", continuousResources.snapshot())
-                    .put("takeover_fence", ResidentBusinessTakeoverFence.snapshot(context) ?: JSONObject.NULL)
+            val controlState = ControlLoopState(
+                runtime = runtime,
+                uiProxyServer = uiProxyServer,
+                server = server,
+                dispatcherServer = dispatcherServer,
+                continuousResources = continuousResources,
+                context = context,
+                sessionId = sessionId,
+                directory = directory,
+                activeSocketName = activeSocketName,
+                backend = backend,
+                startedElapsed = startedElapsed,
+                startedUptime = startedUptime,
+                launchId = launchId,
+                packageName = packageName,
+                contextState = contextState,
+                shutdownHook = shutdownHook
+            )
+            val controlThread = Thread(controlState, "resident-core-control").apply {
+                isDaemon = false
             }
-
-            var userStop = false
-            val controlThread = Thread({
-                var exitCode = 0
-                try {
-                    runtime.start()
-                    uiProxyServer.start()
-                    Thread({ backend.connect() }, "resident-backend-bind").apply {
-                        isDaemon = true
-                        start()
-                    }
-                    println("AIL_RESIDENT_CORE_RUNNING " + snapshot())
-
-                    var stopping = false
-                    while (!stopping) {
-                        server.accept().use { socket ->
-                            socket.soTimeout = ResidentCoreWire.TIMEOUT_MS
-                            var requestId = ""
-                            var operation = "unparsed"
-                            try {
-                                val peer = socket.peerCredentials
-                                check(peer.uid == Process.myUid()) { "Core client UID mismatch" }
-                                val request = ResidentCoreWire.read(socket)
-                                requestId = request.getString("request_id")
-                                require(requestId.length in 1..64) { "Invalid request ID" }
-                                require(request.getInt("protocol") == ResidentCoreWire.VERSION) {
-                                    "Unsupported core protocol"
-                                }
-                                if (!request.isNull("session_id")) {
-                                    check(request.getString("session_id") == sessionId) { "Stale core session" }
-                                }
-                                operation = request.getString("operation")
-                                require(operation == "status" || operation == "stop" ||
-                                    operation == "prepare_handoff" || operation == "activate_business" ||
-                                    operation == "cancel_business_activation" || operation == "quiesce_business") {
-                                    "Unsupported core operation"
-                                }
-                                if (operation != "status") {
-                                    check(request.getString("session_id") == sessionId) {
-                                        "Core mutation requires the current session"
-                                    }
-                                }
-
-                                when (operation) {
-                                    "prepare_handoff" -> backend.prepareHandoffAsync()
-                                    "activate_business" -> {
-                                        check(backend.snapshot().getString("state") == "prepared") {
-                                            "Permission backend must be prepared before business takeover"
-                                        }
-                                        check(activationThread.get() == null) { "Business activation is already armed" }
-                                        try {
-                                            continuousResources.acquireForBusiness()
-                                            runtime.armBusinessTakeover(context, sessionId, peer.pid)
-                                        } catch (error: Throwable) {
-                                            val release =
-                                                continuousResources.release("activate_business_rejected")
-                                            if (!release.optBoolean("release_confirmed", false)) {
-                                                runCatching { server.close() }
-                                            }
-                                            throw error
-                                        }
-                                        val worker = Thread({
-                                            try {
-                                                runtime.activateBusiness(
-                                                    context = context,
-                                                    coreSession = sessionId,
-                                                    backend = backend,
-                                                    hostPid = peer.pid,
-                                                    onBusinessOwnerReady = dispatcherServer::start
-                                                )
-                                            } catch (error: Throwable) {
-                                                runtime.fail(error)
-                                                System.err.println("Resident Core business activation failed: $error")
-                                                error.printStackTrace(System.err)
-                                                runCatching { server.close() }
-                                            } finally {
-                                                activationThread.compareAndSet(Thread.currentThread(), null)
-                                            }
-                                        }, "resident-business-activation").apply { isDaemon = false }
-                                        try {
-                                            check(activationThread.compareAndSet(null, worker)) {
-                                                "Business activation worker changed unexpectedly"
-                                            }
-                                            worker.start()
-                                        } catch (error: Throwable) {
-                                            activationThread.compareAndSet(worker, null)
-                                            runCatching {
-                                                runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
-                                            }
-                                            val release =
-                                                continuousResources.release("activation_worker_arm_failed")
-                                            if (!release.optBoolean("release_confirmed", false)) {
-                                                runCatching { server.close() }
-                                            }
-                                            throw error
-                                        }
-                                    }
-                                    "cancel_business_activation" -> {
-                                        runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
-                                        val release = continuousResources.release("business_takeover_cancelled")
-                                        if (!release.optBoolean("release_confirmed", false)) {
-                                            runCatching { server.close() }
-                                        }
-                                        check(release.getBoolean("release_confirmed")) {
-                                            "Resident continuous resources did not release after takeover cancellation: $release"
-                                        }
-                                    }
-                                    "quiesce_business" -> {
-                                        runtime.beginBusinessQuiesce()
-                                        val drain = dispatcherServer.quiesceAndDrain()
-                                        if (drain.optBoolean("drain_success", false)) {
-                                            runtime.markBusinessDrained()
-                                        } else {
-                                            runtime.markBusinessQuiesceFailed(
-                                                drain.optString("last_error", "Resident Dispatcher drain failed")
-                                            )
-                                        }
-                                    }
-                                    "stop" -> runtime.requestStop()
-                                }
-
-                                val response = JSONObject()
-                                    .put("protocol", ResidentCoreWire.VERSION)
-                                    .put("request_id", requestId)
-                                    .put("session_id", sessionId)
-                                    .put("success", true)
-                                    .put("result", snapshot().put("stop_requested", operation == "stop"))
-                                ResidentCoreWire.write(socket, response)
-                                stopping = operation == "stop"
-                                userStop = stopping
-                            } catch (error: Exception) {
-                                System.err.println("Resident Core rejected request operation=$operation request_id=$requestId: $error")
-                                error.printStackTrace(System.err)
-                                try {
-                                    ResidentCoreWire.write(socket, JSONObject()
-                                        .put("protocol", ResidentCoreWire.VERSION)
-                                        .put("request_id", requestId.take(64))
-                                        .put("session_id", sessionId)
-                                        .put("success", false)
-                                        .put("error", error.toString().take(512)))
-                                } catch (writeError: Exception) {
-                                    System.err.println("Resident Core response failed: $writeError")
-                                    writeError.printStackTrace(System.err)
-                                }
-                            }
-                        }
-                    }
-                } catch (error: Throwable) {
-                    exitCode = 1
-                    if (runtime.snapshot().getString("phase") != "failed") runtime.fail(error)
-                    System.err.println("Resident Core runtime failed: $error")
-                    error.printStackTrace(System.err)
-                } finally {
-                    runtime.requestStop()
-                    activationThread.get()?.let { worker ->
-                        try { worker.join(3_000L) }
-                        catch (_: InterruptedException) { Thread.currentThread().interrupt() }
-                    }
-                    uiProxyServer.close()
-                    dispatcherServer.stop()
-                    try {
-                        runtime.stop()
-                    } catch (error: Throwable) {
-                        exitCode = 1
-                        runtime.fail(error)
-                        System.err.println("Resident Core stop barrier failed: $error")
-                        error.printStackTrace(System.err)
-                    }
-                    val resourceRelease = continuousResources.release(
-                        if (userStop) "resident_off" else "core_exit"
-                    )
-                    if (!resourceRelease.optBoolean("release_confirmed", false)) {
-                        exitCode = 1
-                        System.err.println("Resident continuous resource release was not clean: $resourceRelease")
-                    }
-
-                    val cleanup = AtomicReference<JSONObject?>(null)
-                    val closing = Thread({
-                        try {
-                            backend.close(returnToHost = true)
-                            cleanup.set(JSONObject().put("backend_release_confirmed", true))
-                        } catch (error: Exception) {
-                            cleanup.set(JSONObject().put("backend_release_confirmed", false)
-                                .put("backend_release_error", error.toString().take(512)))
-                        }
-                    }, "resident-backend-close").apply { isDaemon = true; start() }
-                    try {
-                        closing.join(2_000L)
-                        if (userStop) {
-                            ResidentPolicyStateHandoff.clearForExplicitCoreStop(context, sessionId)
-                            ResidentBusinessTakeoverFence.clearForExplicitCoreStop(context, sessionId)
-                        }
-                        val outcome = cleanup.get() ?: JSONObject()
-                            .put("backend_release_confirmed", false)
-                            .put("backend_release_error", "Backend release did not acknowledge within 2000ms")
-                        val runtimeState = runtime.snapshot()
-                        outcome
-                            .put("session_id", sessionId)
-                            .put("pid", Process.myPid())
-                            .put("continuous_resource_release_confirmed",
-                                resourceRelease.optBoolean("release_confirmed", false))
-                            .put("continuous_resource_release", resourceRelease)
-                            .put("phase", runtimeState.getString("phase"))
-                            .put("business_phase", runtimeState.getString("business_phase"))
-                            .put("runtime_skeleton_ready", runtimeState.getBoolean("runtime_skeleton_ready"))
-                        if (!runtimeState.isNull("last_error")) {
-                            outcome.put("runtime_error", runtimeState.getString("last_error"))
-                        }
-                        if (!runtimeState.isNull("business_error")) {
-                            outcome.put("business_error", runtimeState.getString("business_error"))
-                        }
-                        val staged = File(directory, "shutdown.result.tmp")
-                        staged.writeText(outcome.toString())
-                        check(staged.renameTo(File(directory, "shutdown.result.json"))) {
-                            "Cannot save Core shutdown result"
-                        }
-                    } catch (error: Exception) {
-                        System.err.println("Core shutdown result could not be saved: $error")
-                        error.printStackTrace(System.err)
-                    } finally {
-                        runCatching { server.close() }
-                        ResidentCoreEndpoint.clearIfOwned(directory, activeSocketName)
-                        runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
-                    }
-                    exitProcess(exitCode)
-                }
-            }, "resident-core-control")
-            controlThread.isDaemon = false
             controlThread.start()
 
             try {
