@@ -99,27 +99,21 @@ internal class RemoteChildExtensionRuntimeOwner(
     override fun loggingUiContributions() = ui.value.toList()
     override fun residentPresentationDescriptors() = JSONArray(presentations.toString())
 
-    override suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long) = withTimeout(timeoutMs) {
-        while (true) {
-            refresh()
-            val enabled = snapshots.value.filter { it.enabled && it.target.point == point }
-            val failed = enabled.firstOrNull { it.lifecycle == ChildExtensionLifecycle.FAILED || it.lifecycle == ChildExtensionLifecycle.BLOCKED }
-            check(failed == null) { "Enabled child ${failed?.extensionId} cannot become active on $point: ${failed?.lastError}" }
-            if (enabled.all { it.lifecycle == ChildExtensionLifecycle.ACTIVE }) return@withTimeout
-            delay(100L)
-        }
+    override suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long) {
+        request(
+            "await_enabled_point_ready",
+            JSONObject().put("point", point).put("timeout_ms", timeoutMs)
+        )
+        refresh()
     }
 
-    override suspend fun awaitBusinessChildrenReady(timeoutMs: Long): JSONObject = withTimeout(timeoutMs) {
-        while (true) {
-            refresh()
-            val enabled = snapshots.value.filter { it.enabled }
-            val failed = enabled.firstOrNull { it.lifecycle == ChildExtensionLifecycle.FAILED || it.lifecycle == ChildExtensionLifecycle.BLOCKED }
-            check(failed == null) { "Enabled child ${failed?.extensionId} cannot become active: ${failed?.lastError}" }
-            if (enabled.all { it.lifecycle == ChildExtensionLifecycle.ACTIVE }) return@withTimeout JSONObject(runtime.toString())
-            delay(100L)
-        }
-        error("unreachable")
+    override suspend fun awaitBusinessChildrenReady(timeoutMs: Long): JSONObject {
+        val ready = request(
+            "await_business_children_ready",
+            JSONObject().put("timeout_ms", timeoutMs)
+        )
+        refresh()
+        return ready
     }
 
     override suspend fun invokePresentationCommand(extensionId: String, command: String, parameters: JSONObject): JSONObject =

@@ -183,6 +183,15 @@ object PluginRuntimeMain {
                                 }
                             )
                             "start_children" -> runBlocking { worker.startChildren() }
+                            "await_enabled_point_ready" -> runBlocking {
+                                worker.awaitEnabledPointReady(
+                                    payload.getString("point"),
+                                    payload.getLong("timeout_ms")
+                                )
+                            }
+                            "await_business_children_ready" -> runBlocking {
+                                worker.awaitBusinessChildrenReady(payload.getLong("timeout_ms"))
+                            }
                             "stop_children" -> runBlocking { worker.stopChildren() }
                             "child_snapshot" -> worker.childSnapshot()
                             "child_control" -> runBlocking {

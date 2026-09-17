@@ -131,6 +131,22 @@ internal class PluginWorkerRuntime(
         return JSONObject().put("started", true)
     }
 
+    suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long): JSONObject {
+        require(point.isNotBlank()) { "Child extension point is blank" }
+        require(timeoutMs in 1..PluginRuntimeWire.BUSINESS_TIMEOUT_MS.toLong()) {
+            "Invalid child readiness timeout: $timeoutMs"
+        }
+        childRuntime.awaitEnabledPointReady(point, timeoutMs)
+        return JSONObject().put("ready", true).put("point", point)
+    }
+
+    suspend fun awaitBusinessChildrenReady(timeoutMs: Long): JSONObject {
+        require(timeoutMs in 1..PluginRuntimeWire.BUSINESS_TIMEOUT_MS.toLong()) {
+            "Invalid child readiness timeout: $timeoutMs"
+        }
+        return childRuntime.awaitBusinessChildrenReady(timeoutMs)
+    }
+
     suspend fun stopChildren(): JSONObject {
         if (childStarted) {
             childRuntime.stop()
