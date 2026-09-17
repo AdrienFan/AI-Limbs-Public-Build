@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreContextBootstrap
+import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreSecurityBootstrap
 import com.ai.assistance.operit.core.tools.system.resident.ResidentLocalServerSocket
 import com.ai.assistance.operit.core.tools.system.resident.ResidentProcessLiveness
 import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
@@ -38,6 +39,7 @@ object PluginRuntimeMain {
     ) {
         val contextState = ResidentCoreContextBootstrap.create(packageName)
         val context = contextState.context
+        val security = ResidentCoreSecurityBootstrap.initialize(context)
         require(ownerCorePid > 0 && ownerCorePid != Process.myPid()) { "Invalid owner Core PID" }
         require(ownerCoreSession.length in 1..64) { "Invalid owner Core session" }
         check(directory.canonicalFile == File(context.filesDir, "ai_limbs/plugin_runtime").canonicalFile) {
@@ -86,6 +88,7 @@ object PluginRuntimeMain {
                     .put("owner_core_session", ownerCoreSession)
                     .put("package_name", packageName)
                     .put("resource_package", contextState.resourcePackage)
+                    .put("security", security)
                     .put("elapsed_ms", elapsed)
                     .put("uptime_ms", uptime)
                     .put("suspend_ms", (elapsed - uptime).coerceAtLeast(0L))
