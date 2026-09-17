@@ -5,6 +5,7 @@ import android.net.LocalSocketAddress
 import android.os.Process
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
 
@@ -20,7 +21,8 @@ internal object ResidentCoreDispatchWire {
     const val TIMEOUT_MS = 180_000
     private const val MAX_FRAME_BYTES = 8 * 1024 * 1024
 
-    fun socketName(): String = "ai_limbs_core_dispatch_" + Process.myUid()
+    fun legacySocketName(): String = "ai_limbs_core_dispatch_" + Process.myUid()
+    fun socketName(coreSessionId: String): String = legacySocketName() + "_" + coreSessionId
 
     fun read(socket: LocalSocket): JSONObject {
         val input = DataInputStream(socket.inputStream)
@@ -45,13 +47,22 @@ internal object ResidentCoreDispatchWire {
 
     /** Client-side request. Unlike ResidentCoreWire, structured dispatch failures are returned. */
     fun request(coreSessionId: String, expectedCorePid: Int, operation: String, payload: JSONObject = JSONObject()): JSONObject {
+        var lastError: IOException? = null
+        for (name in listOf(socketName(coreSessionId), legacySocketName()).distinct()) {
+            try { return requestAt(name, coreSessionId, expectedCorePid, operation, payload) }
+            catch (error: IOException) { lastError = error }
+        }
+        throw checkNotNull(lastError) { "No Resident Dispatcher endpoint was attempted" }
+    }
+
+    private fun requestAt(name: String, coreSessionId: String, expectedCorePid: Int, operation: String, payload: JSONObject = JSONObject()): JSONObject {
         require(coreSessionId.length in 1..64) { "Invalid Resident Core session id" }
         require(expectedCorePid > 0 && expectedCorePid != Process.myPid()) { "Invalid expected Resident Core PID" }
         require(operation.length in 1..64) { "Invalid Resident Dispatcher operation" }
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
             // Android 16 requires the socket to be created/connected before SO_TIMEOUT is applied.
-            socket.connect(LocalSocketAddress(socketName(), LocalSocketAddress.Namespace.ABSTRACT))
+            socket.connect(LocalSocketAddress(name, LocalSocketAddress.Namespace.ABSTRACT))
             socket.soTimeout = TIMEOUT_MS
             val peer = socket.peerCredentials
             check(peer.uid == Process.myUid()) { "Resident Dispatcher peer UID mismatch" }

@@ -1,11 +1,11 @@
 package com.ai.assistance.operit.plugins.center.isolation
 
-import android.net.LocalServerSocket
 import android.os.Process
 import android.os.SystemClock
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreContextBootstrap
+import com.ai.assistance.operit.core.tools.system.resident.ResidentLocalServerSocket
 import com.ai.assistance.operit.core.tools.system.resident.ResidentProcessLiveness
 import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
 import java.io.File
@@ -66,7 +66,7 @@ object PluginRuntimeMain {
 
             val startedElapsed = SystemClock.elapsedRealtime()
             val startedUptime = SystemClock.uptimeMillis()
-            val server = LocalServerSocket(PluginRuntimeWire.socketName())
+            val server = ResidentLocalServerSocket.bind(PluginRuntimeWire.socketName(sessionId))
             val shutdownHook = Thread { runCatching { server.close() } }
             Runtime.getRuntime().addShutdownHook(shutdownHook)
 

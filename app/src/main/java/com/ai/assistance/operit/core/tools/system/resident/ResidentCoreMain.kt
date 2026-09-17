@@ -1,11 +1,11 @@
 package com.ai.assistance.operit.core.tools.system.resident
 
-import android.net.LocalServerSocket
 import android.os.Looper
 import android.os.Process
 import android.os.SystemClock
 import com.ai.assistance.operit.BuildConfig
 import java.io.File
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.system.exitProcess
@@ -54,8 +54,22 @@ object ResidentCoreMain {
             val continuousResources = ResidentCoreContinuousResources(context, sessionId)
             val startedElapsed = SystemClock.elapsedRealtime()
             val startedUptime = SystemClock.uptimeMillis()
-            val server = LocalServerSocket(ResidentCoreWire.socketName())
-            val shutdownHook = Thread { runCatching { server.close() } }
+            val primarySocketName = ResidentCoreWire.socketName()
+            val fallbackSocketName = ResidentCoreEndpoint.fallbackName(launchId)
+            val binding = try {
+                primarySocketName to ResidentLocalServerSocket.bind(primarySocketName)
+            } catch (error: IOException) {
+                System.err.println("Resident Core primary socket unavailable; using launch endpoint: $error")
+                fallbackSocketName to ResidentLocalServerSocket.bind(fallbackSocketName)
+            }
+            val activeSocketName = binding.first
+            val server = binding.second
+            try { ResidentCoreEndpoint.publish(directory, activeSocketName) }
+            catch (error: Throwable) { runCatching { server.close() }; throw error }
+            val shutdownHook = Thread {
+                runCatching { server.close() }
+                ResidentCoreEndpoint.clearIfOwned(directory, activeSocketName)
+            }
             val activationThread = AtomicReference<Thread?>(null)
             Runtime.getRuntime().addShutdownHook(shutdownHook)
 
@@ -85,6 +99,7 @@ object ResidentCoreMain {
                     .put("uid", Process.myUid())
                     .put("session_id", sessionId)
                     .put("launch_id", launchId)
+                    .put("control_socket", activeSocketName)
                     .put("package_name", packageName)
                     .put("context_ready", true)
                     .put("resource_package", contextState.resourcePackage)
@@ -336,6 +351,7 @@ object ResidentCoreMain {
                         error.printStackTrace(System.err)
                     } finally {
                         runCatching { server.close() }
+                        ResidentCoreEndpoint.clearIfOwned(directory, activeSocketName)
                         runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
                     }
                     exitProcess(exitCode)

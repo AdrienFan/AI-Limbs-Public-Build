@@ -32,7 +32,7 @@ internal object ResidentCoreController {
                 .put("continuous_work", false)
         }
         try {
-            ResidentCoreWire.request("status").also { state ->
+            requestCore(context, "status").also { state ->
                 val buildCodeMatches = state.getInt("build_code") == BuildConfig.VERSION_CODE
                 val sourceApkMatches =
                     state.optString("source_apk", "") == context.applicationInfo.sourceDir
@@ -87,6 +87,7 @@ internal object ResidentCoreController {
         }
         val directory = directory(context)
         check(directory.mkdirs() || directory.isDirectory)
+        ResidentCoreEndpoint.clear(directory)
         val launchId = UUID.randomUUID().toString()
         val requestFile = File(directory, "launch.request")
         requestFile.writeText(launchId)
@@ -147,7 +148,7 @@ internal object ResidentCoreController {
         }
         val pid = state.getInt("pid")
         // Do not require a matching build to stop: an app update may leave an older Core alive.
-        ResidentCoreWire.request("stop", state.getString("session_id"))
+        requestCore(context, "stop", state.getString("session_id"))
         repeat(40) {
             delay(100L)
             if (leaseIsFree(context) && !ResidentProcessLiveness.exists(pid)) {
@@ -192,24 +193,24 @@ internal object ResidentCoreController {
             while (state.getJSONObject("backend").getString("state") == "connecting" &&
                 SystemClock.elapsedRealtime() < deadline) {
                 delay(100L)
-                state = ResidentCoreWire.request("status", session)
+                state = requestCore(context, "status", session)
             }
             val backend = state.getJSONObject("backend")
             check(backend.getString("state") == "ready" || backend.getString("state") == "prepared") {
                 "Core permission backend is not ready for handoff: $backend"
             }
-            var prepared = ResidentCoreWire.request("prepare_handoff", session)
+            var prepared = requestCore(context, "prepare_handoff", session)
             val prepareDeadline = SystemClock.elapsedRealtime() + 6_000L
             while (prepared.getJSONObject("backend").getString("state") == "preparing" &&
                 SystemClock.elapsedRealtime() < prepareDeadline) {
                 delay(100L)
-                prepared = ResidentCoreWire.request("status", session)
+                prepared = requestCore(context, "status", session)
             }
             ResidentPermissionHandoff.fromPreparedCore(prepared)
         }
 
-    suspend fun armBusinessTakeover(coreSession: String): JSONObject = withContext(Dispatchers.IO) {
-        val armed = ResidentCoreWire.request("activate_business", coreSession)
+    suspend fun armBusinessTakeover(context: Context, coreSession: String): JSONObject = withContext(Dispatchers.IO) {
+        val armed = requestCore(context, "activate_business", coreSession)
         check(armed.getString("business_phase") == "waiting_for_host_exit") {
             "Core did not arm Plugin Kernel takeover: $armed"
         }
@@ -226,7 +227,7 @@ internal object ResidentCoreController {
                     .put("phase", state.optString("phase", "stopped"))
             }
             val session = state.getString("session_id")
-            val quiesced = ResidentCoreWire.request("quiesce_business", session)
+            val quiesced = requestCore(context, "quiesce_business", session)
             val dispatcher = quiesced.getJSONObject("dispatcher")
             val businessPhase = quiesced.getString("business_phase")
             JSONObject()
@@ -237,8 +238,8 @@ internal object ResidentCoreController {
                 .put("core_session", session)
         }
 
-    suspend fun cancelBusinessTakeover(coreSession: String): JSONObject = withContext(Dispatchers.IO) {
-        ResidentCoreWire.request("cancel_business_activation", coreSession)
+    suspend fun cancelBusinessTakeover(context: Context, coreSession: String): JSONObject = withContext(Dispatchers.IO) {
+        requestCore(context, "cancel_business_activation", coreSession)
     }
 
     private fun requireRuntimeSkeletonRunning(state: JSONObject) {
@@ -330,6 +331,9 @@ internal object ResidentCoreController {
             "Core must not claim continuous work before real-device power/freezer validation"
         }
     }
+
+    internal fun requestCore(context: Context, operation: String, sessionId: String? = null): JSONObject =
+        ResidentCoreWire.request(operation, sessionId, ResidentCoreEndpoint.candidates(directory(context)))
 
     internal fun bootstrapLeaseIsFree(context: Context): Boolean =
         leaseIsFree(context)

@@ -44,7 +44,7 @@ internal object ResidentPluginKernelHandoff {
                 policyState = policyState
             )
             policyStaged = true
-            val armed = ResidentCoreController.armBusinessTakeover(coreSession)
+            val armed = ResidentCoreController.armBusinessTakeover(app, coreSession)
             takeoverArmed = true
             check(armed.getString("business_phase") == "waiting_for_host_exit") {
                 "Resident Core did not arm business takeover"
@@ -66,7 +66,7 @@ internal object ResidentPluginKernelHandoff {
                 runCatching { ResidentPolicyStateHandoff.clearByHost(app, coreSession, hostPid) }
             }
             if (takeoverArmed) {
-                runCatching { ResidentCoreController.cancelBusinessTakeover(coreSession) }
+                runCatching { ResidentCoreController.cancelBusinessTakeover(app, coreSession) }
             }
             if (policyFrozen) {
                 runCatching { AiLimbsInteractionCycleRuntime.cancelResidentHandoffFreeze(app) }

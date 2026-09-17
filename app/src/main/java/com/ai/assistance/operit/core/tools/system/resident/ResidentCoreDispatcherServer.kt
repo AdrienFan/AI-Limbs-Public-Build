@@ -39,7 +39,7 @@ internal class ResidentCoreDispatcherServer(
         }
 
         val createdRuntime = ResidentCoreDispatcherRuntime(appContext, coreSessionId)
-        val server = LocalServerSocket(ResidentCoreDispatchWire.socketName())
+        val server = ResidentLocalServerSocket.bind(ResidentCoreDispatchWire.socketName(coreSessionId))
         val pool = Executors.newFixedThreadPool(MAX_CONCURRENT_DISPATCH) { task ->
             Thread(task, "resident-dispatch-worker").apply { isDaemon = true }
         }

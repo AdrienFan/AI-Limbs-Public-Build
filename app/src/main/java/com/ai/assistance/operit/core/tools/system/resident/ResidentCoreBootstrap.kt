@@ -81,7 +81,7 @@ internal object ResidentCoreBootstrap {
         require(launch.length in 1..64 && session.length in 1..64)
         try {
             requireLaunch(context, launch)
-            val core = ResidentCoreWire.request("status", session)
+            val core = ResidentCoreController.requestCore(context, "status", session)
             val corePid = core.getInt("pid")
             check(corePid != Process.myPid() && core.getString("launch_id") == launch) { "Bootstrap Core identity mismatch" }
             val used = AtomicBoolean(false)

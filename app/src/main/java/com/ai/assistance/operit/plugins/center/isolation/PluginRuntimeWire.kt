@@ -5,6 +5,7 @@ import android.net.LocalSocketAddress
 import android.os.Process
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
 
@@ -21,7 +22,8 @@ internal object PluginRuntimeWire {
     const val BUSINESS_TIMEOUT_MS = 180_000
     private const val MAX_FRAME_BYTES = 1024 * 1024
 
-    fun socketName(): String = "ai_limbs_plugin_runtime_" + Process.myUid()
+    fun legacySocketName(): String = "ai_limbs_plugin_runtime_" + Process.myUid()
+    fun socketName(sessionId: String): String = legacySocketName() + "_" + sessionId
 
     fun read(socket: LocalSocket): JSONObject {
         val input = DataInputStream(socket.inputStream)
@@ -47,9 +49,20 @@ internal object PluginRuntimeWire {
     }
 
     fun request(operation: String, sessionId: String? = null, payload: JSONObject = JSONObject(), timeoutMs: Int = TIMEOUT_MS): JSONObject {
+        val names = if (sessionId == null) listOf(legacySocketName())
+            else listOf(socketName(sessionId), legacySocketName()).distinct()
+        var lastError: IOException? = null
+        for (name in names) {
+            try { return requestAt(name, operation, sessionId, payload, timeoutMs) }
+            catch (error: IOException) { lastError = error }
+        }
+        throw checkNotNull(lastError) { "No plugin runtime endpoint was attempted" }
+    }
+
+    private fun requestAt(name: String, operation: String, sessionId: String? = null, payload: JSONObject = JSONObject(), timeoutMs: Int = TIMEOUT_MS): JSONObject {
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
-            socket.connect(LocalSocketAddress(socketName(), LocalSocketAddress.Namespace.ABSTRACT))
+            socket.connect(LocalSocketAddress(name, LocalSocketAddress.Namespace.ABSTRACT))
             // Android 16: set soTimeout only after connect. Keep this ordering aligned with ResidentCoreWire.
             socket.soTimeout = timeoutMs
             val peer = socket.peerCredentials

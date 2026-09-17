@@ -25,8 +25,16 @@ internal object PluginRuntimeController {
         if (leaseIsFree(context)) {
             return@withContext stoppedSnapshot()
         }
+        val identityHint = readCurrentIdentity(context)
+        if (identityHint == null) {
+            return@withContext JSONObject()
+                .put("available", false).put("consistent", false).put("process_alive", true)
+                .put("identity_attested", false).put("owner_matches", false)
+                .put("phase", "unresponsive_or_starting")
+        }
+        val sessionHint = identityHint.optString("session_id").takeIf { it.isNotBlank() }
         try {
-            PluginRuntimeWire.request("status").also { state ->
+            PluginRuntimeWire.request("status", sessionHint).also { state ->
                 val buildCodeMatches = state.getInt("build_code") == BuildConfig.VERSION_CODE
                 val sourceApkMatches = state.optString("source_apk", "") == context.applicationInfo.sourceDir
                 val fence = runCatching { ResidentBusinessTakeoverFence.snapshot(context) }.getOrNull()

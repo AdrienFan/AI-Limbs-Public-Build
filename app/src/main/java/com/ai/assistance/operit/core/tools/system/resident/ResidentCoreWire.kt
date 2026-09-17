@@ -5,6 +5,7 @@ import android.net.LocalSocketAddress
 import android.os.Process
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
 
@@ -39,10 +40,19 @@ internal object ResidentCoreWire {
         }
     }
 
-    fun request(operation: String, sessionId: String? = null): JSONObject {
+    fun request(operation: String, sessionId: String? = null, socketNames: List<String> = listOf(socketName())): JSONObject {
+        var lastError: IOException? = null
+        for (name in socketNames.distinct()) {
+            try { return requestAt(name, operation, sessionId) }
+            catch (error: IOException) { lastError = error }
+        }
+        throw checkNotNull(lastError) { "No Core socket endpoint was attempted" }
+    }
+
+    private fun requestAt(name: String, operation: String, sessionId: String? = null): JSONObject {
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
-            socket.connect(LocalSocketAddress(socketName(), LocalSocketAddress.Namespace.ABSTRACT))
+            socket.connect(LocalSocketAddress(name, LocalSocketAddress.Namespace.ABSTRACT))
             socket.soTimeout = TIMEOUT_MS
             val peer = socket.peerCredentials
             check(peer.uid == Process.myUid()) { "Core peer UID mismatch" }

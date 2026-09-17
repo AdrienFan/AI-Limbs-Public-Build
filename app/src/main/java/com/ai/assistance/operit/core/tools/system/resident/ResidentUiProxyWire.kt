@@ -8,6 +8,7 @@ import android.os.Process
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import java.io.DataInputStream
 import java.io.DataOutputStream
+import java.io.IOException
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.CountDownLatch
@@ -33,7 +34,8 @@ internal object ResidentUiProxyWire {
     const val TIMEOUT_MS = 5_000
     const val MAX_FRAME_BYTES = 4 * 1024 * 1024
 
-    fun socketName(): String = "ai_limbs_ui_proxy_" + Process.myUid()
+    fun legacySocketName(): String = "ai_limbs_ui_proxy_" + Process.myUid()
+    fun socketName(sessionId: String): String = legacySocketName() + "_" + sessionId
 
     fun read(socket: LocalSocket): JSONObject {
         val input = DataInputStream(socket.inputStream)
@@ -61,11 +63,27 @@ internal object ResidentUiProxyWire {
         hostGeneration: Long,
         payload: JSONObject = JSONObject()
     ): JSONObject {
+        var lastError: IOException? = null
+        for (name in listOf(socketName(sessionId), legacySocketName()).distinct()) {
+            try { return requestAt(name, operation, sessionId, hostInstanceId, hostGeneration, payload) }
+            catch (error: IOException) { lastError = error }
+        }
+        throw checkNotNull(lastError) { "No Resident UI proxy endpoint was attempted" }
+    }
+
+    private fun requestAt(
+        name: String,
+        operation: String,
+        sessionId: String,
+        hostInstanceId: String,
+        hostGeneration: Long,
+        payload: JSONObject = JSONObject()
+    ): JSONObject {
         require(hostInstanceId.length in 1..64) { "Invalid UI proxy Host instance ID" }
         val requestId = UUID.randomUUID().toString()
         LocalSocket().use { socket ->
             // Android 16 real-device invariant: connect before assigning soTimeout.
-            socket.connect(LocalSocketAddress(socketName(), LocalSocketAddress.Namespace.ABSTRACT))
+            socket.connect(LocalSocketAddress(name, LocalSocketAddress.Namespace.ABSTRACT))
             socket.soTimeout = TIMEOUT_MS
             val peer = socket.peerCredentials
             check(peer.uid == Process.myUid()) { "UI proxy peer UID mismatch" }
@@ -260,7 +278,7 @@ internal class ResidentUiProxyServer(
 
     fun start() {
         if (!running.compareAndSet(false, true)) return
-        val socket = LocalServerSocket(ResidentUiProxyWire.socketName())
+        val socket = ResidentLocalServerSocket.bind(ResidentUiProxyWire.socketName(sessionId))
         ResidentHostComponentProxy.bind(componentBroker)
         server = socket
         thread = Thread({ serve(socket) }, "resident-ui-proxy").apply {
