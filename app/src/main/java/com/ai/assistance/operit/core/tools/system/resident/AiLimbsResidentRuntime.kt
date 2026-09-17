@@ -157,22 +157,20 @@ internal object AiLimbsResidentRuntime {
         if (fence.optString("state") != "owned") return@withLock status()
 
         val crashedPid = fence.optInt("core_pid", -1)
-        if (crashedPid <= 0 || ResidentProcessLiveness.exists(crashedPid)) return@withLock status()
+        if (crashedPid <= 0) return@withLock status()
 
         val core = ResidentCoreController.status(app)
-        if (core.optBoolean("available", false) || core.optBoolean("process_alive", false)) {
-            return@withLock status()
-        }
-        check(ResidentCoreController.bootstrapLeaseIsFree(app)) {
-            "Crashed Resident Core PID is gone but bootstrap lease is still held"
-        }
-        check(pluginKernelLeaseIsFree()) {
-            "Crashed Resident Core PID is gone but plugin_kernel lease is still held"
-        }
+        if (core.optBoolean("available", false)) return@withLock status()
 
+        // An owned fence plus unreachable Core is recoverable even when the Core process is wedged
+        // and still holds bootstrap.lock. stopLocked() owns the verified force-stop path. Do not use
+        // the recorded PID as the ownership fact: Android can recycle a stale PID after Core exit.
         AppLogger.w(
             TAG,
-            "Resident Core pid=$crashedPid died unexpectedly; recycling owner state while preserving desired ON"
+            "Resident Core pid=$crashedPid is unreachable " +
+                "phase=${core.optString("phase", "unknown")} " +
+                "processAlive=${core.optBoolean("process_alive", false)}; " +
+                "recycling owner state while preserving desired ON"
         )
         val result = stopLocked()
             .put("auto_core_recovery", true)
@@ -408,21 +406,44 @@ internal object AiLimbsResidentRuntime {
         } catch (error: Exception) {
             AppLogger.w(TAG, "Resident Core graceful stop was not confirmed; forcing Core process exit", error)
             degraded += "Core graceful stop failed: ${error.message ?: error.javaClass.simpleName}"
-            val pid = coreBefore.optInt("pid", -1)
-            if (coreWasAvailable && pid > 0 && pid != Process.myPid()) {
-                runCatching { Process.killProcess(pid) }
-                val deadline = android.os.SystemClock.elapsedRealtime() + CORE_FORCE_STOP_TIMEOUT_MS
-                while (
-                    (ResidentProcessLiveness.exists(pid) || !ResidentCoreController.bootstrapLeaseIsFree(app)) &&
-                    android.os.SystemClock.elapsedRealtime() < deadline
+            val coreLeaseHeld = !ResidentCoreController.bootstrapLeaseIsFree(app)
+            val pid =
+                coreBefore.optInt("pid", -1).takeIf { it > 0 }
+                    ?: fenceBefore?.optInt("core_pid", -1)?.takeIf { it > 0 }
+            if (coreLeaseHeld) {
+                if (
+                    pid != null &&
+                    pid != Process.myPid() &&
+                    ResidentProcessLiveness.matchesResidentCore(pid, Process.myUid())
                 ) {
-                    delay(50L)
+                    val killError =
+                        runCatching { Process.killProcess(pid) }.exceptionOrNull()
+                    if (killError != null) {
+                        failures +=
+                            "Verified Core process kill failed: " +
+                                (killError.message ?: killError.javaClass.simpleName)
+                    } else {
+                        val deadline =
+                            android.os.SystemClock.elapsedRealtime() + CORE_FORCE_STOP_TIMEOUT_MS
+                        while (
+                            !ResidentCoreController.bootstrapLeaseIsFree(app) &&
+                            android.os.SystemClock.elapsedRealtime() < deadline
+                        ) {
+                            delay(50L)
+                        }
+                        forcedCoreStop = ResidentCoreController.bootstrapLeaseIsFree(app)
+                        if (forcedCoreStop) {
+                            degraded += "Core process required verified forced termination"
+                        } else {
+                            failures += "Core bootstrap lease remained after forced OFF"
+                        }
+                    }
+                } else {
+                    failures +=
+                        "Core bootstrap lease is held but no verified Resident Core PID is available for forced OFF"
                 }
-                forcedCoreStop = !ResidentProcessLiveness.exists(pid) && ResidentCoreController.bootstrapLeaseIsFree(app)
-                if (forcedCoreStop) degraded += "Core process required forced termination"
-                else failures += "Core process/lease remained after forced OFF"
-            } else if (coreWasAvailable) {
-                failures += "Core graceful stop failed and no safe Core PID was available for forced OFF"
+            } else {
+                degraded += "Core owner lease was already released before forced OFF"
             }
         }
 

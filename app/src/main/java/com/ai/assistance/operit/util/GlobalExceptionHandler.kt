@@ -8,8 +8,9 @@ import kotlin.system.exitProcess
 class GlobalExceptionHandler(private val context: Context) : Thread.UncaughtExceptionHandler {
 
     override fun uncaughtException(thread: Thread, ex: Throwable) {
-        CrashRecoveryState.markPendingCrashReportLaunch(context)
         val stackTrace = ThrowableTextFormatter.format(ex)
+        CrashRecoveryState.persistLastCrash(context, stackTrace)
+        CrashRecoveryState.markPendingCrashReportLaunch(context)
 
         val intent =
                 Intent(context, CrashReportActivity::class.java).apply {

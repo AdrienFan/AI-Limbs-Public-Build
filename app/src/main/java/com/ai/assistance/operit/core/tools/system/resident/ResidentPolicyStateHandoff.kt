@@ -82,9 +82,9 @@ internal object ResidentPolicyStateHandoff {
         val target = file(context)
         if (!target.isFile) return
         val envelope = readBounded(target)
-        val corePid = envelope.optInt("core_pid", -1)
-        check(corePid > 0 && !ResidentProcessLiveness.exists(corePid)) {
-            "Refusing to clear policy handoff while recorded Core PID is still alive"
+        check(envelope.optInt("core_pid", -1) > 0) { "Resident policy handoff has no Core PID" }
+        check(ResidentCoreController.bootstrapLeaseIsFree(context)) {
+            "Refusing to clear policy handoff while Resident Core bootstrap lease is still held"
         }
         check(target.delete()) { "Could not clear stale Resident policy handoff state" }
     }

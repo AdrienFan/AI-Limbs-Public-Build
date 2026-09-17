@@ -60,9 +60,12 @@ class CrashReportActivity : ComponentActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        CrashRecoveryState.consumePendingCrashReportLaunch(this)
+        // Do not consume the preservation flag in the isolated :crash process. The next main
+        // process startup owns that acknowledgement so operit.log survives the recovery restart.
         val stackTrace = ThrowableTextFormatter.truncateText(
-            intent.getStringExtra(EXTRA_STACK_TRACE) ?: "No stack trace available.",
+            intent.getStringExtra(EXTRA_STACK_TRACE)
+                ?: CrashRecoveryState.readLastCrash(this)
+                ?: "No stack trace available.",
             MAX_CRASH_REPORT_CHARS
         )
 

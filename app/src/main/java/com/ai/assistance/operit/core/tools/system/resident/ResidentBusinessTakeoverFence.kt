@@ -83,9 +83,9 @@ internal object ResidentBusinessTakeoverFence {
         val target = file(context)
         if (!target.isFile) return
         val current = readBounded(target)
-        val corePid = current.optInt("core_pid", -1)
-        check(corePid > 0 && !ResidentProcessLiveness.exists(corePid)) {
-            "Refusing to clear takeover fence while recorded Core PID is still alive"
+        check(current.optInt("core_pid", -1) > 0) { "Resident takeover fence has no Core PID" }
+        check(ResidentCoreController.bootstrapLeaseIsFree(context)) {
+            "Refusing to clear takeover fence while Resident Core bootstrap lease is still held"
         }
         check(target.delete()) { "Could not clear stale Resident takeover fence" }
     }
