@@ -40,7 +40,7 @@ internal object ResidentProcessLiveness {
                 lines.firstOrNull { it.startsWith("Uid:") }
                     ?.substringAfter("Uid:")
                     ?.trim()
-                    ?.split(Regex("\s+"))
+                    ?.split(Regex("\\s+"))
                     ?.firstOrNull()
                     ?.toIntOrNull()
             }
