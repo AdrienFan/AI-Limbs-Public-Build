@@ -46,7 +46,7 @@ class LocalTerminalProvider(
         val writer: java.io.BufferedWriter,
         val outputChannel: Channel<String>,
         val readJob: kotlinx.coroutines.Job,
-        val shellProcessGroupId: Long,
+        val shellProcessGroupId: AtomicLong = AtomicLong(-1L),
         val mutex: Mutex = Mutex(),
         val activeProcessGroupId: AtomicLong = AtomicLong(-1L)
     )
@@ -68,6 +68,7 @@ class LocalTerminalProvider(
         private const val BEGIN_MARKER_PREFIX = "__OPERIT_HIDDEN_BEGIN__:"
         private const val END_MARKER_PREFIX = "__OPERIT_HIDDEN_END__:"
         private const val PID_MARKER_PREFIX = "__OPERIT_HIDDEN_PID__:"
+        private const val SHELL_PID_MARKER_PREFIX = "__OPERIT_HIDDEN_SHELL_PID__:"
         private const val HIDDEN_EXEC_CANCEL_SETTLE_TIMEOUT_MS = 3_000L
         private const val NO_ACTIVE_PROCESS_GROUP = -1L
     }
@@ -257,13 +258,12 @@ class LocalTerminalProvider(
                 process = process,
                 writer = process.outputStream.bufferedWriter(Charsets.UTF_8),
                 outputChannel = outputChannel,
-                readJob = readJob,
-                shellProcessGroupId = process.pid()
+                readJob = readJob
             )
 
         val readyResult = awaitHiddenExecReady(shell)
         if (!readyResult.isOk) {
-            closeHiddenExecShell(executorKey)
+            disposeHiddenExecShell(shell, executorKey)
             throw IllegalStateException(
                 readyResult.error.ifBlank { "Hidden exec shell did not become ready" }
             )
@@ -284,6 +284,9 @@ class LocalTerminalProvider(
                                 ?: break
                         logHiddenExecChunk(shell.key, "ready", chunk)
                         builder.append(chunk)
+                        extractHiddenShellProcessGroupId(builder.toString())?.let { processGroupId ->
+                            shell.shellProcessGroupId.compareAndSet(NO_ACTIVE_PROCESS_GROUP, processGroupId)
+                        }
                         if (builder.indexOf(READY_MARKER) >= 0) {
                             break
                         }
@@ -291,7 +294,7 @@ class LocalTerminalProvider(
                     builder.toString()
                 }
 
-            if (rawOutput.contains(READY_MARKER)) {
+            if (rawOutput.contains(READY_MARKER) && shell.shellProcessGroupId.get() > 0L) {
                 HiddenExecResult(output = "", exitCode = 0)
             } else if (!shell.process.isAlive) {
                 HiddenExecResult(
@@ -491,6 +494,20 @@ class LocalTerminalProvider(
         return pidText?.toLongOrNull()
     }
 
+    private fun extractHiddenShellProcessGroupId(rawOutput: String): Long? {
+        val markerIndex = rawOutput.indexOf(SHELL_PID_MARKER_PREFIX)
+        if (markerIndex < 0) {
+            return null
+        }
+        val pidText =
+            rawOutput
+                .substring(markerIndex + SHELL_PID_MARKER_PREFIX.length)
+                .lineSequence()
+                .map { it.trim() }
+                .firstOrNull { it.isNotEmpty() }
+        return pidText?.toLongOrNull()
+    }
+
     private fun extractHiddenExecOutput(rawOutput: String, token: String): String {
         val beginMarker = "$BEGIN_MARKER_PREFIX$token"
         val beginIndex = rawOutput.indexOf(beginMarker)
@@ -513,27 +530,33 @@ class LocalTerminalProvider(
 
     private suspend fun closeHiddenExecShell(executorKey: String) {
         hiddenExecShells.remove(executorKey)?.let { shell ->
-            withContext(Dispatchers.IO) {
-                val activeProcessGroupId =
-                    shell.activeProcessGroupId.getAndSet(NO_ACTIVE_PROCESS_GROUP)
-                if (activeProcessGroupId > 0L) {
-                    terminateHiddenExecProcessGroup(activeProcessGroupId)
-                }
-                runCatching { shell.writer.close() }
-                if (shell.shellProcessGroupId > 0L) {
-                    terminateHiddenExecProcessGroup(shell.shellProcessGroupId)
-                }
-                runCatching {
-                    if (!shell.process.waitFor(500L, TimeUnit.MILLISECONDS) && shell.process.isAlive) {
-                        shell.process.destroyForcibly()
-                        shell.process.waitFor(500L, TimeUnit.MILLISECONDS)
-                    }
-                }
-                runCatching { shell.readJob.cancel() }
-                runCatching { shell.outputChannel.close() }
-            }
-            Log.d(TAG, "Closed hidden exec shell: $executorKey pgid=${shell.shellProcessGroupId}")
+            disposeHiddenExecShell(shell, executorKey)
         }
+    }
+
+    private suspend fun disposeHiddenExecShell(shell: HiddenExecShell, executorKey: String) {
+        withContext(Dispatchers.IO) {
+            val activeProcessGroupId =
+                shell.activeProcessGroupId.getAndSet(NO_ACTIVE_PROCESS_GROUP)
+            if (activeProcessGroupId > 0L) {
+                terminateHiddenExecProcessGroup(activeProcessGroupId)
+            }
+            runCatching { shell.writer.close() }
+            val shellProcessGroupId =
+                shell.shellProcessGroupId.getAndSet(NO_ACTIVE_PROCESS_GROUP)
+            if (shellProcessGroupId > 0L) {
+                terminateHiddenExecProcessGroup(shellProcessGroupId)
+            }
+            runCatching {
+                if (!shell.process.waitFor(500L, TimeUnit.MILLISECONDS) && shell.process.isAlive) {
+                    shell.process.destroyForcibly()
+                    shell.process.waitFor(500L, TimeUnit.MILLISECONDS)
+                }
+            }
+            runCatching { shell.readJob.cancel() }
+            runCatching { shell.outputChannel.close() }
+        }
+        Log.d(TAG, "Closed hidden exec shell: $executorKey")
     }
 
     private fun buildVisibleSessionCommand(showDevelopmentPrompt: Boolean): Array<String> {
@@ -545,7 +568,7 @@ class LocalTerminalProvider(
 
     private fun buildHiddenExecStartupCommand(): Array<String> {
         val bash = File(binDir, "bash").absolutePath
-        val startScript = "source \$HOME/common.sh && login_ubuntu '/bin/bash --noprofile --norc'"
+        val startScript = "printf '%s%s\\n' '$SHELL_PID_MARKER_PREFIX' \"\$\$\"; source \$HOME/common.sh && login_ubuntu '/bin/bash --noprofile --norc'"
         return arrayOf("/system/bin/setsid", bash, "-c", startScript)
     }
 
