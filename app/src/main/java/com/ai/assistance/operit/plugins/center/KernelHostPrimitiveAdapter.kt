@@ -35,7 +35,9 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         operation: String,
         parameters: JSONObject
     ): JSONObject {
-        require(PluginPlatformKernel.isInitialized) { "Plugin kernel is not initialized" }
+        if (runtimeRole != PluginRuntimeRole.UI_PROXY) {
+            require(PluginPlatformKernel.isInitialized) { "Plugin kernel is not initialized" }
+        }
         val id = primitiveId.trim().lowercase()
         val op = operation.trim().lowercase()
         if (!isAvailable(id, op)) {
@@ -43,6 +45,9 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 "HOST_PRIMITIVE_OPERATION_NOT_BOUND",
                 "Kernel operation is not bound: $id/$op"
             )
+        }
+        if (runtimeRole == PluginRuntimeRole.BUSINESS && id in HOST_OWNED_PRIMITIVES) {
+            return invokeHostOwnedPrimitive(ownerPluginId, id, op, parameters)
         }
         return when (id) {
             "host.network@1" -> invokeNetwork(op)
@@ -62,6 +67,37 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 "No Kernel adapter for $id/$op"
             )
         }
+    }
+
+    private fun invokeHostOwnedPrimitive(
+        ownerPluginId: String,
+        primitiveId: String,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject {
+        val response = try {
+            com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy.request(
+                com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_HOST_PRIMITIVE,
+                JSONObject()
+                    .put("owner_plugin_id", ownerPluginId)
+                    .put("primitive_id", primitiveId)
+                    .put("operation", operation)
+                    .put("parameters", JSONObject(parameters.toString()))
+            )
+        } catch (error: Throwable) {
+            throw PluginInstallException(
+                "HOST_UI_PROXY_UNAVAILABLE",
+                "Host-owned primitive could not reach the Android Host: $primitiveId/$operation",
+                error
+            )
+        }
+        if (!response.optBoolean("ok", false)) {
+            throw PluginInstallException(
+                "HOST_UI_PROXY_FAILED",
+                response.optString("error", "Host-owned primitive failed: $primitiveId/$operation")
+            )
+        }
+        return response.optJSONObject("result") ?: JSONObject()
     }
 
     private suspend fun invokeNetwork(operation: String): JSONObject = when (operation) {
@@ -595,6 +631,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
 
     private companion object {
+        private val HOST_OWNED_PRIMITIVES = setOf("host.ui.layout@1")
         val LISTENER_SNAPSHOT_LEVELS = listOf(
             AndroidPermissionLevel.DEBUGGER,
             AndroidPermissionLevel.ROOT,

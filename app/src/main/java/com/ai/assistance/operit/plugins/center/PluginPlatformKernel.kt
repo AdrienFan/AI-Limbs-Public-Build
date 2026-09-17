@@ -182,7 +182,8 @@ internal object PluginPlatformKernel {
         val systemUi = com.ai.assistance.operit.plugins.system.KernelSystemUiHostV1(
             ownerPluginId = ownerPluginId,
             admittedRole = admittedRole,
-            registry = systemUiRegistryInstance
+            registry = systemUiRegistryInstance,
+            runtimeRole = runtimeRole
         )
         val services = KernelSystemPluginServicePublisherV2(
             ownerPluginId = ownerPluginId,
@@ -938,7 +939,7 @@ internal object PluginPlatformKernel {
             if (restoreBusinessRuntime) {
                 childExtensionRuntimeInstance.start()
                 childRuntimeStarted = true
-                if (runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
+                if (runtimeRole == PluginRuntimeRole.LEGACY_HOST || runtimeRole == PluginRuntimeRole.BUSINESS) {
                     systemPluginControllerInstance.restore()
                 }
                 managerInstance.restoreEnabledPlugins()
@@ -1206,9 +1207,9 @@ internal object PluginPlatformKernel {
             if (businessRuntimeRestored || residentBridgePluginMounted || residentBridgeIngressPrepared) {
                 retire { managerInstance.shutdown(handoff) }
             }
-            if (businessRuntimeRestored && runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
-                // Plugin Center is a Host UI system plugin. BUSINESS never restored it, so Core
-                // retirement must not manufacture a UI-system-plugin lifecycle on the way out.
+            if (businessRuntimeRestored &&
+                (runtimeRole == PluginRuntimeRole.LEGACY_HOST || runtimeRole == PluginRuntimeRole.BUSINESS)) {
+                // BUSINESS owns system-plugin services; UI renderer objects remain Host-owned/no-op there.
                 retire { systemPluginControllerInstance.shutdown() }
             }
             retire { notificationHostInstance.clear() }

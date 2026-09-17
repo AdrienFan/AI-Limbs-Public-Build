@@ -12,6 +12,7 @@ import com.ai.assistance.operit.plugins.center.PluginContributionRegistry
 import com.ai.assistance.operit.plugins.center.PluginHostCapabilityRegistry
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginManager
+import com.ai.assistance.operit.plugins.center.PluginRuntimeRole
 import com.ai.assistance.operit.plugins.center.SystemPluginUiRegistry
 import com.ai.assistance.operit.plugins.center.ChildExtensionRuntimeOwner
 import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
@@ -386,27 +387,32 @@ internal class KernelPluginPlatformControlV1(
 internal class KernelSystemUiHostV1(
     private val ownerPluginId: String,
     private val admittedRole: String,
-    private val registry: SystemPluginUiRegistry
+    private val registry: SystemPluginUiRegistry,
+    private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 ) : SystemUiHostV2, SystemPageAccessoryHostV1, SystemPageSlotHostV1 {
     init { requirePluginCenterRole(admittedRole) }
 
     override fun registerToolboxEntry(entry: SystemToolboxEntryV1): AutoCloseable {
         requirePluginCenterRole(admittedRole)
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) return AutoCloseable { }
         return registry.registerToolboxEntry(ownerPluginId, entry)
     }
 
     override fun registerPluginSurfaceRenderer(renderer: SystemPluginUiRendererV2): AutoCloseable {
         requirePluginCenterRole(admittedRole)
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) return AutoCloseable { }
         return registry.registerPluginSurfaceRenderer(ownerPluginId, renderer)
     }
 
     override fun registerPageAccessoryRenderer(renderer: SystemPageAccessoryRendererV1): AutoCloseable {
         requirePluginCenterRole(admittedRole)
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) return AutoCloseable { }
         return registry.registerPageAccessoryRenderer(ownerPluginId, renderer)
     }
 
     override fun registerPageSlotRenderer(renderer: SystemPageSlotRendererV1): AutoCloseable {
         requirePluginCenterRole(admittedRole)
+        if (runtimeRole == PluginRuntimeRole.BUSINESS) return AutoCloseable { }
         return registry.registerPageSlotRenderer(ownerPluginId, renderer)
     }
 }

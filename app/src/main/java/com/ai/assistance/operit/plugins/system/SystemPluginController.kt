@@ -53,7 +53,6 @@ internal class SystemPluginController(
     }
 
     suspend fun restore() {
-        if (runtimeRole == PluginRuntimeRole.BUSINESS) return
         val version = readStateVersion() ?: return
         val packageFile = packageFile(version)
         if (!packageFile.isFile) return
@@ -232,9 +231,6 @@ internal class SystemPluginController(
     }
 
     private fun mountPackage(packageFile: File, originalName: String) {
-        check(runtimeRole != PluginRuntimeRole.BUSINESS) {
-            "BUSINESS runtime must not mount the UI-bearing Plugin Center"
-        }
         val validation = SystemPluginPackageValidator.validateForPluginCenterBootstrap(packageFile, originalName)
         val manifest = validation.manifest
         checkRuntimeSupported(manifest)
@@ -243,25 +239,29 @@ internal class SystemPluginController(
         val content = File(versionDir(manifest.version), "content")
         if (!content.isDirectory) extractValidatedPackage(packageFile, content)
         val apk = prepareRuntimeApk(content, manifest)
-        val optimized = File(appContext.codeCacheDir, "system_plugins/${manifest.pluginId}/${manifest.version}").apply { mkdirs() }
+        val optimized = File(
+            appContext.codeCacheDir,
+            "system_plugins/${manifest.pluginId}/${manifest.version}/${runtimeRole.name.lowercase()}"
+        ).apply { mkdirs() }
         val loader = DexClassLoader(apk.absolutePath, optimized.absolutePath, null, appContext.classLoader)
         val entry = loader.loadClass(entryClass).getDeclaredConstructor().newInstance() as? SystemPluginEntryV1
             ?: throw PluginInstallException("SYSTEM_ENTRY_TYPE_INVALID", "$entryClass does not implement SystemPluginEntryV1")
         val host = hostFactory(manifest.pluginId, manifest.role)
         val handle = entry.mount(host)
-        if (!uiRegistry.hasEntryForOwner(manifest.pluginId)) {
-            runCatching { handle.close() }
-            throw PluginInstallException("SYSTEM_UI_HEALTH_FAILED", "Plugin Center mounted without a Toolbox UI entry")
-        }
-        // Plugin Center now owns ordinary-plugin UI semantics.  Treat the renderer as a required
-        // health contract, not an optional feature, otherwise a partially mounted upgrade could
-        // leave every .ailp screen present in routing but impossible to render.
-        if (!uiRegistry.hasPluginSurfaceRendererForOwner(manifest.pluginId)) {
-            runCatching { handle.close() }
-            throw PluginInstallException(
-                "SYSTEM_UI_RENDERER_HEALTH_FAILED",
-                "Plugin Center mounted without the ordinary-plugin UI renderer"
-            )
+        if (runtimeRole != PluginRuntimeRole.BUSINESS) {
+            if (!uiRegistry.hasEntryForOwner(manifest.pluginId)) {
+                runCatching { handle.close() }
+                throw PluginInstallException("SYSTEM_UI_HEALTH_FAILED", "Plugin Center mounted without a Toolbox UI entry")
+            }
+            // UI renderers are Host-owned. BUSINESS mounts the same trusted package only so its
+            // service/control-plane contributions exist beside the authoritative Plugin Kernel.
+            if (!uiRegistry.hasPluginSurfaceRendererForOwner(manifest.pluginId)) {
+                runCatching { handle.close() }
+                throw PluginInstallException(
+                    "SYSTEM_UI_RENDERER_HEALTH_FAILED",
+                    "Plugin Center mounted without the ordinary-plugin UI renderer"
+                )
+            }
         }
         activeSession = ActiveSession(manifest, handle, loader)
         AppLogger.i(TAG, "Plugin Center mounted: ${manifest.pluginId}@${manifest.version}")

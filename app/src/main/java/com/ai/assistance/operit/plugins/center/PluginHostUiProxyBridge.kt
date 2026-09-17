@@ -656,8 +656,9 @@ private class ResidentHostComponentExecutor(
     private val windowLeases = ConcurrentHashMap<String, WeakReference<android.view.Window>>()
     private val permissionOverlay = PermissionRequestOverlay(appContext)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
+    private val hostPrimitiveAdapter = KernelHostPrimitiveAdapter(appContext, PluginRuntimeRole.UI_PROXY)
 
-    fun pollAndExecute() {
+    suspend fun pollAndExecute() {
         val result = client.componentRequest("component_poll", JSONObject().put("max_items", 8))
         result.optJSONArray("requests")?.objects().orEmpty().forEach { request ->
             val id = request.getString("request_id")
@@ -683,7 +684,7 @@ private class ResidentHostComponentExecutor(
     }
 
     /** null means an asynchronous ActivityResult was launched and will complete later. */
-    private fun execute(
+    private suspend fun execute(
         requestId: String,
         kind: String,
         payload: JSONObject,
@@ -746,6 +747,19 @@ private class ResidentHostComponentExecutor(
             launchPermissionRequest(requestId, payload)
         ResidentComponentProxyBroker.KIND_ACTIVITY_RESULT ->
             launchActivityResult(requestId, payload, deadlineElapsedMs)
+        ResidentComponentProxyBroker.KIND_HOST_PRIMITIVE -> {
+            val primitiveId = payload.getString("primitive_id").trim().lowercase()
+            check(primitiveId in HOST_OWNED_PRIMITIVES) {
+                "Primitive is not Host-owned: $primitiveId"
+            }
+            val result = hostPrimitiveAdapter.invoke(
+                ownerPluginId = payload.getString("owner_plugin_id").trim(),
+                primitiveId = primitiveId,
+                operation = payload.getString("operation").trim().lowercase(),
+                parameters = payload.optJSONObject("parameters") ?: JSONObject()
+            )
+            JSONObject().put("ok", true).put("result", result)
+        }
         else -> JSONObject().put("ok", false).put("error", "UNKNOWN_COMPONENT_KIND")
         }
     }
@@ -944,6 +958,10 @@ private class ResidentHostComponentExecutor(
         }) { "Host main Looper rejected component request" }
         check(latch.await(3, TimeUnit.SECONDS)) { "Host UI thread did not execute component request" }
         failure.get()?.let { throw it }
+    }
+
+    private companion object {
+        val HOST_OWNED_PRIMITIVES = setOf("host.ui.layout@1")
     }
 }
 

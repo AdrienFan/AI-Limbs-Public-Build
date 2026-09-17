@@ -1,6 +1,10 @@
 package com.ai.assistance.operit.plugins.center
 
 import java.io.File
+import java.io.FileOutputStream
+import java.nio.file.AtomicMoveNotSupportedException
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -31,22 +35,56 @@ class PluginStateRepository(
 ) {
     fun read(pluginId: String): PluginPersistentState? {
         val file = store.stateFile(pluginId)
+        parseState(file, pluginId)?.let { return it }
+        return recoverInterruptedState(pluginId, file)
+    }
+
+    private fun parseState(file: File, expectedPluginId: String): PluginPersistentState? {
         if (!file.isFile) return null
         val root = runCatching { JSONObject(file.readText(Charsets.UTF_8)) }.getOrNull() ?: return null
-        val activeVersion = root.optString("active_version").trim().ifBlank { null }
-        val previousVersion = root.optString("previous_version").trim().ifBlank { null }
+        val storedPluginId = root.optString("plugin_id").trim()
+        if (storedPluginId.isNotEmpty() && storedPluginId != expectedPluginId) return null
+        val activeVersion = root.stringOrNull("active_version")
+        val previousVersion = root.stringOrNull("previous_version")
         val lastState = runCatching { PluginLifecycleState.valueOf(root.optString("last_state")) }
             .getOrDefault(PluginLifecycleState.INSTALLED)
         return PluginPersistentState(
-            pluginId = pluginId,
+            pluginId = expectedPluginId,
             activeVersion = activeVersion,
             previousVersion = previousVersion,
             enabled = root.optBoolean("enabled", false),
             lastState = lastState,
-            lastError = root.optString("last_error").trim().ifBlank { null },
+            lastError = root.stringOrNull("last_error"),
             quarantinedVersions = root.optJSONArray("quarantined_versions").toStringSet(),
             updatedAtEpochMs = root.optLong("updated_at", 0L)
         )
+    }
+
+    private fun recoverInterruptedState(pluginId: String, target: File): PluginPersistentState? {
+        val parent = target.parentFile ?: return null
+        val now = System.currentTimeMillis()
+        val prefix = ".${target.name}."
+        val candidates = parent.listFiles()
+            ?.asSequence()
+            ?.filter { candidate ->
+                candidate.isFile && candidate.name.startsWith(prefix) && candidate.name.endsWith(".tmp") &&
+                    now - candidate.lastModified() >= ORPHAN_RECOVERY_MIN_AGE_MS
+            }
+            ?.sortedByDescending(File::lastModified)
+            ?.toList()
+            .orEmpty()
+        for (candidate in candidates) {
+            val recovered = parseState(candidate, pluginId) ?: continue
+            val activeVersion = recovered.activeVersion
+            if (activeVersion != null && !store.versionDir(pluginId, activeVersion).isDirectory) continue
+            val promoted = runCatching { replaceAtomically(candidate, target) }.isSuccess
+            if (!promoted) continue
+            parent.listFiles()
+                ?.filter { it.isFile && it.name.startsWith(prefix) && it.name.endsWith(".tmp") }
+                ?.forEach(File::delete)
+            return parseState(target, pluginId) ?: recovered
+        }
+        return null
     }
 
     fun write(state: PluginPersistentState) {
@@ -100,16 +138,31 @@ class PluginStateRepository(
     private fun atomicWrite(target: File, content: String) {
         target.parentFile?.mkdirs()
         val temp = File(target.parentFile, ".${target.name}.${System.nanoTime()}.tmp")
-        temp.writeText(content, Charsets.UTF_8)
-        if (target.exists() && !target.delete()) {
+        try {
+            FileOutputStream(temp).use { output ->
+                output.write(content.toByteArray(Charsets.UTF_8))
+                output.fd.sync()
+            }
+            replaceAtomically(temp, target)
+        } catch (error: Throwable) {
             temp.delete()
-            throw PluginInstallException("STATE_WRITE_FAILED", "Could not replace plugin state")
-        }
-        if (!temp.renameTo(target)) {
-            temp.delete()
-            throw PluginInstallException("STATE_WRITE_FAILED", "Could not commit plugin state")
+            throw PluginInstallException("STATE_WRITE_FAILED", "Could not atomically commit plugin state", error)
         }
     }
+
+    private fun replaceAtomically(source: File, target: File) {
+        try {
+            Files.move(
+                source.toPath(), target.toPath(),
+                StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING
+            )
+        } catch (_: AtomicMoveNotSupportedException) {
+            Files.move(source.toPath(), target.toPath(), StandardCopyOption.REPLACE_EXISTING)
+        }
+    }
+
+    private fun JSONObject.stringOrNull(key: String): String? =
+        if (!has(key) || isNull(key)) null else optString(key).trim().ifBlank { null }
 
     private fun JSONArray?.toStringSet(): Set<String> {
         if (this == null) return emptySet()
@@ -118,5 +171,9 @@ class PluginStateRepository(
                 optString(index).trim().takeIf { it.isNotEmpty() }?.let(::add)
             }
         }
+    }
+
+    private companion object {
+        const val ORPHAN_RECOVERY_MIN_AGE_MS = 5_000L
     }
 }
