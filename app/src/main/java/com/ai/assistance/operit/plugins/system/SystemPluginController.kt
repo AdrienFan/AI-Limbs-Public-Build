@@ -322,7 +322,12 @@ internal class SystemPluginController(
             appContext.codeCacheDir,
             "system_plugins/${manifest.pluginId}/${manifest.version}/${runtimeRole.name.lowercase()}"
         ).apply { mkdirs() }
-        val loader = DexClassLoader(apk.absolutePath, optimized.absolutePath, null, appContext.classLoader)
+        val loader = DexClassLoader(
+            apk.absolutePath,
+            optimized.absolutePath,
+            null,
+            systemPluginAbiClassLoader()
+        )
         val entry = loader.loadClass(entryClass).getDeclaredConstructor().newInstance() as? SystemPluginEntryV1
             ?: throw PluginInstallException("SYSTEM_ENTRY_TYPE_INVALID", "$entryClass does not implement SystemPluginEntryV1")
         val host = hostFactory(manifest.pluginId, manifest.role)
@@ -351,6 +356,21 @@ internal class SystemPluginController(
             runtimeError = error.toString().take(2048)
             throw error
         }
+    }
+
+    private fun systemPluginAbiClassLoader(): ClassLoader {
+        val entryLoader = requireNotNull(SystemPluginEntryV1::class.java.classLoader) {
+            "SystemPluginEntryV1 must not be defined by the bootstrap ClassLoader"
+        }
+        val hostV1Loader = requireNotNull(SystemPluginHostV1::class.java.classLoader)
+        val hostV2Loader = requireNotNull(SystemPluginHostV2::class.java.classLoader)
+        check(entryLoader === hostV1Loader && entryLoader === hostV2Loader) {
+            "System Plugin ABI classes do not share one defining ClassLoader"
+        }
+        check(entryLoader.loadClass(SystemPluginEntryV1::class.java.name) === SystemPluginEntryV1::class.java) {
+            "Canonical System Plugin ABI loader resolves a duplicate SystemPluginEntryV1"
+        }
+        return entryLoader
     }
 
     private fun prepareRuntimeApk(content: File, manifest: SystemPluginManifestV1): File {
