@@ -38,6 +38,7 @@ import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionTarget
 import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
+import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessNotificationAction
 import com.ai.limbs.plugin.runtime.InProcessNotificationState
 import com.ai.limbs.plugin.runtime.InProcessUiContributionProvider
@@ -557,6 +558,7 @@ internal class ResidentProviderDirectory(
     private val pageMetadata = AtomicReference<Map<String, RemoteMetadata>>(emptyMap())
     private val localPages = ConcurrentHashMap<String, LocalOwned>()
     private val proxies = ConcurrentHashMap<String, ResidentUiStateProviderProxy>()
+    private val extensionHubProxies = ConcurrentHashMap<String, ResidentExtensionHubProxy>()
 
     fun update(array: JSONArray) {
         val next = linkedMapOf<String, SystemPluginProviderBindingV2>()
@@ -573,10 +575,23 @@ internal class ResidentProviderDirectory(
                     proxy.update(item.stringOrNull("state_json"))
                     next[id] = SystemPluginProviderBindingV2(owner, id, metadata, proxy)
                 }
+                "extension_hub" -> {
+                    check(owner == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
+                        "Only the canonical Extension Hub may be mirrored into Host UI"
+                    }
+                    check(id == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PROVIDER) {
+                        "Resident Extension Hub provider ID mismatch: $id"
+                    }
+                    val proxy = extensionHubProxies.compute(id) { _, old ->
+                        if (old != null && old.ownerPluginId == owner) old else ResidentExtensionHubProxy(client, owner, id)
+                    }!!
+                    next[id] = SystemPluginProviderBindingV2(owner, id, metadata, proxy)
+                }
                 "page_metadata" -> nextPageMetadata[id] = RemoteMetadata(owner, metadata)
             }
         }
         proxies.keys.retainAll(next.keys)
+        extensionHubProxies.keys.retainAll(next.keys)
         remote.set(next)
         pageMetadata.set(nextPageMetadata)
         publish()
@@ -585,6 +600,7 @@ internal class ResidentProviderDirectory(
     fun disconnectFailClosed() {
         proxies.values.forEach { proxy -> runCatching { proxy.update(null) } }
         proxies.clear()
+        extensionHubProxies.clear()
         remote.set(emptyMap())
         pageMetadata.set(emptyMap())
         localPages.clear()
@@ -644,6 +660,30 @@ internal class ResidentProviderDirectory(
     override fun resolve(id: String): SystemPluginProviderBindingV2? = state.value[id.trim()]
     override fun snapshot(): List<SystemPluginProviderBindingV2> = state.value.values.sortedBy { it.id }
     override fun observe(id: String): Flow<SystemPluginProviderBindingV2?> = state.map { it[id.trim()] }
+}
+
+private class ResidentExtensionHubProxy(
+    private val client: ResidentUiProxyClient,
+    val ownerPluginId: String,
+    private val providerId: String
+) : ExtensionHubService {
+    override suspend fun install(
+        packageFile: java.io.File,
+        expectedParentPluginId: String?,
+        expectedPoint: String?
+    ): ChildExtensionSnapshot {
+        check(packageFile.isFile) { "Selected child extension package is unavailable: ${packageFile.path}" }
+        val result = client.command(
+            JSONObject()
+                .put("command", "extension_hub_install")
+                .put("owner_plugin_id", ownerPluginId)
+                .put("provider_id", providerId)
+                .put("package_path", packageFile.absolutePath)
+                .put("expected_parent_plugin_id", expectedParentPluginId ?: "")
+                .put("expected_point", expectedPoint ?: "")
+        )
+        return childSnapshot(result)
+    }
 }
 
 private class ResidentUiStateProviderProxy(
