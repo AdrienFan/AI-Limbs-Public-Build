@@ -479,8 +479,17 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
 
     private fun invokeInteractionCycle(operation: String, parameters: JSONObject): JSONObject {
         val policy = AiLimbsInteractionCyclePolicy(appContext)
+        fun statusJson(): JSONObject {
+            val runtime = AiLimbsInteractionCycleRuntime.state(appContext).snapshot()
+            val accessGate = runtime.optJSONObject("access_gate")
+            return policy.snapshot().toJson()
+                .put("generation", runtime.optLong("current_generation", runtime.optLong("generation", 0L)))
+                .put("cycle_started_at_ms", runtime.optLong("cycle_started_at_ms", 0L))
+                .put("expired_pending", runtime.optBoolean("expired_pending", false))
+                .put("gate_released", accessGate?.optBoolean("released_for_current_cycle", false) == true)
+        }
         return when (operation) {
-            "status" -> policy.snapshot().toJson()
+            "status" -> statusJson()
             "set_timeout" -> {
                 val password = required(parameters, "admin_password")
                 if (!PluginPlatformKernel.adminSecurity.verifyPassword(password)) {
@@ -491,7 +500,8 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                     throw PluginInstallException("INTERACTION_CYCLE_TIMEOUT_INVALID", "Invalid AI Limbs interaction cycle timeout")
                 }
                 val before = policy.timeoutMs()
-                policy.setTimeoutMs(timeoutMs).toJson()
+                policy.setTimeoutMs(timeoutMs)
+                statusJson()
                     .put("changed", before != timeoutMs)
                     .put("authorized", true)
             }
@@ -501,7 +511,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                     return JSONObject().put("reset", false).put("authorized", false)
                 }
                 val reset = AiLimbsInteractionCycleRuntime.reset(appContext)
-                policy.snapshot().toJson()
+                statusJson()
                     .put("reset", true)
                     .put("authorized", true)
                     .put("generation", reset.generation)
@@ -514,7 +524,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                     return JSONObject().put("gate_released", false).put("authorized", false)
                 }
                 val generation = AiLimbsInteractionCycleRuntime.releaseGate(appContext)
-                policy.snapshot().toJson()
+                statusJson()
                     .put("gate_released", true)
                     .put("authorized", true)
                     .put("generation", generation)

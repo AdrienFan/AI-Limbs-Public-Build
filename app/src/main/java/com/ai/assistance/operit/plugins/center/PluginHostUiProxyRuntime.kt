@@ -42,6 +42,15 @@ internal class PluginHostUiProxyRuntime(
         parameters: JSONObject
     ): JSONObject = residentClient.invokeUiCapability(ownerPluginId, screenId, capabilityId, parameters)
 
+    suspend fun createDynamicNavigationSurface(): JSONObject =
+        residentClient.command(
+            JSONObject()
+                .put("command", "system_json")
+                .put("service", "navigation")
+                .put("operation", "create_surface")
+                .put("parameters", JSONObject())
+        )
+
     suspend fun installPluginCenterRendererFromUri(
         uriText: String,
         originalName: String

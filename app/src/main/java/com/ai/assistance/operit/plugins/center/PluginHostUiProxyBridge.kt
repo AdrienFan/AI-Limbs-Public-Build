@@ -84,6 +84,7 @@ internal class ResidentUiProxyClient(
     private val hostGeneration = AtomicLong(0L)
     private val hostAttachLock = Any()
     private val lastSnapshot = AtomicReference(JSONObject())
+    private val uiPayloadStager = ResidentUiPayloadStager(appContext)
     private val providerDirectory = ResidentProviderDirectory(this)
     private val childControl = ResidentChildControl(this)
     private val hostPrimitiveCache = AtomicReference<List<SystemHostPrimitiveDescriptor>>(emptyList())
@@ -144,6 +145,11 @@ internal class ResidentUiProxyClient(
             wireRequest("command", JSONObject(payload.toString()))
         }
 
+    suspend fun stageUiPayload(payloadJson: String): String =
+        kotlinx.coroutines.withContext(Dispatchers.IO) {
+            uiPayloadStager.stagePickerPayload(payloadJson)
+        }
+
     fun commandBlocking(payload: JSONObject): JSONObject =
         wireRequest("command", JSONObject(payload.toString()))
 
@@ -152,14 +158,17 @@ internal class ResidentUiProxyClient(
         screenId: String,
         capabilityId: String,
         parameters: JSONObject
-    ): JSONObject = command(
-        JSONObject()
-            .put("command", "invoke_ui_capability")
-            .put("owner_plugin_id", ownerPluginId)
-            .put("screen_id", screenId)
-            .put("capability_id", capabilityId)
-            .put("parameters", JSONObject(parameters.toString()))
-    )
+    ): JSONObject {
+        val stagedParameters = JSONObject(stageUiPayload(parameters.toString()))
+        return command(
+            JSONObject()
+                .put("command", "invoke_ui_capability")
+                .put("owner_plugin_id", ownerPluginId)
+                .put("screen_id", screenId)
+                .put("capability_id", capabilityId)
+                .put("parameters", stagedParameters)
+        )
+    }
 
     fun setActiveScreen(screenId: String?) {
         runtime.pagePresentationRegistry.setActiveScreen(screenId)
@@ -645,10 +654,12 @@ private class ResidentUiStateProviderProxy(
     private val mutableState = MutableStateFlow<String?>(null)
     override val stateJson: StateFlow<String?> = mutableState.asStateFlow()
     fun update(value: String?) { mutableState.value = value }
-    override suspend fun perform(eventId: String, payloadJson: String): String =
-        client.command(JSONObject().put("command", "ui_provider_event").put("owner_plugin_id", ownerPluginId)
-            .put("provider_id", providerId).put("event_id", eventId).put("payload_json", payloadJson))
+    override suspend fun perform(eventId: String, payloadJson: String): String {
+        val stagedPayload = client.stageUiPayload(payloadJson)
+        return client.command(JSONObject().put("command", "ui_provider_event").put("owner_plugin_id", ownerPluginId)
+            .put("provider_id", providerId).put("event_id", eventId).put("payload_json", stagedPayload))
             .getString("result_json")
+    }
 }
 
 private class ResidentChildContributionProxy(
@@ -659,10 +670,12 @@ private class ResidentChildContributionProxy(
     private val mutableDocument = MutableStateFlow<String?>(null)
     override val documentJson: StateFlow<String?> = mutableDocument.asStateFlow()
     fun update(value: String?) { mutableDocument.value = value }
-    override suspend fun perform(eventId: String, payloadJson: String): String =
-        client.command(JSONObject().put("command", "child_ui_event").put("extension_id", extensionId)
-            .put("contribution_id", contributionId).put("event_id", eventId).put("payload_json", payloadJson))
+    override suspend fun perform(eventId: String, payloadJson: String): String {
+        val stagedPayload = client.stageUiPayload(payloadJson)
+        return client.command(JSONObject().put("command", "child_ui_event").put("extension_id", extensionId)
+            .put("contribution_id", contributionId).put("event_id", eventId).put("payload_json", stagedPayload))
             .getString("result_json")
+    }
 }
 
 private class ResidentChildControl(

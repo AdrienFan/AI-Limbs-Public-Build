@@ -23,6 +23,12 @@ import com.ai.limbs.plugin.runtime.InProcessNotificationHost
 import com.ai.limbs.plugin.runtime.InProcessNotificationState
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import com.ai.limbs.plugin.runtime.ExtensionHubService
+import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
+import com.ai.limbs.plugin.runtime.ChildExtensionTarget
+import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
+import com.ai.limbs.plugin.runtime.InProcessSystemIds
+import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -286,6 +292,38 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
                         RemotePageProviderMetadata,
                         metadata
                     )
+                    "extension_hub" -> {
+                        check(pluginId == InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
+                            "Only the canonical Extension Hub plugin may publish extension_hub"
+                        }
+                        check(id == InProcessSystemIds.EXTENSION_HUB_PROVIDER) {
+                            "Extension Hub provider id mismatch: $id"
+                        }
+                        context.payloadContext.registrar.registerProvider(
+                            id,
+                            object : ExtensionHubService {
+                                override suspend fun install(
+                                    packageFile: File,
+                                    expectedParentPluginId: String?,
+                                    expectedPoint: String?
+                                ): ChildExtensionSnapshot {
+                                    ensureMounted()
+                                    val sid = checkNotNull(sessionId)
+                                    val result = PluginRuntimeWire.request(
+                                        "child_install",
+                                        sid,
+                                        JSONObject()
+                                            .put("package_path", packageFile.absolutePath)
+                                            .put("expected_parent_plugin_id", expectedParentPluginId ?: "")
+                                            .put("expected_point", expectedPoint ?: ""),
+                                        PluginRuntimeWire.BUSINESS_TIMEOUT_MS
+                                    )
+                                    return parseChildSnapshot(result.getJSONObject("operation_result"))
+                                }
+                            },
+                            metadata
+                        )
+                    }
                     "worker_local" -> Unit
                     else -> throw PluginInstallException(
                         "PLUGIN_WORKER_PROVIDER_UNSUPPORTED",
@@ -351,6 +389,24 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
                 }
             )
         }
+
+        private fun parseChildSnapshot(value: JSONObject): ChildExtensionSnapshot =
+            ChildExtensionSnapshot(
+                extensionId = value.getString("extension_id"),
+                version = value.getString("version"),
+                displayName = value.getString("display_name"),
+                description = value.optNullableString("description"),
+                target = ChildExtensionTarget(
+                    parentPluginId = value.getString("parent_plugin_id"),
+                    point = value.getString("point"),
+                    apiVersion = value.getInt("api_version")
+                ),
+                lifecycle = ChildExtensionLifecycle.valueOf(value.getString("lifecycle").uppercase()),
+                enabled = value.getBoolean("enabled"),
+                roles = value.stringList("roles").toSet(),
+                useCount = value.optLong("use_count", 0L),
+                lastError = value.optNullableString("last_error")
+            )
 
         private inner class RemoteUiStateProvider(
             private val providerId: String,

@@ -125,7 +125,19 @@ fun OperitApp(
     val pluginScreens by PluginPlatformKernel.uiRegistry.activeScreens.collectAsState()
     val pagePresentationRequests by PluginPlatformKernel.pagePresentationRegistry.requests.collectAsState()
     val systemToolboxEntries by PluginPlatformKernel.systemUiRegistry.toolboxEntries.collectAsState()
-    val canCreateDynamicPage = systemToolboxEntries.any { it.id == "plugin_center.main" }
+    val residentUiProxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+    val canCreateDynamicPage = residentUiProxy != null || systemToolboxEntries.any { it.id == "plugin_center.main" }
+    val createDynamicPage: () -> Unit = {
+        val proxy = residentUiProxy
+        if (proxy != null) {
+            scope.launch {
+                runCatching { proxy.createDynamicNavigationSurface() }
+                    .onFailure { AppLogger.e(TAG, "Resident dynamic page creation failed", it) }
+            }
+        } else if (canCreateDynamicPage) {
+            PluginPlatformKernel.dynamicNavigationRegistry.create()
+        }
+    }
     val navigationModel = remember(
         context, configuration, navigationRevision, dynamicSurfaces, pluginHomeTiles, pluginScreens, systemToolboxEntries
     ) { AppRouteCatalog.build(context) }
@@ -154,7 +166,6 @@ fun OperitApp(
     )
     // Presentation is a lease owned by the plugin screen that is visible right now.
     // Changing routes releases the old lease and prevents background plugins from pre-arming fullscreen.
-    val residentUiProxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
     DisposableEffect(currentPluginScreenId, residentUiProxy) {
         if (residentUiProxy != null) {
             residentUiProxy.setActiveScreen(currentPluginScreenId)
@@ -624,9 +635,7 @@ fun OperitApp(
                     },
                     onNavigationEntrySelected = ::navigateToNavigationEntry,
                     canCreateDynamicPage = canCreateDynamicPage,
-                    onCreateDynamicPage = {
-                        if (canCreateDynamicPage) PluginPlatformKernel.dynamicNavigationRegistry.create()
-                    },
+                    onCreateDynamicPage = createDynamicPage,
                     onToggleSidebar = {
                         isTabletSidebarExpanded = !isTabletSidebarExpanded
                     },
@@ -663,9 +672,7 @@ fun OperitApp(
                     },
                     onNavigationEntrySelected = ::navigateToNavigationEntry,
                     canCreateDynamicPage = canCreateDynamicPage,
-                    onCreateDynamicPage = {
-                        if (canCreateDynamicPage) PluginPlatformKernel.dynamicNavigationRegistry.create()
-                    },
+                    onCreateDynamicPage = createDynamicPage,
                     navigateToTokenConfig = ::navigateToTokenConfig,
                     canGoBack = canGoBack,
                     onGoBack = ::requestGoBack,
