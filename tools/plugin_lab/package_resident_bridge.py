@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import tempfile
@@ -57,6 +58,12 @@ def main():
                 archive.writestr("META-INF/AILIMBS.SIG", sig.read_bytes())
             digest = hashlib.sha256(out.read_bytes()).hexdigest()
             out.with_suffix(out.suffix + ".sha256").write_text(digest + "  " + out.name + "\n")
+            if label == "Bridge" and manifest.get("version") == "1.3.11":
+                legacy = dist / "AI-Limbs-Bridge-v1.3.10.ailp"
+                shutil.copyfile(out, legacy)
+                legacy_digest = hashlib.sha256(legacy.read_bytes()).hexdigest()
+                legacy.with_suffix(legacy.suffix + ".sha256").write_text(legacy_digest + "  " + legacy.name + "
+")
             print(out.name + " sha256=" + digest)
 
 if __name__ == "__main__":
