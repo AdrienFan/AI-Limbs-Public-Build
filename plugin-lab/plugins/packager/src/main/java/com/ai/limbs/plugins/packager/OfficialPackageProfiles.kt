@@ -208,7 +208,7 @@ object OfficialPackageProfiles {
             JSONObject()
                 .put("plugin_id", "plugin.system.bridge")
                 .put("extension_point", "ai_limbs.bridge.provider")
-                .put("api", 3)
+                .put("api", 4)
         )
         .put(
             "runtime",
@@ -217,7 +217,6 @@ object OfficialPackageProfiles {
                 .put("entry", "payload/extension.apk")
                 .put("config", JSONObject().put("entry_class", entryClass))
         )
-        .put("permissions", JSONObject().put("host_capabilities", JSONArray().put("core.bridge.remote.invoke")))
 
     private fun display(name: String, description: String): JSONObject =
         JSONObject().put("name", name).put("description", description)

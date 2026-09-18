@@ -2,6 +2,11 @@ package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
 
+object BridgeProviderContract {
+    const val EXTENSION_POINT = "ai_limbs.bridge.provider"
+    const val EXTENSION_API_VERSION = 4
+}
+
 /**
  * Stable UI contribution targets owned by the Bridge parent contract.
  *

@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.bridge",
-  "version": "1.3.10",
+  "version": "1.3.11",
   "api": {
     "target": 1,
     "min": 1
@@ -30,7 +30,8 @@
   },
   "permissions": {
     "requested_scopes": [
-      "host.notification@1"
+      "host.notification@1",
+      "host.ingress@1"
     ]
   },
   "provides": {
@@ -40,8 +41,7 @@
     ],
     "services": [],
     "providers": [
-      "plugin.bridge.control_panel",
-      "plugin.bridge.runtime_readiness.v1"
+      "plugin.bridge.control_panel"
     ],
     "extensions": [
       {

@@ -6,6 +6,7 @@ import com.ai.assistance.operit.integrations.ailimbs.PluginBridgeProviderCatalog
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContribution
+import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderContract
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderUiSlots
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderControl
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelFieldKind
@@ -24,6 +25,7 @@ import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
+import com.ai.limbs.plugin.runtime.InProcessServiceEndpoint
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import java.util.UUID
@@ -32,6 +34,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -72,13 +75,14 @@ private class HostBridgeRemoteIngress(
         require(tool.isNotBlank()) { "Bridge remote tool must not be blank" }
         val currentScopeId = scopeId
         val request = JSONObject()
+            .put("operation", "invoke")
             .put("transport", transportId)
-            .put("provider_id", providerId)
+            .put("source_id", providerId)
             .put("scope_id", currentScopeId)
-            .put("tool", tool)
-            .put("args", JSONObject(args.toString()))
+            .put("capability_id", tool)
+            .put("parameters", JSONObject(args.toString()))
         return JSONObject(
-            host.invokeHostCapability(BRIDGE_REMOTE_INVOKE_CAPABILITY_ID, request.toString())
+            host.invokeHostCapability(HOST_INGRESS_PRIMITIVE_ID, request.toString())
         )
     }
 
@@ -86,7 +90,7 @@ private class HostBridgeRemoteIngress(
         "bridge-$transportId-$providerId-${UUID.randomUUID()}"
 }
 
-private const val BRIDGE_REMOTE_INVOKE_CAPABILITY_ID = "core.bridge.remote.invoke"
+private const val HOST_INGRESS_PRIMITIVE_ID = "host.ingress@1"
 
 private class BridgeRuntime(
     private val host: InProcessPluginHost
@@ -128,26 +132,7 @@ private class BridgeRuntime(
                 InProcessNotificationActionHandler { actionId -> notificationProvider.perform(actionId) }
             )
             registerCapabilities()
-            // Private read-only lifecycle contract; never a second manager or an AI command entry.
-            host.registerProvider(
-                "plugin.bridge.runtime_readiness.v1",
-                InProcessCapabilityExecutor {
-                    synchronized(this@BridgeRuntime) {
-                        (manager?.runtimeReadiness() ?: JSONObject()
-                            .put("schema", 1)
-                            .put("manager_ready", false)
-                            .put("ready", contributions.isEmpty() && !stopped)
-                            .put("fatal_error", stopped)
-                            .put("provider_count", 0)
-                            .put("desired_provider_count", 0)
-                            .put("started_provider_count", 0)
-                            .put("online_provider_count", 0)
-                            .put("providers", JSONArray())).toString()
-                    }
-                },
-                mapOf("kind" to "runtime_readiness", "schema" to "1")
-            )
-            host.registerProvider(
+            host.registerUiProvider(
                 PANEL_PROVIDER_ID,
                 panelProvider,
                 mapOf("kind" to "dynamic_control_panel")
@@ -168,11 +153,11 @@ private class BridgeRuntime(
                                 .put(JSONObject()
                                     .put("type", "child_extension_installer")
                                     .put("label", "添加子插件")
-                                    .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT))
+                                    .put("point", BridgeProviderContract.EXTENSION_POINT))
                                 .put(JSONObject()
                                     .put("type", "child_extension_selector")
                                     .put("label", "当前 Bridge Provider")
-                                    .put("point", InProcessSystemIds.BRIDGE_PROVIDER_POINT)
+                                    .put("point", BridgeProviderContract.EXTENSION_POINT)
                                     .put("select_capability_id", SELECT_CAPABILITY)
                                     .put("selection_provider_id", PANEL_PROVIDER_ID))
                                 .put(
@@ -193,7 +178,7 @@ private class BridgeRuntime(
                                                 BridgeProviderUiSlots.PROVIDER_PANEL_AFTER,
                                                 JSONObject().put(
                                                     "points",
-                                                    JSONArray().put(InProcessSystemIds.BRIDGE_PROVIDER_POINT)
+                                                    JSONArray().put(BridgeProviderContract.EXTENSION_POINT)
                                                 )
                                             )
                                         )
@@ -224,8 +209,8 @@ private class BridgeRuntime(
         pointGeneration += 1L
         val generation = pointGeneration
         pointHandle = host.childExtensions.publishPoint(
-            point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
-            apiVersion = 4,
+            point = BridgeProviderContract.EXTENSION_POINT,
+            apiVersion = BridgeProviderContract.EXTENSION_API_VERSION,
             title = "Bridge Provider",
             description = "AI Limbs remote Bridge provider contract",
             allowedHostCapabilities = emptySet(),
@@ -331,7 +316,7 @@ private class BridgeRuntime(
                     ?: error("Bridge extension has no profile")
                 val currentManager = requireManager()
                 currentManager.selectProvider(profile.id)
-                recordUseCompat(extensionId)
+                recordChildUse(extensionId)
                 publishPresentation(currentManager, currentManager.state.value)
                 JSONObject()
                     .put("success", true)
@@ -352,21 +337,45 @@ private class BridgeRuntime(
                     .getOrElse { error("Unknown Bridge action: $actionName") }
                 val providerId = request.optString("provider_id").trim().takeIf { it.isNotBlank() }
                 val currentManager = requireManager()
-                val target = providerId?.let { requestedProviderId ->
-                    contributions.entries.firstOrNull { (_, contribution) ->
-                        contribution.factory.profiles.any { profile -> profile.id == requestedProviderId }
-                    }
-                } ?: selectedEntry(currentManager)
-                check(currentManager.perform(action, providerId)) {
-                    "Bridge action $action is not available for provider ${providerId ?: currentManager.activeProfile.id}"
+                val resolvedProviderId = providerId ?: currentManager.activeProfile.id
+                val target = contributions.entries.firstOrNull { (_, contribution) ->
+                    contribution.factory.profiles.any { profile -> profile.id == resolvedProviderId }
                 }
-                target?.let { recordUseCompat(it.key) }
-                publishPresentation(currentManager, currentManager.state.value)
-                JSONObject()
-                    .put("success", true)
-                    .put("action", action.name)
-                    .put("provider_id", providerId ?: currentManager.activeProfile.id)
-                    .toString()
+                if (action == BridgeAction.RECONNECT) {
+                    val extensionId = target?.key
+                    presentationScope.launch {
+                        delay(RECONNECT_AFTER_RESPONSE_MS)
+                        runCatching {
+                            val liveManager = requireManager()
+                            check(liveManager.perform(action, resolvedProviderId)) {
+                                "Bridge action $action is not available for provider $resolvedProviderId"
+                            }
+                            extensionId?.let { recordChildUse(it) }
+                            publishPresentation(liveManager, liveManager.state.value)
+                        }.onFailure { error ->
+                            android.util.Log.e(TAG, "Deferred Bridge reconnect failed", error)
+                        }
+                    }
+                    JSONObject()
+                        .put("success", true)
+                        .put("accepted", true)
+                        .put("deferred", true)
+                        .put("reconnect_after_ms", RECONNECT_AFTER_RESPONSE_MS)
+                        .put("action", action.name)
+                        .put("provider_id", resolvedProviderId)
+                        .toString()
+                } else {
+                    check(currentManager.perform(action, resolvedProviderId)) {
+                        "Bridge action $action is not available for provider $resolvedProviderId"
+                    }
+                    target?.let { recordChildUse(it.key) }
+                    publishPresentation(currentManager, currentManager.state.value)
+                    JSONObject()
+                        .put("success", true)
+                        .put("action", action.name)
+                        .put("provider_id", resolvedProviderId)
+                        .toString()
+                }
             }
         )
     }
@@ -381,7 +390,7 @@ private class BridgeRuntime(
     private fun requireManager(): PluginBridgeManager =
         manager ?: error("No Bridge Provider is active")
 
-    private fun recordUseCompat(extensionId: String) {
+    private fun recordChildUse(extensionId: String) {
         host.childExtensions.recordUse(extensionId)
     }
 
@@ -473,7 +482,7 @@ private class BridgeRuntime(
             val currentManager = requireManager()
             val selected = selectedEntry(currentManager)
                 ?: error("Selected Bridge Provider contribution is missing")
-            recordUseCompat(selected.key)
+            recordChildUse(selected.key)
             val result = selected.value.panel.perform(
                 host.applicationContext,
                 eventId,
@@ -518,7 +527,7 @@ private class BridgeRuntime(
             }
             val notification = selected.value.notification
                 ?: error("Selected Bridge Provider has no notification contribution")
-            recordUseCompat(selected.key)
+            recordChildUse(selected.key)
             notification.perform(
                 host.applicationContext,
                 providerActionId,
@@ -595,6 +604,8 @@ private class BridgeRuntime(
         private const val TILE_ID = "plugin.system.bridge.tile"
         private const val SELECT_CAPABILITY = "plugin.bridge.select_provider"
         private const val ACTION_CAPABILITY = "plugin.bridge.perform_action"
+        private const val TAG = "BridgePlugin"
+        private const val RECONNECT_AFTER_RESPONSE_MS = 2_000L
         private const val PANEL_PROVIDER_ID = "plugin.bridge.control_panel"
         // Component schema is versioned by Plugin Center; adding new controls must not change Host ABI.
         private const val PLUGIN_CENTER_UI_SCHEMA = "ai_limbs.plugin_center.ui.v1"

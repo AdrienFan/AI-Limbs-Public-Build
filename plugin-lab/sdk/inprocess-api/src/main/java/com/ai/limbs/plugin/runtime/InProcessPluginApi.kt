@@ -79,6 +79,12 @@ interface InProcessProviderDirectory {
     fun observe(id: String): StateFlow<InProcessProviderBinding?>
 }
 
+interface InProcessUiProvider
+
+fun interface InProcessServiceEndpoint {
+    suspend fun invoke(operation: String, parametersJson: String): String
+}
+
 /**
  * Generic opaque state/event channel for Plugin Center-owned UI components.
  *
@@ -89,7 +95,7 @@ interface InProcessProviderDirectory {
  * This is the permanent escape hatch that lets future complex controls evolve without adding a new
  * Host enum/data class for every visual concept.
  */
-interface InProcessUiStateProvider {
+interface InProcessUiStateProvider : InProcessUiProvider {
     val stateJson: StateFlow<String?>
     suspend fun perform(eventId: String, payloadJson: String = "{}"): String
 }
@@ -98,7 +104,7 @@ interface InProcessUiStateProvider {
  * Plugin-owned full page surface. Basic widgets and layout remain inside the plugin. [sharedUi]
  * exposes only Plugin Center components that were explicitly declared reusable.
  */
-interface InProcessPageProvider {
+interface InProcessPageProvider : InProcessUiProvider {
     fun createView(context: Context, sharedUi: InProcessSharedUiHost): View
 }
 
@@ -260,9 +266,16 @@ interface InProcessPluginHost {
         runtimeClassLoader: ClassLoader
     ): Context = baseContext
 
-    fun registerProvider(
+    fun registerUiProvider(
         id: String,
-        payload: Any,
+        provider: InProcessUiProvider,
+        metadata: Map<String, String> = emptyMap()
+    )
+
+    fun registerService(
+        id: String,
+        apiVersion: Int,
+        endpoint: InProcessServiceEndpoint,
         metadata: Map<String, String> = emptyMap()
     )
 
@@ -414,15 +427,6 @@ interface InProcessChildExtensionRuntime {
     }
 }
 
-interface ExtensionHubService {
-    /** Admission-only surface: verifies a new .ailx package, then hands it to the Host child runtime. */
-    suspend fun install(
-        packageFile: File,
-        expectedParentPluginId: String? = null,
-        expectedPoint: String? = null
-    ): ChildExtensionSnapshot
-}
-
 interface ChildExtensionEntry {
     suspend fun mount(host: ChildExtensionHost): ChildExtensionHandle
 }
@@ -488,12 +492,10 @@ interface ChildExtensionHost {
 }
 
 object InProcessSystemIds {
-    const val EXTENSION_HUB_PROVIDER = "system.extension.hub"
+    const val EXTENSION_HUB_SERVICE = "system.extension.hub"
     const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
     const val PLUGIN_CENTER_PLUGIN_ID = "ai_limbs.system.plugin_center"
     const val PLUGIN_CENTER_DELEGATED_GATEWAY_SERVICE = "system.plugin_center.delegated_gateway"
-    const val BRIDGE_PLUGIN_ID = "plugin.system.bridge"
-    const val BRIDGE_PROVIDER_POINT = "ai_limbs.bridge.provider"
     const val SYSTEM_ENVIRONMENT_PLUGIN_ID = "plugin.system.environment_center"
     const val SYSTEM_ENVIRONMENT_SUBSYSTEM_POINT = "ai_limbs.system_environment.subsystem"
     const val SYSTEM_ENVIRONMENT_SUBSYSTEM_API = 1
