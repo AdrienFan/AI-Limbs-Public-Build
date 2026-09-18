@@ -53,6 +53,7 @@ internal class SystemPluginController(
     }
 
     suspend fun restore() {
+        if (activeSession != null) return
         val version = readStateVersion() ?: return
         val packageFile = packageFile(version)
         if (!packageFile.isFile) return

@@ -1057,6 +1057,10 @@ internal object PluginPlatformKernel {
                 childExtensionRuntimeInstance.start()
                 childRuntimeStarted = true
             }
+            // Resident staged startup must publish the system-plugin service/control plane before
+            // restoring any ordinary HOT parent. This mirrors startInternal(restoreBusinessRuntime=true)
+            // and prevents service-dependent parents from mounting against an incomplete Core registry.
+            systemPluginControllerInstance.restore()
             residentBridgePluginMounted = managerInstance.restoreEnabledPlugin(RESIDENT_BRIDGE_PLUGIN_ID)
             if (residentBridgePluginMounted) {
                 childExtensionRuntimeInstance.awaitEnabledPointReady(RESIDENT_BRIDGE_PROVIDER_POINT)
