@@ -524,7 +524,7 @@ fun OperitApp(
             }
         }
         DisposableEffect(routerState, navigationModel) {
-            AppRouterGateway.install(
+            val routerGatewayLease = AppRouterGateway.install(
                 handler = { routeId, args, source ->
                     val routeSpec = navigationModel.routesById[routeId] ?: return@install
                     val currentEntry = routerState.currentEntry
@@ -565,12 +565,12 @@ fun OperitApp(
                     }
                 }
             )
-            AppRouteDiscoveryGateway.install {
+            val routeDiscoveryLease = AppRouteDiscoveryGateway.install {
                 navigationModel.routes
             }
             onDispose {
-                AppRouterGateway.clear()
-                AppRouteDiscoveryGateway.clear()
+                AppRouterGateway.clear(routerGatewayLease)
+                AppRouteDiscoveryGateway.clear(routeDiscoveryLease)
             }
         }
         CompositionLocalProvider(

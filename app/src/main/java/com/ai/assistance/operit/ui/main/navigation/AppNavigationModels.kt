@@ -138,18 +138,27 @@ object AppRouterGateway {
     private var navigateHandler: ((String, Map<String, Any?>, RouteEntrySource) -> Unit)? = null
     @Volatile
     private var resetHandler: ((String, Map<String, Any?>, RouteEntrySource) -> Unit)? = null
+    private var nextLeaseId: Long = 0L
+    private var activeLeaseId: Long = 0L
 
+    @Synchronized
     fun install(
         handler: (String, Map<String, Any?>, RouteEntrySource) -> Unit,
         reset: (String, Map<String, Any?>, RouteEntrySource) -> Unit
-    ) {
+    ): Long {
+        val leaseId = ++nextLeaseId
         navigateHandler = handler
         resetHandler = reset
+        activeLeaseId = leaseId
+        return leaseId
     }
 
-    fun clear() {
+    @Synchronized
+    fun clear(leaseId: Long) {
+        if (activeLeaseId != leaseId) return
         navigateHandler = null
         resetHandler = null
+        activeLeaseId = 0L
     }
 
     fun navigate(
@@ -172,13 +181,22 @@ object AppRouterGateway {
 object AppRouteDiscoveryGateway {
     @Volatile
     private var routesProvider: (() -> List<RouteSpec>)? = null
+    private var nextLeaseId: Long = 0L
+    private var activeLeaseId: Long = 0L
 
-    fun install(provider: () -> List<RouteSpec>) {
+    @Synchronized
+    fun install(provider: () -> List<RouteSpec>): Long {
+        val leaseId = ++nextLeaseId
         routesProvider = provider
+        activeLeaseId = leaseId
+        return leaseId
     }
 
-    fun clear() {
+    @Synchronized
+    fun clear(leaseId: Long) {
+        if (activeLeaseId != leaseId) return
         routesProvider = null
+        activeLeaseId = 0L
     }
 
     fun listRoutes(): List<RouteSpec> {

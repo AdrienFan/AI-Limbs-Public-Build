@@ -117,6 +117,19 @@ internal object ResidentPluginKernelHandoff {
 
         // Do not return into Host code after a successful retirement. Process death is the ownership
         // boundary; Core waits for this PID to disappear before attempting the plugin_kernel lease.
+        // Schedule the UI relaunch before exiting so Resident ON is a complete role-switch transaction
+        // instead of requiring the user to tap the launcher again. The delay gives Core time to acquire
+        // plugin_kernel and restore business ownership before the fresh MainActivity resolves its role.
+        val relaunchScheduled = scheduleUiRelaunch(
+            app = app,
+            requestCode = SUCCESS_RESTART_REQUEST_CODE,
+            delayMs = SUCCESS_RESTART_DELAY_MS
+        )
+        if (relaunchScheduled) {
+            AppLogger.i(TAG, "Resident ON completed; automatic UI relaunch scheduled")
+        } else {
+            AppLogger.e(TAG, "Resident ON completed but automatic UI relaunch could not be scheduled")
+        }
         Process.killProcess(Process.myPid())
         exitProcess(0)
     }
@@ -287,28 +300,11 @@ internal object ResidentPluginKernelHandoff {
         originalError: Throwable,
         cleanupErrors: List<String>
     ): Nothing {
-        val restartScheduled = runCatching {
-            val launchIntent = checkNotNull(app.packageManager.getLaunchIntentForPackage(app.packageName)) {
-                "No launch intent for ${app.packageName}"
-            }.apply {
-                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
-            }
-            val pending = PendingIntent.getActivity(
-                app,
-                COLD_RESTART_REQUEST_CODE,
-                launchIntent,
-                PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-            )
-            val alarm = app.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-            alarm.set(
-                AlarmManager.RTC,
-                System.currentTimeMillis() + COLD_RESTART_DELAY_MS,
-                pending
-            )
-            true
-        }.onFailure {
-            AppLogger.e(TAG, "Could not schedule cold Host restart after destructive handoff failure", it)
-        }.getOrDefault(false)
+        val restartScheduled = scheduleUiRelaunch(
+            app = app,
+            requestCode = COLD_RESTART_REQUEST_CODE,
+            delayMs = COLD_RESTART_DELAY_MS
+        )
 
         AppLogger.e(
             TAG,
@@ -322,7 +318,28 @@ internal object ResidentPluginKernelHandoff {
         exitProcess(1)
     }
 
+    private fun scheduleUiRelaunch(app: Context, requestCode: Int, delayMs: Long): Boolean = runCatching {
+        val launchIntent = checkNotNull(app.packageManager.getLaunchIntentForPackage(app.packageName)) {
+            "No launch intent for ${app.packageName}"
+        }.apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)
+        }
+        val pending = PendingIntent.getActivity(
+            app,
+            requestCode,
+            launchIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        val alarm = app.getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        alarm.set(AlarmManager.RTC, System.currentTimeMillis() + delayMs, pending)
+        true
+    }.onFailure { error ->
+        AppLogger.e(TAG, "Could not schedule AI Limbs UI relaunch", error)
+    }.getOrDefault(false)
+
     private const val TAG = "ResidentPluginKernelHandoff"
     private const val COLD_RESTART_REQUEST_CODE = 0xA12
     private const val COLD_RESTART_DELAY_MS = 500L
+    private const val SUCCESS_RESTART_REQUEST_CODE = 0xA13
+    private const val SUCCESS_RESTART_DELAY_MS = 1_500L
 }
