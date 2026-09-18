@@ -16,26 +16,115 @@ import org.json.JSONObject
 
 internal enum class HostGatewayRouteKind { HOST_TOOL, CORE_CAPABILITY, MANAGED_DOCUMENT, LOGGING, KERNEL, COMPONENT_PROXY, UNBOUND }
 
+internal enum class HostGatewayExecutionAffinity {
+    CORE_SAFE,
+    HOST_FRAMEWORK,
+    HOST_UI,
+    HOST_SERVICE,
+    CROSS_PROCESS_BACKEND,
+    UNBOUND
+}
+
 internal data class HostGatewayOperationBinding(
     val operation: String,
     val kind: HostGatewayRouteKind,
-    val target: String? = null
+    val target: String? = null,
+    val affinity: HostGatewayExecutionAffinity
+)
+
+internal data class HostPrimitiveBinding(
+    val affinity: HostGatewayExecutionAffinity,
+    val operations: Map<String, HostGatewayOperationBinding>
+)
+
+private data class HostGatewayOperationSpec(
+    val operation: String,
+    val kind: HostGatewayRouteKind,
+    val target: String? = null,
+    val affinityOverride: HostGatewayExecutionAffinity? = null
 )
 
 internal object HostPrimitiveGatewayBindings {
-    private fun tool(operation: String, target: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.HOST_TOOL, target)
-    private fun core(operation: String, target: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.CORE_CAPABILITY, target)
-    private fun document(operation: String, target: AiLimbsDocumentId) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.MANAGED_DOCUMENT, target.stableId)
-    private fun logging(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.LOGGING)
-    private fun kernel(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.KERNEL)
-    private fun component(operation: String, legacyTarget: String? = null) =
-        HostGatewayOperationBinding(operation, HostGatewayRouteKind.COMPONENT_PROXY, legacyTarget)
-    private fun pending(operation: String) = HostGatewayOperationBinding(operation, HostGatewayRouteKind.UNBOUND)
-    private fun ops(vararg items: HostGatewayOperationBinding) = items.associateBy { it.operation }
+    private fun tool(operation: String, target: String) =
+        HostGatewayOperationSpec(operation, HostGatewayRouteKind.HOST_TOOL, target)
 
-    val all: Map<String, Map<String, HostGatewayOperationBinding>> = linkedMapOf(
-        "host.filesystem@1" to ops(tool("list", "list_files"), tool("read", "read_file"), tool("read_range", "read_file_part"), tool("read_full", "read_file_full"), tool("read_binary", "read_file_binary"), tool("write", "write_file"), tool("write_binary", "write_file_binary"), tool("delete", "delete_file"), tool("move", "move_file"), tool("copy", "copy_file"), tool("mkdir", "make_directory"), tool("stat", "file_info"), tool("find", "find_files"), tool("grep", "grep_code"), tool("open", "open_file"), tool("share", "share_file")),
-        "host.process@1" to ops(
+    private fun core(operation: String, target: String) =
+        HostGatewayOperationSpec(operation, HostGatewayRouteKind.CORE_CAPABILITY, target)
+
+    private fun document(operation: String, target: AiLimbsDocumentId) =
+        HostGatewayOperationSpec(operation, HostGatewayRouteKind.MANAGED_DOCUMENT, target.stableId)
+
+    private fun logging(operation: String) =
+        HostGatewayOperationSpec(operation, HostGatewayRouteKind.LOGGING)
+
+    private fun kernel(operation: String) =
+        HostGatewayOperationSpec(operation, HostGatewayRouteKind.KERNEL)
+
+    private fun component(operation: String, legacyTarget: String? = null) =
+        HostGatewayOperationSpec(operation, HostGatewayRouteKind.COMPONENT_PROXY, legacyTarget)
+
+    private fun pending(operation: String) =
+        HostGatewayOperationSpec(
+            operation = operation,
+            kind = HostGatewayRouteKind.UNBOUND,
+            affinityOverride = HostGatewayExecutionAffinity.UNBOUND
+        )
+
+    private fun owned(
+        affinity: HostGatewayExecutionAffinity,
+        item: HostGatewayOperationSpec
+    ): HostGatewayOperationSpec {
+        require(item.kind != HostGatewayRouteKind.UNBOUND) {
+            "UNBOUND operation affinity is fixed by pending()"
+        }
+        require(item.affinityOverride == null) {
+            "Operation affinity already declared: ${item.operation}"
+        }
+        return item.copy(affinityOverride = affinity)
+    }
+
+    private fun primitive(
+        affinity: HostGatewayExecutionAffinity,
+        vararg items: HostGatewayOperationSpec
+    ): HostPrimitiveBinding {
+        val requiresOperationOwnership =
+            affinity == HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND
+
+        items.forEach { item ->
+            if (item.kind == HostGatewayRouteKind.UNBOUND) {
+                require(item.affinityOverride == HostGatewayExecutionAffinity.UNBOUND) {
+                    "UNBOUND operation must declare UNBOUND affinity: ${item.operation}"
+                }
+            } else if (requiresOperationOwnership) {
+                require(item.affinityOverride != null) {
+                    "CROSS_PROCESS_BACKEND operation must declare ownership: ${item.operation}"
+                }
+            } else {
+                require(item.affinityOverride == null) {
+                    "Non-cross-process primitive must inherit its affinity: ${item.operation}"
+                }
+            }
+        }
+
+        val operations = linkedMapOf<String, HostGatewayOperationBinding>()
+        items.forEach { item ->
+            require(item.operation !in operations) {
+                "Duplicate Host Primitive operation: ${item.operation}"
+            }
+            operations[item.operation] =
+                HostGatewayOperationBinding(
+                    operation = item.operation,
+                    kind = item.kind,
+                    target = item.target,
+                    affinity = item.affinityOverride ?: affinity
+                )
+        }
+        return HostPrimitiveBinding(affinity = affinity, operations = operations)
+    }
+
+    private val definitions: Map<String, HostPrimitiveBinding> = linkedMapOf(
+        "host.filesystem@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("list", "list_files")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("read", "read_file")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("read_range", "read_file_part")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("read_full", "read_file_full")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("read_binary", "read_file_binary")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("write", "write_file")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("write_binary", "write_file_binary")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("delete", "delete_file")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("move", "move_file")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("copy", "copy_file")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("mkdir", "make_directory")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("stat", "file_info")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("find", "find_files")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("grep", "grep_code")), owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("open", "open_file")), owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("share", "share_file"))),
+        "host.process@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE,
             tool("execute", "execute_shell"),
             pending("start"),
             pending("read"),
@@ -43,20 +132,20 @@ internal object HostPrimitiveGatewayBindings {
             pending("terminate"),
             pending("list")
         ),
-        "host.ui.automation@1" to ops(tool("snapshot", "get_page_info"), tool("click", "click_element"), tool("tap", "tap"), tool("long_press", "long_press"), tool("set_text", "set_input_text"), tool("key", "press_key"), tool("swipe", "swipe")),
-        "host.screen.capture@1" to ops(tool("capture", "capture_screenshot")),
-        "host.network@1" to ops(tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), pending("listen")),
-        "host.background.runtime@1" to ops(pending("acquire_lease"), pending("update_lease"), pending("release_lease"), pending("status")),
-        "host.notification@1" to ops(tool("publish", "send_notification"), tool("observe", "get_notifications")),
-        "host.android.settings@1" to ops(tool("get", "get_system_setting"), tool("set", "modify_system_setting")),
-        "host.android.package@1" to ops(tool("list", "list_installed_apps"), tool("install", "install_app"), tool("uninstall", "uninstall_app"), tool("launch", "start_app"), tool("stop", "stop_app")),
-        "host.bluetooth@1" to ops(tool("permission", "request_bluetooth_permission"), tool("state", "get_bluetooth_state"), tool("enable", "request_enable_bluetooth"), tool("bonded", "list_bluetooth_bonded_devices"), tool("scan", "scan_bluetooth_devices"), tool("connect", "bluetooth_connect"), tool("listen", "bluetooth_listen"), tool("accept", "bluetooth_accept"), tool("send", "bluetooth_send"), tool("read", "bluetooth_read"), tool("transact", "bluetooth_send_and_read"), tool("close", "bluetooth_close"), tool("ble_connect", "bluetooth_ble_connect"), tool("ble_discover", "bluetooth_ble_discover_services"), tool("ble_read", "bluetooth_ble_read_characteristic"), tool("ble_write", "bluetooth_ble_write_characteristic"), tool("ble_transact", "bluetooth_ble_write_and_read_characteristic"), tool("ble_subscribe", "bluetooth_ble_subscribe_characteristic"), tool("ble_notifications", "bluetooth_ble_read_notifications")),
-        "host.location@1" to ops(tool("locate", "get_device_location")),
-        "host.clipboard@1" to ops(pending("read"), pending("write"), pending("clear"), pending("observe")),
-        "host.permission@1" to ops(pending("check"), pending("request")),
-        "host.audio.capture@1" to ops(pending("start"), pending("read"), pending("stop")),
-        "host.audio.playback@1" to ops(tool("play", "music_play"), tool("pause", "music_pause"), tool("resume", "music_resume"), tool("stop", "music_stop"), tool("seek", "music_seek"), tool("volume", "music_set_volume")),
-        "host.android.component@1" to ops(
+        "host.ui.automation@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("snapshot", "get_page_info")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("click", "click_element")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("tap", "tap")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("long_press", "long_press")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("set_text", "set_input_text")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("key", "press_key")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("swipe", "swipe"))),
+        "host.screen.capture@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("capture", "capture_screenshot")),
+        "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), pending("listen")),
+        "host.background.runtime@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("acquire_lease"), pending("update_lease"), pending("release_lease"), pending("status")),
+        "host.notification@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("publish", "send_notification")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, tool("observe", "get_notifications"))),
+        "host.android.settings@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("get", "get_system_setting")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("set", "modify_system_setting"))),
+        "host.android.package@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("list", "list_installed_apps")), owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("install", "install_app")), owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("uninstall", "uninstall_app")), owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("launch", "start_app")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("stop", "stop_app"))),
+        "host.bluetooth@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("permission", "request_bluetooth_permission")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("state", "get_bluetooth_state")), owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("enable", "request_enable_bluetooth")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("bonded", "list_bluetooth_bonded_devices")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("scan", "scan_bluetooth_devices")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("connect", "bluetooth_connect")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("listen", "bluetooth_listen")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("accept", "bluetooth_accept")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("send", "bluetooth_send")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("read", "bluetooth_read")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("transact", "bluetooth_send_and_read")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("close", "bluetooth_close")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_connect", "bluetooth_ble_connect")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_discover", "bluetooth_ble_discover_services")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_read", "bluetooth_ble_read_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_write", "bluetooth_ble_write_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_transact", "bluetooth_ble_write_and_read_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_subscribe", "bluetooth_ble_subscribe_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_notifications", "bluetooth_ble_read_notifications"))),
+        "host.location@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("locate", "get_device_location")),
+        "host.clipboard@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("read"), pending("write"), pending("clear"), pending("observe")),
+        "host.permission@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("check"), pending("request")),
+        "host.audio.capture@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("start"), pending("read"), pending("stop")),
+        "host.audio.playback@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("play", "music_play"), tool("pause", "music_pause"), tool("resume", "music_resume"), tool("stop", "music_stop"), tool("seek", "music_seek"), tool("volume", "music_set_volume")),
+        "host.android.component@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK,
             component("invoke", "execute_intent"),
             component("broadcast", "send_broadcast"),
             component("activity_result"),
@@ -64,38 +153,44 @@ internal object HostPrimitiveGatewayBindings {
             component("window_lease"),
             component("window_flags")
         ),
-        "host.event@1" to ops(pending("snapshot"), pending("subscribe"), pending("unsubscribe")),
-        "host.device.state@1" to ops(tool("snapshot", "device_info")),
-        "host.scheduler@1" to ops(pending("schedule_once"), pending("schedule_periodic"), pending("cancel"), pending("list")),
-        "host.ai.inference@1" to ops(pending("invoke"), pending("stream"), pending("estimate_tokens")),
-        "host.chat@1" to ops(tool("create", "create_new_chat"), tool("list", "list_chats"), tool("find", "find_chat"), tool("switch", "switch_chat"), tool("title", "update_chat_title"), tool("delete", "delete_chat"), tool("messages", "get_chat_messages"), tool("messages_range", "get_chat_messages_range"), tool("send", "send_message_to_ai"), tool("stream", "send_message_to_ai_streaming")),
-        "host.logging@1" to ops(logging("sources"), logging("read"), logging("export"), logging("clear"), logging("write")),
-        "host.secrets@1" to ops(pending("read"), pending("revoke"), pending("rotate")),
-        "host.ui.surface@1" to ops(kernel("list"), kernel("register"), kernel("open"), kernel("remove")),
-        "host.window.overlay@1" to ops(pending("create"), pending("update"), pending("remove"), pending("list")),
-        "host.capability@1" to ops(core("search", "capability.search"), core("describe", "capability.describe"), kernel("invoke")),
-        "host.plugin.service@1" to ops(kernel("list"), kernel("describe"), kernel("call")),
-        "host.extension.routing@1" to ops(kernel("list_points"), kernel("list_bindings"), kernel("bind"), kernel("unbind")),
-        "host.plugin.runtime@1" to ops(kernel("list"), kernel("status"), kernel("mount"), kernel("stop")),
-        "host.pipeline.hook@1" to ops(pending("list"), pending("register"), pending("unregister")),
-        "host.android.usage@1" to ops(tool("query", "get_app_usage_time")),
-        "host.content@1" to ops(pending("pick"), pending("open"), pending("read"), pending("write"), pending("share")),
-        "host.web.runtime@1" to ops(tool("visit", "visit_web"), tool("navigate", "browser_navigate"), tool("back", "browser_navigate_back"), tool("snapshot", "browser_snapshot"), tool("screenshot", "browser_take_screenshot"), tool("click", "browser_click"), tool("type", "browser_type"), tool("fill", "browser_fill_form"), tool("evaluate", "browser_evaluate"), tool("run_code", "browser_run_code"), tool("tabs", "browser_tabs"), tool("close", "browser_close"), tool("close_all", "browser_close_all"), tool("network", "browser_network_requests")),
-        "host.ingress@1" to ops(pending("list"), pending("register"), pending("unregister"), pending("status")),
-        "host.authorization@1" to ops(core("describe", "ai_limbs.policy.describe"), kernel("evaluate")),
-        "kernel.plugin.trust@1" to ops(kernel("status"), kernel("verify_package"), kernel("verify_detached"), kernel("install_keyring")),
-        "host.ui.widget@1" to ops(pending("list"), pending("register"), pending("update"), pending("remove")),
-        "host.camera.capture@1" to ops(pending("capture")),
-        "host.custom_access_prompt@1" to ops(document("read", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("write", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("snapshots", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("restore", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)),
-        "host.work_manual@1" to ops(document("read", AiLimbsDocumentId.WORK_MANUAL), document("write", AiLimbsDocumentId.WORK_MANUAL), document("snapshots", AiLimbsDocumentId.WORK_MANUAL), document("restore", AiLimbsDocumentId.WORK_MANUAL)),
-        "host.privileged.runtime@1" to ops(kernel("status"), kernel("pair"), kernel("prepare"), kernel("stop"), kernel("select")),
-        "host.resident.runtime@1" to ops(kernel("status"), kernel("set_enabled"), kernel("start"), kernel("stop"), kernel("core_status"), kernel("core_probe"), kernel("core_stop")),
-        "host.ui.layout@1" to ops(kernel("status"), kernel("start"), kernel("finish"), kernel("reset")),
-        "host.interaction.cycle@1" to ops(kernel("status"), kernel("set_timeout"), kernel("reset"), kernel("release_gate"), kernel("close")),
+        "host.event@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("snapshot"), pending("subscribe"), pending("unsubscribe")),
+        "host.device.state@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("snapshot", "device_info")),
+        "host.scheduler@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("schedule_once"), pending("schedule_periodic"), pending("cancel"), pending("list")),
+        "host.ai.inference@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("invoke"), pending("stream"), pending("estimate_tokens")),
+        "host.chat@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("create", "create_new_chat"), tool("list", "list_chats"), tool("find", "find_chat"), tool("switch", "switch_chat"), tool("title", "update_chat_title"), tool("delete", "delete_chat"), tool("messages", "get_chat_messages"), tool("messages_range", "get_chat_messages_range"), tool("send", "send_message_to_ai"), tool("stream", "send_message_to_ai_streaming")),
+        "host.logging@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, logging("sources"), logging("read"), logging("export"), logging("clear"), logging("write")),
+        "host.secrets@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("read"), pending("revoke"), pending("rotate")),
+        "host.ui.surface@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list")), owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("register")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("open")), owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("remove"))),
+        "host.window.overlay@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("create"), pending("update"), pending("remove"), pending("list")),
+        "host.capability@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, core("search", "capability.search"), core("describe", "capability.describe"), kernel("invoke")),
+        "host.plugin.service@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list"), kernel("describe"), kernel("call")),
+        "host.extension.routing@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list_points"), kernel("list_bindings"), kernel("bind"), kernel("unbind")),
+        "host.plugin.runtime@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list"), kernel("status"), kernel("mount"), kernel("stop")),
+        "host.pipeline.hook@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("list"), pending("register"), pending("unregister")),
+        "host.android.usage@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("query", "get_app_usage_time"))),
+        "host.content@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("pick"), pending("open"), pending("read"), pending("write"), pending("share")),
+        "host.web.runtime@1" to primitive(HostGatewayExecutionAffinity.HOST_UI, tool("visit", "visit_web"), tool("navigate", "browser_navigate"), tool("back", "browser_navigate_back"), tool("snapshot", "browser_snapshot"), tool("screenshot", "browser_take_screenshot"), tool("click", "browser_click"), tool("type", "browser_type"), tool("fill", "browser_fill_form"), tool("evaluate", "browser_evaluate"), tool("run_code", "browser_run_code"), tool("tabs", "browser_tabs"), tool("close", "browser_close"), tool("close_all", "browser_close_all"), tool("network", "browser_network_requests")),
+        "host.ingress@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("list"), pending("register"), pending("unregister"), pending("status")),
+        "host.authorization@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, core("describe", "ai_limbs.policy.describe"), kernel("evaluate")),
+        "kernel.plugin.trust@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("status"), kernel("verify_package"), kernel("verify_detached"), kernel("install_keyring")),
+        "host.ui.widget@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("list"), pending("register"), pending("update"), pending("remove")),
+        "host.camera.capture@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("capture")),
+        "host.custom_access_prompt@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, document("read", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("write", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("snapshots", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("restore", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)),
+        "host.work_manual@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, document("read", AiLimbsDocumentId.WORK_MANUAL), document("write", AiLimbsDocumentId.WORK_MANUAL), document("snapshots", AiLimbsDocumentId.WORK_MANUAL), document("restore", AiLimbsDocumentId.WORK_MANUAL)),
+        "host.privileged.runtime@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("status")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("pair")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("prepare")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("stop")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("select"))),
+        "host.resident.runtime@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK, kernel("status"), kernel("set_enabled"), kernel("start"), kernel("stop"), kernel("core_status"), kernel("core_probe"), kernel("core_stop")),
+        "host.ui.layout@1" to primitive(HostGatewayExecutionAffinity.HOST_UI, kernel("status"), kernel("start"), kernel("finish"), kernel("reset")),
+        "host.interaction.cycle@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("status"), kernel("set_timeout"), kernel("reset"), kernel("release_gate"), kernel("close")),
     )
 
+    val all: Map<String, Map<String, HostGatewayOperationBinding>> =
+        definitions.mapValues { (_, definition) -> definition.operations }
+
+    fun primitiveAffinity(primitiveId: String): HostGatewayExecutionAffinity? =
+        definitions[primitiveId.trim().lowercase()]?.affinity
+
     fun operations(primitiveId: String): Map<String, HostGatewayOperationBinding> =
-        all[primitiveId.trim().lowercase()].orEmpty()
+        definitions[primitiveId.trim().lowercase()]?.operations.orEmpty()
 
     fun operationNames(primitiveId: String): List<String> = operations(primitiveId).keys.sorted()
 

@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -101,6 +102,60 @@ internal class ResidentChildPresentationRuntime(
                     "ResidentChildPresentation",
                     "Child presentation entry mount failed: ${error.message ?: error::class.java.simpleName}",
                     error
+                )
+            }
+        }
+    }
+
+    suspend fun disconnectFailClosed() {
+        failedFingerprint.clear()
+        active.entries.toList().forEach { (extensionId, mounted) ->
+            active.remove(extensionId, mounted)
+            val failures = mutableListOf<Throwable>()
+
+            val stopped =
+                runCatching {
+                    withTimeoutOrNull(DISCONNECT_CLEANUP_TIMEOUT_MS) {
+                        mounted.handle.stop()
+                        true
+                    } ?: false
+                }.getOrElse { error ->
+                    failures += error
+                    false
+                }
+            if (!stopped) {
+                failures += IllegalStateException(
+                    "Child presentation stop timed out during Resident disconnect: $extensionId"
+                )
+            }
+
+            runCatching { mounted.host.revokeAllProviders() }
+                .onFailure(failures::add)
+
+            mounted.scope.cancel()
+            val joined =
+                runCatching {
+                    withTimeoutOrNull(DISCONNECT_CLEANUP_TIMEOUT_MS) {
+                        mounted.scope.coroutineContext[Job]?.join()
+                        true
+                    } ?: false
+                }.getOrElse { error ->
+                    failures += error
+                    false
+                }
+            if (!joined) {
+                failures += IllegalStateException(
+                    "Child presentation scope did not stop during Resident disconnect: $extensionId"
+                )
+            }
+
+            if (failures.isNotEmpty()) {
+                HostRuntimeLoggerFactory.extension(extensionId).e(
+                    "ResidentChildPresentation",
+                    "Fail-closed child presentation cleanup completed with ${failures.size} error(s)",
+                    IllegalStateException("Resident child presentation disconnected").also { failure ->
+                        failures.forEach(failure::addSuppressed)
+                    }
                 )
             }
         }
@@ -191,6 +246,10 @@ internal class ResidentChildPresentationRuntime(
         return IllegalStateException(
             "Child presentation retirement failed; Host-local ownership is retained"
         ).also { failure -> failures.forEach(failure::addSuppressed) }
+    }
+
+    private companion object {
+        const val DISCONNECT_CLEANUP_TIMEOUT_MS = 1_500L
     }
 
     private inner class Host(

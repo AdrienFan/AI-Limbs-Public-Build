@@ -138,6 +138,7 @@ internal object ResidentHostRuntimeResolver {
             "acquiring_owner",
             "starting_kernel",
             "claiming_backend",
+            "starting_foundational_runtime",
             "starting_bridge",
             "starting_plugin_services"
         )

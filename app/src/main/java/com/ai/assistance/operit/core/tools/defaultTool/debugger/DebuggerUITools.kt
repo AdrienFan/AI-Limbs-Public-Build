@@ -14,8 +14,10 @@ import com.ai.assistance.operit.core.tools.UIActionResultData
 import com.ai.assistance.operit.core.tools.UIPageResultData
 import com.ai.assistance.operit.core.tools.defaultTool.accessbility.AccessibilityUITools
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
+import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
 import com.ai.assistance.operit.core.tools.system.ShellIdentity
+import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolResult
 import com.ai.assistance.operit.data.repository.UIHierarchyManager
@@ -28,7 +30,11 @@ import org.xmlpull.v1.XmlPullParserFactory
 import com.ai.assistance.operit.util.OperitPaths
 
 /** 调试级别的UI工具，通过Shell命令实现UI操作，继承无障碍版本 */
-open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
+open class DebuggerUITools(
+    context: Context,
+    private val allowAccessibilityFallback: Boolean = true,
+    private val explicitShellPermissionLevel: AndroidPermissionLevel? = null
+) : AccessibilityUITools(context) {
 
     companion object {
         private const val TAG = "DebuggerUITools"
@@ -37,7 +43,32 @@ open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
     protected open val uiShellIdentity: ShellIdentity? = null
 
     protected suspend fun executeUiShellCommand(command: String): AndroidShellExecutor.CommandResult {
-        return AndroidShellExecutor.executeShellCommand(command, uiShellIdentity)
+        val explicitLevel = explicitShellPermissionLevel
+            ?: return AndroidShellExecutor.executeShellCommand(command, uiShellIdentity)
+
+        val executor = ShellExecutorFactory.getExecutor(context, explicitLevel)
+        val permission = executor.hasPermission()
+        if (!executor.isAvailable() || !permission.granted) {
+            return AndroidShellExecutor.CommandResult(
+                success = false,
+                stdout = "",
+                stderr =
+                    "Explicit UI backend $explicitLevel unavailable: " +
+                        permission.reason.ifBlank { "executor unavailable" },
+                exitCode = -1
+            )
+        }
+
+        val result = executor.executeCommand(
+            command,
+            uiShellIdentity ?: ShellIdentity.DEFAULT
+        )
+        return AndroidShellExecutor.CommandResult(
+            success = result.success,
+            stdout = result.stdout,
+            stderr = result.stderr,
+            exitCode = result.exitCode
+        )
     }
 
     /** 是否包含 display 相关参数（有的话强制走 ADB，不走无障碍） */
@@ -54,7 +85,7 @@ open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
 
     /** 使用Shell命令实现点击操作 */
     override suspend fun tap(tool: AITool): ToolResult {
-        if (!hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
+        if (allowAccessibilityFallback && !hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
             AppLogger.d(TAG, "无障碍服务已启用，使用无障碍点击")
             return super.tap(tool)
         }
@@ -125,7 +156,7 @@ open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
     }
 
     override suspend fun longPress(tool: AITool): ToolResult {
-        if (!hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
+        if (allowAccessibilityFallback && !hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
             AppLogger.d(TAG, "无障碍服务已启用，使用无障碍长按")
             return super.longPress(tool)
         }
@@ -189,7 +220,7 @@ open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
 
     /** 使用Shell命令实现滑动操作 */
     override suspend fun swipe(tool: AITool): ToolResult {
-        if (!hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
+        if (allowAccessibilityFallback && !hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
             AppLogger.d(TAG, "无障碍服务已启用，使用无障碍滑动")
             return super.swipe(tool)
         }
@@ -264,7 +295,7 @@ open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
 
     /** 使用Shell命令点击元素 */
     override suspend fun clickElement(tool: AITool): ToolResult {
-        if (!hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
+        if (allowAccessibilityFallback && !hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
             AppLogger.d(TAG, "无障碍服务已启用，使用无障碍点击元素")
             return super.clickElement(tool)
         }
@@ -347,7 +378,7 @@ open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
 
     /** 使用Shell命令设置输入文本 */
     override suspend fun setInputText(tool: AITool): ToolResult {
-        if (!hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
+        if (allowAccessibilityFallback && !hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
             AppLogger.d(TAG, "无障碍服务已启用，使用无障碍设置文本")
             return super.setInputText(tool)
         }
@@ -543,7 +574,7 @@ open class DebuggerUITools(context: Context) : AccessibilityUITools(context) {
 
     /** 使用Shell命令获取页面信息 */
     override suspend fun getPageInfo(tool: AITool): ToolResult {
-        if (!hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
+        if (allowAccessibilityFallback && !hasDisplayParam(tool) && UIHierarchyManager.isAccessibilityServiceEnabled(context)) {
             AppLogger.d(TAG, "无障碍服务已启用，使用无障碍获取页面信息")
             return super.getPageInfo(tool)
         }

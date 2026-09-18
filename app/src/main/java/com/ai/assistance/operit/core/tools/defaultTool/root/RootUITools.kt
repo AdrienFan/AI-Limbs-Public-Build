@@ -9,6 +9,7 @@ import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.core.tools.UIActionResultData
 import com.ai.assistance.operit.core.tools.UIPageResultData
 import com.ai.assistance.operit.core.tools.defaultTool.admin.AdminUITools
+import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.ShellIdentity
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
@@ -24,7 +25,11 @@ import org.xmlpull.v1.XmlPullParserFactory
  * Root-level UI tools that use shell commands (uiautomator, input) for robust UI automation.
  * This implementation is modeled after DebuggerUITools but operates without accessibility fallbacks.
  */
-open class RootUITools(context: Context) : AdminUITools(context) {
+open class RootUITools(context: Context) : AdminUITools(
+    context = context,
+    allowAccessibilityFallback = false,
+    explicitShellPermissionLevel = AndroidPermissionLevel.ROOT
+) {
 
     companion object {
         private const val TAG = "RootUITools"

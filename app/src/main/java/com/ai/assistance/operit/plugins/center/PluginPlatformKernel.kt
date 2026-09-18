@@ -39,6 +39,13 @@ import org.json.JSONObject
  * Plugin Center UI is intentionally not part of this object; system plugins consume versioned host contracts.
  */
 internal object PluginPlatformKernel {
+    private enum class FoundationalRuntimePhase {
+        STOPPED,
+        STARTING,
+        READY,
+        FAILED
+    }
+
     private const val TAG = "PluginPlatformKernel"
     private val lifecycleLock = Any()
     private val runtimeLifecycleMutex = Mutex()
@@ -50,6 +57,8 @@ internal object PluginPlatformKernel {
     @Volatile private var lifecyclePhase = "uninitialized"
     @Volatile private var lifecycleError: String? = null
     @Volatile private var businessRuntimeRestored = false
+    @Volatile private var foundationalRuntimePhase = FoundationalRuntimePhase.STOPPED
+    @Volatile private var foundationalRuntimeError: String? = null
     @Volatile private var childRuntimeStarted = false
     @Volatile private var residentBridgeIngressPrepared = false
     @Volatile private var residentBridgePluginMounted = false
@@ -73,6 +82,7 @@ internal object PluginPlatformKernel {
                     .put("last_error", org.json.JSONObject.NULL)
             }
         }
+        val foundationalRuntime = foundationalRuntimeSnapshotJson()
         return org.json.JSONObject()
             .put("phase", lifecyclePhase)
             .put("runtime_role", runtimeRole.name.lowercase())
@@ -82,6 +92,10 @@ internal object PluginPlatformKernel {
             .put("uid", android.os.Process.myUid())
             .put("owner_lease_held", runtimeOwnerLease != null)
             .put("business_runtime_restored", businessRuntimeRestored)
+            .put("foundational_runtime", foundationalRuntime)
+            .put("foundational_runtime_started", foundationalRuntime.getBoolean("started"))
+            .put("foundational_runtime_ready", foundationalRuntime.getBoolean("ready"))
+            .put("foundational_runtime_stopped", foundationalRuntime.getBoolean("stopped"))
             .put("child_runtime_started", childRuntimeStarted)
             .put("resident_bridge_ingress_prepared", residentBridgeIngressPrepared)
             .put("resident_bridge_plugin_mounted", residentBridgePluginMounted)
@@ -949,7 +963,7 @@ internal object PluginPlatformKernel {
                 childExtensionRuntimeInstance.start()
                 childRuntimeStarted = true
                 if (runtimeRole == PluginRuntimeRole.LEGACY_HOST || runtimeRole == PluginRuntimeRole.BUSINESS) {
-                    systemPluginControllerInstance.restore()
+                    restoreFoundationalRuntime(requireReady = runtimeRole == PluginRuntimeRole.BUSINESS)
                 }
                 managerInstance.restoreEnabledPlugins()
                 managerInstance.reconcileInactivityPolicy()
@@ -1041,6 +1055,156 @@ internal object PluginPlatformKernel {
         }
     }
 
+    private suspend fun restoreFoundationalRuntime(requireReady: Boolean) {
+        foundationalRuntimePhase = FoundationalRuntimePhase.STARTING
+        foundationalRuntimeError = null
+        try {
+            val controller = systemPluginControllerInstance.restore(requireReady = requireReady)
+            if (!requireReady) {
+                foundationalRuntimePhase = when (controller.phase) {
+                    com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.STOPPED ->
+                        FoundationalRuntimePhase.STOPPED
+                    com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.STARTING ->
+                        FoundationalRuntimePhase.STARTING
+                    com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.READY ->
+                        FoundationalRuntimePhase.READY
+                    com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.FAILED ->
+                        FoundationalRuntimePhase.FAILED
+                }
+                foundationalRuntimeError = controller.lastError
+                return
+            }
+
+            check(controller.started && controller.ready && !controller.stopped) {
+                "Plugin Center foundational runtime did not become mounted/READY: $controller"
+            }
+            val delegatedGateway = contributionsInstance.find(
+                PluginContributionKind.SERVICE,
+                com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_DELEGATED_GATEWAY_SERVICE
+            )
+            check(
+                delegatedGateway != null &&
+                    delegatedGateway.ownerPluginId ==
+                    com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID
+            ) {
+                "Plugin Center foundational control-plane is missing required service " +
+                    com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_DELEGATED_GATEWAY_SERVICE
+            }
+            foundationalRuntimePhase = FoundationalRuntimePhase.READY
+            foundationalRuntimeError = null
+        } catch (error: Throwable) {
+            foundationalRuntimePhase = FoundationalRuntimePhase.FAILED
+            foundationalRuntimeError = error.toString().take(2048)
+            throw error
+        }
+    }
+
+    private fun foundationalRuntimeSnapshotJson(): JSONObject {
+        val controller =
+            if (::systemPluginControllerInstance.isInitialized) {
+                systemPluginControllerInstance.runtimeSnapshot()
+            } else {
+                null
+            }
+        val delegatedGatewayReady =
+            if (initialized) {
+                contributionsInstance.find(
+                    PluginContributionKind.SERVICE,
+                    com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_DELEGATED_GATEWAY_SERVICE
+                )?.ownerPluginId == com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID
+            } else {
+                false
+            }
+        val requiredServiceSatisfied =
+            runtimeRole != PluginRuntimeRole.BUSINESS || delegatedGatewayReady
+        val controllerPhase = controller?.phase
+        val effectivePhase = when {
+            controllerPhase == com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.FAILED ->
+                FoundationalRuntimePhase.FAILED
+            controllerPhase == com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.STARTING ->
+                FoundationalRuntimePhase.STARTING
+            controllerPhase == com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.READY &&
+                !requiredServiceSatisfied ->
+                FoundationalRuntimePhase.FAILED
+            controllerPhase == com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.READY ->
+                FoundationalRuntimePhase.READY
+            foundationalRuntimePhase == FoundationalRuntimePhase.FAILED ->
+                FoundationalRuntimePhase.FAILED
+            controllerPhase == com.ai.assistance.operit.plugins.system.SystemPluginRuntimePhase.STOPPED ->
+                FoundationalRuntimePhase.STOPPED
+            else -> foundationalRuntimePhase
+        }
+        val ready =
+            effectivePhase == FoundationalRuntimePhase.READY &&
+                controller?.ready == true &&
+                requiredServiceSatisfied
+        val synthesizedError =
+            if (controller?.ready == true && !requiredServiceSatisfied) {
+                "Plugin Center required foundational service is not published: " +
+                    com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_DELEGATED_GATEWAY_SERVICE
+            } else {
+                null
+            }
+        return JSONObject()
+            .put("phase", effectivePhase.name.lowercase())
+            .put("started", controller?.started == true)
+            .put("ready", ready)
+            .put(
+                "stopped",
+                effectivePhase == FoundationalRuntimePhase.STOPPED && controller?.stopped != false
+            )
+            .put("controller_phase", controller?.phase?.name?.lowercase() ?: "stopped")
+            .put("controller_ready", controller?.ready == true)
+            .put("active_version", controller?.activeVersion ?: JSONObject.NULL)
+            .put("required_service_ready", delegatedGatewayReady)
+            .put(
+                "last_error",
+                synthesizedError ?: foundationalRuntimeError ?: controller?.lastError ?: JSONObject.NULL
+            )
+    }
+
+    private fun requireFoundationalRuntimeReady(): JSONObject {
+        val snapshot = foundationalRuntimeSnapshotJson()
+        if (!snapshot.getBoolean("started") || !snapshot.getBoolean("ready") ||
+            snapshot.getBoolean("stopped")) {
+            val error = IllegalStateException(
+                "Resident foundational runtime readiness was lost: $snapshot"
+            )
+            foundationalRuntimePhase = FoundationalRuntimePhase.FAILED
+            foundationalRuntimeError = error.toString().take(2048)
+            throw error
+        }
+        return snapshot
+    }
+
+    internal suspend fun startResidentFoundationalRuntime(): JSONObject =
+        runtimeLifecycleMutex.withLock {
+            requireInitialized()
+            check(runtimeRole == PluginRuntimeRole.BUSINESS) {
+                "Resident foundational runtime requires BUSINESS role"
+            }
+            check(started && !businessRuntimeRestored && !residentBridgeIngressPrepared) {
+                "Resident foundational runtime requires owner-only BUSINESS Kernel before Bridge"
+            }
+            lifecyclePhase = "starting_foundational_runtime"
+            lifecycleError = null
+            try {
+                restoreFoundationalRuntime(requireReady = true)
+                val snapshot = requireFoundationalRuntimeReady()
+                lifecyclePhase = "running"
+                snapshot
+            } catch (error: CancellationException) {
+                lifecyclePhase = "foundational_runtime_start_failed"
+                lifecycleError = error.toString().take(2048)
+                throw error
+            } catch (error: Throwable) {
+                lifecyclePhase = "foundational_runtime_start_failed"
+                lifecycleError = error.toString().take(2048)
+                AppLogger.e(TAG, "Resident foundational runtime restore failed", error)
+                throw error
+            }
+        }
+
     internal suspend fun startResidentBridgeIngress(): Boolean = runtimeLifecycleMutex.withLock {
         requireInitialized()
         check(runtimeRole == PluginRuntimeRole.BUSINESS) {
@@ -1049,6 +1213,7 @@ internal object PluginPlatformKernel {
         check(started && !businessRuntimeRestored) {
             "Resident Bridge ingress requires owner-only BUSINESS Kernel"
         }
+        requireFoundationalRuntimeReady()
         if (residentBridgeIngressPrepared) return@withLock residentBridgePluginMounted
         lifecyclePhase = "starting_bridge_ingress"
         lifecycleError = null
@@ -1057,10 +1222,8 @@ internal object PluginPlatformKernel {
                 childExtensionRuntimeInstance.start()
                 childRuntimeStarted = true
             }
-            // Resident staged startup must publish the system-plugin service/control plane before
-            // restoring any ordinary HOT parent. This mirrors startInternal(restoreBusinessRuntime=true)
-            // and prevents service-dependent parents from mounting against an incomplete Core registry.
-            systemPluginControllerInstance.restore()
+            // Foundational Plugin Center control-plane is a previous explicit stage. Bridge never
+            // owns or repairs that lifecycle; it only starts after the control-plane is READY.
             residentBridgePluginMounted = managerInstance.restoreEnabledPlugin(RESIDENT_BRIDGE_PLUGIN_ID)
             if (residentBridgePluginMounted) {
                 childExtensionRuntimeInstance.awaitEnabledPointReady(RESIDENT_BRIDGE_PROVIDER_POINT)
@@ -1095,8 +1258,9 @@ internal object PluginPlatformKernel {
             "Resident plugin services require BUSINESS runtime"
         }
         check(started && residentBridgeIngressPrepared) {
-            "Resident plugin services require a running owner and prepared Bridge ingress"
+            "Resident plugin services require owner and prepared Bridge ingress"
         }
+        requireFoundationalRuntimeReady()
         if (residentPluginServicesPrepared) {
             return@withLock checkNotNull(residentPluginRuntimeReport)
         }
@@ -1187,23 +1351,32 @@ internal object PluginPlatformKernel {
     }
 
     suspend fun shutdown(): Unit = withContext(NonCancellable) {
-        shutdownOwner(null)
+        shutdownOwner(null, null)
     }
 
     internal suspend fun shutdownForResidentHandoff(
-        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff,
+        onDestructiveRetirementStarted: () -> Unit
     ): Unit = withContext(NonCancellable) {
-        shutdownOwner(handoff)
+        shutdownOwner(handoff, onDestructiveRetirementStarted)
     }
 
     private suspend fun shutdownOwner(
-        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff?
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff?,
+        onDestructiveRetirementStarted: (() -> Unit)?
     ): Unit {
         runtimeLifecycleMutex.withLock {
             if (!initialized || lifecyclePhase == "stopped") return@withLock
             handoff?.verify(checkNotNull(
                 com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime.connection()
             ) { "Permission backend is disconnected before runtime handoff" })
+            if (handoff != null) {
+                checkNotNull(onDestructiveRetirementStarted) {
+                    "Resident handoff retirement requires an explicit destructive boundary callback"
+                }.invoke()
+            }
+            // Validation ends here. Once started flips false this VM may become partially retired
+            // and must never resume LEGACY_HOST business ownership.
             started = false
             lifecyclePhase = "stopping"
             val failures = mutableListOf<Throwable>()
@@ -1220,10 +1393,21 @@ internal object PluginPlatformKernel {
             if (businessRuntimeRestored || residentBridgePluginMounted || residentBridgeIngressPrepared) {
                 retire { managerInstance.shutdown(handoff) }
             }
-            if (businessRuntimeRestored &&
-                (runtimeRole == PluginRuntimeRole.LEGACY_HOST || runtimeRole == PluginRuntimeRole.BUSINESS)) {
-                // BUSINESS owns system-plugin services; UI renderer objects remain Host-owned/no-op there.
-                retire { systemPluginControllerInstance.shutdown() }
+            if (runtimeRole == PluginRuntimeRole.LEGACY_HOST || runtimeRole == PluginRuntimeRole.BUSINESS) {
+                // Foundational runtime has an independent lifecycle. It may have started before
+                // businessRuntimeRestored=true during Resident staged startup, so never gate its
+                // shutdown on the ordinary plugin-plane completion flag.
+                retire {
+                    try {
+                        systemPluginControllerInstance.shutdown()
+                        foundationalRuntimePhase = FoundationalRuntimePhase.STOPPED
+                        foundationalRuntimeError = null
+                    } catch (error: Throwable) {
+                        foundationalRuntimePhase = FoundationalRuntimePhase.FAILED
+                        foundationalRuntimeError = error.toString().take(2048)
+                        throw error
+                    }
+                }
             }
             retire { notificationHostInstance.clear() }
             if (failures.isNotEmpty()) {

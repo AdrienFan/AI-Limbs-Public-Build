@@ -25,6 +25,22 @@ internal data class SystemPluginMaintenanceSnapshot(
     val previousBackupVersion: String?
 )
 
+internal enum class SystemPluginRuntimePhase {
+    STOPPED,
+    STARTING,
+    READY,
+    FAILED
+}
+
+internal data class SystemPluginRuntimeSnapshot(
+    val phase: SystemPluginRuntimePhase,
+    val started: Boolean,
+    val ready: Boolean,
+    val stopped: Boolean,
+    val activeVersion: String?,
+    val lastError: String?
+)
+
 internal class SystemPluginController(
     context: Context,
     private val runtimeRole: PluginRuntimeRole,
@@ -45,6 +61,8 @@ internal class SystemPluginController(
     private val pendingDir = File(root, "pending")
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     @Volatile private var activeSession: ActiveSession? = null
+    @Volatile private var runtimePhase = SystemPluginRuntimePhase.STOPPED
+    @Volatile private var runtimeError: String? = null
 
     fun initialize() {
         versionsDir.mkdirs()
@@ -52,13 +70,70 @@ internal class SystemPluginController(
         pendingDir.mkdirs()
     }
 
-    suspend fun restore() {
-        if (activeSession != null) return
-        val version = readStateVersion() ?: return
+    suspend fun restore(requireReady: Boolean = false): SystemPluginRuntimeSnapshot {
+        if (activeSession != null) {
+            val current = runtimeSnapshot()
+            if (requireReady) {
+                check(current.ready) {
+                    "Plugin Center control-plane is mounted but not READY: phase=${current.phase} error=${current.lastError}"
+                }
+            }
+            return current
+        }
+
+        val version = readStateVersion()
+        if (version == null) {
+            runtimePhase = SystemPluginRuntimePhase.STOPPED
+            runtimeError = null
+            if (requireReady) {
+                throw PluginInstallException(
+                    "SYSTEM_FOUNDATIONAL_RUNTIME_MISSING",
+                    "Plugin Center control-plane is required by Resident BUSINESS but no active version is configured"
+                )
+            }
+            return runtimeSnapshot()
+        }
+
         val packageFile = packageFile(version)
-        if (!packageFile.isFile) return
-        runCatching { mountPackage(packageFile, packageFile.name) }
-            .onFailure { AppLogger.e(TAG, "Failed to restore Plugin Center $version", it) }
+        if (!packageFile.isFile) {
+            val error = PluginInstallException(
+                "SYSTEM_FOUNDATIONAL_PACKAGE_MISSING",
+                "Configured Plugin Center package is missing: $version"
+            )
+            runtimePhase = SystemPluginRuntimePhase.FAILED
+            runtimeError = error.toString().take(2048)
+            if (requireReady) throw error
+            AppLogger.e(TAG, "Failed to restore Plugin Center $version", error)
+            return runtimeSnapshot()
+        }
+
+        try {
+            mountPackage(packageFile, packageFile.name)
+        } catch (error: Throwable) {
+            AppLogger.e(TAG, "Failed to restore Plugin Center $version", error)
+            if (requireReady) throw error
+        }
+
+        val current = runtimeSnapshot()
+        if (requireReady) {
+            check(current.ready) {
+                "Plugin Center control-plane did not become READY: phase=${current.phase} error=${current.lastError}"
+            }
+        }
+        return current
+    }
+
+    fun runtimeSnapshot(): SystemPluginRuntimeSnapshot {
+        val session = activeSession
+        val phase = runtimePhase
+        return SystemPluginRuntimeSnapshot(
+            phase = phase,
+            started = session != null,
+            ready = phase == SystemPluginRuntimePhase.READY && session != null,
+            stopped = phase == SystemPluginRuntimePhase.STOPPED && session == null,
+            activeVersion = session?.manifest?.version,
+            lastError = runtimeError
+        )
     }
 
     fun snapshot(): SystemPluginMaintenanceSnapshot {
@@ -232,8 +307,11 @@ internal class SystemPluginController(
     }
 
     private fun mountPackage(packageFile: File, originalName: String) {
-        val validation = SystemPluginPackageValidator.validateForPluginCenterBootstrap(packageFile, originalName)
-        val manifest = validation.manifest
+        runtimePhase = SystemPluginRuntimePhase.STARTING
+        runtimeError = null
+        try {
+            val validation = SystemPluginPackageValidator.validateForPluginCenterBootstrap(packageFile, originalName)
+            val manifest = validation.manifest
         checkRuntimeSupported(manifest)
         val entryClass = manifest.runtime.entryClass
             ?: throw PluginInstallException("RUNTIME_ENTRY_CLASS_MISSING", "Plugin Center runtime entry class is missing")
@@ -264,8 +342,15 @@ internal class SystemPluginController(
                 )
             }
         }
-        activeSession = ActiveSession(manifest, handle, loader)
-        AppLogger.i(TAG, "Plugin Center mounted: ${manifest.pluginId}@${manifest.version}")
+            activeSession = ActiveSession(manifest, handle, loader)
+            runtimePhase = SystemPluginRuntimePhase.READY
+            runtimeError = null
+            AppLogger.i(TAG, "Plugin Center mounted: ${manifest.pluginId}@${manifest.version}")
+        } catch (error: Throwable) {
+            runtimePhase = SystemPluginRuntimePhase.FAILED
+            runtimeError = error.toString().take(2048)
+            throw error
+        }
     }
 
     private fun prepareRuntimeApk(content: File, manifest: SystemPluginManifestV1): File {
@@ -290,11 +375,24 @@ internal class SystemPluginController(
     }
 
     private fun stopActive() {
-        val session = activeSession ?: return
+        val session = activeSession
+        if (session == null) {
+            runtimePhase = SystemPluginRuntimePhase.STOPPED
+            runtimeError = null
+            return
+        }
         // A failed close is not proof that the system plugin has stopped. Keep the handle so
         // retirement cannot report success and let another runtime mount a second instance.
-        session.handle.close()
-        activeSession = null
+        try {
+            session.handle.close()
+            activeSession = null
+            runtimePhase = SystemPluginRuntimePhase.STOPPED
+            runtimeError = null
+        } catch (error: Throwable) {
+            runtimePhase = SystemPluginRuntimePhase.FAILED
+            runtimeError = error.toString().take(2048)
+            throw error
+        }
     }
 
     private fun extractValidatedPackage(packageFile: File, destination: File) {

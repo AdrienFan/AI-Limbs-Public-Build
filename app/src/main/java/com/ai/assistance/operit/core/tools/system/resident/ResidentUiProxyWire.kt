@@ -144,6 +144,7 @@ internal class ResidentComponentProxyBroker {
             timeoutMs > 0L -> timeoutMs
             kind == KIND_ACTIVITY_RESULT -> ACTIVITY_RESULT_TIMEOUT_MS
             kind == KIND_PERMISSION_REQUEST -> PERMISSION_REQUEST_TIMEOUT_MS
+            kind == KIND_HOST_TOOL_EXECUTE -> HOST_TOOL_EXECUTION_TIMEOUT_MS
             else -> DEFAULT_TIMEOUT_MS
         }
         val now = android.os.SystemClock.elapsedRealtime()
@@ -225,13 +226,16 @@ internal class ResidentComponentProxyBroker {
         const val KIND_ACTIVITY_PRESENCE = "activity_presence"
         const val KIND_PERMISSION_REQUEST = "permission_request"
         const val KIND_HOST_PRIMITIVE = "host_primitive"
+        const val KIND_HOST_TOOL_EXECUTE = "host_tool_execute"
+        const val KIND_UI_AUTOMATION_PRESENTATION = "ui_automation_presentation"
         private const val DEFAULT_TIMEOUT_MS = 15_000L
         private const val ACTIVITY_RESULT_TIMEOUT_MS = 120_000L
         private const val PERMISSION_REQUEST_TIMEOUT_MS = 60_000L
+        private const val HOST_TOOL_EXECUTION_TIMEOUT_MS = 120_000L
         val SUPPORTED_KINDS = setOf(
             KIND_ACTIVITY_RESULT, KIND_START_ACTIVITY, KIND_SEND_BROADCAST, KIND_START_SERVICE,
             KIND_WINDOW_FLAGS, KIND_WINDOW_LEASE, KIND_ACTIVITY_PRESENCE, KIND_PERMISSION_REQUEST,
-            KIND_HOST_PRIMITIVE
+            KIND_HOST_PRIMITIVE, KIND_HOST_TOOL_EXECUTE, KIND_UI_AUTOMATION_PRESENTATION
         )
     }
 }

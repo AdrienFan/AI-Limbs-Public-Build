@@ -69,6 +69,7 @@ object ResidentCoreMain {
                     businessPhase == "acquiring_owner" ||
                     businessPhase == "starting_kernel" ||
                     businessPhase == "claiming_backend" ||
+                    businessPhase == "starting_foundational_runtime" ||
                     businessPhase == "starting_bridge" ||
                     businessPhase == "starting_plugin_services" -> "handoff_pending"
                 businessPhase == "failed" -> "unavailable"
@@ -101,6 +102,7 @@ object ResidentCoreMain {
                 .put("expected_host_pid", runtimeState.opt("expected_host_pid"))
                 .put("business_attached", businessAttached)
                 .put("plugin_kernel_started", runtimeState.getBoolean("plugin_kernel_started"))
+                .put("foundational_runtime_ready", runtimeState.getBoolean("foundational_runtime_ready"))
                 .put("bridge_ingress_prepared", runtimeState.getBoolean("bridge_ingress_prepared"))
                 .put("bridge_plugin_mounted", runtimeState.getBoolean("bridge_plugin_mounted"))
                 .put("plugin_services_prepared", runtimeState.getBoolean("plugin_services_prepared"))

@@ -8,6 +8,9 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import com.ai.assistance.operit.core.application.ActivityLifecycleManager
+import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
+import com.ai.assistance.operit.services.FloatingChatService
+import com.ai.assistance.operit.ui.common.displays.UIOperationOverlay
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.ui.permissions.PermissionRequestOverlay
@@ -116,13 +119,7 @@ internal class ResidentUiProxyClient(
                 } catch (error: CancellationException) {
                     throw error
                 } catch (error: Throwable) {
-                    revision.set(-1L)
-                    hostGeneration.set(0L)
-                    // Never keep rendering the last Core-owned Bridge state after the Core socket
-                    // is unreachable. A stale ONLINE snapshot produces dead controls and false
-                    // connectivity; clearing it makes the Host notification fail closed.
-                    runtime.replaceForegroundNotification(null)
-                    com.ai.assistance.operit.util.AppLogger.w(TAG, "Resident UI proxy temporarily disconnected", error)
+                    failClosedDisconnected(error)
                     delay(RETRY_MS)
                 }
             }
@@ -249,6 +246,55 @@ internal class ResidentUiProxyClient(
         val snapshot = result.getJSONObject("snapshot")
         lastSnapshot.set(JSONObject(snapshot.toString()))
         applySnapshot(snapshot)
+    }
+
+    private suspend fun failClosedDisconnected(error: Throwable) {
+        revision.set(-1L)
+        hostGeneration.set(0L)
+        lastSnapshot.set(JSONObject())
+
+        // Visibility is revoked before any plugin cleanup runs. Disconnect cleanup is deliberately
+        // idempotent because every retry may fail independently.
+        runtime.replaceForegroundNotification(null)
+        runtime.uiRegistry.replaceFromResidentProxy(emptyList(), emptyList(), null)
+        runtime.pagePresentationRegistry.replaceFromResidentProxy(emptyList())
+        runtime.dynamicNavigationRegistry.replaceFromResidentProxy(emptyList(), emptyList())
+        childControl.update(JSONArray(), JSONArray(), JSONArray())
+        providerDirectory.disconnectFailClosed()
+
+        developerMode = false
+        developerDiscovery = false
+        hostPrimitiveCache.set(emptyList())
+        hostPrimitiveOperations.clear()
+
+        // Visibility is already revoked. Parent and child presentation cleanup is independent and
+        // both runtimes forcibly forget Host ownership even if plugin stop hooks fail or time out.
+        runCatching { presentationRuntime.disconnectFailClosed() }
+            .onFailure {
+                com.ai.assistance.operit.util.AppLogger.w(
+                    TAG,
+                    "Parent presentation fail-closed cleanup reported an error",
+                    it
+                )
+            }
+        runCatching { childPresentationRuntime.disconnectFailClosed() }
+            .onFailure {
+                com.ai.assistance.operit.util.AppLogger.w(
+                    TAG,
+                    "Child presentation fail-closed cleanup reported an error",
+                    it
+                )
+            }
+
+        // A presentation stop hook is untrusted code and may try to republish during teardown.
+        // Close the directory again so disconnected always means unavailable.
+        providerDirectory.disconnectFailClosed()
+
+        com.ai.assistance.operit.util.AppLogger.w(
+            TAG,
+            "Resident UI proxy disconnected; Core-owned presentation state is unavailable",
+            error
+        )
     }
 
     private suspend fun applySnapshot(snapshot: JSONObject) {
@@ -527,6 +573,15 @@ internal class ResidentProviderDirectory(
         publish()
     }
 
+    fun disconnectFailClosed() {
+        proxies.values.forEach { proxy -> runCatching { proxy.update(null) } }
+        proxies.clear()
+        remote.set(emptyMap())
+        pageMetadata.set(emptyMap())
+        localPages.clear()
+        state.value = emptyMap()
+    }
+
     fun registerLocalPageProvider(
         ownerPluginId: String,
         id: String,
@@ -677,6 +732,7 @@ private class ResidentHostComponentExecutor(
     private val permissionOverlay = PermissionRequestOverlay(appContext)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val hostPrimitiveAdapter = KernelHostPrimitiveAdapter(appContext, PluginRuntimeRole.UI_PROXY)
+    private val hostScreenCaptureTools = StandardUITools(appContext)
 
     suspend fun pollAndExecute() {
         val result = client.componentRequest("component_poll", JSONObject().put("max_items", 8))
@@ -779,6 +835,72 @@ private class ResidentHostComponentExecutor(
                 parameters = payload.optJSONObject("parameters") ?: JSONObject()
             )
             JSONObject().put("ok", true).put("result", result)
+        }
+        ResidentComponentProxyBroker.KIND_UI_AUTOMATION_PRESENTATION -> {
+            val action = payload.getString("action")
+            runOnUiThread {
+                val overlay = UIOperationOverlay.getInstance(appContext)
+                when (action) {
+                    "tool_begin" -> {
+                        val floating = FloatingChatService.getInstance()
+                        floating?.setFloatingWindowVisible(false)
+                        floating?.setStatusIndicatorVisible(
+                            payload.optBoolean("show_status_indicator", true)
+                        )
+                    }
+                    "tool_end" -> {
+                        val floating = FloatingChatService.getInstance()
+                        floating?.setFloatingWindowVisible(true)
+                        floating?.setStatusIndicatorVisible(false)
+                    }
+                    "overlay_tap" ->
+                        overlay.showTap(
+                            payload.getInt("x"),
+                            payload.getInt("y"),
+                            payload.optLong("auto_hide_delay_ms", 1500L)
+                        )
+                    "overlay_swipe" ->
+                        overlay.showSwipe(
+                            payload.getInt("start_x"),
+                            payload.getInt("start_y"),
+                            payload.getInt("end_x"),
+                            payload.getInt("end_y"),
+                            payload.optLong("auto_hide_delay_ms", 1500L)
+                        )
+                    "overlay_text" ->
+                        overlay.showTextInput(
+                            payload.getInt("x"),
+                            payload.getInt("y"),
+                            payload.optString("text"),
+                            payload.optLong("auto_hide_delay_ms", 2000L)
+                        )
+                    "overlay_hide" -> overlay.hide()
+                    "overlay_hide_immediate" -> overlay.hideImmediately()
+                    else -> error("Unknown UI automation presentation action: $action")
+                }
+            }
+            JSONObject().put("ok", true)
+        }
+        ResidentComponentProxyBroker.KIND_HOST_TOOL_EXECUTE -> {
+            val toolName = payload.getString("tool_name").trim()
+            check(toolName in HOST_EXECUTABLE_TOOLS) {
+                "Host tool is not approved for Resident execution: $toolName"
+            }
+            val parameters =
+                payload.optJSONArray("parameters")?.objects().orEmpty().map { item ->
+                    ToolParameter(
+                        name = item.getString("name"),
+                        value = item.optString("value")
+                    )
+                }
+            val tool = AITool(name = toolName, parameters = parameters)
+            val (path, _) = hostScreenCaptureTools.captureScreenshot(tool)
+            val success = !path.isNullOrBlank()
+            JSONObject()
+                .put("ok", true)
+                .put("success", success)
+                .put("path", path.orEmpty())
+                .put("error", if (success) JSONObject.NULL else "Screenshot failed")
         }
         else -> JSONObject().put("ok", false).put("error", "UNKNOWN_COMPONENT_KIND")
         }
@@ -982,6 +1104,7 @@ private class ResidentHostComponentExecutor(
 
     private companion object {
         val HOST_OWNED_PRIMITIVES = setOf("host.ui.layout@1")
+        val HOST_EXECUTABLE_TOOLS = setOf("capture_screenshot")
     }
 }
 

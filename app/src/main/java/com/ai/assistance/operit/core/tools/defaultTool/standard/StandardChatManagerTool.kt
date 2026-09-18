@@ -9,6 +9,7 @@ import android.os.IBinder
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
 import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
+import com.ai.assistance.operit.core.application.OperitApplication
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.util.ChatMarkupRegex
 import com.ai.assistance.operit.util.WaifuMessageProcessor
@@ -187,6 +188,7 @@ class StandardChatManagerTool(private val context: Context) {
 
     suspend fun getChatMessages(tool: AITool): ToolResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
@@ -257,6 +259,7 @@ class StandardChatManagerTool(private val context: Context) {
 
     suspend fun getChatMessagesRange(tool: AITool): ToolResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
@@ -490,6 +493,7 @@ class StandardChatManagerTool(private val context: Context) {
      */
     suspend fun findChat(tool: AITool): ToolResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             val query = tool.parameters.find { it.name == "query" }?.value?.trim().orEmpty()
             if (query.isBlank()) {
                 return ToolResult(
@@ -576,6 +580,7 @@ class StandardChatManagerTool(private val context: Context) {
      */
     suspend fun updateChatTitle(tool: AITool): ToolResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
@@ -630,6 +635,7 @@ class StandardChatManagerTool(private val context: Context) {
      */
     suspend fun deleteChat(tool: AITool): ToolResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value?.trim()
             if (chatId.isNullOrBlank()) {
                 return ToolResult(
@@ -688,6 +694,26 @@ class StandardChatManagerTool(private val context: Context) {
 
     private val appContext = context.applicationContext
     private val chatRuntimeHolder by lazy { ChatRuntimeHolder.getInstance(appContext) }
+
+    /**
+     * Business core for host.chat@1.
+     *
+     * This deliberately resolves from the ChatRuntimeHolder in the current Business Owner process.
+     * Resident Core must never bind FloatingChatService to obtain a ChatServiceCore.
+     */
+    private fun requireChatPrimitiveBusinessOwner() {
+        val application = appContext as? OperitApplication
+        check(application?.isResidentUiProxyMode() != true) {
+            "host.chat@1 must execute in the Business Owner process, never Resident UI_PROXY"
+        }
+    }
+
+    private fun chatPrimitiveCore(
+        slot: ChatRuntimeSlot = ChatRuntimeSlot.FLOATING
+    ): ChatServiceCore {
+        requireChatPrimitiveBusinessOwner()
+        return chatRuntimeHolder.getCore(slot)
+    }
 
     // Service 连接状态
     private var chatCore: ChatServiceCore? = null
@@ -1001,21 +1027,8 @@ class StandardChatManagerTool(private val context: Context) {
      */
     suspend fun createNewChat(tool: AITool): ToolResult {
         return try {
-            if (!ensureServiceConnected()) {
-                return ToolResult(
-                    toolName = tool.name,
-                    success = false,
-                    result = ChatCreationResultData(chatId = ""),
-                    error = "Service not connected"
-                )
-            }
-
-            val core = chatCore ?: return ToolResult(
-                toolName = tool.name,
-                success = false,
-                result = ChatCreationResultData(chatId = ""),
-                error = "ChatServiceCore not initialized"
-            )
+            requireChatPrimitiveBusinessOwner()
+            val core = chatPrimitiveCore(ChatRuntimeSlot.FLOATING)
 
             // 获取创建前的 chat list
             val previousChatIds = core.chatHistories.value.map { it.id }.toSet()
@@ -1129,6 +1142,7 @@ class StandardChatManagerTool(private val context: Context) {
      */
     suspend fun listChats(tool: AITool): ToolResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             val chatHistoryManager = ChatHistoryManager.getInstance(appContext)
             val chatHistories = chatHistoryManager.chatHistoriesFlow.first()
             val currentChatId = chatHistoryManager.currentChatIdFlow.first()
@@ -1235,21 +1249,8 @@ class StandardChatManagerTool(private val context: Context) {
      */
     suspend fun switchChat(tool: AITool): ToolResult {
         return try {
-            if (!ensureServiceConnected()) {
-                return ToolResult(
-                    toolName = tool.name,
-                    success = false,
-                    result = ChatSwitchResultData(chatId = "", chatTitle = ""),
-                    error = "Service not connected"
-                )
-            }
-
-            val core = chatCore ?: return ToolResult(
-                toolName = tool.name,
-                success = false,
-                result = ChatSwitchResultData(chatId = "", chatTitle = ""),
-                error = "ChatServiceCore not initialized"
-            )
+            requireChatPrimitiveBusinessOwner()
+            val core = chatPrimitiveCore(ChatRuntimeSlot.FLOATING)
 
             val chatId = tool.parameters.find { it.name == "chat_id" }?.value
             if (chatId.isNullOrBlank()) {
@@ -1315,6 +1316,7 @@ class StandardChatManagerTool(private val context: Context) {
      */
     suspend fun startMessageToAIStream(tool: AITool): MessageSendStreamStartResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             val runtimeParam = tool.parameters.find { it.name == "runtime" }?.value?.trim()
             val runtimeSlot = parseMessageRuntimeSlot(runtimeParam)
             if (runtimeParam != null && runtimeSlot == null) {
@@ -1328,7 +1330,7 @@ class StandardChatManagerTool(private val context: Context) {
                 )
             }
 
-            val core = chatRuntimeHolder.getCore(runtimeSlot ?: ChatRuntimeSlot.FLOATING)
+            val core = chatPrimitiveCore(runtimeSlot ?: ChatRuntimeSlot.FLOATING)
 
             val message = tool.parameters.find { it.name == "message" }?.value
             if (message.isNullOrBlank()) {
@@ -1588,6 +1590,7 @@ class StandardChatManagerTool(private val context: Context) {
 
     suspend fun sendMessageToAI(tool: AITool): ToolResult {
         return try {
+            requireChatPrimitiveBusinessOwner()
             when (val startResult = startMessageToAIStream(tool)) {
                 is MessageSendStreamStartResult.Failed -> startResult.result
                 is MessageSendStreamStartResult.Started -> {

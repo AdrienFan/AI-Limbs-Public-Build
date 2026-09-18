@@ -21,6 +21,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.map
@@ -101,6 +102,60 @@ internal class ResidentPluginPresentationRuntime(
                     "ResidentPresentation",
                   "Presentation entry mount failed: ${error.message ?: error::class.java.simpleName}",
                     error
+                )
+            }
+        }
+    }
+
+    suspend fun disconnectFailClosed() {
+        failedFingerprint.clear()
+        active.entries.toList().forEach { (pluginId, mounted) ->
+            active.remove(pluginId, mounted)
+            val failures = mutableListOf<Throwable>()
+
+            val stopped =
+                runCatching {
+                    withTimeoutOrNull(DISCONNECT_CLEANUP_TIMEOUT_MS) {
+                        mounted.handle.stop()
+                        true
+                    } ?: false
+                }.getOrElse { error ->
+                    failures += error
+                    false
+                }
+            if (!stopped) {
+                failures += IllegalStateException(
+                    "Presentation stop timed out during Resident disconnect: $pluginId"
+                )
+            }
+
+            runCatching { mounted.host.revokeAllPageProviders() }
+                .onFailure(failures::add)
+
+            mounted.scope.cancel()
+            val joined =
+                runCatching {
+                    withTimeoutOrNull(DISCONNECT_CLEANUP_TIMEOUT_MS) {
+                        mounted.scope.coroutineContext[Job]?.join()
+                        true
+                    } ?: false
+                }.getOrElse { error ->
+                    failures += error
+                    false
+                }
+            if (!joined) {
+                failures += IllegalStateException(
+                    "Presentation scope did not stop during Resident disconnect: $pluginId"
+                )
+            }
+
+            if (failures.isNotEmpty()) {
+                HostRuntimeLoggerFactory.plugin(pluginId).e(
+                    "ResidentPresentation",
+                    "Fail-closed presentation cleanup completed with ${failures.size} error(s)",
+                    IllegalStateException("Resident presentation disconnected").also { failure ->
+                        failures.forEach(failure::addSuppressed)
+                    }
                 )
             }
         }
@@ -200,6 +255,10 @@ internal class ResidentPluginPresentationRuntime(
         ).also { failure ->
             failures.forEach(failure::addSuppressed)
         }
+    }
+
+    private companion object {
+        const val DISCONNECT_CLEANUP_TIMEOUT_MS = 1_500L
     }
 
     private inner class Host(

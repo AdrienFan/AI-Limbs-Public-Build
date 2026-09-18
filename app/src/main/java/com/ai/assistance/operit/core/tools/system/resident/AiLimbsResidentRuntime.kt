@@ -36,6 +36,7 @@ internal object AiLimbsResidentRuntime {
     private const val PREFS = "ai_limbs_resident_runtime_v1"
     private const val KEY_ENABLED = "enabled"
     private const val KEY_LAST_ERROR = "last_error"
+    private const val KEY_ON_AUTO_RETRY_BLOCKED = "on_auto_retry_blocked_after_handoff_failure"
     private const val PLUGIN_CENTER_OWNER = "ai_limbs.system.plugin_center"
     private const val MAIN_CLASS =
         "com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentMain"
@@ -62,6 +63,14 @@ internal object AiLimbsResidentRuntime {
     fun scheduleEnsureStarted(context: Context) {
         initialize(context)
         if (!isEnabled()) return
+        if (prefs.getBoolean(KEY_ON_AUTO_RETRY_BLOCKED, false)) {
+            AppLogger.w(
+                TAG,
+                "Resident automatic ON retry is blocked after an unsafe handoff failure; " +
+                    "explicit user retry is required"
+            )
+            return
+        }
         scope.launch {
             runCatching { ensureStartedIfEnabled(app) }
                 .onFailure { recordError("Resident auto-start failed: ${it.message}") }
@@ -123,18 +132,21 @@ internal object AiLimbsResidentRuntime {
     }
 
     private suspend fun setEnabled(enabled: Boolean): JSONObject = lifecycleMutex.withLock {
+        clearOnAutoRetryBlock()
         persistEnabled(enabled)
         notifyHostResidentStateChanged()
         if (enabled) startLocked() else stopLocked()
     }
 
     private suspend fun start(): JSONObject = lifecycleMutex.withLock {
+        clearOnAutoRetryBlock()
         persistEnabled(true)
         notifyHostResidentStateChanged()
         startLocked()
     }
 
     private suspend fun stop(): JSONObject = lifecycleMutex.withLock {
+        clearOnAutoRetryBlock()
         persistEnabled(false)
         notifyHostResidentStateChanged()
         stopLocked()
@@ -885,6 +897,38 @@ internal object AiLimbsResidentRuntime {
     private fun hostShellStateFile(): File = File(stateDir(), "host_shell.state")
     private fun stopRequestFile(): File = File(stateDir(), "stop.request")
     private fun shellLogPath(): String = "/data/local/tmp/ail_resident_${Process.myUid()}.log"
+
+    internal fun blockAutomaticOnRetryAfterHandoffFailure(
+        context: Context,
+        error: Throwable,
+        cleanupErrors: List<String>
+    ) {
+        initialize(context)
+        val detail = buildString {
+            append("Resident ON handoff failed and cannot safely reuse this Host VM: ")
+            append(error.message ?: error.javaClass.simpleName)
+            if (cleanupErrors.isNotEmpty()) {
+                append("; cleanup=")
+                append(cleanupErrors.distinct().joinToString(" | "))
+            }
+        }.take(4000)
+        check(
+            prefs.edit()
+                .putBoolean(KEY_ON_AUTO_RETRY_BLOCKED, true)
+                .putString(KEY_LAST_ERROR, detail)
+                .commit()
+        ) {
+            "Could not persist Resident handoff recovery state"
+        }
+        AppLogger.e(TAG, detail, error)
+    }
+
+    private fun clearOnAutoRetryBlock() {
+        if (!prefs.getBoolean(KEY_ON_AUTO_RETRY_BLOCKED, false)) return
+        check(prefs.edit().remove(KEY_ON_AUTO_RETRY_BLOCKED).commit()) {
+            "Could not clear Resident ON automatic-retry block"
+        }
+    }
 
     private fun persistEnabled(enabled: Boolean) {
         check(prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()) {

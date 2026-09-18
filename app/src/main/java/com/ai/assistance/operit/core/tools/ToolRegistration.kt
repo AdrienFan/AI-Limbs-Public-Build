@@ -6,6 +6,8 @@ import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
 import com.ai.assistance.operit.core.tools.climode.CliToolModeSupport
 import com.ai.assistance.operit.core.tools.climode.ToolExposureMode
 import com.ai.assistance.operit.core.tools.defaultTool.ToolGetter
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationOperation
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationRuntime
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.data.model.ToolResult
@@ -1920,9 +1922,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) {
-                        ToolGetter.getUITools(context).clickElement(it)
-                    }
+                    UiAutomationRuntime.execute(context, tool, UiAutomationOperation.CLICK)
                 }
             }
     )
@@ -1937,7 +1937,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) { ToolGetter.getUITools(context).tap(it) }
+                    UiAutomationRuntime.execute(context, tool, UiAutomationOperation.TAP)
                 }
             }
     )
@@ -1951,9 +1951,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) {
-                        ToolGetter.getUITools(context).longPress(it)
-                    }
+                    UiAutomationRuntime.execute(context, tool, UiAutomationOperation.LONG_PRESS)
                 }
             }
     )
@@ -2617,9 +2615,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             descriptionGenerator = { _ -> s(R.string.toolreg_get_page_info_desc) },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) {
-                        ToolGetter.getUITools(context).getPageInfo(it)
-                    }
+                    UiAutomationRuntime.execute(context, tool, UiAutomationOperation.SNAPSHOT)
                 }
             }
     )
@@ -2629,16 +2625,66 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             descriptionGenerator = { _ -> s(R.string.toolreg_capture_screenshot_desc) },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(
-                        tool = tool,
-                        showStatusIndicator = false,
-                        delayMs = 200
-                    ) { t ->
-                        val (path, _) = ToolGetter.getUITools(context).captureScreenshot(t)
-                        if (path.isNullOrBlank()) {
-                            ToolResult(toolName = t.name, success = false, result = StringResultData(""), error = "Screenshot failed")
-                        } else {
-                            ToolResult(toolName = t.name, success = true, result = StringResultData(path), error = null)
+                    if (com.ai.assistance.operit.core.tools.system.resident.ResidentCoreProcessIdentity.isCurrentProcessCore()) {
+                        val parameters = JSONArray().apply {
+                            tool.parameters.forEach { parameter ->
+                                put(
+                                    JSONObject()
+                                        .put("name", parameter.name)
+                                        .put("value", parameter.value)
+                                )
+                            }
+                        }
+                        val response =
+                            runCatching {
+                                com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy.request(
+                                    com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_HOST_TOOL_EXECUTE,
+                                    JSONObject()
+                                        .put("tool_name", tool.name)
+                                        .put("parameters", parameters)
+                                )
+                            }.getOrElse { error ->
+                                return@runBlocking ToolResult(
+                                    toolName = tool.name,
+                                    success = false,
+                                    result = StringResultData(""),
+                                    error = "Host screenshot proxy unavailable: ${error.message}"
+                                )
+                            }
+                        if (!response.optBoolean("ok", false)) {
+                            return@runBlocking ToolResult(
+                                toolName = tool.name,
+                                success = false,
+                                result = StringResultData(""),
+                                error = response.optString("error", "Host screenshot proxy failed")
+                            )
+                        }
+                        val path = response.optString("path")
+                        val success = response.optBoolean("success", false) && path.isNotBlank()
+                        ToolResult(
+                            toolName = tool.name,
+                            success = success,
+                            result = StringResultData(path),
+                            error =
+                                if (success) {
+                                    null
+                                } else {
+                                    response.optString("error", "Screenshot failed")
+                                        .ifBlank { "Screenshot failed" }
+                                }
+                        )
+                    } else {
+                        executeUiToolWithVisibility(
+                            tool = tool,
+                            showStatusIndicator = false,
+                            delayMs = 200
+                        ) { t ->
+                            val (path, _) = ToolGetter.getUITools(context).captureScreenshot(t)
+                            if (path.isNullOrBlank()) {
+                                ToolResult(toolName = t.name, success = false, result = StringResultData(""), error = "Screenshot failed")
+                            } else {
+                                ToolResult(toolName = t.name, success = true, result = StringResultData(path), error = null)
+                            }
                         }
                     }
                 }
@@ -2675,9 +2721,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) {
-                        ToolGetter.getUITools(context).setInputText(it)
-                    }
+                    UiAutomationRuntime.execute(context, tool, UiAutomationOperation.SET_TEXT)
                 }
             }
     )
@@ -2691,9 +2735,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) {
-                        ToolGetter.getUITools(context).pressKey(it)
-                    }
+                    UiAutomationRuntime.execute(context, tool, UiAutomationOperation.KEY)
                 }
             }
     )
@@ -2710,9 +2752,7 @@ fun registerAllTools(handler: AIToolHandler, context: Context) {
             },
             executor = { tool ->
                 runBlocking(Dispatchers.IO) {
-                    executeUiToolWithVisibility(tool) {
-                        ToolGetter.getUITools(context).swipe(it)
-                    }
+                    UiAutomationRuntime.execute(context, tool, UiAutomationOperation.SWIPE)
                 }
             }
     )

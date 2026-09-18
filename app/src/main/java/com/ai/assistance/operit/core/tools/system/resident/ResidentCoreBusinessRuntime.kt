@@ -33,6 +33,7 @@ internal enum class ResidentCoreBusinessPhase {
     ACQUIRING_OWNER,
     STARTING_KERNEL,
     CLAIMING_BACKEND,
+    STARTING_FOUNDATIONAL_RUNTIME,
     STARTING_BRIDGE,
     STARTING_PLUGIN_SERVICES,
     RUNNING,
@@ -63,6 +64,7 @@ internal class ResidentCoreBusinessRuntime {
     private var dependencyPreflight: JSONObject? = null
     private var expectedHostPid: Int? = null
     private var pluginKernelStarted = false
+    private var foundationalRuntimeReady = false
     private var bridgeIngressPrepared = false
     private var bridgePluginMounted = false
     private var pluginServicesPrepared = false
@@ -235,10 +237,29 @@ internal class ResidentCoreBusinessRuntime {
                 synchronized(lock) { pluginRuntimeSupervisor = supervisor }
                 supervisor.start()
             }
-            // The policy/Dispatcher plane is part of business ownership. Bring it up before Bridge
-            // so a provider that becomes online immediately has a live Core-owned destination.
+            // The policy/Dispatcher plane is part of business ownership. Bring it up before the
+            // foundational Plugin Center control-plane so delegated operations have a live Core
+            // destination before ordinary plugins are allowed to mount.
             onBusinessOwnerReady()
-            synchronized(lock) { businessPhase = ResidentCoreBusinessPhase.STARTING_BRIDGE }
+
+            synchronized(lock) {
+                businessPhase = ResidentCoreBusinessPhase.STARTING_FOUNDATIONAL_RUNTIME
+            }
+            val foundationalRuntime = runBlocking(Dispatchers.IO) {
+                PluginPlatformKernel.startResidentFoundationalRuntime()
+            }
+            check(
+                foundationalRuntime.getBoolean("started") &&
+                    foundationalRuntime.getBoolean("ready") &&
+                    !foundationalRuntime.getBoolean("stopped")
+            ) {
+                "Resident foundational runtime did not become READY: $foundationalRuntime"
+            }
+            synchronized(lock) {
+                foundationalRuntimeReady = true
+                businessPhase = ResidentCoreBusinessPhase.STARTING_BRIDGE
+            }
+
             val bridgeMounted = runBlocking(Dispatchers.IO) {
                 PluginPlatformKernel.startResidentBridgeIngress()
             }
@@ -256,10 +277,17 @@ internal class ResidentCoreBusinessRuntime {
                 PluginPlatformKernel.startResidentPluginServices()
             }
             val serviceKernel = PluginPlatformKernel.lifecycleSnapshot()
-            check(serviceKernel.getBoolean("resident_plugin_services_prepared") &&
-                serviceKernel.getBoolean("business_runtime_restored") &&
-                serviceKernel.getBoolean("resident_subsystems_ready")) {
-                "Resident plugin/subsystem services did not become Core-owned: kernel=$serviceKernel report=$pluginReport"
+            val foundationalKernel = serviceKernel.getJSONObject("foundational_runtime")
+            check(
+                serviceKernel.getBoolean("foundational_runtime_ready") &&
+                    foundationalKernel.getBoolean("started") &&
+                    foundationalKernel.getBoolean("ready") &&
+                    !foundationalKernel.getBoolean("stopped") &&
+                    serviceKernel.getBoolean("resident_plugin_services_prepared") &&
+                    serviceKernel.getBoolean("business_runtime_restored") &&
+                    serviceKernel.getBoolean("resident_subsystems_ready")
+            ) {
+                "Resident foundational/plugin services did not become Core-owned: kernel=$serviceKernel report=$pluginReport"
             }
             check(!stopRequested) { "Business takeover cancelled before ownership publication" }
             synchronized(lock) {
@@ -295,6 +323,7 @@ internal class ResidentCoreBusinessRuntime {
             }
             synchronized(lock) {
                 pluginKernelStarted = PluginPlatformKernel.isStarted
+                foundationalRuntimeReady = false
                 bridgeIngressPrepared = false
                 bridgePluginMounted = false
                 pluginServicesPrepared = false
@@ -361,6 +390,7 @@ internal class ResidentCoreBusinessRuntime {
             runBlocking(Dispatchers.IO) { PluginPlatformKernel.shutdown() }
             synchronized(lock) {
                 pluginKernelStarted = false
+                foundationalRuntimeReady = false
                 bridgeIngressPrepared = false
                 bridgePluginMounted = false
                 pluginServicesPrepared = false
@@ -443,6 +473,7 @@ internal class ResidentCoreBusinessRuntime {
             .put("expected_host_pid", expectedHostPid ?: JSONObject.NULL)
             .put("business_attached", businessAttached)
             .put("plugin_kernel_started", pluginKernelStarted)
+            .put("foundational_runtime_ready", foundationalRuntimeReady)
             .put("bridge_ingress_prepared", bridgeIngressPrepared)
             .put("bridge_plugin_mounted", bridgePluginMounted)
             .put("plugin_services_prepared", pluginServicesPrepared)

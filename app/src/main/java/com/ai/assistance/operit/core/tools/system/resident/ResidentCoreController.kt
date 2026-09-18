@@ -273,6 +273,12 @@ internal object ResidentCoreController {
         check(state.getBoolean("business_attached") == runtime.getBoolean("business_attached")) {
             "Core business ownership snapshot is inconsistent"
         }
+        check(
+            state.getBoolean("foundational_runtime_ready") ==
+                runtime.getBoolean("foundational_runtime_ready")
+        ) {
+            "Core foundational runtime readiness snapshot is inconsistent"
+        }
         check(state.getBoolean("bridge_ingress_prepared") == runtime.getBoolean("bridge_ingress_prepared")) {
             "Core Bridge ingress snapshot is inconsistent"
         }
@@ -283,10 +289,21 @@ internal object ResidentCoreController {
         if (state.getBoolean("business_attached")) {
             check(state.getString("runtime_owner") == "resident_core" &&
                 runtime.getBoolean("plugin_kernel_started") &&
+                runtime.getBoolean("foundational_runtime_ready") &&
                 runtime.getBoolean("bridge_ingress_prepared") &&
                 runtime.getBoolean("plugin_services_prepared") &&
                 runtime.getBoolean("ubuntu_control_ready")) {
-                "Core claims business ownership before Kernel / Bridge / plugin services / Ubuntu are prepared"
+                "Core claims business ownership before Kernel / foundational runtime / Bridge / plugin services / Ubuntu are prepared"
+            }
+            val kernel = runtime.getJSONObject("plugin_kernel")
+            val foundational = kernel.getJSONObject("foundational_runtime")
+            check(
+                kernel.getBoolean("foundational_runtime_ready") &&
+                    foundational.getBoolean("started") &&
+                    foundational.getBoolean("ready") &&
+                    !foundational.getBoolean("stopped")
+            ) {
+                "Core claims business ownership without a READY foundational control-plane: $foundational"
             }
             val resources = state.getJSONObject("continuous_resources")
             check(resources.getString("state") == "active" &&

@@ -13,6 +13,7 @@ import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.core.tools.UIPageResultData
 import com.ai.assistance.operit.core.tools.AppListData
 import com.ai.assistance.operit.core.tools.defaultTool.ToolGetter
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationPresentation
 import com.ai.assistance.operit.core.tools.system.MediaProjectionCaptureManager
 import com.ai.assistance.operit.core.tools.system.MediaProjectionHolder
 import com.ai.assistance.operit.core.tools.system.ScreenCaptureActivity
@@ -21,8 +22,6 @@ import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.FunctionType
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.data.model.ToolResult
-import com.ai.assistance.operit.services.FloatingChatService
-import com.ai.assistance.operit.ui.common.displays.UIOperationOverlay
 import com.ai.assistance.operit.ui.common.displays.UIAutomationProgressOverlay
 import com.ai.assistance.operit.ui.common.displays.VirtualDisplayOverlay
 import com.ai.assistance.operit.util.AppLogger
@@ -297,7 +296,7 @@ open class StandardUITools(protected val context: Context) : ToolImplementations
     }
 
     // UI操作反馈覆盖层（使用单例避免多窗口叠加）
-    protected val operationOverlay = UIOperationOverlay.getInstance(context)
+    protected val operationOverlay = UiAutomationPresentation(context)
 
     private var cachedMediaProjection: MediaProjection? = null
     private var cachedMediaProjectionCaptureManager: MediaProjectionCaptureManager? = null
