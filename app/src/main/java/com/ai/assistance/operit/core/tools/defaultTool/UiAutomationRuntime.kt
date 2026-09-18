@@ -152,7 +152,7 @@ internal object UiAutomationRuntime {
  * In Resident Core it carries neutral JSON only. In Android Host it owns the actual
  * FloatingChatService/UIOperationOverlay objects.
  */
-internal class UiAutomationPresentation(context: Context) {
+class UiAutomationPresentation(context: Context) {
     private val appContext = context.applicationContext
     private val isResidentCore = ResidentCoreProcessIdentity.isCurrentProcessCore()
 
@@ -161,23 +161,27 @@ internal class UiAutomationPresentation(context: Context) {
         UIOperationOverlay.getInstance(appContext)
     }
 
-    fun beginTool(showStatusIndicator: Boolean) {
-        dispatch(
-            action = ACTION_TOOL_BEGIN,
-            payload = JSONObject().put("show_status_indicator", showStatusIndicator)
-        ) {
-            val floating = FloatingChatService.getInstance()
-            floating?.setFloatingWindowVisible(false)
-            floating?.setStatusIndicatorVisible(showStatusIndicator)
+    suspend fun beginTool(showStatusIndicator: Boolean) {
+        if (isResidentCore) {
+            dispatch(
+                action = ACTION_TOOL_BEGIN,
+                payload = JSONObject().put("show_status_indicator", showStatusIndicator)
+            ) {}
+            return
         }
+        val floating = FloatingChatService.getInstance()
+        floating?.setFloatingWindowVisible(false)
+        floating?.setStatusIndicatorVisible(showStatusIndicator)
     }
 
-    fun endTool() {
-        dispatch(action = ACTION_TOOL_END) {
-            val floating = FloatingChatService.getInstance()
-            floating?.setFloatingWindowVisible(true)
-            floating?.setStatusIndicatorVisible(false)
+    suspend fun endTool() {
+        if (isResidentCore) {
+            dispatch(action = ACTION_TOOL_END) {}
+            return
         }
+        val floating = FloatingChatService.getInstance()
+        floating?.setFloatingWindowVisible(true)
+        floating?.setStatusIndicatorVisible(false)
     }
 
     fun showTap(x: Int, y: Int, autoHideDelayMs: Long = 1500L) {

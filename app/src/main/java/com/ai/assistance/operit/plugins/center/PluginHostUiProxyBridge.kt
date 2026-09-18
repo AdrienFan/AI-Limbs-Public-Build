@@ -838,45 +838,47 @@ private class ResidentHostComponentExecutor(
         }
         ResidentComponentProxyBroker.KIND_UI_AUTOMATION_PRESENTATION -> {
             val action = payload.getString("action")
-            runOnUiThread {
-                val overlay = UIOperationOverlay.getInstance(appContext)
-                when (action) {
-                    "tool_begin" -> {
-                        val floating = FloatingChatService.getInstance()
-                        floating?.setFloatingWindowVisible(false)
-                        floating?.setStatusIndicatorVisible(
-                            payload.optBoolean("show_status_indicator", true)
-                        )
+            when (action) {
+                "tool_begin" -> {
+                    val floating = FloatingChatService.getInstance()
+                    floating?.setFloatingWindowVisible(false)
+                    floating?.setStatusIndicatorVisible(
+                        payload.optBoolean("show_status_indicator", true)
+                    )
+                }
+                "tool_end" -> {
+                    val floating = FloatingChatService.getInstance()
+                    floating?.setFloatingWindowVisible(true)
+                    floating?.setStatusIndicatorVisible(false)
+                }
+                else -> runOnUiThread {
+                    val overlay = UIOperationOverlay.getInstance(appContext)
+                    when (action) {
+                        "overlay_tap" ->
+                            overlay.showTap(
+                                payload.getInt("x"),
+                                payload.getInt("y"),
+                                payload.optLong("auto_hide_delay_ms", 1500L)
+                            )
+                        "overlay_swipe" ->
+                            overlay.showSwipe(
+                                payload.getInt("start_x"),
+                                payload.getInt("start_y"),
+                                payload.getInt("end_x"),
+                                payload.getInt("end_y"),
+                                payload.optLong("auto_hide_delay_ms", 1500L)
+                            )
+                        "overlay_text" ->
+                            overlay.showTextInput(
+                                payload.getInt("x"),
+                                payload.getInt("y"),
+                                payload.optString("text"),
+                                payload.optLong("auto_hide_delay_ms", 2000L)
+                            )
+                        "overlay_hide" -> overlay.hide()
+                        "overlay_hide_immediate" -> overlay.hideImmediately()
+                        else -> error("Unknown UI automation presentation action: $action")
                     }
-                    "tool_end" -> {
-                        val floating = FloatingChatService.getInstance()
-                        floating?.setFloatingWindowVisible(true)
-                        floating?.setStatusIndicatorVisible(false)
-                    }
-                    "overlay_tap" ->
-                        overlay.showTap(
-                            payload.getInt("x"),
-                            payload.getInt("y"),
-                            payload.optLong("auto_hide_delay_ms", 1500L)
-                        )
-                    "overlay_swipe" ->
-                        overlay.showSwipe(
-                            payload.getInt("start_x"),
-                            payload.getInt("start_y"),
-                            payload.getInt("end_x"),
-                            payload.getInt("end_y"),
-                            payload.optLong("auto_hide_delay_ms", 1500L)
-                        )
-                    "overlay_text" ->
-                        overlay.showTextInput(
-                            payload.getInt("x"),
-                            payload.getInt("y"),
-                            payload.optString("text"),
-                            payload.optLong("auto_hide_delay_ms", 2000L)
-                        )
-                    "overlay_hide" -> overlay.hide()
-                    "overlay_hide_immediate" -> overlay.hideImmediately()
-                    else -> error("Unknown UI automation presentation action: $action")
                 }
             }
             JSONObject().put("ok", true)
