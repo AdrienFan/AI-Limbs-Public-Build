@@ -92,6 +92,14 @@ Java_com_ai_limbs_extensions_systemenvironment_ubuntu_runtime_terminal_Pty_00024
     }
 
     if (pid == 0) { // Child process
+        // forkpty/login_tty normally creates a new session whose PGID equals the child PID.
+        // Keep that invariant explicit so Kotlin can safely terminate the entire PTY tree via kill(-pid, ...).
+        if (getpgrp() != getpid()) {
+            if (setpgid(0, 0) != 0 && errno != EPERM && errno != EACCES) {
+                LOGE("setpgid failed for PTY child %d: %s", getpid(), strerror(errno));
+            }
+        }
+
         if (chdir(cwd) != 0) {
             fprintf(stderr, "chdir to %s failed: %s\n", cwd, strerror(errno));
             _exit(1);

@@ -120,11 +120,14 @@ class LocalTerminalProvider(
     }
 
     override suspend fun closeSession(sessionId: String) {
-        activeSessions[sessionId]?.let { session ->
-            session.process.destroy()
-            activeSessions.remove(sessionId)
-            Log.d(TAG, "Closed local terminal session: $sessionId")
+        val session = activeSessions.remove(sessionId) ?: return
+        withContext(Dispatchers.IO) {
+            runCatching { session.process.destroy() }
+                .onFailure { Log.w(TAG, "Failed to terminate local terminal session: $sessionId", it) }
+            runCatching { session.process.waitFor() }
+                .onFailure { Log.w(TAG, "Failed to reap local terminal session: $sessionId", it) }
         }
+        Log.d(TAG, "Closed local terminal session: $sessionId")
     }
 
     override suspend fun executeHiddenCommand(

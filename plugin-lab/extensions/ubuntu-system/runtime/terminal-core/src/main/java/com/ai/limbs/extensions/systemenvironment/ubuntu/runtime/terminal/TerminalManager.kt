@@ -964,7 +964,10 @@ class TerminalManager private constructor(
         coroutineScope.launch(Dispatchers.IO) {
             try {
                 Log.d(TAG, "Starting session...")
-                closingSessions.remove(sessionId)
+                if (closingSessions.remove(sessionId) || sessionManager.getSession(sessionId) == null) {
+                    Log.w(TAG, "Session $sessionId was closed before PTY startup; skipping spawn.")
+                    return@launch
+                }
 
                 // 获取单例的终端提供者
                 val provider = getTerminalProvider()
@@ -972,6 +975,16 @@ class TerminalManager private constructor(
                 // 启动终端会话
                 val result = provider.startSession(sessionId)
                 val (terminalSession, pty) = result.getOrThrow()
+
+                // The logical owner may have been closed while forkpty/proot was still starting.
+                // Never attach a newly spawned PTY to a session that has already lost ownership.
+                if (closingSessions.contains(sessionId) || sessionManager.getSession(sessionId) == null) {
+                    Log.w(TAG, "Session $sessionId lost ownership during PTY startup; tearing down spawned process group.")
+                    runCatching { pty.destroy() }
+                    runCatching { provider.closeSession(sessionId) }
+                    return@launch
+                }
+
                 val sessionWriter = terminalSession.stdin.writer()
 
                 // 启动读取协程
@@ -1010,6 +1023,16 @@ class TerminalManager private constructor(
                     }
                 }
 
+                // Closing can race with reader creation too. Check ownership again before publishing resources.
+                if (closingSessions.contains(sessionId) || sessionManager.getSession(sessionId) == null) {
+                    Log.w(TAG, "Session $sessionId closed before PTY attachment; tearing down spawned process group.")
+                    readJob.cancel()
+                    runCatching { sessionWriter.close() }
+                    runCatching { pty.destroy() }
+                    runCatching { provider.closeSession(sessionId) }
+                    return@launch
+                }
+
                 // 更新会话信息
                 sessionManager.updateSession(sessionId) { session ->
                     session.copy(
@@ -1018,6 +1041,17 @@ class TerminalManager private constructor(
                         sessionWriter = sessionWriter,
                         readJob = readJob
                     )
+                }
+
+                // If close won the final race between the ownership check and state publication,
+                // perform an immediate teardown instead of leaving an unowned PTY behind.
+                if (closingSessions.contains(sessionId) || sessionManager.getSession(sessionId) == null) {
+                    Log.w(TAG, "Session $sessionId lost ownership while PTY resources were being attached; cleaning up.")
+                    readJob.cancel()
+                    runCatching { sessionWriter.close() }
+                    runCatching { pty.destroy() }
+                    runCatching { provider.closeSession(sessionId) }
+                    return@launch
                 }
             } catch (e: Exception) {
                 val detail = "SESSION_START_FAILED: ${e.message ?: e.javaClass.simpleName}"
@@ -1034,16 +1068,14 @@ class TerminalManager private constructor(
             return
         }
 
+        // EOF means the PTY side has closed; waitFor also reaps the forkpty leader.
+        // Reaping here prevents a dead leader from lingering as a zombie.
         val exitCode =
-            if (terminalSession.process.isAlive) {
-                -1
-            } else {
-                runCatching { terminalSession.process.waitFor() }
-                    .getOrElse {
-                        Log.w(TAG, "Failed to read exit code for session $sessionId", it)
-                        -1
-                    }
-            }
+            runCatching { terminalSession.process.waitFor() }
+                .getOrElse {
+                    Log.w(TAG, "Failed to reap terminal process for session $sessionId", it)
+                    -1
+                }
 
         Log.i(TAG, "Terminal session $sessionId exited with code $exitCode")
         if (session.initState != SessionInitState.READY) {
