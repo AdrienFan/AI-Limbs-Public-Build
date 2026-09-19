@@ -151,7 +151,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
                 Text("服务仅供 AI Limbs 使用。设备重启后需重新启动；各插件仍按 AI Limbs 授权执行。", style = MaterialTheme.typography.bodySmall)
             }
         }
-        Text("v0.1.1 · 基于 Shizuku 开源技术，采用 Apache-2.0 许可。", style = MaterialTheme.typography.bodySmall)
+        Text("v0.1.2 · 基于 Shizuku 开源技术，采用 Apache-2.0 许可。", style = MaterialTheme.typography.bodySmall)
     }
     if (stopConfirm) AlertDialog(
         onDismissRequest = { stopConfirm = false },

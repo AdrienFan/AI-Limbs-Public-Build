@@ -119,14 +119,11 @@ final class ResidentOwner {
                     Lease previous = owner;
                     owner = null;
                     unlink(previous);
-                    if (destination == 1) {
-                        returningToHost = true;
-                        afterReply = resumeHost;
-                    } else {
-                        returningToHost = false;
-                        terminating = true;
-                        afterReply = stopServer;
-                    }
+                    // Resident lifetime release must never terminate the independent permission daemon.
+                    // Destination 0 is retained for wire compatibility, but both values now mean
+                    // detach Core ownership and return the existing backend to the Android Host.
+                    returningToHost = true;
+                    afterReply = resumeHost;
                 }
             } else {
                 throw new IllegalArgumentException("Unknown Resident lifetime operation");

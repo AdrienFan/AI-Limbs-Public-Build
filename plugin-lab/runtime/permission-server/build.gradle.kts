@@ -8,8 +8,8 @@ android {
         applicationId = "com.ai.limbs.permission.server"
         minSdk = 26
         targetSdk = 36
-        versionCode = 2
-        versionName = "0.1.1"
+        versionCode = 4
+        versionName = "0.1.3"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_21
