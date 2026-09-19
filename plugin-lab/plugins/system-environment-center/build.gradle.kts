@@ -13,8 +13,8 @@ android {
         applicationId = "com.ai.limbs.payload.systemenvironment.center"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.2.11"
+        versionCode = 14
+        versionName = "0.2.12"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -46,13 +46,12 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))
-    // Host-shared UI/runtime libraries are resolved parent-first from AI Limbs; keep them out of payload DEX.
     // Shared ABI type identity is owned by the real AI Limbs host; parent and .ailx must not embed copies.
     compileOnly(project(":system-environment-contract"))
     implementation(platform(libs.compose.bom))
-    compileOnly(libs.compose.ui)
-    compileOnly(libs.compose.material3)
-    compileOnly(libs.compose.material.icons.extended)
-    compileOnly(libs.activity.compose)
-    compileOnly(libs.coroutines.android)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.extended)
+    implementation(libs.activity.compose)
+    implementation(libs.coroutines.android)
 }
