@@ -125,6 +125,8 @@ class AIForegroundService : Service() {
             "com.ai.assistance.operit.action.REFRESH_PLUGIN_NOTIFICATION"
         private const val REQUEST_CODE_VOICE_FLOATING = 9005
         private const val NOTIFICATION_WATCHDOG_INTERVAL_MS = 15_000L
+        private const val RESIDENT_GUARDIAN_WATCHDOG_INTERVAL_MS = 30_000L
+        private const val RESIDENT_GUARDIAN_RECOVERY_COOLDOWN_MS = 120_000L
         private const val RESIDENT_WAKE_LOCK_TAG = "AI-Limbs:ResidentHost"
 
         private const val ACTION_TOGGLE_WAKE_LISTENING = "com.ai.assistance.operit.action.TOGGLE_WAKE_LISTENING"
@@ -776,6 +778,8 @@ class AIForegroundService : Service() {
     private var wakeMonitorJob: Job? = null
     private var externalHttpMonitorJob: Job? = null
     private var notificationWatchdogJob: Job? = null
+    private var residentGuardianWatchdogJob: Job? = null
+    private var lastResidentGuardianRecoveryRequestElapsedMs: Long = 0L
     private var wakeListeningJob: Job? = null
     private var wakeResumeJob: Job? = null
 
@@ -966,6 +970,62 @@ class AIForegroundService : Service() {
     private fun stopNotificationWatchdog() {
         notificationWatchdogJob?.cancel()
         notificationWatchdogJob = null
+    }
+
+    private fun syncResidentGuardianWatchdog() {
+        if (AiLimbsResidentRuntime.isEnabledForHost()) {
+            startResidentGuardianWatchdog()
+        } else {
+            stopResidentGuardianWatchdog()
+        }
+    }
+
+    private fun startResidentGuardianWatchdog() {
+        if (residentGuardianWatchdogJob?.isActive == true) return
+        residentGuardianWatchdogJob = serviceScope.launch {
+            while (isActive) {
+                delay(RESIDENT_GUARDIAN_WATCHDOG_INTERVAL_MS)
+                if (!AiLimbsResidentRuntime.isEnabledForHost()) continue
+
+                val snapshot = runCatching {
+                    AiLimbsResidentRuntime.guardianWatchdogSnapshot(
+                        this@AIForegroundService,
+                        AiLimbsResidentRuntime.GUARDIAN_WATCHDOG_STALE_AFTER_MS
+                    )
+                }.onFailure { error ->
+                    AppLogger.w(TAG, "Resident Guardian watchdog probe failed", error)
+                }.getOrNull() ?: continue
+
+                if (snapshot.optBoolean("healthy", false)) continue
+
+                val nowElapsed = android.os.SystemClock.elapsedRealtime()
+                if (
+                    lastResidentGuardianRecoveryRequestElapsedMs > 0L &&
+                    nowElapsed - lastResidentGuardianRecoveryRequestElapsedMs <
+                        RESIDENT_GUARDIAN_RECOVERY_COOLDOWN_MS
+                ) {
+                    continue
+                }
+                lastResidentGuardianRecoveryRequestElapsedMs = nowElapsed
+                AppLogger.w(
+                    TAG,
+                    "Resident Guardian unhealthy; requesting recovery: " +
+                        "reason=${snapshot.optString("reason", "unknown")} " +
+                        "pid=${snapshot.optInt("guardian_pid", -1)} " +
+                        "heartbeat_age_ms=${snapshot.optLong("heartbeat_age_ms", -1L)}"
+                )
+                AiLimbsResidentRuntime.scheduleGuardianWatchdogRecovery(
+                    this@AIForegroundService,
+                    AiLimbsResidentRuntime.GUARDIAN_WATCHDOG_STALE_AFTER_MS
+                )
+            }
+        }
+    }
+
+    private fun stopResidentGuardianWatchdog() {
+        residentGuardianWatchdogJob?.cancel()
+        residentGuardianWatchdogJob = null
+        lastResidentGuardianRecoveryRequestElapsedMs = 0L
     }
 
     private fun isExternalHttpEnabledNow(): Boolean {
@@ -1182,6 +1242,7 @@ class AIForegroundService : Service() {
                     force = true
                 )
                 observeResidentProxyForegroundNotification()
+                startResidentGuardianWatchdog()
                 // Resident continuous CPU ownership moved to the Core session. UI_PROXY only
                 // keeps the Android framework shell/foreground-service surface alive.
                 releaseResidentCpuWakeLock("resident_ui_proxy_core_owned")
@@ -1212,6 +1273,7 @@ class AIForegroundService : Service() {
         )
         syncResidentCpuWakeLock("service_create")
         startNotificationWatchdog()
+        syncResidentGuardianWatchdog()
         observePluginForegroundNotification()
         observeRuntimeTaskViewPreference()
         observeBackgroundKeepAlivePreference()
@@ -1358,6 +1420,7 @@ class AIForegroundService : Service() {
     private fun handleResidentUiProxyStart(intent: Intent?): Int {
         return when (intent?.action) {
             null, ACTION_RESIDENT_KEEPALIVE -> {
+                syncResidentGuardianWatchdog()
                 publishResidentHostShellState("running", "resident_ui_proxy_keepalive")
                 if (AiLimbsResidentRuntime.isEnabledForHost()) START_STICKY else {
                     stopSelf()
@@ -1365,6 +1428,7 @@ class AIForegroundService : Service() {
                 }
             }
             ACTION_RESIDENT_CORE_RECOVERY -> {
+                syncResidentGuardianWatchdog()
                 publishResidentHostShellState("running", "resident_ui_proxy_core_recovery")
                 if (AiLimbsResidentRuntime.isEnabledForHost()) {
                     AiLimbsResidentRuntime.scheduleCoreCrashRecovery(this)
@@ -1377,8 +1441,10 @@ class AIForegroundService : Service() {
             ACTION_RESIDENT_STATE_CHANGED -> {
                 publishResidentHostShellState("running", "resident_ui_proxy_state_changed")
                 if (AiLimbsResidentRuntime.isEnabledForHost()) {
+                    startResidentGuardianWatchdog()
                     START_STICKY
                 } else {
+                    stopResidentGuardianWatchdog()
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                         @Suppress("DEPRECATION")
                         stopForeground(Service.STOP_FOREGROUND_REMOVE)
@@ -1411,6 +1477,7 @@ class AIForegroundService : Service() {
             releaseResidentCpuWakeLock("exit_app")
             isRunning.set(false)
             stopNotificationWatchdog()
+            stopResidentGuardianWatchdog()
             updateAiBusyState(false)
 
             try {
@@ -1466,6 +1533,7 @@ class AIForegroundService : Service() {
         }
 
         if (intent?.action == ACTION_RESIDENT_KEEPALIVE) {
+            syncResidentGuardianWatchdog()
             // Host shell keepalive never owns Resident continuous CPU wake.
             syncResidentCpuWakeLock("resident_keepalive")
             publishResidentHostShellState("running", "legacy_host_keepalive")
@@ -1480,6 +1548,7 @@ class AIForegroundService : Service() {
         }
 
         if (intent?.action == ACTION_RESIDENT_STATE_CHANGED) {
+            syncResidentGuardianWatchdog()
             syncResidentCpuWakeLock("resident_state_changed")
             stopSelfIfIdle(ignoreAppForeground = true)
             return persistentStartMode()
@@ -1623,6 +1692,7 @@ class AIForegroundService : Service() {
     }
 
     override fun onDestroy() {
+        stopResidentGuardianWatchdog()
         publishResidentHostShellState("stopped", "service_destroy")
         releaseResidentCpuWakeLock("service_destroy")
         if (residentUiProxyShell) {

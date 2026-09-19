@@ -30,6 +30,7 @@ import org.json.JSONObject
 /** Host-owned controller for the independent AI Limbs resident process. */
 internal object AiLimbsResidentRuntime {
     const val PROCESS_NAME = "ail_resident"
+    internal const val GUARDIAN_WATCHDOG_STALE_AFTER_MS = 150_000L
     private const val RESIDENT_PROTOCOL_VERSION = 4
 
     private const val TAG = "AiLimbsResident"
@@ -124,6 +125,106 @@ internal object AiLimbsResidentRuntime {
 
     internal fun isEnabledForHost(): Boolean =
         ::prefs.isInitialized && prefs.getBoolean(KEY_ENABLED, false)
+
+    internal fun guardianWatchdogSnapshot(
+        context: Context,
+        staleAfterMs: Long
+    ): JSONObject {
+        initialize(context)
+        require(staleAfterMs > 0L) { "staleAfterMs must be positive" }
+        return guardianWatchdogSnapshotLocked(staleAfterMs)
+    }
+
+    internal fun scheduleGuardianWatchdogRecovery(
+        context: Context,
+        staleAfterMs: Long
+    ) {
+        initialize(context)
+        if (!isEnabled()) return
+        if (prefs.getBoolean(KEY_ON_AUTO_RETRY_BLOCKED, false)) return
+        require(staleAfterMs > 0L) { "staleAfterMs must be positive" }
+        scope.launch {
+            lifecycleMutex.withLock {
+                if (!isEnabled()) return@withLock
+                if (prefs.getBoolean(KEY_ON_AUTO_RETRY_BLOCKED, false)) return@withLock
+
+                val before = guardianWatchdogSnapshotLocked(staleAfterMs)
+                if (before.optBoolean("healthy", false)) return@withLock
+
+                val executor = if (permissionBackendReady()) debuggerExecutorOrNull() else null
+                if (executor == null) {
+                    recordError(
+                        "Resident Guardian watchdog detected ${before.optString("reason", "unknown")}, " +
+                            "but the permission backend is unavailable for safe recovery"
+                    )
+                    return@withLock
+                }
+
+                AppLogger.w(
+                    TAG,
+                    "Resident Guardian watchdog recovery: reason=${before.optString("reason", "unknown")} " +
+                        "pid=${before.optInt("guardian_pid", -1)} " +
+                        "heartbeat_age_ms=${before.optLong("heartbeat_age_ms", -1L)}"
+                )
+
+                var probe = localProbe()
+                val stalePid = probe.pid?.takeIf { probe.running }
+                if (stalePid != null) {
+                    runCatching { Process.killProcess(stalePid) }
+                    for (attempt in 0 until 12) {
+                        delay(100L)
+                        probe = localProbe()
+                        if (!probe.running) break
+                    }
+
+                    if (probe.running) {
+                        val result = executor.executeCommand(
+                            "/system/bin/run-as ${quote(app.packageName)} /system/bin/kill -9 $stalePid"
+                        )
+                        if (!result.success) {
+                            AppLogger.w(
+                                TAG,
+                                "Guardian watchdog fallback kill failed pid=$stalePid: " +
+                                    result.stderr.ifBlank { result.stdout }
+                            )
+                        }
+                    }
+                }
+
+                for (attempt in 0 until 20) {
+                    probe = localProbe()
+                    if (!probe.running && guardianLeaseIsFree()) break
+                    delay(100L)
+                }
+
+                probe = localProbe()
+                if (probe.running || !guardianLeaseIsFree()) {
+                    recordError("Resident Guardian watchdog could not retire stale Guardian")
+                    return@withLock
+                }
+
+                ensureGuardianStartedLocked()
+                var after = guardianWatchdogSnapshotLocked(staleAfterMs)
+                for (attempt in 0 until 20) {
+                    if (after.optBoolean("healthy", false)) break
+                    delay(100L)
+                    after = guardianWatchdogSnapshotLocked(staleAfterMs)
+                }
+
+                if (after.optBoolean("healthy", false)) {
+                    AppLogger.i(
+                        TAG,
+                        "Resident Guardian watchdog recovery succeeded pid=${after.optInt("guardian_pid", -1)}"
+                    )
+                } else {
+                    recordError(
+                        "Resident Guardian watchdog recovery did not become healthy: " +
+                            after.optString("reason", "unknown")
+                    )
+                }
+            }
+        }
+    }
 
     private suspend fun ensureStartedIfEnabled(context: Context): JSONObject {
         initialize(context)
@@ -736,6 +837,7 @@ internal object AiLimbsResidentRuntime {
                 .put("last_core_recovery_ok", guardian["last_core_recovery_ok"]?.toBooleanStrictOrNull() ?: JSONObject.NULL)
                 .put("last_core_recovery_detail", guardian["last_core_recovery_detail"] ?: JSONObject.NULL)
                 .put("guardian_state", guardian["state"] ?: JSONObject.NULL)
+                .put("guardian_watchdog", guardianWatchdogSnapshotLocked(GUARDIAN_WATCHDOG_STALE_AFTER_MS))
                 .put("backend", if (PrivilegeRuntime.isSelected()) "ai_limbs" else "shizuku")
                 .put("backend_ready", permissionBackendReady())
                 .put("permission_backend_ownership", permissionBackendOwnership ?: JSONObject.NULL)
@@ -764,6 +866,65 @@ internal object AiLimbsResidentRuntime {
             "/system/bin/setsid /system/bin/sh -c ${quote(asApp)} " +
             "> ${quote(shellLogPath())} 2>&1 < /dev/null &"
     }
+
+    private fun guardianWatchdogSnapshotLocked(staleAfterMs: Long): JSONObject {
+        val enabled = isEnabled()
+        if (!enabled) {
+            return JSONObject()
+                .put("enabled", false)
+                .put("healthy", true)
+                .put("reason", "resident_disabled")
+        }
+
+        val probe = localProbe()
+        val heartbeat = parseHeartbeat(lastHeartbeat())
+        val heartbeatElapsed = heartbeat["elapsed_ms"]?.toLongOrNull()
+        val heartbeatPid = heartbeat["pid"]?.toIntOrNull()
+        val heartbeatSession = heartbeat["session"]
+        val nowElapsed = android.os.SystemClock.elapsedRealtime()
+        val heartbeatAge = heartbeatElapsed?.let { value ->
+            (nowElapsed - value).takeIf { it >= 0L }
+        }
+        val buildMatches = guardianMatchesInstalledBuild(probe)
+        val identityMatches =
+            probe.running &&
+                heartbeatPid != null &&
+                heartbeatPid == probe.pid &&
+                heartbeatSession != null &&
+                heartbeatSession == probe.sessionId
+        val heartbeatFresh = heartbeatAge != null && heartbeatAge <= staleAfterMs
+
+        val reason = when {
+            !probe.running -> "guardian_process_missing"
+            !buildMatches -> "guardian_build_mismatch"
+            heartbeatElapsed == null -> "guardian_heartbeat_missing"
+            heartbeatAge == null -> "guardian_heartbeat_clock_invalid"
+            !identityMatches -> "guardian_heartbeat_identity_mismatch"
+            !heartbeatFresh -> "guardian_heartbeat_stale"
+            else -> "healthy"
+        }
+        return JSONObject()
+            .put("enabled", true)
+            .put("healthy", reason == "healthy")
+            .put("reason", reason)
+            .put("guardian_pid", probe.pid ?: JSONObject.NULL)
+            .put("guardian_session_id", probe.sessionId ?: JSONObject.NULL)
+            .put("guardian_build_matches", buildMatches)
+            .put("heartbeat_pid", heartbeatPid ?: JSONObject.NULL)
+            .put("heartbeat_session_id", heartbeatSession ?: JSONObject.NULL)
+            .put("heartbeat_age_ms", heartbeatAge ?: JSONObject.NULL)
+            .put("stale_after_ms", staleAfterMs)
+    }
+
+    private fun parseHeartbeat(line: String?): Map<String, String> =
+        line.orEmpty()
+            .trim()
+            .split(Regex("\\s+"))
+            .mapNotNull { token ->
+                val index = token.indexOf('=')
+                if (index <= 0) null else token.substring(0, index) to token.substring(index + 1)
+            }
+            .toMap()
 
     private fun localProbe(): LocalProbe {
         val meta = readKeyValues(metaFile())

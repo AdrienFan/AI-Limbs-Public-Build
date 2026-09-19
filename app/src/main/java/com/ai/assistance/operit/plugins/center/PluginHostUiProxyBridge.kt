@@ -14,6 +14,7 @@ import com.ai.assistance.operit.ui.common.displays.UIOperationOverlay
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.ui.permissions.PermissionRequestOverlay
+import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
 import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
 import com.ai.assistance.operit.core.tools.system.resident.ResidentUiProxyWire
 import com.ai.assistance.operit.plugins.system.KernelSelfMaintenanceJsonServiceV1
@@ -43,6 +44,7 @@ import com.ai.limbs.plugin.runtime.InProcessNotificationAction
 import com.ai.limbs.plugin.runtime.InProcessNotificationState
 import com.ai.limbs.plugin.runtime.InProcessUiContributionProvider
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import java.io.IOException
 import java.lang.ref.WeakReference
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
@@ -83,6 +85,7 @@ internal class ResidentUiProxyClient(
     private val revision = AtomicLong(-1L)
     private val hostInstanceId = UUID.randomUUID().toString()
     private val hostGeneration = AtomicLong(0L)
+    private val lastCoreRecoveryRequestElapsedMs = AtomicLong(0L)
     private val hostAttachLock = Any()
     private val lastSnapshot = AtomicReference(JSONObject())
     private val uiPayloadStager = ResidentUiPayloadStager(appContext)
@@ -143,7 +146,11 @@ internal class ResidentUiProxyClient(
 
     suspend fun command(payload: JSONObject): JSONObject =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
-            wireRequest("command", JSONObject(payload.toString()))
+            try {
+                wireRequest("command", JSONObject(payload.toString()))
+            } catch (error: IOException) {
+                transportFailureResult(error)
+            }
         }
 
     suspend fun stageUiPayload(payloadJson: String): String =
@@ -152,7 +159,11 @@ internal class ResidentUiProxyClient(
         }
 
     fun commandBlocking(payload: JSONObject): JSONObject =
-        wireRequest("command", JSONObject(payload.toString()))
+        try {
+            wireRequest("command", JSONObject(payload.toString()))
+        } catch (error: IOException) {
+            transportFailureResult(error)
+        }
 
     suspend fun invokeUiCapability(
         ownerPluginId: String,
@@ -234,15 +245,52 @@ internal class ResidentUiProxyClient(
     }
 
     private fun wireRequest(operation: String, payload: JSONObject = JSONObject()): JSONObject {
-        val generation = ensureHostGeneration()
-        return ResidentUiProxyWire.request(
-            operation = operation,
-            sessionId = sessionId(),
-            hostInstanceId = hostInstanceId,
-            hostGeneration = generation,
-            payload = JSONObject(payload.toString())
-        )
+        return try {
+            val generation = ensureHostGeneration()
+            ResidentUiProxyWire.request(
+                operation = operation,
+                sessionId = sessionId(),
+                hostInstanceId = hostInstanceId,
+                hostGeneration = generation,
+                payload = JSONObject(payload.toString())
+            ).also { lastCoreRecoveryRequestElapsedMs.set(0L) }
+        } catch (error: IOException) {
+            hostGeneration.set(0L)
+            requestCoreRecoveryAfterTransportFailure(error)
+            throw error
+        }
     }
+
+    private fun requestCoreRecoveryAfterTransportFailure(error: IOException) {
+        val nowElapsed = android.os.SystemClock.elapsedRealtime()
+        while (true) {
+            val previous = lastCoreRecoveryRequestElapsedMs.get()
+            if (
+                previous > 0L &&
+                nowElapsed - previous < CORE_RECOVERY_REQUEST_COOLDOWN_MS
+            ) {
+                return
+            }
+            if (lastCoreRecoveryRequestElapsedMs.compareAndSet(previous, nowElapsed)) {
+                com.ai.assistance.operit.util.AppLogger.w(
+                    TAG,
+                    "Resident UI proxy transport failed; requesting Core recovery: " +
+                        "${error.javaClass.simpleName}: ${error.message.orEmpty()}",
+                    error
+                )
+                AiLimbsResidentRuntime.scheduleCoreCrashRecovery(appContext)
+                return
+            }
+        }
+    }
+
+    private fun transportFailureResult(error: IOException): JSONObject =
+        JSONObject()
+            .put("ok", false)
+            .put("error_code", "RESIDENT_CORE_UNAVAILABLE")
+            .put("error", "Resident Core connection is unavailable; recovery has been requested")
+            .put("recovering", AiLimbsResidentRuntime.isEnabledForHost())
+            .put("transport_error", error.javaClass.simpleName)
 
     private suspend fun refresh(force: Boolean) {
         val result = if (force) {
@@ -448,6 +496,7 @@ internal class ResidentUiProxyClient(
         private const val TAG = "ResidentUiProxyClient"
         private const val POLL_MS = 350L
         private const val RETRY_MS = 750L
+        private const val CORE_RECOVERY_REQUEST_COOLDOWN_MS = 5_000L
     }
 }
 
