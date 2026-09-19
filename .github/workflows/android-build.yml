@@ -678,7 +678,7 @@ jobs:
 
   laner_access_manager:
     if: inputs.target == 'laner-access-manager'
-    name: Build Laner Access Manager v0.1.1 only
+    name: Build Laner Access Manager v0.1.2 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -720,7 +720,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: laner-access-manager-v0.1.1-${{ github.run_number }}
+          name: laner-access-manager-v0.1.2-${{ github.run_number }}
           path: |
             plugin-lab/plugins/laner-access-manager/build/outputs/apk/debug/*.apk
             plugin-lab/packages/laner-access-manager/plugin.json
@@ -729,7 +729,7 @@ jobs:
 
   log_center:
     if: inputs.target == 'log-center'
-    name: Build Log Center v0.1.1 only
+    name: Build Log Center v0.1.2 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -771,7 +771,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: log-center-v0.1.1-${{ github.run_number }}
+          name: log-center-v0.1.2-${{ github.run_number }}
           path: |
             plugin-lab/plugins/log-center/build/outputs/apk/debug/*.apk
             plugin-lab/packages/log-center/plugin.json
@@ -780,7 +780,7 @@ jobs:
 
   ui_editor:
     if: inputs.target == 'ui-editor'
-    name: Build UI Editor v0.1.1 only
+    name: Build UI Editor v0.1.2 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -818,7 +818,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ui-editor-v0.1.1-${{ github.run_number }}
+          name: ui-editor-v0.1.2-${{ github.run_number }}
           path: |
             plugin-lab/plugins/ui-editor/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ui-editor/plugin.json
@@ -828,7 +828,7 @@ jobs:
 
   permission_service:
     if: inputs.target == 'permission-service'
-    name: Build AI Limbs Permission Service v0.1.3
+    name: Build AI Limbs Permission Service v0.1.4
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     steps:
@@ -867,10 +867,10 @@ jobs:
       - name: Upload installable plugin
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
-          name: permission-service-v0.1.3-${{ github.run_number }}
+          name: permission-service-v0.1.4-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-Permission-Service-v0.1.3.ailp
-            dist/AI-Limbs-Permission-Service-v0.1.3.ailp.sha256
+            dist/AI-Limbs-Permission-Service-v0.1.4.ailp
+            dist/AI-Limbs-Permission-Service-v0.1.4.ailp.sha256
           if-no-files-found: error
           retention-days: 14
       - name: Upload build diagnostics

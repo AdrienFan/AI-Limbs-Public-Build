@@ -9,11 +9,11 @@ android {
     compileSdk = 36
     ndkVersion = "27.0.12077973"
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.permission.v013"
+        applicationId = "com.ai.limbs.payload.permission.v014"
         minSdk = 26
         targetSdk = 34
-        versionCode = 4
-        versionName = "0.1.3"
+        versionCode = 5
+        versionName = "0.1.4"
         ndk { abiFilters += "arm64-v8a" }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=none" } }
     }
@@ -38,13 +38,12 @@ tasks.named("preBuild") { dependsOn(prepareServer) }
 
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))
-    // Host-shared UI/runtime libraries are resolved parent-first from AI Limbs; keep them out of payload DEX.
     implementation(platform(libs.compose.bom))
-    compileOnly(libs.compose.ui)
-    compileOnly(libs.compose.material3)
-    compileOnly(libs.compose.material.icons.extended)
-    compileOnly(libs.activity.compose)
-    compileOnly(libs.coroutines.android)
+    implementation(libs.compose.ui)
+    implementation(libs.compose.material3)
+    implementation(libs.compose.material.icons.extended)
+    implementation(libs.activity.compose)
+    implementation(libs.coroutines.android)
     implementation("org.bouncycastle:bcpkix-jdk18on:1.80")
     implementation("org.lsposed.hiddenapibypass:hiddenapibypass:6.1")
     implementation("io.github.vvb2060.ndk:boringssl:20250114")
