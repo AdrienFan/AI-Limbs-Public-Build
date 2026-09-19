@@ -342,6 +342,10 @@ internal class PluginWorkerRuntime(
             "backup" -> childBackupJson(runtime.backup(extensionId))
             "restore_backup" -> childSnapshotJson(runtime.restoreBackup(extensionId))
             "delete_backup" -> JSONObject().put("deleted", runtime.deleteBackup(extensionId))
+            "activate_version" -> childSnapshotJson(runtime.activateVersion(extensionId, payload.getString("version")))
+            "immediate_rollback" -> childSnapshotJson(runtime.immediateRollback(extensionId))
+            "delete_version" -> JSONObject().put("deleted", runtime.deleteVersion(extensionId, payload.getString("version")))
+            "set_version_retention" -> { runtime.setVersionRetention(extensionId, payload.getInt("limit")); JSONObject().put("ok", true) }}
             "set_auto_backup_policy" -> {
                 runtime.setAutoBackupPolicy(payload.getBoolean("enabled"), payload.optLong("high_frequency_use_count", 10L))
                 JSONObject().put("ok", true)

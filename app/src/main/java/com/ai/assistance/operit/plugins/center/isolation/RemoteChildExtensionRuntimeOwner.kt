@@ -78,6 +78,13 @@ internal class RemoteChildExtensionRuntimeOwner(
             override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { controller(ownerPluginId); val v = control("backup", extensionId); refresh(); return parseBackup(v) }
             override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { controller(ownerPluginId); val v = control("restore_backup", extensionId); refresh(); return parseChild(v) }
             override suspend fun deleteBackup(extensionId: String): Boolean { controller(ownerPluginId); val v = control("delete_backup", extensionId); refresh(); return v.getBoolean("deleted") }
+            override fun versions(extensionId: String): List<String> { controller(ownerPluginId); return snapshots.value.firstOrNull { it.extensionId == extensionId }?.let { listOf(it.version) }.orEmpty() }
+            override fun retentionLimit(extensionId: String): Int { controller(ownerPluginId); return 3 }
+            override fun immediateRollbackVersion(extensionId: String): String? { controller(ownerPluginId); return null }
+            override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot { controller(ownerPluginId); val v = control("activate_version", extensionId, JSONObject().put("version", version)); refresh(); return parseChild(v) }
+            override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot { controller(ownerPluginId); val v = control("immediate_rollback", extensionId); refresh(); return parseChild(v) }
+            override suspend fun deleteVersion(extensionId: String, version: String): Boolean { controller(ownerPluginId); val v = control("delete_version", extensionId, JSONObject().put("version", version)); refresh(); return v.getBoolean("deleted") }
+            override suspend fun setVersionRetention(extensionId: String, limit: Int) { controller(ownerPluginId); control("set_version_retention", extensionId, JSONObject().put("limit", limit)); refresh() }
             override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) {
                 controller(ownerPluginId); control("set_auto_backup_policy", "", JSONObject().put("enabled", enabled).put("high_frequency_use_count", highFrequencyUseCount)); refresh()
             }

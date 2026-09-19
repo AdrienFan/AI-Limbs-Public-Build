@@ -833,6 +833,13 @@ private class ResidentChildControl(
     override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot = childBackup(childCommand("backup", extensionId))
     override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot = childSnapshot(childCommand("restore_backup", extensionId))
     override suspend fun deleteBackup(extensionId: String): Boolean = childCommand("delete_backup", extensionId).getBoolean("deleted")
+    override fun versions(extensionId: String): List<String> = mutableSnapshots.value.firstOrNull { it.extensionId == extensionId }?.let { listOf(it.version) }.orEmpty()
+    override fun retentionLimit(extensionId: String): Int = 3
+    override fun immediateRollbackVersion(extensionId: String): String? = null
+    override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot = childSnapshot(childCommand("activate_version", extensionId, JSONObject().put("version", version)))
+    override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot = childSnapshot(childCommand("immediate_rollback", extensionId))
+    override suspend fun deleteVersion(extensionId: String, version: String): Boolean = childCommand("delete_version", extensionId, JSONObject().put("version", version)).getBoolean("deleted")
+    override suspend fun setVersionRetention(extensionId: String, limit: Int) { childCommand("set_version_retention", extensionId, JSONObject().put("limit", limit)) }
     override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) {
         childCommand("set_auto_backup_policy", "", JSONObject().put("enabled", enabled).put("high_frequency_use_count", highFrequencyUseCount))
     }
