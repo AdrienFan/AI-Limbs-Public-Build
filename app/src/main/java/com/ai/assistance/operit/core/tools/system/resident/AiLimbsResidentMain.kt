@@ -5,6 +5,7 @@ import android.os.SystemClock
 import com.ai.assistance.operit.BuildConfig
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 import org.json.JSONObject
 
 /**
@@ -26,6 +27,7 @@ object AiLimbsResidentMain {
     private const val ACTION_RESIDENT_CORE_RECOVERY =
         "com.ai.assistance.operit.action.RESIDENT_CORE_RECOVERY"
     private const val CORE_RECOVERY_RETRY_MS = 5_000L
+    private const val HOST_ACTION_TIMEOUT_SECONDS = 10L
     private const val HOST_SERVICE_CLASS =
         "com.ai.assistance.operit.api.chat.AIForegroundService"
 
@@ -46,6 +48,7 @@ object AiLimbsResidentMain {
             "Could not create resident state directory: ${stateDir.absolutePath}"
         }
         val guardianLease = ResidentRuntimeLease.acquire(stateDir, "guardian")
+        ResidentFailureDiagnostics.installUncaughtHandler(stateDir, "guardian")
 
         val pid = Process.myPid()
         val uid = Process.myUid()
@@ -153,7 +156,8 @@ object AiLimbsResidentMain {
 
                 if (!hostHealthy || nowElapsed >= nextHostTouchElapsed) {
                     hostTouchSeq += 1
-                    val result = touchHost(packageName)
+                    publishGuardianState("touching_host")
+                    val result = touchHost(packageName, stateDir)
                     lastHostTouchWallMs = System.currentTimeMillis()
                     lastHostTouchExit = result.exitCode
                     lastHostTouchOk = result.ok
@@ -178,7 +182,7 @@ object AiLimbsResidentMain {
                     nextCoreRecoveryElapsed = 0L
                 } else if (lastCoreRecoveryPid != crashedCorePid || nowElapsed >= nextCoreRecoveryElapsed) {
                     lastCoreRecoveryPid = crashedCorePid
-                    val recovery = requestCoreRecovery(packageName)
+                    val recovery = requestCoreRecovery(packageName, stateDir)
                     lastCoreRecoveryWallMs = System.currentTimeMillis()
                     lastCoreRecoveryExit = recovery.exitCode
                     lastCoreRecoveryOk = recovery.ok
@@ -216,13 +220,13 @@ object AiLimbsResidentMain {
         }
     }
 
-    private fun touchHost(packageName: String): CommandResult =
-        sendHostAction(packageName, ACTION_RESIDENT_KEEPALIVE)
+    private fun touchHost(packageName: String, stateDir: File): CommandResult =
+        sendHostAction(packageName, ACTION_RESIDENT_KEEPALIVE, stateDir)
 
-    private fun requestCoreRecovery(packageName: String): CommandResult =
-        sendHostAction(packageName, ACTION_RESIDENT_CORE_RECOVERY)
+    private fun requestCoreRecovery(packageName: String, stateDir: File): CommandResult =
+        sendHostAction(packageName, ACTION_RESIDENT_CORE_RECOVERY, stateDir)
 
-    private fun sendHostAction(packageName: String, action: String): CommandResult {
+    private fun sendHostAction(packageName: String, action: String, stateDir: File): CommandResult {
         val component = "$packageName/$HOST_SERVICE_CLASS"
         return runCommand(
             listOf(
@@ -234,7 +238,8 @@ object AiLimbsResidentMain {
                 action,
                 "-n",
                 component
-            )
+            ),
+            stateDir
         )
     }
 
@@ -296,11 +301,23 @@ object AiLimbsResidentMain {
         return HostShellProbe(true, pid, detail)
     }
 
-    private fun runCommand(command: List<String>): CommandResult {
+    private fun runCommand(command: List<String>, stateDir: File): CommandResult {
+        // Reading a pipe to EOF before waitFor can block forever in system_server. A regular
+        // file plus timed wait keeps Guardian heartbeats and stop requests responsive.
+        val outputFile = File(stateDir, "host-action.log")
+        var process: java.lang.Process? = null
         return try {
-            val process = ProcessBuilder(command).redirectErrorStream(true).start()
-            val output = process.inputStream.bufferedReader().use { it.readText() }.trim().take(1200)
-            val exitCode = process.waitFor()
+            val child = ProcessBuilder(command).redirectErrorStream(true).redirectOutput(outputFile).start()
+            process = child
+            if (!child.waitFor(HOST_ACTION_TIMEOUT_SECONDS, TimeUnit.SECONDS)) {
+                return CommandResult(false, -1, "Host action timed out after ${HOST_ACTION_TIMEOUT_SECONDS}s")
+            }
+            val output = outputFile.inputStream().use { input ->
+                val bytes = ByteArray(1200)
+                val count = input.read(bytes)
+                if (count > 0) String(bytes, 0, count, Charsets.UTF_8).trim() else ""
+            }
+            val exitCode = child.exitValue()
             val looksFailed =
                 output.contains("Exception occurred", ignoreCase = true) ||
                     output.contains("SecurityException", ignoreCase = true) ||
@@ -312,8 +329,13 @@ object AiLimbsResidentMain {
                 exitCode = exitCode,
                 detail = output.ifBlank { "exit=$exitCode" }
             )
-        } catch (error: Throwable) {
+        } catch (error: InterruptedException) {
+            Thread.currentThread().interrupt()
+            CommandResult(false, -1, "Host action interrupted")
+        } catch (error: Exception) {
             CommandResult(false, -1, "${error.javaClass.simpleName}: ${error.message}")
+        } finally {
+            process?.let { child -> if (child.isAlive) child.destroyForcibly() }
         }
     }
 

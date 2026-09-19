@@ -265,6 +265,7 @@ object ResidentCoreMain {
                     }
                 }
             } catch (error: Throwable) {
+                ResidentFailureDiagnostics.recordFailure(directory, "core_control", Thread.currentThread().name, error)
                 exitCode = 1
                 if (runtime.snapshot().getString("phase") != "failed") runtime.fail(error)
                 System.err.println("Resident Core runtime failed: $error")
@@ -354,6 +355,7 @@ object ResidentCoreMain {
             "Unexpected core state directory"
         }
 
+        ResidentFailureDiagnostics.installUncaughtHandler(directory, "core")
         val runtime = ResidentCoreBusinessRuntime()
 
         ResidentRuntimeLease.acquire(directory, "bootstrap").use {
@@ -411,6 +413,7 @@ object ResidentCoreMain {
                 Looper.loop()
                 error("Resident Core main Looper exited unexpectedly")
             } catch (error: Throwable) {
+                ResidentFailureDiagnostics.recordFailure(directory, "core_main", Thread.currentThread().name, error)
                 runtime.fail(error)
                 System.err.println("Resident Core main Looper failed: $error")
                 error.printStackTrace(System.err)

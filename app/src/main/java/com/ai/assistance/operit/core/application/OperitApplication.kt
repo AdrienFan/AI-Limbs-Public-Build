@@ -38,6 +38,7 @@ import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntim
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeAttachment
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeMode
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostRuntimeResolver
+import com.ai.assistance.operit.core.tools.system.resident.ResidentFailureDiagnostics
 import com.ai.assistance.operit.core.workflow.WorkflowSchedulerInitializer
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupPreferences
 import com.ai.assistance.operit.data.backup.RoomDatabaseBackupScheduler
@@ -176,12 +177,20 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
                     if (refreshed.usesUiProxy) {
                         hostRuntimeAttachment = refreshed
                         PluginHostUiProxyRuntimeHolder.attach(applicationContext, refreshed)
+                        if (refreshed.mode == ResidentHostRuntimeMode.UI_PROXY_BLOCKED) {
+                            AiLimbsResidentRuntime.scheduleCoreCrashRecovery(applicationContext)
+                        }
                     }
                 }
                 return
             }
             val attachment = runBlocking(Dispatchers.IO) {
-                ResidentHostRuntimeResolver.resolve(applicationContext)
+                ResidentHostRuntimeResolver.resolve(applicationContext).also {
+                    if (it.mode == ResidentHostRuntimeMode.UI_PROXY_BLOCKED) {
+                        // Capture the previous session before initializeMainApplicationLocked resets logs.
+                        ResidentFailureDiagnostics.captureBlockedHost(applicationContext, it)
+                    }
+                }
             }
             hostRuntimeAttachment = attachment
             initializeMainApplicationLocked(attachment)
@@ -228,6 +237,11 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
 
         if (attachment.usesUiProxy) {
             PluginHostUiProxyRuntimeHolder.attach(applicationContext, attachment)
+            // A system restart can remove both Core and Guardian. Request the existing verified
+            // owner-loss recovery here; waiting for a dead Guardian leaves Host permanently blocked.
+            if (attachment.mode == ResidentHostRuntimeMode.UI_PROXY_BLOCKED) {
+                AiLimbsResidentRuntime.scheduleCoreCrashRecovery(applicationContext)
+            }
             AppLogger.w(
                 TAG,
                 "Resident Host attach-only mode=${attachment.mode} reason=${attachment.reason}; " +

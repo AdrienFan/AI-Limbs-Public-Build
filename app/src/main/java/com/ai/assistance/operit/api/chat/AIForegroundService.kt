@@ -987,6 +987,11 @@ class AIForegroundService : Service() {
                 delay(RESIDENT_GUARDIAN_WATCHDOG_INTERVAL_MS)
                 if (!AiLimbsResidentRuntime.isEnabledForHost()) continue
 
+                // Guardian liveness is not Core liveness. Probe Core even if Guardian cannot
+                // deliver its recovery action after an overnight system-process restart.
+                if (residentUiProxyShell) {
+                    AiLimbsResidentRuntime.scheduleCoreCrashRecovery(this@AIForegroundService)
+                }
                 val snapshot = runCatching {
                     AiLimbsResidentRuntime.guardianWatchdogSnapshot(
                         this@AIForegroundService,

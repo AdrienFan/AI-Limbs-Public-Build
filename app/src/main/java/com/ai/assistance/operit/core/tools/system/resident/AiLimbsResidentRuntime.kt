@@ -14,6 +14,7 @@ import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.system.exitProcess
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
@@ -52,6 +53,7 @@ internal object AiLimbsResidentRuntime {
     private lateinit var prefs: SharedPreferences
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lifecycleMutex = Mutex()
+    private val coreRecoveryScheduled = AtomicBoolean(false)
 
     @Synchronized
     fun initialize(context: Context) {
@@ -80,14 +82,17 @@ internal object AiLimbsResidentRuntime {
 
     fun scheduleCoreCrashRecovery(context: Context) {
         initialize(context)
-        if (!isEnabled()) return
+        if (!isEnabled() || !coreRecoveryScheduled.compareAndSet(false, true)) return
         scope.launch {
-            runCatching { recoverCrashedCoreIfNeeded() }
-                .onFailure {
-                    recordError(
-                        "Resident Core auto-recovery failed: ${it.message ?: it.javaClass.simpleName}"
-                    )
-                }
+            try {
+                recoverCrashedCoreIfNeeded()
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: Exception) {
+                recordError("Resident Core auto-recovery failed: ${error.message ?: error.javaClass.simpleName}")
+            } finally {
+                coreRecoveryScheduled.set(false)
+            }
         }
     }
 
@@ -272,8 +277,20 @@ internal object AiLimbsResidentRuntime {
         val crashedPid = fence.optInt("core_pid", -1)
         if (crashedPid <= 0) return@withLock status()
 
-        val core = ResidentCoreController.status(app)
+        var core = ResidentCoreController.status(app)
         if (core.optBoolean("available", false)) return@withLock status()
+        // Host watchdogs now request this independently. A single slow IPC response must not
+        // retire a healthy owner: require sustained unavailability and the same takeover session.
+        repeat(2) {
+            delay(1_000L)
+            core = ResidentCoreController.status(app)
+            if (core.optBoolean("available", false)) return@withLock status()
+        }
+        val currentFence = ResidentBusinessTakeoverFence.snapshot(app) ?: return@withLock status()
+        if (currentFence.optString("state") != "owned" ||
+            currentFence.optString("core_session") != fence.optString("core_session") ||
+            currentFence.optInt("core_pid", -1) != crashedPid
+        ) return@withLock status()
 
         // An owned fence plus unreachable Core is recoverable even when the Core process is wedged
         // and still holds bootstrap.lock. stopLocked() owns the verified force-stop path. Do not use
@@ -495,6 +512,11 @@ internal object AiLimbsResidentRuntime {
         val coreWasBusinessOwner = coreWasAvailable && coreBefore.optBoolean("business_attached", false)
         val fenceBefore = ResidentBusinessTakeoverFence.snapshot(app)
         val policyBefore = ResidentPolicyStateHandoff.snapshot(app)
+        // Both repair paths remove stale ownership records. Preserve bounded incident evidence
+        // first so the next Host startup cannot erase the cause.
+        if (fenceBefore != null && !coreWasAvailable) {
+            ResidentFailureDiagnostics.captureOwnerLoss(app, coreBefore, fenceBefore)
+        }
         val backendBefore = permissionBackendOwnershipSnapshot()
         val backendOwnerBefore = backendBefore?.optString("runtime_owner")
         val needsBackendReturn =

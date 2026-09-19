@@ -81,3 +81,8 @@ Resident 开关现在在源码层代表业务核心切换：ON 按 Core start �
 ## build32 失败恢复与进程依赖预检
 
 [Core 进程依赖预检与 Resident 失败恢复](15-build32-process-init-and-recovery.md)：依据 build31 真机 `androidPermissionPreferences` 未初始化与 `failed` takeover fence 导致插件系统不可见的现场，补齐独立 Core 的进程 Context/权限偏好预检、Host-only singleton 清理、失败 stage 诊断和 Base 自有的 `UI_PROXY_BLOCKED` 显式 OFF 恢复入口。候选版本为 build32/code105；不允许静默 fallback，也不清插件数据。
+
+
+## build58 隔夜恢复
+
+[隔夜 owner 丢失后的恢复与取证](19-build58-overnight-owner-loss.md)：补齐 Host 重开和 watchdog 的 Core 恢复触发，限制 Guardian 系统调用等待，保留恢复前证据。现场已查到系统 silent reset 和无线 ADB 关闭；00:10 首次心跳中断原因仍待证实。
