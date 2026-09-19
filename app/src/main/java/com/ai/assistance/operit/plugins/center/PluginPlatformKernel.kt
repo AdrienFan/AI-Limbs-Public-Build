@@ -592,7 +592,7 @@ internal object PluginPlatformKernel {
             "activate_version" -> childSnapshotJson(controller.activateVersion(id, request.getString("version")))
             "immediate_rollback" -> childSnapshotJson(controller.immediateRollback(id))
             "delete_version" -> JSONObject().put("deleted", controller.deleteVersion(id, request.getString("version")))
-            "set_version_retention" -> { controller.setVersionRetention(id, request.getInt("limit")); JSONObject().put("ok", true) }}
+            "set_version_retention" -> { controller.setVersionRetention(id, request.getInt("limit")); JSONObject().put("ok", true) }
             "set_auto_backup_policy" -> {
                 controller.setAutoBackupPolicy(request.getBoolean("enabled"), request.optLong("high_frequency_use_count", 10L))
                 JSONObject().put("ok", true)
