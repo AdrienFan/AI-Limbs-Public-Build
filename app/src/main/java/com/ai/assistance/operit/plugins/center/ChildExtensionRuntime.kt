@@ -130,6 +130,8 @@ internal class ChildExtensionRuntime(
     private val extensionsRoot = File(root, "extensions")
     private val dataRoot = File(root, "data")
     private val backupsRoot = File(root, "backups")
+    private val versionHistoryRoot = File(root, "version_history")
+    private val versionPolicyFile = File(root, "version_policy.json")
     private val usageFile = File(root, "usage.json")
     private val backupPolicyFile = File(root, "backup_policy.json")
     private val points = ConcurrentHashMap<String, PointRegistration>()
@@ -148,17 +150,21 @@ internal class ChildExtensionRuntime(
     private val mutableUiContributions = MutableStateFlow<List<ChildUiContributionSnapshot>>(emptyList())
     private val pointFlows = ConcurrentHashMap<String, MutableStateFlow<List<ChildExtensionSnapshot>>>()
     private val usageCounts = ConcurrentHashMap<String, Long>()
+    private val retentionLimits = ConcurrentHashMap<String, Int>()
+    private val rollbackVersions = ConcurrentHashMap<String, String>()
     private val lifecycleLocks = ConcurrentHashMap<String, Mutex>()
     @Volatile private var autoBackupEnabled = false
     @Volatile private var highFrequencyUseCount = 10L
 
     override suspend fun start() {
         migrateLegacyStoreIfNeeded()
-        root.mkdirs(); staging.mkdirs(); extensionsRoot.mkdirs(); dataRoot.mkdirs(); backupsRoot.mkdirs()
+        root.mkdirs(); staging.mkdirs(); extensionsRoot.mkdirs(); dataRoot.mkdirs(); backupsRoot.mkdirs(); versionHistoryRoot.mkdirs()
         staging.listFiles()?.forEach { it.deleteRecursively() }
         loadUsage()
         loadBackupPolicy()
+        loadVersionPolicy()
         restoreInstalled()
+        records.values.forEach(::ensureVersionPackage)
         publishSnapshots()
         publishBackupSnapshots()
         reconcileAutoBackup()
@@ -231,6 +237,13 @@ internal class ChildExtensionRuntime(
             points[manifest.target.point]?.takeIf {
                 it.ownerPluginId == manifest.target.parentPluginId && it.apiVersion == manifest.target.apiVersion
             }?.let { point -> requireAllowedCapabilities(manifest, point) }
+            val previous = records[manifest.extensionId]
+            if (previous != null && previous.manifest.version != manifest.version) {
+                ensureVersionPackage(previous)
+                rollbackVersions[manifest.extensionId] = previous.manifest.version
+            }
+            storeVersionPackage(manifest.extensionId, manifest.version, packageFile)
+            persistVersionPolicy()
             stopChild(manifest.extensionId)
             val destination = extensionDir(manifest.extensionId)
             val replacement = File(extensionsRoot, ".replace-${UUID.randomUUID()}")
@@ -243,6 +256,7 @@ internal class ChildExtensionRuntime(
             persistState(record)
             tryActivate(record)
             autoBackupIfEligible(record)
+            pruneVersionHistory(manifest.extensionId)
             publishSnapshots()
             publishBackupSnapshots()
             return snapshot(record)
@@ -255,6 +269,10 @@ internal class ChildExtensionRuntime(
         val record = records.remove(extensionId) ?: return false
         stopChild(extensionId)
         extensionDir(extensionId).deleteRecursively()
+        File(versionHistoryRoot, extensionId).deleteRecursively()
+        retentionLimits.remove(extensionId)
+        rollbackVersions.remove(extensionId)
+        persistVersionPolicy()
         File(dataRoot, extensionId).deleteRecursively()
         publishSnapshots()
         publishBackupSnapshots()
@@ -357,6 +375,47 @@ internal class ChildExtensionRuntime(
         if (existed) dir.deleteRecursively()
         publishBackupSnapshots()
         return existed
+    }
+
+    fun versions(extensionId: String): List<String> =
+        versionHistoryDir(extensionId).listFiles()?.filter(File::isDirectory)?.map(File::getName)
+            ?.sortedWith { a, b -> val l = SemanticVersion.parse(a); val r = SemanticVersion.parse(b); if (l != null && r != null) l.compareTo(r) else a.compareTo(b) }.orEmpty()
+
+    fun retentionLimit(extensionId: String): Int = retentionLimits[extensionId] ?: 3
+    fun immediateRollbackVersion(extensionId: String): String? = rollbackVersions[extensionId]
+
+    suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot {
+        val current = records[extensionId] ?: error("Unknown child extension: $extensionId")
+        val packageFile = versionPackage(extensionId, version)
+        require(packageFile.isFile) { "Child extension version is not retained: $extensionId $version" }
+        return installAdmittedInternal(packageFile, current.manifest.target.parentPluginId, current.manifest.target.point)
+    }
+
+    suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot {
+        val target = rollbackVersions[extensionId] ?: error("No immediate rollback version is available: $extensionId")
+        val current = records[extensionId] ?: error("Unknown child extension: $extensionId")
+        val packageFile = versionPackage(extensionId, target)
+        require(packageFile.isFile) { "Immediate rollback package is missing: $extensionId $target" }
+        val restored = installAdmittedInternal(packageFile, current.manifest.target.parentPluginId, current.manifest.target.point)
+        rollbackVersions.remove(extensionId)
+        persistVersionPolicy()
+        pruneVersionHistory(extensionId)
+        return restored
+    }
+
+    suspend fun deleteVersion(extensionId: String, version: String): Boolean {
+        val current = records[extensionId]?.manifest?.version
+        require(version != current) { "Cannot delete active child extension version" }
+        require(version != rollbackVersions[extensionId]) { "Cannot delete immediate rollback version" }
+        return File(versionHistoryDir(extensionId), safePath(version)).deleteRecursively()
+    }
+
+    suspend fun setVersionRetention(extensionId: String, limit: Int) {
+        require(limit == 0 || limit in 1..100) { "retention limit must be 0 (unlimited) or 1..100" }
+        require(records.containsKey(extensionId)) { "Unknown child extension: $extensionId" }
+        retentionLimits[extensionId] = limit
+        persistVersionPolicy()
+        pruneVersionHistory(extensionId)
     }
 
     private suspend fun setAutoBackupPolicyInternal(enabled: Boolean, highFrequencyUseCount: Long) {
@@ -1141,6 +1200,53 @@ internal class ChildExtensionRuntime(
         }
     }
 
+    private fun versionHistoryDir(extensionId: String) = File(versionHistoryRoot, safePath(extensionId))
+    private fun versionPackage(extensionId: String, version: String) =
+        File(File(versionHistoryDir(extensionId), safePath(version)), "package" + ExtensionPackage.SUFFIX)
+
+    private fun storeVersionPackage(extensionId: String, version: String, source: File) {
+        val target = versionPackage(extensionId, version)
+        target.parentFile?.mkdirs()
+        if (!target.isFile) source.inputStream().buffered().use { input -> target.outputStream().buffered().use(input::copyTo) }
+        target.setLastModified(System.currentTimeMillis())
+    }
+
+    private fun ensureVersionPackage(record: StoredExtension) {
+        val target = versionPackage(record.manifest.extensionId, record.manifest.version)
+        if (target.isFile) return
+        target.parentFile?.mkdirs()
+        packInstalledExtension(record, target)
+    }
+
+    private fun pruneVersionHistory(extensionId: String) {
+        val limit = retentionLimit(extensionId)
+        if (limit == 0) return
+        val current = records[extensionId]?.manifest?.version
+        val rollback = rollbackVersions[extensionId]
+        val dirs = versionHistoryDir(extensionId).listFiles()?.filter(File::isDirectory).orEmpty()
+        if (dirs.size <= limit) return
+        val removable = dirs.filterNot { it.name == current || it.name == rollback }.sortedBy(File::lastModified).toMutableList()
+        var remaining = dirs.size
+        while (remaining > limit && removable.isNotEmpty()) {
+            if (removable.removeAt(0).deleteRecursively()) remaining--
+        }
+    }
+
+    private fun loadVersionPolicy() {
+        val policy = runCatching { JSONObject(versionPolicyFile.readText()) }.getOrNull() ?: return
+        val limits = policy.optJSONObject("retention") ?: JSONObject()
+        limits.keys().forEach { id -> retentionLimits[id] = limits.optInt(id, 3).let { if (it < 0) 3 else it } }
+        val rollbacks = policy.optJSONObject("rollback") ?: JSONObject()
+        rollbacks.keys().forEach { id -> rollbacks.optString(id).takeIf(String::isNotBlank)?.let { rollbackVersions[id] = it } }
+    }
+
+    private fun persistVersionPolicy() {
+        val limits = JSONObject(); retentionLimits.forEach { (id, limit) -> limits.put(id, limit) }
+        val rollbacks = JSONObject(); rollbackVersions.forEach { (id, version) -> rollbacks.put(id, version) }
+        versionPolicyFile.parentFile?.mkdirs()
+        versionPolicyFile.writeText(JSONObject().put("retention", limits).put("rollback", rollbacks).toString(2))
+    }
+
     private fun readState(dir: File): Pair<Boolean, ChildExtensionLifecycle> {
         val file = File(dir, "state.json")
         if (!file.isFile) return true to ChildExtensionLifecycle.BLOCKED
@@ -1192,6 +1298,13 @@ internal class ChildExtensionRuntime(
             override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { requireRuntimeController(ownerPluginId); return backupInternal(extensionId) }
             override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { requireRuntimeController(ownerPluginId); return restoreBackupInternal(extensionId) }
             override suspend fun deleteBackup(extensionId: String): Boolean { requireRuntimeController(ownerPluginId); return deleteBackupInternal(extensionId) }
+            override fun versions(extensionId: String): List<String> { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.versions(extensionId) }
+            override fun retentionLimit(extensionId: String): Int { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.retentionLimit(extensionId) }
+            override fun immediateRollbackVersion(extensionId: String): String? { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.immediateRollbackVersion(extensionId) }
+            override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.activateVersion(extensionId, version) }
+            override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.immediateRollback(extensionId) }
+            override suspend fun deleteVersion(extensionId: String, version: String): Boolean { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.deleteVersion(extensionId, version) }
+            override suspend fun setVersionRetention(extensionId: String, limit: Int) { requireRuntimeController(ownerPluginId); this@ChildExtensionRuntime.setVersionRetention(extensionId, limit) }
             override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) { requireRuntimeController(ownerPluginId); setAutoBackupPolicyInternal(enabled, highFrequencyUseCount) }
             override fun recordUse(extensionId: String) { recordUseForParent(ownerPluginId, extensionId) }
             override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> { requireRuntimeController(ownerPluginId); return snapshotsInternal() }

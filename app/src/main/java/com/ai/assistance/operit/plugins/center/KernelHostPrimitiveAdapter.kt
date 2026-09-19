@@ -400,6 +400,8 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         .put("plugin_id", state.pluginId)
         .put("active_version", state.activeVersion ?: JSONObject.NULL)
         .put("previous_version", state.previousVersion ?: JSONObject.NULL)
+        .put("rollback_version", state.rollbackVersion ?: JSONObject.NULL)
+        .put("retention_limit", state.retentionLimit)
         .put("enabled", state.enabled)
         .put("state", state.lastState.name)
         .put("last_error", state.lastError ?: JSONObject.NULL)

@@ -467,6 +467,13 @@ interface InProcessChildExtensionRuntime {
     suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot
     suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot
     suspend fun deleteBackup(extensionId: String): Boolean
+    fun versions(extensionId: String): List<String>
+    fun retentionLimit(extensionId: String): Int
+    fun immediateRollbackVersion(extensionId: String): String?
+    suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot
+    suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot
+    suspend fun deleteVersion(extensionId: String, version: String): Boolean
+    suspend fun setVersionRetention(extensionId: String, limit: Int)
     suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long = 10L)
     fun recordUse(extensionId: String)
     fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
@@ -484,6 +491,13 @@ interface InProcessChildExtensionRuntime {
             override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot = unavailable()
             override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot = unavailable()
             override suspend fun deleteBackup(extensionId: String): Boolean = unavailable()
+            override fun versions(extensionId: String): List<String> = unavailable()
+            override fun retentionLimit(extensionId: String): Int = unavailable()
+            override fun immediateRollbackVersion(extensionId: String): String? = unavailable()
+            override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot = unavailable()
+            override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot = unavailable()
+            override suspend fun deleteVersion(extensionId: String, version: String): Boolean = unavailable()
+            override suspend fun setVersionRetention(extensionId: String, limit: Int) = unavailable()
             override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) = unavailable()
             override fun recordUse(extensionId: String) = unavailable()
             override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> = unavailable()

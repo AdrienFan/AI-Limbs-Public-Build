@@ -89,6 +89,7 @@ internal class PluginManager(
         options: PluginInstallOptions = PluginInstallOptions()
     ): PluginInstallResult = locked {
         val result = installLocked(sourcePackage, options)
+        pruneVersionsLocked(result.pluginId)
         autoBackupIfEligibleLocked(result.pluginId)
         result
     }
@@ -122,15 +123,34 @@ internal class PluginManager(
         version: String
     ): PluginPersistentState = locked {
         val state = activateVersionLocked(pluginId, version)
+        pruneVersionsLocked(pluginId)
         autoBackupIfEligibleLocked(pluginId)
         state
     }
 
     suspend fun rollback(pluginId: String): PluginPersistentState = locked {
         val state = requireState(pluginId)
-        val target = state.previousVersion
-            ?: throw PluginInstallException("ROLLBACK_UNAVAILABLE", "No previous version is available for $pluginId")
-        activateVersionLocked(pluginId, target)
+        val target = state.rollbackVersion ?: state.previousVersion
+            ?: throw PluginInstallException("ROLLBACK_UNAVAILABLE", "No immediate rollback version is available for $pluginId")
+        val restored = activateVersionLocked(pluginId, target)
+        val consumed = writeState(restored.copy(rollbackVersion = null))
+        pruneVersionsLocked(pluginId)
+        consumed
+    }
+
+    suspend fun configureVersionRetention(pluginId: String, limit: Int): PluginPersistentState = locked {
+        require(limit == 0 || limit in 1..100) { "retention limit must be 0 (unlimited) or 1..100" }
+        writeState(requireState(pluginId).copy(retentionLimit = limit))
+        pruneVersionsLocked(pluginId)
+        requireState(pluginId)
+    }
+
+    suspend fun deleteVersion(pluginId: String, version: String): PluginPersistentState = locked {
+        val state = requireState(pluginId)
+        if (version == state.activeVersion) throw PluginInstallException("ACTIVE_VERSION_DELETE_FORBIDDEN", "Cannot delete active plugin version")
+        if (version == state.rollbackVersion) throw PluginInstallException("ROLLBACK_VERSION_DELETE_FORBIDDEN", "Cannot delete the immediate rollback version")
+        if (!store.deleteVersion(pluginId, version)) throw PluginInstallException("VERSION_NOT_INSTALLED", "Plugin version is not installed: $pluginId $version")
+        writeState(state.copy(previousVersion = state.previousVersion?.takeUnless { it == version }))
     }
 
     suspend fun uninstall(
@@ -520,11 +540,13 @@ internal class PluginManager(
         ensureVersionSatisfiesDependents(pluginId, version)
         val candidateManifest = stateRepository.readInstalledManifest(pluginId, version)
         val previousVersion = current.activeVersion
+        val rollbackVersion = current.activeVersion
         if (!current.enabled) {
             return writeState(
                 current.copy(
                     activeVersion = version,
                     previousVersion = previousVersion,
+                    rollbackVersion = rollbackVersion,
                     lastState = PluginLifecycleState.INSTALLED,
                     lastError = null
                 )
@@ -537,6 +559,7 @@ internal class PluginManager(
                 current.copy(
                     activeVersion = version,
                     previousVersion = previousVersion,
+                    rollbackVersion = rollbackVersion,
                     enabled = true,
                     lastState = PluginLifecycleState.BLOCKED,
                     lastError = surfaceBlock
@@ -548,6 +571,7 @@ internal class PluginManager(
                 current.copy(
                     activeVersion = version,
                     previousVersion = previousVersion,
+                    rollbackVersion = rollbackVersion,
                     lastState = PluginLifecycleState.PENDING_RESTART,
                     lastError = null
                 )
@@ -558,6 +582,7 @@ internal class PluginManager(
             current.copy(
                 activeVersion = version,
                 previousVersion = previousVersion,
+                rollbackVersion = rollbackVersion,
                 lastState = PluginLifecycleState.MOUNTING,
                 lastError = null
             )
@@ -1116,6 +1141,21 @@ internal class PluginManager(
         if (existing?.version == version) return
         runCatching { backupStore.backup(pluginId, version, state.enabled) }
             .onFailure { AppLogger.w(TAG, "Automatic backup failed for $pluginId", it) }
+    }
+
+    private fun pruneVersionsLocked(pluginId: String) {
+        val state = stateRepository.read(pluginId) ?: return
+        val limit = state.retentionLimit
+        if (limit == 0) return
+        val protected = setOfNotNull(state.activeVersion, state.rollbackVersion)
+        val versions = store.listVersions(pluginId)
+        if (versions.size <= limit) return
+        val removable = versions.filterNot(protected::contains).sortedBy { version -> stateRepository.readInstallMetadata(pluginId, version)?.installedAtEpochMs ?: 0L }.toMutableList()
+        var remaining = versions.size
+        while (remaining > limit && removable.isNotEmpty()) {
+            val version = removable.removeAt(0)
+            if (store.deleteVersion(pluginId, version)) remaining--
+        }
     }
 
     private fun defaultState(pluginId: String, version: String): PluginPersistentState =

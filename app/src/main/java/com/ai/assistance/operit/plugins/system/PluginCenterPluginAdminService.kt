@@ -71,6 +71,12 @@ internal class KernelPluginAdminJsonServiceV1(
         "rollback" -> stateJson(
             manager.rollback(parameters.requireAdminText("plugin_id"))
         )
+        "configure_version_retention" -> stateJson(
+            manager.configureVersionRetention(parameters.requireAdminText("plugin_id"), parameters.getInt("limit"))
+        )
+        "delete_version" -> stateJson(
+            manager.deleteVersion(parameters.requireAdminText("plugin_id"), parameters.requireAdminText("version"))
+        )
         "uninstall" -> {
             manager.uninstall(
                 pluginId = parameters.requireAdminText("plugin_id"),
@@ -395,6 +401,8 @@ internal class KernelPluginAdminJsonServiceV1(
         .put("plugin_id", state.pluginId)
         .put("active_version", state.activeVersion ?: JSONObject.NULL)
         .put("previous_version", state.previousVersion ?: JSONObject.NULL)
+        .put("rollback_version", state.rollbackVersion ?: JSONObject.NULL)
+        .put("retention_limit", state.retentionLimit)
         .put("enabled", state.enabled)
         .put("last_state", state.lastState.name)
         .put("last_error", state.lastError ?: JSONObject.NULL)

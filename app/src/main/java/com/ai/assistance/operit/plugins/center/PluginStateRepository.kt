@@ -12,6 +12,8 @@ data class PluginPersistentState(
     val pluginId: String,
     val activeVersion: String?,
     val previousVersion: String?,
+    val rollbackVersion: String? = null,
+    val retentionLimit: Int = 3,
     val enabled: Boolean,
     val lastState: PluginLifecycleState,
     val lastError: String?,
@@ -46,12 +48,16 @@ class PluginStateRepository(
         if (storedPluginId.isNotEmpty() && storedPluginId != expectedPluginId) return null
         val activeVersion = root.stringOrNull("active_version")
         val previousVersion = root.stringOrNull("previous_version")
+        val rollbackVersion = root.stringOrNull("rollback_version") ?: previousVersion
+        val retentionLimit = root.optInt("retention_limit", 3).let { if (it < 0) 3 else it }
         val lastState = runCatching { PluginLifecycleState.valueOf(root.optString("last_state")) }
             .getOrDefault(PluginLifecycleState.INSTALLED)
         return PluginPersistentState(
             pluginId = expectedPluginId,
             activeVersion = activeVersion,
             previousVersion = previousVersion,
+            rollbackVersion = rollbackVersion,
+            retentionLimit = retentionLimit,
             enabled = root.optBoolean("enabled", false),
             lastState = lastState,
             lastError = root.stringOrNull("last_error"),
@@ -92,6 +98,8 @@ class PluginStateRepository(
             .put("plugin_id", state.pluginId)
             .put("active_version", state.activeVersion ?: JSONObject.NULL)
             .put("previous_version", state.previousVersion ?: JSONObject.NULL)
+            .put("rollback_version", state.rollbackVersion ?: JSONObject.NULL)
+            .put("retention_limit", state.retentionLimit)
             .put("enabled", state.enabled)
             .put("last_state", state.lastState.name)
             .put("last_error", state.lastError ?: JSONObject.NULL)

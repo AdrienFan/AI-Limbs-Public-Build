@@ -86,6 +86,11 @@ class PluginStore(
             }
         }.orEmpty()
 
+    fun deleteVersion(pluginId: String, version: String): Boolean {
+        val target = versionDir(pluginId, version)
+        if (!target.exists()) return false
+        return target.deleteRecursively()
+    }
     fun quarantineVersion(pluginId: String, version: String): File? {
         val source = versionDir(pluginId, version)
         if (!source.exists()) return null

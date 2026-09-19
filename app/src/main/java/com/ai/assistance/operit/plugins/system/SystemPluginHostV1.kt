@@ -266,6 +266,13 @@ interface SystemPluginChildExtensionControlV2 {
     suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot
     suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot
     suspend fun deleteBackup(extensionId: String): Boolean
+    fun versions(extensionId: String): List<String>
+    fun retentionLimit(extensionId: String): Int
+    fun immediateRollbackVersion(extensionId: String): String?
+    suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot
+    suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot
+    suspend fun deleteVersion(extensionId: String, version: String): Boolean
+    suspend fun setVersionRetention(extensionId: String, limit: Int)
     suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long = 10L)
     suspend fun exportBackups(extensionIds: Collection<String>, treeUri: String): List<String>
     fun snapshots(): StateFlow<List<ChildExtensionSnapshot>>
@@ -544,6 +551,13 @@ internal class KernelSystemPluginChildExtensionControlV2(
     override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot = runtime.backup(extensionId)
     override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot = runtime.restoreBackup(extensionId)
     override suspend fun deleteBackup(extensionId: String): Boolean = runtime.deleteBackup(extensionId)
+    override fun versions(extensionId: String): List<String> = runtime.versions(extensionId)
+    override fun retentionLimit(extensionId: String): Int = runtime.retentionLimit(extensionId)
+    override fun immediateRollbackVersion(extensionId: String): String? = runtime.immediateRollbackVersion(extensionId)
+    override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot = runtime.activateVersion(extensionId, version)
+    override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot = runtime.immediateRollback(extensionId)
+    override suspend fun deleteVersion(extensionId: String, version: String): Boolean = runtime.deleteVersion(extensionId, version)
+    override suspend fun setVersionRetention(extensionId: String, limit: Int) = runtime.setVersionRetention(extensionId, limit)
     override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) =
         runtime.setAutoBackupPolicy(enabled, highFrequencyUseCount)
     override suspend fun exportBackups(extensionIds: Collection<String>, treeUri: String): List<String> =
