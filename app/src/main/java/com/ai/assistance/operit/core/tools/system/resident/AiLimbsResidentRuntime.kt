@@ -464,12 +464,27 @@ internal object AiLimbsResidentRuntime {
         val diagnostic = executor.executeCommand(
             "tail -n 40 ${quote(shellLogPath())} 2>/dev/null || true"
         )
+        // The launch command can return before resident.meta / process probing catches up.
+        // Re-probe once after reading diagnostics so a late but valid READY handshake is
+        // never persisted as KEY_LAST_ERROR.
+        val lateProbe = localProbe()
+        if (guardianMatchesInstalledBuild(lateProbe)) {
+            clearError()
+            AppLogger.i(TAG, "Resident became ready after launch probe window: pid=${lateProbe.pid}, uid=${lateProbe.uid}")
+            return status(lateProbe)
+        }
+        val stdout = diagnostic.stdout.trim()
+        val stderr = diagnostic.stderr.trim()
+        val emittedReady = stdout.lineSequence().any { it.trim().startsWith("AIL_RESIDENT_READY ") }
         recordError(
-            diagnostic.stdout.trim().takeIf { it.isNotEmpty() }
-                ?: diagnostic.stderr.trim().takeIf { it.isNotEmpty() }
-                ?: "Resident process did not become ready"
+            when {
+                stderr.isNotEmpty() -> stderr
+                emittedReady -> "Resident emitted READY but process liveness was not confirmed after launch"
+                stdout.isNotEmpty() -> stdout
+                else -> "Resident process did not become ready"
+            }
         )
-        return status(localProbe())
+        return status(lateProbe)
     }
 
     private suspend fun stopLocked(): JSONObject = withContext(NonCancellable) {
@@ -734,7 +749,22 @@ internal object AiLimbsResidentRuntime {
                 continuousResources?.optBoolean("network_available", false) == true
             val networkValidated =
                 continuousResources?.optBoolean("network_validated", false) == true
-            val lastError = prefs.getString(KEY_LAST_ERROR, null)
+            val rawLastError = prefs.getString(KEY_LAST_ERROR, null)
+            val runtimeFullyHealthy =
+                enabled &&
+                    guardianMatchesInstalledBuild(probe) &&
+                    coreOwned &&
+                    hostAttachComplete &&
+                    fenceState != "failed" &&
+                    core.optString("business_phase") != "failed" &&
+                    core.optString("business_phase") != "quiesce_failed"
+            val lastError =
+                if (runtimeFullyHealthy) {
+                    if (rawLastError != null) clearError()
+                    null
+                } else {
+                    rawLastError
+                }
             val offFactsClean =
                 !probe.running &&
                     !coreAvailable &&
