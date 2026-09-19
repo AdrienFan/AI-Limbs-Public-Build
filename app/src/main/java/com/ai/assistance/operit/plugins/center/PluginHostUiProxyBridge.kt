@@ -147,7 +147,7 @@ internal class ResidentUiProxyClient(
     suspend fun command(payload: JSONObject): JSONObject =
         kotlinx.coroutines.withContext(Dispatchers.IO) {
             try {
-                wireRequest("command", JSONObject(payload.toString()))
+                wireRequest("command", stageResidentCommandPayload(payload))
             } catch (error: IOException) {
                 transportFailureResult(error)
             }
@@ -160,10 +160,38 @@ internal class ResidentUiProxyClient(
 
     fun commandBlocking(payload: JSONObject): JSONObject =
         try {
-            wireRequest("command", JSONObject(payload.toString()))
+            wireRequest("command", stageResidentCommandPayload(payload))
         } catch (error: IOException) {
             transportFailureResult(error)
         }
+
+    /**
+     * Final Host-side guard before a UI command crosses into app_process-owned Resident code.
+     *
+     * Picker payloads are JSON-encoded inside payload_json, so recursively staging the outer
+     * command object is not enough. Materialize them here even if an upper UI proxy forgot to
+     * call stageUiPayload(). Resident must never dereference Android ContentProvider URIs.
+     */
+    private fun stageResidentCommandPayload(payload: JSONObject): JSONObject {
+        val staged = JSONObject(payload.toString())
+        when (staged.optString("command")) {
+            "ui_provider_event", "child_ui_event" -> {
+                val payloadJson = staged.optString("payload_json")
+                if (payloadJson.isNotBlank()) {
+                    staged.put("payload_json", uiPayloadStager.stagePickerPayload(payloadJson))
+                }
+            }
+            "invoke_ui_capability" -> {
+                staged.optJSONObject("parameters")?.let { parameters ->
+                    staged.put(
+                        "parameters",
+                        JSONObject(uiPayloadStager.stagePickerPayload(parameters.toString()))
+                    )
+                }
+            }
+        }
+        return staged
+    }
 
     suspend fun invokeUiCapability(
         ownerPluginId: String,
