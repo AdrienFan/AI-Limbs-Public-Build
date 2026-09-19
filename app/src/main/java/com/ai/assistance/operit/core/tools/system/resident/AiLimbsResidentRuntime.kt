@@ -969,9 +969,12 @@ internal object AiLimbsResidentRuntime {
 
         val cmdline = readProcText(pid, "cmdline")?.replace('\u0000', ' ')?.trim().orEmpty()
         val comm = readProcText(pid, "comm")?.trim().orEmpty()
-        val processIdentityVisible = cmdline.isNotEmpty() || comm.isNotEmpty()
-        if (processIdentityVisible &&
-            PROCESS_NAME !in cmdline && PROCESS_NAME !in comm && MAIN_CLASS !in cmdline) {
+        // SELinux may hide cmdline across runas_app -> untrusted_app while still exposing
+        // the generic app_process comm value (usually "main"). A generic comm is not
+        // negative identity evidence; the guardian lease + app-private meta + UID/liveness
+        // remain the ownership facts. Reject only when cmdline is actually visible and wrong.
+        if (cmdline.isNotEmpty() &&
+            PROCESS_NAME !in cmdline && MAIN_CLASS !in cmdline) {
             return LocalProbe()
         }
 
