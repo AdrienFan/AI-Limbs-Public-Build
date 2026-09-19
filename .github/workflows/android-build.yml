@@ -81,10 +81,10 @@ jobs:
         with:
           name: resident-bridge-fixes-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-Bridge-v1.3.10.ailp
-            dist/AI-Limbs-Bridge-v1.3.10.ailp.sha256
-            dist/AI-Limbs-SentinelX-v0.1.2.ailx
-            dist/AI-Limbs-SentinelX-v0.1.2.ailx.sha256
+            dist/AI-Limbs-Bridge-v*.ailp
+            dist/AI-Limbs-Bridge-v*.ailp.sha256
+            dist/AI-Limbs-SentinelX-v*.ailx
+            dist/AI-Limbs-SentinelX-v*.ailx.sha256
           if-no-files-found: error
           retention-days: 14
   build:
