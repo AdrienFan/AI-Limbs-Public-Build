@@ -111,8 +111,7 @@ internal object AiLimbsResidentRuntime {
             "core_status" -> ResidentCoreController.status(app)
             "core_probe" -> lifecycleMutex.withLock {
                 check(permissionBackendReady()) { "AI Limbs permission backend is not ready" }
-                val executor = checkNotNull(debuggerExecutorOrNull()) { "DEBUGGER Shell is unavailable" }
-                ResidentCoreController.probe(app, executor)
+                ResidentCoreController.probe(app)
             }
             "core_stop" -> lifecycleMutex.withLock { ResidentCoreController.stop(app) }
             "set_enabled" -> {
@@ -156,15 +155,6 @@ internal object AiLimbsResidentRuntime {
                 val before = guardianWatchdogSnapshotLocked(staleAfterMs)
                 if (before.optBoolean("healthy", false)) return@withLock
 
-                val executor = if (permissionBackendReady()) debuggerExecutorOrNull() else null
-                if (executor == null) {
-                    recordError(
-                        "Resident Guardian watchdog detected ${before.optString("reason", "unknown")}, " +
-                            "but the permission backend is unavailable for safe recovery"
-                    )
-                    return@withLock
-                }
-
                 AppLogger.w(
                     TAG,
                     "Resident Guardian watchdog recovery: reason=${before.optString("reason", "unknown")} " +
@@ -182,18 +172,6 @@ internal object AiLimbsResidentRuntime {
                         if (!probe.running) break
                     }
 
-                    if (probe.running) {
-                        val result = executor.executeCommand(
-                            "/system/bin/run-as ${quote(app.packageName)} /system/bin/kill -9 $stalePid"
-                        )
-                        if (!result.success) {
-                            AppLogger.w(
-                                TAG,
-                                "Guardian watchdog fallback kill failed pid=$stalePid: " +
-                                    result.stderr.ifBlank { result.stdout }
-                            )
-                        }
-                    }
                 }
 
                 for (attempt in 0 until 20) {
@@ -239,6 +217,11 @@ internal object AiLimbsResidentRuntime {
 
     private suspend fun setEnabled(enabled: Boolean): JSONObject = lifecycleMutex.withLock {
         clearOnAutoRetryBlock()
+        if (enabled && !isEnabled()) {
+            check(permissionBackendReady()) {
+                "AI Limbs permission backend is required for the initial Resident enable"
+            }
+        }
         persistEnabled(enabled)
         notifyHostResidentStateChanged()
         if (enabled) startLocked() else stopLocked()
@@ -246,6 +229,11 @@ internal object AiLimbsResidentRuntime {
 
     private suspend fun start(): JSONObject = lifecycleMutex.withLock {
         clearOnAutoRetryBlock()
+        if (!isEnabled()) {
+            check(permissionBackendReady()) {
+                "AI Limbs permission backend is required for the initial Resident enable"
+            }
+        }
         persistEnabled(true)
         notifyHostResidentStateChanged()
         startLocked()
@@ -371,11 +359,10 @@ internal object AiLimbsResidentRuntime {
             "Resident ON requires the active LEGACY_HOST Plugin Kernel owner"
         }
         check(permissionBackendReady()) { "AI Limbs permission backend is not ready" }
-        val executor = checkNotNull(debuggerExecutorOrNull()) { "DEBUGGER Shell is unavailable" }
 
         // Success never returns: the old Host process exits and Core acquires plugin_kernel.
         return try {
-            ResidentPluginKernelHandoff.execute(app, executor)
+            ResidentPluginKernelHandoff.execute(app)
         } catch (error: Throwable) {
             recordError("Resident business takeover failed: ${error.message ?: error.javaClass.simpleName}")
             status(localProbe())
@@ -385,6 +372,7 @@ internal object AiLimbsResidentRuntime {
     private suspend fun ensureGuardianStartedLocked(): JSONObject {
         var existing = localProbe()
         if (guardianMatchesInstalledBuild(existing)) {
+            runCatching { ResidentProcessHostService.ensureRunning(app) }
             clearError()
             return status(existing)
         }
@@ -403,35 +391,12 @@ internal object AiLimbsResidentRuntime {
                 }
             }
             existing = localProbe()
-            if (existing.running && existing.pid != null && permissionBackendReady()) {
-                debuggerExecutorOrNull()?.let { executor ->
-                    val fallback = "/system/bin/run-as ${quote(app.packageName)} " +
-                        "/system/bin/kill -9 ${existing.pid}"
-                    executor.executeCommand(fallback)
-                    for (attempt in 0 until 12) {
-                        delay(100L)
-                        existing = localProbe()
-                        if (!existing.running) return@let
-                    }
-                }
-            }
             if (existing.running) {
                 recordError(
-                    "旧版或旧安装 Resident 仍在运行，无法安全切换到当前 build=${BuildConfig.VERSION_CODE}"
+                    "旧版、异常隔离或旧安装 Resident 仍在运行，无法安全切换到当前 build=${BuildConfig.VERSION_CODE}"
                 )
                 return status(existing)
             }
-        }
-
-        if (!permissionBackendReady()) {
-            recordError("AI Limbs 权限服务未连接或未选择为当前权限后端")
-            return status(existing)
-        }
-
-        val executor = debuggerExecutorOrNull()
-        if (executor == null) {
-            recordError("DEBUGGER Shell 当前不可用")
-            return status(existing)
         }
 
         // guardian.lock is the process-ownership fact. resident.meta is diagnostic
@@ -440,11 +405,15 @@ internal object AiLimbsResidentRuntime {
             delay(250L)
             existing = localProbe()
             if (guardianMatchesInstalledBuild(existing)) {
+                runCatching { ResidentProcessHostService.ensureRunning(app) }
                 clearError()
                 return status(existing)
             }
-            if (!retireUntrackedGuardianLocked(executor)) {
-                recordError("Resident guardian lease is held but no trusted current Guardian could be recovered")
+            val executor = if (permissionBackendReady()) debuggerExecutorOrNull() else null
+            if (executor == null || !retireUntrackedGuardianLocked(executor)) {
+                recordError(
+                    "Resident guardian lease is held but no trusted current Guardian could be recovered"
+                )
                 return status(localProbe())
             }
         }
@@ -457,13 +426,13 @@ internal object AiLimbsResidentRuntime {
         }
         metaFile().delete()
         stopRequestFile().delete()
+        File(shellLogPath()).delete()
 
-        val result = executor.executeCommand(launchCommand())
-        if (!result.success) {
+        try {
+            ResidentProcessHostService.launchGuardian(app)
+        } catch (error: Throwable) {
             recordError(
-                result.stderr.ifBlank {
-                    result.stdout.ifBlank { "Resident launch command failed: exit=${result.exitCode}" }
-                }
+                "Resident AMS host launch failed: ${error.message ?: error.javaClass.simpleName}"
             )
             return status(localProbe())
         }
@@ -471,33 +440,45 @@ internal object AiLimbsResidentRuntime {
         for (attempt in 0 until 20) {
             delay(150L)
             val probe = localProbe()
-            if (probe.running) {
+            if (guardianMatchesInstalledBuild(probe)) {
                 clearError()
-                AppLogger.i(TAG, "Resident started: pid=${probe.pid}, uid=${probe.uid}")
+                AppLogger.i(
+                    TAG,
+                    "Resident started outside adbd cgroup: pid=${probe.pid}, uid=${probe.uid}, cgroup=${probe.cgroup}"
+                )
                 return status(probe)
+            }
+            if (guardianIsCurrentBuildButAdbdBound(probe)) {
+                probe.pid?.let { runCatching { Process.killProcess(it) } }
+                recordError("Resident Guardian launch rejected because it remained attached to the adbd cgroup")
+                return status(localProbe())
             }
         }
 
-        val diagnostic = executor.executeCommand(
-            "tail -n 40 ${quote(shellLogPath())} 2>/dev/null || true"
-        )
-        // The launch command can return before resident.meta / process probing catches up.
-        // Re-probe once after reading diagnostics so a late but valid READY handshake is
-        // never persisted as KEY_LAST_ERROR.
+        // The process can publish resident.meta slightly after the normal probe window.
         val lateProbe = localProbe()
         if (guardianMatchesInstalledBuild(lateProbe)) {
             clearError()
-            AppLogger.i(TAG, "Resident became ready after launch probe window: pid=${lateProbe.pid}, uid=${lateProbe.uid}")
+            AppLogger.i(
+                TAG,
+                "Resident became ready after launch probe window: pid=${lateProbe.pid}, cgroup=${lateProbe.cgroup}"
+            )
             return status(lateProbe)
         }
-        val stdout = diagnostic.stdout.trim()
-        val stderr = diagnostic.stderr.trim()
-        val emittedReady = stdout.lineSequence().any { it.trim().startsWith("AIL_RESIDENT_READY ") }
+        if (guardianIsCurrentBuildButAdbdBound(lateProbe)) {
+            lateProbe.pid?.let { runCatching { Process.killProcess(it) } }
+            recordError("Resident Guardian launch rejected because it remained attached to the adbd cgroup")
+            return status(localProbe())
+        }
+
+        val diagnostic = runCatching {
+            File(shellLogPath()).readLines().takeLast(40).joinToString("\n")
+        }.getOrDefault("").trim()
+        val emittedReady = diagnostic.lineSequence().any { it.trim().startsWith("AIL_RESIDENT_READY ") }
         recordError(
             when {
-                stderr.isNotEmpty() -> stderr
-                emittedReady -> "Resident emitted READY but process liveness was not confirmed after launch"
-                stdout.isNotEmpty() -> stdout
+                emittedReady -> "Resident emitted READY but isolated process liveness was not confirmed after launch"
+                diagnostic.isNotEmpty() -> diagnostic
                 else -> "Resident process did not become ready"
             }
         )
@@ -656,17 +637,6 @@ internal object AiLimbsResidentRuntime {
                 if (!probe.running) break
             }
         }
-        val executor = if (permissionBackendReady()) debuggerExecutorOrNull() else null
-        probe = localProbe()
-        if (probe.running && probe.pid != null && executor != null) {
-            val fallback = "/system/bin/run-as ${quote(app.packageName)} /system/bin/kill -9 ${probe.pid}"
-            executor.executeCommand(fallback)
-            for (attempt in 0 until 8) {
-                delay(100L)
-                probe = localProbe()
-                if (!probe.running) break
-            }
-        }
         probe = localProbe()
         if (probe.running) failures += "Resident Guardian is still alive after stop request"
         else {
@@ -697,6 +667,7 @@ internal object AiLimbsResidentRuntime {
         }
 
         if (failures.isEmpty()) {
+            ResidentProcessHostService.stopHost(app)
             clearError()
             AppLogger.i(TAG, "Resident OFF cleanup confirmed mode=$backendReturnMode degraded=${degraded.isNotEmpty()}")
         } else {
@@ -906,19 +877,6 @@ internal object AiLimbsResidentRuntime {
         return if (executor.isAvailable() && permission.granted) executor else null
     }
 
-    private fun launchCommand(): String {
-        val inner =
-            "export CLASSPATH=${quote(app.applicationInfo.sourceDir)}; " +
-                "exec /system/bin/app_process /system/bin --nice-name=$PROCESS_NAME " +
-                "$MAIN_CLASS ${quote(stateDir().absolutePath)} ${quote(app.packageName)} " +
-                "${quote(BuildConfig.VERSION_CODE.toString())} ${quote(app.applicationInfo.sourceDir)}"
-        val asApp =
-            "exec /system/bin/run-as ${quote(app.packageName)} /system/bin/sh -c ${quote(inner)}"
-        return "trap '' HUP; rm -f ${quote(shellLogPath())}; " +
-            "/system/bin/setsid /system/bin/sh -c ${quote(asApp)} " +
-            "> ${quote(shellLogPath())} 2>&1 < /dev/null &"
-    }
-
     private fun guardianWatchdogSnapshotLocked(staleAfterMs: Long): JSONObject {
         val enabled = isEnabled()
         if (!enabled) {
@@ -1020,11 +978,25 @@ internal object AiLimbsResidentRuntime {
         )
     }
 
-    private fun guardianMatchesInstalledBuild(probe: LocalProbe): Boolean =
+    private fun guardianIsCurrentBuild(probe: LocalProbe): Boolean =
         probe.running &&
             probe.protocolVersion == RESIDENT_PROTOCOL_VERSION &&
             probe.buildCode == BuildConfig.VERSION_CODE &&
             probe.sourceApk == app.applicationInfo.sourceDir
+
+    private fun guardianMatchesInstalledBuild(probe: LocalProbe): Boolean =
+        guardianIsCurrentBuild(probe) &&
+            probe.pid?.let {
+                ResidentProcessIsolation.snapshot(it).optBoolean("isolated_from_adbd", false)
+            } == true
+
+    private fun guardianIsCurrentBuildButAdbdBound(probe: LocalProbe): Boolean =
+        guardianIsCurrentBuild(probe) &&
+            probe.pid?.let { pid ->
+                val isolation = ResidentProcessIsolation.snapshot(pid)
+                isolation.optBoolean("readable", false) &&
+                    !isolation.optBoolean("isolated_from_adbd", false)
+            } == true
 
     private fun guardianLeaseIsFree(): Boolean {
         val lease = ResidentRuntimeLease.tryAcquire(stateDir(), "guardian") ?: return false
@@ -1112,7 +1084,7 @@ internal object AiLimbsResidentRuntime {
 
     private fun hostShellStateFile(): File = File(stateDir(), "host_shell.state")
     private fun stopRequestFile(): File = File(stateDir(), "stop.request")
-    private fun shellLogPath(): String = "/data/local/tmp/ail_resident_${Process.myUid()}.log"
+    private fun shellLogPath(): String = File(stateDir(), "launcher.log").absolutePath
 
     internal fun blockAutomaticOnRetryAfterHandoffFailure(
         context: Context,

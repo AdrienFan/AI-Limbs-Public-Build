@@ -5,7 +5,6 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.os.Process
-import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.util.AppLogger
@@ -25,7 +24,7 @@ import kotlinx.coroutines.withContext
  * and terminates this process instead of ever returning into partially retired business code.
  */
 internal object ResidentPluginKernelHandoff {
-    suspend fun execute(context: Context, executor: ShellExecutor): Nothing {
+    suspend fun execute(context: Context): Nothing {
         val app = context.applicationContext
         val before = PluginPlatformKernel.lifecycleSnapshot()
         check(before.getBoolean("started") && before.getString("runtime_role") == "legacy_host") {
@@ -35,7 +34,7 @@ internal object ResidentPluginKernelHandoff {
             "Host Plugin Kernel ownership identity is invalid"
         }
 
-        val handoff = ResidentCoreController.prepareHandoff(app, executor)
+        val handoff = ResidentCoreController.prepareHandoff(app)
         val coreSession = handoff.coreSessionId()
         val hostPid = Process.myPid()
         var policyFrozen = false

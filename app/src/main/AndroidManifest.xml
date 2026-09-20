@@ -359,6 +359,18 @@
                 android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
                 android:value="Keeps the user-requested assistant runtime alive for AI Limbs remote bridge connectivity and external HTTP control when no standard foreground service type fully describes that mode." />
         </service>
+
+        <service
+            android:name=".core.tools.system.resident.ResidentProcessHostService"
+            android:enabled="true"
+            android:exported="false"
+            android:process=":resident_host"
+            android:stopWithTask="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Hosts the user-enabled AI Limbs resident Guardian and Core independently from wireless debugging and adbd lifecycle." />
+        </service>
         
         <!-- 添加广播接收器配置 -->
         <receiver

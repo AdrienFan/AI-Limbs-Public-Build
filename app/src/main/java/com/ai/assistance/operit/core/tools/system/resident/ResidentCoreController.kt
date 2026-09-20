@@ -3,7 +3,6 @@ package com.ai.assistance.operit.core.tools.system.resident
 import android.content.Context
 import android.os.SystemClock
 import com.ai.assistance.operit.BuildConfig
-import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import java.io.File
 import java.io.IOException
 import java.io.RandomAccessFile
@@ -37,13 +36,19 @@ internal object ResidentCoreController {
                 val sourceApkMatches =
                     state.optString("source_apk", "") == context.applicationInfo.sourceDir
                 val buildMatches = buildCodeMatches && sourceApkMatches
+                val isolation = ResidentProcessIsolation.snapshot(state.getInt("pid"))
+                val isolatedFromAdbd = isolation.optBoolean("isolated_from_adbd", false)
                 state.put("build_code_matches", buildCodeMatches)
                     .put("source_apk_matches", sourceApkMatches)
                     .put("build_matches", buildMatches)
                     .put("process_alive", true)
+                    .put("process_isolation", isolation)
                 if (!buildMatches) {
                     state.put("consistent", false)
                         .put("consistency_error", "Resident Core build does not match the installed Host build")
+                } else if (!isolatedFromAdbd) {
+                    state.put("consistent", false)
+                        .put("consistency_error", "Resident Core is still attached to the adbd cgroup")
                 } else {
                     val consistencyError =
                         runCatching { requireSnapshotConsistent(state) }.exceptionOrNull()
@@ -65,7 +70,7 @@ internal object ResidentCoreController {
         }
     }
 
-    suspend fun probe(context: Context, executor: ShellExecutor): JSONObject = withContext(Dispatchers.IO) {
+    suspend fun probe(context: Context): JSONObject = withContext(Dispatchers.IO) {
         var existing = status(context)
         if (existing.getBoolean("available")) {
             if (!existing.getBoolean("build_matches")) {
@@ -97,19 +102,7 @@ internal object ResidentCoreController {
             check(nativeLibraryDir.isNotBlank() && File(nativeLibraryDir).isDirectory) {
                 "Resident Core native library directory is unavailable: $nativeLibraryDir"
             }
-            val inner = "export CLASSPATH=" + quote(context.applicationInfo.sourceDir) + "; " +
-                "export LD_LIBRARY_PATH=" + quote(nativeLibraryDir) + ":\$LD_LIBRARY_PATH; " +
-                "exec /system/bin/app_process -Djava.library.path=\$LD_LIBRARY_PATH /system/bin " +
-                "--nice-name=ail_resident_core " +
-                MAIN_CLASS + " " + quote(context.packageName) + " " +
-                quote(directory.absolutePath) + " " + quote(launchId)
-            val asApp = "exec /system/bin/run-as " + quote(context.packageName) +
-                " /system/bin/sh -c " + quote(inner + " > " +
-                    quote(File(directory, "bootstrap.log").absolutePath) + " 2>&1 < /dev/null")
-            val command = "trap '' HUP; /system/bin/setsid /system/bin/sh -c " +
-                quote(asApp) + " > /dev/null 2>&1 < /dev/null &"
-            val result = executor.executeCommand(command)
-            check(result.success) { "Core launch failed: " + result.stderr.take(1000) }
+            ResidentProcessHostService.launchCore(context, launchId)
             var lastStatus = existing
             val readyDeadline = SystemClock.elapsedRealtime() + 6_000L
             while (SystemClock.elapsedRealtime() < readyDeadline) {
@@ -120,6 +113,18 @@ internal object ResidentCoreController {
                     check(state.getBoolean("build_matches")) { "Core build mismatch" }
                     check(state.getString("launch_id") == launchId) { "Core launch identity mismatch" }
                     requireRuntimeSkeletonRunning(state)
+                    try {
+                        state.put(
+                            "process_isolation",
+                            ResidentProcessIsolation.requireDetachedFromAdbd(
+                                state.getInt("pid"),
+                                "Resident Core"
+                            )
+                        )
+                    } catch (error: Throwable) {
+                        runCatching { requestCore(context, "stop", state.getString("session_id")) }
+                        throw error
+                    }
                     ready = true
                     return@withContext state
                 }
@@ -185,9 +190,9 @@ internal object ResidentCoreController {
     }
 
     /** Prepare only. Old Host retirement and process exit must precede Core kernel activation. */
-    suspend fun prepareHandoff(context: Context, executor: ShellExecutor): ResidentPermissionHandoff =
+    suspend fun prepareHandoff(context: Context): ResidentPermissionHandoff =
         withContext(Dispatchers.IO) {
-            var state = probe(context, executor)
+            var state = probe(context)
             check(!state.getBoolean("business_attached")) {
                 "Resident Core already owns the Plugin Kernel; a second handoff is forbidden"
             }
