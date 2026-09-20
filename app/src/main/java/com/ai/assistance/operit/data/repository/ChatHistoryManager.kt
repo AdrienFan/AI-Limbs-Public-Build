@@ -531,6 +531,14 @@ class ChatHistoryManager private constructor(private val context: Context) {
             null
         )
 
+    /**
+     * Read the first real DataStore value instead of relying on currentChatIdFlow.value.
+     * The shared StateFlow intentionally starts with null, so its synchronous value cannot
+     * distinguish "not loaded yet" from "persisted selection is actually empty".
+     */
+    suspend fun readPersistedCurrentChatId(): String? =
+        _currentChatIdFlow.first()
+
     private fun validateArchivedMessageVariants(
         message: ChatMessage,
         variants: List<OperitArchivedMessageVariant>,
