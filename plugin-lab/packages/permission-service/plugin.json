@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.permission_service",
-  "version": "0.1.2",
+  "version": "0.1.4",
   "api": {
     "target": 1,
     "min": 1

@@ -1,5 +1,6 @@
 package com.ai.limbs.plugins.permission
 
+import kotlinx.coroutines.CancellationException
 import com.ai.limbs.plugin.runtime.*
 import org.json.JSONArray
 import org.json.JSONObject
@@ -28,6 +29,19 @@ class PermissionEntry : InProcessPluginEntry {
             description = "AI Limbs 权限服务 · 无线调试与 root",
             screenId = "$ID.screen"
         ))
+        // Resident handoff remounts this plugin in the Core-owned runtime. Re-read the
+        // Host-owned privilege state immediately so the page never flashes a synthetic
+        // "not running" state while the Binder backend is already connected.
+        try {
+            controller.refresh()
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            host.logger.w(
+                "PermissionService",
+                "Initial permission status refresh unavailable: ${error.message ?: error.javaClass.simpleName}"
+            )
+        }
         host.registerCapability(InProcessCapabilitySpec(
             id = "plugin.permission_service.status", displayName = "AI Limbs 权限服务状态",
             description = "读取内置权限服务连接状态及当前执行后端",
