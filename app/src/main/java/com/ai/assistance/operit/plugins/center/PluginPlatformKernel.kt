@@ -1076,7 +1076,16 @@ internal object PluginPlatformKernel {
                 desiredCount == snapshot.getInt("desired_provider_count")) {
                 "Inconsistent Bridge runtime readiness inventory"
             }
-            val ingressReady = snapshot.getBoolean("manager_ready") && requestedCount == desiredCount
+            // An empty Bridge is a valid runtime state: without provider contributions there is
+            // intentionally no PluginBridgeManager to create, so manager_ready remains false while
+            // the Bridge readiness contract reports ready=true and fatal_error=false. Preserve the
+            // stricter manager requirement whenever at least one provider exists.
+            val emptyBridgeReady = providers.length() == 0 &&
+                desiredCount == 0 &&
+                snapshot.getBoolean("ready") &&
+                !snapshot.getBoolean("fatal_error")
+            val ingressReady = requestedCount == desiredCount &&
+                (snapshot.getBoolean("manager_ready") || emptyBridgeReady)
             snapshot.put("ingress_handoff_ready", ingressReady)
             if (ingressReady) {
                 if (!snapshot.getBoolean("ready")) {
