@@ -36,6 +36,44 @@ internal class ResidentUiPayloadStager(context: Context) {
         }
     }
 
+    /**
+     * Materializes a single plugin package selected through Android SAF into app-private cache.
+     *
+     * Plugin administration executes in Resident Core while the UI picker grant belongs to the
+     * AMS-owned Android Host. The raw app_process Core must therefore receive a plain file path,
+     * never the original ContentProvider URI. A dedicated internal-cache root lets Core validate
+     * that the path was staged by Host instead of accepting arbitrary filesystem paths.
+     */
+    fun stagePluginPackageUri(uriText: String): String {
+        val normalized = uriText.trim()
+        if (!normalized.startsWith(CONTENT_SCHEME)) return normalized
+
+        val uri = Uri.parse(normalized)
+        val sourceName = safeName(
+            queryDisplayName(uri).ifBlank { "selected-" + UUID.randomUUID() + ".ailp" }
+        )
+        val session = StageSession()
+        val stagingRoot = File(appContext.cacheDir, PLUGIN_PACKAGE_STAGING_DIR).apply {
+            check(mkdirs() || isDirectory) { "Could not create Resident plugin import staging root" }
+        }
+        val eventRoot = File(
+            stagingRoot,
+            System.currentTimeMillis().toString() + "-" + UUID.randomUUID().toString()
+        ).apply {
+            check(mkdirs()) { "Could not create Resident plugin import staging directory" }
+        }
+        val destination = uniqueChild(eventRoot, sourceName)
+
+        return try {
+            copyDocument(uri, destination, session)
+            AppLogger.d(TAG, "Staged Resident plugin package for Core import: " + destination.absolutePath)
+            destination.absolutePath
+        } catch (error: Throwable) {
+            eventRoot.deleteRecursively()
+            throw error
+        }
+    }
+
     private fun rewriteObject(value: JSONObject, session: StageSession) {
         value.keys().asSequence().toList().forEach { key ->
             when (key) {
@@ -273,6 +311,7 @@ internal class ResidentUiPayloadStager(context: Context) {
         const val SELECTED_URIS = "selected_uris"
         const val EXTERNAL_STORAGE_AUTHORITY = "com.android.externalstorage.documents"
         const val STAGING_DIR = "resident-ui-picker"
+        const val PLUGIN_PACKAGE_STAGING_DIR = "resident-plugin-imports"
         const val MAX_TREE_DEPTH = 12
         const val MAX_TREE_ENTRIES = 500
         const val MAX_STAGED_BYTES = 512L * 1024L * 1024L

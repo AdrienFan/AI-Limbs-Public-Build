@@ -195,6 +195,18 @@ internal class ResidentUiProxyClient(
                     )
                 }
             }
+            "system_json" -> {
+                val service = staged.optString("service").trim().lowercase()
+                val operation = staged.optString("operation").trim().lowercase()
+                if (service == "plugin_admin" && operation in PLUGIN_ADMIN_URI_OPERATIONS) {
+                    staged.optJSONObject("parameters")?.let { parameters ->
+                        val uriText = parameters.optString("uri").trim()
+                        if (uriText.startsWith("content://")) {
+                            parameters.put("uri", uiPayloadStager.stagePluginPackageUri(uriText))
+                        }
+                    }
+                }
+            }
         }
         return staged
     }
@@ -579,6 +591,7 @@ internal class ResidentUiProxyClient(
         private const val TRANSIENT_TRANSPORT_RETRY_COUNT = 3
         private const val TRANSIENT_TRANSPORT_RETRY_DELAY_MS = 250L
         private const val CORE_RECOVERY_REQUEST_COOLDOWN_MS = 5_000L
+        private val PLUGIN_ADMIN_URI_OPERATIONS = setOf("inspect_uri", "install_uri")
     }
 }
 

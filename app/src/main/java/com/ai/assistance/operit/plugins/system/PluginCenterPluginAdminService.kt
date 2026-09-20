@@ -35,6 +35,8 @@ internal class KernelPluginAdminJsonServiceV1(
 ) : SystemJsonServiceV1 {
     private val appContext = context.applicationContext
     private val importDir = File(appContext.cacheDir, "plugin-center-imports").apply { mkdirs() }
+    private val residentImportStagingRoot =
+        File(appContext.cacheDir, RESIDENT_PLUGIN_IMPORT_STAGING_DIR).apply { mkdirs() }
 
     override suspend fun call(
         operation: String,
@@ -302,19 +304,36 @@ internal class KernelPluginAdminJsonServiceV1(
         parameters: JSONObject,
         block: suspend (File, String) -> T
     ): T {
-        val uri = Uri.parse(parameters.requireAdminText("uri"))
-        val sourceName = resolveDisplayName(uri)
-            ?: throw PluginInstallException("SOURCE_NAME_UNAVAILABLE", "Unable to resolve selected plugin file name")
+        val sourceText = parameters.requireAdminText("uri").trim()
+        val contentUri = sourceText.takeIf { it.startsWith("content://") }?.let(Uri::parse)
+        val stagedSource = if (contentUri == null) resolveResidentStagedPackage(sourceText) else null
+        val sourceName = when {
+            stagedSource != null -> stagedSource.name
+            contentUri != null -> resolveDisplayName(contentUri)
+            else -> null
+        } ?: throw PluginInstallException(
+            "SOURCE_NAME_UNAVAILABLE",
+            "Unable to resolve selected plugin file name"
+        )
+
         if (!sourceName.lowercase().endsWith(".ailp")) {
+            cleanupResidentStagedPackage(stagedSource)
             throw PluginInstallException(
                 "PACKAGE_EXTENSION_INVALID",
                 "Plugin package must use .ailp"
             )
         }
+
         val target = File(importDir, "import-${System.nanoTime()}.ailp")
         try {
-            val input = appContext.contentResolver.openInputStream(uri)
-                ?: throw PluginInstallException("SOURCE_OPEN_FAILED", "Unable to read selected plugin package")
+            val input = when {
+                stagedSource != null -> stagedSource.inputStream()
+                contentUri != null -> appContext.contentResolver.openInputStream(contentUri)
+                else -> null
+            } ?: throw PluginInstallException(
+                "SOURCE_OPEN_FAILED",
+                "Unable to read selected plugin package"
+            )
             input.use { source ->
                 target.outputStream().buffered().use { output ->
                     val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
@@ -333,6 +352,57 @@ internal class KernelPluginAdminJsonServiceV1(
             return block(target, sourceName)
         } finally {
             target.delete()
+            cleanupResidentStagedPackage(stagedSource)
+        }
+    }
+
+    private fun resolveResidentStagedPackage(pathText: String): File {
+        if (!pathText.startsWith(File.separator)) {
+            throw PluginInstallException(
+                "SOURCE_URI_INVALID",
+                "Resident plugin import must be a Host-staged file"
+            )
+        }
+        val root = runCatching { residentImportStagingRoot.canonicalFile }
+            .getOrElse {
+                throw PluginInstallException(
+                    "SOURCE_STAGE_INVALID",
+                    "Resident plugin import staging root is unavailable",
+                    it
+                )
+            }
+        val candidate = runCatching { File(pathText).canonicalFile }
+            .getOrElse {
+                throw PluginInstallException(
+                    "SOURCE_STAGE_INVALID",
+                    "Resident plugin import path is invalid",
+                    it
+                )
+            }
+        if (candidate.path == root.path ||
+            !candidate.path.startsWith(root.path + File.separator) ||
+            !candidate.isFile
+        ) {
+            throw PluginInstallException(
+                "SOURCE_STAGE_FORBIDDEN",
+                "Resident plugin import path is outside the Host staging boundary"
+            )
+        }
+        return candidate
+    }
+
+    private fun cleanupResidentStagedPackage(file: File?) {
+        if (file == null) return
+        runCatching {
+            val root = residentImportStagingRoot.canonicalFile
+            val parent = file.parentFile?.canonicalFile
+            file.delete()
+            if (parent != null &&
+                parent.path != root.path &&
+                parent.parentFile?.canonicalFile?.path == root.path
+            ) {
+                parent.deleteRecursively()
+            }
         }
     }
     private fun resolveDisplayName(uri: Uri): String? {
@@ -466,6 +536,7 @@ internal class KernelPluginAdminJsonServiceV1(
         )
 
     companion object {
+        private const val RESIDENT_PLUGIN_IMPORT_STAGING_DIR = "resident-plugin-imports"
         private const val MAX_IMPORT_BYTES = 512L * 1024L * 1024L
     }
 }
