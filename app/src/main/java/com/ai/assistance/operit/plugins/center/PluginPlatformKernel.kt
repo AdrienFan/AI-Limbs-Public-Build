@@ -1387,26 +1387,27 @@ internal object PluginPlatformKernel {
     }
 
     suspend fun shutdown(): Unit = withContext(NonCancellable) {
-        shutdownOwner(null, null)
+        shutdownOwner(null, null, residentHandoff = false)
     }
 
     internal suspend fun shutdownForResidentHandoff(
-        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff,
+        handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff?,
         onDestructiveRetirementStarted: () -> Unit
     ): Unit = withContext(NonCancellable) {
-        shutdownOwner(handoff, onDestructiveRetirementStarted)
+        shutdownOwner(handoff, onDestructiveRetirementStarted, residentHandoff = true)
     }
 
     private suspend fun shutdownOwner(
         handoff: com.ai.assistance.operit.core.tools.system.resident.ResidentPermissionHandoff?,
-        onDestructiveRetirementStarted: (() -> Unit)?
+        onDestructiveRetirementStarted: (() -> Unit)?,
+        residentHandoff: Boolean
     ): Unit {
         runtimeLifecycleMutex.withLock {
             if (!initialized || lifecyclePhase == "stopped") return@withLock
             handoff?.verify(checkNotNull(
                 com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime.connection()
             ) { "Permission backend is disconnected before runtime handoff" })
-            if (handoff != null) {
+            if (residentHandoff) {
                 checkNotNull(onDestructiveRetirementStarted) {
                     "Resident handoff retirement requires an explicit destructive boundary callback"
                 }.invoke()

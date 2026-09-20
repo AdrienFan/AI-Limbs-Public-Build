@@ -189,40 +189,92 @@ internal object ResidentCoreController {
         error("Core accepted stop but process exit has not been confirmed")
     }
 
-    /** Prepare only. Old Host retirement and process exit must precede Core kernel activation. */
-    suspend fun prepareHandoff(context: Context): ResidentPermissionHandoff =
-        withContext(Dispatchers.IO) {
-            var state = probe(context)
-            check(!state.getBoolean("business_attached")) {
-                "Resident Core already owns the Plugin Kernel; a second handoff is forbidden"
-            }
-            val session = state.getString("session_id")
-            val deadline = SystemClock.elapsedRealtime() + 6_000L
-            while (state.getJSONObject("backend").getString("state") == "connecting" &&
-                SystemClock.elapsedRealtime() < deadline) {
-                delay(100L)
-                state = requestCore(context, "status", session)
-            }
-            val backend = state.getJSONObject("backend")
-            check(backend.getString("state") == "ready" || backend.getString("state") == "prepared") {
-                "Core permission backend is not ready for handoff: $backend"
-            }
-            var prepared = requestCore(context, "prepare_handoff", session)
-            val prepareDeadline = SystemClock.elapsedRealtime() + 6_000L
-            while (prepared.getJSONObject("backend").getString("state") == "preparing" &&
-                SystemClock.elapsedRealtime() < prepareDeadline) {
-                delay(100L)
-                prepared = requestCore(context, "status", session)
-            }
-            ResidentPermissionHandoff.fromPreparedCore(prepared)
+    /**
+     * Prepare the Core business takeover. Test cold-start mode may proceed without a permission
+     * backend on both first enable and automatic recovery, entering DEGRADED until late rebind.
+     */
+    suspend fun prepareHandoff(
+        context: Context,
+        backendRequirement: ResidentBackendRequirement
+    ): ResidentBusinessHandoff = withContext(Dispatchers.IO) {
+        var state = probe(context)
+        check(!state.getBoolean("business_attached")) {
+            "Resident Core already owns the Plugin Kernel; a second handoff is forbidden"
+        }
+        val session = state.getString("session_id")
+        val corePid = state.getInt("pid")
+        val settleMs = if (backendRequirement == ResidentBackendRequirement.REQUIRED) 6_000L else 1_200L
+        val deadline = SystemClock.elapsedRealtime() + settleMs
+        while (state.getJSONObject("backend").getString("state") == "connecting" &&
+            SystemClock.elapsedRealtime() < deadline) {
+            delay(100L)
+            state = requestCore(context, "status", session)
         }
 
-    suspend fun armBusinessTakeover(context: Context, coreSession: String): JSONObject = withContext(Dispatchers.IO) {
-        val armed = requestCore(context, "activate_business", coreSession)
+        var permissionHandoff: ResidentPermissionHandoff? = null
+        var backendState = state.getJSONObject("backend").getString("state")
+        if (backendState == "ready" || backendState == "prepared") {
+            val preparation = runCatching {
+                var prepared =
+                    if (backendState == "prepared") state
+                    else requestCore(context, "prepare_handoff", session)
+                val prepareDeadline = SystemClock.elapsedRealtime() +
+                    if (backendRequirement == ResidentBackendRequirement.REQUIRED) 6_000L else 2_000L
+                while (prepared.getJSONObject("backend").getString("state") == "preparing" &&
+                    SystemClock.elapsedRealtime() < prepareDeadline) {
+                    delay(100L)
+                    prepared = requestCore(context, "status", session)
+                }
+                backendState = prepared.getJSONObject("backend").getString("state")
+                if (backendState == "prepared") {
+                    ResidentPermissionHandoff.fromPreparedCore(prepared)
+                } else null
+            }
+            if (preparation.isSuccess) {
+                permissionHandoff = preparation.getOrNull()
+            } else if (backendRequirement == ResidentBackendRequirement.REQUIRED) {
+                throw checkNotNull(preparation.exceptionOrNull())
+            } else {
+                backendState = "degraded_prepare_failed"
+            }
+        }
+
+        if (backendRequirement == ResidentBackendRequirement.REQUIRED) {
+            check(permissionHandoff != null) {
+                "Core permission backend is not prepared for required handoff: state=$backendState"
+            }
+        }
+
+        ResidentBusinessHandoff(
+            coreSessionId = session,
+            coreProcessId = corePid,
+            permissionHandoff = permissionHandoff,
+            backendRequirement = backendRequirement,
+            backendState = backendState
+        )
+    }
+
+    suspend fun armBusinessTakeover(
+        context: Context,
+        coreSession: String,
+        backendRequirement: ResidentBackendRequirement
+    ): JSONObject = withContext(Dispatchers.IO) {
+        val operation =
+            if (backendRequirement == ResidentBackendRequirement.REQUIRED)
+                "activate_business" else "activate_business_degraded"
+        val armed = requestCore(context, operation, coreSession)
         check(armed.getString("business_phase") == "waiting_for_host_exit") {
             "Core did not arm Plugin Kernel takeover: $armed"
         }
         armed
+    }
+
+    suspend fun rebindPermissionBackend(context: Context): JSONObject = withContext(Dispatchers.IO) {
+        val state = status(context)
+        check(state.optBoolean("available", false) && state.optBoolean("business_attached", false)) {
+            "Resident Core must own business before permission backend rebind"
+        }
+        requestCore(context, "rebind_backend", state.getString("session_id"))
     }
 
     suspend fun quiesceBusiness(context: Context): JSONObject =

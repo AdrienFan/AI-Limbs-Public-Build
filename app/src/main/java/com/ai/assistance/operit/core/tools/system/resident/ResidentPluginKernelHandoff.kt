@@ -24,7 +24,10 @@ import kotlinx.coroutines.withContext
  * and terminates this process instead of ever returning into partially retired business code.
  */
 internal object ResidentPluginKernelHandoff {
-    suspend fun execute(context: Context): Nothing {
+    suspend fun execute(
+        context: Context,
+        backendRequirement: ResidentBackendRequirement
+    ): Nothing {
         val app = context.applicationContext
         val before = PluginPlatformKernel.lifecycleSnapshot()
         check(before.getBoolean("started") && before.getString("runtime_role") == "legacy_host") {
@@ -34,8 +37,8 @@ internal object ResidentPluginKernelHandoff {
             "Host Plugin Kernel ownership identity is invalid"
         }
 
-        val handoff = ResidentCoreController.prepareHandoff(app)
-        val coreSession = handoff.coreSessionId()
+        val handoff = ResidentCoreController.prepareHandoff(app, backendRequirement)
+        val coreSession = handoff.coreSessionId
         val hostPid = Process.myPid()
         var policyFrozen = false
         var policyStaged = false
@@ -48,12 +51,12 @@ internal object ResidentPluginKernelHandoff {
             ResidentPolicyStateHandoff.stage(
                 context = app,
                 coreSession = coreSession,
-                corePid = handoff.coreProcessId(),
+                corePid = handoff.coreProcessId,
                 hostPid = hostPid,
                 policyState = policyState
             )
             policyStaged = true
-            val armed = ResidentCoreController.armBusinessTakeover(app, coreSession)
+            val armed = ResidentCoreController.armBusinessTakeover(app, coreSession, backendRequirement)
             takeoverArmed = true
             check(armed.getString("business_phase") == "waiting_for_host_exit") {
                 "Resident Core did not arm business takeover"
@@ -62,7 +65,7 @@ internal object ResidentPluginKernelHandoff {
                 "Resident Core armed takeover for a different Host process"
             }
 
-            PluginPlatformKernel.shutdownForResidentHandoff(handoff) {
+            PluginPlatformKernel.shutdownForResidentHandoff(handoff.permissionHandoff) {
                 destructiveRetirementStarted = true
             }
             val retired = PluginPlatformKernel.lifecycleSnapshot()

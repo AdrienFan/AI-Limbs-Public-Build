@@ -467,6 +467,10 @@ class AIForegroundService : Service() {
             startServiceForAction(context, ACTION_START_OR_REFRESH_EXTERNAL_HTTP)
         }
 
+        fun ensureResidentKeepAlive(context: Context) {
+            startServiceForAction(context, ACTION_RESIDENT_KEEPALIVE)
+        }
+
         fun refreshBackgroundKeepAlive(context: Context) {
             val appContext = context.applicationContext
             val keepAliveEnabled = runCatching {
@@ -1063,11 +1067,13 @@ class AIForegroundService : Service() {
         microphone: Boolean = wakeListeningMicActiveForRecordingDetection,
         force: Boolean = false
     ) {
+        val residentEnabled = AiLimbsResidentRuntime.isEnabledForHost()
         val policy = backgroundSurvivalManager.buildPolicy(
             persistentBackgroundRequested = shouldRequestPersistentBackgroundSurvival(),
-            dataSync = true,
-            specialUse = shouldUseSpecialForegroundType(),
-            microphone = microphone
+            dataSync = !residentEnabled,
+            specialUse = residentEnabled || shouldUseSpecialForegroundType(),
+            microphone = microphone,
+            allowSystemExempted = !residentEnabled
         )
         val result = backgroundSurvivalManager.applyForeground(
             service = this,
@@ -1230,6 +1236,31 @@ class AIForegroundService : Service() {
         super.onCreate()
         // Preserve the legacy recursion guard while main application startup decides Host role.
         isRunning.set(true)
+
+        // A BOOT_COMPLETED cold start enters through startForegroundService(). Promote immediately
+        // before Plugin Kernel/application restoration, otherwise heavyweight initialization can
+        // exceed Android's foreground-service start window. This bootstrap notification is replaced
+        // after Host role resolution.
+        AiLimbsResidentRuntime.initialize(applicationContext)
+        if (AiLimbsResidentRuntime.isEnabledForHost()) {
+            createNotificationChannel()
+            val bootstrapPolicy = backgroundSurvivalManager.buildPolicy(
+                persistentBackgroundRequested = true,
+                dataSync = false,
+                specialUse = true,
+                microphone = false,
+                allowSystemExempted = false
+            )
+            backgroundSurvivalManager.applyForeground(
+                service = this,
+                notificationId = NOTIFICATION_ID,
+                notification = createResidentBootstrapNotification(),
+                policy = bootstrapPolicy,
+                reason = "resident_cold_bootstrap",
+                force = true
+            )
+        }
+
         val operitApplication = application as OperitApplication
         operitApplication.initializeMainApplication()
         if (operitApplication.isResidentUiProxyMode()) {
@@ -1239,9 +1270,10 @@ class AIForegroundService : Service() {
                 createNotificationChannel()
                 val policy = backgroundSurvivalManager.buildPolicy(
                     persistentBackgroundRequested = true,
-                    dataSync = true,
-                    specialUse = false,
-                    microphone = false
+                    dataSync = false,
+                    specialUse = true,
+                    microphone = false,
+                    allowSystemExempted = false
                 )
                 backgroundSurvivalManager.applyForeground(
                     service = this,
@@ -1547,6 +1579,13 @@ class AIForegroundService : Service() {
             // Host shell keepalive never owns Resident continuous CPU wake.
             syncResidentCpuWakeLock("resident_keepalive")
             publishResidentHostShellState("running", "legacy_host_keepalive")
+            // ResidentProcessHostService starts Guardian asynchronously. If the user's initial
+            // enable probe times out before Guardian publishes READY, the first Guardian keepalive
+            // is the authoritative late-ready signal. Re-enter the serialized startup path so Core
+            // activation continues without requiring a second tap.
+            if (AiLimbsResidentRuntime.isEnabledForHost()) {
+                AiLimbsResidentRuntime.scheduleEnsureStarted(this)
+            }
             return START_STICKY
         }
 
@@ -2361,6 +2400,19 @@ class AIForegroundService : Service() {
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
     }
+
+    private fun createResidentBootstrapNotification(): Notification =
+        NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle(getString(R.string.service_ai_limbs_running))
+            .setContentText("Resident 正在恢复")
+            .setSmallIcon(R.drawable.ic_ai_limbs_notification)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setOngoing(true)
+            .setOnlyAlertOnce(true)
+            .setSilent(true)
+            .setContentIntent(mainContentPendingIntent())
+            .build()
 
     private fun createResidentHostNotification(): Notification {
         val pluginSnapshot = PluginHostUiProxyRuntimeHolder.currentOrNull()?.foregroundNotification?.value
