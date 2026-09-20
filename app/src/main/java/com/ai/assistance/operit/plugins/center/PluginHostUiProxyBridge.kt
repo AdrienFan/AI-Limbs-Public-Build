@@ -1296,7 +1296,10 @@ private class ResidentHostComponentExecutor(
     }
 
     private companion object {
-        val HOST_OWNED_PRIMITIVES = setOf("host.ui.layout@1")
+        val HOST_OWNED_PRIMITIVES = setOf(
+            "host.ui.layout@1",
+            "host.privileged.runtime@1"
+        )
         val HOST_EXECUTABLE_TOOLS = setOf("capture_screenshot")
     }
 }
