@@ -764,11 +764,33 @@ class ChatHistoryDelegate(
         AppLogger.d(TAG, "开场白同步完成，聊天ID: $chatId")
     }
 
-    /** Create and select the first Chat exactly once across concurrent UI send entry points. */
+    /**
+     * Ensure a Chat is selected without confusing an uninitialized StateFlow with an empty
+     * persisted selection. Startup used to observe the StateFlow's synthetic null before
+     * DataStore emitted its real value, launch createNewChat(), then restore the old id a few
+     * hundred milliseconds later. The already-launched creation would still complete and switch
+     * to a new empty conversation on every process restart.
+     */
     suspend fun ensureCurrentChat(timeoutMs: Long): String {
         _currentChatId.value?.takeIf { it.isNotBlank() }?.let { return it }
         return initialChatCreationMutex.withLock {
             _currentChatId.value?.takeIf { it.isNotBlank() }?.let { return@withLock it }
+
+            val persistedChatId =
+                chatHistoryManager.readPersistedCurrentChatId()?.takeIf { it.isNotBlank() }
+            if (persistedChatId != null && chatHistoryManager.chatExists(persistedChatId)) {
+                AppLogger.i(TAG, "Restoring persisted Chat before first-chat creation: $persistedChatId")
+                _currentChatId.value = persistedChatId
+                loadChatMessages(persistedChatId)
+                return@withLock persistedChatId
+            }
+
+            if (persistedChatId != null && selectionMode == ChatSelectionMode.FOLLOW_GLOBAL) {
+                AppLogger.w(TAG, "Persisted currentChatId no longer exists; clearing before first-chat creation: $persistedChatId")
+                chatHistoryManager.clearCurrentChatId()
+            }
+
+            AppLogger.i(TAG, "Persisted currentChatId is empty; creating the first Chat")
             createNewChat()
             withTimeout(timeoutMs) {
                 _currentChatId.filterNotNull().first { it.isNotBlank() }
