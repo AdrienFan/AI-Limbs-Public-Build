@@ -62,7 +62,20 @@ internal class ResidentProcessHostService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        if (intent == null) {
+            AiLimbsResidentRuntime.initialize(this)
+            if (!AiLimbsResidentRuntime.isEnabledForHost()) {
+                stopForeground(STOP_FOREGROUND_REMOVE)
+                stopSelf()
+                return START_NOT_STICKY
+            }
+            AiLimbsResidentRuntime.scheduleGuardianWatchdogRecovery(
+                this,
+                AiLimbsResidentRuntime.GUARDIAN_WATCHDOG_STALE_AFTER_MS
+            )
+            return START_STICKY
+        }
+        when (intent.action) {
             ACTION_START_GUARDIAN -> runCatching { launchGuardian() }
                 .onFailure { writeHostError("guardian", it) }
             ACTION_START_CORE -> {

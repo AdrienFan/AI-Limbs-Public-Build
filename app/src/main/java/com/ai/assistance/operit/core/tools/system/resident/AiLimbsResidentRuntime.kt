@@ -6,6 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Process
+import android.os.PowerManager
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
@@ -60,6 +61,7 @@ internal object AiLimbsResidentRuntime {
         if (::prefs.isInitialized) return
         app = context.applicationContext
         prefs = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
+        ResidentDesiredStateStore.ensureMigrated(app, prefs.getBoolean(KEY_ENABLED, false))
         PrivilegeRuntime.initialize(app)
     }
 
@@ -96,6 +98,26 @@ internal object AiLimbsResidentRuntime {
         }
     }
 
+    fun schedulePermissionBackendRebind(context: Context) {
+        initialize(context)
+        if (!isEnabled() || !permissionBackendReady()) return
+        scope.launch {
+            lifecycleMutex.withLock {
+                if (!isEnabled() || !permissionBackendReady()) return@withLock
+                val core = ResidentCoreController.status(app)
+                if (!core.optBoolean("available", false) || !core.optBoolean("business_attached", false)) {
+                    return@withLock
+                }
+                val backend = core.optJSONObject("backend")
+                if (backend?.optString("state") == "owned" && backend.optBoolean("connected", false)) {
+                    return@withLock
+                }
+                runCatching { ResidentCoreController.rebindPermissionBackend(app) }
+                    .onFailure { AppLogger.w(TAG, "Resident permission backend rebind request failed", it) }
+            }
+        }
+    }
+
     suspend fun invoke(
         context: Context,
         ownerPluginId: String,
@@ -125,10 +147,10 @@ internal object AiLimbsResidentRuntime {
     }
 
     private fun isEnabled(): Boolean =
-        prefs.getBoolean(KEY_ENABLED, false)
+        ResidentDesiredStateStore.read(app, prefs.getBoolean(KEY_ENABLED, false))
 
     internal fun isEnabledForHost(): Boolean =
-        ::prefs.isInitialized && prefs.getBoolean(KEY_ENABLED, false)
+        ::prefs.isInitialized && ResidentDesiredStateStore.read(app, prefs.getBoolean(KEY_ENABLED, false))
 
     internal fun guardianWatchdogSnapshot(
         context: Context,
@@ -212,31 +234,27 @@ internal object AiLimbsResidentRuntime {
     private suspend fun ensureStartedIfEnabled(context: Context): JSONObject {
         initialize(context)
         if (!isEnabled()) return status()
-        return start()
+        return lifecycleMutex.withLock {
+            if (!isEnabled()) status() else startLocked(ResidentBackendRequirement.OPTIONAL)
+        }
     }
 
     private suspend fun setEnabled(enabled: Boolean): JSONObject = lifecycleMutex.withLock {
         clearOnAutoRetryBlock()
-        if (enabled && !isEnabled()) {
-            check(permissionBackendReady()) {
-                "AI Limbs permission backend is required for the initial Resident enable"
-            }
-        }
         persistEnabled(enabled)
         notifyHostResidentStateChanged()
-        if (enabled) startLocked() else stopLocked()
+        if (enabled) {
+            // Test cold-start path: first enable must be able to enter DEGRADED mode without
+            // a permission backend. Late backend attachment upgrades the same Core to FULL.
+            startLocked(ResidentBackendRequirement.OPTIONAL)
+        } else stopLocked()
     }
 
     private suspend fun start(): JSONObject = lifecycleMutex.withLock {
         clearOnAutoRetryBlock()
-        if (!isEnabled()) {
-            check(permissionBackendReady()) {
-                "AI Limbs permission backend is required for the initial Resident enable"
-            }
-        }
         persistEnabled(true)
         notifyHostResidentStateChanged()
-        startLocked()
+        startLocked(ResidentBackendRequirement.OPTIONAL)
     }
 
     private suspend fun stop(): JSONObject = lifecycleMutex.withLock {
@@ -327,7 +345,7 @@ internal object AiLimbsResidentRuntime {
         }
     }
 
-    private suspend fun startLocked(): JSONObject {
+    private suspend fun startLocked(backendRequirement: ResidentBackendRequirement): JSONObject {
         val guardianStatus = ensureGuardianStartedLocked()
         val guardian = localProbe()
         if (!guardian.running) return guardianStatus
@@ -358,11 +376,13 @@ internal object AiLimbsResidentRuntime {
             hostKernel.optBoolean("owner_lease_held", false)) {
             "Resident ON requires the active LEGACY_HOST Plugin Kernel owner"
         }
-        check(permissionBackendReady()) { "AI Limbs permission backend is not ready" }
+        if (backendRequirement == ResidentBackendRequirement.REQUIRED) {
+            check(permissionBackendReady()) { "AI Limbs permission backend is not ready" }
+        }
 
         // Success never returns: the old Host process exits and Core acquires plugin_kernel.
         return try {
-            ResidentPluginKernelHandoff.execute(app)
+            ResidentPluginKernelHandoff.execute(app, backendRequirement)
         } catch (error: Throwable) {
             recordError("Resident business takeover failed: ${error.message ?: error.javaClass.simpleName}")
             status(localProbe())
@@ -437,7 +457,7 @@ internal object AiLimbsResidentRuntime {
             return status(localProbe())
         }
 
-        for (attempt in 0 until 20) {
+        for (attempt in 0 until 80) {
             delay(150L)
             val probe = localProbe()
             if (guardianMatchesInstalledBuild(probe)) {
@@ -500,11 +520,10 @@ internal object AiLimbsResidentRuntime {
         }
         val backendBefore = permissionBackendOwnershipSnapshot()
         val backendOwnerBefore = backendBefore?.optString("runtime_owner")
+        val coreBackendBefore = coreBefore.optJSONObject("backend")
+        val coreBackendWasConnected = coreBackendBefore?.optBoolean("connected", false) == true
         val needsBackendReturn =
-            hostRoleBefore == "ui_proxy" ||
-                coreWasBusinessOwner ||
-                fenceBefore != null ||
-                policyBefore != null ||
+            coreBackendWasConnected ||
                 backendOwnerBefore == "handoff_prepared" ||
                 backendOwnerBefore == "resident_core" ||
                 backendOwnerBefore == "returning_to_host"
@@ -863,6 +882,15 @@ internal object AiLimbsResidentRuntime {
                 .put("guardian_watchdog", guardianWatchdogSnapshotLocked(GUARDIAN_WATCHDOG_STALE_AFTER_MS))
                 .put("backend", if (PrivilegeRuntime.isSelected()) "ai_limbs" else "shizuku")
                 .put("backend_ready", permissionBackendReady())
+                .put(
+                    "permission_state",
+                    when {
+                        coreOwned && core.optJSONObject("backend")?.optString("state") == "owned" -> "full"
+                        coreOwned -> "degraded"
+                        permissionBackendReady() -> "host_ready"
+                        else -> "unavailable"
+                    }
+                )
                 .put("permission_backend_ownership", permissionBackendOwnership ?: JSONObject.NULL)
                 .put("last_error", lastError ?: JSONObject.NULL)
         }
@@ -903,6 +931,16 @@ internal object AiLimbsResidentRuntime {
                 heartbeatSession != null &&
                 heartbeatSession == probe.sessionId
         val heartbeatFresh = heartbeatAge != null && heartbeatAge <= staleAfterMs
+        val deviceInteractive = runCatching {
+            (app.getSystemService(Context.POWER_SERVICE) as PowerManager).isInteractive
+        }.getOrDefault(true)
+        // Guardian is a raw app_process child. Samsung may suspend that child while the screen is
+        // non-interactive even though Resident Core remains alive under its own PARTIAL_WAKE_LOCK.
+        // A stale heartbeat in that state is therefore not evidence of Guardian death. Process,
+        // lease, build and session identity remain the hard liveness facts; heartbeat becomes a
+        // strong failure signal again as soon as the device is interactive.
+        val heartbeatSuspendedByScreenOff =
+            !deviceInteractive && !heartbeatFresh && identityMatches && buildMatches
 
         val reason = when {
             !probe.running -> "guardian_process_missing"
@@ -910,12 +948,16 @@ internal object AiLimbsResidentRuntime {
             heartbeatElapsed == null -> "guardian_heartbeat_missing"
             heartbeatAge == null -> "guardian_heartbeat_clock_invalid"
             !identityMatches -> "guardian_heartbeat_identity_mismatch"
+            heartbeatSuspendedByScreenOff -> "guardian_heartbeat_suspended_screen_off"
             !heartbeatFresh -> "guardian_heartbeat_stale"
             else -> "healthy"
         }
+        val healthy = reason == "healthy" || reason == "guardian_heartbeat_suspended_screen_off"
         return JSONObject()
             .put("enabled", true)
-            .put("healthy", reason == "healthy")
+            .put("healthy", healthy)
+            .put("device_interactive", deviceInteractive)
+            .put("heartbeat_stale_ignored_screen_off", heartbeatSuspendedByScreenOff)
             .put("reason", reason)
             .put("guardian_pid", probe.pid ?: JSONObject.NULL)
             .put("guardian_session_id", probe.sessionId ?: JSONObject.NULL)
@@ -1119,8 +1161,9 @@ internal object AiLimbsResidentRuntime {
     }
 
     private fun persistEnabled(enabled: Boolean) {
+        ResidentDesiredStateStore.write(app, enabled)
         check(prefs.edit().putBoolean(KEY_ENABLED, enabled).commit()) {
-            "Could not persist Resident desired state"
+            "Could not mirror Resident desired state to preferences"
         }
     }
 

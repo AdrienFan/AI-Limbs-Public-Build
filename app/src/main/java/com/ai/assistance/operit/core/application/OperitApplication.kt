@@ -235,6 +235,13 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         ActivityLifecycleManager.initialize(this)
         AppLogger.d(TAG, "【启动计时】ActivityLifecycleManager初始化完成 - ${System.currentTimeMillis() - startTime}ms")
 
+        // Backend availability is an independent capability plane. Register before the UI_PROXY
+        // early return so a late permission-service start can upgrade DEGRADED -> FULL in-place.
+        ShizukuAuthorizer.addStateChangeListener {
+            AiLimbsResidentRuntime.schedulePermissionBackendRebind(applicationContext)
+            AiLimbsResidentRuntime.scheduleEnsureStarted(applicationContext)
+        }
+
         if (attachment.usesUiProxy) {
             PluginHostUiProxyRuntimeHolder.attach(applicationContext, attachment)
             // A system restart can remove both Core and Guardian. Request the existing verified
@@ -300,10 +307,7 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         AndroidShellExecutor.setContext(applicationContext)
         AppLogger.d(TAG, "【启动计时】AndroidShellExecutor初始化完成 - ${System.currentTimeMillis() - startTime}ms")
 
-        // Resident is a separate app-UID process. The permission backend is only its bootstrap.
-        ShizukuAuthorizer.addStateChangeListener {
-            AiLimbsResidentRuntime.scheduleEnsureStarted(applicationContext)
-        }
+        // Resident automatic recovery follows persisted desired state and may start DEGRADED.
         AiLimbsResidentRuntime.scheduleEnsureStarted(applicationContext)
         AppLogger.d(TAG, "【启动计时】AI Limbs Resident Runtime 已初始化 - ${System.currentTimeMillis() - startTime}ms")
 

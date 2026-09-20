@@ -168,6 +168,7 @@ internal class ResidentCoreBusinessRuntime {
         coreSession: String,
         backend: ResidentBackendBinding,
         hostPid: Int,
+        requireBackendOwnership: Boolean,
         onBusinessOwnerReady: () -> Unit = {},
         timeoutMs: Long = BUSINESS_TAKEOVER_TIMEOUT_MS
     ) {
@@ -229,7 +230,11 @@ internal class ResidentCoreBusinessRuntime {
                 businessPhase = ResidentCoreBusinessPhase.CLAIMING_BACKEND
             }
 
-            backend.claimRuntimeOwnership()
+            if (requireBackendOwnership) {
+                backend.claimRuntimeOwnership()
+            } else {
+                backend.claimRuntimeOwnershipIfPrepared()
+            }
             // Dynamic plugin code is moving behind its own process wall. The supervisor is Core-owned,
             // but worker launch failure is deliberately non-fatal to Core: a plugin-layer failure must
             // never collapse the authoritative Policy/Dispatcher process.

@@ -151,6 +151,7 @@ object ResidentCoreMain {
                             operation = request.getString("operation")
                             require(operation == "status" || operation == "stop" ||
                                 operation == "prepare_handoff" || operation == "activate_business" ||
+                                operation == "activate_business_degraded" || operation == "rebind_backend" ||
                                 operation == "cancel_business_activation" || operation == "quiesce_business") {
                                 "Unsupported core operation"
                             }
@@ -162,9 +163,12 @@ object ResidentCoreMain {
 
                             when (operation) {
                                 "prepare_handoff" -> backend.prepareHandoffAsync()
-                                "activate_business" -> {
-                                    check(backend.snapshot().getString("state") == "prepared") {
-                                        "Permission backend must be prepared before business takeover"
+                                "activate_business", "activate_business_degraded" -> {
+                                    val requireBackendOwnership = operation == "activate_business"
+                                    if (requireBackendOwnership) {
+                                        check(backend.snapshot().getString("state") == "prepared") {
+                                            "Permission backend must be prepared before required business takeover"
+                                        }
                                     }
                                     check(activationThread.get() == null) { "Business activation is already armed" }
                                     try {
@@ -185,6 +189,7 @@ object ResidentCoreMain {
                                                 coreSession = sessionId,
                                                 backend = backend,
                                                 hostPid = peer.pid,
+                                                requireBackendOwnership = requireBackendOwnership,
                                                 onBusinessOwnerReady = dispatcherServer::start
                                             )
                                         } catch (error: Throwable) {
@@ -213,6 +218,12 @@ object ResidentCoreMain {
                                         }
                                         throw error
                                     }
+                                }
+                                "rebind_backend" -> {
+                                    check(runtime.snapshot().getBoolean("business_attached")) {
+                                        "Permission backend rebind requires active Resident business ownership"
+                                    }
+                                    backend.rebindActiveBusinessAsync()
                                 }
                                 "cancel_business_activation" -> {
                                     runtime.cancelBusinessTakeover(context, sessionId, peer.pid)

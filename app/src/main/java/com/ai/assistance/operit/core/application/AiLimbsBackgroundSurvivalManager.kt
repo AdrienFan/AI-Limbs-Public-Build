@@ -36,13 +36,15 @@ class AiLimbsBackgroundSurvivalManager(context: Context) {
         persistentBackgroundRequested: Boolean,
         dataSync: Boolean = true,
         specialUse: Boolean = false,
-        microphone: Boolean = false
+        microphone: Boolean = false,
+        allowSystemExempted: Boolean = true
     ): AiLimbsBackgroundSurvivalPolicy {
         val dozeAllowlisted = isDozeAllowlisted()
         val systemExemptedEligible =
             Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && dozeAllowlisted
         val systemExemptedRequested =
             persistentBackgroundRequested &&
+                allowSystemExempted &&
                 systemExemptedEligible &&
                 !systemExemptedRejectedForProcess
         val fallbackTypes = ForegroundServiceCompat.buildTypes(

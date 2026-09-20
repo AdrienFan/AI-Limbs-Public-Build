@@ -5,6 +5,7 @@ import android.os.Binder
 import android.os.IBinder
 import com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicReference
 import org.json.JSONObject
 
@@ -27,6 +28,7 @@ internal class ResidentBackendBinding(
     private var prepared = false
     private var preparationAttempted = false
     private var closed = false
+    private val rebindInFlight = AtomicBoolean(false)
 
     fun snapshot(): JSONObject = JSONObject(diagnostic.get())
 
@@ -51,7 +53,11 @@ internal class ResidentBackendBinding(
                         if (server == incoming) {
                             server = null
                             serverToken = null
+                            serverInstance = null
                             recipient = null
+                            ownsRuntime = false
+                            prepared = false
+                            preparationAttempted = false
                             diagnostic.set(
                                 JSONObject()
                                     .put("state", "degraded")
@@ -79,6 +85,9 @@ internal class ResidentBackendBinding(
                 serverToken = token
                 serverInstance = instance
                 recipient = death
+                ownsRuntime = false
+                prepared = false
+                preparationAttempted = false
                 diagnostic.set(description.put("state", "ready").put("connected", true).toString())
             }
         } catch (error: Exception) {
@@ -137,6 +146,58 @@ internal class ResidentBackendBinding(
         ownsRuntime = true
         check(current.isBinderAlive) { "Permission backend died during ownership activation" }
         diagnostic.set(result.put("state", "owned").put("connected", true).toString())
+    }
+
+    fun claimRuntimeOwnershipIfPrepared(): Boolean {
+        val state = snapshot().optString("state")
+        if (state != "prepared") {
+            publishDegraded("permission_backend_unavailable_at_business_start", null)
+            return false
+        }
+        return try {
+            claimRuntimeOwnership()
+            true
+        } catch (error: Exception) {
+            publishDegraded("permission_backend_claim_failed", error)
+            false
+        }
+    }
+
+    fun rebindActiveBusinessAsync() {
+        if (!rebindInFlight.compareAndSet(false, true)) return
+        Thread({
+            try {
+                val alreadyOwned = synchronized(lock) {
+                    check(!closed) { "Core backend is closed" }
+                    ownsRuntime && server?.isBinderAlive == true
+                }
+                if (!alreadyOwned) {
+                    connect()
+                    check(snapshot().optString("state") == "ready") {
+                        "Permission backend did not become ready during rebind: ${snapshot()}"
+                    }
+                    prepareHandoff()
+                    claimRuntimeOwnership()
+                }
+            } catch (error: Exception) {
+                publishDegraded("permission_backend_rebind_failed", error)
+                System.err.println("Resident backend rebind failed: $error")
+            } finally {
+                rebindInFlight.set(false)
+            }
+        }, "resident-backend-rebind").apply { isDaemon = true; start() }
+    }
+
+    private fun publishDegraded(reason: String, error: Throwable?) = synchronized(lock) {
+        if (closed) return@synchronized
+        val value = JSONObject()
+            .put("state", "degraded")
+            .put("connected", server?.isBinderAlive == true)
+            .put("runtime_owner", "resident_core")
+            .put("permission_backend_available", server?.isBinderAlive == true)
+            .put("degraded_reason", reason)
+        if (error != null) value.put("error", error.toString().take(512))
+        diagnostic.set(value.toString())
     }
 
     /** returnToHost is reserved for an explicit user stop after the business kernel has retired. */
