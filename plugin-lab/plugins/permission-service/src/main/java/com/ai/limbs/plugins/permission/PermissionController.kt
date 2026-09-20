@@ -233,7 +233,7 @@ internal class PermissionController(private val host: InProcessPluginHost) : Per
     }
 
     suspend fun close() {
-        host.logger.i("PermissionService", "Plugin unmounted; Host revokes the runtime")
+        host.logger.i("PermissionService", "Plugin unmounted; privilege runtime lifecycle remains Host-owned")
     }
 
 }
