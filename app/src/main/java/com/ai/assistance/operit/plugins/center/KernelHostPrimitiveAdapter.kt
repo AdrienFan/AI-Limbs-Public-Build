@@ -643,7 +643,10 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
 
     private companion object {
-        private val HOST_OWNED_PRIMITIVES = setOf("host.ui.layout@1")
+        private val HOST_OWNED_PRIMITIVES = setOf(
+            "host.ui.layout@1",
+            "host.privileged.runtime@1"
+        )
         val LISTENER_SNAPSHOT_LEVELS = listOf(
             AndroidPermissionLevel.DEBUGGER,
             AndroidPermissionLevel.ROOT,
