@@ -936,7 +936,12 @@ class AIForegroundService : Service() {
         if (!isRunning.get()) {
             return
         }
-        val notification = createNotification()
+        val notification =
+            if (residentUiProxyShell) {
+                createResidentHostNotification()
+            } else {
+                createNotification()
+            }
         applyBackgroundSurvivalForeground(
             reason = "notification_refresh",
             notification = notification

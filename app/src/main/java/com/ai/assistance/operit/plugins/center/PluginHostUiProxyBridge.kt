@@ -123,6 +123,12 @@ internal class ResidentUiProxyClient(
                     delay(POLL_MS)
                 } catch (error: CancellationException) {
                     throw error
+                } catch (error: IOException) {
+                    val terminalError = retryTransientTransport(error)
+                    if (terminalError != null) {
+                        failClosedDisconnected(terminalError)
+                        delay(RETRY_MS)
+                    }
                 } catch (error: Throwable) {
                     failClosedDisconnected(error)
                     delay(RETRY_MS)
@@ -272,7 +278,11 @@ internal class ResidentUiProxyClient(
         generation
     }
 
-    private fun wireRequest(operation: String, payload: JSONObject = JSONObject()): JSONObject {
+    private fun wireRequest(
+        operation: String,
+        payload: JSONObject = JSONObject(),
+        requestRecoveryOnFailure: Boolean = true
+    ): JSONObject {
         return try {
             val generation = ensureHostGeneration()
             ResidentUiProxyWire.request(
@@ -284,7 +294,9 @@ internal class ResidentUiProxyClient(
             ).also { lastCoreRecoveryRequestElapsedMs.set(0L) }
         } catch (error: IOException) {
             hostGeneration.set(0L)
-            requestCoreRecoveryAfterTransportFailure(error)
+            if (requestRecoveryOnFailure) {
+                requestCoreRecoveryAfterTransportFailure(error)
+            }
             throw error
         }
     }
@@ -322,9 +334,13 @@ internal class ResidentUiProxyClient(
 
     private suspend fun refresh(force: Boolean) {
         val result = if (force) {
-            wireRequest("snapshot")
+            wireRequest("snapshot", requestRecoveryOnFailure = false)
         } else {
-            wireRequest("events", JSONObject().put("since_revision", revision.get()))
+            wireRequest(
+                "events",
+                JSONObject().put("since_revision", revision.get()),
+                requestRecoveryOnFailure = false
+            )
         }
         val nextRevision = result.optLong("revision", revision.get())
         revision.set(nextRevision)
@@ -332,6 +348,42 @@ internal class ResidentUiProxyClient(
         val snapshot = result.getJSONObject("snapshot")
         lastSnapshot.set(JSONObject(snapshot.toString()))
         applySnapshot(snapshot)
+    }
+
+    private suspend fun retryTransientTransport(initialError: IOException): Throwable? {
+        var lastError: Throwable = initialError
+        com.ai.assistance.operit.util.AppLogger.w(
+            TAG,
+            "Resident UI proxy transport transient failure; preserving last trusted snapshot while retrying: " +
+                "${initialError.javaClass.simpleName}: ${initialError.message.orEmpty()}"
+        )
+        repeat(TRANSIENT_TRANSPORT_RETRY_COUNT) { attempt ->
+            delay(TRANSIENT_TRANSPORT_RETRY_DELAY_MS)
+            try {
+                refresh(force = true)
+                com.ai.assistance.operit.util.AppLogger.i(
+                    TAG,
+                    "Resident UI proxy transport recovered on retry ${attempt + 1}; preserved last trusted snapshot"
+                )
+                return null
+            } catch (error: CancellationException) {
+                throw error
+            } catch (error: IOException) {
+                lastError = error
+            } catch (error: Throwable) {
+                return error
+            }
+        }
+        val transportError = lastError as? IOException
+        if (transportError != null) {
+            requestCoreRecoveryAfterTransportFailure(transportError)
+        }
+        com.ai.assistance.operit.util.AppLogger.w(
+            TAG,
+            "Resident UI proxy transport unavailable after $TRANSIENT_TRANSPORT_RETRY_COUNT retries; failing closed",
+            lastError
+        )
+        return lastError
     }
 
     private suspend fun failClosedDisconnected(error: Throwable) {
@@ -524,6 +576,8 @@ internal class ResidentUiProxyClient(
         private const val TAG = "ResidentUiProxyClient"
         private const val POLL_MS = 350L
         private const val RETRY_MS = 750L
+        private const val TRANSIENT_TRANSPORT_RETRY_COUNT = 3
+        private const val TRANSIENT_TRANSPORT_RETRY_DELAY_MS = 250L
         private const val CORE_RECOVERY_REQUEST_COOLDOWN_MS = 5_000L
     }
 }
