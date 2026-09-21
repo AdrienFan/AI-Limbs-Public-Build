@@ -159,6 +159,8 @@ def main() -> int:
         "ToolExecutionOverride",
         "result_data",
         "Host-affinity target mismatch",
+        "HostGatewayHostExecution",
+        "MEDIA_PROJECTION_SCREEN_CAPTURE",
     )
     ui_proxy_bridge_text = UI_PROXY_BRIDGE.read_text(encoding="utf-8")
     combined_affinity_text = host_gateway_text + "\n" + ui_proxy_wire_text + "\n" + ui_proxy_bridge_text
@@ -194,10 +196,16 @@ def main() -> int:
     override_index = safe_text.find("executionOverride?.execute(invocation)")
     if validation_index == -1 or override_index == -1 or validation_index > override_index:
         errors.append("Test 9.1 execution override must remain downstream of tool parameter validation")
-    if "hostToolHandler.getToolExecutorOrActivate(toolName)" not in ui_proxy_bridge_text:
-        errors.append("UI Host affinity transport is not executing the exact canonical tool target")
+    if "hostToolHandler.getToolExecutorOrActivate(toolName)" in ui_proxy_bridge_text:
+        errors.append(
+            "UI Host affinity transport must not reselect permission-dependent tool executors"
+        )
     if "binding.target == toolName" not in ui_proxy_bridge_text:
         errors.append("UI Host affinity transport does not verify canonical binding target")
+    if "when (binding.hostExecution)" not in ui_proxy_bridge_text:
+        errors.append("UI Host affinity transport does not dispatch from canonical Host execution strategy")
+    if "hostScreenCaptureTools.captureScreenshot(tool)" not in ui_proxy_bridge_text:
+        errors.append("screen.capture Host strategy does not execute the Host MediaProjection handler")
 
     if host_gateway_text.count("enforceAffinity = true") != 1:
         errors.append("Test 9.1 must enforce affinity for exactly one pilot primitive")
@@ -208,6 +216,8 @@ def main() -> int:
     )
     if screen_capture_block is None or "enforceAffinity = true" not in screen_capture_block.group(1):
         errors.append("Test 9.1 pilot affinity enforcement is not scoped to host.screen.capture@1")
+    elif "HostGatewayHostExecution.MEDIA_PROJECTION_SCREEN_CAPTURE" not in screen_capture_block.group(1):
+        errors.append("Test 9.1 screen.capture pilot does not declare its Host MediaProjection strategy")
 
     required_tokens = (
         "val version: Int",

@@ -8,7 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import com.ai.assistance.operit.core.application.ActivityLifecycleManager
-import com.ai.assistance.operit.core.tools.AIToolHandler
+import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.ui.common.displays.UIOperationOverlay
@@ -62,7 +62,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
-import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
@@ -938,9 +937,6 @@ private class ResidentHostComponentExecutor(
     private val permissionOverlay = PermissionRequestOverlay(appContext)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val hostPrimitiveAdapter = KernelHostPrimitiveAdapter(appContext, PluginRuntimeRole.UI_PROXY)
-    private val hostToolHandler = AIToolHandler.getInstance(appContext).also {
-        it.registerDefaultTools()
-    }
     private val hostScreenCaptureTools = StandardUITools(appContext)
 
     suspend fun pollAndExecute() {
@@ -1075,22 +1071,25 @@ private class ResidentHostComponentExecutor(
                     )
                 }
             val tool = AITool(name = toolName, parameters = parameters)
-            val executor = checkNotNull(hostToolHandler.getToolExecutorOrActivate(toolName)) {
-                "Host-affinity tool is unavailable: $toolName"
-            }
-            val validation = executor.validateParameters(tool)
-            check(validation.valid) {
-                "Host-affinity tool parameter validation failed: " + validation.errorMessage
-            }
-
             val results = JSONArray()
-            executor.invokeAndStream(tool).collect { result ->
-                results.put(
-                    JSONObject()
-                        .put("tool_name", result.toolName)
-                        .put("success", result.success)
-                        .put("result_data", result.result.toJson())
-                        .put("error", result.error ?: JSONObject.NULL)
+            when (binding.hostExecution) {
+                HostGatewayHostExecution.MEDIA_PROJECTION_SCREEN_CAPTURE -> {
+                    val (path, _) = hostScreenCaptureTools.captureScreenshot(tool)
+                    val success = !path.isNullOrBlank()
+                    results.put(
+                        JSONObject()
+                            .put("tool_name", toolName)
+                            .put("success", success)
+                            .put("result_data", StringResultData(path.orEmpty()).toJson())
+                            .put(
+                                "error",
+                                if (success) JSONObject.NULL else "Screenshot failed"
+                            )
+                    )
+                }
+                null -> error(
+                    "Host-affinity operation has no Host-local execution strategy: " +
+                        "$primitiveId/$operation"
                 )
             }
             JSONObject().put("ok", true).put("results", results)

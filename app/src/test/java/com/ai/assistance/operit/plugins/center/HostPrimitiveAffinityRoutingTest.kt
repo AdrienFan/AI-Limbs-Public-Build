@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.plugins.center
 
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -9,6 +10,17 @@ class HostPrimitiveAffinityRoutingTest {
     fun screenCapturePilotRequiresAndroidHost() {
         assertTrue(HostPrimitiveGatewayBindings.affinityEnforced("host.screen.capture@1"))
         assertTrue(HostPrimitiveGatewayBindings.requiresAndroidHost("host.screen.capture@1", "capture"))
+    }
+
+    @Test
+    fun screenCapturePilotUsesMediaProjectionHostHandler() {
+        assertEquals(
+            HostGatewayHostExecution.MEDIA_PROJECTION_SCREEN_CAPTURE,
+            HostPrimitiveGatewayBindings
+                .operations("host.screen.capture@1")
+                .getValue("capture")
+                .hostExecution
+        )
     }
 
     @Test

@@ -35,11 +35,16 @@ internal enum class HostGatewayExecutionAffinity {
     UNBOUND
 }
 
+internal enum class HostGatewayHostExecution {
+    MEDIA_PROJECTION_SCREEN_CAPTURE
+}
+
 internal data class HostGatewayOperationBinding(
     val operation: String,
     val kind: HostGatewayRouteKind,
     val target: String? = null,
-    val affinity: HostGatewayExecutionAffinity
+    val affinity: HostGatewayExecutionAffinity,
+    val hostExecution: HostGatewayHostExecution? = null
 )
 
 internal data class HostPrimitiveBinding(
@@ -52,12 +57,25 @@ private data class HostGatewayOperationSpec(
     val operation: String,
     val kind: HostGatewayRouteKind,
     val target: String? = null,
-    val affinityOverride: HostGatewayExecutionAffinity? = null
+    val affinityOverride: HostGatewayExecutionAffinity? = null,
+    val hostExecution: HostGatewayHostExecution? = null
 )
 
 internal object HostPrimitiveGatewayBindings {
     private fun tool(operation: String, target: String) =
         HostGatewayOperationSpec(operation, HostGatewayRouteKind.HOST_TOOL, target)
+
+    private fun hostTool(
+        operation: String,
+        target: String,
+        hostExecution: HostGatewayHostExecution
+    ) =
+        HostGatewayOperationSpec(
+            operation = operation,
+            kind = HostGatewayRouteKind.HOST_TOOL,
+            target = target,
+            hostExecution = hostExecution
+        )
 
     private fun core(operation: String, target: String) =
         HostGatewayOperationSpec(operation, HostGatewayRouteKind.CORE_CAPABILITY, target)
@@ -118,6 +136,36 @@ internal object HostPrimitiveGatewayBindings {
             }
         }
 
+        items.forEach { item ->
+            val effectiveAffinity = item.affinityOverride ?: affinity
+            if (item.hostExecution != null) {
+                require(item.kind == HostGatewayRouteKind.HOST_TOOL) {
+                    "Host-local execution strategy requires HOST_TOOL: " + item.operation
+                }
+                require(
+                    effectiveAffinity == HostGatewayExecutionAffinity.HOST_FRAMEWORK ||
+                        effectiveAffinity == HostGatewayExecutionAffinity.HOST_UI ||
+                        effectiveAffinity == HostGatewayExecutionAffinity.HOST_SERVICE
+                ) {
+                    "Host-local execution strategy requires Android Host affinity: " + item.operation
+                }
+            }
+            if (
+                enforceAffinity &&
+                item.kind == HostGatewayRouteKind.HOST_TOOL &&
+                (
+                    effectiveAffinity == HostGatewayExecutionAffinity.HOST_FRAMEWORK ||
+                        effectiveAffinity == HostGatewayExecutionAffinity.HOST_UI ||
+                        effectiveAffinity == HostGatewayExecutionAffinity.HOST_SERVICE
+                )
+            ) {
+                require(item.hostExecution != null) {
+                    "Enforced Host-affinity HOST_TOOL requires explicit Host execution strategy: " +
+                        item.operation
+                }
+            }
+        }
+
         val operations = linkedMapOf<String, HostGatewayOperationBinding>()
         items.forEach { item ->
             require(item.operation !in operations) {
@@ -128,7 +176,8 @@ internal object HostPrimitiveGatewayBindings {
                     operation = item.operation,
                     kind = item.kind,
                     target = item.target,
-                    affinity = item.affinityOverride ?: affinity
+                    affinity = item.affinityOverride ?: affinity,
+                    hostExecution = item.hostExecution
                 )
         }
         return HostPrimitiveBinding(
@@ -151,7 +200,11 @@ internal object HostPrimitiveGatewayBindings {
         "host.ui.automation@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("snapshot", "get_page_info")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("click", "click_element")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("tap", "tap")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("long_press", "long_press")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("set_text", "set_input_text")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("key", "press_key")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("swipe", "swipe"))),
         "host.screen.capture@1" to primitive(
             HostGatewayExecutionAffinity.HOST_FRAMEWORK,
-            tool("capture", "capture_screenshot"),
+            hostTool(
+                "capture",
+                "capture_screenshot",
+                HostGatewayHostExecution.MEDIA_PROJECTION_SCREEN_CAPTURE
+            ),
             enforceAffinity = true
         ),
         "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), pending("listen")),
@@ -414,6 +467,9 @@ internal class SystemHostPrimitiveExecutor(
                     )
                 check(binding.kind == HostGatewayRouteKind.HOST_TOOL && binding.target == toolName) {
                     "Host-affinity tool binding mismatch: $primitiveId/$operation -> $toolName"
+                }
+                check(binding.hostExecution != null) {
+                    "Host-affinity operation has no Host-local execution strategy: $primitiveId/$operation"
                 }
                 ToolExecutionManager.ToolExecutionOverride { invocation ->
                     invokeResidentHostAffinityTool(
