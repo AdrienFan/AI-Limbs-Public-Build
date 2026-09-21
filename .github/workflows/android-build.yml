@@ -51,6 +51,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Validate runtime capability registry
+        run: python3 ci/script/check_runtime_capability_registry.py
+
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:

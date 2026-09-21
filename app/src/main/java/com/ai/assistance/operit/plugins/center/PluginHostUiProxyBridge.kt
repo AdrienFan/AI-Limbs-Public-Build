@@ -1029,7 +1029,7 @@ private class ResidentHostComponentExecutor(
             launchActivityResult(requestId, payload, deadlineElapsedMs)
         ResidentComponentProxyBroker.KIND_HOST_PRIMITIVE -> {
             val primitiveId = payload.getString("primitive_id").trim().lowercase()
-            check(primitiveId in HOST_OWNED_PRIMITIVES) {
+            check(CapabilityRegistry.isOwnedBy(primitiveId, CapabilityExecutionOwner.HOST)) {
                 "Primitive is not Host-owned: $primitiveId"
             }
             val result = hostPrimitiveAdapter.invoke(
@@ -1313,6 +1313,16 @@ private class ResidentHostComponentExecutor(
             "host.ui.layout@1",
             "host.privileged.runtime@1"
         )
+
+        init {
+            check(
+                HOST_OWNED_PRIMITIVES ==
+                    CapabilityRegistry.idsOwnedBy(CapabilityExecutionOwner.HOST)
+            ) {
+                "Legacy UI Proxy Host-owned primitive mirror drifted from CapabilityRegistry"
+            }
+        }
+
         val HOST_EXECUTABLE_TOOLS = setOf("capture_screenshot")
     }
 }

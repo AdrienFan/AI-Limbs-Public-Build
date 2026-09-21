@@ -46,7 +46,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 "Kernel operation is not bound: $id/$op"
             )
         }
-        if (runtimeRole == PluginRuntimeRole.BUSINESS && id in HOST_OWNED_PRIMITIVES) {
+        if (runtimeRole == PluginRuntimeRole.BUSINESS && CapabilityRegistry.isOwnedBy(id, CapabilityExecutionOwner.HOST)) {
             return invokeHostOwnedPrimitive(ownerPluginId, id, op, parameters)
         }
         return when (id) {
@@ -647,6 +647,16 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.ui.layout@1",
             "host.privileged.runtime@1"
         )
+
+        init {
+            check(
+                HOST_OWNED_PRIMITIVES ==
+                    CapabilityRegistry.idsOwnedBy(CapabilityExecutionOwner.HOST)
+            ) {
+                "Legacy Kernel Host-owned primitive mirror drifted from CapabilityRegistry"
+            }
+        }
+
         val LISTENER_SNAPSHOT_LEVELS = listOf(
             AndroidPermissionLevel.DEBUGGER,
             AndroidPermissionLevel.ROOT,
