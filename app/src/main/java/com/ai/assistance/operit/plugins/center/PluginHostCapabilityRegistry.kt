@@ -440,11 +440,25 @@ internal class PluginHostCapabilityRegistry(
         parameters: JSONObject = JSONObject()
     ): JSONObject {
         val normalized = capabilityId.trim().lowercase()
-        val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
-            ?: throw PluginInstallException("HOST_PRIMITIVE_UNKNOWN", "Unknown AI Limbs Host Primitive: $normalized")
         val executor = systemExecutor
             ?: throw PluginInstallException("HOST_GATEWAY_NOT_READY", "System Host Gateway executor is not initialized")
-        return executor.invoke(ownerPluginId, primitive.id, operation, JSONObject(parameters.toString()))
+        val copiedParameters = JSONObject(parameters.toString())
+        if (runtimeRole == PluginRuntimeRole.LEGACY_HOST &&
+            normalized == LOCAL_HOST_MIGRATED_UI_LAYOUT_ID) {
+            val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(
+                LocalHostTransport(ownerPluginId, executor)
+            )
+            return api.invoke(
+                RuntimeCapabilityCall(
+                    capabilityId = normalized,
+                    operation = operation,
+                    parameters = copiedParameters
+                )
+            ).payload
+        }
+        val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
+            ?: throw PluginInstallException("HOST_PRIMITIVE_UNKNOWN", "Unknown AI Limbs Host Primitive: $normalized")
+        return executor.invoke(ownerPluginId, primitive.id, operation, copiedParameters)
     }
 
     internal suspend fun invokeSystemHost(ownerPluginId: String, capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject {
@@ -501,12 +515,7 @@ internal class PluginHostCapabilityRegistry(
             )
         }
         copy.remove("operation")
-        val executor = systemExecutor
-            ?: throw PluginInstallException(
-                "HOST_GATEWAY_NOT_READY",
-                "System Host Gateway executor is not initialized"
-            )
-        return executor.invoke(ownerPluginId, primitiveId, operation, copy)
+        return invokeSystemHost(ownerPluginId, primitiveId, operation, copy)
     }
 
     internal fun normalizeExternalBridgeTransportId(rawTransportId: String): String {
@@ -535,6 +544,7 @@ internal class PluginHostCapabilityRegistry(
     }
 
     private companion object {
+        const val LOCAL_HOST_MIGRATED_UI_LAYOUT_ID = "host.ui.layout@1"
         val BRIDGE_TRANSPORT_ID_REGEX = Regex("^[a-z0-9][a-z0-9._-]{0,63}$")
         const val BRIDGE_REMOTE_INVOKE_CAPABILITY_ID = "core.bridge.remote.invoke"
         const val SYSTEM_BRIDGE_PLUGIN_ID = "plugin.system.bridge"
