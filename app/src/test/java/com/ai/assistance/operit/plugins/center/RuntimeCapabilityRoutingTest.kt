@@ -56,7 +56,7 @@ class RuntimeCapabilityRoutingTest {
     }
 
     @Test
-    fun `business descriptor resolves through BUSINESS transport without capability whitelist`() = runBlocking {
+    fun businessDescriptorResolvesThroughBusinessTransportWithoutCapabilityWhitelist() = runBlocking {
         var received: RuntimeCapabilityCall? = null
         val api: RuntimeCapabilityApi = router(
             host = marker("host"),
@@ -65,48 +65,56 @@ class RuntimeCapabilityRoutingTest {
 
         val result = api.invoke(
             RuntimeCapabilityCall(
-                capabilityId = "HOST.RESIDENT.RUNTIME@1",
-                operation = "status"
+                capabilityId = "HOST.CHAT@1",
+                operation = "messages"
             )
         )
 
         assertEquals("business", result.payload.getString("path"))
-        assertEquals("host.resident.runtime@1", received?.capabilityId)
+        assertEquals("host.chat@1", received?.capabilityId)
         assertEquals(
             CapabilityExecutionOwner.BUSINESS,
-            CapabilityRegistry.requireDescriptor("host.resident.runtime@1").executionOwner
+            CapabilityRegistry.requireDescriptor("host.chat@1").executionOwner
         )
     }
 
     @Test
-    fun `remote host transport preserves the same capability envelope`() = runBlocking {
+    fun residentRuntimeDescriptorResolvesThroughRemoteHostTransport() = runBlocking {
         var receivedKind = ""
         var receivedPayload: JSONObject? = null
-        val remote = RemoteHostTransport("plugin.test") { kind, payload ->
+        val remote = RemoteHostTransport("ai_limbs.system.plugin_center") { kind, payload ->
             receivedKind = kind
             receivedPayload = JSONObject(payload.toString())
             JSONObject()
                 .put("ok", true)
-                .put("result", JSONObject().put("path", "remote-host"))
+                .put("result", JSONObject().put("available", true))
         }
-        val api: RuntimeCapabilityApi = router(host = remote)
+        val api: RuntimeCapabilityApi = router(
+            host = remote,
+            business = marker("business")
+        )
 
         val result = api.invoke(
             RuntimeCapabilityCall(
-                capabilityId = "host.ui.layout@1",
-                operation = "status",
-                parameters = JSONObject().put("surface_id", "toolbox")
+                capabilityId = " HOST.RESIDENT.RUNTIME@1 ",
+                operation = "status"
             )
         )
 
-        assertEquals("remote-host", result.payload.getString("path"))
+        assertTrue(result.payload.getBoolean("available"))
         assertEquals("host_primitive", receivedKind)
-        assertEquals("plugin.test", receivedPayload?.getString("owner_plugin_id"))
-        assertEquals("host.ui.layout@1", receivedPayload?.getString("primitive_id"))
+        assertEquals(
+            "ai_limbs.system.plugin_center",
+            receivedPayload?.getString("owner_plugin_id")
+        )
+        assertEquals(
+            "host.resident.runtime@1",
+            receivedPayload?.getString("primitive_id")
+        )
         assertEquals("status", receivedPayload?.getString("operation"))
         assertEquals(
-            "toolbox",
-            receivedPayload?.getJSONObject("parameters")?.getString("surface_id")
+            CapabilityExecutionOwner.HOST,
+            CapabilityRegistry.requireDescriptor("host.resident.runtime@1").executionOwner
         )
     }
 

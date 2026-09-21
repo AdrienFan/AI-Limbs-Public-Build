@@ -28,14 +28,18 @@ class CapabilityRegistryTest {
     }
 
     @Test
-    fun `stage three host ownership mirrors legacy contract only`() {
+    fun `test nine host ownership includes migrated resident runtime`() {
         val hostOwned = CapabilityRegistry
             .descriptorsOwnedBy(CapabilityExecutionOwner.HOST)
             .map { it.id }
             .toSet()
 
         assertEquals(
-            setOf("host.ui.layout@1", "host.privileged.runtime@1"),
+            setOf(
+                "host.ui.layout@1",
+                "host.privileged.runtime@1",
+                "host.resident.runtime@1"
+            ),
             hostOwned
         )
         assertTrue(

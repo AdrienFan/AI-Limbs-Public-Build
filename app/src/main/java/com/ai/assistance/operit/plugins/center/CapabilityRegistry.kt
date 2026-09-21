@@ -99,7 +99,7 @@ object CapabilityRegistry {
         hostPrimitive("host.ui.presentation@1"),
         hostPrimitive("host.interaction.cycle@1"),
         hostPrimitive("host.privileged.runtime@1", CapabilityExecutionOwner.HOST),
-        hostPrimitive("host.resident.runtime@1"),
+        hostPrimitive("host.resident.runtime@1", CapabilityExecutionOwner.HOST),
         hostPrimitive("host.ui.layout@1", CapabilityExecutionOwner.HOST)
     )
 

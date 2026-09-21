@@ -86,6 +86,18 @@ def main() -> int:
     if not host_owned:
         errors.append("CapabilityRegistry has no HOST-owned descriptors")
 
+    required_host_owned = {
+        "host.ui.layout@1",
+        "host.privileged.runtime@1",
+        "host.resident.runtime@1",
+    }
+    missing_required_host = sorted(required_host_owned - host_owned)
+    if missing_required_host:
+        errors.append(
+            "Test 9 canonical HOST ownership regressed for: "
+            + str(missing_required_host)
+        )
+
     for path in OWNER_GUARDED_FILES:
         text = path.read_text(encoding="utf-8")
         if "HOST_OWNED_PRIMITIVES" in text:

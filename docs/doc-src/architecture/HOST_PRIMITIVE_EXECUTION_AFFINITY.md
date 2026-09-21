@@ -221,6 +221,7 @@ UNBOUND 不是最终实现状态。operation 从 UNBOUND 变成 callable 的同�
 ## 已开始按 affinity 执行的能力
 
 - host.screen.capture@1/capture：Resident Core 只发送 neutral JSON request；MediaProjection、ScreenCaptureActivity 与 process-local capture state 全部留在 Android Host；Host 返回 success/path/error
+- host.resident.runtime@1：Test 9.2 将 CapabilityRegistry executionOwner 归正为 HOST；普通模式走 local Host transport，Resident Business 统一走 RemoteHostTransport → Android Host → 同一个 KernelHostPrimitiveAdapter / AiLimbsResidentRuntime lifecycle controller
 - host.ui.automation@1：Core 保留授权、operation 语义和唯一 backend 选择；Android Host 只持有 FloatingChatService/UIOperationOverlay 等 presentation state；Accessibility 通过独立 AIDL provider，Debugger/ADMIN-compat 通过显式 Debugger-family shell executor，Root 通过显式 Root shell executor
 - host.chat@1：全部 10 个 operation 均为 CORE_SAFE；create/switch/send/stream 只访问当前 Business Owner 的 ChatRuntimeHolder，Host FloatingChatService 生命周期完全退出 primitive ABI
 
@@ -235,6 +236,5 @@ UNBOUND 不是最终实现状态。operation 从 UNBOUND 变成 callable 的同�
 - host.filesystem@1/open|share 仍可在 Core startActivity
 - host.android.package@1/install|uninstall|launch 仍可在 Core startActivity
 - host.android.settings@1/set 与 host.android.usage@1/query 的权限引导仍可从 Core 发起 Activity
-- host.resident.runtime@1 仍可由 Resident Business execution path 进入自身 lifecycle controller
 
 当前 HostPrimitiveGatewayBindings 已同时保存 primitive-level affinity 与 operation-level affinity。Arch Test 9.1 起，SystemHostPrimitiveExecutor 对已启用 staged enforcement 的 Host-tool operation 注入 post-authorization execution override；Core 保持唯一 Policy/Dispatcher owner，Android Host 只执行经过 canonical binding 二次校验的 exact handler。首个试点为 `host.screen.capture@1/capture`，其他 primitive 继续逐项迁移。

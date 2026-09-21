@@ -24,6 +24,18 @@ class HostPrimitiveAffinityRoutingTest {
     }
 
     @Test
+    fun residentRuntimeIsHostOwnedAtDescriptorLevel() {
+        assertEquals(
+            HostGatewayExecutionAffinity.HOST_FRAMEWORK,
+            HostPrimitiveGatewayBindings.primitiveAffinity("host.resident.runtime@1")
+        )
+        assertEquals(
+            CapabilityExecutionOwner.HOST,
+            CapabilityRegistry.requireDescriptor("host.resident.runtime@1").executionOwner
+        )
+    }
+
+    @Test
     fun coreSafePrimitiveRemainsLocalToBusinessOwner() {
         assertFalse(HostPrimitiveGatewayBindings.affinityEnforced("host.chat@1"))
         assertFalse(HostPrimitiveGatewayBindings.requiresAndroidHost("host.chat@1", "messages"))
