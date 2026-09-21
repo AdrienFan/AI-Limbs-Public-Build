@@ -609,20 +609,6 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
 
     private companion object {
-        private val HOST_OWNED_PRIMITIVES = setOf(
-            "host.ui.layout@1",
-            "host.privileged.runtime@1"
-        )
-
-        init {
-            check(
-                HOST_OWNED_PRIMITIVES ==
-                    CapabilityRegistry.idsOwnedBy(CapabilityExecutionOwner.HOST)
-            ) {
-                "Legacy Kernel Host-owned primitive mirror drifted from CapabilityRegistry"
-            }
-        }
-
         val LISTENER_SNAPSHOT_LEVELS = listOf(
             AndroidPermissionLevel.DEBUGGER,
             AndroidPermissionLevel.ROOT,

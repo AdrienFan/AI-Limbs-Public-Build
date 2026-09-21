@@ -1309,20 +1309,6 @@ private class ResidentHostComponentExecutor(
     }
 
     private companion object {
-        val HOST_OWNED_PRIMITIVES = setOf(
-            "host.ui.layout@1",
-            "host.privileged.runtime@1"
-        )
-
-        init {
-            check(
-                HOST_OWNED_PRIMITIVES ==
-                    CapabilityRegistry.idsOwnedBy(CapabilityExecutionOwner.HOST)
-            ) {
-                "Legacy UI Proxy Host-owned primitive mirror drifted from CapabilityRegistry"
-            }
-        }
-
         val HOST_EXECUTABLE_TOOLS = setOf("capture_screenshot")
     }
 }

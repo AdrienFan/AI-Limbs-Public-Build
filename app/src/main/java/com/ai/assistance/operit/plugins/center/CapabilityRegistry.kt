@@ -42,8 +42,8 @@ data class CapabilityDescriptor(
  *
  * The explicit list is deliberate. A new Host Primitive must be added here in the same
  * change; ci/script/check_runtime_capability_registry.py rejects catalog/registry drift.
- * The two HOST entries are the canonical owner metadata. The legacy
- * HOST_OWNED_PRIMITIVES sets remain only as compatibility mirrors and fail-fast checks.
+ * executionOwner is the single canonical owner source; legacy Host-owner mirror sets were
+ * removed in Arch Test 8 and CI rejects their reintroduction.
  */
 object CapabilityRegistry {
     private val legacyRequestEnvelope =

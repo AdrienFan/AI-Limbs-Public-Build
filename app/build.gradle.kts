@@ -422,7 +422,7 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 143
+        versionCode = 144
         versionName = "0.8.0.5"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
@@ -459,10 +459,10 @@ android {
         }
         debug {
             // Arch Test package identity: each iteration stays installable beside prior baselines.
-            applicationIdSuffix = ".ailimbs.archtest7"
-            versionNameSuffix = "-build63-archtest7"
+            applicationIdSuffix = ".ailimbs.archtest8"
+            versionNameSuffix = "-build63-archtest8"
             signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
-            resValue("string", "app_name", "AI Limbs Arch Test 7")
+            resValue("string", "app_name", "AI Limbs Arch Test 8")
         }
         create("clone") {
             initWith(getByName("debug"))

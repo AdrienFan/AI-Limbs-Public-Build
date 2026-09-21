@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static guard for the canonical runtime capability registry and Test 7 owner router."""
+"""Static guard for the canonical runtime capability registry and owner router."""
 from __future__ import annotations
 
 import re
@@ -9,31 +9,17 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 CATALOG = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/HostPrimitiveCatalog.kt"
 REGISTRY = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/CapabilityRegistry.kt"
-LEGACY_OWNER_FILES = (
-    ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/KernelHostPrimitiveAdapter.kt",
-    ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginHostUiProxyBridge.kt",
-)
+KERNEL_ADAPTER = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/KernelHostPrimitiveAdapter.kt"
+UI_PROXY_BRIDGE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginHostUiProxyBridge.kt"
+OWNER_GUARDED_FILES = (KERNEL_ADAPTER, UI_PROXY_BRIDGE)
 ROUTER = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/RuntimeCapabilityRouting.kt"
 CAPABILITY_GATEWAY = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginHostCapabilityRegistry.kt"
-KERNEL_ADAPTER = LEGACY_OWNER_FILES[0]
-OWNER_CONSUMERS = (
-    (
-        LEGACY_OWNER_FILES[1],
-        "CapabilityRegistry.isOwnedBy(primitiveId, CapabilityExecutionOwner.HOST)",
-        "primitiveId in HOST_OWNED_PRIMITIVES",
-    ),
-)
 
 CATALOG_ID_RE = re.compile(r'HostPrimitiveDefinition\(\s*\d+\s*,\s*"([^"]+)"')
 REGISTRY_ENTRY_RE = re.compile(
     r'hostPrimitive\(\s*"([^"]+)"'
     r'(?:\s*,\s*CapabilityExecutionOwner\.([A-Z_]+))?\s*\)'
 )
-LEGACY_OWNER_RE = re.compile(
-    r'HOST_OWNED_PRIMITIVES\s*=\s*setOf\((.*?)\)',
-    re.DOTALL,
-)
-STRING_RE = re.compile(r'"([^"]+)"')
 VALID_OWNERS = {"HOST", "BUSINESS", "PLUGIN_RUNTIME", "EXTERNAL_DAEMON"}
 def duplicate_values(values: list[str]) -> list[str]:
     seen: set[str] = set()
@@ -43,16 +29,6 @@ def duplicate_values(values: list[str]) -> list[str]:
             duplicates.add(value)
         seen.add(value)
     return sorted(duplicates)
-
-
-def extract_legacy_owner_ids(path: Path) -> set[str]:
-    text = path.read_text(encoding="utf-8")
-    matches = LEGACY_OWNER_RE.findall(text)
-    if len(matches) != 1:
-        raise ValueError(
-            f"{path.relative_to(ROOT)} must contain exactly one HOST_OWNED_PRIMITIVES set"
-        )
-    return {item.strip().lower() for item in STRING_RE.findall(matches[0])}
 
 
 def main() -> int:
@@ -100,28 +76,24 @@ def main() -> int:
         for capability_id, owner in registry_owners.items()
         if owner == "HOST"
     }
-    for path in LEGACY_OWNER_FILES:
-        try:
-            legacy_ids = extract_legacy_owner_ids(path)
-        except ValueError as error:
-            errors.append(str(error))
-            continue
-        if legacy_ids != host_owned:
+    if not host_owned:
+        errors.append("CapabilityRegistry has no HOST-owned descriptors")
+
+    for path in OWNER_GUARDED_FILES:
+        text = path.read_text(encoding="utf-8")
+        if "HOST_OWNED_PRIMITIVES" in text:
             errors.append(
-                f"{path.relative_to(ROOT)} HOST_OWNED_PRIMITIVES={sorted(legacy_ids)} "
-                f"does not mirror CapabilityRegistry HOST ids={sorted(host_owned)}"
+                f"{path.relative_to(ROOT)} reintroduced forbidden HOST_OWNED_PRIMITIVES"
             )
 
-    for path, canonical_token, legacy_routing_token in OWNER_CONSUMERS:
-        text = path.read_text(encoding="utf-8")
-        if canonical_token not in text:
-            errors.append(
-                f"{path.relative_to(ROOT)} does not consume canonical owner metadata"
-            )
-        if legacy_routing_token in text:
-            errors.append(
-                f"{path.relative_to(ROOT)} still routes directly from the legacy owner mirror"
-            )
+    ui_proxy_text = UI_PROXY_BRIDGE.read_text(encoding="utf-8")
+    canonical_ui_proxy_guard = (
+        "CapabilityRegistry.isOwnedBy(primitiveId, CapabilityExecutionOwner.HOST)"
+    )
+    if canonical_ui_proxy_guard not in ui_proxy_text:
+        errors.append(
+            "PluginHostUiProxyBridge does not validate Host ownership from CapabilityRegistry"
+        )
 
     router_text = ROUTER.read_text(encoding="utf-8")
     gateway_text = CAPABILITY_GATEWAY.read_text(encoding="utf-8")
