@@ -10,8 +10,11 @@ internal fun interface RuntimeCapabilityTransport {
 }
 
 /**
- * Local Host transport for capabilities that execute inside the current Android Host process.
- * It delegates to the existing SystemHostPrimitiveExecutor, preserving the existing handler.
+ * Current-process transport backed by the existing SystemHostPrimitiveExecutor.
+ *
+ * The historical name is kept for compatibility with Arch Tests 4-6. In Test 7 the same
+ * current-process transport also serves BUSINESS-owned descriptors because the business owner
+ * is whichever process currently owns PluginPlatformKernel.
  */
 internal class LocalHostTransport private constructor(
     private val delegate: suspend (RuntimeCapabilityCall) -> JSONObject
@@ -38,8 +41,7 @@ internal class LocalHostTransport private constructor(
  * Resident Core -> Android Host transport.
  *
  * The wire payload remains neutral JSON and reuses the existing Resident component broker.
- * The Host side therefore reaches the same KernelHostPrimitiveAdapter handler used before
- * Arch Test 5; only ownership of the cross-process call construction moves into this transport.
+ * Host-side execution still reaches the same KernelHostPrimitiveAdapter handler.
  */
 internal class RemoteHostTransport(
     private val ownerPluginId: String,
@@ -79,36 +81,125 @@ internal class RemoteHostTransport(
     }
 }
 
+/** Adapter slot for descriptors whose canonical execution owner is PLUGIN_RUNTIME. */
+internal class PluginRuntimeTransportAdapter(
+    private val delegate: RuntimeCapabilityTransport? = null
+) : RuntimeCapabilityTransport {
+    override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult =
+        delegate?.invoke(call)
+            ?: throw PluginInstallException(
+                "RUNTIME_CAPABILITY_TRANSPORT_UNAVAILABLE",
+                "No PLUGIN_RUNTIME transport adapter is registered for ${call.capabilityId}"
+            )
+}
+
+/** Adapter slot for descriptors whose canonical execution owner is EXTERNAL_DAEMON. */
+internal class ExternalDaemonTransportAdapter(
+    private val delegate: RuntimeCapabilityTransport? = null
+) : RuntimeCapabilityTransport {
+    override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult =
+        delegate?.invoke(call)
+            ?: throw PluginInstallException(
+                "RUNTIME_CAPABILITY_TRANSPORT_UNAVAILABLE",
+                "No EXTERNAL_DAEMON transport adapter is registered for ${call.capabilityId}"
+            )
+}
+
 /**
- * Unified Host router for the incrementally migrated capability set.
+ * One owner -> transport table for a single invocation environment.
  *
- * Arch Tests 4-6 incrementally admit host.ui.layout@1 and host.privileged.runtime@1.
- * Test 7 expands routing by owner instead of an explicit migrated set.
+ * Process knowledge lives here, not in callers or primitive handlers:
+ * - HOST is local in Android Host / UI proxy and remote from Resident BUSINESS.
+ * - BUSINESS is always local to the process that currently owns business.
+ * - PLUGIN_RUNTIME and EXTERNAL_DAEMON are explicit adapter slots. The canonical Registry does
+ *   not yet assign descriptors to either owner, so Test 7 adds the route without inventing work.
+ */
+internal class RuntimeCapabilityTransportSet private constructor(
+    private val transports: Map<CapabilityExecutionOwner, RuntimeCapabilityTransport>
+) {
+    fun resolve(owner: CapabilityExecutionOwner): RuntimeCapabilityTransport =
+        requireNotNull(transports[owner]) {
+            "Runtime capability transport is not configured for owner: $owner"
+        }
+
+    companion object {
+        fun forRuntime(
+            runtimeRole: PluginRuntimeRole,
+            ownerPluginId: String,
+            executor: SystemHostPrimitiveExecutor,
+            pluginRuntimeAdapter: RuntimeCapabilityTransport? = null,
+            externalDaemonAdapter: RuntimeCapabilityTransport? = null
+        ): RuntimeCapabilityTransportSet {
+            val local = LocalHostTransport(ownerPluginId, executor)
+            val host = when (runtimeRole) {
+                PluginRuntimeRole.BUSINESS -> RemoteHostTransport(ownerPluginId)
+                PluginRuntimeRole.LEGACY_HOST,
+                PluginRuntimeRole.UI_PROXY -> local
+            }
+            return RuntimeCapabilityTransportSet(
+                mapOf(
+                    CapabilityExecutionOwner.HOST to host,
+                    CapabilityExecutionOwner.BUSINESS to local,
+                    CapabilityExecutionOwner.PLUGIN_RUNTIME to
+                        PluginRuntimeTransportAdapter(pluginRuntimeAdapter),
+                    CapabilityExecutionOwner.EXTERNAL_DAEMON to
+                        ExternalDaemonTransportAdapter(externalDaemonAdapter)
+                )
+            )
+        }
+
+        internal fun explicit(
+            host: RuntimeCapabilityTransport,
+            business: RuntimeCapabilityTransport,
+            pluginRuntime: RuntimeCapabilityTransport,
+            externalDaemon: RuntimeCapabilityTransport
+        ): RuntimeCapabilityTransportSet =
+            RuntimeCapabilityTransportSet(
+                mapOf(
+                    CapabilityExecutionOwner.HOST to host,
+                    CapabilityExecutionOwner.BUSINESS to business,
+                    CapabilityExecutionOwner.PLUGIN_RUNTIME to pluginRuntime,
+                    CapabilityExecutionOwner.EXTERNAL_DAEMON to externalDaemon
+                )
+            )
+    }
+}
+
+/**
+ * Canonical descriptor-owner router.
+ *
+ * Test 7 removes the incrementally migrated capability whitelist. Every canonical descriptor
+ * selects its transport exclusively from CapabilityDescriptor.executionOwner.
  */
 internal class RuntimeCapabilityRouter(
-    private val hostTransport: RuntimeCapabilityTransport
+    private val transports: RuntimeCapabilityTransportSet
 ) : RuntimeCapabilityApi {
     override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult {
         val normalizedId = call.capabilityId.trim().lowercase()
-        check(isMigrated(normalizedId)) {
-            "Runtime capability is not migrated to unified Host transport: $normalizedId"
-        }
-
         val descriptor = CapabilityRegistry.requireDescriptor(normalizedId)
-        check(descriptor.executionOwner == CapabilityExecutionOwner.HOST) {
-            "Unified Host transport requires HOST ownership: ${descriptor.id}"
+        check(descriptor.policy == CapabilityPolicyRef.LEGACY_EXISTING_POLICY) {
+            "Unsupported runtime capability policy: ${descriptor.policy}"
         }
-
-        return hostTransport.invoke(call.copy(capabilityId = descriptor.id))
+        val canonicalCall = call.copy(capabilityId = descriptor.id)
+        return transports.resolve(descriptor.executionOwner).invoke(canonicalCall)
     }
 
     companion object {
-        private val MIGRATED_HOST_IDS = setOf(
-            "host.ui.layout@1",
-            "host.privileged.runtime@1"
-        )
-
-        fun isMigrated(capabilityId: String): Boolean =
-            capabilityId.trim().lowercase() in MIGRATED_HOST_IDS
+        fun forRuntime(
+            runtimeRole: PluginRuntimeRole,
+            ownerPluginId: String,
+            executor: SystemHostPrimitiveExecutor,
+            pluginRuntimeAdapter: RuntimeCapabilityTransport? = null,
+            externalDaemonAdapter: RuntimeCapabilityTransport? = null
+        ): RuntimeCapabilityRouter =
+            RuntimeCapabilityRouter(
+                RuntimeCapabilityTransportSet.forRuntime(
+                    runtimeRole = runtimeRole,
+                    ownerPluginId = ownerPluginId,
+                    executor = executor,
+                    pluginRuntimeAdapter = pluginRuntimeAdapter,
+                    externalDaemonAdapter = externalDaemonAdapter
+                )
+            )
     }
 }

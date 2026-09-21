@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static guard for the Arch Test 3 runtime capability registry."""
+"""Static guard for the canonical runtime capability registry and Test 7 owner router."""
 from __future__ import annotations
 
 import re
@@ -13,12 +13,10 @@ LEGACY_OWNER_FILES = (
     ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/KernelHostPrimitiveAdapter.kt",
     ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginHostUiProxyBridge.kt",
 )
+ROUTER = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/RuntimeCapabilityRouting.kt"
+CAPABILITY_GATEWAY = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginHostCapabilityRegistry.kt"
+KERNEL_ADAPTER = LEGACY_OWNER_FILES[0]
 OWNER_CONSUMERS = (
-    (
-        LEGACY_OWNER_FILES[0],
-        "CapabilityRegistry.isOwnedBy(id, CapabilityExecutionOwner.HOST)",
-        "id in HOST_OWNED_PRIMITIVES",
-    ),
     (
         LEGACY_OWNER_FILES[1],
         "CapabilityRegistry.isOwnedBy(primitiveId, CapabilityExecutionOwner.HOST)",
@@ -124,6 +122,29 @@ def main() -> int:
             errors.append(
                 f"{path.relative_to(ROOT)} still routes directly from the legacy owner mirror"
             )
+
+    router_text = ROUTER.read_text(encoding="utf-8")
+    gateway_text = CAPABILITY_GATEWAY.read_text(encoding="utf-8")
+    kernel_text = KERNEL_ADAPTER.read_text(encoding="utf-8")
+    for forbidden in ("MIGRATED_HOST_IDS", "fun isMigrated("):
+        if forbidden in router_text:
+            errors.append(f"RuntimeCapabilityRouter still contains staged capability routing: {forbidden}")
+    if "RuntimeCapabilityRouter.forRuntime(" not in gateway_text:
+        errors.append("PluginHostCapabilityRegistry does not route SystemHost calls through RuntimeCapabilityRouter")
+    if "CapabilityRegistry.isOwnedBy(id, CapabilityExecutionOwner.HOST)" in kernel_text:
+        errors.append("KernelHostPrimitiveAdapter still performs capability owner/process routing")
+    router_required_tokens = (
+        "CapabilityExecutionOwner.HOST to host",
+        "CapabilityExecutionOwner.BUSINESS to local",
+        "CapabilityExecutionOwner.PLUGIN_RUNTIME to",
+        "CapabilityExecutionOwner.EXTERNAL_DAEMON to",
+        "transports.resolve(descriptor.executionOwner)",
+        "PluginRuntimeTransportAdapter",
+        "ExternalDaemonTransportAdapter",
+    )
+    for token in router_required_tokens:
+        if token not in router_text:
+            errors.append(f"RuntimeCapabilityRouter is missing owner transport contract: {token}")
 
     required_tokens = (
         "val version: Int",

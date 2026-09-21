@@ -442,23 +442,20 @@ internal class PluginHostCapabilityRegistry(
         val normalized = capabilityId.trim().lowercase()
         val executor = systemExecutor
             ?: throw PluginInstallException("HOST_GATEWAY_NOT_READY", "System Host Gateway executor is not initialized")
-        val copiedParameters = JSONObject(parameters.toString())
-        if (runtimeRole == PluginRuntimeRole.LEGACY_HOST &&
-            RuntimeCapabilityRouter.isMigrated(normalized)) {
-            val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(
-                LocalHostTransport(ownerPluginId, executor)
-            )
-            return api.invoke(
-                RuntimeCapabilityCall(
-                    capabilityId = normalized,
-                    operation = operation,
-                    parameters = copiedParameters
-                )
-            ).payload
-        }
         val primitive = AiLimbsHostPrimitiveCatalog.find(normalized)
             ?: throw PluginInstallException("HOST_PRIMITIVE_UNKNOWN", "Unknown AI Limbs Host Primitive: $normalized")
-        return executor.invoke(ownerPluginId, primitive.id, operation, copiedParameters)
+        val api: RuntimeCapabilityApi = RuntimeCapabilityRouter.forRuntime(
+            runtimeRole = runtimeRole,
+            ownerPluginId = ownerPluginId,
+            executor = executor
+        )
+        return api.invoke(
+            RuntimeCapabilityCall(
+                capabilityId = primitive.id,
+                operation = operation,
+                parameters = JSONObject(parameters.toString())
+            )
+        ).payload
     }
 
     internal suspend fun invokeSystemHost(ownerPluginId: String, capabilityId: String, parameters: JSONObject = JSONObject()): JSONObject {

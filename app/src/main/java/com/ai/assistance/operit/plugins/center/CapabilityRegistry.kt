@@ -3,9 +3,9 @@ package com.ai.assistance.operit.plugins.center
 /**
  * Canonical capability metadata introduced by Arch Test 3.
  *
- * Arch Test 3 makes this the canonical metadata source for execution ownership only.
- * Handler selection, transport selection and the invocation chain remain on the legacy
- * implementation until later stages, so the observable execution behavior is unchanged.
+ * Arch Test 3 introduced this as the canonical execution-owner metadata source.
+ * Arch Test 7 makes RuntimeCapabilityRouter consume executionOwner directly for transport
+ * selection while existing handlers and policy enforcement remain authoritative.
  */
 enum class CapabilityExecutionOwner {
     HOST,

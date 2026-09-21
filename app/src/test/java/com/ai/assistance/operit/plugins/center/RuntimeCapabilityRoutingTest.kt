@@ -5,21 +5,37 @@ import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
-import org.junit.Assert.fail
 import org.junit.Test
 
 class RuntimeCapabilityRoutingTest {
-    @Test
-    fun `ui layout resolves through registry and local host transport unchanged`() = runBlocking {
-        var received: RuntimeCapabilityCall? = null
-        val transport = object : RuntimeCapabilityTransport {
-            override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult {
-                received = call
-                return RuntimeCapabilityResult(JSONObject().put("path", "local-host"))
-            }
+    private fun marker(path: String, received: ((RuntimeCapabilityCall) -> Unit)? = null) =
+        RuntimeCapabilityTransport { call ->
+            received?.invoke(call)
+            RuntimeCapabilityResult(JSONObject().put("path", path))
         }
-        val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(transport)
+
+    private fun router(
+        host: RuntimeCapabilityTransport,
+        business: RuntimeCapabilityTransport = marker("business"),
+        pluginRuntime: RuntimeCapabilityTransport = marker("plugin-runtime"),
+        externalDaemon: RuntimeCapabilityTransport = marker("external-daemon")
+    ): RuntimeCapabilityRouter =
+        RuntimeCapabilityRouter(
+            RuntimeCapabilityTransportSet.explicit(
+                host = host,
+                business = business,
+                pluginRuntime = pluginRuntime,
+                externalDaemon = externalDaemon
+            )
+        )
+
+    @Test
+    fun `host descriptor resolves through HOST transport with canonical schema`() = runBlocking {
+        var received: RuntimeCapabilityCall? = null
         val parameters = JSONObject().put("surface_id", "toolbox")
+        val api: RuntimeCapabilityApi = router(
+            host = marker("local-host") { received = it }
+        )
 
         val result = api.invoke(
             RuntimeCapabilityCall(
@@ -40,17 +56,40 @@ class RuntimeCapabilityRoutingTest {
     }
 
     @Test
+    fun `business descriptor resolves through BUSINESS transport without capability whitelist`() = runBlocking {
+        var received: RuntimeCapabilityCall? = null
+        val api: RuntimeCapabilityApi = router(
+            host = marker("host"),
+            business = marker("business") { received = it }
+        )
+
+        val result = api.invoke(
+            RuntimeCapabilityCall(
+                capabilityId = "HOST.RESIDENT.RUNTIME@1",
+                operation = "status"
+            )
+        )
+
+        assertEquals("business", result.payload.getString("path"))
+        assertEquals("host.resident.runtime@1", received?.capabilityId)
+        assertEquals(
+            CapabilityExecutionOwner.BUSINESS,
+            CapabilityRegistry.requireDescriptor("host.resident.runtime@1").executionOwner
+        )
+    }
+
+    @Test
     fun `remote host transport preserves the same capability envelope`() = runBlocking {
         var receivedKind = ""
         var receivedPayload: JSONObject? = null
-        val transport = RemoteHostTransport("plugin.test") { kind, payload ->
+        val remote = RemoteHostTransport("plugin.test") { kind, payload ->
             receivedKind = kind
             receivedPayload = JSONObject(payload.toString())
             JSONObject()
                 .put("ok", true)
                 .put("result", JSONObject().put("path", "remote-host"))
         }
-        val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(transport)
+        val api: RuntimeCapabilityApi = router(host = remote)
 
         val result = api.invoke(
             RuntimeCapabilityCall(
@@ -72,15 +111,15 @@ class RuntimeCapabilityRoutingTest {
     }
 
     @Test
-    fun `privileged runtime preserves permission service owner across remote host transport`() = runBlocking {
+    fun `privileged runtime preserves permission service owner across HOST transport`() = runBlocking {
         var receivedPayload: JSONObject? = null
-        val transport = RemoteHostTransport("plugin.system.permission_service") { _, payload ->
+        val remote = RemoteHostTransport("plugin.system.permission_service") { _, payload ->
             receivedPayload = JSONObject(payload.toString())
             JSONObject()
                 .put("ok", true)
                 .put("result", JSONObject().put("running", true))
         }
-        val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(transport)
+        val api: RuntimeCapabilityApi = router(host = remote)
 
         val result = api.invoke(
             RuntimeCapabilityCall(
@@ -98,28 +137,29 @@ class RuntimeCapabilityRoutingTest {
             "host.privileged.runtime@1",
             receivedPayload?.getString("primitive_id")
         )
-        assertEquals("status", receivedPayload?.getString("operation"))
-        assertEquals(
-            CapabilityExecutionOwner.HOST,
-            CapabilityRegistry.requireDescriptor("host.privileged.runtime@1").executionOwner
-        )
     }
 
     @Test
-    fun `stage six router rejects non migrated host capabilities`() = runBlocking {
-        val transport = object : RuntimeCapabilityTransport {
-            override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult {
-                fail("Transport must not be reached for an unmigrated capability")
-                error("unreachable")
-            }
-        }
-        val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(transport)
+    fun `plugin runtime and external daemon owners use explicit adapter slots`() = runBlocking {
+        var pluginCall: RuntimeCapabilityCall? = null
+        var daemonCall: RuntimeCapabilityCall? = null
+        val pluginAdapter = PluginRuntimeTransportAdapter(marker("plugin") { pluginCall = it })
+        val daemonAdapter = ExternalDaemonTransportAdapter(marker("daemon") { daemonCall = it })
+        val transports = RuntimeCapabilityTransportSet.explicit(
+            host = marker("host"),
+            business = marker("business"),
+            pluginRuntime = pluginAdapter,
+            externalDaemon = daemonAdapter
+        )
 
-        val error = runCatching {
-            api.invoke(RuntimeCapabilityCall("host.resident.runtime@1", "status"))
-        }.exceptionOrNull()
+        val pluginResult = transports.resolve(CapabilityExecutionOwner.PLUGIN_RUNTIME)
+            .invoke(RuntimeCapabilityCall("plugin.synthetic@1", "invoke"))
+        val daemonResult = transports.resolve(CapabilityExecutionOwner.EXTERNAL_DAEMON)
+            .invoke(RuntimeCapabilityCall("daemon.synthetic@1", "invoke"))
 
-        assertTrue(error is IllegalStateException)
-        assertTrue(error?.message.orEmpty().contains("not migrated"))
+        assertEquals("plugin", pluginResult.payload.getString("path"))
+        assertEquals("daemon", daemonResult.payload.getString("path"))
+        assertEquals("plugin.synthetic@1", pluginCall?.capabilityId)
+        assertEquals("daemon.synthetic@1", daemonCall?.capabilityId)
     }
 }

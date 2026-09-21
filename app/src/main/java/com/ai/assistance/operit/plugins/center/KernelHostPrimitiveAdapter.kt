@@ -46,22 +46,6 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 "Kernel operation is not bound: $id/$op"
             )
         }
-        if (runtimeRole == PluginRuntimeRole.BUSINESS &&
-            CapabilityRegistry.isOwnedBy(id, CapabilityExecutionOwner.HOST)) {
-            if (RuntimeCapabilityRouter.isMigrated(id)) {
-                val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(
-                    RemoteHostTransport(ownerPluginId)
-                )
-                return api.invoke(
-                    RuntimeCapabilityCall(
-                        capabilityId = id,
-                        operation = op,
-                        parameters = JSONObject(parameters.toString())
-                    )
-                ).payload
-            }
-            return invokeHostOwnedPrimitiveLegacy(ownerPluginId, id, op, parameters)
-        }
         return when (id) {
             "host.network@1" -> invokeNetwork(op)
             "host.ui.surface@1" -> invokeUiSurface(op, parameters)
@@ -80,37 +64,6 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 "No Kernel adapter for $id/$op"
             )
         }
-    }
-
-    private fun invokeHostOwnedPrimitiveLegacy(
-        ownerPluginId: String,
-        primitiveId: String,
-        operation: String,
-        parameters: JSONObject
-    ): JSONObject {
-        val response = try {
-            com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy.request(
-                com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_HOST_PRIMITIVE,
-                JSONObject()
-                    .put("owner_plugin_id", ownerPluginId)
-                    .put("primitive_id", primitiveId)
-                    .put("operation", operation)
-                    .put("parameters", JSONObject(parameters.toString()))
-            )
-        } catch (error: Throwable) {
-            throw PluginInstallException(
-                "HOST_UI_PROXY_UNAVAILABLE",
-                "Host-owned primitive could not reach the Android Host: $primitiveId/$operation",
-                error
-            )
-        }
-        if (!response.optBoolean("ok", false)) {
-            throw PluginInstallException(
-                "HOST_UI_PROXY_FAILED",
-                response.optString("error", "Host-owned primitive failed: $primitiveId/$operation")
-            )
-        }
-        return response.optJSONObject("result") ?: JSONObject()
     }
 
     private suspend fun invokeNetwork(operation: String): JSONObject = when (operation) {
