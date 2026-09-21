@@ -72,7 +72,41 @@ class RuntimeCapabilityRoutingTest {
     }
 
     @Test
-    fun `stage five router does not migrate privileged runtime yet`() = runBlocking {
+    fun `privileged runtime preserves permission service owner across remote host transport`() = runBlocking {
+        var receivedPayload: JSONObject? = null
+        val transport = RemoteHostTransport("plugin.system.permission_service") { _, payload ->
+            receivedPayload = JSONObject(payload.toString())
+            JSONObject()
+                .put("ok", true)
+                .put("result", JSONObject().put("running", true))
+        }
+        val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(transport)
+
+        val result = api.invoke(
+            RuntimeCapabilityCall(
+                capabilityId = " HOST.PRIVILEGED.RUNTIME@1 ",
+                operation = "status"
+            )
+        )
+
+        assertTrue(result.payload.getBoolean("running"))
+        assertEquals(
+            "plugin.system.permission_service",
+            receivedPayload?.getString("owner_plugin_id")
+        )
+        assertEquals(
+            "host.privileged.runtime@1",
+            receivedPayload?.getString("primitive_id")
+        )
+        assertEquals("status", receivedPayload?.getString("operation"))
+        assertEquals(
+            CapabilityExecutionOwner.HOST,
+            CapabilityRegistry.requireDescriptor("host.privileged.runtime@1").executionOwner
+        )
+    }
+
+    @Test
+    fun `stage six router rejects non migrated host capabilities`() = runBlocking {
         val transport = object : RuntimeCapabilityTransport {
             override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult {
                 fail("Transport must not be reached for an unmigrated capability")
@@ -82,7 +116,7 @@ class RuntimeCapabilityRoutingTest {
         val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(transport)
 
         val error = runCatching {
-            api.invoke(RuntimeCapabilityCall("host.privileged.runtime@1", "status"))
+            api.invoke(RuntimeCapabilityCall("host.resident.runtime@1", "status"))
         }.exceptionOrNull()
 
         assertTrue(error is IllegalStateException)

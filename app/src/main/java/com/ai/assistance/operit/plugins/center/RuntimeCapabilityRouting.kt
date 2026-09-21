@@ -82,7 +82,8 @@ internal class RemoteHostTransport(
 /**
  * Unified Host router for the incrementally migrated capability set.
  *
- * Arch Tests 4/5 intentionally admit only host.ui.layout@1. Test 7 expands routing by owner.
+ * Arch Tests 4-6 incrementally admit host.ui.layout@1 and host.privileged.runtime@1.
+ * Test 7 expands routing by owner instead of an explicit migrated set.
  */
 internal class RuntimeCapabilityRouter(
     private val hostTransport: RuntimeCapabilityTransport
@@ -102,7 +103,10 @@ internal class RuntimeCapabilityRouter(
     }
 
     companion object {
-        private val MIGRATED_HOST_IDS = setOf("host.ui.layout@1")
+        private val MIGRATED_HOST_IDS = setOf(
+            "host.ui.layout@1",
+            "host.privileged.runtime@1"
+        )
 
         fun isMigrated(capabilityId: String): Boolean =
             capabilityId.trim().lowercase() in MIGRATED_HOST_IDS

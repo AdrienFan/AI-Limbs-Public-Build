@@ -444,7 +444,7 @@ internal class PluginHostCapabilityRegistry(
             ?: throw PluginInstallException("HOST_GATEWAY_NOT_READY", "System Host Gateway executor is not initialized")
         val copiedParameters = JSONObject(parameters.toString())
         if (runtimeRole == PluginRuntimeRole.LEGACY_HOST &&
-            normalized == LOCAL_HOST_MIGRATED_UI_LAYOUT_ID) {
+            RuntimeCapabilityRouter.isMigrated(normalized)) {
             val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(
                 LocalHostTransport(ownerPluginId, executor)
             )
@@ -544,7 +544,6 @@ internal class PluginHostCapabilityRegistry(
     }
 
     private companion object {
-        const val LOCAL_HOST_MIGRATED_UI_LAYOUT_ID = "host.ui.layout@1"
         val BRIDGE_TRANSPORT_ID_REGEX = Regex("^[a-z0-9][a-z0-9._-]{0,63}$")
         const val BRIDGE_REMOTE_INVOKE_CAPABILITY_ID = "core.bridge.remote.invoke"
         const val SYSTEM_BRIDGE_PLUGIN_ID = "plugin.system.bridge"
