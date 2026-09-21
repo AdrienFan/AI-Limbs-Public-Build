@@ -14,6 +14,9 @@ UI_PROXY_BRIDGE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/cen
 OWNER_GUARDED_FILES = (KERNEL_ADAPTER, UI_PROXY_BRIDGE)
 ROUTER = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/RuntimeCapabilityRouting.kt"
 CAPABILITY_GATEWAY = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginHostCapabilityRegistry.kt"
+PRIVILEGE_RUNTIME = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/privilege/PrivilegeRuntime.kt"
+RESIDENT_BACKEND = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/resident/ResidentBackendBinding.kt"
+RESIDENT_CORE_MAIN = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/resident/ResidentCoreMain.kt"
 
 CATALOG_ID_RE = re.compile(r'HostPrimitiveDefinition\(\s*\d+\s*,\s*"([^"]+)"')
 REGISTRY_ENTRY_RE = re.compile(
@@ -98,6 +101,9 @@ def main() -> int:
     router_text = ROUTER.read_text(encoding="utf-8")
     gateway_text = CAPABILITY_GATEWAY.read_text(encoding="utf-8")
     kernel_text = KERNEL_ADAPTER.read_text(encoding="utf-8")
+    privilege_text = PRIVILEGE_RUNTIME.read_text(encoding="utf-8")
+    resident_backend_text = RESIDENT_BACKEND.read_text(encoding="utf-8")
+    resident_core_main_text = RESIDENT_CORE_MAIN.read_text(encoding="utf-8")
     for forbidden in ("MIGRATED_HOST_IDS", "fun isMigrated("):
         if forbidden in router_text:
             errors.append(f"RuntimeCapabilityRouter still contains staged capability routing: {forbidden}")
@@ -117,6 +123,26 @@ def main() -> int:
     for token in router_required_tokens:
         if token not in router_text:
             errors.append(f"RuntimeCapabilityRouter is missing owner transport contract: {token}")
+
+    privilege_handoff_tokens = (
+        "ResidentCoreController.ownedPermissionBackendSnapshot(context)",
+        "ResidentCoreController.stopPermissionBackend(context)",
+        "ResidentCoreController.syncPermissionSelection(context, selected)",
+        "selected = true",
+        "detachResidentConnection(incoming: IBinder)",
+    )
+    for token in privilege_handoff_tokens:
+        if token not in privilege_text:
+            errors.append(f"PrivilegeRuntime is missing handoff-aware control contract: {token}")
+    if "fun stopOwnedPermissionBackend()" not in resident_backend_text:
+        errors.append("ResidentBackendBinding cannot stop a Core-owned permission backend in place")
+    for token in (
+        '"stop_permission_backend"',
+        '"select_permission_ai_limbs"',
+        '"select_permission_shizuku"',
+    ):
+        if token not in resident_core_main_text:
+            errors.append(f"Resident Core control protocol is missing permission operation: {token}")
 
     required_tokens = (
         "val version: Int",

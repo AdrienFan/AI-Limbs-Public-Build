@@ -277,6 +277,38 @@ internal object ResidentCoreController {
         requestCore(context, "rebind_backend", state.getString("session_id"))
     }
 
+    internal fun ownedPermissionBackendSnapshot(context: Context): JSONObject? =
+        runCatching {
+            val state = requestCore(context, "status")
+            if (!state.optBoolean("available", false) ||
+                !state.optBoolean("business_attached", false) ||
+                state.optString("package_name") != context.packageName) {
+                return@runCatching null
+            }
+            state.optJSONObject("backend")?.takeIf {
+                it.optString("runtime_owner") == "resident_core"
+            }
+        }.getOrNull()
+
+    internal fun stopPermissionBackend(context: Context): JSONObject {
+        val state = requestCore(context, "status")
+        check(state.optBoolean("available", false) && state.optBoolean("business_attached", false)) {
+            "Resident Core must own business before permission backend stop"
+        }
+        return requestCore(context, "stop_permission_backend", state.getString("session_id"))
+    }
+
+    internal fun syncPermissionSelection(context: Context, aiLimbsSelected: Boolean): JSONObject? =
+        runCatching {
+            val state = requestCore(context, "status")
+            if (!state.optBoolean("available", false) || !state.optBoolean("business_attached", false)) {
+                return@runCatching null
+            }
+            val operation =
+                if (aiLimbsSelected) "select_permission_ai_limbs" else "select_permission_shizuku"
+            requestCore(context, operation, state.getString("session_id"))
+        }.getOrNull()
+
     suspend fun quiesceBusiness(context: Context): JSONObject =
         withContext(Dispatchers.IO + NonCancellable) {
             val state = status(context)

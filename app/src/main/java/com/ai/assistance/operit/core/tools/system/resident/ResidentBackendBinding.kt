@@ -200,6 +200,47 @@ internal class ResidentBackendBinding(
         diagnostic.set(value.toString())
     }
 
+    fun stopOwnedPermissionBackend(): JSONObject = synchronized(lock) {
+        check(!closed) { "Core backend is closed" }
+        check(ownsRuntime) { "Resident Core does not own the permission backend" }
+        val current = checkNotNull(server) { "Permission backend is not connected" }
+        check(current.isBinderAlive) { "Permission backend is not alive" }
+        val release = ResidentPermissionWire.release(
+            current,
+            checkNotNull(serverToken),
+            sessionId,
+            lifetime,
+            returnToHost = false
+        )
+
+        recipient?.let { death ->
+            try { current.unlinkToDeath(death, 0) }
+            catch (error: Exception) {
+                System.err.println("Core backend death link cleanup after user stop failed: $error")
+            }
+        }
+        PrivilegeRuntime.detachResidentConnection(current)
+        server = null
+        serverToken = null
+        serverInstance = null
+        recipient = null
+        ownsRuntime = false
+        prepared = false
+        preparationAttempted = false
+        diagnostic.set(
+            JSONObject()
+                .put("state", "degraded")
+                .put("connected", false)
+                .put("runtime_owner", "resident_core")
+                .put("permission_backend_available", false)
+                .put("degraded_reason", "permission_backend_stopped_by_user")
+                .toString()
+        )
+        JSONObject(release.toString())
+            .put("stopped", true)
+            .put("runtime_owner", "resident_core")
+    }
+
     /** returnToHost is reserved for an explicit user stop after the business kernel has retired. */
     fun close(returnToHost: Boolean) = synchronized(lock) {
         if (closed) return@synchronized

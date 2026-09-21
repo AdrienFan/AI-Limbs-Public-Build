@@ -152,6 +152,9 @@ object ResidentCoreMain {
                             require(operation == "status" || operation == "stop" ||
                                 operation == "prepare_handoff" || operation == "activate_business" ||
                                 operation == "activate_business_degraded" || operation == "rebind_backend" ||
+                                operation == "stop_permission_backend" ||
+                                operation == "select_permission_ai_limbs" ||
+                                operation == "select_permission_shizuku" ||
                                 operation == "cancel_business_activation" || operation == "quiesce_business") {
                                 "Unsupported core operation"
                             }
@@ -225,6 +228,18 @@ object ResidentCoreMain {
                                     }
                                     backend.rebindActiveBusinessAsync()
                                 }
+                                "stop_permission_backend" -> {
+                                    check(runtime.snapshot().getBoolean("business_attached")) {
+                                        "Permission backend stop requires active Resident business ownership"
+                                    }
+                                    backend.stopOwnedPermissionBackend()
+                                }
+                                "select_permission_ai_limbs" ->
+                                    com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
+                                        .applyResidentSelection(true)
+                                "select_permission_shizuku" ->
+                                    com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime
+                                        .applyResidentSelection(false)
                                 "cancel_business_activation" -> {
                                     runtime.cancelBusinessTakeover(context, sessionId, peer.pid)
                                     val release = continuousResources.release("business_takeover_cancelled")

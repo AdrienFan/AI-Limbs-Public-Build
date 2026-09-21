@@ -7,13 +7,17 @@ import android.os.IBinder
 import android.os.Process
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
 import com.ai.assistance.operit.core.tools.system.ShizukuConnectionInfo
+import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreController
 import com.ai.assistance.operit.util.AppLogger
 import moe.shizuku.server.IShizukuApplication
 import moe.shizuku.server.IShizukuService
 import org.json.JSONObject
 import java.util.UUID
 
-/** Host owns backend selection and Binder identity. No raw Binder crosses the plugin ABI. */
+/**
+ * Host owns the permission control plane and persisted selection. The active Binder may be
+ * handed to Resident Core; plugin ABI never receives the raw Binder.
+ */
 internal object PrivilegeRuntime {
     private const val OWNER = "plugin.system.permission_service"
     private const val TAG = "PermissionService"
@@ -64,10 +68,10 @@ internal object PrivilegeRuntime {
         initialize(context)
         require(owner == OWNER) { "Only the permission service owner can manage its runtime" }
         return when (operation) {
-            "status" -> status()
+            "status" -> status(context)
             "pair" -> JSONObject().put("allowed", true)
             "prepare" -> {
-                check(connection() == null) { "权限服务已在运行，请先停止再启动" }
+                check(!runtimeConnected(context)) { "权限服务已在运行，请先停止再启动" }
                 val token = UUID.randomUUID().toString() + UUID.randomUUID().toString()
                 check(prefs.edit().putString("launch_token", token)
                     .putLong("launch_deadline", System.currentTimeMillis() + 180_000L)
@@ -80,23 +84,29 @@ internal object PrivilegeRuntime {
                 check(prefs.edit().remove("launch_token").putBoolean("active", false).commit())
                 val current = connection()
                 try {
-                    if (current != null) IShizukuService.Stub.asInterface(current.binder).exit()
+                    when {
+                        current != null -> IShizukuService.Stub.asInterface(current.binder).exit()
+                        residentBackend(context)?.optBoolean("connected", false) == true ->
+                            ResidentCoreController.stopPermissionBackend(context)
+                    }
                 } catch (error: android.os.DeadObjectException) {
                     AppLogger.i(TAG, "Permission server exited")
                 } finally {
                     clearBinder()
                     ShizukuAuthorizer.onPrivilegeBackendChanged()
                 }
-                status()
+                status(context)
             }
             "select" -> {
                 val backend = args.getString("backend")
                 require(backend == "ai_limbs" || backend == "shizuku")
-                if (backend == "ai_limbs") check(connection() != null) { "权限服务尚未连接" }
+                if (backend == "ai_limbs") check(runtimeConnected(context)) { "权限服务尚未连接" }
                 check(prefs.edit().putString("backend", backend).commit())
                 selected = backend == "ai_limbs"
+                runCatching { ResidentCoreController.syncPermissionSelection(context, selected) }
+                    .onFailure { AppLogger.w(TAG, "Resident permission selection sync skipped: " + it.message) }
                 ShizukuAuthorizer.onPrivilegeBackendChanged()
-                status()
+                status(context)
             }
             else -> error("Unknown privileged runtime operation: $operation")
         }
@@ -130,7 +140,19 @@ internal object PrivilegeRuntime {
     @Synchronized internal fun adoptResidentConnection(context: Context, uid: Int, incoming: IBinder) {
         initialize(context)
         require(uid == 0 || uid == 2000) { "Resident backend requires root or adb" }
+        selected = true
         check(attachConnection(uid, incoming, persistActive = false))
+    }
+
+    @Synchronized internal fun detachResidentConnection(incoming: IBinder) {
+        if (binder != incoming) return
+        clearBinder()
+        ShizukuAuthorizer.onPrivilegeBackendChanged()
+    }
+
+    @Synchronized internal fun applyResidentSelection(aiLimbsSelected: Boolean) {
+        selected = aiLimbsSelected
+        ShizukuAuthorizer.onPrivilegeBackendChanged()
     }
 
     private fun attachConnection(callingUid: Int, incoming: IBinder, persistActive: Boolean): Boolean {
@@ -176,8 +198,28 @@ internal object PrivilegeRuntime {
         }
     }
 
-    private fun status(): JSONObject = JSONObject()
-        .put("available", true).put("running", connection() != null)
-        .put("backend", if (selected) "ai_limbs" else "shizuku")
-        .put("uid", serverUid).put("api", 1)
+    private fun runtimeConnected(context: Context): Boolean =
+        connection() != null || residentBackend(context)?.optBoolean("connected", false) == true
+
+    private fun residentBackend(context: Context): JSONObject? =
+        ResidentCoreController.ownedPermissionBackendSnapshot(context)
+
+    private fun status(context: Context): JSONObject {
+        val local = connection()
+        val resident = if (local == null) residentBackend(context) else null
+        val running = local != null || resident?.optBoolean("connected", false) == true
+        val uid = local?.uid ?: resident?.optInt("uid", -1) ?: -1
+        val runtimeOwner = when {
+            local != null -> "android_host"
+            resident != null && running -> "resident_core"
+            else -> "none"
+        }
+        return JSONObject()
+            .put("available", true)
+            .put("running", running)
+            .put("backend", if (selected) "ai_limbs" else "shizuku")
+            .put("uid", uid)
+            .put("runtime_owner", runtimeOwner)
+            .put("api", 1)
+    }
 }
