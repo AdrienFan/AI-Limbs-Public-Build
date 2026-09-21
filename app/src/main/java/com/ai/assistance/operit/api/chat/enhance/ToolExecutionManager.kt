@@ -37,6 +37,10 @@ import org.json.JSONObject
 
 /** Utility class for managing tool executions */
 object ToolExecutionManager {
+    fun interface ToolExecutionOverride {
+        fun execute(invocation: ToolInvocation): Flow<ToolResult>?
+    }
+
     private const val TAG = "ToolExecutionManager"
     private const val PACKAGE_PROXY_TOOL_NAME = "package_proxy"
     private const val PACKAGE_CALLER_NAME_PARAM = "__operit_package_caller_name"
@@ -382,7 +386,8 @@ object ToolExecutionManager {
     fun executeToolSafely(
         invocation: ToolInvocation,
         executor: ToolExecutor,
-        toolHandler: AIToolHandler? = null
+        toolHandler: AIToolHandler? = null,
+        executionOverride: ToolExecutionOverride? = null
     ): Flow<ToolResult> {
         val validationResult = executor.validateParameters(invocation.tool)
         if (!validationResult.valid) {
@@ -398,7 +403,11 @@ object ToolExecutionManager {
             }
         }
 
-        return executor.invokeAndStream(invocation.tool).catch { e ->
+        val executionFlow =
+            executionOverride?.execute(invocation)
+                ?: executor.invokeAndStream(invocation.tool)
+
+        return executionFlow.catch { e ->
             AppLogger.e(TAG, "Tool execution error: ${invocation.tool.name}", e)
             toolHandler?.notifyToolExecutionError(invocation.tool, e)
             emit(
@@ -507,7 +516,8 @@ object ToolExecutionManager {
         callerChatId: String? = null,
         callerCardId: String? = null,
         preapprovedAsk: Boolean = false,
-        preserveStructuredResult: Boolean = false
+        preserveStructuredResult: Boolean = false,
+        executionOverride: ToolExecutionOverride? = null
     ): List<ToolResult> = coroutineScope {
         // 默认工具注册现在可能在启动阶段被延后；这里确保在真正执行工具前已完成注册
         // registerDefaultTools() 是幂等且线程安全的，可安全重复调用
@@ -656,7 +666,8 @@ object ToolExecutionManager {
                         packageManager = packageManager,
                         collector = collector,
                         runtimeContext = toolRuntimeContext,
-                        preserveStructuredResult = preserveStructuredResult
+                        preserveStructuredResult = preserveStructuredResult,
+                        executionOverride = executionOverride
                     )
                 executionResults[invocation] = result
             }
@@ -671,7 +682,8 @@ object ToolExecutionManager {
                     packageManager = packageManager,
                     collector = collector,
                     runtimeContext = toolRuntimeContext,
-                    preserveStructuredResult = preserveStructuredResult
+                    preserveStructuredResult = preserveStructuredResult,
+                    executionOverride = executionOverride
                 )
             executionResults[invocation] = result
         }
@@ -699,7 +711,8 @@ object ToolExecutionManager {
         packageManager: PackageManager,
         collector: StreamCollector<String>,
         runtimeContext: ToolRuntimeContext,
-        preserveStructuredResult: Boolean
+        preserveStructuredResult: Boolean,
+        executionOverride: ToolExecutionOverride?
     ): ToolResult {
         val toolName = invocation.tool.name
         val displayToolName = resolveDisplayToolName(invocation.tool)
@@ -728,7 +741,12 @@ object ToolExecutionManager {
                 toolHandler.notifyToolExecutionStarted(invocation.tool)
 
                 val collectedResults = mutableListOf<ToolResult>()
-                executeToolSafely(invocation, executor, toolHandler).collect { result ->
+                executeToolSafely(
+                    invocation,
+                    executor,
+                    toolHandler,
+                    executionOverride
+                ).collect { result ->
                     collectedResults.add(result)
                     // 实时输出每个结果
                     val toolResultStatusContent =

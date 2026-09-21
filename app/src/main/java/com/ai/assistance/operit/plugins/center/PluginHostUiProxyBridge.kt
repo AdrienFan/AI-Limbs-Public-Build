@@ -8,6 +8,7 @@ import androidx.activity.ComponentActivity
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import com.ai.assistance.operit.core.application.ActivityLifecycleManager
+import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.ui.common.displays.UIOperationOverlay
@@ -61,6 +62,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.map
@@ -936,6 +938,9 @@ private class ResidentHostComponentExecutor(
     private val permissionOverlay = PermissionRequestOverlay(appContext)
     private val mainHandler = android.os.Handler(android.os.Looper.getMainLooper())
     private val hostPrimitiveAdapter = KernelHostPrimitiveAdapter(appContext, PluginRuntimeRole.UI_PROXY)
+    private val hostToolHandler = AIToolHandler.getInstance(appContext).also {
+        it.registerDefaultTools()
+    }
     private val hostScreenCaptureTools = StandardUITools(appContext)
 
     suspend fun pollAndExecute() {
@@ -1039,6 +1044,56 @@ private class ResidentHostComponentExecutor(
                 parameters = payload.optJSONObject("parameters") ?: JSONObject()
             )
             JSONObject().put("ok", true).put("result", result)
+        }
+        ResidentComponentProxyBroker.KIND_HOST_AFFINITY_OPERATION -> {
+            val ownerPluginId = payload.getString("owner_plugin_id").trim()
+            val primitiveId = payload.getString("primitive_id").trim().lowercase()
+            val operation = payload.getString("operation").trim().lowercase()
+            val toolName = payload.getString("tool_name").trim()
+            check(ownerPluginId.isNotEmpty()) { "Host-affinity operation requires owner_plugin_id" }
+            CapabilityRegistry.requireDescriptor(primitiveId)
+            check(HostPrimitiveGatewayBindings.affinityEnforced(primitiveId)) {
+                "Primitive affinity routing is not enabled: $primitiveId"
+            }
+            check(HostPrimitiveGatewayBindings.requiresAndroidHost(primitiveId, operation)) {
+                "Operation is not Android-Host affinity: $primitiveId/$operation"
+            }
+            val binding = HostPrimitiveGatewayBindings.operations(primitiveId)[operation]
+                ?: error("Unknown Host Primitive operation: $primitiveId/$operation")
+            check(binding.kind == HostGatewayRouteKind.HOST_TOOL) {
+                "Test 9.1 Host-affinity transport only accepts HOST_TOOL bindings"
+            }
+            check(binding.target == toolName) {
+                "Host-affinity target mismatch: $primitiveId/$operation -> $toolName"
+            }
+
+            val parameters =
+                payload.optJSONArray("parameters")?.objects().orEmpty().map { item ->
+                    ToolParameter(
+                        name = item.getString("name"),
+                        value = item.optString("value")
+                    )
+                }
+            val tool = AITool(name = toolName, parameters = parameters)
+            val executor = checkNotNull(hostToolHandler.getToolExecutorOrActivate(toolName)) {
+                "Host-affinity tool is unavailable: $toolName"
+            }
+            val validation = executor.validateParameters(tool)
+            check(validation.valid) {
+                "Host-affinity tool parameter validation failed: " + validation.errorMessage
+            }
+
+            val results = JSONArray()
+            executor.invokeAndStream(tool).collect { result ->
+                results.put(
+                    JSONObject()
+                        .put("tool_name", result.toolName)
+                        .put("success", result.success)
+                        .put("result_data", result.result.toJson())
+                        .put("error", result.error ?: JSONObject.NULL)
+                )
+            }
+            JSONObject().put("ok", true).put("results", results)
         }
         ResidentComponentProxyBroker.KIND_UI_AUTOMATION_PRESENTATION -> {
             val action = payload.getString("action")

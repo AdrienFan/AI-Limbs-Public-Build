@@ -30,7 +30,8 @@ import kotlin.coroutines.coroutineContext
 class AiLimbsDispatcher(
     context: Context,
     private val policyEngine: AiLimbsExecutionPolicyEngine,
-    private val preserveHostToolResultData: Boolean = false
+    private val preserveHostToolResultData: Boolean = false,
+    private val toolExecutionOverride: ToolExecutionManager.ToolExecutionOverride? = null
 ) {
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
@@ -289,6 +290,7 @@ class AiLimbsDispatcher(
                 callerName = "AI Limbs Bridge",
                 preapprovedAsk = preapprovedAsk,
                 preserveStructuredResult = preserveHostToolResultData,
+                executionOverride = toolExecutionOverride,
                 collector =
                     object : StreamCollector<String> {
                         override suspend fun emit(value: String) {

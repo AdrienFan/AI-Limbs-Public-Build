@@ -17,6 +17,10 @@ CAPABILITY_GATEWAY = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/
 PRIVILEGE_RUNTIME = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/privilege/PrivilegeRuntime.kt"
 RESIDENT_BACKEND = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/resident/ResidentBackendBinding.kt"
 RESIDENT_CORE_MAIN = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/resident/ResidentCoreMain.kt"
+HOST_GATEWAY_BINDINGS = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/HostPrimitiveGatewayBindings.kt"
+UI_PROXY_WIRE = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/resident/ResidentUiProxyWire.kt"
+DISPATCHER = ROOT / "app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsDispatcher.kt"
+TOOL_EXECUTION_MANAGER = ROOT / "app/src/main/java/com/ai/assistance/operit/api/chat/enhance/ToolExecutionManager.kt"
 
 CATALOG_ID_RE = re.compile(r'HostPrimitiveDefinition\(\s*\d+\s*,\s*"([^"]+)"')
 REGISTRY_ENTRY_RE = re.compile(
@@ -104,6 +108,8 @@ def main() -> int:
     privilege_text = PRIVILEGE_RUNTIME.read_text(encoding="utf-8")
     resident_backend_text = RESIDENT_BACKEND.read_text(encoding="utf-8")
     resident_core_main_text = RESIDENT_CORE_MAIN.read_text(encoding="utf-8")
+    host_gateway_text = HOST_GATEWAY_BINDINGS.read_text(encoding="utf-8")
+    ui_proxy_wire_text = UI_PROXY_WIRE.read_text(encoding="utf-8")
     for forbidden in ("MIGRATED_HOST_IDS", "fun isMigrated("):
         if forbidden in router_text:
             errors.append(f"RuntimeCapabilityRouter still contains staged capability routing: {forbidden}")
@@ -143,6 +149,65 @@ def main() -> int:
     ):
         if token not in resident_core_main_text:
             errors.append(f"Resident Core control protocol is missing permission operation: {token}")
+
+    affinity_tokens = (
+        "affinityEnforced: Boolean",
+        "fun requiresAndroidHost(",
+        '"host.screen.capture@1" to primitive(',
+        "enforceAffinity = true",
+        "KIND_HOST_AFFINITY_OPERATION",
+        "ToolExecutionOverride",
+        "result_data",
+        "Host-affinity target mismatch",
+    )
+    ui_proxy_bridge_text = UI_PROXY_BRIDGE.read_text(encoding="utf-8")
+    combined_affinity_text = host_gateway_text + "\n" + ui_proxy_wire_text + "\n" + ui_proxy_bridge_text
+    for token in affinity_tokens:
+        if token not in combined_affinity_text:
+            errors.append(f"Test 9 affinity routing contract is missing: {token}")
+    if 'HOST_EXECUTABLE_TOOLS = setOf("capture_screenshot")' not in ui_proxy_bridge_text:
+        errors.append("Existing direct screenshot compatibility path changed unexpectedly during Test 9.1")
+    if "hostAffinityExecutor = SystemHostPrimitiveExecutor" in ui_proxy_bridge_text:
+        errors.append("Test 9.1 must not recreate SystemHostPrimitiveExecutor inside UI Host affinity transport")
+    dispatcher_text = DISPATCHER.read_text(encoding="utf-8")
+    tool_execution_text = TOOL_EXECUTION_MANAGER.read_text(encoding="utf-8")
+    if "executionOverride = toolExecutionOverride" not in dispatcher_text:
+        errors.append("AI Limbs Dispatcher does not forward the authorized execution override")
+    if "executionOverride?.execute(invocation)" not in tool_execution_text:
+        errors.append("Tool execution override is not applied after tool validation")
+    execute_invocations_start = tool_execution_text.find("suspend fun executeInvocations(")
+    execute_and_emit_definition = tool_execution_text.find("private suspend fun executeAndEmitTool(")
+    execute_invocations_text = (
+        tool_execution_text[execute_invocations_start:execute_and_emit_definition]
+        if execute_invocations_start != -1 and execute_and_emit_definition != -1
+        else ""
+    )
+    permission_call_index = execute_invocations_text.find("checkToolPermission(")
+    execute_call_index = execute_invocations_text.find("executeAndEmitTool(")
+    if permission_call_index == -1 or execute_call_index == -1 or permission_call_index > execute_call_index:
+        errors.append("Test 9.1 execution override must remain downstream of ToolPermissionSystem checks")
+
+    safe_start = tool_execution_text.find("fun executeToolSafely(")
+    safe_end = tool_execution_text.find("suspend fun checkToolPermission(")
+    safe_text = tool_execution_text[safe_start:safe_end] if safe_start != -1 and safe_end != -1 else ""
+    validation_index = safe_text.find("validateParameters(")
+    override_index = safe_text.find("executionOverride?.execute(invocation)")
+    if validation_index == -1 or override_index == -1 or validation_index > override_index:
+        errors.append("Test 9.1 execution override must remain downstream of tool parameter validation")
+    if "hostToolHandler.getToolExecutorOrActivate(toolName)" not in ui_proxy_bridge_text:
+        errors.append("UI Host affinity transport is not executing the exact canonical tool target")
+    if "binding.target == toolName" not in ui_proxy_bridge_text:
+        errors.append("UI Host affinity transport does not verify canonical binding target")
+
+    if host_gateway_text.count("enforceAffinity = true") != 1:
+        errors.append("Test 9.1 must enforce affinity for exactly one pilot primitive")
+    screen_capture_block = re.search(
+        r'"host\.screen\.capture@1"\s+to\s+primitive\((.*?)\),\s*"host\.network@1"',
+        host_gateway_text,
+        re.DOTALL,
+    )
+    if screen_capture_block is None or "enforceAffinity = true" not in screen_capture_block.group(1):
+        errors.append("Test 9.1 pilot affinity enforcement is not scoped to host.screen.capture@1")
 
     required_tokens = (
         "val version: Int",

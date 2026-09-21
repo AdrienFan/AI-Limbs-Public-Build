@@ -1,7 +1,11 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
+import com.ai.assistance.operit.api.chat.enhance.ToolExecutionManager
 import com.ai.assistance.operit.core.tools.AIToolHandler
+import com.ai.assistance.operit.core.tools.ToolResultData
+import com.ai.assistance.operit.data.model.AITool
+import com.ai.assistance.operit.data.model.ToolResult
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDocumentId
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDocumentProvider
@@ -11,6 +15,12 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRegistry
 import com.ai.assistance.operit.util.AppLogger
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -34,7 +44,8 @@ internal data class HostGatewayOperationBinding(
 
 internal data class HostPrimitiveBinding(
     val affinity: HostGatewayExecutionAffinity,
-    val operations: Map<String, HostGatewayOperationBinding>
+    val operations: Map<String, HostGatewayOperationBinding>,
+    val affinityEnforced: Boolean
 )
 
 private data class HostGatewayOperationSpec(
@@ -85,7 +96,8 @@ internal object HostPrimitiveGatewayBindings {
 
     private fun primitive(
         affinity: HostGatewayExecutionAffinity,
-        vararg items: HostGatewayOperationSpec
+        vararg items: HostGatewayOperationSpec,
+        enforceAffinity: Boolean = false
     ): HostPrimitiveBinding {
         val requiresOperationOwnership =
             affinity == HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND
@@ -119,7 +131,11 @@ internal object HostPrimitiveGatewayBindings {
                     affinity = item.affinityOverride ?: affinity
                 )
         }
-        return HostPrimitiveBinding(affinity = affinity, operations = operations)
+        return HostPrimitiveBinding(
+            affinity = affinity,
+            operations = operations,
+            affinityEnforced = enforceAffinity
+        )
     }
 
     private val definitions: Map<String, HostPrimitiveBinding> = linkedMapOf(
@@ -133,7 +149,11 @@ internal object HostPrimitiveGatewayBindings {
             pending("list")
         ),
         "host.ui.automation@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("snapshot", "get_page_info")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("click", "click_element")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("tap", "tap")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("long_press", "long_press")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("set_text", "set_input_text")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("key", "press_key")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("swipe", "swipe"))),
-        "host.screen.capture@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("capture", "capture_screenshot")),
+        "host.screen.capture@1" to primitive(
+            HostGatewayExecutionAffinity.HOST_FRAMEWORK,
+            tool("capture", "capture_screenshot"),
+            enforceAffinity = true
+        ),
         "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), pending("listen")),
         "host.background.runtime@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("acquire_lease"), pending("update_lease"), pending("release_lease"), pending("status")),
         "host.notification@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("publish", "send_notification")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, tool("observe", "get_notifications"))),
@@ -194,6 +214,19 @@ internal object HostPrimitiveGatewayBindings {
 
     fun operationNames(primitiveId: String): List<String> = operations(primitiveId).keys.sorted()
 
+    fun affinityEnforced(primitiveId: String): Boolean =
+        definitions[primitiveId.trim().lowercase()]?.affinityEnforced == true
+
+    fun requiresAndroidHost(primitiveId: String, operation: String): Boolean {
+        val normalizedId = primitiveId.trim().lowercase()
+        val definition = definitions[normalizedId] ?: return false
+        if (!definition.affinityEnforced) return false
+        val affinity = definition.operations[operation.trim().lowercase()]?.affinity ?: return false
+        return affinity == HostGatewayExecutionAffinity.HOST_FRAMEWORK ||
+            affinity == HostGatewayExecutionAffinity.HOST_UI ||
+            affinity == HostGatewayExecutionAffinity.HOST_SERVICE
+    }
+
     fun isCallable(primitiveId: String): Boolean =
         operations(primitiveId).values.any { it.kind != HostGatewayRouteKind.UNBOUND }
 }
@@ -207,6 +240,10 @@ internal class SystemHostPrimitiveExecutor(
     private val toolHandler = AIToolHandler.getInstance(appContext)
     private val kernelAdapter = KernelHostPrimitiveAdapter(appContext, runtimeRole)
     private val documents = AiLimbsDocumentProvider(appContext)
+    private val toolResultJson = Json {
+        ignoreUnknownKeys = true
+        classDiscriminator = "__type"
+    }
 
     init {
         toolHandler.registerDefaultTools()
@@ -252,10 +289,10 @@ internal class SystemHostPrimitiveExecutor(
                         operation = normalizedOperation,
                         targetName = target
                     ) {
-                        invokeHostTool(ownerPluginId, target, parameters)
+                        invokeHostTool(ownerPluginId, normalizedId, normalizedOperation, target, parameters)
                     }
                 } else {
-                    invokeHostTool(ownerPluginId, target, parameters)
+                    invokeHostTool(ownerPluginId, normalizedId, normalizedOperation, target, parameters)
                 }
             }
             HostGatewayRouteKind.CORE_CAPABILITY -> {
@@ -288,7 +325,7 @@ internal class SystemHostPrimitiveExecutor(
                         "HOST_PRIMITIVE_OPERATION_NOT_BOUND",
                         "Component proxy operation requires Resident Core: $normalizedId/$normalizedOperation"
                     )
-                    invokeHostTool(ownerPluginId, target, parameters)
+                    invokeHostTool(ownerPluginId, normalizedId, normalizedOperation, target, parameters)
                 }
             }
             HostGatewayRouteKind.UNBOUND -> error("unreachable")
@@ -360,23 +397,112 @@ internal class SystemHostPrimitiveExecutor(
         return payload
     }
 
-    private suspend fun invokeHostTool(ownerPluginId: String, toolName: String, parameters: JSONObject): JSONObject =
-        dispatcher(ownerPluginId).execute(
+    private suspend fun invokeHostTool(
+        ownerPluginId: String,
+        primitiveId: String,
+        operation: String,
+        toolName: String,
+        parameters: JSONObject
+    ): JSONObject {
+        val executionOverride =
+            if (runtimeRole == PluginRuntimeRole.BUSINESS &&
+                HostPrimitiveGatewayBindings.requiresAndroidHost(primitiveId, operation)) {
+                val binding = HostPrimitiveGatewayBindings.operations(primitiveId)[operation]
+                    ?: throw PluginInstallException(
+                        "HOST_OPERATION_UNKNOWN",
+                        "Unknown operation $operation for $primitiveId"
+                    )
+                check(binding.kind == HostGatewayRouteKind.HOST_TOOL && binding.target == toolName) {
+                    "Host-affinity tool binding mismatch: $primitiveId/$operation -> $toolName"
+                }
+                ToolExecutionManager.ToolExecutionOverride { invocation ->
+                    invokeResidentHostAffinityTool(
+                        ownerPluginId = ownerPluginId,
+                        primitiveId = primitiveId,
+                        operation = operation,
+                        expectedToolName = toolName,
+                        tool = invocation.tool
+                    )
+                }
+            } else {
+                null
+            }
+
+        return dispatcher(ownerPluginId, executionOverride).execute(
             "ai_limbs.host_tool.execute",
             JSONObject().put("name", toolName).put("parameters", JSONObject(parameters.toString()))
         )
+    }
+
+    private fun invokeResidentHostAffinityTool(
+        ownerPluginId: String,
+        primitiveId: String,
+        operation: String,
+        expectedToolName: String,
+        tool: AITool
+    ): Flow<ToolResult> = flow {
+        check(tool.name == expectedToolName) {
+            "Host-affinity tool changed after authorization: expected $expectedToolName, got " + tool.name
+        }
+        val wireParameters = JSONArray().apply {
+            tool.parameters.forEach { parameter ->
+                put(
+                    JSONObject()
+                        .put("name", parameter.name)
+                        .put("value", parameter.value)
+                )
+            }
+        }
+        val response = withContext(Dispatchers.IO) {
+            com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy.request(
+                com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_HOST_AFFINITY_OPERATION,
+                JSONObject()
+                    .put("owner_plugin_id", ownerPluginId)
+                    .put("primitive_id", primitiveId)
+                    .put("operation", operation)
+                    .put("tool_name", expectedToolName)
+                    .put("parameters", wireParameters)
+            )
+        }
+        check(response.optBoolean("ok", false)) {
+            response.optString(
+                "error",
+                "Host-affinity tool failed: $primitiveId/$operation"
+            )
+        }
+        val results = response.optJSONArray("results") ?: JSONArray()
+        for (index in 0 until results.length()) {
+            val item = results.getJSONObject(index)
+            val resultData =
+                toolResultJson.decodeFromString<ToolResultData>(
+                    item.getString("result_data")
+                )
+            emit(
+                ToolResult(
+                    toolName = item.optString("tool_name", expectedToolName),
+                    success = item.optBoolean("success", false),
+                    result = resultData,
+                    error = if (item.isNull("error")) null else item.optString("error")
+                )
+            )
+        }
+    }
 
     private fun isApprovedScopeRead(primitiveId: String, operation: String): Boolean =
         when (primitiveId to operation) {
             else -> false
         }
 
-    private fun dispatcher(ownerPluginId: String): AiLimbsDispatcher {
+    private fun dispatcher(
+        ownerPluginId: String,
+        executionOverride: ToolExecutionManager.ToolExecutionOverride? = null
+    ): AiLimbsDispatcher {
         val session = AiLimbsExecutionSession(AiLimbsExecutionTransport.PLUGIN_RUNTIME, "system:$ownerPluginId")
         return AiLimbsDispatcher(
             appContext,
             AiLimbsExecutionPolicyEngine(appContext, session),
-            preserveHostToolResultData = true
+            preserveHostToolResultData = true,
+            toolExecutionOverride = executionOverride
         )
     }
 

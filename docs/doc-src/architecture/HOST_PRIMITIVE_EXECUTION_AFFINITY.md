@@ -10,7 +10,7 @@ scope: AI Limbs Base / HostPrimitiveGatewayBindings
 
 本文件定义 HostPrimitiveGatewayBindings 中全部 Host Primitive 的执行归属。
 
-本契约已写入 Kotlin 数据模型，但不改变当前 runtime route。现有 HOST_TOOL、KERNEL、COMPONENT_PROXY 等 route kind 继续保持当前行为；后续阶段才会让执行器读取 affinity 并据此路由。
+本契约已写入 Kotlin 数据模型。Arch Test 9.1 开始逐项执行 affinity：首个试点为 `host.screen.capture@1`。未进入试点的 primitive 暂时保持原 route；Resident BUSINESS 中的 Host-only operation 仍先在 Core 完成 Policy Engine、ToolPermissionSystem 与参数校验，只有最终 handler execution 跨到 Android Host。
 
 核心规则：
 
@@ -237,4 +237,4 @@ UNBOUND 不是最终实现状态。operation 从 UNBOUND 变成 callable 的同�
 - host.android.settings@1/set 与 host.android.usage@1/query 的权限引导仍可从 Core 发起 Activity
 - host.resident.runtime@1 仍可由 Resident Business execution path 进入自身 lifecycle controller
 
-当前 HostPrimitiveGatewayBindings 已同时保存 primitive-level affinity 与 operation-level affinity；SystemHostPrimitiveExecutor 仍只读取 route kind，不读取 affinity。下一阶段才能开始让具体能力按 affinity 修正执行位置。
+当前 HostPrimitiveGatewayBindings 已同时保存 primitive-level affinity 与 operation-level affinity。Arch Test 9.1 起，SystemHostPrimitiveExecutor 对已启用 staged enforcement 的 Host-tool operation 注入 post-authorization execution override；Core 保持唯一 Policy/Dispatcher owner，Android Host 只执行经过 canonical binding 二次校验的 exact handler。首个试点为 `host.screen.capture@1/capture`，其他 primitive 继续逐项迁移。
