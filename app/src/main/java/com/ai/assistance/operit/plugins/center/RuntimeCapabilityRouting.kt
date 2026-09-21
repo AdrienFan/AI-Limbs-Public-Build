@@ -1,22 +1,17 @@
 package com.ai.assistance.operit.plugins.center
 
+import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
+import com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy
 import org.json.JSONObject
 
-/**
- * Transport contract used by the unified runtime capability router.
- *
- * Arch Test 4 introduces only the local Host transport. Remote Host, plugin-runtime and
- * external-daemon transports remain deliberately unavailable until their own stages.
- */
+/** Transport contract used by the unified runtime capability router. */
 internal fun interface RuntimeCapabilityTransport {
     suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult
 }
 
 /**
  * Local Host transport for capabilities that execute inside the current Android Host process.
- *
- * The production constructor delegates to the existing SystemHostPrimitiveExecutor so the
- * handler, policy checks, parameter semantics and returned JSON remain unchanged.
+ * It delegates to the existing SystemHostPrimitiveExecutor, preserving the existing handler.
  */
 internal class LocalHostTransport private constructor(
     private val delegate: suspend (RuntimeCapabilityCall) -> JSONObject
@@ -40,31 +35,76 @@ internal class LocalHostTransport private constructor(
 }
 
 /**
- * Stage-4 router. Only host.ui.layout@1 is admitted here.
+ * Resident Core -> Android Host transport.
  *
- * Keeping this allow-list to one descriptor is intentional: Resident remote routing belongs to
- * Arch Test 5 and the general owner router belongs to Arch Test 7.
+ * The wire payload remains neutral JSON and reuses the existing Resident component broker.
+ * The Host side therefore reaches the same KernelHostPrimitiveAdapter handler used before
+ * Arch Test 5; only ownership of the cross-process call construction moves into this transport.
+ */
+internal class RemoteHostTransport(
+    private val ownerPluginId: String,
+    private val requester: (String, JSONObject) -> JSONObject = { kind, payload ->
+        ResidentHostComponentProxy.request(kind, payload)
+    }
+) : RuntimeCapabilityTransport {
+    override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult {
+        val response = try {
+            requester(
+                ResidentComponentProxyBroker.KIND_HOST_PRIMITIVE,
+                JSONObject()
+                    .put("owner_plugin_id", ownerPluginId)
+                    .put("primitive_id", call.capabilityId)
+                    .put("operation", call.operation)
+                    .put("parameters", JSONObject(call.parameters.toString()))
+            )
+        } catch (error: Throwable) {
+            throw PluginInstallException(
+                "HOST_UI_PROXY_UNAVAILABLE",
+                "Host-owned primitive could not reach the Android Host: " +
+                    "${call.capabilityId}/${call.operation}",
+                error
+            )
+        }
+
+        if (!response.optBoolean("ok", false)) {
+            throw PluginInstallException(
+                "HOST_UI_PROXY_FAILED",
+                response.optString(
+                    "error",
+                    "Host-owned primitive failed: ${call.capabilityId}/${call.operation}"
+                )
+            )
+        }
+        return RuntimeCapabilityResult(response.optJSONObject("result") ?: JSONObject())
+    }
+}
+
+/**
+ * Unified Host router for the incrementally migrated capability set.
+ *
+ * Arch Tests 4/5 intentionally admit only host.ui.layout@1. Test 7 expands routing by owner.
  */
 internal class RuntimeCapabilityRouter(
-    private val localHostTransport: RuntimeCapabilityTransport
+    private val hostTransport: RuntimeCapabilityTransport
 ) : RuntimeCapabilityApi {
     override suspend fun invoke(call: RuntimeCapabilityCall): RuntimeCapabilityResult {
         val normalizedId = call.capabilityId.trim().lowercase()
-        check(normalizedId in LOCAL_HOST_MIGRATED_IDS) {
-            "Runtime capability is not migrated to LocalHostTransport in Arch Test 4: $normalizedId"
+        check(isMigrated(normalizedId)) {
+            "Runtime capability is not migrated to unified Host transport: $normalizedId"
         }
 
         val descriptor = CapabilityRegistry.requireDescriptor(normalizedId)
         check(descriptor.executionOwner == CapabilityExecutionOwner.HOST) {
-            "LocalHostTransport requires HOST ownership: ${descriptor.id}"
+            "Unified Host transport requires HOST ownership: ${descriptor.id}"
         }
 
-        return localHostTransport.invoke(
-            call.copy(capabilityId = descriptor.id)
-        )
+        return hostTransport.invoke(call.copy(capabilityId = descriptor.id))
     }
 
-    private companion object {
-        val LOCAL_HOST_MIGRATED_IDS = setOf("host.ui.layout@1")
+    companion object {
+        private val MIGRATED_HOST_IDS = setOf("host.ui.layout@1")
+
+        fun isMigrated(capabilityId: String): Boolean =
+            capabilityId.trim().lowercase() in MIGRATED_HOST_IDS
     }
 }

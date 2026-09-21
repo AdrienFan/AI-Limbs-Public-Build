@@ -46,8 +46,21 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 "Kernel operation is not bound: $id/$op"
             )
         }
-        if (runtimeRole == PluginRuntimeRole.BUSINESS && CapabilityRegistry.isOwnedBy(id, CapabilityExecutionOwner.HOST)) {
-            return invokeHostOwnedPrimitive(ownerPluginId, id, op, parameters)
+        if (runtimeRole == PluginRuntimeRole.BUSINESS &&
+            CapabilityRegistry.isOwnedBy(id, CapabilityExecutionOwner.HOST)) {
+            if (RuntimeCapabilityRouter.isMigrated(id)) {
+                val api: RuntimeCapabilityApi = RuntimeCapabilityRouter(
+                    RemoteHostTransport(ownerPluginId)
+                )
+                return api.invoke(
+                    RuntimeCapabilityCall(
+                        capabilityId = id,
+                        operation = op,
+                        parameters = JSONObject(parameters.toString())
+                    )
+                ).payload
+            }
+            return invokeHostOwnedPrimitiveLegacy(ownerPluginId, id, op, parameters)
         }
         return when (id) {
             "host.network@1" -> invokeNetwork(op)
@@ -69,7 +82,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         }
     }
 
-    private fun invokeHostOwnedPrimitive(
+    private fun invokeHostOwnedPrimitiveLegacy(
         ownerPluginId: String,
         primitiveId: String,
         operation: String,
