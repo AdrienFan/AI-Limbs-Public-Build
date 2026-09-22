@@ -10,6 +10,7 @@ WORKER = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isola
 REMOTE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isolation/RemoteAndroidInProcessPluginRuntimeAdapter.kt"
 WIRE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isolation/PluginRuntimeMain.kt"
 SERVICE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isolation/ServiceContributionTransport.kt"
+KERNEL_SERVICE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/KernelHostPrimitiveAdapter.kt"
 EXTENSION = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isolation/ExtensionContributionTransport.kt"
 CHILD = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/CanonicalChildDescriptor.kt"
 CHILD_RUNTIME = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/ChildExtensionRuntime.kt"
@@ -31,6 +32,7 @@ def main() -> int:
     remote = REMOTE.read_text(encoding="utf-8")
     wire = WIRE.read_text(encoding="utf-8")
     service = SERVICE.read_text(encoding="utf-8")
+    kernel_service = KERNEL_SERVICE.read_text(encoding="utf-8")
     extension = EXTENSION.read_text(encoding="utf-8")
     child = CHILD.read_text(encoding="utf-8")
     child_runtime = CHILD_RUNTIME.read_text(encoding="utf-8")
@@ -45,6 +47,9 @@ def main() -> int:
         "Service RPC wire operation": (wire, '"service_invoke" ->'),
         "Remote Service canonical decode": (remote, "ServiceContributionTransportCodec.decode"),
         "Remote Service trusted restore": (remote, "context.canonicalRestore.registerService(contract, proxy)"),
+        "Host Service bus caller-aware callable": (kernel_service, "record.payload is CallerAwarePluginServiceEndpoint || record.payload is PluginServiceEndpoint"),
+        "Host Service bus caller-aware dispatch": (kernel_service, "is CallerAwarePluginServiceEndpoint ->"),
+        "Host Service bus preserves Plugin Center role": (kernel_service, "SystemPluginProtocolV1.ROLE_PLUGIN_CENTER"),
         "Extension codec registry": (extension, "ExtensionContributionTransportCodecRegistry"),
         "UI_SCREEN protocol version": (extension, 'UI_SCREEN("ui.screen@2"'),
         "THEME protocol version": (extension, 'THEME("ui.theme@1"'),

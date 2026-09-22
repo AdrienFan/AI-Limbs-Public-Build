@@ -11,6 +11,7 @@ import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCyclePolicy
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleRuntime
 import com.ai.assistance.operit.plugins.system.KernelDynamicNavigationJsonServiceV1
+import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
 import com.ai.assistance.operit.widget.ToolPkgDesktopWidgetHost
 import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
 import com.ai.assistance.operit.ui.main.screens.Screen
@@ -50,7 +51,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.network@1" -> invokeNetwork(op)
             "host.ui.surface@1" -> invokeUiSurface(op, parameters)
             "host.capability@1" -> invokeCapability(ownerPluginId, parameters)
-            "host.plugin.service@1" -> invokePluginService(op, parameters)
+            "host.plugin.service@1" -> invokePluginService(ownerPluginId, op, parameters)
             "host.extension.routing@1" -> invokeExtensionRouting(op, parameters)
             "host.plugin.runtime@1" -> invokePluginRuntime(op, parameters)
             "host.authorization@1" -> evaluateAuthorization(ownerPluginId, parameters)
@@ -222,7 +223,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         }
     }
 
-    private suspend fun invokePluginService(operation: String, parameters: JSONObject): JSONObject {
+    private suspend fun invokePluginService(ownerPluginId: String, operation: String, parameters: JSONObject): JSONObject {
         val contributions = PluginPlatformKernel.contributions
         return when (operation) {
             "list" -> JSONObject().put(
@@ -245,9 +246,22 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 val args = parameters.optJSONObject("parameters") ?: JSONObject()
                 val record = contributions.find(PluginContributionKind.SERVICE, id)
                     ?: throw PluginInstallException("SERVICE_NOT_ACTIVE", "Service is not active: $id")
-                val endpoint = record.payload as? PluginServiceEndpoint
-                    ?: throw PluginInstallException("SERVICE_NOT_CALLABLE", "Service has no PluginServiceEndpoint: $id")
-                endpoint.invoke(method, JSONObject(args.toString()))
+                when (val endpoint = record.payload) {
+                    is CallerAwarePluginServiceEndpoint -> endpoint.invoke(
+                        PluginServiceCaller(
+                            pluginId = ownerPluginId,
+                            roles = setOf(SystemPluginProtocolV1.ROLE_PLUGIN_CENTER),
+                            grantedScopes = emptySet()
+                        ),
+                        method,
+                        JSONObject(args.toString())
+                    )
+                    is PluginServiceEndpoint -> endpoint.invoke(method, JSONObject(args.toString()))
+                    else -> throw PluginInstallException(
+                        "SERVICE_NOT_CALLABLE",
+                        "Service does not expose a controlled endpoint contract: $id"
+                    )
+                }
             }
             else -> unsupported("host.plugin.service@1", operation)
         }
@@ -258,7 +272,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         .put("owner_plugin_id", record.ownerPluginId)
         .put("api_version", record.apiVersion ?: 0)
         .put("metadata", JSONObject(record.metadata))
-        .put("callable", record.payload is PluginServiceEndpoint)
+        .put("callable", record.payload is CallerAwarePluginServiceEndpoint || record.payload is PluginServiceEndpoint)
 
     private fun invokeExtensionRouting(operation: String, parameters: JSONObject): JSONObject {
         val points = PluginPlatformKernel.extensionPoints
