@@ -18,6 +18,8 @@ import com.ai.assistance.operit.ui.permissions.PermissionRequestOverlay
 import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
 import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
 import com.ai.assistance.operit.core.tools.system.resident.ResidentUiProxyWire
+import com.ai.assistance.operit.plugins.center.isolation.ProviderContributionTransportCodec
+import com.ai.assistance.operit.plugins.center.isolation.ProviderProxyProtocol
 import com.ai.assistance.operit.plugins.system.KernelSelfMaintenanceJsonServiceV1
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.KernelSystemUiHostV1
@@ -704,40 +706,38 @@ internal class ResidentProviderDirectory(
     private val pageMetadata = AtomicReference<Map<String, RemoteMetadata>>(emptyMap())
     private val localPages = ConcurrentHashMap<String, LocalOwned>()
     private val proxies = ConcurrentHashMap<String, ResidentUiStateProviderProxy>()
-    private val extensionHubProxies = ConcurrentHashMap<String, ResidentExtensionHubProxy>()
+    private val childInstallerProxies = ConcurrentHashMap<String, ResidentChildExtensionInstallerProxy>()
 
     fun update(array: JSONArray) {
         val next = linkedMapOf<String, SystemPluginProviderBindingV2>()
         val nextPageMetadata = linkedMapOf<String, RemoteMetadata>()
         array.objects().forEach { item ->
-            val id = item.getString("id")
-            val owner = item.getString("owner_plugin_id")
-            val metadata = item.optJSONObject("metadata")?.stringMap().orEmpty()
-            when (item.optString("kind")) {
-                "ui_state" -> {
+            val envelope = ProviderContributionTransportCodec.decode(item)
+            val contract = envelope.contract
+            val id = contract.id
+            val owner = contract.ownerPluginId
+            val metadata = contract.metadata
+            when (envelope.protocol) {
+                ProviderProxyProtocol.UI_STATE -> {
                     val proxy = proxies.compute(id) { _, old ->
                         if (old != null && old.ownerPluginId == owner) old else ResidentUiStateProviderProxy(client, owner, id)
                     }!!
-                    proxy.update(item.stringOrNull("state_json"))
+                    proxy.update(envelope.proxy.stringOrNull("state_json"))
                     next[id] = SystemPluginProviderBindingV2(owner, id, metadata, proxy)
                 }
-                "extension_hub" -> {
-                    check(owner == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
-                        "Only the canonical Extension Hub may be mirrored into Host UI"
-                    }
-                    check(id == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PROVIDER) {
-                        "Resident Extension Hub provider ID mismatch: $id"
-                    }
-                    val proxy = extensionHubProxies.compute(id) { _, old ->
-                        if (old != null && old.ownerPluginId == owner) old else ResidentExtensionHubProxy(client, owner, id)
+                ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER -> {
+                    val proxy = childInstallerProxies.compute(id) { _, old ->
+                        if (old != null && old.ownerPluginId == owner) old else ResidentChildExtensionInstallerProxy(client, owner, id)
                     }!!
                     next[id] = SystemPluginProviderBindingV2(owner, id, metadata, proxy)
                 }
-                "page_metadata" -> nextPageMetadata[id] = RemoteMetadata(owner, metadata)
+                ProviderProxyProtocol.PAGE_METADATA ->
+                    nextPageMetadata[id] = RemoteMetadata(owner, metadata)
+                ProviderProxyProtocol.CAPABILITY_EXECUTOR -> Unit // Not part of Host presentation state.
             }
         }
         proxies.keys.retainAll(next.keys)
-        extensionHubProxies.keys.retainAll(next.keys)
+        childInstallerProxies.keys.retainAll(next.keys)
         remote.set(next)
         pageMetadata.set(nextPageMetadata)
         publish()
@@ -808,7 +808,7 @@ internal class ResidentProviderDirectory(
     override fun observe(id: String): Flow<SystemPluginProviderBindingV2?> = state.map { it[id.trim()] }
 }
 
-private class ResidentExtensionHubProxy(
+private class ResidentChildExtensionInstallerProxy(
     private val client: ResidentUiProxyClient,
     val ownerPluginId: String,
     private val providerId: String
@@ -821,7 +821,7 @@ private class ResidentExtensionHubProxy(
         check(packageFile.isFile) { "Selected child extension package is unavailable: ${packageFile.path}" }
         val result = client.command(
             JSONObject()
-                .put("command", "extension_hub_install")
+                .put("command", "provider_child_install")
                 .put("owner_plugin_id", ownerPluginId)
                 .put("provider_id", providerId)
                 .put("package_path", packageFile.absolutePath)

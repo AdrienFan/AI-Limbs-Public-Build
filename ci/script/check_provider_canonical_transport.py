@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Static guard for canonical Provider transport across Worker -> Resident Core."""
+"""Static guard for canonical Provider transport across Worker -> Resident Core -> Host UI."""
 from __future__ import annotations
 
 import sys
@@ -11,6 +11,8 @@ REMOTE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isola
 TRANSPORT = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isolation/ProviderContributionTransport.kt"
 RUNTIME = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginRuntime.kt"
 WIRE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/isolation/PluginRuntimeMain.kt"
+KERNEL = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginPlatformKernel.kt"
+UI_PROXY = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginHostUiProxyBridge.kt"
 TEST = ROOT / "app/src/test/java/com/ai/assistance/operit/plugins/center/ProviderContributionTransportTest.kt"
 MAIN = ROOT / "app/src/main/java"
 
@@ -24,6 +26,8 @@ def main() -> int:
     transport = TRANSPORT.read_text(encoding="utf-8")
     runtime = RUNTIME.read_text(encoding="utf-8")
     wire = WIRE.read_text(encoding="utf-8")
+    kernel = KERNEL.read_text(encoding="utf-8")
+    ui_proxy = UI_PROXY.read_text(encoding="utf-8")
     test = TEST.read_text(encoding="utf-8")
 
     required = {
@@ -34,6 +38,11 @@ def main() -> int:
         "generic child installer protocol": (transport, 'CHILD_EXTENSION_INSTALLER("child_extension_installer.v1")'),
         "generic provider child install op": (wire, '"provider_child_install"'),
         "provider id carried on wire": (remote, '.put("provider_id", id)'),
+        "Core UI canonical Provider export": (kernel, "ProviderContributionTransportCodec.encode(record)"),
+        "Host UI canonical Provider decode": (ui_proxy, "ProviderContributionTransportCodec.decode(item)"),
+        "Host UI generic child installer protocol": (ui_proxy, "ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER"),
+        "Host UI generic child install command": (ui_proxy, '.put("command", "provider_child_install")'),
+        "Core generic child install command": (kernel, '"provider_child_install" ->'),
         "test-only unseen plugin identity": (test, SYNTHETIC_ID),
         "unseen Host path uses real Registrar": (test, "hostRegistrar.registerProvider(providerId, executor"),
         "unseen Resident path uses canonical restore": (test, "restore.registerProvider(envelope.contract, residentProxy)"),
@@ -55,6 +64,11 @@ def main() -> int:
     if '.put("kind", "extension_hub")' in worker:
         errors.append("Worker Provider export still emits extension_hub wire kind")
 
+    for name, source in (("Core UI Provider mirror", kernel), ("Host UI Provider mirror", ui_proxy)):
+        for token in ('"extension_hub"', '"extension_hub_install"', "EXTENSION_HUB_PLUGIN_ID", "EXTENSION_HUB_PROVIDER"):
+            if token in source:
+                errors.append(f"{name} still contains plugin-specific Provider token: {token}")
+
     if SYNTHETIC_ID not in test:
         errors.append("Synthetic unseen plugin identity test is missing")
     for path in MAIN.rglob("*.kt"):
@@ -68,6 +82,7 @@ def main() -> int:
 
     print("Canonical Provider transport: PASS")
     print("Remote concrete plugin/provider identity checks: 0")
+    print("Resident UI concrete plugin/provider identity checks: 0")
     print("Synthetic unseen plugin identity remains test-only")
     return 0
 

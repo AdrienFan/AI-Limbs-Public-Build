@@ -56,7 +56,8 @@ internal object ProviderContributionTransportCodec {
             is InProcessUiStateProvider -> proxy(ProviderProxyProtocol.UI_STATE)
                 .put("state_json", payload.stateJson.value ?: JSONObject.NULL)
             is InProcessPageProvider,
-            BusinessPageProviderMetadata -> proxy(ProviderProxyProtocol.PAGE_METADATA)
+            BusinessPageProviderMetadata,
+            RemotePageProviderMetadata -> proxy(ProviderProxyProtocol.PAGE_METADATA)
             is ExtensionHubService -> proxy(ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER)
             else -> throw PluginInstallException(
                 "WORKER_PROVIDER_NOT_PROXYABLE",

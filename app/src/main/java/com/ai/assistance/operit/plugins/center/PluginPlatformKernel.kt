@@ -13,6 +13,7 @@ import com.ai.assistance.operit.plugins.system.KernelSystemPluginChildExtensionC
 import com.ai.assistance.operit.plugins.system.KernelSystemPluginServicePublisherV2
 import com.ai.assistance.operit.plugins.system.SystemPluginHostV2
 import com.ai.assistance.operit.plugins.system.SystemPluginProtocolV1
+import com.ai.assistance.operit.plugins.center.isolation.ProviderContributionTransportCodec
 import com.ai.assistance.operit.plugins.center.isolation.RemoteAndroidInProcessPluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.center.isolation.RemoteChildExtensionRuntimeOwner
 import com.ai.assistance.operit.plugins.center.isolation.RemotePageProviderMetadata
@@ -289,29 +290,12 @@ internal object PluginPlatformKernel {
         }
         val providers = JSONArray().apply {
             contributionsInstance.listAll().filter { it.kind == PluginContributionKind.PROVIDER }.sortedBy { it.id }.forEach { record ->
-                when (val payload = record.payload) {
-                    is com.ai.limbs.plugin.runtime.InProcessUiStateProvider -> put(
-                        JSONObject().put("owner_plugin_id", record.ownerPluginId).put("id", record.id)
-                            .put("kind", "ui_state").put("metadata", JSONObject(record.metadata))
-                            .put("state_json", payload.stateJson.value ?: JSONObject.NULL)
-                    )
+                when (record.payload) {
+                    is com.ai.limbs.plugin.runtime.InProcessUiStateProvider,
+                    is com.ai.limbs.plugin.runtime.ExtensionHubService,
+                    BusinessPageProviderMetadata,
+                    RemotePageProviderMetadata -> put(ProviderContributionTransportCodec.encode(record))
                     is com.ai.limbs.plugin.runtime.InProcessPageProvider -> Unit // View/Context ABI: never exported.
-                    is com.ai.limbs.plugin.runtime.ExtensionHubService -> {
-                        check(record.ownerPluginId == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
-                            "Only the canonical Extension Hub may be mirrored to Resident UI"
-                        }
-                        check(record.id == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PROVIDER) {
-                            "Extension Hub provider ID mismatch in Resident UI snapshot"
-                        }
-                        put(
-                            JSONObject().put("owner_plugin_id", record.ownerPluginId).put("id", record.id)
-                                .put("kind", "extension_hub").put("metadata", JSONObject(record.metadata))
-                        )
-                    }
-                    RemotePageProviderMetadata -> put(
-                        JSONObject().put("owner_plugin_id", record.ownerPluginId).put("id", record.id)
-                            .put("kind", "page_metadata").put("metadata", JSONObject(record.metadata))
-                    )
                     else -> Unit
                 }
             }
@@ -555,25 +539,27 @@ internal object PluginPlatformKernel {
                     capabilityRegistryInstance.invokeSystemHost(owner, id, request.getString("host_operation"), params)
                 else capabilityRegistryInstance.invokeSystemHost(owner, id, params)
             }
-            "extension_hub_install" -> {
+            "provider_child_install" -> {
                 val owner = request.getString("owner_plugin_id").trim()
                 val providerId = request.getString("provider_id").trim()
-                check(owner == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
-                    "Resident UI Extension Hub owner mismatch"
-                }
-                check(providerId == com.ai.limbs.plugin.runtime.InProcessSystemIds.EXTENSION_HUB_PROVIDER) {
-                    "Resident UI Extension Hub provider mismatch"
-                }
                 val record = contributionsInstance.find(PluginContributionKind.PROVIDER, providerId)
-                    ?: throw PluginInstallException("UI_EXTENSION_HUB_UNAVAILABLE", "Plugin Extension Hub is not active")
-                check(record.ownerPluginId == owner) { "Resident UI Extension Hub contribution owner mismatch" }
-                val hub = record.payload as? com.ai.limbs.plugin.runtime.ExtensionHubService
-                    ?: throw PluginInstallException("UI_EXTENSION_HUB_INVALID", "Extension Hub provider contract is unavailable")
+                    ?: throw PluginInstallException("UI_PROVIDER_UNAVAILABLE", "Provider is not active: $providerId")
+                if (record.ownerPluginId != owner) {
+                    throw PluginInstallException(
+                        "UI_PROVIDER_OWNER_MISMATCH",
+                        "Provider $providerId belongs to ${record.ownerPluginId}, not $owner"
+                    )
+                }
+                val installer = record.payload as? com.ai.limbs.plugin.runtime.ExtensionHubService
+                    ?: throw PluginInstallException(
+                        "UI_PROVIDER_PROTOCOL_MISMATCH",
+                        "Provider $providerId does not implement child_extension_installer.v1"
+                    )
                 val packageFile = File(request.getString("package_path")).canonicalFile
                 check(packageFile.isFile) { "Selected child extension package is unavailable: ${packageFile.path}" }
                 val expectedParent = request.optString("expected_parent_plugin_id").trim().ifBlank { null }
                 val expectedPoint = request.optString("expected_point").trim().ifBlank { null }
-                childSnapshotJson(hub.install(packageFile, expectedParent, expectedPoint))
+                childSnapshotJson(installer.install(packageFile, expectedParent, expectedPoint))
             }
             "child_control" -> dispatchResidentChildControl(request)
             else -> throw PluginInstallException("UI_PROXY_COMMAND_UNKNOWN", "Unsupported Resident UI command: $command")
