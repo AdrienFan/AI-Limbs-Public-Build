@@ -205,6 +205,7 @@ jobs:
             --tests com.ai.assistance.operit.plugins.center.ProviderContributionTransportTest \
             --tests com.ai.assistance.operit.plugins.center.ServiceExtensionChildCanonicalTest \
             --tests com.ai.assistance.operit.plugins.center.PluginHostCapabilityRegistryUnifiedHostEntryTest \
+            --tests com.ai.assistance.operit.plugins.center.UnknownPluginUnifiedReceiverTest \
             --stacktrace --no-daemon
 
       - name: Run Gradle build

@@ -5,6 +5,7 @@ import sys
 ROOT = Path(__file__).resolve().parents[2]
 MAIN = ROOT / "app/src/main"
 TEST = ROOT / "app/src/test"
+WORKFLOW = ROOT / ".github/workflows/android-build.yml"
 UNKNOWN = "plugin.test.unknown_abc"
 
 errors = []
@@ -17,6 +18,10 @@ for path in MAIN.rglob("*"):
             main_hits.append(str(path.relative_to(ROOT)))
 if main_hits:
     errors.append("unknown acceptance plugin leaked into production source: " + ", ".join(main_hits))
+
+workflow_text = WORKFLOW.read_text(encoding="utf-8")
+if "--tests com.ai.assistance.operit.plugins.center.UnknownPluginUnifiedReceiverTest" not in workflow_text:
+    errors.append("CI does not execute UnknownPluginUnifiedReceiverTest")
 
 test_path = TEST / "java/com/ai/assistance/operit/plugins/center/UnknownPluginUnifiedReceiverTest.kt"
 if not test_path.is_file():
