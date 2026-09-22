@@ -746,7 +746,7 @@ internal class ResidentProviderDirectory(
     fun disconnectFailClosed() {
         proxies.values.forEach { proxy -> runCatching { proxy.update(null) } }
         proxies.clear()
-        extensionHubProxies.clear()
+        childInstallerProxies.clear()
         remote.set(emptyMap())
         pageMetadata.set(emptyMap())
         localPages.clear()
