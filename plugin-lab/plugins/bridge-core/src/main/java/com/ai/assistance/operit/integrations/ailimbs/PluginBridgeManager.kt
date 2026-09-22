@@ -86,7 +86,7 @@ class PluginBridgeManager(
         publishSelectedState()
     }
 
-    fun perform(action: BridgeAction, providerId: String? = null): Boolean {
+    suspend fun perform(action: BridgeAction, providerId: String? = null): Boolean {
         val provider = providerFor(providerId)
         if (action !in availableActionsFor(provider, provider.state.value)) return false
         return when (action) {
@@ -152,7 +152,7 @@ class PluginBridgeManager(
 
     fun rePair() = rePairProvider(selectedProvider())
 
-    fun openAuthorizationPage(): Boolean = selectedProvider().openAuthorizationPage()
+    suspend fun openAuthorizationPage(): Boolean = selectedProvider().openAuthorizationPage()
 
     fun verifyLiveness() = verifyProviderLiveness(selectedProvider())
 

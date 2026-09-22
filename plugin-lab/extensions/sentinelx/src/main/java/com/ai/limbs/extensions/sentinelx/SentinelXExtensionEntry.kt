@@ -11,7 +11,7 @@ class SentinelXExtensionEntry : ChildExtensionEntry {
         SentinelXLogger.bind(host.logger)
         host.publish(
             BridgeProviderContribution(
-                factory = SentinelXBridgeProvider.Factory(),
+                factory = SentinelXBridgeProvider.Factory(host),
                 panel = SentinelXBridgeProviderPanel,
                 notification = SentinelXBridgeProviderNotification
             ),

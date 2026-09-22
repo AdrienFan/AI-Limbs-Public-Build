@@ -65,12 +65,14 @@ jobs:
           set -euo pipefail
           sdkmanager --install "platform-tools" "platforms;android-34" "platforms;android-36" "build-tools;35.0.0"
           echo "sdk.dir=$ANDROID_HOME" > local.properties
-      - name: Build only Bridge and SentinelX
+      - name: Validate unified Host action path
+        run: python3 tools/plugin_lab/check_unified_host_action.py
+      - name: Build Bridge provider ABI v5 suite
         shell: bash
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew :bridge-core-plugin:assembleDebug :sentinelx-extension:assembleDebug --stacktrace --no-daemon
+          ./gradlew :bridge-core-plugin:assembleDebug :rdc-extension:assembleDebug :triggercmd-extension:assembleDebug :sentinelx-extension:assembleDebug --stacktrace --no-daemon
       - name: Sign installable parent and child packages
         env:
           AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
@@ -81,10 +83,14 @@ jobs:
         with:
           name: resident-bridge-fixes-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-Bridge-v1.3.10.ailp
-            dist/AI-Limbs-Bridge-v1.3.10.ailp.sha256
-            dist/AI-Limbs-SentinelX-v0.1.2.ailx
-            dist/AI-Limbs-SentinelX-v0.1.2.ailx.sha256
+            dist/AI-Limbs-Bridge-v1.3.11.ailp
+            dist/AI-Limbs-Bridge-v1.3.11.ailp.sha256
+            dist/AI-Limbs-RDC-v1.2.8.ailx
+            dist/AI-Limbs-RDC-v1.2.8.ailx.sha256
+            dist/AI-Limbs-TriggerCMD-v1.2.5.ailx
+            dist/AI-Limbs-TriggerCMD-v1.2.5.ailx.sha256
+            dist/AI-Limbs-SentinelX-v0.1.3.ailx
+            dist/AI-Limbs-SentinelX-v0.1.3.ailx.sha256
           if-no-files-found: error
           retention-days: 14
   build:
@@ -122,6 +128,9 @@ jobs:
       - name: Configure Android SDK
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+
+      - name: Validate unified Host action path
+        run: python3 tools/plugin_lab/check_unified_host_action.py
 
       - name: Build 1 - plugin-extension-hub.ailp payload
         shell: bash

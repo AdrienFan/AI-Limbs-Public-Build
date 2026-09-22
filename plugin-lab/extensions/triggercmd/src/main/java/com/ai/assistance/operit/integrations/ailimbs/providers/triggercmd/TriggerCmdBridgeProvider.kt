@@ -95,7 +95,7 @@ internal class TriggerCmdBridgeProvider private constructor(
 
     override fun rePair() = Unit
 
-    override fun openAuthorizationPage(): Boolean = false
+    override suspend fun openAuthorizationPage(): Boolean = false
 
     override fun verifyLiveness() {
         if (!storage.readConfig().configured) {

@@ -2,9 +2,7 @@
 package com.ai.limbs.extensions.rdc.runtime
 
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
 import android.os.Build
 import android.os.SystemClock
 import android.util.Base64
@@ -21,6 +19,7 @@ import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatBridgeService
 import com.ai.limbs.extensions.rdc.runtime.chat.LanerChatQueueChangedEvent
 import com.ai.limbs.extensions.rdc.runtime.chat.requiresWorkAttention
 import com.ai.limbs.extensions.rdc.RdcLogger
+import com.ai.limbs.plugin.runtime.ChildExtensionHost
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
@@ -63,7 +62,8 @@ import org.json.JSONObject
 class AiLimbsRdcClient(
     context: Context,
     private val scope: CoroutineScope,
-    remoteIngress: BridgeRemoteIngress
+    remoteIngress: BridgeRemoteIngress,
+    private val childHost: ChildExtensionHost
 ) {
     private val appContext = context.applicationContext
     private val remoteExecutor = AiLimbsRemoteInvocationExecutor(remoteIngress)
@@ -519,18 +519,24 @@ class AiLimbsRdcClient(
         launchPairingWorker()
     }
 
-    fun openAuthorizationPage(): Boolean {
+    suspend fun openAuthorizationPage(): Boolean {
         val auth = activeAuthorization ?: return false
         val targetUrl = auth.verificationUriComplete.ifBlank { auth.verificationUri }
         if (targetUrl.isBlank()) return false
         return runCatching {
-            appContext.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(targetUrl)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            childHost.invokeHostCapability(
+                HOST_COMPONENT_CAPABILITY,
+                JSONObject()
+                    .put("operation", "invoke")
+                    .put("action", "android.intent.action.VIEW")
+                    .put("uri", targetUrl)
+                    .put("type", "activity")
+                    .toString()
             )
-            RdcLogger.i(TAG, "RDC authorization page opened from connection console")
+            RdcLogger.i(TAG, "RDC authorization page requested through Host capability")
             true
         }.getOrElse { error ->
-            RdcLogger.e(TAG, "Unable to open RDC authorization page", error)
+            RdcLogger.e(TAG, "Unable to open RDC authorization page through Host capability", error)
             false
         }
     }
@@ -1671,6 +1677,7 @@ class AiLimbsRdcClient(
     private class UnauthorizedException : IllegalStateException()
 
     companion object {
+        private const val HOST_COMPONENT_CAPABILITY = "host.android.component@1"
         const val ENABLED = true
         const val PROVIDER_ID = "rdc"
         const val PROVIDER_LABEL = "RDC"

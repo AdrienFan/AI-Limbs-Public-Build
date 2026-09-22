@@ -61,7 +61,7 @@ interface AiLimbsBridgeProvider {
     fun reconnect()
     fun recover()
     fun rePair()
-    fun openAuthorizationPage(): Boolean
+    suspend fun openAuthorizationPage(): Boolean
     fun verifyLiveness()
     fun onHostSignal(signal: AiLimbsBridgeHostSignal) = Unit
 }

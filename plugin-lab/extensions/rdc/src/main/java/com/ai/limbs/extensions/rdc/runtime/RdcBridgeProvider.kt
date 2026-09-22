@@ -10,6 +10,7 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory
 import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import com.ai.assistance.operit.integrations.ailimbs.NativeBridgeProfile
+import com.ai.limbs.plugin.runtime.ChildExtensionHost
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.flow.StateFlow
 
@@ -17,9 +18,10 @@ internal class RdcBridgeProvider private constructor(
     context: Context,
     scope: CoroutineScope,
     private val profile: NativeBridgeProfile,
-    remoteIngress: BridgeRemoteIngress
+    remoteIngress: BridgeRemoteIngress,
+    childHost: ChildExtensionHost
 ) : AiLimbsBridgeProvider {
-    private val client = AiLimbsRdcClient(context, scope, remoteIngress)
+    private val client = AiLimbsRdcClient(context, scope, remoteIngress, childHost)
 
     override val id: String
         get() = profile.id
@@ -43,11 +45,11 @@ internal class RdcBridgeProvider private constructor(
     override fun reconnect() = client.reconnect()
     override fun recover() = client.recover()
     override fun rePair() = client.rePair()
-    override fun openAuthorizationPage(): Boolean = client.openAuthorizationPage()
+    override suspend fun openAuthorizationPage(): Boolean = client.openAuthorizationPage()
     override fun verifyLiveness() = client.verifyLiveness()
     override fun onHostSignal(signal: AiLimbsBridgeHostSignal) = client.onHostSignal(signal)
 
-    internal class Factory : BridgeProviderFactory {
+    internal class Factory(private val childHost: ChildExtensionHost) : BridgeProviderFactory {
         override val type: String = PROFILE_TYPE
         override val transportId: String = "rdc"
         override val profiles: List<BridgeProfile> =
@@ -75,7 +77,7 @@ internal class RdcBridgeProvider private constructor(
             require(profile.id == PROFILE_ID && profile.type == PROFILE_TYPE) {
                 "Unsupported RDC profile: ${profile.id} (${profile.type})"
             }
-            return RdcBridgeProvider(context, scope, profile, remoteIngress)
+            return RdcBridgeProvider(context, scope, profile, remoteIngress, childHost)
         }
     }
 

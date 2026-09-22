@@ -225,10 +225,10 @@ private class BridgeRuntime(
         val generation = pointGeneration
         pointHandle = host.childExtensions.publishPoint(
             point = InProcessSystemIds.BRIDGE_PROVIDER_POINT,
-            apiVersion = 4,
+            apiVersion = 5,
             title = "Bridge Provider",
             description = "AI Limbs remote Bridge provider contract",
-            allowedHostCapabilities = emptySet(),
+            allowedHostCapabilities = setOf("host.android.component@1"),
             binder = ChildExtensionBinder { binding ->
                 bindContribution(generation, binding.extensionId, binding.payload)
             }
@@ -394,7 +394,7 @@ private class BridgeRuntime(
             override val availableActions: List<BridgeAction>
                 get() = current.availableActions()
 
-            override fun perform(action: BridgeAction): Boolean = current.perform(action)
+            override suspend fun perform(action: BridgeAction): Boolean = current.perform(action)
             override fun statusSummary(): String = current.statusSummary()
         }
 
@@ -410,7 +410,7 @@ private class BridgeRuntime(
             override val state: AiLimbsBridgeState = bridgeState
             override val availableActions: List<BridgeAction> = capturedActions
 
-            override fun perform(action: BridgeAction): Boolean = current.perform(action)
+            override suspend fun perform(action: BridgeAction): Boolean = current.perform(action)
             override fun statusSummary(): String = capturedSummary
         }
     }

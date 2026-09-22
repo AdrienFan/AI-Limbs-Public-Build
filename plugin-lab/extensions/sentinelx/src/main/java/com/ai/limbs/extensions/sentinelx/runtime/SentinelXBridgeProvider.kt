@@ -1,8 +1,6 @@
 package com.ai.limbs.extensions.sentinelx.runtime
 
 import android.content.Context
-import android.content.Intent
-import android.net.Uri
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeHostSignal
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgeNetworkState
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
@@ -13,7 +11,7 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeProfile
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderFactory
 import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import com.ai.assistance.operit.integrations.ailimbs.NativeBridgeProfile
-import com.ai.limbs.extensions.sentinelx.SentinelXLogger
+import com.ai.limbs.plugin.runtime.ChildExtensionHost
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -21,12 +19,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import org.json.JSONObject
 
 internal class SentinelXBridgeProvider private constructor(
     context: Context,
     private val scope: CoroutineScope,
     private val profile: NativeBridgeProfile,
-    remoteIngress: BridgeRemoteIngress
+    remoteIngress: BridgeRemoteIngress,
+    private val childHost: ChildExtensionHost
 ) : AiLimbsBridgeProvider, SentinelXTransportListener {
     private val appContext = context.applicationContext
     private val storage = SentinelXBridgeStorage(appContext)
@@ -109,16 +109,22 @@ internal class SentinelXBridgeProvider private constructor(
         )
     }
 
-    override fun openAuthorizationPage(): Boolean {
+    override suspend fun openAuthorizationPage(): Boolean {
         val target = storage.enrollmentUrl()
+        if (target.isBlank()) return false
         return runCatching {
-            appContext.startActivity(
-                Intent(Intent.ACTION_VIEW, Uri.parse(target))
-                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            childHost.invokeHostCapability(
+                HOST_COMPONENT_CAPABILITY,
+                JSONObject()
+                    .put("operation", "invoke")
+                    .put("action", "android.intent.action.VIEW")
+                    .put("uri", target)
+                    .put("type", "activity")
+                    .toString()
             )
             true
         }.getOrElse { error ->
-            SentinelXLogger.e(TAG, "Unable to open SentinelX enrollment page", error)
+            SentinelXLogger.e(TAG, "Unable to open SentinelX enrollment page through Host capability", error)
             false
         }
     }
@@ -230,7 +236,7 @@ internal class SentinelXBridgeProvider private constructor(
     private fun shortId(value: String): String =
         if (value.length <= 12) value else "…${value.takeLast(12)}"
 
-    internal class Factory : BridgeProviderFactory {
+    internal class Factory(private val childHost: ChildExtensionHost) : BridgeProviderFactory {
         override val type: String = PROFILE_TYPE
         override val transportId: String = PROFILE_ID
         override val profiles: List<BridgeProfile> = listOf(
@@ -254,7 +260,7 @@ internal class SentinelXBridgeProvider private constructor(
             require(profile.id == PROFILE_ID && profile.type == PROFILE_TYPE) {
                 "Unsupported SentinelX profile: ${profile.id} (${profile.type})"
             }
-            return SentinelXBridgeProvider(context, scope, profile, remoteIngress)
+            return SentinelXBridgeProvider(context, scope, profile, remoteIngress, childHost)
         }
     }
 
@@ -262,6 +268,7 @@ internal class SentinelXBridgeProvider private constructor(
         const val PROFILE_ID = "sentinelx"
         const val PROFILE_TYPE = "native_sentinelx"
         const val PROVIDER_LABEL = "SentinelX"
+        private const val HOST_COMPONENT_CAPABILITY = "host.android.component@1"
         private const val TAG = "SentinelXBridge"
         private val SUPPORTED_ACTIONS = setOf(
             BridgeAction.CONNECT,

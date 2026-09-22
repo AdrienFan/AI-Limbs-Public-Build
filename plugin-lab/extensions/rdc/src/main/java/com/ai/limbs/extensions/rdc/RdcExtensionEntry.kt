@@ -11,7 +11,7 @@ class RdcExtensionEntry : ChildExtensionEntry {
         RdcLogger.bind(host.logger)
         host.publish(
             BridgeProviderContribution(
-                factory = RdcBridgeProvider.Factory(),
+                factory = RdcBridgeProvider.Factory(host),
                 panel = RdcBridgeProviderPanel,
                 notification = RdcBridgeProviderNotification
             ),
