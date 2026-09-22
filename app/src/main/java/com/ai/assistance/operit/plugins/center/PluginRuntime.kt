@@ -16,14 +16,16 @@ enum class PluginContributionKind {
 }
 
 data class PluginContributionRecord(
-    val ownerPluginId: String,
-    val kind: PluginContributionKind,
-    val id: String,
-    val apiVersion: Int?,
-    val extensionPoint: String? = null,
-    val metadata: Map<String, String>,
+    val contract: CanonicalContributionContract,
     val payload: Any?
-)
+) {
+    val ownerPluginId: String get() = contract.ownerPluginId
+    val kind: PluginContributionKind get() = contract.kind
+    val id: String get() = contract.id
+    val apiVersion: Int? get() = contract.apiVersion
+    val extensionPoint: String? get() = contract.extensionPoint
+    val metadata: Map<String, String> get() = contract.metadata
+}
 
 class PluginRegistrationHandle internal constructor(
     private val onClose: () -> Unit
@@ -113,22 +115,16 @@ class PluginRegistrar internal constructor(
         capability: PluginCapabilitySpec,
         metadata: Map<String, String> = emptyMap()
     ) {
-        surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
-        requireDeclared(PluginContributionKind.CAPABILITY, id)
-        val registration =
-            registry.register(
-                PluginContributionRecord(
-                    ownerPluginId = manifest.pluginId,
-                    kind = PluginContributionKind.CAPABILITY,
-                    id = id,
-                    apiVersion = null,
-                    metadata = metadata,
-                    payload = capability
-                )
-            )
+        val contract = validatedContract(
+            kind = PluginContributionKind.CAPABILITY,
+            id = id,
+            metadata = metadata
+        )
+        val record = PluginContributionRecord(contract, capability)
+        val registration = registry.register(record)
         track(registration)
         try {
-            track(capabilityBinder.register(manifest.pluginId, id, capability))
+            track(capabilityBinder.register(manifest.pluginId, contract.id, capability))
         } catch (error: Throwable) {
             registration.close()
             throw error
@@ -140,20 +136,27 @@ class PluginRegistrar internal constructor(
         payload: Any,
         metadata: Map<String, String> = emptyMap()
     ) {
-        surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_PROVIDER)
-        requireDeclared(PluginContributionKind.PROVIDER, id)
-        track(
-            registry.register(
-                PluginContributionRecord(
-                    ownerPluginId = manifest.pluginId,
-                    kind = PluginContributionKind.PROVIDER,
-                    id = id,
-                    apiVersion = null,
-                    metadata = metadata,
-                    payload = payload
-                )
-            )
+        val contract = validatedContract(
+            kind = PluginContributionKind.PROVIDER,
+            id = id,
+            metadata = metadata
         )
+        track(registry.register(PluginContributionRecord(contract, payload)))
+    }
+
+    fun registerService(
+        id: String,
+        apiVersion: Int,
+        payload: Any,
+        metadata: Map<String, String> = emptyMap()
+    ) {
+        val contract = validatedContract(
+            kind = PluginContributionKind.SERVICE,
+            id = id,
+            apiVersion = apiVersion,
+            metadata = metadata
+        )
+        track(registry.register(PluginContributionRecord(contract, payload)))
     }
 
     fun registerExtension(
@@ -162,23 +165,13 @@ class PluginRegistrar internal constructor(
         payload: Any,
         metadata: Map<String, String> = emptyMap()
     ) {
-        val normalizedPoint = point.trim().lowercase()
-        surfacePolicy.requireAllowed(PluginSurfaceIds.extension(normalizedPoint))
-        val declaration = manifest.provides.extensions.firstOrNull {
-            it.point == normalizedPoint && it.id == id
-        } ?: throw PluginInstallException(
-            "REGISTRATION_NOT_DECLARED",
-            "extension:$normalizedPoint:$id was not declared by ${manifest.pluginId}"
-        )
-        val record = PluginContributionRecord(
-            ownerPluginId = manifest.pluginId,
+        val contract = validatedContract(
             kind = PluginContributionKind.EXTENSION,
             id = id,
-            apiVersion = declaration.apiVersion,
-            extensionPoint = normalizedPoint,
-            metadata = metadata,
-            payload = payload
+            extensionPoint = point,
+            metadata = metadata
         )
+        val record = PluginContributionRecord(contract, payload)
         val registration = registry.register(record)
         track(registration)
         try {
@@ -189,12 +182,119 @@ class PluginRegistrar internal constructor(
         }
     }
 
+    private fun validatedContract(
+        kind: PluginContributionKind,
+        id: String,
+        apiVersion: Int? = null,
+        extensionPoint: String? = null,
+        metadata: Map<String, String>
+    ): CanonicalContributionContract {
+        val normalizedId = id.trim()
+        if (normalizedId.isBlank()) {
+            throw PluginInstallException(
+                "CONTRIBUTION_ID_INVALID",
+                "${kind.name.lowercase()} contribution id must not be blank"
+            )
+        }
+
+        val contract = when (kind) {
+            PluginContributionKind.CAPABILITY -> {
+                surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
+                requireDeclared(kind, normalizedId)
+                if (apiVersion != null || extensionPoint != null) {
+                    throw PluginInstallException(
+                        "CONTRIBUTION_CONTRACT_INVALID",
+                        "capability:$normalizedId does not accept apiVersion or extensionPoint"
+                    )
+                }
+                CanonicalContributionContracts.capability(
+                    ownerPluginId = manifest.pluginId,
+                    id = normalizedId,
+                    metadata = metadata
+                )
+            }
+            PluginContributionKind.SERVICE -> {
+                surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_SERVICE)
+                requireDeclared(kind, normalizedId)
+                val version = apiVersion ?: throw PluginInstallException(
+                    "SERVICE_API_INVALID",
+                    "Service API version is required: $normalizedId"
+                )
+                if (version <= 0 || extensionPoint != null) {
+                    throw PluginInstallException(
+                        "SERVICE_API_INVALID",
+                        "Service API version must be positive: $normalizedId"
+                    )
+                }
+                CanonicalContributionContracts.service(
+                    ownerPluginId = manifest.pluginId,
+                    id = normalizedId,
+                    apiVersion = version,
+                    metadata = metadata
+                )
+            }
+            PluginContributionKind.PROVIDER -> {
+                surfacePolicy.requireAllowed(PluginSurfaceIds.PUBLISH_PROVIDER)
+                requireDeclared(kind, normalizedId)
+                if (apiVersion != null || extensionPoint != null) {
+                    throw PluginInstallException(
+                        "CONTRIBUTION_CONTRACT_INVALID",
+                        "provider:$normalizedId does not accept apiVersion or extensionPoint"
+                    )
+                }
+                CanonicalContributionContracts.provider(
+                    ownerPluginId = manifest.pluginId,
+                    id = normalizedId,
+                    metadata = metadata
+                )
+            }
+            PluginContributionKind.EXTENSION -> {
+                val normalizedPoint = extensionPoint?.trim()?.lowercase().orEmpty()
+                if (normalizedPoint.isBlank()) {
+                    throw PluginInstallException(
+                        "EXTENSION_POINT_INVALID",
+                        "Extension point must not be blank: $normalizedId"
+                    )
+                }
+                surfacePolicy.requireAllowed(PluginSurfaceIds.extension(normalizedPoint))
+                val declaration = manifest.provides.extensions.firstOrNull {
+                    it.point == normalizedPoint && it.id == normalizedId
+                } ?: throw PluginInstallException(
+                    "REGISTRATION_NOT_DECLARED",
+                    "extension:$normalizedPoint:$normalizedId was not declared by ${manifest.pluginId}"
+                )
+                if (apiVersion != null && apiVersion != declaration.apiVersion) {
+                    throw PluginInstallException(
+                        "EXTENSION_API_MISMATCH",
+                        "extension:$normalizedPoint:$normalizedId declared API ${declaration.apiVersion}, got $apiVersion"
+                    )
+                }
+                CanonicalContributionContracts.extension(
+                    ownerPluginId = manifest.pluginId,
+                    point = normalizedPoint,
+                    id = normalizedId,
+                    apiVersion = declaration.apiVersion,
+                    metadata = metadata
+                )
+            }
+        }
+
+        if (contract.ownerPluginId != manifest.pluginId) {
+            throw PluginInstallException(
+                "CONTRIBUTION_OWNER_MISMATCH",
+                "Contribution owner ${contract.ownerPluginId} does not match ${manifest.pluginId}"
+            )
+        }
+        return contract
+    }
+
     private fun requireDeclared(kind: PluginContributionKind, id: String) {
         val declared = when (kind) {
             PluginContributionKind.CAPABILITY -> manifest.provides.capabilities
             PluginContributionKind.SERVICE -> manifest.provides.services
             PluginContributionKind.PROVIDER -> manifest.provides.providers
-            PluginContributionKind.EXTENSION -> throw IllegalStateException("Extensions use typed declaration validation")
+            PluginContributionKind.EXTENSION ->
+                throw IllegalStateException("Extensions use typed declaration validation")
         }
         if (id !in declared) {
             throw PluginInstallException(

@@ -159,7 +159,12 @@ internal class RemoteChildExtensionRuntimeOwner(
             for (i in 0 until values.length()) {
                 val d = values.getJSONObject(i); val owner = d.getString("owner_id"); val id = d.getString("id")
                 val spec = capabilitySpec(d, owner, id)
-                val contribution = contributions.register(PluginContributionRecord(owner, PluginContributionKind.CAPABILITY, id, null, metadata = emptyMap(), payload = spec))
+                val contribution = contributions.register(
+                    PluginContributionRecord(
+                        contract = CanonicalContributionContracts.capability(owner, id),
+                        payload = spec
+                    )
+                )
                 val capability = try { capabilityRegistry.register(owner, id, spec) } catch (e: Throwable) { contribution.close(); throw e }
                 capabilityBindings["$owner|$id"] = Binding(contribution, capability)
             }

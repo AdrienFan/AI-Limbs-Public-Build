@@ -1372,11 +1372,10 @@ internal class ChildExtensionRuntime(
         )
         val contribution = contributions.register(
             PluginContributionRecord(
-                ownerPluginId = ownerExtensionId,
-                kind = PluginContributionKind.CAPABILITY,
-                id = capabilityId,
-                apiVersion = null,
-                metadata = emptyMap(),
+                contract = CanonicalContributionContracts.capability(
+                    ownerPluginId = ownerExtensionId,
+                    id = capabilityId
+                ),
                 payload = capability
             )
         )

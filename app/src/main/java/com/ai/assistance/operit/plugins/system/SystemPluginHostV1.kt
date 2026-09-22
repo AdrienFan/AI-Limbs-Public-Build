@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins.system
 import androidx.compose.runtime.Composable
 import com.ai.assistance.operit.plugins.center.AiLimbsHostPrimitiveCatalog
 import com.ai.assistance.operit.plugins.center.CallerAwarePluginServiceEndpoint
+import com.ai.assistance.operit.plugins.center.CanonicalContributionContracts
 import com.ai.assistance.operit.plugins.center.HostPrimitiveDefinition
 import com.ai.assistance.operit.plugins.center.HostPrimitiveExposure
 import com.ai.assistance.operit.plugins.center.HostSurfacePolicy
@@ -500,11 +501,12 @@ internal class KernelSystemPluginServicePublisherV2(
         }
         return contributions.register(
             PluginContributionRecord(
-                ownerPluginId = ownerPluginId,
-                kind = PluginContributionKind.SERVICE,
-                id = normalized,
-                apiVersion = apiVersion,
-                metadata = metadata.toMap(),
+                contract = CanonicalContributionContracts.service(
+                    ownerPluginId = ownerPluginId,
+                    id = normalized,
+                    apiVersion = apiVersion,
+                    metadata = metadata
+                ),
                 payload = payload
             )
         )
