@@ -586,7 +586,10 @@ interface ChildExtensionHost {
 }
 
 object InProcessSystemIds {
-    const val EXTENSION_HUB_PROVIDER = "system.extension.hub"
+    const val EXTENSION_HUB_PROVIDER = "system.extension_hub"
+    // Plugin Center 1.3.33 consumes the canonical Hub provider through Service RPC,
+    // while Hub 1.5.4 still publishes ExtensionHubService as a provider.
+    const val EXTENSION_HUB_SERVICE = EXTENSION_HUB_PROVIDER
     const val EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
     const val PLUGIN_CENTER_PLUGIN_ID = "ai_limbs.system.plugin_center"
     const val PLUGIN_CENTER_DELEGATED_GATEWAY_SERVICE = "system.plugin_center.delegated_gateway"

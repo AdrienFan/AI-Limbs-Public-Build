@@ -30,12 +30,10 @@ internal class PluginHostCapabilityRegistry(
     context: Context?,
     private val surfacePolicy: HostSurfacePolicy?,
     private val usageStore: PluginUsageStore? = null,
-    private val uiRegistry: PluginUiRegistry? = null,
-    private val pagePresentationRegistry: PluginPagePresentationRegistry? = null,
     private val loggingService: HostLoggingService? = context?.let { HostLoggingService(it, PluginStore.fromContext(it)) },
     private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 ) : PluginCapabilityGateway, PluginCapabilityInvokerFactory {
-    internal constructor() : this(null, null, null, null, null, null, PluginRuntimeRole.LEGACY_HOST)
+    internal constructor() : this(null, null, null, null, PluginRuntimeRole.LEGACY_HOST)
     private val appContext = context?.applicationContext
     private val systemExecutor = context?.let { SystemHostPrimitiveExecutor(it, requireNotNull(loggingService), runtimeRole) }
 
@@ -69,7 +67,7 @@ internal class PluginHostCapabilityRegistry(
             invokeSystemHostFromPlugin(ownerPluginId, "host.work_manual@1", parameters)
         },
         "host.ui.presentation@1" to HostCapability("host.ui.presentation@1") { ownerPluginId, parameters ->
-            invokePagePresentation(ownerPluginId, parameters)
+            invokeSystemHostFromPlugin(ownerPluginId, "host.ui.presentation@1", parameters)
         },
         "host.privileged.runtime@1" to HostCapability("host.privileged.runtime@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.privileged.runtime@1", parameters)
@@ -77,7 +75,9 @@ internal class PluginHostCapabilityRegistry(
         "host.ui.layout@1" to HostCapability("host.ui.layout@1") { ownerPluginId, parameters ->
             invokeSystemHostFromPlugin(ownerPluginId, "host.ui.layout@1", parameters)
         },
-        "host.logging@1" to HostCapability("host.logging@1") { ownerPluginId, parameters -> invokeLogging(ownerPluginId, parameters) }
+        "host.logging@1" to HostCapability("host.logging@1") { ownerPluginId, parameters ->
+            invokeSystemHostFromPlugin(ownerPluginId, "host.logging@1", parameters)
+        }
     )
 
     init {
@@ -136,52 +136,6 @@ internal class PluginHostCapabilityRegistry(
         }
     }
 
-
-    private fun invokePagePresentation(ownerPluginId: String, parameters: JSONObject): JSONObject {
-        val screens = uiRegistry ?: throw PluginInstallException(
-            "UI_PRESENTATION_UNAVAILABLE",
-            "Plugin page presentation registry is unavailable"
-        )
-        val presentations = pagePresentationRegistry ?: throw PluginInstallException(
-            "UI_PRESENTATION_UNAVAILABLE",
-            "Plugin page presentation registry is unavailable"
-        )
-        val screenId = parameters.optString("screen_id").trim()
-        if (screenId.isEmpty()) {
-            throw PluginInstallException("UI_PRESENTATION_SCREEN_REQUIRED", "screen_id is required")
-        }
-        val screen = screens.screen(screenId) ?: throw PluginInstallException(
-            "UI_PRESENTATION_SCREEN_UNKNOWN",
-            "Plugin screen is not registered: $screenId"
-        )
-        if (screen.ownerPluginId != ownerPluginId) {
-            throw PluginInstallException(
-                "UI_PRESENTATION_OWNER_MISMATCH",
-                "Plugin may change presentation only for its own screen: $screenId"
-            )
-        }
-        if (!presentations.isActiveScreen(screenId)) {
-            throw PluginInstallException(
-                "UI_PRESENTATION_SCREEN_NOT_ACTIVE",
-                "Plugin page presentation may be changed only by the currently displayed screen: $screenId"
-            )
-        }
-        return when (parameters.optString("operation", "set_mode").trim().lowercase()) {
-            "set_mode" -> {
-                val mode = PluginPagePresentationMode.parse(parameters.optString("mode", "normal"))
-                presentations.set(ownerPluginId, screenId, mode)
-                JSONObject().put("ok", true).put("screen_id", screenId).put("mode", mode.name.lowercase())
-            }
-            "get_mode" -> {
-                val mode = presentations.get(screenId)?.mode ?: PluginPagePresentationMode.NORMAL
-                JSONObject().put("ok", true).put("screen_id", screenId).put("mode", mode.name.lowercase())
-            }
-            else -> throw PluginInstallException(
-                "UI_PRESENTATION_OPERATION_UNKNOWN",
-                "Unsupported host.ui.presentation@1 operation"
-            )
-        }
-    }
 
     override fun register(
         ownerPluginId: String,
@@ -530,14 +484,6 @@ internal class PluginHostCapabilityRegistry(
             )
         }
         return transportId
-    }
-
-    private suspend fun invokeLogging(ownerPluginId: String, parameters: JSONObject): JSONObject {
-        val service = loggingService ?: throw PluginInstallException(
-            "HOST_GATEWAY_NOT_READY",
-            "Logging Host Primitive is not initialized"
-        )
-        return service.invoke(ownerPluginId, parameters)
     }
 
     private companion object {

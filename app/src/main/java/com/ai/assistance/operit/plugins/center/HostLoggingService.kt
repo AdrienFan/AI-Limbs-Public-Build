@@ -50,13 +50,18 @@ internal class HostLoggingService(
 ) {
     private val appContext = context.applicationContext
     private val states = PluginStateRepository(pluginStore)
+    @Volatile private var pluginSources: (suspend () -> List<PluginSnapshot>)? = null
     @Volatile private var childSources: () -> List<ChildExtensionSnapshot> = { emptyList() }
+
+    fun bindPluginSourceProvider(provider: suspend () -> List<PluginSnapshot>) {
+        pluginSources = provider
+    }
 
     fun bindChildSourceProvider(provider: () -> List<ChildExtensionSnapshot>) {
         childSources = provider
     }
 
-    fun invoke(ownerPluginId: String, operation: String, parameters: JSONObject): JSONObject = when (operation.trim().lowercase()) {
+    suspend fun invoke(ownerPluginId: String, operation: String, parameters: JSONObject): JSONObject = when (operation.trim().lowercase()) {
         "sources" -> sources()
         "read" -> read(parameters)
         "export" -> export(parameters)
@@ -65,23 +70,48 @@ internal class HostLoggingService(
         else -> throw PluginInstallException("HOST_OPERATION_UNSUPPORTED", "Unsupported host.logging@1 operation: $operation")
     }
 
-    fun invoke(ownerPluginId: String, parameters: JSONObject): JSONObject {
+    suspend fun invoke(ownerPluginId: String, parameters: JSONObject): JSONObject {
         val copy = JSONObject(parameters.toString())
         val operation = copy.optString("operation", "read").trim().lowercase()
         copy.remove("operation")
         return invoke(ownerPluginId, operation, copy)
     }
 
-    fun sources(): JSONObject {
+    suspend fun sources(): JSONObject {
         val items = JSONArray()
         items.put(sourceJson("global", "global", "全局日志", null, null, true))
         items.put(sourceJson("host", "host", "基座日志", null, null, true))
-        pluginStore.listPluginIds().forEach { pluginId ->
-            val state = states.read(pluginId)
-            val version = state?.activeVersion ?: pluginStore.listVersions(pluginId).lastOrNull()
-            val manifest = version?.let { runCatching { states.readInstalledManifest(pluginId, it) }.getOrNull() }
-            items.put(sourceJson("plugin", pluginId, manifest?.display?.name ?: pluginId, version, null, state?.enabled == true))
+
+        val runtimeSnapshots = pluginSources?.invoke()
+        if (runtimeSnapshots != null) {
+            runtimeSnapshots
+                .sortedBy { it.pluginId }
+                .forEach { snapshot ->
+                    val state = snapshot.persistentState
+                    val version = state?.activeVersion ?: snapshot.versions.lastOrNull()
+                    val manifest = snapshot.activeManifest
+                    items.put(
+                        sourceJson(
+                            "plugin",
+                            snapshot.pluginId,
+                            manifest?.display?.name ?: snapshot.pluginId,
+                            version,
+                            null,
+                            state?.enabled == true
+                        )
+                    )
+                }
+        } else {
+            // Bootstrap/test fallback only. Production Kernel binds PluginManager::snapshots so
+            // Log Center observes the same canonical runtime inventory as Plugin Center itself.
+            pluginStore.listPluginIds().forEach { pluginId ->
+                val state = states.read(pluginId)
+                val version = state?.activeVersion ?: pluginStore.listVersions(pluginId).lastOrNull()
+                val manifest = version?.let { runCatching { states.readInstalledManifest(pluginId, it) }.getOrNull() }
+                items.put(sourceJson("plugin", pluginId, manifest?.display?.name ?: pluginId, version, null, state?.enabled == true))
+            }
         }
+
         childSources().sortedBy { it.displayName.lowercase(Locale.ROOT) }.forEach { child ->
             items.put(sourceJson("extension", child.extensionId, child.displayName, child.version, child.target.parentPluginId, child.enabled))
         }

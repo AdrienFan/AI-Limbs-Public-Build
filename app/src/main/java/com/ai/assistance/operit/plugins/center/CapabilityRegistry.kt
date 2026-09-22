@@ -96,7 +96,7 @@ object CapabilityRegistry {
         hostPrimitive("host.peripheral.display@1"),
         hostPrimitive("host.peripheral.keyboard@1"),
         hostPrimitive("host.peripheral.pointer@1"),
-        hostPrimitive("host.ui.presentation@1"),
+        hostPrimitive("host.ui.presentation@1", CapabilityExecutionOwner.HOST),
         hostPrimitive("host.interaction.cycle@1"),
         hostPrimitive("host.privileged.runtime@1", CapabilityExecutionOwner.HOST),
         hostPrimitive("host.resident.runtime@1", CapabilityExecutionOwner.HOST),

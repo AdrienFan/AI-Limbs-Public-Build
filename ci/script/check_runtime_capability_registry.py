@@ -21,6 +21,9 @@ HOST_GATEWAY_BINDINGS = ROOT / "app/src/main/java/com/ai/assistance/operit/plugi
 UI_PROXY_WIRE = ROOT / "app/src/main/java/com/ai/assistance/operit/core/tools/system/resident/ResidentUiProxyWire.kt"
 DISPATCHER = ROOT / "app/src/main/java/com/ai/assistance/operit/integrations/ailimbs/AiLimbsDispatcher.kt"
 TOOL_EXECUTION_MANAGER = ROOT / "app/src/main/java/com/ai/assistance/operit/api/chat/enhance/ToolExecutionManager.kt"
+HOST_LOGGING_SERVICE = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/HostLoggingService.kt"
+PLATFORM_KERNEL = ROOT / "app/src/main/java/com/ai/assistance/operit/plugins/center/PluginPlatformKernel.kt"
+RUNTIME_API = ROOT / "app/src/main/java/com/ai/limbs/plugin/runtime/InProcessPluginApi.kt"
 
 CATALOG_ID_RE = re.compile(r'HostPrimitiveDefinition\(\s*\d+\s*,\s*"([^"]+)"')
 REGISTRY_ENTRY_RE = re.compile(
@@ -90,6 +93,7 @@ def main() -> int:
         "host.ui.layout@1",
         "host.privileged.runtime@1",
         "host.resident.runtime@1",
+        "host.ui.presentation@1",
     }
     missing_required_host = sorted(required_host_owned - host_owned)
     if missing_required_host:
@@ -117,6 +121,43 @@ def main() -> int:
     router_text = ROUTER.read_text(encoding="utf-8")
     gateway_text = CAPABILITY_GATEWAY.read_text(encoding="utf-8")
     kernel_text = KERNEL_ADAPTER.read_text(encoding="utf-8")
+
+    for capability_id in ("host.logging@1", "host.ui.presentation@1"):
+        expected = f'invokeSystemHostFromPlugin(ownerPluginId, "{capability_id}", parameters)'
+        if expected not in gateway_text:
+            errors.append(f"{capability_id} bypassed RuntimeCapabilityRouter in PluginHostCapabilityRegistry")
+    if "private suspend fun invokeLogging(" in gateway_text or "private fun invokePagePresentation(" in gateway_text:
+        errors.append("PluginHostCapabilityRegistry reintroduced local Host Primitive bypass helpers")
+    if '"host.ui.presentation@1" to primitive(HostGatewayExecutionAffinity.HOST_UI' not in HOST_GATEWAY_BINDINGS.read_text(encoding="utf-8"):
+        errors.append("host.ui.presentation@1 is missing HOST_UI gateway binding")
+    if '"host.ui.presentation@1" -> invokeUiPresentation(ownerPluginId, op, parameters)' not in kernel_text:
+        errors.append("KernelHostPrimitiveAdapter is missing host.ui.presentation@1 handler")
+
+    logging_text = HOST_LOGGING_SERVICE.read_text(encoding="utf-8")
+    platform_kernel_text = PLATFORM_KERNEL.read_text(encoding="utf-8")
+    runtime_api_text = RUNTIME_API.read_text(encoding="utf-8")
+    logging_contract_tokens = (
+        "bindPluginSourceProvider(provider: suspend () -> List<PluginSnapshot>)",
+        "val runtimeSnapshots = pluginSources?.invoke()",
+    )
+    for token in logging_contract_tokens:
+        if token not in logging_text:
+            errors.append(f"HostLoggingService lost canonical PluginManager inventory binding: {token}")
+    if "loggingService.bindPluginSourceProvider(manager::snapshots)" not in platform_kernel_text:
+        errors.append("PluginPlatformKernel does not bind logging sources to PluginManager snapshots")
+
+    extension_hub_compat_tokens = (
+        'EXTENSION_HUB_COMPAT_SERVICE_ID = "system.extension.hub"',
+        "extensionHubCompatRecord(contributions)",
+        "invokeExtensionHubCompat(contributions, method, args)",
+        "record.payload !is com.ai.limbs.plugin.runtime.ExtensionHubService",
+        'if (operation != "install")',
+    )
+    for token in extension_hub_compat_tokens:
+        if token not in kernel_text:
+            errors.append(f"Extension Hub provider/service compatibility bridge regressed: {token}")
+    if "const val EXTENSION_HUB_SERVICE = EXTENSION_HUB_PROVIDER" not in runtime_api_text:
+        errors.append("Runtime SDK lost the canonical Extension Hub service/provider alias")
     privilege_text = PRIVILEGE_RUNTIME.read_text(encoding="utf-8")
     resident_backend_text = RESIDENT_BACKEND.read_text(encoding="utf-8")
     resident_core_main_text = RESIDENT_CORE_MAIN.read_text(encoding="utf-8")

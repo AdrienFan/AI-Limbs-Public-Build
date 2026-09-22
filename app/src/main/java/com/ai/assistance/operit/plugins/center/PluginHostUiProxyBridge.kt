@@ -239,6 +239,7 @@ internal class ResidentUiProxyClient(
     }
 
     fun setPresentationMode(ownerPluginId: String, screenId: String, mode: PluginPagePresentationMode) {
+        runtime.pagePresentationRegistry.set(ownerPluginId, screenId, mode)
         scope.launch {
             runCatching {
                 command(

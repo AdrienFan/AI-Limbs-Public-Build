@@ -752,8 +752,6 @@ internal object PluginPlatformKernel {
                 appContext,
                 surfacePolicy,
                 usageStore,
-                uiRegistry,
-                pagePresentationRegistry,
                 loggingService,
                 role
             )
@@ -937,6 +935,7 @@ internal object PluginPlatformKernel {
                 packageVerifier = PluginPackageVerifier(officialIdentities)
             )
             manager.initialize()
+            loggingService.bindPluginSourceProvider(manager::snapshots)
             appContextInstance = appContext
             managerInstance = manager
             runtimeAdaptersInstance = runtimeAdapters

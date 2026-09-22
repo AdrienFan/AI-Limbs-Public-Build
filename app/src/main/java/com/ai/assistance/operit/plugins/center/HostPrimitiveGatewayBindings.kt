@@ -253,6 +253,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.privileged.runtime@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("status")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("pair")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("prepare")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("stop")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("select"))),
         "host.resident.runtime@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK, kernel("status"), kernel("set_enabled"), kernel("start"), kernel("stop"), kernel("core_status"), kernel("core_probe"), kernel("core_stop")),
         "host.ui.layout@1" to primitive(HostGatewayExecutionAffinity.HOST_UI, kernel("status"), kernel("start"), kernel("finish"), kernel("reset")),
+        "host.ui.presentation@1" to primitive(HostGatewayExecutionAffinity.HOST_UI, kernel("set_mode"), kernel("get_mode")),
         "host.interaction.cycle@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("status"), kernel("set_timeout"), kernel("reset"), kernel("release_gate"), kernel("close")),
     )
 
