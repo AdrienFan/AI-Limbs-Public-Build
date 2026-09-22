@@ -52,7 +52,7 @@ object OfficialPackageProfiles {
         "provides",
         provides(
             capabilities = listOf("plugin.extension_hub.export_backups"),
-            providers = listOf("system.extension.hub")
+            services = listOf("system.extension.hub")
         )
     )
 

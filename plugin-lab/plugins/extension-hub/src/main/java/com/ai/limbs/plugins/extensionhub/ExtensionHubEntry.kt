@@ -2,10 +2,10 @@ package com.ai.limbs.plugins.extensionhub
 
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionTarget
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import com.ai.limbs.plugin.runtime.InProcessServiceEndpoint
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import java.io.File
 import java.io.FileOutputStream
@@ -19,10 +19,20 @@ import org.json.JSONObject
 class ExtensionHubEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
         val service = ExtensionHubAdmissionService(host)
-        host.registerProvider(
-            InProcessSystemIds.EXTENSION_HUB_PROVIDER,
-            service,
-            mapOf(
+        host.registerService(
+            id = EXTENSION_HUB_SERVICE_ID,
+            apiVersion = EXTENSION_HUB_SERVICE_API,
+            endpoint = InProcessServiceEndpoint { operation, parametersJson ->
+                check(operation == "install") {
+                    "Extension Hub service supports only install"
+                }
+                val parameters = JSONObject(parametersJson)
+                val packageFile = File(parameters.getString("package_path")).canonicalFile
+                val expectedParent = parameters.optString("expected_parent_plugin_id").trim().ifBlank { null }
+                val expectedPoint = parameters.optString("expected_point").trim().ifBlank { null }
+                childSnapshotJson(service.install(packageFile, expectedParent, expectedPoint)).toString()
+            },
+            metadata = mapOf(
                 "format" to ExtensionPackage.FORMAT,
                 "package_extension" to ExtensionPackage.SUFFIX,
                 "role" to "admission_only"
@@ -31,6 +41,23 @@ class ExtensionHubEntry : InProcessPluginEntry {
         return InProcessPluginHandle { }
     }
 }
+
+private const val EXTENSION_HUB_SERVICE_ID = "system.extension.hub"
+private const val EXTENSION_HUB_SERVICE_API = 1
+
+private fun childSnapshotJson(value: ChildExtensionSnapshot): JSONObject = JSONObject()
+    .put("extension_id", value.extensionId)
+    .put("version", value.version)
+    .put("display_name", value.displayName)
+    .put("description", value.description ?: JSONObject.NULL)
+    .put("parent_plugin_id", value.target.parentPluginId)
+    .put("point", value.target.point)
+    .put("api_version", value.target.apiVersion)
+    .put("lifecycle", value.lifecycle.name.lowercase())
+    .put("enabled", value.enabled)
+    .put("roles", JSONArray(value.roles.toList().sorted()))
+    .put("use_count", value.useCount)
+    .put("last_error", value.lastError ?: JSONObject.NULL)
 
 private object ExtensionPackage {
     const val FORMAT = "AIL_EXTENSION_V1"
@@ -64,7 +91,7 @@ private data class ExtensionManifest(
 
 private class ExtensionHubAdmissionService(
     private val host: InProcessPluginHost
-) : ExtensionHubService {
+) {
     private val delegatedGateway = requireNotNull(
         host.services.resolve(DELEGATED_GATEWAY_SERVICE, DELEGATED_GATEWAY_API)
     ) { "Plugin Center delegated gateway is unavailable" }.also { binding ->
@@ -75,7 +102,7 @@ private class ExtensionHubAdmissionService(
 
     private val stagingRoot = File(host.cacheDir, "extension_admission")
 
-    override suspend fun install(
+    suspend fun install(
         packageFile: File,
         expectedParentPluginId: String?,
         expectedPoint: String?

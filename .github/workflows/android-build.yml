@@ -211,7 +211,7 @@ jobs:
 
   extension_hub:
     if: inputs.target == 'extension-hub'
-    name: Build Plugin Extension Hub v1.5.4 only
+    name: Build Plugin Extension Hub v1.5.5 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -241,6 +241,9 @@ jobs:
       - name: Configure Android SDK
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Validate Extension Hub canonical Service
+        shell: bash
+        run: python3 tools/plugin_lab/check_extension_hub_canonical_service.py
       - name: Build Extension Hub payload
         shell: bash
         run: |
@@ -250,7 +253,7 @@ jobs:
       - name: Upload Extension Hub payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: extension-hub-v1.5.4-${{ github.run_number }}
+          name: extension-hub-v1.5.5-${{ github.run_number }}
           path: |
             plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
             plugin-lab/packages/extension-hub/plugin.json
