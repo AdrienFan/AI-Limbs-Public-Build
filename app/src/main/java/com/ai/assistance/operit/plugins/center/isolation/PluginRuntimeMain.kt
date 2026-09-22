@@ -200,6 +200,15 @@ object PluginRuntimeMain {
                             "child_control" -> runBlocking {
                                 worker.childControl(payload.getString("child_operation"), payload)
                             }
+                            "provider_child_install" -> runBlocking {
+                                worker.installFromProvider(
+                                    payload.getString("plugin_id"),
+                                    payload.getString("provider_id"),
+                                    payload.getString("package_path"),
+                                    payload.optString("expected_parent_plugin_id").trim().ifBlank { null },
+                                    payload.optString("expected_point").trim().ifBlank { null }
+                                )
+                            }
                             "child_install" -> runBlocking {
                                 worker.installChild(
                                     payload.getString("package_path"),

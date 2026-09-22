@@ -225,7 +225,8 @@ internal class PluginWorkerRuntime(
                     dataDir = dataDir,
                     cacheDir = cacheDir,
                     installMetadata = metadata,
-                    payloadContext = payloadContext
+                    payloadContext = payloadContext,
+                    canonicalRestore = mountScope.canonicalRestore
                 ),
                 scope = mountScope
             )
@@ -358,13 +359,30 @@ internal class PluginWorkerRuntime(
         }
     }
 
-    suspend fun installChild(packagePath: String, expectedParentPluginId: String?, expectedPoint: String?): JSONObject {
-        val record = contributions.find(PluginContributionKind.PROVIDER, InProcessSystemIds.EXTENSION_HUB_PROVIDER)
-            ?: throw PluginInstallException("WORKER_EXTENSION_HUB_UNAVAILABLE", "Extension Hub provider is not active")
+    suspend fun installFromProvider(
+        pluginId: String,
+        providerId: String,
+        packagePath: String,
+        expectedParentPluginId: String?,
+        expectedPoint: String?
+    ): JSONObject {
+        val record = requireProvider(pluginId, providerId)
         val service = record.payload as? ExtensionHubService
-            ?: throw PluginInstallException("WORKER_EXTENSION_HUB_INVALID", "Extension Hub provider has incompatible payload")
+            ?: throw PluginInstallException(
+                "WORKER_PROVIDER_PROTOCOL_MISMATCH",
+                "Provider is not a child-extension installer: " + providerId
+            )
         return childSnapshotJson(service.install(java.io.File(packagePath), expectedParentPluginId, expectedPoint))
     }
+
+    suspend fun installChild(packagePath: String, expectedParentPluginId: String?, expectedPoint: String?): JSONObject =
+        installFromProvider(
+            InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID,
+            InProcessSystemIds.EXTENSION_HUB_PROVIDER,
+            packagePath,
+            expectedParentPluginId,
+            expectedPoint
+        )
 
     suspend fun performChildUi(
         extensionId: String,
@@ -425,23 +443,7 @@ internal class PluginWorkerRuntime(
             .filter { it.kind == PluginContributionKind.PROVIDER }
             .sortedBy { it.id }
             .forEach { record ->
-                val base = JSONObject()
-                    .put("id", record.id)
-                    .put("metadata", JSONObject(record.metadata))
-                when (val payload = record.payload) {
-                    is InProcessUiStateProvider -> put(
-                        base.put("kind", "ui_state")
-                            .put("state_json", payload.stateJson.value ?: JSONObject.NULL)
-                    )
-                    is InProcessCapabilityExecutor -> put(base.put("kind", "capability_executor"))
-                    is InProcessPageProvider -> put(base.put("kind", "page_local"))
-                    BusinessPageProviderMetadata -> put(base.put("kind", "page_local"))
-                    is ExtensionHubService -> put(base.put("kind", "extension_hub"))
-                    else -> throw PluginInstallException(
-                        "WORKER_PROVIDER_NOT_PROXYABLE",
-                        "Provider ${record.id} has no structured cross-process contract: ${payload?.let { it::class.java.name } ?: "null"}"
-                    )
-                }
+                put(ProviderContributionTransportCodec.encode(record))
             }
     }
 

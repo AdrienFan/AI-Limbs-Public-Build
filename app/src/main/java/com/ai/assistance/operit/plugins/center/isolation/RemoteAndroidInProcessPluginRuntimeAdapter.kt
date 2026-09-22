@@ -27,7 +27,6 @@ import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionTarget
 import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
-import com.ai.limbs.plugin.runtime.InProcessSystemIds
 import java.io.File
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -260,75 +259,54 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
 
         private fun registerProviders(descriptors: JSONArray) {
             for (index in 0 until descriptors.length()) {
-                val d = descriptors.getJSONObject(index)
-                val id = d.getString("id")
-                val metadata = d.optJSONObject("metadata")?.toStringMap().orEmpty()
-                when (d.getString("kind")) {
-                    "capability_executor" -> context.payloadContext.registrar.registerProvider(
-                        id,
-                        InProcessCapabilityExecutor { parametersJson ->
+                val envelope = ProviderContributionTransportCodec.decode(descriptors.getJSONObject(index))
+                val contract = envelope.contract
+                val id = contract.id
+                val payload: Any = when (envelope.protocol) {
+                    ProviderProxyProtocol.CAPABILITY_EXECUTOR -> InProcessCapabilityExecutor { parametersJson ->
+                        ensureMounted()
+                        val sid = checkNotNull(sessionId)
+                        val result = PluginRuntimeWire.request(
+                            "provider_executor",
+                            sid,
+                            JSONObject()
+                                .put("plugin_id", pluginId)
+                                .put("provider_id", id)
+                                .put("parameters_json", parametersJson),
+                            PluginRuntimeWire.BUSINESS_TIMEOUT_MS
+                        )
+                        result.getJSONObject("operation_result").getString("result_json")
+                    }
+                    ProviderProxyProtocol.UI_STATE ->
+                        RemoteUiStateProvider(id, envelope.proxy.optNullableString("state_json"))
+                    ProviderProxyProtocol.PAGE_METADATA -> RemotePageProviderMetadata
+                    ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER -> object : ExtensionHubService {
+                        override suspend fun install(
+                            packageFile: File,
+                            expectedParentPluginId: String?,
+                            expectedPoint: String?
+                        ): ChildExtensionSnapshot {
                             ensureMounted()
                             val sid = checkNotNull(sessionId)
                             val result = PluginRuntimeWire.request(
-                                "provider_executor",
+                                "provider_child_install",
                                 sid,
                                 JSONObject()
                                     .put("plugin_id", pluginId)
                                     .put("provider_id", id)
-                                    .put("parameters_json", parametersJson),
+                                    .put("package_path", packageFile.absolutePath)
+                                    .put("expected_parent_plugin_id", expectedParentPluginId ?: "")
+                                    .put("expected_point", expectedPoint ?: ""),
                                 PluginRuntimeWire.BUSINESS_TIMEOUT_MS
                             )
-                            result.getJSONObject("operation_result").getString("result_json")
-                        },
-                        metadata
-                    )
-                    "ui_state" -> {
-                        val provider = RemoteUiStateProvider(id, d.optNullableString("state_json"))
-                        uiProviders[id] = provider
-                        context.payloadContext.registrar.registerProvider(id, provider, metadata)
-                    }
-                    "page_local" -> context.payloadContext.registrar.registerProvider(
-                        id,
-                        RemotePageProviderMetadata,
-                        metadata
-                    )
-                    "extension_hub" -> {
-                        check(pluginId == InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
-                            "Only the canonical Extension Hub plugin may publish extension_hub"
+                            return parseChildSnapshot(result.getJSONObject("operation_result"))
                         }
-                        check(id == InProcessSystemIds.EXTENSION_HUB_PROVIDER) {
-                            "Extension Hub provider id mismatch: $id"
-                        }
-                        context.payloadContext.registrar.registerProvider(
-                            id,
-                            object : ExtensionHubService {
-                                override suspend fun install(
-                                    packageFile: File,
-                                    expectedParentPluginId: String?,
-                                    expectedPoint: String?
-                                ): ChildExtensionSnapshot {
-                                    ensureMounted()
-                                    val sid = checkNotNull(sessionId)
-                                    val result = PluginRuntimeWire.request(
-                                        "child_install",
-                                        sid,
-                                        JSONObject()
-                                            .put("package_path", packageFile.absolutePath)
-                                            .put("expected_parent_plugin_id", expectedParentPluginId ?: "")
-                                            .put("expected_point", expectedPoint ?: ""),
-                                        PluginRuntimeWire.BUSINESS_TIMEOUT_MS
-                                    )
-                                    return parseChildSnapshot(result.getJSONObject("operation_result"))
-                                }
-                            },
-                            metadata
-                        )
                     }
-                    "worker_local" -> Unit
-                    else -> throw PluginInstallException(
-                        "PLUGIN_WORKER_PROVIDER_UNSUPPORTED",
-                        "Worker returned unsupported provider kind: ${d.getString("kind")}"
-                    )
+                }
+
+                context.canonicalRestore.registerProvider(contract, payload)
+                if (payload is RemoteUiStateProvider) {
+                    uiProviders[id] = payload
                 }
             }
         }
@@ -338,9 +316,10 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
             val snapshot = ensureMounted()
             val descriptors = snapshot.optJSONArray("providers") ?: JSONArray()
             for (index in 0 until descriptors.length()) {
-                val d = descriptors.getJSONObject(index)
-                if (d.optString("kind") == "ui_state") {
-                    uiProviders[d.getString("id")]?.update(d.optNullableString("state_json"))
+                val envelope = ProviderContributionTransportCodec.decode(descriptors.getJSONObject(index))
+                if (envelope.protocol == ProviderProxyProtocol.UI_STATE) {
+                    uiProviders[envelope.contract.id]
+                        ?.update(envelope.proxy.optNullableString("state_json"))
                 }
             }
             updateNotification(snapshot.optJSONObject("notification"))

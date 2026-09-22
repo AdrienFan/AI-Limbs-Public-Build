@@ -52,7 +52,8 @@ internal data class PluginRuntimeAdapterContext(
     val dataDir: File,
     val cacheDir: File,
     val installMetadata: PluginInstallMetadata,
-    val payloadContext: PluginContext
+    val payloadContext: PluginContext,
+    val canonicalRestore: CanonicalContributionRestoreSink
 )
 
 internal interface PluginRuntimeHandle {

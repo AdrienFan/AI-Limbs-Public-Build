@@ -912,7 +912,8 @@ internal class PluginManager(
                             dataDir = dataDir,
                             cacheDir = cacheDir,
                             installMetadata = installMetadata,
-                            payloadContext = payloadContext
+                            payloadContext = payloadContext,
+                            canonicalRestore = mountScope.canonicalRestore
                         ),
                     scope = mountScope
                 )

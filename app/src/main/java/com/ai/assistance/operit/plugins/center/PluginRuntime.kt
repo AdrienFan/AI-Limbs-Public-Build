@@ -305,6 +305,38 @@ class PluginRegistrar internal constructor(
     }
 }
 
+internal class CanonicalContributionRestoreSink(
+    private val expectedOwnerPluginId: String,
+    private val registry: PluginContributionRegistry,
+    private val track: (AutoCloseable) -> Unit
+) {
+    /**
+     * Restores a Provider that was already validated and canonicalized in the isolated Worker.
+     *
+     * This is deliberately not a second PluginRegistrar business-validation pass. The only checks
+     * here are transport integrity: the wire contract must still be a Provider and must belong to
+     * the plugin session that is currently being restored.
+     */
+    fun registerProvider(contract: CanonicalContributionContract, payload: Any) {
+        if (
+            contract.kind != PluginContributionKind.PROVIDER ||
+            contract.contractType != PluginContributionContractType.PROVIDER_BINDING
+        ) {
+            throw PluginInstallException(
+                "REMOTE_CONTRIBUTION_KIND_INVALID",
+                "Remote canonical restore accepts Provider contributions only"
+            )
+        }
+        if (contract.ownerPluginId != expectedOwnerPluginId) {
+            throw PluginInstallException(
+                "REMOTE_CONTRIBUTION_OWNER_MISMATCH",
+                "Remote Provider owner " + contract.ownerPluginId + " does not match " + expectedOwnerPluginId
+            )
+        }
+        track(registry.register(PluginContributionRecord(contract, payload)))
+    }
+}
+
 internal class PluginCallerLease {
     @Volatile
     private var active = true
@@ -348,6 +380,12 @@ class PluginMountScope internal constructor(
             handles.addLast(handle)
         }
     }
+
+    internal val canonicalRestore = CanonicalContributionRestoreSink(
+        expectedOwnerPluginId = manifest.pluginId,
+        registry = registry,
+        track = ::trackOwned
+    )
 
     internal fun trackOwned(handle: AutoCloseable) {
         synchronized(this) {

@@ -57,6 +57,9 @@ jobs:
       - name: Validate canonical contribution contract
         run: python3 ci/script/check_canonical_contribution_contract.py
 
+      - name: Validate canonical Provider transport
+        run: python3 ci/script/check_provider_canonical_transport.py
+
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
@@ -186,12 +189,15 @@ jobs:
           chmod 600 "$signing_file"
           keytool -list -keystore "$signing_file" -storepass "$AI_LIMBS_ANDROID_STORE_PASSWORD" -alias "$AI_LIMBS_ANDROID_KEY_ALIAS" >/dev/null
 
-      - name: Test canonical contribution contract
+      - name: Test canonical contribution contracts
         shell: bash
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew :app:testDebugUnitTest --tests com.ai.assistance.operit.plugins.center.CanonicalContributionContractTest --stacktrace --no-daemon
+          ./gradlew :app:testDebugUnitTest \
+            --tests com.ai.assistance.operit.plugins.center.CanonicalContributionContractTest \
+            --tests com.ai.assistance.operit.plugins.center.ProviderContributionTransportTest \
+            --stacktrace --no-daemon
 
       - name: Run Gradle build
         env:
