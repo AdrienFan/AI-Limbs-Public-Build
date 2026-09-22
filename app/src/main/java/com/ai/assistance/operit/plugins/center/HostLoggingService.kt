@@ -82,34 +82,35 @@ internal class HostLoggingService(
         items.put(sourceJson("global", "global", "全局日志", null, null, true))
         items.put(sourceJson("host", "host", "基座日志", null, null, true))
 
-        val runtimeSnapshots = pluginSources?.invoke()
-        if (runtimeSnapshots != null) {
-            runtimeSnapshots
-                .sortedBy { it.pluginId }
-                .forEach { snapshot ->
-                    val state = snapshot.persistentState
-                    val version = state?.activeVersion ?: snapshot.versions.lastOrNull()
-                    val manifest = snapshot.activeManifest
-                    items.put(
-                        sourceJson(
-                            "plugin",
-                            snapshot.pluginId,
-                            manifest?.display?.name ?: snapshot.pluginId,
-                            version,
-                            null,
-                            state?.enabled == true
-                        )
-                    )
-                }
-        } else {
-            // Bootstrap/test fallback only. Production Kernel binds PluginManager::snapshots so
-            // Log Center observes the same canonical runtime inventory as Plugin Center itself.
-            pluginStore.listPluginIds().forEach { pluginId ->
-                val state = states.read(pluginId)
-                val version = state?.activeVersion ?: pluginStore.listVersions(pluginId).lastOrNull()
-                val manifest = version?.let { runCatching { states.readInstalledManifest(pluginId, it) }.getOrNull() }
-                items.put(sourceJson("plugin", pluginId, manifest?.display?.name ?: pluginId, version, null, state?.enabled == true))
-            }
+        val runtimeSnapshots = try {
+            pluginSources?.invoke().orEmpty()
+        } catch (_: Throwable) {
+            emptyList()
+        }
+        val runtimeById = runtimeSnapshots.associateBy { it.pluginId }
+        val pluginIds = (pluginStore.listPluginIds() + runtimeById.keys)
+            .distinct()
+            .sorted()
+
+        pluginIds.forEach { pluginId ->
+            val snapshot = runtimeById[pluginId]
+            val state = snapshot?.persistentState ?: states.read(pluginId)
+            val version = state?.activeVersion
+                ?: snapshot?.versions?.lastOrNull()
+                ?: pluginStore.listVersions(pluginId).lastOrNull()
+            val manifest = snapshot?.activeManifest
+                ?: version?.let { runCatching { states.readInstalledManifest(pluginId, it) }.getOrNull() }
+
+            items.put(
+                sourceJson(
+                    "plugin",
+                    pluginId,
+                    manifest?.display?.name ?: pluginId,
+                    version,
+                    null,
+                    state?.enabled == true
+                )
+            )
         }
 
         childSources().sortedBy { it.displayName.lowercase(Locale.ROOT) }.forEach { child ->

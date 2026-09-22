@@ -151,7 +151,8 @@ def main() -> int:
     runtime_api_text = RUNTIME_API.read_text(encoding="utf-8")
     logging_contract_tokens = (
         "bindPluginSourceProvider(provider: suspend () -> List<PluginSnapshot>)",
-        "val runtimeSnapshots = pluginSources?.invoke()",
+        "pluginSources?.invoke().orEmpty()",
+        "pluginStore.listPluginIds() + runtimeById.keys",
     )
     for token in logging_contract_tokens:
         if token not in logging_text:
