@@ -7,6 +7,7 @@ import com.ai.assistance.operit.plugins.center.PluginServiceEndpoint
 import com.ai.assistance.operit.plugins.center.PluginServiceCaller
 import com.ai.assistance.operit.plugins.center.CallerAwarePluginServiceEndpoint
 import com.ai.assistance.operit.plugins.center.ChildExtensionRuntime
+import com.ai.assistance.operit.plugins.center.ChildRuntimeAuthorityRoles
 import com.ai.assistance.operit.plugins.center.CanonicalChildDescriptorKind
 import com.ai.assistance.operit.plugins.center.CanonicalChildDescriptorEnvelopeCodec
 import com.ai.assistance.operit.plugins.center.CanonicalChildDescriptorEnvelope
