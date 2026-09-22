@@ -36,6 +36,23 @@ internal data class VaultSignature(
  * Keystore wrapping key.
  */
 internal class DevelopmentSigningVault(private val dataDir: File) {
+    private class VaultStageException(
+        val stage: String,
+        cause: Throwable
+    ) : IllegalStateException(
+        "[$stage] ${cause.message ?: cause::class.java.simpleName}",
+        cause
+    )
+
+    private inline fun <T> stage(name: String, block: () -> T): T =
+        try {
+            block()
+        } catch (error: VaultStageException) {
+            throw error
+        } catch (error: Throwable) {
+            throw VaultStageException(name, error)
+        }
+
     private data class Profile(
         val type: PackagerArtifactType,
         val wireName: String,
@@ -74,23 +91,28 @@ internal class DevelopmentSigningVault(private val dataDir: File) {
         require(pem.isNotEmpty()) { "私钥文件为空" }
         require(pem.size <= MAX_PRIVATE_KEY_BYTES) { "私钥文件过大" }
         val profile = requireProfile(type)
-        validatePrivateKey(profile, pem)
-        if (!root.exists() && !root.mkdirs()) error("无法创建开发签名仓")
+        stage("ED25519_SELF_TEST") { validatePrivateKey(profile, pem) }
+        stage("VAULT_DIRECTORY") {
+            if (!root.exists() && !root.mkdirs()) error("无法创建开发签名仓")
+        }
         val target = blobFile(profile)
         val temporary = File(root, ".${profile.wireName}-${UUID.randomUUID()}.tmp")
         try {
-            temporary.writeBytes(encrypt(pem))
-            harden(temporary)
-            if (target.exists() && !target.delete()) error("无法替换旧签名密钥")
-            if (!temporary.renameTo(target)) {
-                temporary.copyTo(target, overwrite = true)
-                temporary.delete()
+            val encrypted = stage("KEYSTORE_ENCRYPT") { encrypt(pem) }
+            stage("VAULT_WRITE") {
+                temporary.writeBytes(encrypted)
+                harden(temporary)
+                if (target.exists() && !target.delete()) error("无法替换旧签名密钥")
+                if (!temporary.renameTo(target)) {
+                    temporary.copyTo(target, overwrite = true)
+                    temporary.delete()
+                }
+                harden(target)
             }
-            harden(target)
         } finally {
             temporary.delete()
         }
-        return profileStatus(profile, validate = true)
+        return stage("VAULT_REOPEN") { profileStatus(profile, validate = true) }
     }
 
     fun sign(type: PackagerArtifactType, data: ByteArray): VaultSignature {
@@ -174,25 +196,38 @@ internal class DevelopmentSigningVault(private val dataDir: File) {
     private fun validatePrivateKey(profile: Profile, pem: ByteArray) {
         val privateKey = parsePrivateKey(pem)
         val test = "AI Limbs Packager development signing vault self-test".toByteArray(Charsets.UTF_8)
-        val signer = Signature.getInstance("Ed25519")
-        signer.initSign(privateKey)
-        signer.update(test)
-        val signature = signer.sign()
-        val verifier = Signature.getInstance("Ed25519")
-        verifier.initVerify(publicKey(profile))
-        verifier.update(test)
-        require(verifier.verify(signature)) {
+        val signature = stage("ED25519_SIGN") {
+            Signature.getInstance("Ed25519").run {
+                initSign(privateKey)
+                update(test)
+                sign()
+            }
+        }
+        val verified = stage("ED25519_VERIFY") {
+            Signature.getInstance("Ed25519").run {
+                initVerify(publicKey(profile))
+                update(test)
+                verify(signature)
+            }
+        }
+        require(verified) {
             "选择的私钥与 AI Limbs 正式 ${profile.displayName} 公钥不匹配"
         }
     }
 
-    private fun parsePrivateKey(pem: ByteArray): PrivateKey = KeyFactory.getInstance("Ed25519").generatePrivate(
-        PKCS8EncodedKeySpec(readPem(pem, "PRIVATE KEY"))
-    )
+    private fun parsePrivateKey(pem: ByteArray): PrivateKey {
+        val der = stage("PEM_DECODE") { readPem(pem, "PRIVATE KEY") }
+        return stage("ED25519_PRIVATE_KEY_PARSE") {
+            KeyFactory.getInstance("Ed25519").generatePrivate(PKCS8EncodedKeySpec(der))
+        }
+    }
 
-    private fun publicKey(profile: Profile): PublicKey = KeyFactory.getInstance("Ed25519").generatePublic(
-        X509EncodedKeySpec(Base64.getDecoder().decode(profile.publicKeyDerBase64))
-    )
+    private fun publicKey(profile: Profile): PublicKey =
+        stage("ED25519_PUBLIC_KEY_PARSE") {
+            KeyFactory.getInstance("Ed25519").generatePublic(
+                X509EncodedKeySpec(Base64.getDecoder().decode(profile.publicKeyDerBase64))
+            )
+        }
 
     private fun fingerprint(profile: Profile): String {
         val der = Base64.getDecoder().decode(profile.publicKeyDerBase64)
@@ -219,9 +254,11 @@ internal class DevelopmentSigningVault(private val dataDir: File) {
     private fun blobFile(profile: Profile): File = File(root, "${profile.wireName}.blob")
 
     private fun encrypt(plaintext: ByteArray): ByteArray {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, wrappingKey(createIfMissing = true))
-        val ciphertext = cipher.doFinal(plaintext)
+        val cipher = stage("AES_GCM_CIPHER") { Cipher.getInstance(TRANSFORMATION) }
+        stage("AES_GCM_INIT") {
+            cipher.init(Cipher.ENCRYPT_MODE, wrappingKey(createIfMissing = true))
+        }
+        val ciphertext = stage("AES_GCM_ENCRYPT") { cipher.doFinal(plaintext) }
         val iv = cipher.iv
         require(iv.size in 8..32) { "Unexpected AES-GCM IV length" }
         return ByteBuffer.allocate(2 + iv.size + ciphertext.size)
@@ -250,23 +287,29 @@ internal class DevelopmentSigningVault(private val dataDir: File) {
 
     private fun wrappingKey(createIfMissing: Boolean): SecretKey {
         val keyStore = androidKeyStore()
-        (keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey)?.let { return it }
+        stage("KEYSTORE_LOOKUP") {
+            keyStore.getKey(KEYSTORE_ALIAS, null) as? SecretKey
+        }?.let { return it }
         require(createIfMissing) { "Android Keystore 包装密钥不存在；请清除签名仓后重新导入私钥" }
-        val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
-        generator.init(
-            KeyGenParameterSpec.Builder(
-                KEYSTORE_ALIAS,
-                KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+        return stage("KEYSTORE_GENERATE") {
+            val generator = KeyGenerator.getInstance(KeyProperties.KEY_ALGORITHM_AES, "AndroidKeyStore")
+            generator.init(
+                KeyGenParameterSpec.Builder(
+                    KEYSTORE_ALIAS,
+                    KeyProperties.PURPOSE_ENCRYPT or KeyProperties.PURPOSE_DECRYPT
+                )
+                    .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
+                    .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
+                    .setKeySize(256)
+                    .build()
             )
-                .setBlockModes(KeyProperties.BLOCK_MODE_GCM)
-                .setEncryptionPaddings(KeyProperties.ENCRYPTION_PADDING_NONE)
-                .setKeySize(256)
-                .build()
-        )
-        return generator.generateKey()
+            generator.generateKey()
+        }
     }
 
-    private fun androidKeyStore(): KeyStore = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    private fun androidKeyStore(): KeyStore = stage("KEYSTORE_LOAD") {
+        KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+    }
 
     private fun harden(file: File) {
         file.setReadable(false, false)
