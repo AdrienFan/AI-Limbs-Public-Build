@@ -8,7 +8,7 @@ import tempfile
 import zipfile
 
 ROOT = Path(__file__).resolve().parents[2]
-APK = ROOT / "plugin-lab/plugins/extension-hub/build/outputs/apk/debug/plugin-extension-hub-debug.apk"
+APK = Path(os.environ.get("HUB_APK_PATH", str(ROOT / "plugin-lab/plugins/extension-hub/build/outputs/apk/debug/plugin-extension-hub-debug.apk")))
 MANIFEST = ROOT / "plugin-lab/packages/extension-hub/plugin.json"
 OUT_DIR = ROOT / "dist"
 PAYLOAD_ENTRY = "payload/plugin.apk"

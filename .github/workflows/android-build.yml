@@ -31,6 +31,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 env:
   JAVA_VERSION: '21'
@@ -252,9 +253,23 @@ jobs:
           set -euo pipefail
           chmod +x ./gradlew
           ./gradlew :plugin-extension-hub:assembleDebug --stacktrace --no-daemon
+      - name: Download exact Hub 1.5.5 payload from successful run 363
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/hub363
+          mkdir -p /tmp/hub363
+          gh run download 35723334094 -n extension-hub-v1.5.5-363 -D /tmp/hub363
+          apk="$(find /tmp/hub363 -type f -name 'plugin-extension-hub-debug.apk' -print -quit)"
+          test -n "$apk"
+          echo "HUB_EXACT_APK_PATH=$apk" >> "$GITHUB_ENV"
+          echo "2cad2a879d1c1f9dee26a29d9f8be52be7ac5d5647439ca2c39955788eaf1fd1  $apk" | sha256sum -c -
       - name: Sign installable Extension Hub package
         env:
           AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+          HUB_APK_PATH: ${{ env.HUB_EXACT_APK_PATH }}
           HUB_EXPECTED_APK_SHA256: 2cad2a879d1c1f9dee26a29d9f8be52be7ac5d5647439ca2c39955788eaf1fd1
         run: python3 tools/plugin_lab/package_extension_hub.py
       - name: Upload Extension Hub payload
