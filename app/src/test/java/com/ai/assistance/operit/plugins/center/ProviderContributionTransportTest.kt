@@ -2,9 +2,7 @@ package com.ai.assistance.operit.plugins.center
 
 import com.ai.assistance.operit.plugins.center.isolation.ProviderContributionTransportCodec
 import com.ai.assistance.operit.plugins.center.isolation.ProviderProxyProtocol
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
-import java.io.File
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -83,30 +81,6 @@ class ProviderContributionTransportTest {
             integrity = null,
             signature = null
         )
-
-    @Test
-    fun providerTransportUsesGenericChildInstallerProtocolWithoutHubWireIdentity() {
-        val contract = CanonicalContributionContracts.provider(
-            ownerPluginId = unseenPluginId,
-            id = "provider.test.child_installer"
-        )
-        val installer = object : ExtensionHubService {
-            override suspend fun install(
-                packageFile: File,
-                expectedParentPluginId: String?,
-                expectedPoint: String?
-            ) = throw UnsupportedOperationException("transport test only")
-        }
-
-        val encoded = ProviderContributionTransportCodec.encode(
-            PluginContributionRecord(contract, installer)
-        )
-        val decoded = ProviderContributionTransportCodec.decode(encoded)
-
-        assertEquals(ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER, decoded.protocol)
-        assertFalse(encoded.toString().contains("extension_hub", ignoreCase = true))
-        assertFalse(encoded.toString().contains("plugin.system.", ignoreCase = true))
-    }
 
     @Test
     fun residentRestoreRejectsOnlyGenericSessionOwnerMismatch() {

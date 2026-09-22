@@ -8,10 +8,17 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 /** Internal lifecycle/control boundary so BUSINESS can move child code out of Resident Core. */
+internal object ChildRuntimeAuthorityRoles {
+    // Existing officially-approved Hub role; authorization is based on verified role, never plugin ID.
+    const val ADMISSION = "system_extension_hub"
+    // Kernel-only authority for installed-child lifecycle administration.
+    const val RUNTIME_CONTROLLER = "kernel_child_runtime_controller"
+}
+
 internal interface ChildExtensionRuntimeOwner {
     suspend fun start()
     suspend fun stop()
-    fun bound(ownerPluginId: String, grantedScopes: Set<String>): InProcessChildExtensionRuntime
+    fun bound(ownerPluginId: String, roles: Set<String>, grantedScopes: Set<String>): InProcessChildExtensionRuntime
     suspend fun exportBackups(extensionIds: Collection<String>, treeUriRaw: String): List<String>
     fun loggingSnapshots(): List<ChildExtensionSnapshot>
     fun loggingBackupSnapshots(): List<ChildExtensionBackupSnapshot>

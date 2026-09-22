@@ -62,40 +62,48 @@ internal class RemoteChildExtensionRuntimeOwner(
         clearMirrors()
     }
 
-    override fun bound(ownerPluginId: String, grantedScopes: Set<String>): InProcessChildExtensionRuntime =
+    override fun bound(ownerPluginId: String, roles: Set<String>, grantedScopes: Set<String>): InProcessChildExtensionRuntime =
         object : InProcessChildExtensionRuntime {
             override fun publishPoint(point: String, apiVersion: Int, title: String, description: String,
                 allowedHostCapabilities: Set<String>, binder: ChildExtensionBinder): AutoCloseable =
                 throw PluginInstallException("REMOTE_CHILD_POINT_FORBIDDEN", "Parent points live in ail_plugin_runtime")
 
             override suspend fun installAdmitted(packageFile: File, expectedParentPluginId: String?, expectedPoint: String?): ChildExtensionSnapshot {
-                check(ownerPluginId == InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID)
-                val value = request("child_install", JSONObject().put("package_path", packageFile.absolutePath)
-                    .put("expected_parent_plugin_id", expectedParentPluginId ?: "").put("expected_point", expectedPoint ?: ""))
+                check(ChildRuntimeAuthorityRoles.ADMISSION in roles) {
+                    "Remote child admission requires an approved child admission authority role"
+                }
+                val value = request(
+                    "child_install",
+                    JSONObject()
+                        .put("owner_plugin_id", ownerPluginId)
+                        .put("package_path", packageFile.absolutePath)
+                        .put("expected_parent_plugin_id", expectedParentPluginId ?: "")
+                        .put("expected_point", expectedPoint ?: "")
+                )
                 refresh(); return parseChild(value)
             }
-            override suspend fun uninstall(extensionId: String): Boolean { controller(ownerPluginId); val v = control("uninstall", extensionId); refresh(); return v.getBoolean("removed") }
-            override suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot { controller(ownerPluginId); val v = control("set_enabled", extensionId, JSONObject().put("enabled", enabled)); refresh(); return parseChild(v) }
-            override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { controller(ownerPluginId); val v = control("backup", extensionId); refresh(); return parseBackup(v) }
-            override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { controller(ownerPluginId); val v = control("restore_backup", extensionId); refresh(); return parseChild(v) }
-            override suspend fun deleteBackup(extensionId: String): Boolean { controller(ownerPluginId); val v = control("delete_backup", extensionId); refresh(); return v.getBoolean("deleted") }
-            override fun versions(extensionId: String): List<String> { controller(ownerPluginId); return snapshots.value.firstOrNull { it.extensionId == extensionId }?.let { listOf(it.version) }.orEmpty() }
-            override fun retentionLimit(extensionId: String): Int { controller(ownerPluginId); return 3 }
-            override fun immediateRollbackVersion(extensionId: String): String? { controller(ownerPluginId); return null }
-            override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot { controller(ownerPluginId); val v = control("activate_version", extensionId, JSONObject().put("version", version)); refresh(); return parseChild(v) }
-            override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot { controller(ownerPluginId); val v = control("immediate_rollback", extensionId); refresh(); return parseChild(v) }
-            override suspend fun deleteVersion(extensionId: String, version: String): Boolean { controller(ownerPluginId); val v = control("delete_version", extensionId, JSONObject().put("version", version)); refresh(); return v.getBoolean("deleted") }
-            override suspend fun setVersionRetention(extensionId: String, limit: Int) { controller(ownerPluginId); control("set_version_retention", extensionId, JSONObject().put("limit", limit)); refresh() }
+            override suspend fun uninstall(extensionId: String): Boolean { controller(roles); val v = control("uninstall", extensionId); refresh(); return v.getBoolean("removed") }
+            override suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot { controller(roles); val v = control("set_enabled", extensionId, JSONObject().put("enabled", enabled)); refresh(); return parseChild(v) }
+            override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { controller(roles); val v = control("backup", extensionId); refresh(); return parseBackup(v) }
+            override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { controller(roles); val v = control("restore_backup", extensionId); refresh(); return parseChild(v) }
+            override suspend fun deleteBackup(extensionId: String): Boolean { controller(roles); val v = control("delete_backup", extensionId); refresh(); return v.getBoolean("deleted") }
+            override fun versions(extensionId: String): List<String> { controller(roles); return snapshots.value.firstOrNull { it.extensionId == extensionId }?.let { listOf(it.version) }.orEmpty() }
+            override fun retentionLimit(extensionId: String): Int { controller(roles); return 3 }
+            override fun immediateRollbackVersion(extensionId: String): String? { controller(roles); return null }
+            override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot { controller(roles); val v = control("activate_version", extensionId, JSONObject().put("version", version)); refresh(); return parseChild(v) }
+            override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot { controller(roles); val v = control("immediate_rollback", extensionId); refresh(); return parseChild(v) }
+            override suspend fun deleteVersion(extensionId: String, version: String): Boolean { controller(roles); val v = control("delete_version", extensionId, JSONObject().put("version", version)); refresh(); return v.getBoolean("deleted") }
+            override suspend fun setVersionRetention(extensionId: String, limit: Int) { controller(roles); control("set_version_retention", extensionId, JSONObject().put("limit", limit)); refresh() }
             override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) {
-                controller(ownerPluginId); control("set_auto_backup_policy", "", JSONObject().put("enabled", enabled).put("high_frequency_use_count", highFrequencyUseCount)); refresh()
+                controller(roles); control("set_auto_backup_policy", "", JSONObject().put("enabled", enabled).put("high_frequency_use_count", highFrequencyUseCount)); refresh()
             }
             override fun recordUse(extensionId: String) { scope.launch { runCatching { control("record_use", extensionId); refresh() } } }
-            override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> { controller(ownerPluginId); return snapshots.asStateFlow() }
+            override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> { controller(roles); return snapshots.asStateFlow() }
             override fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>> {
-                controller(ownerPluginId); return points.computeIfAbsent(point) { MutableStateFlow(snapshots.value.filter { it.target.point == point }) }.asStateFlow()
+                controller(roles); return points.computeIfAbsent(point) { MutableStateFlow(snapshots.value.filter { it.target.point == point }) }.asStateFlow()
             }
-            override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> { controller(ownerPluginId); return backups.asStateFlow() }
-            override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> { controller(ownerPluginId); return ui.asStateFlow() }
+            override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> { controller(roles); return backups.asStateFlow() }
+            override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> { controller(roles); return ui.asStateFlow() }
         }
 
     override suspend fun exportBackups(extensionIds: Collection<String>, treeUriRaw: String): List<String> {
@@ -264,7 +272,11 @@ internal class RemoteChildExtensionRuntimeOwner(
         snapshots.value = emptyList(); backups.value = emptyList(); ui.value = emptyList(); canonicalDescriptors = emptyList()
         points.values.forEach { it.value = emptyList() }; uiProviders.clear(); presentations = JSONArray(); runtime = JSONObject()
     }
-    private fun controller(owner: String) { check(owner == InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID) { "Child runtime administration is reserved for Plugin Center" } }
+    private fun controller(roles: Set<String>) {
+        check(ChildRuntimeAuthorityRoles.RUNTIME_CONTROLLER in roles) {
+            "Child runtime administration requires the kernel runtime-controller role"
+        }
+    }
 }
 
 private fun JSONObject.nullable(key: String): String? = if (!has(key) || isNull(key)) null else getString(key)

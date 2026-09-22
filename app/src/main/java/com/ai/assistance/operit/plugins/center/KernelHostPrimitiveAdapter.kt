@@ -228,96 +228,30 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "list" -> JSONObject().put(
                 "services",
                 JSONArray().apply {
-                    val services = contributions.listAll()
+                    contributions.listAll()
                         .filter { it.kind == PluginContributionKind.SERVICE }
-                    services.forEach { put(serviceJson(it)) }
-                    if (services.none { it.id == EXTENSION_HUB_COMPAT_SERVICE_ID }) {
-                        extensionHubCompatRecord(contributions)?.let {
-                            put(extensionHubCompatServiceJson(it))
-                        }
-                    }
+                        .forEach { put(serviceJson(it)) }
                 }
             )
             "describe" -> {
                 val id = required(parameters, "service_id")
                 val record = contributions.find(PluginContributionKind.SERVICE, id)
-                if (record != null) {
-                    JSONObject().put("service", serviceJson(record))
-                } else if (id == EXTENSION_HUB_COMPAT_SERVICE_ID) {
-                    val provider = extensionHubCompatRecord(contributions)
-                        ?: throw PluginInstallException("SERVICE_NOT_ACTIVE", "Service is not active: $id")
-                    JSONObject().put("service", extensionHubCompatServiceJson(provider))
-                } else {
-                    throw PluginInstallException("SERVICE_NOT_ACTIVE", "Service is not active: $id")
-                }
+                    ?: throw PluginInstallException("SERVICE_NOT_ACTIVE", "Service is not active: $id")
+                JSONObject().put("service", serviceJson(record))
             }
             "call" -> {
                 val id = required(parameters, "service_id")
                 val method = required(parameters, "operation")
                 val args = parameters.optJSONObject("parameters") ?: JSONObject()
                 val record = contributions.find(PluginContributionKind.SERVICE, id)
-                if (record != null) {
-                    val endpoint = record.payload as? PluginServiceEndpoint
-                        ?: throw PluginInstallException("SERVICE_NOT_CALLABLE", "Service has no PluginServiceEndpoint: $id")
-                    endpoint.invoke(method, JSONObject(args.toString()))
-                } else if (id == EXTENSION_HUB_COMPAT_SERVICE_ID) {
-                    invokeExtensionHubCompat(contributions, method, args)
-                } else {
-                    throw PluginInstallException("SERVICE_NOT_ACTIVE", "Service is not active: $id")
-                }
+                    ?: throw PluginInstallException("SERVICE_NOT_ACTIVE", "Service is not active: $id")
+                val endpoint = record.payload as? PluginServiceEndpoint
+                    ?: throw PluginInstallException("SERVICE_NOT_CALLABLE", "Service has no PluginServiceEndpoint: $id")
+                endpoint.invoke(method, JSONObject(args.toString()))
             }
             else -> unsupported("host.plugin.service@1", operation)
         }
     }
-
-    private fun extensionHubCompatRecord(
-        contributions: PluginContributionRegistry
-    ): PluginContributionRecord? {
-        val record = contributions.find(
-            PluginContributionKind.PROVIDER,
-            EXTENSION_HUB_COMPAT_SERVICE_ID
-        ) ?: return null
-        if (record.ownerPluginId != EXTENSION_HUB_OWNER_PLUGIN_ID) return null
-        if (record.payload !is com.ai.limbs.plugin.runtime.ExtensionHubService) return null
-        return record
-    }
-
-    private suspend fun invokeExtensionHubCompat(
-        contributions: PluginContributionRegistry,
-        operation: String,
-        parameters: JSONObject
-    ): JSONObject {
-        if (operation != "install") {
-            throw PluginInstallException(
-                "SERVICE_OPERATION_UNSUPPORTED",
-                "Extension Hub compatibility service supports only install"
-            )
-        }
-        val record = extensionHubCompatRecord(contributions)
-            ?: throw PluginInstallException(
-                "SERVICE_NOT_ACTIVE",
-                "Service is not active: $EXTENSION_HUB_COMPAT_SERVICE_ID"
-            )
-        val hub = record.payload as com.ai.limbs.plugin.runtime.ExtensionHubService
-        val packageFile = File(required(parameters, "package_path")).canonicalFile
-        check(packageFile.isFile) {
-            "Selected child extension package is unavailable: " + packageFile.path
-        }
-        val expectedParent = parameters.optString("expected_parent_plugin_id").trim().ifBlank { null }
-        val expectedPoint = parameters.optString("expected_point").trim().ifBlank { null }
-        return childExtensionSnapshotJson(
-            hub.install(packageFile, expectedParent, expectedPoint)
-        )
-    }
-
-    private fun extensionHubCompatServiceJson(record: PluginContributionRecord): JSONObject =
-        JSONObject()
-            .put("service_id", EXTENSION_HUB_COMPAT_SERVICE_ID)
-            .put("owner_plugin_id", record.ownerPluginId)
-            .put("api_version", 1)
-            .put("metadata", JSONObject(record.metadata))
-            .put("callable", true)
-            .put("compatibility", "provider_bridge")
 
     private fun serviceJson(record: PluginContributionRecord): JSONObject = JSONObject()
         .put("service_id", record.id)
@@ -325,22 +259,6 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         .put("api_version", record.apiVersion ?: 0)
         .put("metadata", JSONObject(record.metadata))
         .put("callable", record.payload is PluginServiceEndpoint)
-
-    private fun childExtensionSnapshotJson(
-        value: com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
-    ): JSONObject = JSONObject()
-        .put("extension_id", value.extensionId)
-        .put("version", value.version)
-        .put("display_name", value.displayName)
-        .put("description", value.description ?: JSONObject.NULL)
-        .put("parent_plugin_id", value.target.parentPluginId)
-        .put("point", value.target.point)
-        .put("api_version", value.target.apiVersion)
-        .put("lifecycle", value.lifecycle.name.lowercase())
-        .put("enabled", value.enabled)
-        .put("roles", JSONArray(value.roles.toList().sorted()))
-        .put("use_count", value.useCount)
-        .put("last_error", value.lastError ?: JSONObject.NULL)
 
     private fun invokeExtensionRouting(operation: String, parameters: JSONObject): JSONObject {
         val points = PluginPlatformKernel.extensionPoints
@@ -743,8 +661,6 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
 
     private companion object {
-        const val EXTENSION_HUB_COMPAT_SERVICE_ID = "system.extension.hub"
-        const val EXTENSION_HUB_OWNER_PLUGIN_ID = "plugin.system.extension_hub"
         val LISTENER_SNAPSHOT_LEVELS = listOf(
             AndroidPermissionLevel.DEBUGGER,
             AndroidPermissionLevel.ROOT,

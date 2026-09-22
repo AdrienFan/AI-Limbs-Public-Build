@@ -126,7 +126,7 @@ internal class ChildExtensionRuntime(
 ) : ChildExtensionRuntimeOwner {
     private val runtimeScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
     private val root = File(appContext.filesDir, "ai_limbs/child_runtime")
-    private val legacyRoot = File(pluginStore.dataDir(InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID), "extension_store")
+    private val legacyRoot = File(pluginStore.dataDir(LEGACY_EXTENSION_HUB_PLUGIN_ID), "extension_store")
     private val staging = File(root, "staging")
     private val extensionsRoot = File(root, "extensions")
     private val dataRoot = File(root, "data")
@@ -1363,33 +1363,33 @@ internal class ChildExtensionRuntime(
     private fun safeFile(root: File, relative: String): File { val r=root.canonicalFile; val f=File(r,safePath(relative)).canonicalFile; require(f.path.startsWith(r.path+File.separator)); return f }
     private fun sha256(file: File): String { val d=MessageDigest.getInstance("SHA-256"); file.inputStream().use { input -> val b=ByteArray(8192); while(true){val n=input.read(b); if(n<0)break; d.update(b,0,n)} }; return d.digest().joinToString(""){"%02x".format(it)} }
 
-    override fun bound(ownerPluginId: String, grantedScopes: Set<String>): InProcessChildExtensionRuntime =
+    override fun bound(ownerPluginId: String, roles: Set<String>, grantedScopes: Set<String>): InProcessChildExtensionRuntime =
         object : InProcessChildExtensionRuntime {
             override fun publishPoint(point: String, apiVersion: Int, title: String, description: String, allowedHostCapabilities: Set<String>, binder: ChildExtensionBinder): AutoCloseable =
                 this@ChildExtensionRuntime.publishPoint(ownerPluginId, grantedScopes, point, apiVersion, title, description, allowedHostCapabilities, binder)
 
             override suspend fun installAdmitted(packageFile: File, expectedParentPluginId: String?, expectedPoint: String?): ChildExtensionSnapshot {
-                requireHub(ownerPluginId)
+                requireAdmissionAuthority(roles)
                 return installAdmittedInternal(packageFile, expectedParentPluginId, expectedPoint)
             }
-            override suspend fun uninstall(extensionId: String): Boolean { requireRuntimeController(ownerPluginId); return uninstallInternal(extensionId) }
-            override suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot { requireRuntimeController(ownerPluginId); return setEnabledInternal(extensionId, enabled) }
-            override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { requireRuntimeController(ownerPluginId); return backupInternal(extensionId) }
-            override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { requireRuntimeController(ownerPluginId); return restoreBackupInternal(extensionId) }
-            override suspend fun deleteBackup(extensionId: String): Boolean { requireRuntimeController(ownerPluginId); return deleteBackupInternal(extensionId) }
-            override fun versions(extensionId: String): List<String> { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.versions(extensionId) }
-            override fun retentionLimit(extensionId: String): Int { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.retentionLimit(extensionId) }
-            override fun immediateRollbackVersion(extensionId: String): String? { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.immediateRollbackVersion(extensionId) }
-            override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.activateVersion(extensionId, version) }
-            override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.immediateRollback(extensionId) }
-            override suspend fun deleteVersion(extensionId: String, version: String): Boolean { requireRuntimeController(ownerPluginId); return this@ChildExtensionRuntime.deleteVersion(extensionId, version) }
-            override suspend fun setVersionRetention(extensionId: String, limit: Int) { requireRuntimeController(ownerPluginId); this@ChildExtensionRuntime.setVersionRetention(extensionId, limit) }
-            override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) { requireRuntimeController(ownerPluginId); setAutoBackupPolicyInternal(enabled, highFrequencyUseCount) }
+            override suspend fun uninstall(extensionId: String): Boolean { requireRuntimeController(roles); return uninstallInternal(extensionId) }
+            override suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot { requireRuntimeController(roles); return setEnabledInternal(extensionId, enabled) }
+            override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { requireRuntimeController(roles); return backupInternal(extensionId) }
+            override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { requireRuntimeController(roles); return restoreBackupInternal(extensionId) }
+            override suspend fun deleteBackup(extensionId: String): Boolean { requireRuntimeController(roles); return deleteBackupInternal(extensionId) }
+            override fun versions(extensionId: String): List<String> { requireRuntimeController(roles); return this@ChildExtensionRuntime.versions(extensionId) }
+            override fun retentionLimit(extensionId: String): Int { requireRuntimeController(roles); return this@ChildExtensionRuntime.retentionLimit(extensionId) }
+            override fun immediateRollbackVersion(extensionId: String): String? { requireRuntimeController(roles); return this@ChildExtensionRuntime.immediateRollbackVersion(extensionId) }
+            override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot { requireRuntimeController(roles); return this@ChildExtensionRuntime.activateVersion(extensionId, version) }
+            override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot { requireRuntimeController(roles); return this@ChildExtensionRuntime.immediateRollback(extensionId) }
+            override suspend fun deleteVersion(extensionId: String, version: String): Boolean { requireRuntimeController(roles); return this@ChildExtensionRuntime.deleteVersion(extensionId, version) }
+            override suspend fun setVersionRetention(extensionId: String, limit: Int) { requireRuntimeController(roles); this@ChildExtensionRuntime.setVersionRetention(extensionId, limit) }
+            override suspend fun setAutoBackupPolicy(enabled: Boolean, highFrequencyUseCount: Long) { requireRuntimeController(roles); setAutoBackupPolicyInternal(enabled, highFrequencyUseCount) }
             override fun recordUse(extensionId: String) { recordUseForParent(ownerPluginId, extensionId) }
-            override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> { requireRuntimeController(ownerPluginId); return snapshotsInternal() }
-            override fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>> { requireRuntimeController(ownerPluginId); return snapshotsForPointInternal(point) }
-            override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> { requireRuntimeController(ownerPluginId); return backupSnapshotsInternal() }
-            override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> { requireRuntimeController(ownerPluginId); return uiContributionsInternal() }
+            override fun snapshots(): StateFlow<List<ChildExtensionSnapshot>> { requireRuntimeController(roles); return snapshotsInternal() }
+            override fun snapshotsForPoint(point: String): StateFlow<List<ChildExtensionSnapshot>> { requireRuntimeController(roles); return snapshotsForPointInternal(point) }
+            override fun backupSnapshots(): StateFlow<List<ChildExtensionBackupSnapshot>> { requireRuntimeController(roles); return backupSnapshotsInternal() }
+            override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> { requireRuntimeController(roles); return uiContributionsInternal() }
         }
 
     private fun recordUseForParent(ownerPluginId: String, extensionId: String) {
@@ -1400,15 +1400,15 @@ internal class ChildExtensionRuntime(
         recordUse(extensionId)
     }
 
-    private fun requireHub(ownerPluginId: String) {
-        check(ownerPluginId == InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID) {
-            "Child code admission is reserved for Plugin Extension Hub"
+    private fun requireAdmissionAuthority(roles: Set<String>) {
+        check(ChildRuntimeAuthorityRoles.ADMISSION in roles) {
+            "Child code admission requires an approved child admission authority role"
         }
     }
 
-    private fun requireRuntimeController(ownerPluginId: String) {
-        check(ownerPluginId == InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID) {
-            "Child runtime administration is reserved for Plugin Center"
+    private fun requireRuntimeController(roles: Set<String>) {
+        check(ChildRuntimeAuthorityRoles.RUNTIME_CONTROLLER in roles) {
+            "Child runtime administration requires the kernel runtime-controller role"
         }
     }
 
@@ -1532,6 +1532,7 @@ internal class ChildExtensionRuntime(
     }
 
     companion object {
+        private const val LEGACY_EXTENSION_HUB_PLUGIN_ID = "plugin.system.extension_hub"
         private val SYSTEM_EXTENSION_ROLES = setOf("system", "system_extension", "system_provider")
         private val ID_PATTERN = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*$")
         private val HOST_CAPABILITY_ID_PATTERN = Regex("^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:@[1-9][0-9]*)?$")

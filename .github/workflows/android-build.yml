@@ -63,6 +63,9 @@ jobs:
       - name: Validate Service Extension Child canonical transport
         run: python3 ci/script/check_service_extension_child_canonical.py
 
+      - name: Validate unknown plugin unified receiver
+        run: python3 ci/script/check_unknown_plugin_unified_receiver.py
+
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:

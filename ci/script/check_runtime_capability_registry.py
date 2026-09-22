@@ -159,18 +159,18 @@ def main() -> int:
     if "loggingService.bindPluginSourceProvider(manager::snapshots)" not in platform_kernel_text:
         errors.append("PluginPlatformKernel does not bind logging sources to PluginManager snapshots")
 
-    extension_hub_compat_tokens = (
+    retired_extension_hub_compat_tokens = (
         'EXTENSION_HUB_COMPAT_SERVICE_ID = "system.extension.hub"',
         "extensionHubCompatRecord(contributions)",
         "invokeExtensionHubCompat(contributions, method, args)",
-        "record.payload !is com.ai.limbs.plugin.runtime.ExtensionHubService",
-        'if (operation != "install")',
+        "com.ai.limbs.plugin.runtime.ExtensionHubService",
+        "const val EXTENSION_HUB_SERVICE = EXTENSION_HUB_PROVIDER",
+        "const val EXTENSION_HUB_PROVIDER",
     )
-    for token in extension_hub_compat_tokens:
-        if token not in kernel_text:
-            errors.append(f"Extension Hub provider/service compatibility bridge regressed: {token}")
-    if "const val EXTENSION_HUB_SERVICE = EXTENSION_HUB_PROVIDER" not in runtime_api_text:
-        errors.append("Runtime SDK lost the canonical Extension Hub service/provider alias")
+    for token in retired_extension_hub_compat_tokens:
+        if token in kernel_text or token in runtime_api_text:
+            errors.append(f"Retired Extension Hub provider/service compatibility debt reintroduced: {token}")
+
     privilege_text = PRIVILEGE_RUNTIME.read_text(encoding="utf-8")
     resident_backend_text = RESIDENT_BACKEND.read_text(encoding="utf-8")
     resident_core_main_text = RESIDENT_CORE_MAIN.read_text(encoding="utf-8")

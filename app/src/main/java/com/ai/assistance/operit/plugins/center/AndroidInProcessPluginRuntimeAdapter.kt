@@ -327,7 +327,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             )
         )
         override val childExtensions: InProcessChildExtensionRuntime
-            get() = childRuntimeProvider().bound(pluginId, context.payloadContext.permissions.grantedScopes)
+            get() = childRuntimeProvider().bound(pluginId, context.manifest.roles, context.payloadContext.permissions.grantedScopes)
 
         override val services: InProcessServiceDirectory = object : InProcessServiceDirectory {
             override fun resolve(id: String, minApi: Int?): InProcessServiceBinding? {

@@ -45,7 +45,6 @@ import com.ai.assistance.operit.plugins.center.HostedPluginRuntime
 import com.ai.limbs.plugin.runtime.ChildExtensionBackupSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildUiContributionSnapshot
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessSystemIds
@@ -392,7 +391,11 @@ internal class PluginWorkerRuntime(
     }
 
     suspend fun childControl(operation: String, payload: JSONObject): JSONObject {
-        val runtime = childRuntime.bound(InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID, emptySet())
+        val runtime = childRuntime.bound(
+            "kernel.child_runtime.controller",
+            setOf(ChildRuntimeAuthorityRoles.RUNTIME_CONTROLLER),
+            emptySet()
+        )
         val extensionId = payload.optString("extension_id").trim()
         return when (operation) {
             "uninstall" -> JSONObject().put("removed", runtime.uninstall(extensionId))
@@ -416,30 +419,38 @@ internal class PluginWorkerRuntime(
         }
     }
 
-    suspend fun installFromProvider(
-        pluginId: String,
-        providerId: String,
+    suspend fun installChild(
+        ownerPluginId: String,
         packagePath: String,
         expectedParentPluginId: String?,
         expectedPoint: String?
     ): JSONObject {
-        val record = requireProvider(pluginId, providerId)
-        val service = record.payload as? ExtensionHubService
+        val mounted = mounts[ownerPluginId]
             ?: throw PluginInstallException(
-                "WORKER_PROVIDER_PROTOCOL_MISMATCH",
-                "Provider is not a child-extension installer: " + providerId
+                "WORKER_CHILD_ADMISSION_OWNER_INACTIVE",
+                "Child admission owner is not mounted: $ownerPluginId"
             )
-        return childSnapshotJson(service.install(java.io.File(packagePath), expectedParentPluginId, expectedPoint))
-    }
-
-    suspend fun installChild(packagePath: String, expectedParentPluginId: String?, expectedPoint: String?): JSONObject =
-        installFromProvider(
-            InProcessSystemIds.EXTENSION_HUB_PLUGIN_ID,
-            InProcessSystemIds.EXTENSION_HUB_PROVIDER,
-            packagePath,
-            expectedParentPluginId,
-            expectedPoint
+        val manifest = stateRepository.readInstalledManifest(ownerPluginId, mounted.version)
+        val metadata = stateRepository.readInstallMetadata(ownerPluginId, mounted.version)
+            ?: throw PluginInstallException(
+                "WORKER_CHILD_ADMISSION_OWNER_INVALID",
+                "Child admission owner has no install metadata: $ownerPluginId"
+            )
+        check(identityRegistry.isTrusted(manifest, metadata)) {
+            "Child admission owner is not a trusted mounted identity: $ownerPluginId"
+        }
+        check(metadata.grantedScopes == manifest.permissions.requestedScopes) {
+            "Child admission owner scope approval does not match manifest"
+        }
+        val runtime = childRuntime.bound(ownerPluginId, manifest.roles, metadata.grantedScopes)
+        return childSnapshotJson(
+            runtime.installAdmitted(
+                java.io.File(packagePath),
+                expectedParentPluginId,
+                expectedPoint
+            )
         )
+    }
 
     suspend fun performChildUi(
         extensionId: String,

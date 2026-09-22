@@ -19,7 +19,6 @@ import com.ai.limbs.plugin.runtime.InProcessNotificationHost
 import com.ai.limbs.plugin.runtime.InProcessNotificationState
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
 import com.ai.limbs.plugin.runtime.ChildExtensionTarget
 import com.ai.limbs.plugin.runtime.ChildExtensionLifecycle
@@ -264,28 +263,7 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
                     ProviderProxyProtocol.UI_STATE ->
                         RemoteUiStateProvider(id, envelope.proxy.optNullableString("state_json"))
                     ProviderProxyProtocol.PAGE_METADATA -> RemotePageProviderMetadata
-                    ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER -> object : ExtensionHubService {
-                        override suspend fun install(
-                            packageFile: File,
-                            expectedParentPluginId: String?,
-                            expectedPoint: String?
-                        ): ChildExtensionSnapshot {
-                            ensureMounted()
-                            val sid = checkNotNull(sessionId)
-                            val result = PluginRuntimeWire.request(
-                                "provider_child_install",
-                                sid,
-                                JSONObject()
-                                    .put("plugin_id", pluginId)
-                                    .put("provider_id", id)
-                                    .put("package_path", packageFile.absolutePath)
-                                    .put("expected_parent_plugin_id", expectedParentPluginId ?: "")
-                                    .put("expected_point", expectedPoint ?: ""),
-                                PluginRuntimeWire.BUSINESS_TIMEOUT_MS
-                            )
-                            return parseChildSnapshot(result.getJSONObject("operation_result"))
-                        }
-                    }
+
                 }
 
                 context.canonicalRestore.registerProvider(contract, payload)

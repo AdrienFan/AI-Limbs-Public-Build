@@ -35,14 +35,9 @@ def main() -> int:
         "remote canonical decode": (remote, "ProviderContributionTransportCodec.decode"),
         "trusted canonical restore": (remote, "context.canonicalRestore.registerProvider(contract, payload)"),
         "restore owner binding": (runtime, "REMOTE_CONTRIBUTION_OWNER_MISMATCH"),
-        "generic child installer protocol": (transport, 'CHILD_EXTENSION_INSTALLER("child_extension_installer.v1")'),
-        "generic provider child install op": (wire, '"provider_child_install"'),
         "provider id carried on wire": (remote, '.put("provider_id", id)'),
         "Core UI canonical Provider export": (kernel, "ProviderContributionTransportCodec.encode(record)"),
         "Host UI canonical Provider decode": (ui_proxy, "ProviderContributionTransportCodec.decode(item)"),
-        "Host UI generic child installer protocol": (ui_proxy, "ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER"),
-        "Host UI generic child install command": (ui_proxy, '.put("command", "provider_child_install")'),
-        "Core generic child install command": (kernel, '"provider_child_install" ->'),
         "test-only unseen plugin identity": (test, SYNTHETIC_ID),
         "unseen Host path uses real Registrar": (test, "hostRegistrar.registerProvider(providerId, executor"),
         "unseen Resident path uses canonical restore": (test, "restore.registerProvider(envelope.contract, residentProxy)"),
@@ -50,6 +45,23 @@ def main() -> int:
     for name, (haystack, token) in required.items():
         if token not in haystack:
             errors.append(f"{name} missing: {token}")
+
+    retired_installer_tokens = (
+        'CHILD_EXTENSION_INSTALLER("child_extension_installer.v1")',
+        "ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER",
+        '"provider_child_install"',
+        "ExtensionHubService",
+    )
+    for name, source in (
+        ("Provider transport", transport),
+        ("Worker wire", wire),
+        ("Remote adapter", remote),
+        ("Core UI mirror", kernel),
+        ("Host UI mirror", ui_proxy),
+    ):
+        for token in retired_installer_tokens:
+            if token in source:
+                errors.append(f"{name} reintroduced retired child-installer Provider debt: {token}")
 
     forbidden_remote = (
         '"extension_hub"',
@@ -83,6 +95,7 @@ def main() -> int:
     print("Canonical Provider transport: PASS")
     print("Remote concrete plugin/provider identity checks: 0")
     print("Resident UI concrete plugin/provider identity checks: 0")
+    print("Retired child-installer Provider protocol: absent")
     print("Synthetic unseen plugin identity remains test-only")
     return 0
 

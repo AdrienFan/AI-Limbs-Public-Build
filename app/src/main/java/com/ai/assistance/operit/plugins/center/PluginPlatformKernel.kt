@@ -221,7 +221,8 @@ internal object PluginPlatformKernel {
         val childExtensions = KernelSystemPluginChildExtensionControlV2(
             admittedRole = admittedRole,
             runtime = childExtensionRuntimeInstance.bound(
-                com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID,
+                "kernel.child_runtime.controller",
+                setOf(ChildRuntimeAuthorityRoles.RUNTIME_CONTROLLER),
                 emptySet()
             ),
             runtimeOwner = childExtensionRuntimeInstance
@@ -292,7 +293,6 @@ internal object PluginPlatformKernel {
             contributionsInstance.listAll().filter { it.kind == PluginContributionKind.PROVIDER }.sortedBy { it.id }.forEach { record ->
                 when (record.payload) {
                     is com.ai.limbs.plugin.runtime.InProcessUiStateProvider,
-                    is com.ai.limbs.plugin.runtime.ExtensionHubService,
                     BusinessPageProviderMetadata,
                     RemotePageProviderMetadata -> put(ProviderContributionTransportCodec.encode(record))
                     is com.ai.limbs.plugin.runtime.InProcessPageProvider -> Unit // View/Context ABI: never exported.
@@ -539,28 +539,6 @@ internal object PluginPlatformKernel {
                     capabilityRegistryInstance.invokeSystemHost(owner, id, request.getString("host_operation"), params)
                 else capabilityRegistryInstance.invokeSystemHost(owner, id, params)
             }
-            "provider_child_install" -> {
-                val owner = request.getString("owner_plugin_id").trim()
-                val providerId = request.getString("provider_id").trim()
-                val record = contributionsInstance.find(PluginContributionKind.PROVIDER, providerId)
-                    ?: throw PluginInstallException("UI_PROVIDER_UNAVAILABLE", "Provider is not active: $providerId")
-                if (record.ownerPluginId != owner) {
-                    throw PluginInstallException(
-                        "UI_PROVIDER_OWNER_MISMATCH",
-                        "Provider $providerId belongs to ${record.ownerPluginId}, not $owner"
-                    )
-                }
-                val installer = record.payload as? com.ai.limbs.plugin.runtime.ExtensionHubService
-                    ?: throw PluginInstallException(
-                        "UI_PROVIDER_PROTOCOL_MISMATCH",
-                        "Provider $providerId does not implement child_extension_installer.v1"
-                    )
-                val packageFile = File(request.getString("package_path")).canonicalFile
-                check(packageFile.isFile) { "Selected child extension package is unavailable: ${packageFile.path}" }
-                val expectedParent = request.optString("expected_parent_plugin_id").trim().ifBlank { null }
-                val expectedPoint = request.optString("expected_point").trim().ifBlank { null }
-                childSnapshotJson(installer.install(packageFile, expectedParent, expectedPoint))
-            }
             "child_control" -> dispatchResidentChildControl(request)
             else -> throw PluginInstallException("UI_PROXY_COMMAND_UNKNOWN", "Unsupported Resident UI command: $command")
         }
@@ -568,7 +546,11 @@ internal object PluginPlatformKernel {
 
     private suspend fun dispatchResidentChildControl(request: JSONObject): JSONObject {
         val id = request.optString("extension_id").trim()
-        val controller = childExtensionRuntimeInstance.bound(com.ai.limbs.plugin.runtime.InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID, emptySet())
+        val controller = childExtensionRuntimeInstance.bound(
+            "kernel.child_runtime.controller",
+            setOf(ChildRuntimeAuthorityRoles.RUNTIME_CONTROLLER),
+            emptySet()
+        )
         return when (request.getString("operation")) {
             "uninstall" -> JSONObject().put("removed", controller.uninstall(id))
             "set_enabled" -> childSnapshotJson(controller.setEnabled(id, request.getBoolean("enabled")))

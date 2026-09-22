@@ -6,7 +6,6 @@ import com.ai.assistance.operit.plugins.center.PluginContributionContractCodec
 import com.ai.assistance.operit.plugins.center.PluginContributionKind
 import com.ai.assistance.operit.plugins.center.PluginContributionRecord
 import com.ai.assistance.operit.plugins.center.PluginInstallException
-import com.ai.limbs.plugin.runtime.ExtensionHubService
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
@@ -21,8 +20,7 @@ import org.json.JSONObject
 internal enum class ProviderProxyProtocol(val wireName: String) {
     CAPABILITY_EXECUTOR("capability_executor.v1"),
     UI_STATE("ui_state.v1"),
-    PAGE_METADATA("page_metadata.v1"),
-    CHILD_EXTENSION_INSTALLER("child_extension_installer.v1");
+    PAGE_METADATA("page_metadata.v1");
 
     companion object {
         fun fromWireName(raw: String): ProviderProxyProtocol =
@@ -58,7 +56,6 @@ internal object ProviderContributionTransportCodec {
             is InProcessPageProvider,
             BusinessPageProviderMetadata,
             RemotePageProviderMetadata -> proxy(ProviderProxyProtocol.PAGE_METADATA)
-            is ExtensionHubService -> proxy(ProviderProxyProtocol.CHILD_EXTENSION_INSTALLER)
             else -> throw PluginInstallException(
                 "WORKER_PROVIDER_NOT_PROXYABLE",
                 "Provider " + record.id + " has no structured cross-process proxy protocol: " +
