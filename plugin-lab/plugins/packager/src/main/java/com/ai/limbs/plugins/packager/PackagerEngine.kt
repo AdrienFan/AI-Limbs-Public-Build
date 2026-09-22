@@ -156,7 +156,14 @@ class PackagerEngine(private val host: InProcessPluginHost) {
     fun signingStatus(): JSONObject = signingVault.status()
 
     fun importSigningKey(type: PackagerArtifactType, source: String): JSONObject {
-        val pem = readBinarySource(source)
+        val pem = try {
+            readBinarySource(source)
+        } catch (error: Throwable) {
+            throw IllegalStateException(
+                "[SOURCE_READ] ${error.message ?: error::class.java.simpleName}",
+                error
+            )
+        }
         return try {
             signingVault.importPrivateKey(type, pem)
         } finally {
