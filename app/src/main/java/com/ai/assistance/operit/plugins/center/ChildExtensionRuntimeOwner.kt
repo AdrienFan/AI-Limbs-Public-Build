@@ -16,6 +16,7 @@ internal interface ChildExtensionRuntimeOwner {
     fun loggingSnapshots(): List<ChildExtensionSnapshot>
     fun loggingBackupSnapshots(): List<ChildExtensionBackupSnapshot>
     fun loggingUiContributions(): List<ChildUiContributionSnapshot>
+    fun loggingCanonicalDescriptors(): List<CanonicalChildDescriptor>
     fun residentPresentationDescriptors(): JSONArray
     suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long = 5_000L)
     suspend fun awaitBusinessChildrenReady(timeoutMs: Long = 10_000L): JSONObject

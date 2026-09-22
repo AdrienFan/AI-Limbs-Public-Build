@@ -60,6 +60,9 @@ jobs:
       - name: Validate canonical Provider transport
         run: python3 ci/script/check_provider_canonical_transport.py
 
+      - name: Validate Service Extension Child canonical transport
+        run: python3 ci/script/check_service_extension_child_canonical.py
+
       - name: Set up JDK
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
@@ -197,6 +200,7 @@ jobs:
           ./gradlew :app:testDebugUnitTest \
             --tests com.ai.assistance.operit.plugins.center.CanonicalContributionContractTest \
             --tests com.ai.assistance.operit.plugins.center.ProviderContributionTransportTest \
+            --tests com.ai.assistance.operit.plugins.center.ServiceExtensionChildCanonicalTest \
             --stacktrace --no-daemon
 
       - name: Run Gradle build

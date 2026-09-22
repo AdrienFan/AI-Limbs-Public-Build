@@ -3,7 +3,13 @@ package com.ai.assistance.operit.plugins.center.isolation
 import android.content.Context
 import com.ai.assistance.operit.plugins.center.AndroidInProcessPluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.center.BusinessPageProviderMetadata
+import com.ai.assistance.operit.plugins.center.PluginServiceEndpoint
+import com.ai.assistance.operit.plugins.center.PluginServiceCaller
+import com.ai.assistance.operit.plugins.center.CallerAwarePluginServiceEndpoint
 import com.ai.assistance.operit.plugins.center.ChildExtensionRuntime
+import com.ai.assistance.operit.plugins.center.CanonicalChildDescriptorKind
+import com.ai.assistance.operit.plugins.center.CanonicalChildDescriptorEnvelopeCodec
+import com.ai.assistance.operit.plugins.center.CanonicalChildDescriptorEnvelope
 import com.ai.assistance.operit.plugins.center.ExtensionPointDefinition
 import com.ai.assistance.operit.plugins.center.ExtensionPointRegistry
 import com.ai.assistance.operit.plugins.center.ExtensionRouter
@@ -287,6 +293,33 @@ internal class PluginWorkerRuntime(
         return provider.perform(eventId, payloadJson)
     }
 
+    suspend fun invokeService(
+        pluginId: String,
+        serviceId: String,
+        callerPluginId: String,
+        callerRoles: Set<String>,
+        callerScopes: Set<String>,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject {
+        val record = contributions.find(PluginContributionKind.SERVICE, serviceId)
+            ?: throw PluginInstallException("WORKER_SERVICE_UNKNOWN", "Service is not active: " + serviceId)
+        check(record.ownerPluginId == pluginId) { "Worker service owner mismatch: " + serviceId }
+        val copy = JSONObject(parameters.toString())
+        return when (val endpoint = record.payload) {
+            is CallerAwarePluginServiceEndpoint -> endpoint.invoke(
+                PluginServiceCaller(callerPluginId, callerRoles, callerScopes),
+                operation,
+                copy
+            )
+            is PluginServiceEndpoint -> endpoint.invoke(operation, copy)
+            else -> throw PluginInstallException(
+                "WORKER_SERVICE_NOT_CALLABLE",
+                "Service does not expose the generic RPC endpoint: " + serviceId
+            )
+        }
+    }
+
     suspend fun performNotification(pluginId: String, actionId: String): Boolean =
         notificationRegistry.perform(pluginId, actionId)
 
@@ -297,6 +330,7 @@ internal class PluginWorkerRuntime(
             .put("plugin_id", pluginId)
             .put("version", mount.version)
             .put("capabilities", capabilityGateway.descriptors(pluginId))
+            .put("services", serviceDescriptors(pluginId))
             .put("extensions", extensionDescriptors(pluginId))
             .put("providers", providerDescriptors(pluginId))
             .put("notification", notificationRegistry.snapshot(pluginId))
@@ -305,33 +339,56 @@ internal class PluginWorkerRuntime(
     fun childSnapshot(): JSONObject {
         val children = childRuntime.loggingSnapshots()
         val childIds = children.mapTo(linkedSetOf()) { it.extensionId }
-        val childCapabilities = JSONArray().apply {
-            val all = capabilityGateway.descriptors()
-            for (index in 0 until all.length()) {
-                val descriptor = all.getJSONObject(index)
-                if (descriptor.optString("owner_id") in childIds) put(descriptor)
+        val capabilityPayloads = linkedMapOf<String, JSONObject>()
+        val allCapabilities = capabilityGateway.descriptors()
+        for (index in 0 until allCapabilities.length()) {
+            val value = allCapabilities.getJSONObject(index)
+            val owner = value.optString("owner_id")
+            if (owner in childIds) {
+                capabilityPayloads[owner + "|" + value.getString("id")] = JSONObject(value.toString())
+            }
+        }
+        val uiPayloads = childRuntime.loggingUiContributions().associateBy {
+            it.extensionId + "|" + it.contributionId
+        }
+        val descriptors = JSONArray().apply {
+            childRuntime.loggingCanonicalDescriptors().forEach { descriptor ->
+                val payload = when (descriptor.kind) {
+                    CanonicalChildDescriptorKind.CAPABILITY ->
+                        capabilityPayloads[descriptor.ownerId + "|" + descriptor.id]
+                            ?: throw PluginInstallException(
+                                "WORKER_CHILD_CAPABILITY_DESCRIPTOR_MISSING",
+                                "Canonical child capability has no runtime payload: " + descriptor.id
+                            )
+                    CanonicalChildDescriptorKind.UI_CONTRIBUTION -> {
+                        val contribution = uiPayloads[descriptor.ownerId + "|" + descriptor.id]
+                            ?: throw PluginInstallException(
+                                "WORKER_CHILD_UI_DESCRIPTOR_MISSING",
+                                "Canonical child UI contribution has no runtime payload: " + descriptor.id
+                            )
+                        JSONObject().put(
+                            "document_json",
+                            contribution.provider.documentJson.value ?: JSONObject.NULL
+                        )
+                    }
+                    CanonicalChildDescriptorKind.PARENT_POINT,
+                    CanonicalChildDescriptorKind.CHILD_BINDING -> JSONObject()
+                }
+                put(
+                    CanonicalChildDescriptorEnvelopeCodec.encode(
+                        CanonicalChildDescriptorEnvelope(descriptor, payload)
+                    )
+                )
             }
         }
         return JSONObject()
             .put("runtime", childRuntime.businessRuntimeSnapshot())
             .put("presentations", childRuntime.residentPresentationDescriptors())
             .put("children", JSONArray().apply { children.forEach { put(childSnapshotJson(it)) } })
-            .put("backups", JSONArray().apply { childRuntime.loggingBackupSnapshots().forEach { put(childBackupJson(it)) } })
-            .put("ui_contributions", JSONArray().apply {
-                childRuntime.loggingUiContributions().forEach { contribution ->
-                    put(JSONObject()
-                        .put("extension_id", contribution.extensionId)
-                        .put("parent_plugin_id", contribution.target.parentPluginId)
-                        .put("point", contribution.target.point)
-                        .put("api_version", contribution.target.apiVersion)
-                        .put("screen_id", contribution.screenId)
-                        .put("component_id", contribution.componentId)
-                        .put("slot_id", contribution.slotId)
-                        .put("contribution_id", contribution.contributionId)
-                        .put("document_json", contribution.provider.documentJson.value ?: JSONObject.NULL))
-                }
+            .put("backups", JSONArray().apply {
+                childRuntime.loggingBackupSnapshots().forEach { put(childBackupJson(it)) }
             })
-            .put("capabilities", childCapabilities)
+            .put("descriptors", descriptors)
     }
 
     suspend fun childControl(operation: String, payload: JSONObject): JSONObject {
@@ -447,33 +504,18 @@ internal class PluginWorkerRuntime(
             }
     }
 
+    private fun serviceDescriptors(pluginId: String): JSONArray = JSONArray().apply {
+        contributions.listByOwner(pluginId)
+            .filter { it.kind == PluginContributionKind.SERVICE }
+            .sortedBy { it.id }
+            .forEach { record -> put(ServiceContributionTransportCodec.encode(record)) }
+    }
+
     private fun extensionDescriptors(pluginId: String): JSONArray = JSONArray().apply {
         contributions.listByOwner(pluginId)
             .filter { it.kind == PluginContributionKind.EXTENSION }
             .sortedWith(compareBy({ it.extensionPoint }, { it.id }))
-            .forEach { record ->
-                when (val payload = record.payload) {
-                    is PluginHomeTileSpec -> put(JSONObject()
-                        .put("kind", "home_tile").put("point", record.extensionPoint)
-                        .put("id", record.id).put("title", payload.title)
-                        .put("description", payload.description).put("screen_id", payload.screenId))
-                    is PluginScreenSpec -> put(JSONObject()
-                        .put("kind", "screen").put("point", record.extensionPoint)
-                        .put("id", record.id).put("title", payload.title)
-                        .put("description", payload.description ?: JSONObject.NULL)
-                        .put("schema_id", payload.schemaId).put("document_json", payload.documentJson))
-                    is PluginThemeSpec -> put(JSONObject()
-                        .put("kind", "theme").put("point", record.extensionPoint)
-                        .put("id", record.id).put("mode", payload.mode.name)
-                        .put("pure_black", payload.pureBlack)
-                        .put("colors", JSONObject(payload.colors))
-                        .put("background_gradient", JSONArray(payload.backgroundGradient)))
-                    is PluginLocalModelLoaderSpec -> throw PluginInstallException(
-                        "WORKER_EXTENSION_NOT_PROXYABLE",
-                        "Local model loader requires a structured cross-process AIService contract"
-                    )
-                }
-            }
+            .forEach { record -> put(ExtensionContributionTransportCodecRegistry.encode(record)) }
     }
 
     private fun registerSurfaces() {
@@ -493,11 +535,10 @@ internal class PluginWorkerRuntime(
             PluginSurfaceIds.HOST_NOTIFICATION, "Notification Host", "worker notification proxy",
             HostSurfaceKind.HOST_PROVIDER, requiredScope = "host.notification@1"
         ))
-        listOf(
-            PluginExtensionPoints.UI_HOME_TILE to 1,
-            PluginExtensionPoints.UI_SCREEN to 2,
-            PluginExtensionPoints.UI_THEME to 1,
-            PluginExtensionPoints.LOCAL_MODEL_LOADER to 1
+        (
+            ExtensionContributionTransportCodecRegistry.proxyableProtocols()
+                .map { it.point to it.apiVersion } +
+                listOf(PluginExtensionPoints.LOCAL_MODEL_LOADER to 1)
         ).forEach { (point, _) ->
             surfacePolicy.register(HostSurfaceDefinition(
                 PluginSurfaceIds.extension(point), point, "worker extension point",
@@ -507,31 +548,21 @@ internal class PluginWorkerRuntime(
     }
 
     private fun registerExtensionPoints() {
-        extensionPoints.register(ExtensionPointDefinition(
-            PluginExtensionPoints.UI_HOME_TILE, 1
-        ) { record ->
-            check(record.payload is PluginHomeTileSpec)
-            AutoCloseable { }
-        })
-        extensionPoints.register(ExtensionPointDefinition(
-            PluginExtensionPoints.UI_SCREEN, 2
-        ) { record ->
-            check(record.payload is PluginScreenSpec)
-            AutoCloseable { }
-        })
-        extensionPoints.register(ExtensionPointDefinition(
-            PluginExtensionPoints.UI_THEME, 1
-        ) { record ->
-            check(record.payload is PluginThemeSpec)
-            AutoCloseable { }
-        })
-        extensionPoints.register(ExtensionPointDefinition(
-            PluginExtensionPoints.LOCAL_MODEL_LOADER, 1
-        ) { _ ->
-            throw PluginInstallException(
-                "WORKER_EXTENSION_NOT_PROXYABLE",
-                "Local model loader cannot execute inside Resident Core"
+        ExtensionContributionTransportCodecRegistry.proxyableProtocols().forEach { protocol ->
+            extensionPoints.register(
+                ExtensionPointDefinition(protocol.point, protocol.apiVersion) { record ->
+                    ExtensionContributionTransportCodecRegistry.validateRecord(record)
+                    AutoCloseable { }
+                }
             )
-        })
+        }
+        extensionPoints.register(
+            ExtensionPointDefinition(PluginExtensionPoints.LOCAL_MODEL_LOADER, 1) { _ ->
+                throw PluginInstallException(
+                    "WORKER_EXTENSION_NOT_PROXYABLE",
+                    "Local model loader cannot execute inside Resident Core"
+                )
+            }
+        )
     }
 }

@@ -239,6 +239,10 @@ data class InProcessScreen(
     val documentJson: String
 )
 
+fun interface InProcessServiceEndpoint {
+    suspend fun invoke(operation: String, parametersJson: String): String
+}
+
 class InProcessServiceBinding(
     val ownerPluginId: String,
     val id: String,
@@ -343,6 +347,13 @@ interface InProcessPluginHost : InProcessPluginUiHost {
     fun registerProvider(
         id: String,
         payload: Any,
+        metadata: Map<String, String> = emptyMap()
+    )
+
+    fun registerService(
+        id: String,
+        apiVersion: Int,
+        endpoint: InProcessServiceEndpoint,
         metadata: Map<String, String> = emptyMap()
     )
 

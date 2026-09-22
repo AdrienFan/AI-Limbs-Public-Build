@@ -28,6 +28,7 @@ internal class RemoteChildExtensionRuntimeOwner(
     private val snapshots = MutableStateFlow<List<ChildExtensionSnapshot>>(emptyList())
     private val backups = MutableStateFlow<List<ChildExtensionBackupSnapshot>>(emptyList())
     private val ui = MutableStateFlow<List<ChildUiContributionSnapshot>>(emptyList())
+    @Volatile private var canonicalDescriptors: List<CanonicalChildDescriptor> = emptyList()
     private val points = ConcurrentHashMap<String, MutableStateFlow<List<ChildExtensionSnapshot>>>()
     private val uiProviders = ConcurrentHashMap<String, RemoteUi>()
     private val capabilityBindings = linkedMapOf<String, Binding>()
@@ -104,6 +105,7 @@ internal class RemoteChildExtensionRuntimeOwner(
     override fun loggingSnapshots() = snapshots.value.toList()
     override fun loggingBackupSnapshots() = backups.value.toList()
     override fun loggingUiContributions() = ui.value.toList()
+    override fun loggingCanonicalDescriptors() = canonicalDescriptors.toList()
     override fun residentPresentationDescriptors() = JSONArray(presentations.toString())
 
     override suspend fun awaitEnabledPointReady(point: String, timeoutMs: Long) {
@@ -147,26 +149,45 @@ internal class RemoteChildExtensionRuntimeOwner(
         snapshots.value = parsedChildren
         backups.value = buildList { for (i in 0 until backupValues.length()) add(parseBackup(backupValues.getJSONObject(i))) }
         points.forEach { (point, flow) -> flow.value = parsedChildren.filter { it.target.point == point } }
-        reconcileUi(value.optJSONArray("ui_contributions") ?: JSONArray())
-        reconcileCapabilities(value.optJSONArray("capabilities") ?: JSONArray())
+        val descriptorValues = value.optJSONArray("descriptors") ?: JSONArray()
+        val envelopes = buildList {
+            for (index in 0 until descriptorValues.length()) {
+                add(CanonicalChildDescriptorEnvelopeCodec.decode(descriptorValues.getJSONObject(index)))
+            }
+        }
+        canonicalDescriptors = envelopes.map { it.descriptor }
+        reconcileUi(envelopes.filter {
+            it.descriptor.kind == CanonicalChildDescriptorKind.UI_CONTRIBUTION
+        })
+        reconcileCapabilities(envelopes.filter {
+            it.descriptor.kind == CanonicalChildDescriptorKind.CAPABILITY
+        })
     }
 
-    private fun reconcileCapabilities(values: JSONArray) {
-        val fingerprint = values.toString()
+    private fun reconcileCapabilities(values: List<CanonicalChildDescriptorEnvelope>) {
+        val fingerprint = JSONArray(values.map { CanonicalChildDescriptorEnvelopeCodec.encode(it) }).toString()
         if (fingerprint == capabilityFingerprint) return
         synchronized(capabilityBindings) {
-            capabilityBindings.values.forEach(Binding::close); capabilityBindings.clear()
-            for (i in 0 until values.length()) {
-                val d = values.getJSONObject(i); val owner = d.getString("owner_id"); val id = d.getString("id")
-                val spec = capabilitySpec(d, owner, id)
+            capabilityBindings.values.forEach(Binding::close)
+            capabilityBindings.clear()
+            values.forEach { envelope ->
+                val descriptor = envelope.descriptor
+                val owner = descriptor.ownerId
+                val id = descriptor.id
+                val spec = capabilitySpec(envelope.payload, owner, id)
                 val contribution = contributions.register(
                     PluginContributionRecord(
                         contract = CanonicalContributionContracts.capability(owner, id),
                         payload = spec
                     )
                 )
-                val capability = try { capabilityRegistry.register(owner, id, spec) } catch (e: Throwable) { contribution.close(); throw e }
-                capabilityBindings["$owner|$id"] = Binding(contribution, capability)
+                val capability = try {
+                    capabilityRegistry.register(owner, id, spec)
+                } catch (error: Throwable) {
+                    contribution.close()
+                    throw error
+                }
+                capabilityBindings[owner + "|" + id] = Binding(contribution, capability)
             }
             capabilityFingerprint = fingerprint
         }
@@ -186,16 +207,30 @@ internal class RemoteChildExtensionRuntimeOwner(
             executor = PluginCapabilityExecutor { params -> refresh(); request("invoke_capability", JSONObject().put("plugin_id", owner).put("capability_id", id).put("parameters", JSONObject(params.toString()))) }
         )
 
-    private fun reconcileUi(values: JSONArray) {
+    private fun reconcileUi(values: List<CanonicalChildDescriptorEnvelope>) {
         val live = linkedSetOf<String>()
         ui.value = buildList {
-            for (i in 0 until values.length()) {
-                val d = values.getJSONObject(i); val extensionId = d.getString("extension_id"); val contributionId = d.getString("contribution_id")
-                val key = "$extensionId|$contributionId"; live += key
-                val provider = uiProviders.computeIfAbsent(key) { RemoteUi(extensionId, contributionId, d.nullable("document_json")) }
-                provider.update(d.nullable("document_json"))
-                add(ChildUiContributionSnapshot(extensionId, ChildExtensionTarget(d.getString("parent_plugin_id"), d.getString("point"), d.getInt("api_version")),
-                    d.getString("screen_id"), d.getString("component_id"), d.getString("slot_id"), contributionId, provider))
+            values.forEach { envelope ->
+                val descriptor = envelope.descriptor
+                val extensionId = descriptor.ownerId
+                val contributionId = descriptor.id
+                val key = extensionId + "|" + contributionId
+                live += key
+                val provider = uiProviders.computeIfAbsent(key) {
+                    RemoteUi(extensionId, contributionId, envelope.payload.nullable("document_json"))
+                }
+                provider.update(envelope.payload.nullable("document_json"))
+                add(
+                    ChildUiContributionSnapshot(
+                        extensionId = extensionId,
+                        target = descriptor.target,
+                        screenId = descriptor.metadata.getValue("screen_id"),
+                        componentId = descriptor.metadata.getValue("component_id"),
+                        slotId = descriptor.metadata.getValue("slot_id"),
+                        contributionId = contributionId,
+                        provider = provider
+                    )
+                )
             }
         }
         uiProviders.keys.removeIf { it !in live }
@@ -226,7 +261,7 @@ internal class RemoteChildExtensionRuntimeOwner(
 
     private fun clearMirrors() {
         synchronized(capabilityBindings) { capabilityBindings.values.forEach(Binding::close); capabilityBindings.clear(); capabilityFingerprint = "" }
-        snapshots.value = emptyList(); backups.value = emptyList(); ui.value = emptyList()
+        snapshots.value = emptyList(); backups.value = emptyList(); ui.value = emptyList(); canonicalDescriptors = emptyList()
         points.values.forEach { it.value = emptyList() }; uiProviders.clear(); presentations = JSONArray(); runtime = JSONObject()
     }
     private fun controller(owner: String) { check(owner == InProcessSystemIds.PLUGIN_CENTER_PLUGIN_ID) { "Child runtime administration is reserved for Plugin Center" } }

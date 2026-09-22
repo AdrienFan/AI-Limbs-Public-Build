@@ -13,6 +13,7 @@ import java.io.File
 import java.util.UUID
 import kotlin.system.exitProcess
 import kotlinx.coroutines.runBlocking
+import org.json.JSONArray
 import org.json.JSONObject
 
 /** Standalone crash boundary for trusted dynamic plugin business code. */
@@ -155,6 +156,17 @@ object PluginRuntimeMain {
                                     payload.optJSONObject("parameters") ?: JSONObject()
                                 )
                             }
+                            "service_invoke" -> runBlocking {
+                                worker.invokeService(
+                                    pluginId = payload.getString("plugin_id"),
+                                    serviceId = payload.getString("service_id"),
+                                    callerPluginId = payload.getString("caller_plugin_id"),
+                                    callerRoles = payload.optJSONArray("caller_roles").stringSet(),
+                                    callerScopes = payload.optJSONArray("caller_scopes").stringSet(),
+                                    operation = payload.getString("service_operation"),
+                                    parameters = payload.optJSONObject("parameters") ?: JSONObject()
+                                )
+                            }
                             "provider_executor" -> JSONObject().put(
                                 "result_json",
                                 runBlocking {
@@ -286,4 +298,9 @@ object PluginRuntimeMain {
             }
         }
     }
+}
+
+private fun JSONArray?.stringSet(): Set<String> = buildSet {
+    val source = this@stringSet ?: return@buildSet
+    for (index in 0 until source.length()) add(source.getString(index))
 }

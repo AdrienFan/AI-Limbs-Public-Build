@@ -308,6 +308,7 @@ class PluginRegistrar internal constructor(
 internal class CanonicalContributionRestoreSink(
     private val expectedOwnerPluginId: String,
     private val registry: PluginContributionRegistry,
+    private val extensionRouter: ExtensionRouter? = null,
     private val track: (AutoCloseable) -> Unit
 ) {
     /**
@@ -334,6 +335,45 @@ internal class CanonicalContributionRestoreSink(
             )
         }
         track(registry.register(PluginContributionRecord(contract, payload)))
+    }
+
+    fun registerService(contract: CanonicalContributionContract, payload: Any) {
+        requireTransport(contract, PluginContributionKind.SERVICE, PluginContributionContractType.SERVICE_RPC)
+        track(registry.register(PluginContributionRecord(contract, payload)))
+    }
+
+    fun registerExtension(contract: CanonicalContributionContract, payload: Any) {
+        requireTransport(contract, PluginContributionKind.EXTENSION, PluginContributionContractType.EXTENSION_BINDING)
+        val router = requireNotNull(extensionRouter) { "Extension restore requires an ExtensionRouter" }
+        val record = PluginContributionRecord(contract, payload)
+        val registration = registry.register(record)
+        track(registration)
+        try {
+            track(router.bind(record))
+        } catch (error: Throwable) {
+            registration.close()
+            throw error
+        }
+    }
+
+    private fun requireTransport(
+        contract: CanonicalContributionContract,
+        expectedKind: PluginContributionKind,
+        expectedType: PluginContributionContractType
+    ) {
+        if (contract.kind != expectedKind || contract.contractType != expectedType) {
+            throw PluginInstallException(
+                "REMOTE_CONTRIBUTION_KIND_INVALID",
+                "Remote canonical restore expected " + expectedKind.name
+            )
+        }
+        if (contract.ownerPluginId != expectedOwnerPluginId) {
+            throw PluginInstallException(
+                "REMOTE_CONTRIBUTION_OWNER_MISMATCH",
+                "Remote " + expectedKind.name + " owner " + contract.ownerPluginId +
+                    " does not match " + expectedOwnerPluginId
+            )
+        }
     }
 }
 
@@ -384,6 +424,7 @@ class PluginMountScope internal constructor(
     internal val canonicalRestore = CanonicalContributionRestoreSink(
         expectedOwnerPluginId = manifest.pluginId,
         registry = registry,
+        extensionRouter = extensionRouter,
         track = ::trackOwned
     )
 

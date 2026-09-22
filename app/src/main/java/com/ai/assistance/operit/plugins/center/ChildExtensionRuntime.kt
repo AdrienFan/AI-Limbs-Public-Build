@@ -78,6 +78,7 @@ private data class PointRegistration(
     val point: String,
     val apiVersion: Int,
     val title: String,
+    val description: String,
     val allowedHostCapabilities: Set<String>,
     val binder: ChildExtensionBinder,
     val token: String
@@ -147,6 +148,7 @@ internal class ChildExtensionRuntime(
     // UI contributions are instance overlays, not component definitions. Keeping them in the Host child runtime
     // binds every entry to the verified child identity and gives child lifecycle one cleanup point.
     private val uiContributions = ConcurrentHashMap<String, ChildUiContributionSnapshot>()
+    private val bindingMetadata = ConcurrentHashMap<String, Map<String, String>>()
     private val mutableUiContributions = MutableStateFlow<List<ChildUiContributionSnapshot>>(emptyList())
     private val pointFlows = ConcurrentHashMap<String, MutableStateFlow<List<ChildExtensionSnapshot>>>()
     private val usageCounts = ConcurrentHashMap<String, Long>()
@@ -182,6 +184,7 @@ internal class ChildExtensionRuntime(
         // Defense in depth: normal child stop paths already revoke overlays, but service shutdown
         // also clears the registry explicitly so no stale contribution can survive an unusual state.
         uiContributions.clear()
+        bindingMetadata.clear()
         publishUiContributions()
         publishSnapshots()
         if (failures.isNotEmpty()) {
@@ -203,7 +206,17 @@ internal class ChildExtensionRuntime(
     ): AutoCloseable {
         require(ownerPluginId.isNotBlank() && point.matches(ID_PATTERN) && apiVersion > 0)
         val token = UUID.randomUUID().toString()
-        val registration = PointRegistration(ownerPluginId, ownerGrantedScopes.toSet(), point, apiVersion, title, allowedHostCapabilities.toSet(), binder, token)
+        val registration = PointRegistration(
+            ownerPluginId,
+            ownerGrantedScopes.toSet(),
+            point,
+            apiVersion,
+            title,
+            description,
+            allowedHostCapabilities.toSet(),
+            binder,
+            token
+        )
         check(points.putIfAbsent(point, registration) == null) { "Extension point already published: $point" }
         runtimeScope.launch { reconcilePoint(point) }
         return AutoCloseable {
@@ -441,6 +454,66 @@ internal class ChildExtensionRuntime(
     override fun loggingBackupSnapshots(): List<ChildExtensionBackupSnapshot> = mutableBackupSnapshots.value.toList()
     override fun loggingUiContributions(): List<ChildUiContributionSnapshot> = mutableUiContributions.value.toList()
 
+    override fun loggingCanonicalDescriptors(): List<CanonicalChildDescriptor> {
+        val childTargets = records.values.associate { it.manifest.extensionId to it.manifest.target }
+        return buildList {
+            points.values.forEach { point ->
+                add(
+                    CanonicalChildDescriptors.parentPoint(
+                        ownerPluginId = point.ownerPluginId,
+                        point = point.point,
+                        apiVersion = point.apiVersion,
+                        metadata = mapOf(
+                            "title" to point.title,
+                            "description" to point.description,
+                            "allowed_host_capabilities" to point.allowedHostCapabilities.toList().sorted().joinToString(",")
+                        )
+                    )
+                )
+            }
+            bindingMetadata.forEach { (extensionId, metadata) ->
+                val record = records[extensionId] ?: return@forEach
+                add(
+                    CanonicalChildDescriptors.childBinding(
+                        extensionId = extensionId,
+                        target = record.manifest.target,
+                        metadata = metadata + mapOf(
+                            "version" to record.manifest.version,
+                            "display_name" to record.manifest.displayName
+                        )
+                    )
+                )
+            }
+            contributions.listAll()
+                .filter { it.kind == PluginContributionKind.CAPABILITY }
+                .forEach { record ->
+                    val target = childTargets[record.ownerPluginId] ?: return@forEach
+                    add(
+                        CanonicalChildDescriptors.capability(
+                            extensionId = record.ownerPluginId,
+                            capabilityId = record.id,
+                            target = target,
+                            metadata = record.metadata
+                        )
+                    )
+                }
+            uiContributions.values.forEach { contribution ->
+                add(
+                    CanonicalChildDescriptors.ui(
+                        extensionId = contribution.extensionId,
+                        contributionId = contribution.contributionId,
+                        target = contribution.target,
+                        metadata = mapOf(
+                            "screen_id" to contribution.screenId,
+                            "component_id" to contribution.componentId,
+                            "slot_id" to contribution.slotId
+                        )
+                    )
+                )
+            }
+        }.sortedWith(compareBy({ it.kind.wireName }, { it.ownerId }, { it.id }))
+    }
+
     /** Neutral descriptors for Host-only child presentation code. Business ownership stays here. */
     override fun residentPresentationDescriptors(): JSONArray = JSONArray().apply {
         records.values
@@ -664,9 +737,14 @@ internal class ChildExtensionRuntime(
 
                 override fun publish(payload: Any, metadata: Map<String, String>) {
                     check(bindingHandle == null) { "Child extension may publish only one binding" }
-                    bindingHandle = point.binder.bind(
+                    val delegated = point.binder.bind(
                         ChildExtensionBinding(extensionId, version, target, record.manifest.displayName, metadata, payload)
                     )
+                    bindingMetadata[extensionId] = metadata.toSortedMap()
+                    bindingHandle = AutoCloseable {
+                        bindingMetadata.remove(extensionId)
+                        delegated.close()
+                    }
                 }
 
                 override fun publishUiContribution(
@@ -876,6 +954,7 @@ internal class ChildExtensionRuntime(
         // Contributions are bound to the child lifecycle. Remove them even when no ActiveChild handle
         // remains (for example after a partial mount failure) so stale UI can never outlive the .ailx.
         removeUiContributionsForExtension(extensionId)
+        bindingMetadata.remove(extensionId)
         val mounted = active[extensionId] ?: return
         val failures = mutableListOf<Throwable>()
         fun close(handle: AutoCloseable?) {

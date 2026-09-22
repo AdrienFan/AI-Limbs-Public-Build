@@ -23,6 +23,7 @@ import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import com.ai.limbs.plugin.runtime.InProcessScreen
 import com.ai.limbs.plugin.runtime.InProcessServiceBinding
 import com.ai.limbs.plugin.runtime.InProcessServiceDirectory
+import com.ai.limbs.plugin.runtime.InProcessServiceEndpoint as RuntimeServiceEndpoint
 import dalvik.system.DexClassLoader
 import java.io.File
 import java.util.zip.ZipFile
@@ -385,6 +386,23 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 return
             }
             context.payloadContext.registrar.registerProvider(id, payload, metadata)
+        }
+
+        override fun registerService(
+            id: String,
+            apiVersion: Int,
+            endpoint: RuntimeServiceEndpoint,
+            metadata: Map<String, String>
+        ) {
+            context.payloadContext.registrar.registerService(
+                id = id,
+                apiVersion = apiVersion,
+                payload = PluginServiceEndpoint { operation, parameters ->
+                    val raw = endpoint.invoke(operation, parameters.toString())
+                    runCatching { JSONObject(raw) }.getOrElse { JSONObject().put("content", raw) }
+                },
+                metadata = metadata
+            )
         }
 
         override fun registerCapability(

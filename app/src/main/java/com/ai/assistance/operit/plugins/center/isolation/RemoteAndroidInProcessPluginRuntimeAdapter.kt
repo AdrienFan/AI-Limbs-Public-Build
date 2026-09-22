@@ -6,16 +6,12 @@ import com.ai.assistance.operit.plugins.center.PluginCapabilityExecutor
 import com.ai.assistance.operit.plugins.center.PluginCapabilityParameterSpec
 import com.ai.assistance.operit.plugins.center.PluginCapabilityReceipt
 import com.ai.assistance.operit.plugins.center.PluginCapabilitySpec
-import com.ai.assistance.operit.plugins.center.PluginExtensionPoints
-import com.ai.assistance.operit.plugins.center.PluginHomeTileSpec
+import com.ai.assistance.operit.plugins.center.CallerAwarePluginServiceEndpoint
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.center.PluginRuntimeAdapterContext
 import com.ai.assistance.operit.plugins.center.PluginRuntimeHandle
 import com.ai.assistance.operit.plugins.center.PluginRuntimeRole
-import com.ai.assistance.operit.plugins.center.PluginScreenSpec
-import com.ai.assistance.operit.plugins.center.PluginThemeMode
-import com.ai.assistance.operit.plugins.center.PluginThemeSpec
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessNotificationAction
 import com.ai.limbs.plugin.runtime.InProcessNotificationActionHandler
@@ -81,6 +77,7 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
         suspend fun mountAndRegister() {
             val snapshot = ensureMounted(force = true)
             registerCapabilities(snapshot.optJSONArray("capabilities") ?: JSONArray())
+            registerServices(snapshot.optJSONArray("services") ?: JSONArray())
             registerExtensions(snapshot.optJSONArray("extensions") ?: JSONArray())
             registerProviders(snapshot.optJSONArray("providers") ?: JSONArray())
             updateNotification(snapshot.optJSONObject("notification"))
@@ -209,51 +206,38 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
             }
         }
 
+        private fun registerServices(descriptors: JSONArray) {
+            for (index in 0 until descriptors.length()) {
+                val envelope = ServiceContributionTransportCodec.decode(descriptors.getJSONObject(index))
+                check(envelope.protocol == ServiceProxyProtocol.RPC)
+                val contract = envelope.contract
+                val id = contract.id
+                val proxy = CallerAwarePluginServiceEndpoint { caller, operation, parameters ->
+                    ensureMounted()
+                    val sid = checkNotNull(sessionId)
+                    val result = PluginRuntimeWire.request(
+                        "service_invoke",
+                        sid,
+                        JSONObject()
+                            .put("plugin_id", pluginId)
+                            .put("service_id", id)
+                            .put("caller_plugin_id", caller.pluginId)
+                            .put("caller_roles", JSONArray(caller.roles.toList().sorted()))
+                            .put("caller_scopes", JSONArray(caller.grantedScopes.toList().sorted()))
+                            .put("service_operation", operation)
+                            .put("parameters", JSONObject(parameters.toString())),
+                        PluginRuntimeWire.BUSINESS_TIMEOUT_MS
+                    )
+                    result.getJSONObject("operation_result")
+                }
+                context.canonicalRestore.registerService(contract, proxy)
+            }
+        }
+
         private fun registerExtensions(descriptors: JSONArray) {
             for (index in 0 until descriptors.length()) {
-                val d = descriptors.getJSONObject(index)
-                val id = d.getString("id")
-                when (d.getString("kind")) {
-                    "home_tile" -> context.payloadContext.registrar.registerExtension(
-                        PluginExtensionPoints.UI_HOME_TILE,
-                        id,
-                        PluginHomeTileSpec(
-                            ownerPluginId = pluginId,
-                            id = id,
-                            title = d.getString("title"),
-                            description = d.optString("description", ""),
-                            screenId = d.getString("screen_id")
-                        )
-                    )
-                    "screen" -> context.payloadContext.registrar.registerExtension(
-                        PluginExtensionPoints.UI_SCREEN,
-                        id,
-                        PluginScreenSpec(
-                            ownerPluginId = pluginId,
-                            id = id,
-                            title = d.getString("title"),
-                            description = d.optNullableString("description"),
-                            schemaId = d.getString("schema_id"),
-                            documentJson = d.getString("document_json")
-                        )
-                    )
-                    "theme" -> context.payloadContext.registrar.registerExtension(
-                        PluginExtensionPoints.UI_THEME,
-                        id,
-                        PluginThemeSpec(
-                            ownerPluginId = pluginId,
-                            id = id,
-                            mode = PluginThemeMode.valueOf(d.getString("mode")),
-                            pureBlack = d.optBoolean("pure_black", false),
-                            colors = d.optJSONObject("colors")?.toStringMap().orEmpty(),
-                            backgroundGradient = d.stringList("background_gradient")
-                        )
-                    )
-                    else -> throw PluginInstallException(
-                        "PLUGIN_WORKER_EXTENSION_UNSUPPORTED",
-                        "Worker returned unsupported cross-process extension kind: ${d.getString("kind")}"
-                    )
-                }
+                val envelope = ExtensionContributionTransportCodecRegistry.decode(descriptors.getJSONObject(index))
+                context.canonicalRestore.registerExtension(envelope.contract, envelope.payload)
             }
         }
 
