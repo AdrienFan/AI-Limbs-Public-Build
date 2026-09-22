@@ -252,6 +252,11 @@ jobs:
           set -euo pipefail
           chmod +x ./gradlew
           ./gradlew :plugin-extension-hub:assembleDebug --stacktrace --no-daemon
+      - name: Sign installable Extension Hub package
+        env:
+          AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+          HUB_EXPECTED_APK_SHA256: 2cad2a879d1c1f9dee26a29d9f8be52be7ac5d5647439ca2c39955788eaf1fd1
+        run: python3 tools/plugin_lab/package_extension_hub.py
       - name: Upload Extension Hub payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -259,6 +264,8 @@ jobs:
           path: |
             plugin-lab/plugins/extension-hub/build/outputs/apk/debug/*.apk
             plugin-lab/packages/extension-hub/plugin.json
+            dist/AI-Limbs-Extension-Hub-v1.5.5.ailp
+            dist/AI-Limbs-Extension-Hub-v1.5.5.ailp.sha256
           if-no-files-found: error
           retention-days: 14
 
