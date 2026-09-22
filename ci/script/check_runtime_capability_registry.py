@@ -122,12 +122,25 @@ def main() -> int:
     gateway_text = CAPABILITY_GATEWAY.read_text(encoding="utf-8")
     kernel_text = KERNEL_ADAPTER.read_text(encoding="utf-8")
 
-    for capability_id in ("host.logging@1", "host.ui.presentation@1"):
-        expected = f'invokeSystemHostFromPlugin(ownerPluginId, "{capability_id}", parameters)'
-        if expected not in gateway_text:
-            errors.append(f"{capability_id} bypassed RuntimeCapabilityRouter in PluginHostCapabilityRegistry")
-    if "private suspend fun invokeLogging(" in gateway_text or "private fun invokePagePresentation(" in gateway_text:
-        errors.append("PluginHostCapabilityRegistry reintroduced local Host Primitive bypass helpers")
+    unified_gateway_tokens = (
+        "AiLimbsHostPrimitiveCatalog.all",
+        ".filter { it.requestableScope && it.exposure == HostPrimitiveExposure.BOUND }",
+        "HostPrimitiveGatewayBindings.isCallable(capabilityId)",
+        "if (primitive.id !in grantedScopes)",
+        "invokeSystemHostFromPlugin(",
+        "primitive.id,",
+    )
+    for token in unified_gateway_tokens:
+        if token not in gateway_text:
+            errors.append(f"PluginHostCapabilityRegistry lost catalog-driven Host Primitive gateway: {token}")
+    for forbidden in (
+        "private data class HostCapability(",
+        "hostCapabilities = mapOf(",
+        "private suspend fun invokeLogging(",
+        "private fun invokePagePresentation(",
+    ):
+        if forbidden in gateway_text:
+            errors.append(f"PluginHostCapabilityRegistry reintroduced per-primitive Host adapters: {forbidden}")
     if '"host.ui.presentation@1" to primitive(HostGatewayExecutionAffinity.HOST_UI' not in HOST_GATEWAY_BINDINGS.read_text(encoding="utf-8"):
         errors.append("host.ui.presentation@1 is missing HOST_UI gateway binding")
     if '"host.ui.presentation@1" -> invokeUiPresentation(ownerPluginId, op, parameters)' not in kernel_text:

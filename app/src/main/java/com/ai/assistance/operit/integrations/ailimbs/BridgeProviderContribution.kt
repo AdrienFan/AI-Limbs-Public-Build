@@ -73,7 +73,7 @@ interface BridgeProviderControl {
     val state: AiLimbsBridgeState
     val availableActions: List<BridgeAction>
 
-    fun perform(action: BridgeAction): Boolean
+    suspend fun perform(action: BridgeAction): Boolean
     fun statusSummary(): String
 }
 

@@ -43,42 +43,8 @@ internal class PluginHostCapabilityRegistry(
         val spec: PluginCapabilitySpec
     )
 
-    private data class HostCapability(
-        val requiredScope: String,
-        val execute: suspend (String, JSONObject) -> JSONObject
-    )
-
     private val capabilities = ConcurrentHashMap<String, OwnedCapability>()
     private val bridgeIngressGateways = ConcurrentHashMap<String, AiLimbsIngressGateway>()
-
-    // Ordinary plugin scope adapters remain intentionally narrow here.
-    // Plugin Center system-role access uses SystemHostPrimitiveExecutor and the full Host Primitive Gateway catalog.
-    private val hostCapabilities = mapOf(
-        "host.process@1" to HostCapability("host.process@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.process@1", parameters)
-        },
-        "host.network@1" to HostCapability("host.network@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.network@1", parameters)
-        },
-        "host.custom_access_prompt@1" to HostCapability("host.custom_access_prompt@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.custom_access_prompt@1", parameters)
-        },
-        "host.work_manual@1" to HostCapability("host.work_manual@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.work_manual@1", parameters)
-        },
-        "host.ui.presentation@1" to HostCapability("host.ui.presentation@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.ui.presentation@1", parameters)
-        },
-        "host.privileged.runtime@1" to HostCapability("host.privileged.runtime@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.privileged.runtime@1", parameters)
-        },
-        "host.ui.layout@1" to HostCapability("host.ui.layout@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.ui.layout@1", parameters)
-        },
-        "host.logging@1" to HostCapability("host.logging@1") { ownerPluginId, parameters ->
-            invokeSystemHostFromPlugin(ownerPluginId, "host.logging@1", parameters)
-        }
-    )
 
     init {
         surfacePolicy?.register(
@@ -119,21 +85,21 @@ internal class PluginHostCapabilityRegistry(
                 )
             )
         )
-        hostCapabilities.forEach { (id, capability) ->
-            val primitive = requireNotNull(AiLimbsHostPrimitiveCatalog.find(id)) {
-                "Bound Host Primitive is missing from catalog: $id"
-            }
-            surfacePolicy?.register(
-                HostSurfaceDefinition(
-                    id = PluginSurfaceIds.hostPrimitive(id),
-                    title = "${primitive.title} · ${primitive.id}",
-                    detail = "BOUND · scope: ${capability.requiredScope}",
-                    kind = HostSurfaceKind.HOST_CAPABILITY,
-                    requiredScope = capability.requiredScope,
-                    publicContracts = HOST_PRIMITIVE_INVOKE_CONTRACTS
+        AiLimbsHostPrimitiveCatalog.all
+            .asSequence()
+            .filter { it.requestableScope && it.exposure == HostPrimitiveExposure.BOUND }
+            .forEach { primitive ->
+                surfacePolicy?.register(
+                    HostSurfaceDefinition(
+                        id = PluginSurfaceIds.hostPrimitive(primitive.id),
+                        title = "${primitive.title} · ${primitive.id}",
+                        detail = "BOUND · scope: ${primitive.id}",
+                        kind = HostSurfaceKind.HOST_CAPABILITY,
+                        requiredScope = primitive.id,
+                        publicContracts = HOST_PRIMITIVE_INVOKE_CONTRACTS
+                    )
                 )
-            )
-        }
+            }
     }
 
 
@@ -365,7 +331,7 @@ internal class PluginHostCapabilityRegistry(
     fun activeIds(): Set<String> = capabilities.keys.toSortedSet()
 
     internal fun isHostCallable(capabilityId: String): Boolean =
-        systemExecutor?.isCallable(capabilityId) ?: (capabilityId.trim().lowercase() in hostCapabilities)
+        systemExecutor?.isCallable(capabilityId) ?: HostPrimitiveGatewayBindings.isCallable(capabilityId)
 
     internal fun systemHostOperations(capabilityId: String): List<String> =
         systemExecutor?.operationNames(capabilityId).orEmpty()
@@ -438,19 +404,24 @@ internal class PluginHostCapabilityRegistry(
                     "Host Primitive is not callable in this kernel build: ${primitive.id} (${primitive.exposure})"
                 )
             }
-            val capability = hostCapabilities[primitive.id]
-                ?: throw PluginInstallException(
+            if (!isHostCallable(primitive.id)) {
+                throw PluginInstallException(
                     "HOST_PRIMITIVE_NOT_BOUND",
                     "Host Primitive has no runtime adapter: ${primitive.id}"
                 )
+            }
             surfacePolicy?.requireScopeAllowed(primitive.id)
-            if (capability.requiredScope !in grantedScopes) {
+            if (primitive.id !in grantedScopes) {
                 throw PluginInstallException(
                     "PLUGIN_SCOPE_DENIED",
-                    "$ownerPluginId was not granted required scope: ${capability.requiredScope}"
+                    "$ownerPluginId was not granted required scope: ${primitive.id}"
                 )
             }
-            capability.execute(ownerPluginId, JSONObject(parameters.toString()))
+            invokeSystemHostFromPlugin(
+                ownerPluginId,
+                primitive.id,
+                JSONObject(parameters.toString())
+            )
         }
 
     private suspend fun invokeSystemHostFromPlugin(
