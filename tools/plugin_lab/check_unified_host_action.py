@@ -57,6 +57,17 @@ for directory in RUNTIME_DIRS:
         if "startActivity(" in text:
             errors.append(f"Direct Activity side effect bypasses unified Host entry: {path.relative_to(ROOT)}")
 
+panel_files = [
+    ROOT / "plugin-lab/extensions/sentinelx/src/main/java/com/ai/limbs/extensions/sentinelx/SentinelXBridgeProviderPanel.kt",
+    ROOT / "plugin-lab/extensions/triggercmd/src/main/java/com/ai/limbs/extensions/triggercmd/TriggerCmdBridgeProviderPanel.kt",
+]
+for path in panel_files:
+    text = path.read_text(encoding="utf-8")
+    if "private suspend fun performBridgeAction(" not in text:
+        errors.append(f"Bridge action helper lost suspend semantics: {path.relative_to(ROOT)}")
+    if "private fun performBridgeAction(" in text:
+        errors.append(f"Bridge action helper bypasses suspend control: {path.relative_to(ROOT)}")
+
 rdc = (ROOT / "plugin-lab/extensions/rdc/src/main/java/com/ai/limbs/extensions/rdc/runtime/AiLimbsRdcClient.kt").read_text(encoding="utf-8")
 sentinel = (ROOT / "plugin-lab/extensions/sentinelx/src/main/java/com/ai/limbs/extensions/sentinelx/runtime/SentinelXBridgeProvider.kt").read_text(encoding="utf-8")
 for label, text in (("RDC", rdc), ("SentinelX", sentinel)):

@@ -108,7 +108,7 @@ internal object TriggerCmdBridgeProviderPanel : BridgeProviderPanel {
             else -> performBridgeAction(actionId, control)
         }
     }
-    private fun performBridgeAction(
+    private suspend fun performBridgeAction(
         actionId: String,
         control: BridgeProviderControl
     ): BridgeProviderPanelResult {
