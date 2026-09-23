@@ -854,6 +854,13 @@ internal class ChildExtensionRuntime(
             }
         }
         persistState(record)
+        // Child activation belongs to Worker; label the outcome for the Core log reader.
+        val sourceLogger = HostRuntimeLoggerFactory.extension(record.manifest.extensionId)
+        when (record.lifecycle) {
+            ChildExtensionLifecycle.ACTIVE -> sourceLogger.i("ChildExtensionRuntime", "Child active: version=${record.manifest.version}")
+            ChildExtensionLifecycle.FAILED -> sourceLogger.e("ChildExtensionRuntime", "Child activation failed: ${record.lastError}")
+            else -> Unit
+        }
     }
 
     private fun prepareLoadedRuntime(
