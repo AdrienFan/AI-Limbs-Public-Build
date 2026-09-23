@@ -27,6 +27,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -586,19 +587,59 @@ internal class ChildExtensionRuntime(
         }
     }
 
-    /** Wait until every enabled child whose parent point is live has either mounted or failed. */
+    /**
+     * Wait until every enabled child whose parent point is live has mounted or reached a real
+     * terminal failure.
+     *
+     * Parent point publication is intentionally non-blocking: publishPoint() inserts the point
+     * first and schedules reconcilePoint() asynchronously. Resident startup can therefore observe
+     * the point while a restored child still carries its initial BLOCKED/"Waiting for parent
+     * extension point" state. Treating that transient state as terminal races the reconciliation
+     * coroutine and can abort the entire Resident takeover.
+     *
+     * Close that race here: while the readiness barrier is active, synchronously retry only
+     * enabled non-active children whose parent point is already live. Per-child lifecycle locks
+     * serialize this with the normal asynchronous reconcile path.
+     */
     override suspend fun awaitBusinessChildrenReady(timeoutMs: Long): JSONObject {
         withTimeout(timeoutMs) {
-            mutableSnapshots.first { snapshots ->
-                val expected = snapshots.filter { it.enabled && points.containsKey(it.target.point) }
-                val terminalFailure = expected.firstOrNull {
-                    it.lifecycle == ChildExtensionLifecycle.FAILED ||
-                        it.lifecycle == ChildExtensionLifecycle.BLOCKED
+            while (true) {
+                val livePoints = points.keys.toSet()
+                val pending = records.values.filter { record ->
+                    record.enabled &&
+                        livePoints.contains(record.manifest.target.point) &&
+                        record.lifecycle != ChildExtensionLifecycle.ACTIVE &&
+                        record.lifecycle != ChildExtensionLifecycle.FAILED
+                }
+
+                if (pending.isNotEmpty()) {
+                    pending.forEach { record -> tryActivate(record) }
+                    publishSnapshots()
+                }
+
+                val snapshots = mutableSnapshots.value
+                val expected = snapshots.filter {
+                    it.enabled && points.containsKey(it.target.point)
+                }
+                val terminalFailure = expected.firstOrNull { snapshot ->
+                    when (snapshot.lifecycle) {
+                        ChildExtensionLifecycle.FAILED -> true
+                        ChildExtensionLifecycle.BLOCKED -> {
+                            val error = snapshot.lastError.orEmpty()
+                            error.isNotBlank() &&
+                                error != "Waiting for parent extension point" &&
+                                !error.startsWith("Parent extension point is not active:")
+                        }
+                        else -> false
+                    }
                 }
                 check(terminalFailure == null) {
                     "Enabled child ${terminalFailure?.extensionId} cannot become active on ${terminalFailure?.target?.point}: ${terminalFailure?.lastError}"
                 }
-                expected.all { it.lifecycle == ChildExtensionLifecycle.ACTIVE }
+                if (expected.all { it.lifecycle == ChildExtensionLifecycle.ACTIVE }) {
+                    return@withTimeout
+                }
+                delay(25L)
             }
         }
         return businessRuntimeSnapshot()
