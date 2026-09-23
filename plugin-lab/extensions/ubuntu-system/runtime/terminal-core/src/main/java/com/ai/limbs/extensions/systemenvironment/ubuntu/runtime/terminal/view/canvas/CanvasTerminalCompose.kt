@@ -22,6 +22,7 @@ fun CanvasTerminalScreen(
     imeAnimationOffsetPx: Int = 0,
     committedImeBottomInsetPx: Int = 0,
     onInput: (String) -> Unit = {},
+    onTerminalSizeChanged: ((Int, Int) -> Unit)? = null,
     onScaleChanged: (Float) -> Unit = {},
     sessionId: String? = null,
     onScrollOffsetChanged: ((String, Float) -> Unit)? = null,
@@ -40,6 +41,7 @@ fun CanvasTerminalScreen(
         factory = { context ->
             CanvasTerminalView(context).apply {
                 setConfig(config)
+                setOnTerminalSizeChanged(onTerminalSizeChanged)
                 setEmulator(emulator)
                 setPty(pty)
                 setImeViewportState(
@@ -74,6 +76,7 @@ fun CanvasTerminalScreen(
         },
         update = { view ->
             view.setConfig(config)
+            view.setOnTerminalSizeChanged(onTerminalSizeChanged)
             view.setEmulator(emulator)
             view.setPty(pty)
             view.setImeViewportState(
@@ -187,6 +190,7 @@ fun CanvasTerminalOutput(
     imeAnimationOffsetPx: Int = 0,
     committedImeBottomInsetPx: Int = 0,
     onRequestShowKeyboard: (() -> Unit)? = null,
+    onTerminalSizeChanged: ((Int, Int) -> Unit)? = null,
     sessionId: String? = null,
     onScrollOffsetChanged: ((String, Float) -> Unit)? = null,
     getScrollOffset: ((String) -> Float)? = null,
@@ -204,6 +208,7 @@ fun CanvasTerminalOutput(
         factory = { context ->
             CanvasTerminalView(context).apply {
                 setConfig(config)
+                setOnTerminalSizeChanged(onTerminalSizeChanged)
                 setEmulator(emulator)
                 setPty(pty)
                 setImeViewportState(
@@ -233,6 +238,7 @@ fun CanvasTerminalOutput(
         },
         update = { view ->
             view.setConfig(config)
+            view.setOnTerminalSizeChanged(onTerminalSizeChanged)
             view.setEmulator(emulator)
             view.setPty(pty)
             view.setImeViewportState(

@@ -6,6 +6,7 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.Ub
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimeState
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuStopRequester
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.StateFlow
 
 /** UI-facing terminal contract. Implementations may be local or a Resident Core mirror. */
@@ -32,6 +33,7 @@ interface TerminalUiController {
     suspend fun sendCommandToSession(sessionId: String, command: String, commandId: String? = null): String
     fun sendInput(input: String)
     fun sendInterruptSignal()
+    fun updateSessionSize(sessionId: String, rows: Int, cols: Int)
 }
 
 /** Legacy/single-process adapter; all business calls still land on the one local TerminalManager. */
@@ -60,4 +62,7 @@ class LocalTerminalUiController(
         terminal.sendCommandToSession(sessionId, command, commandId)
     override fun sendInput(input: String) = terminal.sendInput(input)
     override fun sendInterruptSignal() = terminal.sendInterruptSignal()
+    override fun updateSessionSize(sessionId: String, rows: Int, cols: Int) {
+        terminal.coroutineScope.launch { terminal.resizeSessionNow(sessionId, rows, cols) }
+    }
 }

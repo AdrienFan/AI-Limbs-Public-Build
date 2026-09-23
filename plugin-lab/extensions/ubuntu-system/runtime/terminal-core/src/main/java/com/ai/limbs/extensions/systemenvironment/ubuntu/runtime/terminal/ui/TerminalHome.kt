@@ -383,6 +383,9 @@ fun TerminalHome(
                         committedImeBottomInsetPx = committedFullscreenImeBottomPx,
                         onInput = { sendDirectInput(it) },
                         sessionId = env.currentSessionId,
+                        onTerminalSizeChanged = { rows, cols ->
+                            env.currentSessionId?.let { env.terminalController.updateSessionSize(it, rows, cols) }
+                        },
                         onScrollOffsetChanged = { id, offset -> env.saveScrollOffset(id, offset) },
                         getScrollOffset = { id -> env.getScrollOffset(id) },
                         tabs = tabItems,
@@ -446,6 +449,9 @@ fun TerminalHome(
                         committedImeBottomInsetPx = committedStandardImeBottomPx,
                         onInput = { sendDirectInput(it) },
                         sessionId = env.currentSessionId,
+                        onTerminalSizeChanged = { rows, cols ->
+                            env.currentSessionId?.let { env.terminalController.updateSessionSize(it, rows, cols) }
+                        },
                         onScrollOffsetChanged = { id, offset -> env.saveScrollOffset(id, offset) },
                         getScrollOffset = { id -> env.getScrollOffset(id) },
                         tabs = tabItems,
@@ -472,6 +478,9 @@ fun TerminalHome(
                             pendingShowIme = true
                         },
                         sessionId = env.currentSessionId,
+                        onTerminalSizeChanged = { rows, cols ->
+                            env.currentSessionId?.let { env.terminalController.updateSessionSize(it, rows, cols) }
+                        },
                         onScrollOffsetChanged = { id, offset -> env.saveScrollOffset(id, offset) },
                         getScrollOffset = { id -> env.getScrollOffset(id) },
                         tabs = tabItems,

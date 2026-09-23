@@ -132,6 +132,30 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.PROCESS_EXECUTION
         ) { p -> sessionInput(terminal, p) },
         spec(
+            id = "plugin.ubuntu.session.command",
+            name = "向 Ubuntu 会话执行命令",
+            description = "在指定持久终端中按与 Host 模式相同的队列语义执行命令。",
+            keywords = listOf("Ubuntu", "terminal", "命令", "PTY"),
+            params = listOf(
+                param("session_id", "string", "目标终端会话 ID"),
+                param("command", "string", "命令文本"),
+                param("command_id", "string", "命令 ID", required = false)
+            ),
+            effect = InProcessCapabilityEffect.PROCESS_EXECUTION
+        ) { p -> sessionCommand(terminal, p) },
+        spec(
+            id = "plugin.ubuntu.session.resize",
+            name = "调整 Ubuntu 会话窗口",
+            description = "根据 Host 页面视口更新持久终端的 PTY 行列数。",
+            keywords = listOf("Ubuntu", "terminal", "窗口", "PTY"),
+            params = listOf(
+                param("session_id", "string", "目标终端会话 ID"),
+                param("rows", "integer", "窗口行数"),
+                param("cols", "integer", "窗口列数")
+            ),
+            effect = InProcessCapabilityEffect.STATE_CHANGE
+        ) { p -> sessionResize(terminal, p) },
+        spec(
             id = "plugin.ubuntu.session.interrupt",
             invokeAliases = listOf("plugin.system_environment.session.interrupt"),
             name = "中断 Ubuntu 会话",
@@ -149,6 +173,17 @@ internal object UbuntuSubsystemCapabilities {
             params = listOf(param("session_id", "string", "目标终端会话 ID")),
             effect = InProcessCapabilityEffect.READ_ONLY
         ) { p -> sessionScreen(terminal, p) },
+        spec(
+            id = "plugin.ubuntu.session.frame",
+            name = "读取 Ubuntu 终端画面状态",
+            description = "供常驻模式页面镜像使用，包含样式、光标和滚动历史。",
+            keywords = listOf("Ubuntu", "terminal", "画面", "PTY"),
+            params = listOf(
+                param("session_id", "string", "目标终端会话 ID"),
+                param("revision", "integer", "已显示的画面修订号", required = false)
+            ),
+            effect = InProcessCapabilityEffect.READ_ONLY
+        ) { p -> sessionFrame(terminal, p) },
         spec(
             id = "plugin.ubuntu.session.close",
             invokeAliases = listOf("plugin.system_environment.session.close"),
@@ -400,6 +435,28 @@ internal object UbuntuSubsystemCapabilities {
             .put("input_length", if (hasInput) input.length else 0)
     }
 
+    private suspend fun sessionCommand(terminal: TerminalManager, p: JSONObject): JSONObject {
+        requireRunning(terminal)
+        val sessionId = p.requiredText("session_id")
+        requireSession(terminal, sessionId)
+        // Preserve whitespace and empty commands exactly as the Host terminal does.
+        val command = p.getString("command")
+        val commandId = if (p.has("command_id") && !p.isNull("command_id")) p.getString("command_id") else null
+        val actualId = terminal.sendCommandToSession(sessionId, command, commandId)
+        return ok().put("session_id", sessionId).put("command_id", actualId)
+    }
+
+    private suspend fun sessionResize(terminal: TerminalManager, p: JSONObject): JSONObject {
+        requireRunning(terminal)
+        val sessionId = p.requiredText("session_id")
+        requireSession(terminal, sessionId)
+        val rows = p.getInt("rows")
+        val cols = p.getInt("cols")
+        require(rows in 1..500 && cols in 1..500) { "Invalid terminal window size" }
+        require(terminal.resizeSessionNow(sessionId, rows, cols)) { "Could not resize terminal session" }
+        return ok().put("session_id", sessionId).put("rows", rows).put("cols", cols)
+    }
+
     private suspend fun sessionInterrupt(terminal: TerminalManager, p: JSONObject): JSONObject {
         requireRunning(terminal)
         val sessionId = p.requiredText("session_id")
@@ -418,6 +475,16 @@ internal object UbuntuSubsystemCapabilities {
             .put("rows", screen.size)
             .put("cols", if (screen.isNotEmpty()) screen[0].size else 0)
             .put("content", content)
+    }
+
+    private fun sessionFrame(terminal: TerminalManager, p: JSONObject): JSONObject {
+        val sessionId = p.requiredText("session_id")
+        val session = requireSession(terminal, sessionId)
+        val terminal = session.ansiParser
+        if (p.has("revision") && p.getLong("revision") == terminal.getFrameRevision()) {
+            return ok().put("session_id", sessionId).put("unchanged", true)
+        }
+        return ok().put("session_id", sessionId).put("frame", terminal.exportFrame())
     }
 
     private fun sessionClose(terminal: TerminalManager, p: JSONObject): JSONObject {

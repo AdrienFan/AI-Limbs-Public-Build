@@ -499,6 +499,7 @@ class CanvasTerminalView @JvmOverloads constructor(
 
     // PTY 引用（用于窗口大小同步）
     private var pty: com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.Pty? = null
+    private var onTerminalSizeChanged: ((Int, Int) -> Unit)? = null
 
     // 渲染线程
     private var renderThread: RenderThread? = null
@@ -877,6 +878,10 @@ class CanvasTerminalView @JvmOverloads constructor(
     /**
      * 设置 PTY（用于窗口大小同步）
      */
+    fun setOnTerminalSizeChanged(callback: ((Int, Int) -> Unit)?) {
+        onTerminalSizeChanged = callback
+    }
+
     fun setPty(pty: com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.Pty?) {
         this.pty = pty
         // 如果 Surface 已经创建且有 emulator，立即同步终端大小
@@ -917,9 +922,16 @@ class CanvasTerminalView @JvmOverloads constructor(
         onScrollOffsetChanged: ((String, Float) -> Unit)?,
         getScrollOffset: ((String) -> Float)?
     ) {
+        val sessionChanged = this.sessionId != sessionId
         this.sessionId = sessionId
         this.onScrollOffsetChanged = onScrollOffsetChanged
         this.getScrollOffset = getScrollOffset
+        if (sessionChanged) {
+            // A new tab needs its own PTY size even when the viewport is unchanged.
+            cachedRows = -1
+            cachedCols = -1
+            if (width > 0 && height > 0 && emulator != null) updateTerminalSize(width, height)
+        }
 
         // 如果设置了sessionId，立即恢复滚动位置
         sessionId?.let { id ->
@@ -2933,12 +2945,17 @@ class CanvasTerminalView @JvmOverloads constructor(
         // 同步 PTY 窗口尺寸
         // 使用后台线程执行，避免ANR（特别是在SSH会话或PTY阻塞时）
         val targetPty = pty
-        Thread {
-            try {
-                targetPty?.setWindowSize(rows, cols)
-            } catch (e: Exception) {
-                Log.e("CanvasTerminalView", "Failed to update PTY window size", e)
-            }
-        }.start()
+        if (targetPty != null) {
+            Thread {
+                try {
+                    targetPty.setWindowSize(rows, cols)
+                } catch (e: Exception) {
+                    Log.e("CanvasTerminalView", "Failed to update PTY window size", e)
+                }
+            }.start()
+        } else {
+            // Resident UI has no local PTY: send the viewport to its Core owner.
+            onTerminalSizeChanged?.invoke(rows, cols)
+        }
     }
 }

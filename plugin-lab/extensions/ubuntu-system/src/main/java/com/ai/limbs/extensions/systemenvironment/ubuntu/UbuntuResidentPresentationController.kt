@@ -15,8 +15,10 @@ import com.ai.limbs.plugin.runtime.ChildExtensionPresentationHost
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
+import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -44,12 +46,22 @@ internal class UbuntuResidentPresentationController(
         mutableSharedHidden.asStateFlow()
 
     private val refreshMutex = Mutex()
+    private val screenMutex = Mutex()
     private val emulators = ConcurrentHashMap<String, AnsiTerminalEmulator>()
     private val localUiClients = AtomicInteger(0)
     private val uiLeaseId = UUID.randomUUID().toString()
     private val scrollOffsets = ConcurrentHashMap<String, Float>()
+    private val inputQueue = Channel<suspend () -> Unit>(Channel.UNLIMITED)
+    private val requestedSizes = ConcurrentHashMap<String, Pair<Int, Int>>()
 
     init {
+        host.scope.launch {
+            for (operation in inputQueue) {
+                runCatching { operation() }.onFailure { error ->
+                    host.logger.w("ResidentUbuntuUi", "Terminal input failed: " + error.message)
+                }
+            }
+        }
         host.scope.launch {
             while (isActive) {
                 runCatching { refresh() }.onFailure { error ->
@@ -124,6 +136,7 @@ internal class UbuntuResidentPresentationController(
             invoke("plugin.ubuntu.session.close", JSONObject().put("session_id", sessionId))
             emulators.remove(sessionId)
             scrollOffsets.remove(sessionId)
+            requestedSizes.remove(sessionId)
             refresh()
         }
     }
@@ -144,23 +157,46 @@ internal class UbuntuResidentPresentationController(
         command: String,
         commandId: String?
     ): String {
-        invoke("plugin.ubuntu.session.input", JSONObject().put("session_id", sessionId).put("input", command))
-        invoke("plugin.ubuntu.session.input", JSONObject().put("session_id", sessionId).put("control", "enter"))
-        return commandId ?: UUID.randomUUID().toString()
+        val completed = CompletableDeferred<String>()
+        inputQueue.send {
+            try {
+                val params = JSONObject().put("session_id", sessionId).put("command", command)
+                if (commandId != null) params.put("command_id", commandId)
+                completed.complete(invoke("plugin.ubuntu.session.command", params).getString("command_id"))
+            } catch (error: Throwable) {
+                completed.completeExceptionally(error)
+            }
+        }
+        return completed.await()
     }
 
     override fun sendInput(input: String) {
         val id = mutableTerminalState.value.currentSessionId ?: return
-        host.scope.launch {
+        inputQueue.trySend {
             invoke("plugin.ubuntu.session.input", JSONObject().put("session_id", id).put("input", input))
-        }
+        }.getOrThrow()
     }
 
     override fun sendInterruptSignal() {
         val id = mutableTerminalState.value.currentSessionId ?: return
-        host.scope.launch {
+        inputQueue.trySend {
             invoke("plugin.ubuntu.session.interrupt", JSONObject().put("session_id", id))
-        }
+        }.getOrThrow()
+    }
+
+    override fun updateSessionSize(sessionId: String, rows: Int, cols: Int) {
+        val size = rows to cols
+        if (requestedSizes.put(sessionId, size) == size) return
+        inputQueue.trySend {
+            runCatching {
+                invoke("plugin.ubuntu.session.resize", JSONObject()
+                    .put("session_id", sessionId).put("rows", rows).put("cols", cols))
+                refreshScreen(sessionId)
+            }.onFailure { error ->
+                requestedSizes.remove(sessionId, size)
+                host.logger.w("ResidentUbuntuUi", "Terminal resize failed: " + error.message)
+            }
+        }.getOrThrow()
     }
 
     suspend fun refresh(preferredSessionId: String? = null) = refreshMutex.withLock {
@@ -241,17 +277,14 @@ internal class UbuntuResidentPresentationController(
         desired?.let { refreshScreen(it) }
     }
 
-    private suspend fun refreshScreen(sessionId: String) {
-        if (mutableTerminalState.value.sessions.none { it.id == sessionId }) return
-        val screen = invoke(
-            "plugin.ubuntu.session.screen",
-            JSONObject().put("session_id", sessionId)
-        )
-        val rows = screen.optInt("rows", 1).coerceAtLeast(1)
-        val cols = screen.optInt("cols", 1).coerceAtLeast(1)
-        val emulator = AnsiTerminalEmulator(screenWidth = cols, screenHeight = rows, historySize = 200)
-        emulator.parse(screen.optString("content"))
-        emulators[sessionId] = emulator
+    private suspend fun refreshScreen(sessionId: String) = screenMutex.withLock {
+        if (mutableTerminalState.value.sessions.none { it.id == sessionId }) return@withLock
+        val emulator = emulators.computeIfAbsent(sessionId) { AnsiTerminalEmulator() }
+        val params = JSONObject().put("session_id", sessionId)
+        emulator.getMirroredRevision().takeIf { it >= 0 }?.let { params.put("revision", it) }
+        val response = invoke("plugin.ubuntu.session.frame", params)
+        if (response.optBoolean("unchanged")) return@withLock
+        emulator.importFrame(response.getJSONObject("frame"))
         val current = mutableTerminalState.value
         mutableTerminalState.value = current.copy(
             sessions = current.sessions.map { session ->

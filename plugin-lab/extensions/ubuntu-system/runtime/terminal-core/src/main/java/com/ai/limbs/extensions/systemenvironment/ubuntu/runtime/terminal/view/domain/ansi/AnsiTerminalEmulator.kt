@@ -3,6 +3,8 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.d
 import android.graphics.Color
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import java.util.concurrent.CopyOnWriteArrayList
+import org.json.JSONArray
+import org.json.JSONObject
 
 /**
  * 终端字符数据
@@ -76,6 +78,10 @@ class AnsiTerminalEmulator(
     // 光标位置
     private var cursorX: Int = 0
     private var cursorY: Int = 0
+    private var frameRevision: Long = 0
+    private var outputRevision: Long = 0
+    private var mirroredRevision: Long = -1
+    private var mirroredOutputRevision: Long = -1
 
     // 当前文本属性
     private var currentAttributes = TextAttributes()
@@ -107,6 +113,7 @@ class AnsiTerminalEmulator(
     /**
      * 解析并执行 ANSI 序列
      */
+    @Synchronized
     fun parse(text: String) {
         val scanner = AnsiScanner(text)
 
@@ -125,6 +132,8 @@ class AnsiTerminalEmulator(
             }
         }
 
+        frameRevision++
+        outputRevision++
         // 通知监听器内容已改变
         notifyChange()
         // 通知新输出监听器
@@ -694,6 +703,131 @@ class AnsiTerminalEmulator(
 
     fun getScreenContent(): Array<Array<TerminalChar>> = screenBuffer
 
+    @Synchronized
+    fun getFrameRevision(): Long = frameRevision
+
+    @Synchronized
+    fun getMirroredRevision(): Long = mirroredRevision
+
+    /**
+     * The resident presentation receives the same cells, scrollback and cursor as
+     * the local canvas. Adjacent cells with identical attributes share one run.
+     */
+    @Synchronized
+    fun exportFrame(): JSONObject = JSONObject()
+        .put("version", 1)
+        .put("revision", frameRevision)
+        .put("output_revision", outputRevision)
+        .put("cols", screenWidth)
+        .put("rows", screenHeight)
+        .put("screen", encodeRows(screenBuffer.toList(), lineWrapped.toList()))
+        .put("history", encodeRows(historyBuffer, historyWrapped))
+        .put("cursor_x", cursorX)
+        .put("cursor_y", cursorY)
+        .put("cursor_visible", cursorVisible)
+        .put("alternate_screen", isAltScreenActive)
+
+    @Synchronized
+    fun importFrame(frame: JSONObject) {
+        require(frame.getInt("version") == 1) { "Unsupported terminal frame version" }
+        val revision = frame.getLong("revision")
+        val newOutputRevision = frame.getLong("output_revision")
+        val sawNewOutput = mirroredOutputRevision >= 0 && newOutputRevision > mirroredOutputRevision
+        val cols = frame.getInt("cols")
+        val rows = frame.getInt("rows")
+        require(cols > 0 && rows > 0) { "Invalid terminal frame dimensions" }
+        val (screen, wraps) = decodeRows(frame.getJSONArray("screen"), rows, cols)
+        val encodedHistory = frame.getJSONArray("history")
+        require(encodedHistory.length() <= historySize) { "Terminal frame exceeds history capacity" }
+        val (history, historyWraps) = decodeRows(encodedHistory, encodedHistory.length(), cols)
+        screenWidth = cols
+        screenHeight = rows
+        screenBuffer = screen.toTypedArray()
+        lineWrapped = wraps.toBooleanArray()
+        historyBuffer.clear()
+        historyBuffer.addAll(history)
+        historyWrapped.clear()
+        historyWrapped.addAll(historyWraps)
+        cursorX = frame.getInt("cursor_x").coerceIn(0, cols - 1)
+        cursorY = frame.getInt("cursor_y").coerceIn(0, rows - 1)
+        cursorVisible = frame.getBoolean("cursor_visible")
+        isAltScreenActive = frame.getBoolean("alternate_screen")
+        altScreenBuffer = null // Presentation renders frames; Core owns the PTY mode.
+        scrollTop = 0
+        scrollBottom = rows - 1
+        frameRevision = revision
+        outputRevision = newOutputRevision
+        mirroredRevision = revision
+        mirroredOutputRevision = newOutputRevision
+        notifyChange()
+        if (sawNewOutput) notifyNewOutput()
+    }
+
+    private fun encodeRows(lines: List<Array<TerminalChar>>, wraps: List<Boolean>): JSONArray {
+        require(lines.size == wraps.size)
+        return JSONArray().apply {
+            lines.forEachIndexed { index, line ->
+                val runs = JSONArray()
+                var start = 0
+                while (start < line.size) {
+                    val attributes = line[start].attributes
+                    var end = start + 1
+                    while (end < line.size && line[end].attributes == attributes) end++
+                    val chars = CharArray(end - start) { line[start + it].char }
+                    val flags = (if (attributes.isBold) 1 else 0) or
+                        (if (attributes.isDim) 2 else 0) or
+                        (if (attributes.isItalic) 4 else 0) or
+                        (if (attributes.isUnderline) 8 else 0) or
+                        (if (attributes.isBlinking) 16 else 0) or
+                        (if (attributes.isInverse) 32 else 0) or
+                        (if (attributes.isHidden) 64 else 0) or
+                        (if (attributes.isStrikethrough) 128 else 0)
+                    runs.put(JSONArray().put(String(chars)).put(attributes.fgColor)
+                        .put(attributes.bgColor).put(flags))
+                    start = end
+                }
+                put(JSONObject().put("wrapped", wraps[index]).put("runs", runs))
+            }
+        }
+    }
+
+    private fun decodeRows(encoded: JSONArray, count: Int, cols: Int):
+        Pair<List<Array<TerminalChar>>, List<Boolean>> {
+        require(encoded.length() == count) { "Unexpected terminal frame row count" }
+        val lines = ArrayList<Array<TerminalChar>>(count)
+        val wraps = ArrayList<Boolean>(count)
+        for (index in 0 until count) {
+            val row = encoded.getJSONObject(index)
+            val cells = Array(cols) { TerminalChar() }
+            var column = 0
+            val runs = row.getJSONArray("runs")
+            for (runIndex in 0 until runs.length()) {
+                val run = runs.getJSONArray(runIndex)
+                val value = run.getString(0)
+                require(value.isNotEmpty() && column + value.length <= cols) { "Invalid terminal frame run" }
+                val flags = run.getInt(3)
+                val attributes = TextAttributes(
+                    fgColor = run.getInt(1),
+                    bgColor = run.getInt(2),
+                    isBold = (flags and 1) != 0,
+                    isDim = (flags and 2) != 0,
+                    isItalic = (flags and 4) != 0,
+                    isUnderline = (flags and 8) != 0,
+                    isBlinking = (flags and 16) != 0,
+                    isInverse = (flags and 32) != 0,
+                    isHidden = (flags and 64) != 0,
+                    isStrikethrough = (flags and 128) != 0
+                )
+                value.forEach { character -> cells[column++] = TerminalChar(character, attributes) }
+            }
+            require(column == cols) { "Incomplete terminal frame row" }
+            lines.add(cells)
+            wraps.add(row.getBoolean("wrapped"))
+        }
+        return lines to wraps
+    }
+
+
     /**
      * 获取包含历史记录的完整内容（历史 + 屏幕）
      */
@@ -722,6 +856,7 @@ class AnsiTerminalEmulator(
      */
     fun getHistorySize(): Int = historyBuffer.size
 
+    @Synchronized
     fun resize(newWidth: Int, newHeight: Int) {
         if (newWidth == screenWidth && newHeight == screenHeight) return
 
@@ -739,6 +874,7 @@ class AnsiTerminalEmulator(
         scrollTop = 0
         scrollBottom = screenHeight - 1
         cursorX = 0
+        frameRevision++
 
         notifyChange()
     }

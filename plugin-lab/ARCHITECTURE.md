@@ -69,6 +69,18 @@ mode. System-role plugins and the currently bound global theme are exempt. The g
 latest real use, explicit enable time, or policy-enable time, so process restart/mount restoration does
 not reset inactivity age.
 
+## Ubuntu resident terminal presentation
+
+Ubuntu owns the PTY and terminal emulator in its business process. In Host mode the
+canvas uses that emulator directly. In Resident mode the Host canvas receives a
+versioned terminal frame containing cells, styles, cursor state, wrap metadata, and
+scrollback. The frame revision lets the Worker omit unchanged frames. The Host sends
+its viewport size to the Worker PTY on resize and on tab changes, and serializes
+keyboard operations. Command submission uses the same session queue in both modes.
+
+The existing public session.screen capability continues to return plain visible
+text for callers that requested that contract; the UI uses session.frame.
+
 ## Growth path
 
 New behavior should be added by defining a versioned host capability or extension point, then

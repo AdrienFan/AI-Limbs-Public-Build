@@ -908,6 +908,17 @@ class TerminalManager private constructor(
             }
         }
 
+    suspend fun resizeSessionNow(sessionId: String, rows: Int, cols: Int): Boolean =
+        withContext(Dispatchers.IO) {
+            require(rows > 0 && cols > 0)
+            val session = sessionManager.getSession(sessionId) ?: return@withContext false
+            val terminalPty = session.pty ?: return@withContext false
+            if (!terminalPty.setWindowSize(rows, cols)) return@withContext false
+            // The renderer and the PTY must agree on geometry in both modes.
+            session.ansiParser.resize(cols, rows)
+            true
+        }
+
     fun isSessionWaitingForInput(sessionId: String): Boolean =
         sessionManager.getSession(sessionId)?.isWaitingForInteractiveInput == true
 
