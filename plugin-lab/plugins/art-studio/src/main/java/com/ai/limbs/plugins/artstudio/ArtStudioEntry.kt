@@ -130,10 +130,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.importImage("LANER", p.getString("base64"))
         }
         capability("export.png", "导出 PNG", write) { p ->
-            ArtRenderer.export(store, store.current(), "png", p.optString("name", ""))
+            ArtRenderer.export(host.applicationContext, store, store.current(), "png", p.optString("name", ""))
         }
         capability("export.jpeg", "导出 JPEG", write) { p ->
-            ArtRenderer.export(store, store.current(), "jpeg", p.optString("name", ""))
+            ArtRenderer.export(host.applicationContext, store, store.current(), "jpeg", p.optString("name", ""))
         }
         host.logger.i("ArtStudio", "Art Studio mounted")
         return InProcessPluginHandle { host.logger.i("ArtStudio", "Art Studio stopped") }

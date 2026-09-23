@@ -378,7 +378,7 @@ private class StudioCanvas(context: Context) : View(context) {
             canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 style = Paint.Style.STROKE; strokeWidth = brushWidth
                 strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
-                color = Color.parseColor(color)
+                color = Color.parseColor(this@StudioCanvas.color)
             })
             canvas.restore()
         }
