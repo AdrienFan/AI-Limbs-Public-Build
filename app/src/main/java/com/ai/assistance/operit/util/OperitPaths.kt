@@ -26,7 +26,10 @@ object OperitPaths {
     const val SKILL_REPO_ZIP_POOL_DIR_NAME = "skill_repo_zip_pool"
 
     fun downloadsDir(): File {
-        return Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
+        // Resident Core uses app_process without Android application binding. Framework storage
+        // lookup can report the wrong calling package and abort ToolPkg QuickJS initialization.
+        // /sdcard is the shared-storage alias already used by the public path helpers.
+        return File("/sdcard", Environment.DIRECTORY_DOWNLOADS)
     }
 
     fun aiLimbsRootDir(): File {
