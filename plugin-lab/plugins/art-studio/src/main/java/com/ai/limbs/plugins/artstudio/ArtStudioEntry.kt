@@ -67,6 +67,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             "layer.set_visibility" to "LAYER_VISIBLE", "layer.set_opacity" to "LAYER_OPACITY",
             "layer.set_lock" to "LAYER_LOCK", "layer.set_blend" to "LAYER_BLEND",
             "selection.create" to "SELECTION_CREATE", "selection.clear" to "SELECTION_CLEAR",
+            "selection.edit" to "SELECTION_EDIT",
             "canvas.crop" to "CROP").forEach { (name, type) ->
             capability(name, "画室 ${name.substringAfter('.')}", write) { p -> store.apply("LANER", type, p) }
         }
@@ -166,7 +167,11 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("opacity", "number", true), p("tool", optional = true))
         "stroke.erase" -> listOf(p("layerId"), p("strokeId"))
         "selection.create" -> listOf(p("x", "number"), p("y", "number"), p("width", "number"), p("height", "number"))
-        "canvas.crop" -> listOf(p("width", "integer"), p("height", "integer"))
+        "selection.edit" -> listOf(p("layerId"), p("action"), p("dx", "number", true),
+            p("dy", "number", true), p("factor", "number", true), p("degrees", "number", true),
+            p("copyId", optional = true))
+        "canvas.crop" -> listOf(p("width", "integer"), p("height", "integer"),
+            p("x", "number", true), p("y", "number", true))
         "transform.move" -> listOf(id, p("x", "number"), p("y", "number"))
         "transform.scale" -> listOf(id, p("scale", "number"))
         "transform.rotate" -> listOf(id, p("rotation", "number"))

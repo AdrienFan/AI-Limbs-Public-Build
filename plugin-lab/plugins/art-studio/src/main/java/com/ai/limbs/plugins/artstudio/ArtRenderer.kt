@@ -32,7 +32,8 @@ internal object ArtRenderer {
         for (i in 0 until layers.length()) {
             val layer = layers.getJSONObject(i)
             if (layer.getString("kind") == "group" || !layer.getBoolean("visible")) continue
-            if (!parentsVisible(layer, layers)) continue
+            val parents = ancestors(layer, layers) ?: continue
+            if (parents.any { !it.getBoolean("visible") }) continue
             val buffer = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
             val local = Canvas(buffer)
             if (layer.getString("kind") == "image") {
@@ -45,12 +46,19 @@ internal object ArtRenderer {
                 for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s))
             }
             canvas.save()
+            for (parent in parents) {
+                canvas.translate(parent.getDouble("x").toFloat(), parent.getDouble("y").toFloat())
+                canvas.rotate(parent.getDouble("rotation").toFloat())
+                val parentScale = parent.getDouble("scale").toFloat()
+                canvas.scale(parentScale, parentScale)
+            }
             canvas.translate(layer.getDouble("x").toFloat(), layer.getDouble("y").toFloat())
             canvas.rotate(layer.getDouble("rotation").toFloat())
             val scale = layer.getDouble("scale").toFloat()
             canvas.scale(scale, scale)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                alpha = (layer.getDouble("opacity") * 255).toInt().coerceIn(0, 255)
+                alpha = (parents.fold(layer.getDouble("opacity")) { value, parent ->
+                    value * parent.getDouble("opacity") } * 255).toInt().coerceIn(0, 255)
                 if (Build.VERSION.SDK_INT >= 29) blendMode = when (layer.getString("blend")) {
                     "multiply" -> android.graphics.BlendMode.MULTIPLY
                     "screen" -> android.graphics.BlendMode.SCREEN
@@ -65,16 +73,17 @@ internal object ArtRenderer {
         return bitmap
     }
 
-    private fun parentsVisible(layer: JSONObject, layers: JSONArray): Boolean {
+    private fun ancestors(layer: JSONObject, layers: JSONArray): List<JSONObject>? {
         var parentId = layer.optString("parentId")
+        val path = mutableListOf<JSONObject>()
         repeat(layers.length()) {
-            if (parentId.isBlank()) return true
+            if (parentId.isBlank()) return path.reversed()
             val parent = (0 until layers.length()).map { layers.getJSONObject(it) }
-                .firstOrNull { it.getString("id") == parentId } ?: return false
-            if (!parent.getBoolean("visible")) return false
+                .firstOrNull { it.getString("id") == parentId } ?: return null
+            path.add(parent)
             parentId = parent.optString("parentId")
         }
-        return false
+        return null
     }
 
     private fun drawStroke(canvas: Canvas, stroke: JSONObject) {

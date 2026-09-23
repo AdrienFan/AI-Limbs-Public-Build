@@ -11,6 +11,8 @@ import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
+import kotlin.math.cos
+import kotlin.math.sin
 
 /** Both the Host presentation and Resident business runtime use the same plugin data directory. */
 internal class ArtStore(private val root: File) {
@@ -71,8 +73,13 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
-        val operation = JSONObject().put("id", UUID.randomUUID().toString())
-            .put("actor", actor).put("type", type).put("parameters", JSONObject(params.toString()))
+        val operationId = UUID.randomUUID().toString()
+        val normalized = JSONObject(params.toString())
+        if (type == "SELECTION_EDIT" && normalized.optString("action") == "COPY") {
+            normalized.put("copyId", operationId)
+        }
+        val operation = JSONObject().put("id", operationId)
+            .put("actor", actor).put("type", type).put("parameters", normalized)
             .put("timestamp", System.currentTimeMillis())
         doc.getJSONArray("operations").put(operation)
         // A failed replay must never overwrite the existing draft or its history.
@@ -91,11 +98,12 @@ internal class ArtStore(private val root: File) {
                 zip.putNextEntry(ZipEntry("project.json"))
                 zip.write(doc.toString().toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
-                val state = replay(doc)
                 val used = mutableSetOf<String>()
-                val layers = state.getJSONArray("layers")
-                for (i in 0 until layers.length()) {
-                    val asset = layers.getJSONObject(i).optString("asset")
+                val operations = doc.getJSONArray("operations")
+                for (i in 0 until operations.length()) {
+                    val operation = operations.getJSONObject(i)
+                    if (operation.getString("type") != "IMAGE_IMPORT") continue
+                    val asset = operation.getJSONObject("parameters").getString("asset")
                     if (asset.isNotBlank() && used.add(asset)) {
                         zip.putNextEntry(ZipEntry("assets/$asset.png"))
                         zip.write(assetFile(asset).readBytes())
@@ -221,10 +229,13 @@ internal class ArtStore(private val root: File) {
             "LAYER_CREATE", "GROUP_CREATE", "IMAGE_IMPORT" -> {
                 val id = p.optString("id").ifBlank { p.optString("asset") }
                 require(id.isNotBlank())
+                require((0 until layers.length()).none { layers.getJSONObject(it).getString("id") == id })
+                val parentId = p.optString("parentId")
+                if (parentId.isNotBlank()) require(find(parentId).second.getString("kind") == "group")
                 val kind = if (type == "GROUP_CREATE") "group" else if (type == "IMAGE_IMPORT") "image" else "paint"
                 layers.put(JSONObject().put("id", id).put("kind", kind)
                     .put("name", p.optString("name", if (kind == "group") "图层组" else "图层"))
-                    .put("parentId", p.optString("parentId"))
+                    .put("parentId", parentId)
                     .put("visible", true).put("opacity", 1.0).put("locked", false)
                     .put("blend", "normal").put("x", 0.0).put("y", 0.0)
                     .put("scale", 1.0).put("rotation", 0.0)
@@ -247,6 +258,9 @@ internal class ArtStore(private val root: File) {
             "LAYER_DELETE" -> {
                 val (index, layer) = find(p.getString("id"))
                 require(!layer.getBoolean("locked"))
+                require((0 until layers.length()).none { layers.getJSONObject(it).optString("parentId") == p.getString("id") }) {
+                    "请先删除或移出组中的图层"
+                }
                 layers.remove(index)
             }
             "LAYER_COPY" -> {
@@ -295,9 +309,86 @@ internal class ArtStore(private val root: File) {
                 state.put("selection", JSONObject(p.toString()))
             }
             "SELECTION_CLEAR" -> state.put("selection", JSONObject.NULL)
+            "SELECTION_EDIT" -> {
+                val selection = state.optJSONObject("selection") ?: error("请先创建矩形选区")
+                val layer = find(p.getString("layerId")).second
+                require(layer.getString("kind") == "paint" && !layer.getBoolean("locked"))
+                val strokes = layer.getJSONArray("strokes")
+                val chosen = (0 until strokes.length()).filter { index ->
+                    val points = strokes.getJSONObject(index).getJSONArray("points")
+                    val x = (0 until points.length()).sumOf { points.getJSONArray(it).getDouble(0) } / points.length()
+                    val y = (0 until points.length()).sumOf { points.getJSONArray(it).getDouble(1) } / points.length()
+                    x >= selection.getDouble("x") && y >= selection.getDouble("y") &&
+                        x <= selection.getDouble("x") + selection.getDouble("width") &&
+                        y <= selection.getDouble("y") + selection.getDouble("height")
+                }
+                require(chosen.isNotEmpty()) { "选区中没有笔画" }
+                val action = p.getString("action")
+                val centerX = selection.getDouble("x") + selection.getDouble("width") / 2.0
+                val centerY = selection.getDouble("y") + selection.getDouble("height") / 2.0
+                when (action) {
+                    "DELETE" -> for (index in chosen.asReversed()) strokes.remove(index)
+                    "COPY", "MOVE", "SCALE", "ROTATE" -> {
+                        val source = chosen.map { JSONObject(strokes.getJSONObject(it).toString()) }
+                        for ((ordinal, stroke) in source.withIndex()) {
+                            val points = stroke.getJSONArray("points")
+                            for (i in 0 until points.length()) {
+                                val point = points.getJSONArray(i)
+                                val x = point.getDouble(0)
+                                val y = point.getDouble(1)
+                                val transformed = when (action) {
+                                    "MOVE" -> (x + p.getDouble("dx")) to (y + p.getDouble("dy"))
+                                    "SCALE" -> {
+                                        val factor = p.getDouble("factor").also { require(it in 0.01..100.0) }
+                                        (centerX + (x - centerX) * factor) to (centerY + (y - centerY) * factor)
+                                    }
+                                    "ROTATE" -> {
+                                        val angle = Math.toRadians(p.getDouble("degrees"))
+                                        val dx = x - centerX; val dy = y - centerY
+                                        (centerX + dx * cos(angle) - dy * sin(angle)) to
+                                            (centerY + dx * sin(angle) + dy * cos(angle))
+                                    }
+                                    else -> (x + 20.0) to (y + 20.0)
+                                }
+                                require(transformed.first.isFinite() && transformed.second.isFinite())
+                                point.put(0, transformed.first).put(1, transformed.second)
+                            }
+                            if (action == "COPY") stroke.put("id", "${p.getString("copyId")}:$ordinal")
+                            else strokes.put(chosen[ordinal], stroke)
+                            if (action == "COPY") strokes.put(stroke)
+                        }
+                    }
+                    else -> error("未知选区操作")
+                }
+                when (action) {
+                    "MOVE" -> {
+                        selection.put("x", selection.getDouble("x") + p.getDouble("dx"))
+                        selection.put("y", selection.getDouble("y") + p.getDouble("dy"))
+                    }
+                    "SCALE" -> {
+                        val factor = p.getDouble("factor")
+                        selection.put("width", selection.getDouble("width") * factor)
+                        selection.put("height", selection.getDouble("height") * factor)
+                        selection.put("x", centerX - selection.getDouble("width") / 2)
+                        selection.put("y", centerY - selection.getDouble("height") / 2)
+                    }
+                    "COPY" -> {
+                        selection.put("x", selection.getDouble("x") + 20.0)
+                        selection.put("y", selection.getDouble("y") + 20.0)
+                    }
+                }
+            }
             "CROP" -> {
                 state.put("width", p.getInt("width").also { require(it in 64..4096) })
                 state.put("height", p.getInt("height").also { require(it in 64..4096) })
+                val dx = p.optDouble("x", 0.0); val dy = p.optDouble("y", 0.0)
+                require(dx.isFinite() && dy.isFinite())
+                for (i in 0 until layers.length()) {
+                    val layer = layers.getJSONObject(i)
+                    layer.put("x", layer.getDouble("x") - dx)
+                    layer.put("y", layer.getDouble("y") - dy)
+                }
+                state.put("selection", JSONObject.NULL)
             }
             else -> error("未知画室操作：$type")
         }

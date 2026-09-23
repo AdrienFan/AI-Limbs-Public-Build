@@ -59,6 +59,7 @@ private fun Studio(host: InProcessPluginUiHost) {
     var newCanvas by remember { mutableStateOf(false) }
     var canvasWidth by remember { mutableStateOf("1024") }
     var canvasHeight by remember { mutableStateOf("1024") }
+    var transparent by remember { mutableStateOf(false) }
     var openDialog by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var layerName by remember { mutableStateOf("") }
@@ -164,10 +165,14 @@ private fun Studio(host: InProcessPluginUiHost) {
                 }
                 view.onSelection = { rect -> perform { store.apply("AWEI", "SELECTION_CREATE", rect) } }
                 view.onMove = { dx, dy -> if (selected.isNotBlank()) {
-                    val layer = (0 until state.getJSONArray("layers").length()).map { state.getJSONArray("layers").getJSONObject(it) }
-                        .firstOrNull { it.getString("id") == selected }
-                    if (layer != null) perform { store.apply("AWEI", "TRANSFORM", JSONObject()
-                        .put("id", selected).put("x", layer.getDouble("x") + dx).put("y", layer.getDouble("y") + dy)) }
+                    if (state.optJSONObject("selection") != null) perform { store.apply("AWEI", "SELECTION_EDIT",
+                        JSONObject().put("layerId", selected).put("action", "MOVE").put("dx", dx).put("dy", dy)) }
+                    else {
+                        val layer = (0 until state.getJSONArray("layers").length()).map { state.getJSONArray("layers").getJSONObject(it) }
+                            .firstOrNull { it.getString("id") == selected }
+                        if (layer != null) perform { store.apply("AWEI", "TRANSFORM", JSONObject()
+                            .put("id", selected).put("x", layer.getDouble("x") + dx).put("y", layer.getDouble("y") + dy)) }
+                    }
                 } }
             })
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -179,11 +184,31 @@ private fun Studio(host: InProcessPluginUiHost) {
                 Slider(value = opacity, onValueChange = { opacity = it }, modifier = Modifier.width(110.dp))
             }
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = { val id = UUID.randomUUID().toString(); selected = id
-                    perform { store.apply("AWEI", "LAYER_CREATE", JSONObject().put("id", id).put("name", "绘画图层")) } }) { Text("＋图层") }
-                OutlinedButton(onClick = { perform { store.apply("AWEI", "GROUP_CREATE", JSONObject().put("id", UUID.randomUUID().toString())) } }) { Text("＋组") }
+                Button(onClick = {
+                    val id = UUID.randomUUID().toString()
+                    val layers = state.getJSONArray("layers")
+                    val parent = (0 until layers.length()).map { layers.getJSONObject(it) }
+                        .firstOrNull { it.getString("id") == selected && it.getString("kind") == "group" }
+                    selected = id
+                    perform { store.apply("AWEI", "LAYER_CREATE", JSONObject().put("id", id)
+                        .put("name", "绘画图层").put("parentId", parent?.getString("id") ?: "")) }
+                }) { Text("＋图层") }
+                OutlinedButton(onClick = { val id = UUID.randomUUID().toString(); selected = id
+                    perform { store.apply("AWEI", "GROUP_CREATE", JSONObject().put("id", id)) } }) { Text("＋组") }
                 OutlinedButton(onClick = { if (selected.isNotBlank()) perform { store.apply("AWEI", "LAYER_COPY", JSONObject().put("id", selected).put("newId", UUID.randomUUID().toString())) } }) { Text("复制") }
                 OutlinedButton(onClick = { if (selected.isNotBlank()) perform { store.apply("AWEI", "LAYER_DELETE", JSONObject().put("id", selected)) } }) { Text("删除") }
+                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
+                    val layers = store.current().getJSONObject("state").getJSONArray("layers")
+                    val index = (0 until layers.length()).first { layers.getJSONObject(it).getString("id") == selected }
+                    store.apply("AWEI", "LAYER_MOVE", JSONObject().put("id", selected)
+                        .put("index", (index + 1).coerceAtMost(layers.length() - 1)))
+                } }) { Text("上移") }
+                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
+                    val layers = store.current().getJSONObject("state").getJSONArray("layers")
+                    val index = (0 until layers.length()).first { layers.getJSONObject(it).getString("id") == selected }
+                    store.apply("AWEI", "LAYER_MOVE", JSONObject().put("id", selected)
+                        .put("index", (index - 1).coerceAtLeast(0)))
+                } }) { Text("下移") }
                 OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
                     val layer = store.current().getJSONObject("state").getJSONArray("layers")
                     val target = (0 until layer.length()).map { layer.getJSONObject(it) }.first { it.getString("id") == selected }
@@ -216,7 +241,8 @@ private fun Studio(host: InProcessPluginUiHost) {
                     val layer = layers.getJSONObject(i)
                     val id = layer.getString("id")
                     FilterChip(selected = selected == id, onClick = { selected = id },
-                        label = { Text(layer.getString("name") + if (layer.getBoolean("visible")) "" else "（隐藏）") })
+                        label = { Text((if (layer.getString("kind") == "group") "▣ " else if (layer.optString("parentId").isNotBlank()) "↳ " else "") +
+                            layer.getString("name") + if (layer.getBoolean("visible")) "" else "（隐藏）") })
                 }
             }
             if (selected.isNotBlank()) {
@@ -233,6 +259,26 @@ private fun Studio(host: InProcessPluginUiHost) {
                     }
                 }
             }
+            val selection = state.optJSONObject("selection")
+            if (selection != null) Row(Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text("选区：${selection.getInt("width")}×${selection.getInt("height")}")
+                for ((label, action, value) in listOf(
+                    Triple("复制内容", "COPY", 0.0), Triple("删除内容", "DELETE", 0.0),
+                    Triple("放大内容", "SCALE", 1.1), Triple("旋转内容", "ROTATE", 15.0))) {
+                    OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
+                        val p = JSONObject().put("layerId", selected).put("action", action)
+                        if (action == "SCALE") p.put("factor", value)
+                        if (action == "ROTATE") p.put("degrees", value)
+                        store.apply("AWEI", "SELECTION_EDIT", p)
+                    } }) { Text(label) }
+                }
+                OutlinedButton(onClick = { perform { store.apply("AWEI", "CROP", JSONObject()
+                    .put("x", selection.getDouble("x")).put("y", selection.getDouble("y"))
+                    .put("width", selection.getDouble("width").toInt())
+                    .put("height", selection.getDouble("height").toInt())) } }) { Text("裁剪画布") }
+                TextButton(onClick = { perform { store.apply("AWEI", "SELECTION_CLEAR", JSONObject()) } }) { Text("取消选区") }
+            }
             val operations = current.getJSONArray("operations")
             val lastLaner = (operations.length() - 1 downTo 0).map { operations.getJSONObject(it) }
                 .firstOrNull { it.getString("actor") == "LANER" && it.getString("type") !in setOf("REVERT", "RESTORE") }
@@ -248,8 +294,13 @@ private fun Studio(host: InProcessPluginUiHost) {
         text = { Column {
             OutlinedTextField(canvasWidth, { canvasWidth = it.filter(Char::isDigit).take(4) }, label = { Text("宽度") })
             OutlinedTextField(canvasHeight, { canvasHeight = it.filter(Char::isDigit).take(4) }, label = { Text("高度") })
+            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("透明背景")
+                Switch(checked = transparent, onCheckedChange = { transparent = it })
+            }
         } }, confirmButton = { TextButton(onClick = {
-            newCanvas = false; selected = ""; perform { store.create(canvasWidth.toInt(), canvasHeight.toInt()) }
+            newCanvas = false; selected = ""; perform { store.create(canvasWidth.toInt(), canvasHeight.toInt(),
+                if (transparent) "#00000000" else "#FFFFFFFF") }
         }) { Text("创建") } }, dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
     if (openDialog) AlertDialog(onDismissRequest = { openDialog = false }, title = { Text("打开工程") },
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
