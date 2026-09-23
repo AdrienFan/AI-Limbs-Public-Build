@@ -130,6 +130,7 @@ internal class SentinelXTransportClient(
                 )
                 "capabilities" -> SentinelXProtocol.success(id, SentinelXProtocol.capabilities(config))
                 "state" -> SentinelXProtocol.success(id, SentinelXProtocol.state(config))
+                "help" -> SentinelXProtocol.success(id, SentinelXProtocol.help(payload.optString("topic", "index")))
                 "exec" -> handleExec(id, payload)
                 else -> SentinelXProtocol.failure(
                     id,

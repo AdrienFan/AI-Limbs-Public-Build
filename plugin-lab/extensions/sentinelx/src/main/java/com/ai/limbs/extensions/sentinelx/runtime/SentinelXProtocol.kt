@@ -15,8 +15,9 @@ data class SentinelXBridgeRequest(
 
 internal object SentinelXProtocol {
     const val PROTOCOL_VERSION = "1.10.0"
-    const val AGENT_VERSION = "0.1.1"
+    const val AGENT_VERSION = "0.1.3"
     const val BRIDGE_PREFIX = "AIL_SENTINEL_BRIDGE_V1 "
+    private val supportedOps = listOf("ping", "capabilities", "state", "exec", "help")
 
     fun webSocketUrl(hubUrl: String): String {
         val base = hubUrl.trim().trimEnd('/')
@@ -43,7 +44,7 @@ internal object SentinelXProtocol {
                 .put("arch", Build.SUPPORTED_ABIS.firstOrNull().orEmpty())
                 .put("machine_type", Build.MODEL)
         )
-        .put("capabilities", JSONArray(listOf("ping", "capabilities", "state", "exec")))
+        .put("capabilities", JSONArray(supportedOps))
         .put("preferred_profile", "compact")
 
     fun pong(timestamp: String?): JSONObject = JSONObject()
@@ -66,7 +67,7 @@ internal object SentinelXProtocol {
         .put("agent", "ai-limbs-sentinelx")
         .put("version", AGENT_VERSION)
         .put("host_label", config.deviceName)
-        .put("supported_ops", JSONArray(listOf("ping", "capabilities", "state", "exec")))
+        .put("supported_ops", JSONArray(supportedOps))
         .put(
             "bridge",
             JSONObject()
@@ -77,6 +78,16 @@ internal object SentinelXProtocol {
                 .put("authorization", "AI Limbs Policy Engine / Dispatcher")
         )
 
+    fun help(topic: String): JSONObject = JSONObject()
+        .put("ok", true)
+        .put("agent", "ai-limbs-sentinelx")
+        .put("topic", topic)
+        .put("supported_ops", JSONArray(supportedOps))
+        .put("scope", "Android bridge child; separate from the upstream Python agent")
+        .put("bridge_command", "AIL_SENTINEL_BRIDGE_V1 <JSON>")
+        .put("bridge_payload", JSONObject().put("tool", "capability name").put("args", JSONObject()))
+        .put("authorization", "AI Limbs Dispatcher / Policy Engine")
+        .put("unsupported_ops", "File, service and script operations are not implemented by this child")
     fun state(config: SentinelXBridgeConfig): JSONObject = JSONObject()
         .put("hostname", config.deviceName)
         .put("kernel", Build.VERSION.RELEASE)
