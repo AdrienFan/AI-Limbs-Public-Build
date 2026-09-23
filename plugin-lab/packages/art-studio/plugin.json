@@ -1,0 +1,50 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.art.studio",
+  "version": "0.1.0",
+  "api": { "target": 1, "min": 1 },
+  "display": {
+    "name": "AI Limbs 画室",
+    "description": "阿伟和兰儿共同编辑、保存和回溯的结构化画布。"
+  },
+  "roles": ["skill"],
+  "activation": { "mode": "hot" },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.artstudio.ArtStudioEntry",
+      "presentation_entry_class": "com.ai.limbs.plugins.artstudio.ArtStudioPresentationEntry"
+    }
+  },
+  "dependencies": { "plugins": [], "services": [] },
+  "permissions": { "requested_scopes": [] },
+  "provides": {
+    "capabilities": [
+      "plugin.art.studio.document.create", "plugin.art.studio.document.open",
+      "plugin.art.studio.document.save", "plugin.art.studio.document.info",
+      "plugin.art.studio.document.list", "plugin.art.studio.canvas.inspect",
+      "plugin.art.studio.canvas.crop", "plugin.art.studio.layer.list",
+      "plugin.art.studio.layer.create", "plugin.art.studio.layer.group",
+      "plugin.art.studio.layer.select", "plugin.art.studio.layer.rename",
+      "plugin.art.studio.layer.move", "plugin.art.studio.layer.delete",
+      "plugin.art.studio.layer.copy", "plugin.art.studio.layer.set_visibility",
+      "plugin.art.studio.layer.set_opacity", "plugin.art.studio.layer.set_lock",
+      "plugin.art.studio.layer.set_blend", "plugin.art.studio.stroke.add",
+      "plugin.art.studio.stroke.erase", "plugin.art.studio.selection.create",
+      "plugin.art.studio.selection.clear", "plugin.art.studio.transform.move",
+      "plugin.art.studio.transform.scale", "plugin.art.studio.transform.rotate",
+      "plugin.art.studio.history.list", "plugin.art.studio.history.undo",
+      "plugin.art.studio.history.redo", "plugin.art.studio.history.revert_actor_operations",
+      "plugin.art.studio.image.import", "plugin.art.studio.export.png",
+      "plugin.art.studio.export.jpeg"
+    ],
+    "services": [],
+    "providers": ["plugin.art.studio.page"],
+    "extensions": [
+      { "point": "ai_limbs.ui.home_tile", "id": "plugin.art.studio.tile", "api": 1 },
+      { "point": "ai_limbs.ui.screen", "id": "plugin.art.studio.screen", "api": 2 }
+    ]
+  }
+}

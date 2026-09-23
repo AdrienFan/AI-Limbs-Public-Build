@@ -88,3 +88,6 @@ include(":permission-server")
 project(":permission-server").projectDir = file("plugin-lab/runtime/permission-server")
 include(":permission-service-plugin")
 project(":permission-service-plugin").projectDir = file("plugin-lab/plugins/permission-service")
+
+include(":art-studio-plugin")
+project(":art-studio-plugin").projectDir = file("plugin-lab/plugins/art-studio")

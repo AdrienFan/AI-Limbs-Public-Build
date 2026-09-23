@@ -1,0 +1,53 @@
+name: AI Limbs Art Studio
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  art_studio:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - name: Verify source and manifest versions
+        run: python3 tools/plugin_lab/source_provenance.py check --output dist/source-inventory.json
+      - name: Set up Java
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
+      - name: Install Android toolchain
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-34" "platforms;android-36" "build-tools;35.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+      - name: Compile plugin payload
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :art-studio-plugin:assembleDebug --stacktrace --no-daemon
+      - name: Sign installable plugin
+        env:
+          AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+        run: python3 tools/plugin_lab/package_art_studio.py
+      - name: Record source provenance
+        run: python3 tools/plugin_lab/source_provenance.py record --manifest plugin-lab/packages/art-studio/plugin.json --package dist/AI-Limbs-Art-Studio-v0.1.0.ailp
+      - name: Upload plugin
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: art-studio-v0.1.0-${{ github.run_number }}
+          path: |
+            dist/AI-Limbs-Art-Studio-v0.1.0.ailp
+            dist/AI-Limbs-Art-Studio-v0.1.0.ailp.sha256
+            dist/AI-Limbs-Art-Studio-v0.1.0.ailp.source.json
+          if-no-files-found: error
