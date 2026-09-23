@@ -63,25 +63,57 @@ class AiLimbsRdcToolAdapter(
 
     private suspend fun processTool(operation: String, args: JSONObject): JSONObject {
         val params = JSONObject(args.toString()).put("operation", operation)
+        if (operation == "read") {
+            params.put("length", args.optInt("length", DEFAULT_PROCESS_PAGE_LINES)
+                .coerceIn(1, MAX_PROCESS_PAGE_LINES))
+        }
         return mcpProcessResult(remoteExecutor.execute(SYSTEM_ENVIRONMENT_PROCESS, params))
     }
     private suspend fun readFile(args: JSONObject): JSONObject {
-        val path = args.optString("path")
-        val offset = args.optInt("offset", 0).coerceAtLeast(0)
-        val length = args.optInt("length", 0).coerceAtLeast(0)
+        val path = args.optString("path").trim()
+        if (path.isEmpty()) return mcpError("read_file requires a path")
+        val requestedOffset = args.optInt("offset", 0)
+        val requestedLength = args.optInt("length", DEFAULT_FILE_PAGE_LINES)
+        val length = if (requestedLength > 0) requestedLength.coerceAtMost(MAX_FILE_PAGE_LINES)
+            else DEFAULT_FILE_PAGE_LINES
+        val environment = resolveEnvironment(path, args)
+        // Host read_file_part reports the total line count. Probe one line to
+        // implement negative offsets instead of silently reading from line one.
+        val offset = if (requestedOffset < 0) {
+            val probe = executeHostTool("read_file_part", JSONObject()
+                .put("path", path).put("environment", environment)
+                .put("text_only", "true").put("start_line", 1).put("end_line", 1))
+            if (!probe.optBoolean("success", false)) return mcpResult(probe)
+            val total = totalLines(probe) ?: return mcpError("Host did not report the file line count")
+            (total.toLong() + requestedOffset).coerceAtLeast(0).toInt()
+        } else requestedOffset
         val params = JSONObject()
             .put("path", path)
-            .put("environment", resolveEnvironment(path, args))
+            .put("environment", environment)
             .put("text_only", "true")
-        val hostToolName = if (length > 0) {
-            params.put("start_line", offset + 1)
-            params.put("end_line", offset + length)
-            "read_file_part"
-        } else {
-            "read_file_full"
+            .put("start_line", offset.toLong().plus(1).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+            .put("end_line", offset.toLong().plus(length).coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
+        val raw = executeHostTool("read_file_part", params)
+        if (!raw.optBoolean("success", false)) return mcpResult(raw)
+        val total = totalLines(raw) ?: return mcpError("Host did not report the file line count")
+        // Host events echo the full result body. Return it once with a cursor.
+        val result = JSONObject(raw.toString()).apply { remove("events") }
+        val value = result.optJSONObject("result")?.optString("value").orEmpty()
+        if (value.contains("... (file content truncated) ...")) {
+            return mcpError("One page exceeded the Host's 32000-character file limit; request fewer lines or use a bounded shell command")
         }
-        return hostTool(hostToolName, params)
+        if (offset >= total) result.put("result", JSONObject().put("value", ""))
+        val next = (offset.toLong() + length).coerceAtMost(total.toLong()).toInt()
+        result.put("page", JSONObject()
+            .put("offset", offset).put("length", if (offset >= total) 0 else next - offset)
+            .put("total_lines", total).put("has_more", next < total)
+            .put("next_offset", if (next < total) next else JSONObject.NULL))
+        return mcpResult(result)
     }
+    private fun totalLines(result: JSONObject): Int? =
+        Regex("""Lines\s+\d+-\d+\s+of\s+(\d+)""")
+            .find(result.optJSONObject("result")?.optString("value").orEmpty())
+            ?.groupValues?.get(1)?.toIntOrNull()
 
     private suspend fun writeFile(args: JSONObject): JSONObject {
         val path = args.optString("path")
@@ -169,10 +201,15 @@ class AiLimbsRdcToolAdapter(
     private fun mcpProcessResult(result: JSONObject): JSONObject {
         val success = result.optBoolean("success", false)
         val text = result.optString("text").ifBlank { result.toString(2) }
+        val display = if (text.length > MAX_PROCESS_TEXT_CHARS) {
+            val header = text.lineSequence().firstOrNull().orEmpty()
+            header + "\n[Bridge display shortened; use read_process_output with an absolute offset and a small length]\n" +
+                text.takeLast(MAX_PROCESS_TEXT_CHARS - header.length - 110)
+        } else text
         val response = JSONObject()
             .put(
                 "content",
-                JSONArray().put(JSONObject().put("type", "text").put("text", text))
+                JSONArray().put(JSONObject().put("type", "text").put("text", display))
             )
             .put("isError", !success)
         if (result.has("execution_policy")) {
@@ -201,6 +238,11 @@ class AiLimbsRdcToolAdapter(
         const val SYSTEM_ENVIRONMENT_PROCESS = "plugin.system_environment.process"
         const val HOST_TOOL_EXECUTE = "ai_limbs.host_tool.execute"
         const val DEFAULT_RDC_START_WAIT_MS = 10_000L
+        const val DEFAULT_FILE_PAGE_LINES = 20
+        const val MAX_FILE_PAGE_LINES = 20
+        const val DEFAULT_PROCESS_PAGE_LINES = 20
+        const val MAX_PROCESS_PAGE_LINES = 20
+        const val MAX_PROCESS_TEXT_CHARS = 16_000
         val LINUX_PREFIXES = listOf("/root", "/home", "/etc", "/usr", "/var", "/tmp")
     }
 }

@@ -32,6 +32,7 @@ internal class SentinelXTransportClient(
         .build()
 
     @Volatile private var socket: WebSocket? = null
+    private val resultPager = SentinelXResultPager()
     @Volatile var isRunning: Boolean = false
         private set
 
@@ -165,16 +166,36 @@ internal class SentinelXTransportClient(
                 error.message ?: "无法解析 AI Limbs Bridge 请求"
             )
         }
+        if (bridgeRequest.tool == "ai_limbs.bridge.result_page") {
+            val cursor = bridgeRequest.args.optString("cursor").trim()
+            val offset = bridgeRequest.args.optInt("offset", -1)
+            val page = resultPager.page(cursor, offset)
+                ?: return SentinelXProtocol.failure(id, "invalid_result_cursor", "Cursor expired or offset is invalid")
+            return SentinelXProtocol.success(id, page
+                .put("duration", (System.nanoTime() - startedAt) / 1_000_000_000.0)
+                .put("returncode", 0)
+                .put("request_id", bridgeRequest.requestId))
+        }
         val result = executor.execute(bridgeRequest.tool, bridgeRequest.args)
-        val duration = (System.nanoTime() - startedAt) / 1_000_000_000.0
+        // The Host events repeat result.value; shipping them as both output and
+        // bridge_result multiplies payload size before the Hub's own response cap.
+        val compact = JSONObject(result.toString()).apply { remove("events") }
+        val serialized = compact.toString()
+        if (!resultPager.canStore(serialized)) {
+            return SentinelXProtocol.failure(id, "bridge_result_too_large",
+                "Result exceeds 4 MiB; request a smaller range at the source")
+        }
+        val response = if (resultPager.inline(serialized)) {
+            JSONObject().put("output", serialized).put("bridge_result", compact)
+        } else {
+            resultPager.store(serialized)
+        }
         return SentinelXProtocol.success(
             id,
-            JSONObject()
-                .put("output", result.toString())
-                .put("duration", duration)
+            response
+                .put("duration", (System.nanoTime() - startedAt) / 1_000_000_000.0)
                 .put("returncode", 0)
                 .put("request_id", bridgeRequest.requestId)
-                .put("bridge_result", result)
         )
     }
 

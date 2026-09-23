@@ -1,9 +1,9 @@
-# Bridge 接收端版本与能力
+# Bridge 接收端版本与输出分页
 
-本次修改从 `fae5b9d` 开始，该提交是 2026-09-22 Bridge 联合构建的源码。云端构建 `35709451915` 的 RDC 1.2.8 与 SentinelX 0.1.3 产物，和手机备份的两个安装包 SHA-256 完全一致。
+这次从已安装的 Bridge ABI 5 接收端继续迭代。联合构建目标 `resident-bridge` 同时生成 Bridge 主插件与 RDC、TRIGGERcmd、SentinelX 子插件；RDC 更新为 1.2.10，SentinelX 更新为 0.1.5，接口仍为 `ai_limbs.bridge.provider@5`。
 
-两个子插件仍接入 `ai_limbs.bridge.provider@5`，由 `resident-bridge` 目标与 Bridge 1.3.11 一起编译和签名。新清单、APK 构建版本分别为 RDC 1.2.9、SentinelX 0.1.4；SentinelX 对 Hub 报告的本地 agent 版本同步为 0.1.4。先前安装包清单版本高于 APK 构建版本，容易造成版本判断混乱。
+RDC 的 `read_file` 默认读取 20 行，`length` 超过 20 行时也只交付本页。响应中的 `page` 给出 `offset`、`total_lines`、`has_more` 和 `next_offset`。负数 `offset` 先向 Host 查询总行数，再从文件末尾定位。Host 每页超过 32000 字符时明确报错，调用方应缩小行数或改用有界命令。进程输出每次最多读取 20 行；初始预览过长会标出省略，完整内容按绝对行号续读。
 
-RDC 对 `edit_block` 的单次非空文本替换通过 Host 的 `edit_file` 能力派发，保留 Host 对权限及修改动作的审批。SentinelX 增加 `help` 元信息入口；它仍是 Android Bridge 接收端，不等同于上游 Python Agent 的全部操作。
+SentinelX 的小结果继续返回 `output` 和 `bridge_result`；去掉 Host 中重复的 `events`。大结果的 `bridge_result` 标记 `paged=true`，给出 `cursor`、`next_offset`、`total_chars`、`sha256`；`output` 是当页内容。继续调用 `sentinel_exec`，命令为 `AIL_SENTINEL_BRIDGE_V1 {"tool":"ai_limbs.bridge.result_page","args":{"cursor":"<游标>","offset":<下一偏移>}}`。依序连接 `output` 并核对 SHA-256。结果最多缓存 4 项，每项最多 4 MiB，10 分钟到期；超限会明确报错，须从源头缩小查询。
 
-安装前核对构建目标、Git 提交及 `.ailx` 清单的接口版本，不应使用同名旧分支构建产物覆盖手机当前版本。
+AI Limbs Host 的 Ubuntu 进程收集链路仍可能重复记录输出，这不属于两个子插件的 APK。接收端只约束单次返回并保留续读路径，不擅自删除可能本来就重复的日志行。Host 的 32000 字符文件读取上限也仍然生效。

@@ -85,12 +85,12 @@ jobs:
           path: |
             dist/AI-Limbs-Bridge-v1.3.11.ailp
             dist/AI-Limbs-Bridge-v1.3.11.ailp.sha256
-            dist/AI-Limbs-RDC-v1.2.9.ailx
-            dist/AI-Limbs-RDC-v1.2.9.ailx.sha256
+            dist/AI-Limbs-RDC-v1.2.10.ailx
+            dist/AI-Limbs-RDC-v1.2.10.ailx.sha256
             dist/AI-Limbs-TriggerCMD-v1.2.5.ailx
             dist/AI-Limbs-TriggerCMD-v1.2.5.ailx.sha256
-            dist/AI-Limbs-SentinelX-v0.1.4.ailx
-            dist/AI-Limbs-SentinelX-v0.1.4.ailx.sha256
+            dist/AI-Limbs-SentinelX-v0.1.5.ailx
+            dist/AI-Limbs-SentinelX-v0.1.5.ailx.sha256
           if-no-files-found: error
           retention-days: 14
   build:
@@ -408,7 +408,7 @@ jobs:
 
   rdc:
     if: inputs.target == 'rdc'
-    name: Build RDC v1.2.9 only
+    name: Build RDC v1.2.10 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -447,7 +447,7 @@ jobs:
       - name: Upload RDC child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: rdc-extension-v1.2.9-${{ github.run_number }}
+          name: rdc-extension-v1.2.10-${{ github.run_number }}
           path: |
             plugin-lab/extensions/rdc/build/outputs/apk/debug/*.apk
             plugin-lab/packages/rdc/extension.json
@@ -504,7 +504,7 @@ jobs:
 
   sentinelx:
     if: inputs.target == 'sentinelx'
-    name: Build SentinelX v0.1.4 child extension only
+    name: Build SentinelX v0.1.5 child extension only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -543,7 +543,7 @@ jobs:
       - name: Upload SentinelX child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: sentinelx-extension-v0.1.4-${{ github.run_number }}
+          name: sentinelx-extension-v0.1.5-${{ github.run_number }}
           path: |
             plugin-lab/extensions/sentinelx/build/outputs/apk/debug/*.apk
             plugin-lab/packages/sentinelx/extension.json

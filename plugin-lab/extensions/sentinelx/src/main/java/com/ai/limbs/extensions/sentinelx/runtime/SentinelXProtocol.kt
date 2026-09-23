@@ -15,7 +15,7 @@ data class SentinelXBridgeRequest(
 
 internal object SentinelXProtocol {
     const val PROTOCOL_VERSION = "1.10.0"
-    const val AGENT_VERSION = "0.1.4"
+    const val AGENT_VERSION = "0.1.5"
     const val BRIDGE_PREFIX = "AIL_SENTINEL_BRIDGE_V1 "
     private val supportedOps = listOf("ping", "capabilities", "state", "exec", "help")
 
@@ -86,6 +86,7 @@ internal object SentinelXProtocol {
         .put("scope", "Android bridge child; separate from the upstream Python agent")
         .put("bridge_command", "AIL_SENTINEL_BRIDGE_V1 <JSON>")
         .put("bridge_payload", JSONObject().put("tool", "capability name").put("args", JSONObject()))
+        .put("result_paging", "For a paged exec result, call exec again with tool=ai_limbs.bridge.result_page and args={cursor,offset}; concatenate output pages and verify sha256")
         .put("authorization", "AI Limbs Dispatcher / Policy Engine")
         .put("unsupported_ops", "File, service and script operations are not implemented by this child")
     fun state(config: SentinelXBridgeConfig): JSONObject = JSONObject()
