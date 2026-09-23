@@ -43,24 +43,34 @@ internal class PermissionPage(
 
 private data class BuiltInAccessibilityStatus(
     val available: Boolean = false,
-    val enabled: Boolean = false
+    val enabled: Boolean = false,
+    val queryError: String? = null
 )
 
 private const val AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS =
     "com.ai.assistance.ailimbs.accessibility.AiLimbsAccessibilityService"
 
 private fun readBuiltInAccessibilityStatus(context: Context): BuiltInAccessibilityStatus {
-    val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
-        ?: return BuiltInAccessibilityStatus()
-    val available = manager.installedAccessibilityServiceList.any {
-        it.resolveInfo.serviceInfo.name == AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS
+    val appContext = context.applicationContext
+    return runCatching {
+        val manager = appContext.getSystemService(AccessibilityManager::class.java)
+            ?: return@runCatching BuiltInAccessibilityStatus(
+                queryError = "AccessibilityManager unavailable"
+            )
+        val available = manager.installedAccessibilityServiceList.orEmpty().any { info ->
+            info.resolveInfo?.serviceInfo?.name == AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS
+        }
+        val enabled = manager.getEnabledAccessibilityServiceList(
+            AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+        ).orEmpty().any { info ->
+            info.resolveInfo?.serviceInfo?.name == AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS
+        }
+        BuiltInAccessibilityStatus(available = available, enabled = enabled)
+    }.getOrElse { error ->
+        BuiltInAccessibilityStatus(
+            queryError = error.message ?: error.javaClass.simpleName
+        )
     }
-    val enabled = manager.getEnabledAccessibilityServiceList(
-        AccessibilityServiceInfo.FEEDBACK_ALL_MASK
-    ).any {
-        it.resolveInfo.serviceInfo.name == AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS
-    }
-    return BuiltInAccessibilityStatus(available = available, enabled = enabled)
 }
 
 @Composable
@@ -86,8 +96,17 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
     }
 
     LaunchedEffect(context) {
+        var lastAccessibilityError: String? = null
         while (true) {
-            accessibilityStatus = readBuiltInAccessibilityStatus(context)
+            val next = readBuiltInAccessibilityStatus(context)
+            accessibilityStatus = next
+            if (next.queryError != null && next.queryError != lastAccessibilityError) {
+                host.logger.w(
+                    "PermissionService",
+                    "Accessibility status query unavailable: " + next.queryError
+                )
+            }
+            lastAccessibilityError = next.queryError
             delay(1500)
         }
     }
@@ -188,6 +207,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
                 Text("无障碍服务", style = MaterialTheme.typography.titleMedium)
                 Text(
                     when {
+                        accessibilityStatus.queryError != null -> "无障碍服务状态暂不可读"
                         !accessibilityStatus.available -> "当前基座未内置 AI Limbs 无障碍服务"
                         accessibilityStatus.enabled -> "AI Limbs 无障碍服务已启用"
                         else -> "AI Limbs 无障碍服务已内置，尚未启用"
@@ -195,15 +215,18 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
                     style = MaterialTheme.typography.titleSmall
                 )
                 Text(
-                    if (accessibilityStatus.available) {
-                        "无障碍能力已经集成到 AI Limbs 主程序，无需额外安装独立无障碍应用。"
-                    } else {
-                        "请使用 build67 或更新版本的 AI Limbs 基座后再启用此功能。"
+                    when {
+                        accessibilityStatus.queryError != null ->
+                            "当前页面无法读取系统无障碍状态；权限服务其他功能仍可正常使用。"
+                        accessibilityStatus.available ->
+                            "无障碍能力已经集成到 AI Limbs 主程序，无需额外安装独立无障碍应用。"
+                        else ->
+                            "请使用 build67 或更新版本的 AI Limbs 基座后再启用此功能。"
                     },
                     style = MaterialTheme.typography.bodySmall
                 )
                 OutlinedButton(
-                    enabled = accessibilityStatus.available,
+                    enabled = accessibilityStatus.available && accessibilityStatus.queryError == null,
                     onClick = {
                         try {
                             context.startActivity(
@@ -228,7 +251,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
             }
         }
         Text(
-            "v0.1.5 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
+            "v0.1.6 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
             style = MaterialTheme.typography.bodySmall
         )
     }
