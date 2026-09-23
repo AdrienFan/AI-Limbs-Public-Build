@@ -459,8 +459,8 @@ android {
         }
         debug {
             // Stable Android package identity: keep this unchanged for in-place updates.
-            applicationIdSuffix = ".ailimbs.accessibility67"
-            versionNameSuffix = "-build67-accessibility"
+            applicationIdSuffix = ".ailimbs.stable"
+            versionNameSuffix = "-build67"
             signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")
         }
