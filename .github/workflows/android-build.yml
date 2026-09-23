@@ -36,8 +36,25 @@ env:
   JAVA_VERSION: '21'
 
 jobs:
-
+  source_inventory:
+    name: Verify source and package versions
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout exact source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+      - name: Validate all plugin and child extension versions
+        run: python3 tools/plugin_lab/source_provenance.py check --output dist/source-inventory.json
+      - name: Upload source inventory
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: plugin-source-inventory-${{ github.run_number }}
+          path: dist/source-inventory.json
+          if-no-files-found: error
+          retention-days: 14
   resident-bridge:
+    needs: source_inventory
     if: inputs.target == 'resident-bridge'
     name: Build and sign Resident Bridge fixes
     runs-on: ubuntu-24.04
@@ -76,6 +93,14 @@ jobs:
           AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
           AILIMBS_CHILD_EXTENSION_PRIVATE_PEM: ${{ secrets.AILIMBS_CHILD_EXTENSION_PRIVATE_PEM }}
         run: python3 tools/plugin_lab/package_resident_bridge.py
+      - name: Record Resident Bridge package sources
+        run: |
+          python3 tools/plugin_lab/source_provenance.py record \
+            --manifest plugin-lab/packages/bridge-core/plugin.json \
+            --package dist/AI-Limbs-Bridge-v1.3.10.ailp
+          python3 tools/plugin_lab/source_provenance.py record \
+            --manifest plugin-lab/packages/sentinelx/extension.json \
+            --package dist/AI-Limbs-SentinelX-v0.1.2.ailx
       - name: Upload installable packages
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
@@ -83,11 +108,14 @@ jobs:
           path: |
             dist/AI-Limbs-Bridge-v1.3.10.ailp
             dist/AI-Limbs-Bridge-v1.3.10.ailp.sha256
+            dist/AI-Limbs-Bridge-v1.3.10.ailp.source.json
             dist/AI-Limbs-SentinelX-v0.1.2.ailx
             dist/AI-Limbs-SentinelX-v0.1.2.ailx.sha256
+            dist/AI-Limbs-SentinelX-v0.1.2.ailx.source.json
           if-no-files-found: error
           retention-days: 14
   build:
+    needs: source_inventory
     if: inputs.target == 'all'
     name: Build Eight Plugin Payloads
     runs-on: ubuntu-24.04
@@ -203,6 +231,7 @@ jobs:
           retention-days: 14
 
   extension_hub:
+    needs: source_inventory
     if: inputs.target == 'extension-hub'
     name: Build Plugin Extension Hub v1.5.4 only
     runs-on: ubuntu-24.04
@@ -253,6 +282,7 @@ jobs:
           retention-days: 14
 
   packager:
+    needs: source_inventory
     if: inputs.target == 'packager'
     name: Build AI Limbs Packager v0.4.1 only
     runs-on: ubuntu-24.04
@@ -303,6 +333,7 @@ jobs:
           retention-days: 14
 
   developer_guide:
+    needs: source_inventory
     if: inputs.target == 'developer-guide'
     name: Build Developer Guide v1.5.2 only
     runs-on: ubuntu-24.04
@@ -352,6 +383,7 @@ jobs:
           if-no-files-found: error
           retention-days: 14
   ubuntu_terminal:
+    needs: source_inventory
     if: inputs.target == 'ubuntu-terminal'
     name: Build Ubuntu Terminal v0.3.7 only
     runs-on: ubuntu-24.04
@@ -408,6 +440,7 @@ jobs:
           retention-days: 14
 
   rdc:
+    needs: source_inventory
     if: inputs.target == 'rdc'
     name: Build RDC v1.2.7 only
     runs-on: ubuntu-24.04
@@ -458,6 +491,7 @@ jobs:
           retention-days: 14
 
   triggercmd:
+    needs: source_inventory
     if: inputs.target == 'triggercmd'
     name: Build TriggerCMD v1.2.4 only
     runs-on: ubuntu-24.04
@@ -508,6 +542,7 @@ jobs:
           retention-days: 14
 
   sentinelx:
+    needs: source_inventory
     if: inputs.target == 'sentinelx'
     name: Build SentinelX v0.1.1 child extension only
     runs-on: ubuntu-24.04
@@ -558,6 +593,7 @@ jobs:
           retention-days: 14
 
   ubuntu_system:
+    needs: source_inventory
     if: inputs.target == 'ubuntu-system'
     name: Build Ubuntu System v0.1.10 child extension
     runs-on: ubuntu-24.04
@@ -601,6 +637,11 @@ jobs:
         env:
           AILIMBS_CHILD_EXTENSION_PRIVATE_PEM: ${{ secrets.AILIMBS_CHILD_EXTENSION_PRIVATE_PEM }}
         run: python3 tools/plugin_lab/package_ubuntu_system.py
+      - name: Record exact Ubuntu package source
+        run: >-
+          python3 tools/plugin_lab/source_provenance.py record
+          --manifest plugin-lab/packages/ubuntu-system/extension.json
+          --package dist/AI-Limbs-Ubuntu-v0.1.10.ailx
       - name: Upload Ubuntu System child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -608,12 +649,14 @@ jobs:
           path: |
             dist/AI-Limbs-Ubuntu-v0.1.10.ailx
             dist/AI-Limbs-Ubuntu-v0.1.10.ailx.sha256
+            dist/AI-Limbs-Ubuntu-v0.1.10.ailx.source.json
             plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-system/extension.json
           if-no-files-found: error
           retention-days: 14
 
   system_environment:
+    needs: source_inventory
     if: inputs.target == 'system-environment'
     name: Build System Environment Center v0.2.12 only
     runs-on: ubuntu-24.04
@@ -683,6 +726,7 @@ jobs:
 
 
   laner_access_manager:
+    needs: source_inventory
     if: inputs.target == 'laner-access-manager'
     name: Build Laner Access Manager v0.1.2 only
     runs-on: ubuntu-24.04
@@ -734,6 +778,7 @@ jobs:
           retention-days: 14
 
   log_center:
+    needs: source_inventory
     if: inputs.target == 'log-center'
     name: Build Log Center v0.1.2 only
     runs-on: ubuntu-24.04
@@ -785,6 +830,7 @@ jobs:
           retention-days: 14
 
   ui_editor:
+    needs: source_inventory
     if: inputs.target == 'ui-editor'
     name: Build UI Editor v0.1.2 only
     runs-on: ubuntu-24.04
@@ -833,6 +879,7 @@ jobs:
 
 
   permission_service:
+    needs: source_inventory
     if: inputs.target == 'permission-service'
     name: Build AI Limbs Permission Service v0.1.4
     runs-on: ubuntu-24.04

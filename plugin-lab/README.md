@@ -1,5 +1,7 @@
 # AI Limbs Plugin Lab
 
+Release source and package provenance rules: [SOURCE_RELEASE_POLICY.md](SOURCE_RELEASE_POLICY.md).
+
 Plugin Lab is the reference host used to develop and validate AI Limbs plugin contracts before they
 move into the production application. The installed base keeps lifecycle, trust, permission
 brokering, capability/extension routing, storage isolation, admin security, and Plugin Center.

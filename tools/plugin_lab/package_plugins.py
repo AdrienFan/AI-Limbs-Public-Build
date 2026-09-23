@@ -5,6 +5,7 @@ import os
 import subprocess
 import tempfile
 import zipfile
+from source_provenance import record
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -167,12 +168,16 @@ def main() -> None:
         temp_dir = Path(raw_temp)
         key_path = prepare_parent_key(temp_dir)
         for out_name, manifest, apk, entry in PARENTS:
-            print_artifact(pack_parent(out_name, manifest, apk, entry, key_path, temp_dir))
+            out = pack_parent(out_name, manifest, apk, entry, key_path, temp_dir)
+            print_artifact(out)
+            record(manifest, out)
     with tempfile.TemporaryDirectory(prefix="ailimbs-child-sign-") as raw_temp:
         temp_dir = Path(raw_temp)
         key_path = prepare_child_key(temp_dir)
         for out_name, manifest, apk, entry in CHILDREN:
-            print_artifact(pack_child(out_name, manifest, apk, entry, key_path, temp_dir))
+            out = pack_child(out_name, manifest, apk, entry, key_path, temp_dir)
+            print_artifact(out)
+            record(manifest, out)
 
 
 if __name__ == "__main__":
