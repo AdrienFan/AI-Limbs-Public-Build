@@ -143,6 +143,8 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
         appStartupTimeMs = startTime
         instance = this
         OperitProcessContext.initialize(applicationContext)
+        // Shell tools can run during asynchronous startup and before the main runtime is attached.
+        AndroidShellExecutor.setContext(applicationContext)
 
         // Workers and receivers can cold-start the process without creating an Activity.
         // Initialize process-wide preference dependencies before those entry points can run.
@@ -302,10 +304,6 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
             CustomEmojiRepository.getInstance(applicationContext).initializeBuiltinEmojis()
             AppLogger.d(TAG, "【启动计时】当前角色自定义表情初始化完成（异步） - ${System.currentTimeMillis() - emojiStartTime}ms")
         }
-
-        // 初始化AndroidShellExecutor上下文
-        AndroidShellExecutor.setContext(applicationContext)
-        AppLogger.d(TAG, "【启动计时】AndroidShellExecutor初始化完成 - ${System.currentTimeMillis() - startTime}ms")
 
         // Resident automatic recovery follows persisted desired state and may start DEGRADED.
         AiLimbsResidentRuntime.scheduleEnsureStarted(applicationContext)
