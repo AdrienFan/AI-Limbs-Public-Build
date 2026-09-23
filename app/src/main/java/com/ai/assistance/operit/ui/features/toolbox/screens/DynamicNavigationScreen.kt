@@ -16,6 +16,7 @@ import androidx.compose.material.icons.filled.Extension
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
@@ -31,6 +32,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.res.stringResource
+import com.ai.assistance.operit.R
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.center.PluginHostUiProxyRuntimeHolder
@@ -46,6 +49,8 @@ fun DynamicNavigationScreen(
     focusId: String? = null,
     onOpenPluginScreen: (String) -> Unit
 ) {
+    val residentProxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+    val pluginUiReady = residentProxy?.uiReady?.collectAsState()?.value ?: true
     val surfaces by PluginPlatformKernel.dynamicNavigationRegistry.surfaces.collectAsState()
     val bindings by PluginPlatformKernel.dynamicNavigationRegistry.bindings.collectAsState()
     val homeTiles by PluginPlatformKernel.uiRegistry.homeTiles.collectAsState()
@@ -77,9 +82,16 @@ fun DynamicNavigationScreen(
             fontWeight = FontWeight.SemiBold
         )
 
-        if (boundTiles.isEmpty()) {
+        if (boundTiles.isEmpty() || !pluginUiReady) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                Text("这是一个空白页面，可在 Plugin Center 中向这里添加插件或应用。")
+                if (!pluginUiReady) {
+                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                        CircularProgressIndicator()
+                        Text(stringResource(R.string.resident_plugins_connecting))
+                    }
+                } else {
+                    Text("这是一个空白页面，可在 Plugin Center 中向这里添加插件或应用。")
+                }
             }
         } else {
             LazyColumn(
@@ -131,18 +143,20 @@ fun PluginDeclarativeScreen(
     focusKind: String? = null,
     focusId: String? = null
 ) {
+    val residentProxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+    val pluginUiReady = residentProxy?.uiReady?.collectAsState()?.value ?: true
     val screen = PluginPlatformKernel.uiRegistry.screen(screenId)
     val renderer by PluginPlatformKernel.systemUiRegistry.pluginSurfaceRenderer.collectAsState()
     if (screen == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("插件页面当前不可用")
+            Text(if (pluginUiReady) "插件页面当前不可用" else stringResource(R.string.resident_plugins_connecting))
         }
         return
     }
     val activeRenderer = renderer
     if (activeRenderer == null) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text("Plugin Center UI Runtime 当前不可用")
+            Text(if (pluginUiReady) "Plugin Center UI Runtime 当前不可用" else stringResource(R.string.resident_plugins_connecting))
         }
         return
     }

@@ -24,6 +24,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Wifi
 import androidx.compose.material.icons.filled.WifiOff
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -58,6 +59,7 @@ import com.ai.assistance.operit.core.tools.system.action.ActionListenerFactory
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
 import com.ai.assistance.operit.data.repository.WorkflowRepository
+import com.ai.assistance.operit.plugins.center.PluginHostUiProxyRuntimeHolder
 import com.ai.assistance.operit.ui.common.NavItem
 import com.ai.assistance.operit.ui.main.screens.ScreenRouteRegistry
 import com.ai.assistance.operit.ui.main.navigation.NavigationEntrySpec
@@ -305,6 +307,8 @@ fun CollapsedDrawerContent(
         val topInset = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
         val bottomInset = WindowInsets.navigationBars.asPaddingValues().calculateBottomPadding()
         val systemNavItems = remember(navItems) { navItems.filterNot { it == NavItem.Settings } }
+        val residentProxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+        val pluginUiReady = residentProxy?.uiReady?.collectAsState()?.value ?: true
 
         Column(
                 modifier =
@@ -351,7 +355,12 @@ fun CollapsedDrawerContent(
                         modifier = Modifier.weight(1f).verticalScroll(rememberScrollState()),
                         horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                        pluginEntries.forEach { entry ->
+                        if (!pluginUiReady) {
+                                CircularProgressIndicator(
+                                        modifier = Modifier.size(24.dp),
+                                        strokeWidth = 2.dp
+                                )
+                        } else pluginEntries.forEach { entry ->
                                 CollapsedRailButton(
                                         icon = entry.icon,
                                         contentDescription = entry.title,
@@ -498,7 +507,9 @@ private fun NewSidebarTopContent(
                         onClick = { onNavItemClick(item) }
                 )
         }
-        if (pluginEntries.isNotEmpty()) {
+        val residentProxy = PluginHostUiProxyRuntimeHolder.currentOrNull()
+        val pluginUiReady = residentProxy?.uiReady?.collectAsState()?.value ?: true
+        if (pluginEntries.isNotEmpty() || !pluginUiReady) {
                 Spacer(modifier = Modifier.height(14.dp))
                 Text(
                         text = stringResource(id = R.string.nav_group_plugins),
@@ -508,7 +519,13 @@ private fun NewSidebarTopContent(
                         modifier = Modifier.padding(start = 28.dp, end = 20.dp, bottom = 2.dp)
                 )
                 Spacer(modifier = Modifier.height(6.dp))
-                pluginEntries.forEach { entry ->
+                if (!pluginUiReady) {
+                        Text(
+                                text = stringResource(id = R.string.resident_plugins_connecting),
+                                modifier = Modifier.padding(horizontal = 28.dp, vertical = 8.dp),
+                                color = appearance.titleColor.copy(alpha = 0.82f)
+                        )
+                } else pluginEntries.forEach { entry ->
                         CompactNavigationDrawerItem(
                                 icon = entry.icon,
                                 label = entry.title,

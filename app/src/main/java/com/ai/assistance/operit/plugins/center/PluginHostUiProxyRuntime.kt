@@ -29,6 +29,8 @@ internal class PluginHostUiProxyRuntime(
     val pagePresentationRegistry = PluginPagePresentationRegistry()
     private val foregroundNotificationFlow = MutableStateFlow<PluginForegroundNotificationSnapshot?>(null)
     val foregroundNotification: StateFlow<PluginForegroundNotificationSnapshot?> = foregroundNotificationFlow.asStateFlow()
+    private val uiReadyFlow = MutableStateFlow(false)
+    val uiReady: StateFlow<Boolean> = uiReadyFlow.asStateFlow()
     private val residentClient = ResidentUiProxyClient(context.applicationContext, this)
 
     init {
@@ -64,6 +66,10 @@ internal class PluginHostUiProxyRuntime(
 
     internal fun replaceForegroundNotification(snapshot: PluginForegroundNotificationSnapshot?) {
         foregroundNotificationFlow.value = snapshot
+    }
+
+    internal fun setUiReady(ready: Boolean) {
+        uiReadyFlow.value = ready
     }
 
     fun dispatchNotificationAction(bindingId: String, actionId: String) =

@@ -7888,6 +7888,7 @@
     <string name="display_name_label">Display Name</string>
 
     <string name="nav_group_plugins">Plugins</string>
+    <string name="resident_plugins_connecting">Connecting to Resident Core; loading plugins…</string>
     <string name="chat_delete_single_variant">Delete Single Message</string>
     <string name="chat_delete_single_variant_unavailable">No single message candidates available for deletion</string>
     <string name="chat_delete_single_variant_failed">Failed to delete single message: %1$s</string>

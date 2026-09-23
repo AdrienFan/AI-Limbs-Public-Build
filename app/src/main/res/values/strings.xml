@@ -121,6 +121,7 @@
     <string name="nav_group_ai_features">AI 功能</string>
     <string name="nav_group_tools">工具</string>
     <string name="nav_group_plugins">插件</string>
+    <string name="resident_plugins_connecting">正在连接常驻核心，插件加载中…</string>
     <string name="nav_group_system">系统</string>
     <string name="menu">菜单</string>
     <string name="token_config">获取密钥</string>

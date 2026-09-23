@@ -118,9 +118,9 @@ internal class ResidentUiProxyClient(
                 try {
                     refresh(force = revision.get() < 0L)
                     if (!rendererRestored) {
-                        systemPluginController.restore()
-                        rendererRestored = true
+                        rendererRestored = systemPluginController.restore().ready
                     }
+                    runtime.setUiReady(rendererRestored)
                     componentExecutor.pollAndExecute()
                     delay(POLL_MS)
                 } catch (error: CancellationException) {
@@ -402,6 +402,7 @@ internal class ResidentUiProxyClient(
     }
 
     private suspend fun failClosedDisconnected(error: Throwable) {
+        runtime.setUiReady(false)
         revision.set(-1L)
         hostGeneration.set(0L)
         lastSnapshot.set(JSONObject())
