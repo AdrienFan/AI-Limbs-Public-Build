@@ -2,6 +2,9 @@ name: AI Limbs Art Studio
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - feat/art-studio-v01
 
 permissions:
   contents: read
