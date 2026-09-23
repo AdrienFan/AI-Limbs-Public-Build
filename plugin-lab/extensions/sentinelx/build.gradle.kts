@@ -3,7 +3,7 @@ plugins { alias(libs.plugins.android.application); alias(libs.plugins.kotlin.and
 android {
     namespace = "com.ai.limbs.extensions.sentinelx"
     compileSdk = 36
-    defaultConfig { applicationId = "com.ai.limbs.payload.sentinelx"; minSdk = 26; targetSdk = 34; versionCode = 3; versionName = "0.1.2" }
+    defaultConfig { applicationId = "com.ai.limbs.payload.sentinelx"; minSdk = 26; targetSdk = 34; versionCode = 5; versionName = "0.1.4" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures { buildConfig = false }
 }

@@ -29,6 +29,7 @@ class AiLimbsRdcToolAdapter(
         "kill_process", "force_terminate" -> processTool("terminate", args)
         "read_file" -> readFile(args)
         "write_file" -> writeFile(args)
+        "edit_block" -> editBlock(args)
         "list_directory" -> listDirectory(args)
         "get_file_info" -> hostTool("file_info", withEnvironment(args))
         "create_directory" -> hostTool("make_directory", withEnvironment(args))
@@ -90,6 +91,27 @@ class AiLimbsRdcToolAdapter(
             .put("append", args.optString("mode").equals("append", ignoreCase = true))
             .put("environment", resolveEnvironment(path, args))
         return hostTool("write_file", params)
+    }
+    private suspend fun editBlock(args: JSONObject): JSONObject {
+        val path = args.optString("file_path").trim()
+        val old = args.optString("old_string")
+        val replacement = args.optString("new_string")
+        val expected = args.optInt("expected_replacements", 1)
+        if (path.isBlank() || old.isBlank() || replacement.isBlank() || expected != 1 || args.has("range")) {
+            return mcpError("edit_block supports a non-empty text replacement with expected_replacements=1")
+        }
+        // The Host dispatcher owns edit_file permissions and replacement semantics.
+        // Routing edit_block as a Host tool name was rejected as an unregistered target.
+        return mcpResult(
+            remoteExecutor.execute(
+                "edit_file",
+                JSONObject()
+                    .put("path", path)
+                    .put("old", old)
+                    .put("new", replacement)
+                    .put("environment", resolveEnvironment(path, args))
+            )
+        )
     }
     private suspend fun listDirectory(args: JSONObject): JSONObject {
         val path = args.optString("path")
