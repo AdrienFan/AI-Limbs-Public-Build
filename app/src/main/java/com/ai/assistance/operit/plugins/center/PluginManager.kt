@@ -928,6 +928,8 @@ internal class PluginManager(
                     updatedAtEpochMs = System.currentTimeMillis()
                 )
             )
+            // Core owns lifecycle state; publish its outcome under the plugin source as well.
+            HostRuntimeLoggerFactory.plugin(pluginId).i(TAG, "Plugin mounted: version=$version")
             return mount
         } catch (error: Throwable) {
             activeMounts.remove(pluginId)
@@ -956,6 +958,7 @@ internal class PluginManager(
                     updatedAtEpochMs = System.currentTimeMillis()
                 )
             )
+            HostRuntimeLoggerFactory.plugin(pluginId).e(TAG, "Plugin mount failed: version=$version", reportedError)
             throw reportedError
         }
     }

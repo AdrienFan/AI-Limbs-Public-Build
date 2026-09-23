@@ -9,6 +9,7 @@ import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreSecurityB
 import com.ai.assistance.operit.core.tools.system.resident.ResidentLocalServerSocket
 import com.ai.assistance.operit.core.tools.system.resident.ResidentProcessLiveness
 import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
+import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import java.util.UUID
 import kotlin.system.exitProcess
@@ -41,6 +42,9 @@ object PluginRuntimeMain {
         val contextState = ResidentCoreContextBootstrap.create(packageName)
         val context = contextState.context
         val security = ResidentCoreSecurityBootstrap.initialize(context)
+        // app_process skips Application.onCreate(); without a file Context, Worker logger calls
+        // reach logcat but never enter the shared log file read by Log Center.
+        AppLogger.bindContext(context)
         require(ownerCorePid > 0 && ownerCorePid != Process.myPid()) { "Invalid owner Core PID" }
         require(ownerCoreSession.length in 1..64) { "Invalid owner Core session" }
         check(directory.canonicalFile == File(context.filesDir, "ai_limbs/plugin_runtime").canonicalFile) {
