@@ -17,7 +17,7 @@ class PermissionEntry : InProcessPluginEntry {
             mapOf("kind" to "plugin_page", "screen_id" to "$ID.screen"))
         host.registerScreen(InProcessScreen(
             id = "$ID.screen", title = "AI Limbs 权限服务",
-            description = "配对、启动和管理 Android 权限服务",
+            description = "配对、启动和管理 Android 权限服务与 AI Limbs 内置无障碍服务",
             schemaId = "ai_limbs.plugin_center.ui.v1",
             documentJson = JSONObject().put("schema", 1).put("layout", "edge_to_edge")
                 .put("blocks", JSONArray().put(JSONObject().put("type", "plugin_page")
@@ -25,7 +25,7 @@ class PermissionEntry : InProcessPluginEntry {
         ))
         host.registerHomeTile(InProcessHomeTile(
             id = "$ID.tile", title = "权限服务",
-            description = "AI Limbs 权限服务 · 无线调试与 root",
+            description = "AI Limbs 权限服务 · 无线调试、root 与无障碍",
             screenId = "$ID.screen"
         ))
         host.registerCapability(InProcessCapabilitySpec(

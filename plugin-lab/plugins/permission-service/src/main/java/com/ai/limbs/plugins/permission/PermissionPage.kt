@@ -1,8 +1,10 @@
 package com.ai.limbs.plugins.permission
 
 import android.content.Context
+import android.accessibilityservice.AccessibilityServiceInfo
 import android.content.Intent
 import android.provider.Settings
+import android.view.accessibility.AccessibilityManager
 import android.view.View
 import android.widget.Toast
 import androidx.compose.foundation.layout.*
@@ -39,6 +41,28 @@ internal class PermissionPage(
         }
 }
 
+private data class BuiltInAccessibilityStatus(
+    val available: Boolean = false,
+    val enabled: Boolean = false
+)
+
+private const val AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS =
+    "com.ai.assistance.ailimbs.accessibility.AiLimbsAccessibilityService"
+
+private fun readBuiltInAccessibilityStatus(context: Context): BuiltInAccessibilityStatus {
+    val manager = context.getSystemService(Context.ACCESSIBILITY_SERVICE) as? AccessibilityManager
+        ?: return BuiltInAccessibilityStatus()
+    val available = manager.installedAccessibilityServiceList.any {
+        it.resolveInfo.serviceInfo.name == AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS
+    }
+    val enabled = manager.getEnabledAccessibilityServiceList(
+        AccessibilityServiceInfo.FEEDBACK_ALL_MASK
+    ).any {
+        it.resolveInfo.serviceInfo.name == AI_LIMBS_ACCESSIBILITY_SERVICE_CLASS
+    }
+    return BuiltInAccessibilityStatus(available = available, enabled = enabled)
+}
+
 @Composable
 private fun Content(host: InProcessPluginUiHost, controller: PermissionPageController) {
     val state by controller.state.collectAsState()
@@ -47,6 +71,7 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
     var pairCode by remember { mutableStateOf("") }
     var connectPort by remember { mutableStateOf("") }
     var stopConfirm by remember { mutableStateOf(false) }
+    var accessibilityStatus by remember { mutableStateOf(BuiltInAccessibilityStatus()) }
 
     fun perform(block: suspend () -> Unit) {
         // A pairing/start action belongs to the plugin runtime, so opening Settings does not cancel it.
@@ -57,6 +82,13 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
                 host.logger.e("PermissionService", "Operation failed: " + error.message)
                 Toast.makeText(context, error.message ?: "操作失败，请查看日志中心", Toast.LENGTH_LONG).show()
             }
+        }
+    }
+
+    LaunchedEffect(context) {
+        while (true) {
+            accessibilityStatus = readBuiltInAccessibilityStatus(context)
+            delay(1500)
         }
     }
 
@@ -151,7 +183,54 @@ private fun Content(host: InProcessPluginUiHost, controller: PermissionPageContr
                 Text("服务仅供 AI Limbs 使用。设备重启后需重新启动；各插件仍按 AI Limbs 授权执行。", style = MaterialTheme.typography.bodySmall)
             }
         }
-        Text("v0.1.2 · 基于 Shizuku 开源技术，采用 Apache-2.0 许可。", style = MaterialTheme.typography.bodySmall)
+        Card(Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("无障碍服务", style = MaterialTheme.typography.titleMedium)
+                Text(
+                    when {
+                        !accessibilityStatus.available -> "当前基座未内置 AI Limbs 无障碍服务"
+                        accessibilityStatus.enabled -> "AI Limbs 无障碍服务已启用"
+                        else -> "AI Limbs 无障碍服务已内置，尚未启用"
+                    },
+                    style = MaterialTheme.typography.titleSmall
+                )
+                Text(
+                    if (accessibilityStatus.available) {
+                        "无障碍能力已经集成到 AI Limbs 主程序，无需额外安装独立无障碍应用。"
+                    } else {
+                        "请使用 build67 或更新版本的 AI Limbs 基座后再启用此功能。"
+                    },
+                    style = MaterialTheme.typography.bodySmall
+                )
+                OutlinedButton(
+                    enabled = accessibilityStatus.available,
+                    onClick = {
+                        try {
+                            context.startActivity(
+                                Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+                                    .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            )
+                        } catch (error: Exception) {
+                            host.logger.w(
+                                "PermissionService",
+                                "Open accessibility settings failed: " + error.message
+                            )
+                            Toast.makeText(
+                                context,
+                                "请手动打开系统设置中的无障碍服务",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        }
+                    }
+                ) {
+                    Text(if (accessibilityStatus.enabled) "管理无障碍服务" else "打开无障碍设置")
+                }
+            }
+        }
+        Text(
+            "v0.1.5 · 权限服务基于 Shizuku 开源技术（Apache-2.0）；无障碍功能由 AI Limbs 基座提供。",
+            style = MaterialTheme.typography.bodySmall
+        )
     }
     if (stopConfirm) AlertDialog(
         onDismissRequest = { stopConfirm = false },
