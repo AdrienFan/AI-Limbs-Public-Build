@@ -1,160 +1,52 @@
 package com.ai.assistance.operit.core.tools.system
 
 import android.content.Context
-import android.content.pm.PackageInfo
 import android.content.pm.PackageManager
 import android.os.Build
-import com.ai.assistance.operit.R
-import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.data.repository.UIHierarchyManager
-import kotlin.math.min
+import com.ai.assistance.operit.util.AppLogger
 
 /**
- * 用于管理内置无障碍服务提供者应用的安装和更新
+ * build67 兼容层。
+ *
+ * 独立 Accessibility Provider APK 已移除；旧调用点仍可通过这里读取
+ * AI Limbs 主 APK 版本，并把“安装”动作重定向到系统无障碍设置。
  */
 class AccessibilityProviderInstaller {
     companion object {
         private const val TAG = "AccessibilityProviderInstaller"
-        private const val ACCESSIBILITY_PACKAGE_NAME = "com.ai.assistance.operit.provider"
 
-        // 缓存版本信息
-        private var cachedInstalledVersion: String? = null
-        private var cachedBundledVersion: String? = null
-        private var cachedUpdateNeeded: Boolean? = null
-        private var lastCheckTime: Long = 0
-        private const val CACHE_EXPIRE_TIME = 60 * 1000 // 缓存有效期1分钟
+        fun getBundledVersion(context: Context): String =
+            getHostVersion(context)
 
-        /**
-         * 获取内置无障碍服务APK版本信息
-         */
-        fun getBundledVersion(context: Context): String {
-            if (cachedBundledVersion != null && !isCacheExpired()) {
-                return cachedBundledVersion!!
-            }
+        fun getInstalledVersion(context: Context): String =
+            getHostVersion(context)
 
-            try {
-                val versionInfo = context.assets.open("accessibility_version.txt").use {
-                    it.bufferedReader().readText().trim()
-                }
-                cachedBundledVersion = versionInfo
-                return versionInfo
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "获取内置无障碍服务版本失败", e)
-                val unknown = context.getString(R.string.accessibility_provider_unknown)
-                cachedBundledVersion = unknown
-                return unknown
-            }
+        fun isUpdateNeeded(context: Context): Boolean = false
+
+        fun launchInstall(context: Context) {
+            AppLogger.i(TAG, "独立无障碍 Provider 已内置到 AI Limbs，打开系统无障碍设置")
+            UIHierarchyManager.launchProviderInstall(context)
         }
 
-        /**
-         * 获取已安装的无障碍服务版本
-         */
-        fun getInstalledVersion(context: Context): String? {
-            if (cachedInstalledVersion != null && !isCacheExpired()) {
-                return cachedInstalledVersion
-            }
+        fun clearCache() = Unit
 
-            try {
-                val packageManager = context.packageManager
-                val packageInfo: PackageInfo = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                    packageManager.getPackageInfo(ACCESSIBILITY_PACKAGE_NAME, PackageManager.PackageInfoFlags.of(0))
+        private fun getHostVersion(context: Context): String {
+            return try {
+                val info = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.packageManager.getPackageInfo(
+                        context.packageName,
+                        PackageManager.PackageInfoFlags.of(0)
+                    )
                 } else {
                     @Suppress("DEPRECATION")
-                    packageManager.getPackageInfo(ACCESSIBILITY_PACKAGE_NAME, 0)
+                    context.packageManager.getPackageInfo(context.packageName, 0)
                 }
-                val versionName = packageInfo.versionName
-                cachedInstalledVersion = versionName
-                return versionName
-            } catch (e: PackageManager.NameNotFoundException) {
-                cachedInstalledVersion = null
-                return null
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "获取已安装无障碍服务版本出错", e)
-                cachedInstalledVersion = null
-                return null
+                info.versionName ?: "AI Limbs"
+            } catch (error: Exception) {
+                AppLogger.w(TAG, "读取 AI Limbs 版本失败: " + error.message)
+                "AI Limbs"
             }
-        }
-
-        /**
-         * 检查是否需要更新无障碍服务
-         */
-        fun isUpdateNeeded(context: Context): Boolean {
-            if (cachedUpdateNeeded != null && !isCacheExpired()) {
-                return cachedUpdateNeeded!!
-            }
-
-            val installedVersion = getInstalledVersion(context)
-            if (installedVersion == null) {
-                cachedUpdateNeeded = false
-                updateCacheTimestamp()
-                return false // Not installed, no need to update
-            }
-
-            val bundledVersion = getBundledVersion(context)
-            val unknown = context.getString(R.string.accessibility_provider_unknown)
-            if (bundledVersion == unknown) {
-                cachedUpdateNeeded = false
-                updateCacheTimestamp()
-                return false // Cannot determine bundled version, do not suggest update
-            }
-
-            try {
-                val installed = installedVersion.split(".").map { it.toIntOrNull() ?: 0 }
-                val bundled = bundledVersion.split(".").map { it.toIntOrNull() ?: 0 }
-
-                val commonPartLength = min(installed.size, bundled.size)
-                for (i in 0 until commonPartLength) {
-                    if (bundled[i] > installed[i]) {
-                        cachedUpdateNeeded = true
-                        updateCacheTimestamp()
-                        return true
-                    }
-                    if (bundled[i] < installed[i]) {
-                        cachedUpdateNeeded = false
-                        updateCacheTimestamp()
-                        return false
-                    }
-                }
-
-                if (bundled.size > installed.size) {
-                    cachedUpdateNeeded = true
-                    updateCacheTimestamp()
-                    return true
-                }
-                
-                cachedUpdateNeeded = false
-                updateCacheTimestamp()
-                return false
-            } catch (e: Exception) {
-                AppLogger.e(TAG, "比较无障碍服务版本时出错", e)
-                cachedUpdateNeeded = false
-                updateCacheTimestamp()
-                return false
-            }
-        }
-
-        /**
-         * 触发内置无障碍服务的安装流程
-         */
-        fun launchInstall(context: Context) {
-            UIHierarchyManager.launchProviderInstall(context)
-            clearCache() // 清除缓存以在安装后刷新状态
-        }
-
-        private fun updateCacheTimestamp() {
-            lastCheckTime = System.currentTimeMillis()
-        }
-
-        private fun isCacheExpired(): Boolean {
-            return System.currentTimeMillis() - lastCheckTime > CACHE_EXPIRE_TIME
-        }
-
-        fun clearCache() {
-            cachedInstalledVersion = null
-            cachedBundledVersion = null
-            cachedUpdateNeeded = null
-            lastCheckTime = 0
-            AppLogger.d(TAG, "无障碍服务版本缓存已清除")
         }
     }
-} 
+}

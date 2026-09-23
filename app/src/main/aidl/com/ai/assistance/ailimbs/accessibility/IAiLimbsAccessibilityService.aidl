@@ -1,6 +1,6 @@
-package com.ai.assistance.operit.provider;
+package com.ai.assistance.ailimbs.accessibility;
 
-interface IAccessibilityProvider {
+interface IAiLimbsAccessibilityService {
     String getUiHierarchy();
     boolean performClick(int x, int y);
     boolean performLongPress(int x, int y);
@@ -11,4 +11,4 @@ interface IAccessibilityProvider {
     boolean takeScreenshot(String path, String format);
     boolean isAccessibilityServiceEnabled();
     String getCurrentActivityName();
-} 
+}

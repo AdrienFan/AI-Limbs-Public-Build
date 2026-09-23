@@ -1,0 +1,4 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="ailimbs_accessibility_service_description">AI Limbs 内置无障碍服务，用于读取界面结构并执行用户授权的界面操作。</string>
+</resources>
