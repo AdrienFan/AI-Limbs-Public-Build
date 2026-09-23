@@ -16,6 +16,9 @@ TARGETS = (
     ("sentinelx", "extensions/sentinelx", "extension.json", "payload/extension.apk",
      "AILIMBS_CHILD_EXTENSION_PRIVATE_PEM", "ai-limbs-child-extension-dev-v1",
      "8b11ff0b92a3aa485c8aa755588f51e8e587bfa4bd120681aba9bc1da9c369ff", "SentinelX", ".ailx"),
+    ("rdc", "extensions/rdc", "extension.json", "payload/extension.apk",
+     "AILIMBS_CHILD_EXTENSION_PRIVATE_PEM", "ai-limbs-child-extension-dev-v1",
+     "8b11ff0b92a3aa485c8aa755588f51e8e587bfa4bd120681aba9bc1da9c369ff", "RDC", ".ailx"),
 )
 
 def main():
