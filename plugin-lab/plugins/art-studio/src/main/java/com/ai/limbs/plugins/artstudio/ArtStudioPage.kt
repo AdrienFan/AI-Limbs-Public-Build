@@ -9,17 +9,21 @@ import android.graphics.Paint
 import android.graphics.Path
 import android.view.MotionEvent
 import android.view.View
+import android.view.Gravity
+import android.widget.FrameLayout
+import android.widget.PopupMenu
+import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
@@ -41,15 +45,67 @@ import kotlin.math.atan2
 import kotlin.math.hypot
 
 internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider {
-    override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
-        ComposeView(host.createPluginContext(context)).apply {
+    override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View {
+        val pluginContext = host.createPluginContext(context)
+        val bridge = StudioMenuBridge()
+        val root = FrameLayout(pluginContext)
+        val content = ComposeView(pluginContext).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-            setContent { MaterialTheme(colorScheme = darkColorScheme()) { Studio(host) } }
+            setContent { MaterialTheme(colorScheme = darkColorScheme()) { Studio(host, bridge) } }
         }
+        root.addView(content, FrameLayout.LayoutParams(-1, -1))
+        val density = pluginContext.resources.displayMetrics.density
+        val button = TextView(pluginContext).apply {
+            text = "⋮"
+            textSize = 28f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER
+            contentDescription = "画室菜单：新建、保存、另存为"
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.rgb(52, 52, 58))
+                cornerRadius = 12f * density
+            }
+            setOnClickListener {
+                val popup = PopupMenu(pluginContext, this)
+                val labels = listOf(
+                    "new" to "新建画布",
+                    "open" to "打开工程",
+                    "save" to "保存工程",
+                    "png" to "另存为 PNG 图片…",
+                    "jpeg" to "另存为 JPEG 图片…",
+                    "archive" to "另存工程副本 .ailart…",
+                    "image" to "导入图片…",
+                    "import" to "导入工程…",
+                    "rename" to "重命名工程"
+                )
+                labels.forEachIndexed { index, (action, label) ->
+                    popup.menu.add(0, index + 1, index, label).isEnabled =
+                        !bridge.busy && (bridge.hasDocument || action in setOf("new", "open", "import"))
+                }
+                popup.setOnMenuItemClickListener { item ->
+                    bridge.action?.invoke(labels[item.itemId - 1].first)
+                    true
+                }
+                popup.show()
+            }
+        }
+        root.addView(button, FrameLayout.LayoutParams((52f * density).toInt(),
+            (48f * density).toInt(), Gravity.TOP or Gravity.END).apply {
+            topMargin = (8f * density).toInt()
+            rightMargin = (8f * density).toInt()
+        })
+        return root
+    }
+}
+
+private class StudioMenuBridge {
+    var hasDocument: Boolean = false
+    var busy: Boolean = false
+    var action: ((String) -> Unit)? = null
 }
 
 @Composable
-private fun Studio(host: InProcessPluginUiHost) {
+private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
@@ -76,7 +132,6 @@ private fun Studio(host: InProcessPluginUiHost) {
     var transformScale by remember { mutableStateOf("1") }
     var transformAngle by remember { mutableStateOf("0") }
     var panel by remember { mutableStateOf("layers") }
-    var moreMenu by remember { mutableStateOf(false) }
     var exportPath by remember { mutableStateOf("") }
     var archivePath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
@@ -152,36 +207,57 @@ private fun Studio(host: InProcessPluginUiHost) {
         }
     }
     val exportProject = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        awaitingExport = false; busy = pendingOperations > 0
-        if (uri != null) scope.launch {
-            try { withContext(Dispatchers.IO) {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    java.io.File(archivePath).inputStream().use { it.copyTo(output) }
-                } ?: error("无法写入工程文件")
-            }; Toast.makeText(context, "工程备份已保存", Toast.LENGTH_SHORT).show() }
-            catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
+        if (uri == null) { awaitingExport = false; busy = pendingOperations > 0 }
+        else {
+            val source = archivePath
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                            java.io.File(source).inputStream().use { it.copyTo(output) }
+                        } ?: error("无法写入工程文件")
+                    }
+                    Toast.makeText(context, "工程备份已保存", Toast.LENGTH_SHORT).show()
+                } catch (error: Exception) {
+                    Toast.makeText(context, error.message ?: "备份失败", Toast.LENGTH_LONG).show()
+                } finally { awaitingExport = false; busy = pendingOperations > 0 }
+            }
         }
     }
     val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
-        awaitingExport = false; busy = pendingOperations > 0
-        if (uri != null) scope.launch {
-            try { withContext(Dispatchers.IO) {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    java.io.File(exportPath).inputStream().use { it.copyTo(output) }
-                } ?: error("无法写入所选文件")
-            }; Toast.makeText(context, "PNG 已保存", Toast.LENGTH_SHORT).show() }
-            catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
+        if (uri == null) { awaitingExport = false; busy = pendingOperations > 0 }
+        else {
+            val source = exportPath
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                            java.io.File(source).inputStream().use { it.copyTo(output) }
+                        } ?: error("无法写入所选文件")
+                    }
+                    Toast.makeText(context, "PNG 图片已保存", Toast.LENGTH_SHORT).show()
+                } catch (error: Exception) {
+                    Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
+                } finally { awaitingExport = false; busy = pendingOperations > 0 }
+            }
         }
     }
     val exportJpeg = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { uri ->
-        awaitingExport = false; busy = pendingOperations > 0
-        if (uri != null) scope.launch {
-            try { withContext(Dispatchers.IO) {
-                context.contentResolver.openOutputStream(uri)?.use { output ->
-                    java.io.File(exportPath).inputStream().use { it.copyTo(output) }
-                } ?: error("无法写入所选文件")
-            }; Toast.makeText(context, "JPEG 已保存", Toast.LENGTH_SHORT).show() }
-            catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
+        if (uri == null) { awaitingExport = false; busy = pendingOperations > 0 }
+        else {
+            val source = exportPath
+            scope.launch {
+                try {
+                    withContext(Dispatchers.IO) {
+                        context.contentResolver.openOutputStream(uri)?.use { output ->
+                            java.io.File(source).inputStream().use { it.copyTo(output) }
+                        } ?: error("无法写入所选文件")
+                    }
+                    Toast.makeText(context, "JPEG 图片已保存", Toast.LENGTH_SHORT).show()
+                } catch (error: Exception) {
+                    Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
+                } finally { awaitingExport = false; busy = pendingOperations > 0 }
+            }
         }
     }
     LaunchedEffect(store) {
@@ -221,45 +297,60 @@ private fun Studio(host: InProcessPluginUiHost) {
             } finally { busy = pendingOperations > 0 || awaitingExport }
         }
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-            Text(state?.optString("name", "画室") ?: "画室", Modifier.weight(1f),
-                maxLines = 1, style = MaterialTheme.typography.titleMedium)
-            TextButton(onClick = { newCanvas = true }, enabled = !busy) { Text("新建") }
-            TextButton(onClick = { openDialog = true }, enabled = !busy) { Text("打开") }
-            TextButton(onClick = { scope.launch {
-                try { withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
-                    refresh(); Toast.makeText(context, "工程已保存", Toast.LENGTH_SHORT).show() }
-                catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
-            } }, enabled = current != null && !busy) { Text("保存") }
-            Box {
-                TextButton(onClick = { moreMenu = true }, enabled = !busy) { Text("⋮ 更多") }
-                DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
-                    DropdownMenuItem(text = { Text("重命名工程") }, onClick = {
-                        moreMenu = false; projectName = state?.optString("name", "未命名工程") ?: ""; projectDialog = true
-                    }, enabled = current != null)
-                    DropdownMenuItem(text = { Text("导入图片") }, onClick = { moreMenu = false; import.launch("image/*") }, enabled = current != null)
-                    DropdownMenuItem(text = { Text("导入工程") }, onClick = { moreMenu = false; importProject.launch("*/*") })
-                    DropdownMenuItem(text = { Text("备份工程 .ailart") }, onClick = { moreMenu = false
-                        if (!busy) {
-                            awaitingExport = true; busy = true
-                            scope.launch {
-                                try {
-                                    val result = withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
-                                    archivePath = result.getString("path")
-                                    exportProject.launch("${state?.optString("name", "画室") ?: "画室"}.ailart")
-                                } catch (e: Exception) {
-                                    awaitingExport = false; busy = false
-                                    Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
-                                }
-                            }
-                        }
-                    }, enabled = current != null)
-                    DropdownMenuItem(text = { Text("导出 PNG") }, onClick = { moreMenu = false; publish("png") }, enabled = current != null)
-                    DropdownMenuItem(text = { Text("导出 JPEG") }, onClick = { moreMenu = false; publish("jpeg") }, enabled = current != null)
+    fun saveProject() {
+        if (current == null || busy) return
+        busy = true
+        scope.launch {
+            try {
+                withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
+                refresh()
+                Toast.makeText(context, "工程已保存，可继续编辑；图片请从菜单另存为", Toast.LENGTH_LONG).show()
+            } catch (error: Exception) {
+                Toast.makeText(context, error.message ?: "保存工程失败", Toast.LENGTH_LONG).show()
+            } finally { busy = pendingOperations > 0 || awaitingExport }
+        }
+    }
+    fun saveProjectCopy() {
+        if (current == null || busy) return
+        awaitingExport = true
+        busy = true
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
+                archivePath = result.getString("path")
+                val name = state?.optString("name", "画室") ?: "画室"
+                exportProject.launch("${name.replace(Regex("[\\\\/:*?\"<>|]"), "_")}.ailart")
+            } catch (error: Exception) {
+                awaitingExport = false
+                Toast.makeText(context, error.message ?: "备份工程失败", Toast.LENGTH_LONG).show()
+            } finally { busy = pendingOperations > 0 || awaitingExport }
+        }
+    }
+    SideEffect {
+        menuBridge.hasDocument = current != null
+        menuBridge.busy = busy
+        menuBridge.action = { action ->
+            when (action) {
+                "new" -> newCanvas = true
+                "open" -> openDialog = true
+                "save" -> saveProject()
+                "png" -> publish("png")
+                "jpeg" -> publish("jpeg")
+                "archive" -> saveProjectCopy()
+                "image" -> import.launch("image/*")
+                "import" -> importProject.launch("*/*")
+                "rename" -> {
+                    projectName = state?.optString("name", "未命名工程") ?: "未命名工程"
+                    projectDialog = true
                 }
             }
+        }
+    }
+    Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 64.dp),
+            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+            Text(state?.optString("name", "未命名工程") ?: "画室", maxLines = 1,
+                style = MaterialTheme.typography.titleMedium)
         }
         if (current == null) {
             Text("新建画布，即可开始和兰儿共同编辑。", Modifier.padding(12.dp))
@@ -282,7 +373,8 @@ private fun Studio(host: InProcessPluginUiHost) {
                                 label = { Text(label, maxLines = 1) }, modifier = Modifier.fillMaxWidth())
                         }
                 }
-                AndroidView(factory = { ctx -> StudioCanvas(ctx) }, modifier = Modifier.fillMaxSize().weight(1f), update = { view ->
+                Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+                AndroidView(factory = { ctx -> StudioCanvas(ctx) }, modifier = Modifier.fillMaxSize(), update = { view ->
                     view.image = image
                     view.layers = layers
                     view.selectedId = selected
@@ -305,6 +397,7 @@ private fun Studio(host: InProcessPluginUiHost) {
                         }
                     }
                 })
+                }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)) {
