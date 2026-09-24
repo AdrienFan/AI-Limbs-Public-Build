@@ -212,6 +212,27 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("history.redo", "重做画室操作", write) {
             store.history("LANER", redo = true)
         }
+        capability("edit.clipboard_info", "读取画室剪贴板", read) { store.clipboardInfo() }
+        capability("edit.cut", "剪切选区像素", write) { store.copyPixels("LANER", cut = true) }
+        capability("edit.copy", "复制选区像素", write) { store.copyPixels("LANER") }
+        capability("edit.copy_merged", "合并复制可见画布", write) {
+            store.copyPixels("LANER", merged = true)
+        }
+        capability("edit.paste", "粘贴剪贴板为新图层", write) { store.pastePixels("LANER") }
+        capability("edit.paste_at", "粘贴到画布坐标", write) { p ->
+            store.pastePixels("LANER", atX = p.getInt("x"), atY = p.getInt("y"))
+        }
+        capability("edit.paste_into", "粘贴进活动图层", write) {
+            store.pastePixels("LANER", intoActive = true)
+        }
+        capability("edit.paste_new", "从剪贴板创建新工程", write) { store.pasteAsNew("LANER") }
+        capability("edit.clear", "清除选区像素", write) { store.editPixels("LANER", "CLEAR") }
+        capability("edit.fill_foreground", "用前景色填充选区", write) { p ->
+            store.editPixels("LANER", "FILL", p.getString("color"))
+        }
+        capability("edit.fill_background", "用指定背景色填充选区", write) { p ->
+            store.editPixels("LANER", "FILL", p.getString("color"))
+        }
         capability("image.import", "导入 PNG 或 JPEG", write) { p ->
             store.importImage("LANER", p.getString("base64"))
         }
@@ -298,6 +319,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("cropWidth", "integer", true), p("cropHeight", "integer", true),
             p("width", "integer", true), p("height", "integer", true))
         "document.rename" -> listOf(p("name"))
+        "edit.fill_foreground", "edit.fill_background" -> listOf(p("color"))
+        "edit.paste_at" -> listOf(p("x", "integer"), p("y", "integer"))
         else -> emptyList()
     }.let { fields ->
         if ((name.startsWith("layer.") && name !in setOf("layer.list", "layer.search")) ||

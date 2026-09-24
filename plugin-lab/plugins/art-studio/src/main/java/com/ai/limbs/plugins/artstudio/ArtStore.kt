@@ -1,6 +1,8 @@
 package com.ai.limbs.plugins.artstudio
 
+import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import java.io.ByteArrayOutputStream
 import android.graphics.Matrix
 import android.util.Base64
 import org.json.JSONArray
@@ -26,6 +28,7 @@ internal class ArtStore(private val root: File) {
     private val recentIndex = File(root, "recent.json")
     private val sessionIndex = File(root, "sessions.json")
     private val externalLinks = File(root, "external-links.json")
+    private val editClipboard = File(root, "edit-clipboard.json")
     private val templates = File(root, "templates")
     private val backups = File(root, "backups")
     private val lockFile = File(root, "art-studio.lock")
@@ -74,7 +77,9 @@ internal class ArtStore(private val root: File) {
             val marker = File(documents, id + ".sha256")
             "$id:${draft(id).lastModified()}:${draft(id).length()}:" +
                 "${marker.lastModified()}:${marker.length()}:" +
-                "${archive(id).lastModified()}:${externalLink(id)?.optBoolean("pending") == true}"
+                "${archive(id).lastModified()}:${externalLink(id)?.optBoolean("pending") == true}:" +
+                editClipboard.lastModified().toString() + ":" +
+                (if (editClipboard.isFile) JSONObject(editClipboard.readText()).optString("asset") else "")
         }
     }
 
@@ -366,10 +371,16 @@ internal class ArtStore(private val root: File) {
                 for (i in 0 until layers.length()) {
                     val layer = layers.getJSONObject(i)
                     if (layer.optString("kind") == "image") used.add(layer.getString("asset"))
+                    layer.optJSONArray("contentOrder")?.let { order ->
+                        for (n in 0 until order.length()) {
+                            val event = order.getJSONObject(n)
+                            if (event.optString("kind") == "paste") used.add(event.getString("asset"))
+                        }
+                    }
                 }
                 for (i in 0 until operations.length()) {
                     val operation = operations.getJSONObject(i)
-                    if (operation.getString("type") == "IMAGE_IMPORT") {
+                    if (operation.getString("type") in setOf("IMAGE_IMPORT", "PASTE_IMAGE", "PIXEL_PASTE")) {
                         used.add(operation.getJSONObject("parameters").getString("asset"))
                     }
                 }
@@ -462,9 +473,21 @@ internal class ArtStore(private val root: File) {
                 layer.put("asset", assetIds.getValue(oldAsset))
             }
         }
+        for (i in 0 until baseLayers.length()) {
+            baseLayers.getJSONObject(i).optJSONArray("contentOrder")?.let { order ->
+                for (n in 0 until order.length()) {
+                    val event = order.getJSONObject(n)
+                    if (event.optString("kind") == "paste") {
+                        val old = event.getString("asset")
+                        require(old in importedAssets) { "工程剪贴资源缺失" }
+                        event.put("asset", assetIds.getValue(old))
+                    }
+                }
+            }
+        }
         for (i in 0 until operations.length()) {
             val op = operations.getJSONObject(i)
-            if (op.getString("type") == "IMAGE_IMPORT") {
+            if (op.getString("type") in setOf("IMAGE_IMPORT", "PASTE_IMAGE", "PIXEL_PASTE")) {
                 val parameters = op.getJSONObject("parameters")
                 val oldId = parameters.getString("asset")
                 require(oldId in importedAssets) { "工程图片缺失" }
@@ -560,8 +583,31 @@ internal class ArtStore(private val root: File) {
         val state = replay(doc)
         val id = doc.getString("id")
         val saved = archive(id)
+        val operations = doc.getJSONArray("operations")
+        val (undoStack, redoStack) = historyStacks(operations)
+        fun operationLabel(id: String?): String {
+            if (id == null) return ""
+            val operation = (0 until operations.length()).map { operations.getJSONObject(it) }
+                .firstOrNull { it.getString("id") == id } ?: return ""
+            return when (operation.getString("type")) {
+                "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
+                "LAYER_DELETE" -> "移除图层节点"
+                "STROKE_ADD" -> "绘制笔画"
+                "PIXEL_EDIT" -> if (operation.getJSONObject("parameters").optString("mode") == "CLEAR")
+                    "清除像素" else "填充像素"
+                "PIXEL_PASTE" -> "粘贴像素"
+                "LAYER_COPY" -> "复制图层"
+                "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
+                "DOCUMENT_RENAME" -> "重命名工程"
+                else -> "画室操作"
+            }
+        }
         return JSONObject().put("id", doc.getString("id"))
             .put("state", state).put("revision", doc.getJSONArray("operations").length())
+            .put("canUndo", undoStack.isNotEmpty()).put("canRedo", redoStack.isNotEmpty())
+            .put("undoLabel", operationLabel(undoStack.lastOrNull()))
+            .put("redoLabel", operationLabel(redoStack.lastOrNull()))
+            .put("hasClipboard", editClipboard.isFile)
             .put("dirty", externalLink(id)?.optBoolean("pending") == true ||
                 !saved.exists() || File(documents, id + ".sha256").let { marker ->
                 if (marker.isFile) marker.readText() != digest(doc.toString())
@@ -620,6 +666,44 @@ internal class ArtStore(private val root: File) {
                 val kind = if (type == "GROUP_CREATE") "group" else if (type == "IMAGE_IMPORT") "image" else "paint"
                 layers.put(newLayer(id, kind, p.optString("name", if (kind == "group") "图层组" else "图层"), parentId, p.optString("asset")))
                 if (p.optBoolean("select", false)) state.put("selectedLayerId", id)
+            }
+            "PASTE_IMAGE" -> {
+                val asset = p.getString("asset")
+                validateId(asset)
+                val id = p.getString("id")
+                validateId(id)
+                require((0 until layers.length()).none { layers.getJSONObject(it).getString("id") == id })
+                val layer = newLayer(id, "image", "粘贴图层", "", asset)
+                layer.put("x", p.getInt("x")).put("y", p.getInt("y"))
+                layers.put(layer)
+                state.put("selectedLayerId", id)
+            }
+            "PIXEL_EDIT", "PIXEL_PASTE" -> {
+                val layer = find(p.getString("layerId")).second
+                require(layer.getString("kind") in setOf("paint", "image") && !lockedByParent(layer, layers))
+                require(layer.optString("parentId").isBlank() &&
+                    layer.getDouble("x") == 0.0 && layer.getDouble("y") == 0.0 &&
+                    layer.getDouble("scale") == 1.0 && layer.getDouble("rotation") == 0.0) {
+                    "请先取消图层变换和分组，再编辑选区像素"
+                }
+                val order = contentOrder(layer)
+                if (type == "PIXEL_PASTE") {
+                    validateId(p.getString("asset"))
+                    order.put(JSONObject().put("kind", "paste").put("asset", p.getString("asset"))
+                        .put("x", p.getInt("x")).put("y", p.getInt("y")))
+                } else {
+                    val x = p.getInt("x"); val y = p.getInt("y")
+                    val width = p.getInt("width"); val height = p.getInt("height")
+                    require(x >= 0 && y >= 0 && width > 0 && height > 0 &&
+                        x.toLong() + width <= state.getInt("width") &&
+                        y.toLong() + height <= state.getInt("height"))
+                    val mode = p.getString("mode")
+                    require(mode == "CLEAR" || mode == "FILL")
+                    if (mode == "FILL") requireColor(p.getString("color"))
+                    order.put(JSONObject().put("kind", mode.lowercase()).put("x", x).put("y", y)
+                        .put("width", width).put("height", height)
+                        .put("color", p.optString("color")))
+                }
             }
             "DOCUMENT_RENAME" -> state.put("name", p.getString("name").trim().take(100).also { require(it.isNotBlank()) })
             "LAYER_SELECT" -> state.put("selectedLayerId", find(p.getString("id")).second.getString("id"))
@@ -706,6 +790,20 @@ internal class ArtStore(private val root: File) {
                         stroke.put("id", UUID.nameUUIDFromBytes("${copy.getString("id")}:$i".toByteArray()).toString())
                         stroke.put("layerId", copy.getString("id"))
                     }
+                    copy.optJSONArray("contentOrder")?.let { order ->
+                        val oldStrokes = source.getJSONArray("strokes")
+                        val newStrokes = copy.getJSONArray("strokes")
+                        for (i in 0 until order.length()) {
+                            val event = order.getJSONObject(i)
+                            if (event.optString("kind") == "stroke") {
+                                val oldId = event.getString("id")
+                                val index = (0 until oldStrokes.length()).firstOrNull {
+                                    oldStrokes.getJSONObject(it).getString("id") == oldId
+                                }
+                                if (index != null) event.put("id", newStrokes.getJSONObject(index).getString("id"))
+                            }
+                        }
+                    }
                     layers.put(copy)
                 }
                 if (p.optBoolean("select", false)) state.put("selectedLayerId", p.getString("newId"))
@@ -726,6 +824,8 @@ internal class ArtStore(private val root: File) {
                 require(p.optDouble("opacity", 1.0) in 0.0..1.0)
                 require(p.optString("tool", "pencil") in setOf("pencil", "ink", "eraser", "soft", "spray"))
                 layer.getJSONArray("strokes").put(JSONObject(p.toString()))
+                layer.optJSONArray("contentOrder")?.put(JSONObject().put("kind", "stroke")
+                    .put("id", p.getString("id")))
             }
             "STROKE_ERASE" -> {
                 val layer = find(p.getString("layerId")).second
@@ -800,7 +900,11 @@ internal class ArtStore(private val root: File) {
                             }
                             if (action == "COPY") stroke.put("id", "${p.getString("copyId")}:$ordinal")
                             else strokes.put(chosen[ordinal], stroke)
-                            if (action == "COPY") strokes.put(stroke)
+                            if (action == "COPY") {
+                                strokes.put(stroke)
+                                layer.optJSONArray("contentOrder")?.put(
+                                    JSONObject().put("kind", "stroke").put("id", stroke.getString("id")))
+                            }
                         }
                     }
                     else -> error("未知选区操作")
@@ -841,9 +945,7 @@ internal class ArtStore(private val root: File) {
         }
     }
 
-    fun history(actor: String, redo: Boolean): JSONObject = locked {
-        val operations = loadCurrent().getJSONArray("operations")
-        val disabled = mutableSetOf<String>()
+    private fun historyStacks(operations: JSONArray): Pair<List<String>, List<String>> {
         val undoStack = mutableListOf<String>()
         val redoStack = mutableListOf<String>()
         for (i in 0 until operations.length()) {
@@ -851,15 +953,160 @@ internal class ArtStore(private val root: File) {
             val id = op.getString("id")
             val target = op.optJSONObject("parameters")?.optString("targetId") ?: ""
             when (op.getString("type")) {
-                "REVERT" -> { disabled.add(target); undoStack.remove(target); redoStack.add(target) }
-                "RESTORE" -> { disabled.remove(target); redoStack.remove(target); undoStack.add(target) }
+                "REVERT" -> { undoStack.remove(target); redoStack.add(target) }
+                "RESTORE" -> { redoStack.remove(target); undoStack.add(target) }
                 else -> { undoStack.add(id); redoStack.clear() }
             }
         }
+        return undoStack to redoStack
+    }
+
+    fun history(actor: String, redo: Boolean): JSONObject = locked {
+        val (undoStack, redoStack) = historyStacks(loadCurrent().getJSONArray("operations"))
         val target = if (redo) redoStack.lastOrNull() else undoStack.lastOrNull()
         require(target != null) { if (redo) "没有可重做的操作" else "没有可撤销的操作" }
         // History commits under the same lock; the replay validates dependencies before writing.
         appendToCurrent(actor, if (redo) "RESTORE" else "REVERT", JSONObject().put("targetId", target))
+    }
+
+    fun clipboardInfo(): JSONObject = locked {
+        if (editClipboard.isFile) JSONObject(editClipboard.readText()) else JSONObject()
+    }
+
+    private fun editingRectangle(state: JSONObject): IntArray {
+        val canvasWidth = state.getInt("width")
+        val canvasHeight = state.getInt("height")
+        val selected = state.optJSONObject("selection")
+        if (selected == null) return intArrayOf(0, 0, canvasWidth, canvasHeight)
+        val left = kotlin.math.floor(selected.getDouble("x")).toInt().coerceIn(0, canvasWidth)
+        val top = kotlin.math.floor(selected.getDouble("y")).toInt().coerceIn(0, canvasHeight)
+        val right = kotlin.math.ceil(selected.getDouble("x") + selected.getDouble("width"))
+            .toInt().coerceIn(0, canvasWidth)
+        val bottom = kotlin.math.ceil(selected.getDouble("y") + selected.getDouble("height"))
+            .toInt().coerceIn(0, canvasHeight)
+        require(right > left && bottom > top) { "选区不在画布范围内" }
+        return intArrayOf(left, top, right - left, bottom - top)
+    }
+
+    private fun copyableLayer(state: JSONObject): JSONObject {
+        val layers = state.getJSONArray("layers")
+        val selected = state.optString("selectedLayerId")
+        val layer = (0 until layers.length()).map { layers.getJSONObject(it) }
+            .firstOrNull { it.getString("id") == selected } ?: error("请先选择图层")
+        require(layer.getString("kind") in setOf("paint", "image") &&
+            layer.getBoolean("visible") && layer.optString("parentId").isBlank()) {
+            "请选择可见的根绘画图层或图像图层"
+        }
+        return layer
+    }
+
+    private fun editableLayer(state: JSONObject): JSONObject {
+        val layers = state.getJSONArray("layers")
+        val id = state.optString("selectedLayerId")
+        val layer = (0 until layers.length()).map { layers.getJSONObject(it) }
+            .firstOrNull { it.getString("id") == id } ?: error("请先选择图层")
+        require(layer.getString("kind") == "paint" || layer.getString("kind") == "image") {
+            "当前图层不支持像素编辑"
+        }
+        require(!lockedByParent(layer, layers) && layer.getBoolean("visible")) {
+            "图层已锁定或隐藏"
+        }
+        require(layer.optString("parentId").isBlank() &&
+            layer.getDouble("x") == 0.0 && layer.getDouble("y") == 0.0 &&
+            layer.getDouble("scale") == 1.0 && layer.getDouble("rotation") == 0.0) {
+            "请先取消图层变换和分组，再编辑选区像素"
+        }
+        return layer
+    }
+
+    fun copyPixels(actor: String, merged: Boolean = false, cut: Boolean = false): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        require(!merged || !cut)
+        val doc = loadCurrent()
+        val state = replay(doc)
+        val area = editingRectangle(state)
+        val layer = if (merged) null else if (cut) editableLayer(state) else copyableLayer(state)
+        val view = snapshot(doc)
+        if (layer != null) {
+            val imageState = view.getJSONObject("state")
+            imageState.put("background", "#00000000")
+            val only = imageState.getJSONArray("layers")
+            for (i in 0 until only.length()) {
+                val candidate = only.getJSONObject(i)
+                if (candidate.getString("id") != layer.getString("id")) {
+                    candidate.put("visible", false)
+                } else {
+                    // Copy the selected layer's pixels; compositing belongs to merged copy.
+                    candidate.put("blend", "normal").put("opacity", 1.0)
+                }
+            }
+        }
+        val bitmap = ArtRenderer.render(this, view)
+        val bytes = try {
+            val clipped = Bitmap.createBitmap(bitmap, area[0], area[1], area[2], area[3])
+            try {
+                ByteArrayOutputStream().use { stream ->
+                    require(clipped.compress(Bitmap.CompressFormat.PNG, 100, stream))
+                    stream.toByteArray()
+                }
+            } finally { if (clipped !== bitmap) clipped.recycle() }
+        } finally { bitmap.recycle() }
+        require(bytes.size <= 8 * 1024 * 1024) { "选区图片超过 8 MB" }
+        val asset = UUID.randomUUID().toString()
+        atomicBytes(assetFile(asset), bytes)
+        val clipboard = JSONObject().put("asset", asset).put("width", area[2]).put("height", area[3])
+            .put("sourceActor", actor).put("sourceDocument", doc.getString("id"))
+        atomic(editClipboard, clipboard.toString())
+        if (cut) appendToCurrent(actor, "PIXEL_EDIT", JSONObject().put("layerId", layer!!.getString("id"))
+            .put("mode", "CLEAR").put("x", area[0]).put("y", area[1])
+            .put("width", area[2]).put("height", area[3]))
+        clipboard.put("cut", cut)
+    }
+
+    fun pastePixels(actor: String, intoActive: Boolean = false,
+                    atX: Int? = null, atY: Int? = null): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        require(editClipboard.isFile) { "画室剪贴板为空" }
+        val clip = JSONObject(editClipboard.readText())
+        val asset = clip.getString("asset")
+        require(assetFile(asset).isFile) { "画室剪贴板图片已丢失" }
+        val state = replay(loadCurrent())
+        require((atX == null) == (atY == null)) { "请同时提供光标 X 与 Y" }
+        if (atX != null && atY != null) {
+            require(atX in 0..state.getInt("width") && atY in 0..state.getInt("height")) {
+                "光标位置超出画布"
+            }
+        }
+        val x = if (atX != null) atX - clip.getInt("width") / 2
+            else (state.getInt("width") - clip.getInt("width")) / 2
+        val y = if (atY != null) atY - clip.getInt("height") / 2
+            else (state.getInt("height") - clip.getInt("height")) / 2
+        val mode = if (intoActive) "PIXEL_PASTE" else "PASTE_IMAGE"
+        val target = if (intoActive) editableLayer(state).getString("id") else ""
+        appendToCurrent(actor, mode, JSONObject().put("asset", asset).put("id", UUID.randomUUID().toString())
+            .put("layerId", target).put("x", x).put("y", y))
+    }
+
+    fun pasteAsNew(actor: String): JSONObject {
+        val clip = clipboardInfo()
+        require(clip.has("asset")) { "画室剪贴板为空" }
+        require(clip.getInt("width") in 64..4096 && clip.getInt("height") in 64..4096) {
+            "新画布至少需要 64 × 64 像素"
+        }
+        val bytes = locked { assetFile(clip.getString("asset")).readBytes() }
+        return openImage(Base64.encodeToString(bytes, Base64.NO_WRAP), "粘贴图像", actor)
+    }
+
+    fun editPixels(actor: String, mode: String, color: String = ""): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        require(mode == "CLEAR" || mode == "FILL")
+        val state = replay(loadCurrent())
+        val layer = editableLayer(state)
+        val area = editingRectangle(state)
+        if (mode == "FILL") requireColor(color)
+        appendToCurrent(actor, "PIXEL_EDIT", JSONObject().put("layerId", layer.getString("id"))
+            .put("mode", mode).put("color", color).put("x", area[0]).put("y", area[1])
+            .put("width", area[2]).put("height", area[3]))
     }
 
     private fun appendToCurrent(actor: String, type: String, params: JSONObject): JSONObject {
@@ -870,6 +1117,17 @@ internal class ArtStore(private val root: File) {
         val result = snapshot(doc)
         atomic(draft(doc.getString("id")), doc.toString())
         return result.put("lastOperationId", op.getString("id"))
+    }
+
+    private fun contentOrder(layer: JSONObject): JSONArray {
+        layer.optJSONArray("contentOrder")?.let { return it }
+        val order = JSONArray()
+        val strokes = layer.getJSONArray("strokes")
+        for (i in 0 until strokes.length()) {
+            order.put(JSONObject().put("kind", "stroke").put("id", strokes.getJSONObject(i).getString("id")))
+        }
+        layer.put("contentOrder", order)
+        return order
     }
 
     private fun newLayer(id: String, kind: String, name: String, parent: String, asset: String): JSONObject =

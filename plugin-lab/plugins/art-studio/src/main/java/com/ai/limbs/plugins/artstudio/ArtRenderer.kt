@@ -64,9 +64,41 @@ internal object ArtRenderer {
                                 local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
                                 image.recycle()
                             }
-                        } else {
-                            val strokes = layer.getJSONArray("strokes")
+                        }
+                        val strokes = layer.getJSONArray("strokes")
+                        val order = layer.optJSONArray("contentOrder")
+                        if (order == null) {
                             for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s))
+                        } else {
+                            val byId = (0 until strokes.length()).associate {
+                                val stroke = strokes.getJSONObject(it)
+                                stroke.getString("id") to stroke
+                            }
+                            for (n in 0 until order.length()) {
+                                val event = order.getJSONObject(n)
+                                when (event.getString("kind")) {
+                                    "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it) }
+                                    "clear", "fill" -> {
+                                        val editPaint = Paint(Paint.ANTI_ALIAS_FLAG)
+                                        if (event.getString("kind") == "clear") {
+                                            editPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
+                                        } else editPaint.color = Color.parseColor(event.getString("color"))
+                                        local.drawRect(event.getInt("x").toFloat(), event.getInt("y").toFloat(),
+                                            (event.getInt("x") + event.getInt("width")).toFloat(),
+                                            (event.getInt("y") + event.getInt("height")).toFloat(), editPaint)
+                                    }
+                                    "paste" -> {
+                                        val inserted = BitmapFactory.decodeFile(
+                                            store.assetFile(event.getString("asset")).absolutePath)
+                                            ?: error("工程粘贴资源已丢失")
+                                        try {
+                                            local.drawBitmap(inserted, event.getInt("x").toFloat(),
+                                                event.getInt("y").toFloat(), Paint(Paint.FILTER_BITMAP_FLAG))
+                                        } finally { inserted.recycle() }
+                                    }
+                                    else -> error("未知像素编辑记录")
+                                }
+                            }
                         }
                         target.drawBitmap(buffer, 0f, 0f, paint)
                     } finally { buffer.recycle() }

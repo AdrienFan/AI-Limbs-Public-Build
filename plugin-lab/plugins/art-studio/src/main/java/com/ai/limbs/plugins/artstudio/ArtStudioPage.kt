@@ -133,6 +133,51 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                                 }
                                 show()
                             }
+                        } else if (title == "编辑(E)") {
+                            val anchor = this
+                            PopupMenu(pluginContext, anchor).apply {
+                                fun add(group: Int, id: Int, label: String, enabled: Boolean = true) {
+                                    menu.add(group, id, id, label).isEnabled = enabled && !bridge.busy
+                                }
+                                val doc = bridge.hasDocument
+                                val pixels = bridge.canEditPixels
+                                val clip = bridge.hasClipboard
+                                add(0, 101, "撤销 " + bridge.undoLabel, bridge.canUndo)
+                                add(0, 102, "重做 " + bridge.redoLabel, bridge.canRedo)
+                                add(1, 103, "剪切(T)", pixels)
+                                add(1, 104, "复制(C)", bridge.canCopyPixels)
+                                add(1, 105, "剪切（锐利）(S)", false)
+                                add(1, 106, "复制（锐利）(O)", false)
+                                add(1, 107, "合并复制(M)", doc)
+                                add(1, 108, "复制图层样式", false)
+                                add(1, 109, "粘贴(P)", doc && clip)
+                                add(1, 110, "粘贴到光标处", doc && clip && bridge.hasCanvasCursor)
+                                add(1, 111, "粘贴到活动图层", pixels && clip)
+                                add(1, 112, "粘贴为新图像(N)", clip && bridge.clipboardCanNew)
+                                add(1, 113, "粘贴为参考图像(E)", false)
+                                add(1, 114, "粘贴矢量形状样式", false)
+                                add(1, 115, "粘贴图层样式", false)
+                                add(2, 116, "清除(L)", pixels)
+                                add(3, 117, "填充前景色(F)", pixels)
+                                add(3, 118, "填充背景色(W)", pixels)
+                                add(3, 119, "填充图案(I)", false)
+                                add(3, 120, "填充 - 额外属性", false)
+                                add(4, 121, "描边 - 选中形状(K)", false)
+                                add(4, 122, "描边 - 选区(T)…", false)
+                                add(5, 123, "拾取屏幕颜色(S)", false)
+                                add(5, 124, "拾取屏幕颜色（拾取画布实际颜色）(S)", false)
+                                if (android.os.Build.VERSION.SDK_INT >= 28) menu.setGroupDividerEnabled(true)
+                                setOnMenuItemClickListener { item ->
+                                    bridge.onEditCommand?.invoke(item.itemId)
+                                    true
+                                }
+                                setOnDismissListener {
+                                    anchor.isSelected = false
+                                    anchor.setBackgroundColor(Color.TRANSPARENT)
+                                    anchor.setTextColor(Color.rgb(218, 218, 218))
+                                }
+                                show()
+                            }
                         }
                     }
                 }
@@ -150,7 +195,17 @@ private class StudioMenuBridge {
     var busy = false
     var hasDocument = false
     var hasRecent = false
+    var canUndo = false
+    var canRedo = false
+    var undoLabel = ""
+    var redoLabel = ""
+    var canEditPixels = false
+    var canCopyPixels = false
+    var hasCanvasCursor = false
+    var hasClipboard = false
+    var clipboardCanNew = false
     var onFileCommand: ((Int) -> Unit)? = null
+    var onEditCommand: ((Int) -> Unit)? = null
 }
 
 @Composable
@@ -195,6 +250,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var cropHeight by remember { mutableStateOf("") }
     var outputWidth by remember { mutableStateOf("") }
     var outputHeight by remember { mutableStateOf("") }
+    var canvasCursor by remember { mutableStateOf<Pair<Int, Int>?>(null) }
+    var backgroundFillDialog by remember { mutableStateOf(false) }
+    var backgroundFillColor by remember { mutableStateOf("#FFFFFFFF") }
     var closeDialog by remember { mutableStateOf(false) }
     var exitAfterClose by remember { mutableStateOf(false) }
     var recentDocs by remember { mutableStateOf(JSONArray()) }
@@ -401,10 +459,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         if (templateDialog) templateItems = withContext(Dispatchers.IO) { store.templates() }
     }
     LaunchedEffect(snapshot?.optString("id")) {
+        canvasCursor = null
         recentDocs = withContext(Dispatchers.IO) { store.recent() }
     }
 
     val current = snapshot
+    val clipboardSize = remember(current?.optString("id"), current?.optBoolean("hasClipboard"),
+        revision) {
+        val clip = store.clipboardInfo()
+        clip.optInt("width") to clip.optInt("height")
+    }
     val state = current?.getJSONObject("state")
     val layers = state?.getJSONArray("layers")
     val selectedLayer = (0 until (layers?.length() ?: 0)).map { layers!!.getJSONObject(it) }
@@ -516,6 +580,41 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         menuBridge.busy = busy
         menuBridge.hasDocument = current != null
         menuBridge.hasRecent = recentDocs.length() > 0
+        menuBridge.canUndo = current?.optBoolean("canUndo") == true
+        menuBridge.canRedo = current?.optBoolean("canRedo") == true
+        menuBridge.undoLabel = current?.optString("undoLabel") ?: ""
+        menuBridge.redoLabel = current?.optString("redoLabel") ?: ""
+        menuBridge.hasClipboard = clipboardSize.first > 0 && clipboardSize.second > 0
+        menuBridge.hasCanvasCursor = canvasCursor != null
+        val active = selectedLayer
+        menuBridge.canCopyPixels = current != null && active != null &&
+            active.optString("kind") in setOf("paint", "image") &&
+            active.optString("parentId").isBlank() && active.optBoolean("visible")
+        menuBridge.canEditPixels = current != null && active != null &&
+            active.optString("kind") in setOf("paint", "image") &&
+            active.optString("parentId").isBlank() && active.optBoolean("visible") &&
+            !active.optBoolean("locked") &&
+            active.optDouble("x") == 0.0 && active.optDouble("y") == 0.0 &&
+            active.optDouble("scale") == 1.0 && active.optDouble("rotation") == 0.0
+        menuBridge.clipboardCanNew = clipboardSize.first in 64..4096 && clipboardSize.second in 64..4096
+        menuBridge.onEditCommand = { command ->
+            if (!busy) when (command) {
+                101 -> perform { store.history("AWEI", redo = false) }
+                102 -> perform { store.history("AWEI", redo = true) }
+                103 -> perform { store.copyPixels("AWEI", cut = true) }
+                104 -> perform { store.copyPixels("AWEI") }
+                107 -> perform { store.copyPixels("AWEI", merged = true) }
+                109 -> perform { store.pastePixels("AWEI") }
+                110 -> canvasCursor?.let { point ->
+                    perform { store.pastePixels("AWEI", atX = point.first, atY = point.second) }
+                }
+                111 -> perform { store.pastePixels("AWEI", intoActive = true) }
+                112 -> perform { store.pasteAsNew("AWEI") }
+                116 -> perform { store.editPixels("AWEI", "CLEAR") }
+                117 -> perform { store.editPixels("AWEI", "FILL", color) }
+                118 -> backgroundFillDialog = true
+            }
+        }
         menuBridge.onFileCommand = { command ->
             if (!busy) when (command) {
                 1 -> { canvasTab = 0; newCanvas = true }
@@ -580,6 +679,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             .put("layerId", selected).put("tool", tool).put("color", color)
                             .put("width", width.toDouble()).put("opacity", opacity.toDouble()).put("points", points))
                     }
+                    view.onCursor = { x, y -> canvasCursor = x to y }
                     view.onSelection = { rect -> edit("SELECTION_CREATE", rect) }
                     view.onMove = { dx, dy ->
                         if (selectedLayer != null) {
@@ -800,6 +900,18 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }, enabled = canCreate) { Text("创建") } },
             dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
     }
+    if (backgroundFillDialog) AlertDialog(
+        onDismissRequest = { backgroundFillDialog = false },
+        title = { Text("填充背景色") },
+        text = { OutlinedTextField(backgroundFillColor,
+            { backgroundFillColor = it.uppercase(java.util.Locale.ROOT).take(9) },
+            label = { Text("背景颜色 #AARRGGBB") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = {
+            val fill = backgroundFillColor
+            backgroundFillDialog = false
+            perform { store.editPixels("AWEI", "FILL", fill) }
+        }, enabled = backgroundFillColor.matches(Regex("#[0-9A-F]{8}"))) { Text("填充") } },
+        dismissButton = { TextButton(onClick = { backgroundFillDialog = false }) { Text("取消") } })
     if (saveAsDialog) AlertDialog(onDismissRequest = { saveAsDialog = false },
         title = { Text("另存为工程") },
         text = { OutlinedTextField(saveAsName, { saveAsName = it.take(100) },
@@ -1028,6 +1140,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var opacity: Float = 1f
     var onStroke: (JSONArray) -> Unit = {}
     var onSelection: (JSONObject) -> Unit = {}
+    var onCursor: (Int, Int) -> Unit = { _, _ -> }
     var onMove: (Float, Float) -> Unit = { _, _ -> }
     private var zoom = 1f
     private var angle = 0f
@@ -1148,6 +1261,11 @@ private class StudioCanvas(context: Context) : View(context) {
                 lastX = event.x; lastY = event.y
             }
             MotionEvent.ACTION_UP -> {
+                val bitmap = image
+                if (bitmap != null && xy[0] >= 0f && xy[1] >= 0f &&
+                    xy[0] <= bitmap.width && xy[1] <= bitmap.height) {
+                    onCursor(xy[0].toInt(), xy[1].toInt())
+                }
                 when (tool) {
                     "select" -> onSelection(JSONObject().put("x", minOf(startX, xy[0])).put("y", minOf(startY, xy[1]))
                         .put("width", kotlin.math.abs(xy[0] - startX)).put("height", kotlin.math.abs(xy[1] - startY)))

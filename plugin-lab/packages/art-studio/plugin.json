@@ -51,6 +51,12 @@
       "plugin.art.studio.transform.scale", "plugin.art.studio.transform.rotate",
       "plugin.art.studio.history.list", "plugin.art.studio.history.undo",
       "plugin.art.studio.history.redo", "plugin.art.studio.history.revert_actor_operations",
+      "plugin.art.studio.edit.clipboard_info", "plugin.art.studio.edit.cut",
+      "plugin.art.studio.edit.copy", "plugin.art.studio.edit.copy_merged",
+      "plugin.art.studio.edit.paste", "plugin.art.studio.edit.paste_at",
+      "plugin.art.studio.edit.paste_into",
+      "plugin.art.studio.edit.paste_new", "plugin.art.studio.edit.clear",
+      "plugin.art.studio.edit.fill_foreground", "plugin.art.studio.edit.fill_background",
       "plugin.art.studio.image.import", "plugin.art.studio.export.png",
       "plugin.art.studio.export.jpeg"
     ],
