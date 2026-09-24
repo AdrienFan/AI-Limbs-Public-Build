@@ -13,7 +13,6 @@ import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
-import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -51,7 +50,7 @@ import kotlin.math.hypot
 internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View {
         val pluginContext = host.createPluginContext(context)
-        val bridge = StudioMenuBridge()
+        val bridge = StudioStatusBridge()
         val root = FrameLayout(pluginContext)
         val density = pluginContext.resources.displayMetrics.density
         val menuHeight = (42f * density).toInt()
@@ -106,7 +105,7 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
             gravity = Gravity.CENTER_VERTICAL
             maxLines = 1
             ellipsize = android.text.TextUtils.TruncateAt.END
-            maxWidth = (pluginContext.resources.displayMetrics.widthPixels - 108f * density).toInt()
+            maxWidth = (pluginContext.resources.displayMetrics.widthPixels - 16f * density).toInt()
             val inset = (10f * density).toInt()
             setPadding(inset, 0, inset, 0)
             background = android.graphics.drawable.GradientDrawable().apply {
@@ -120,61 +119,16 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
             leftMargin = (8f * density).toInt()
         })
         bridge.showStatus = { status.text = it }
-        val button = TextView(pluginContext).apply {
-            text = "⋮"
-            textSize = 28f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER
-            contentDescription = "画室菜单：新建、保存、另存为"
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.rgb(52, 52, 58))
-                cornerRadius = 12f * density
-            }
-            setOnClickListener {
-                val popup = PopupMenu(pluginContext, this)
-                val labels = listOf(
-                    "new" to "新建画布",
-                    "open" to "打开工程",
-                    "undo" to "撤销",
-                    "redo" to "重做",
-                    "fit" to "画布适合窗口",
-                    "save" to "保存工程",
-                    "png" to "另存为 PNG 图片…",
-                    "jpeg" to "另存为 JPEG 图片…",
-                    "archive" to "另存工程副本 .ailart…",
-                    "image" to "导入图片…",
-                    "import" to "导入工程…",
-                    "rename" to "重命名工程"
-                )
-                labels.forEachIndexed { index, (action, label) ->
-                    popup.menu.add(0, index + 1, index, label).isEnabled =
-                        !bridge.busy && (bridge.hasDocument || action in setOf("new", "open", "import"))
-                }
-                popup.setOnMenuItemClickListener { item ->
-                    bridge.action?.invoke(labels[item.itemId - 1].first)
-                    true
-                }
-                popup.show()
-            }
-        }
-        root.addView(button, FrameLayout.LayoutParams((52f * density).toInt(),
-            (48f * density).toInt(), Gravity.TOP or Gravity.END).apply {
-            topMargin = menuHeight + (8f * density).toInt()
-            rightMargin = (8f * density).toInt()
-        })
         return root
     }
 }
 
-private class StudioMenuBridge {
-    var hasDocument: Boolean = false
-    var busy: Boolean = false
+private class StudioStatusBridge {
     var showStatus: ((String) -> Unit)? = null
-    var action: ((String) -> Unit)? = null
 }
 
 @Composable
-private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
+private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge) {
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
@@ -375,7 +329,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             try {
                 withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
                 refresh()
-                Toast.makeText(context, "工程已保存，可继续编辑；图片请从菜单另存为", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, "工程已保存", Toast.LENGTH_LONG).show()
             } catch (error: Exception) {
                 Toast.makeText(context, error.message ?: "保存工程失败", Toast.LENGTH_LONG).show()
             } finally { busy = pendingOperations > 0 || awaitingExport }
@@ -398,33 +352,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
     SideEffect {
-        menuBridge.hasDocument = current != null
-        menuBridge.busy = busy
-        menuBridge.showStatus?.invoke(if (state == null) "尚未创建画布 · 点右上角菜单新建"
+        statusBridge.showStatus?.invoke(if (state == null) "尚未创建画布"
             else "${state.optString("name", "未命名工程")} · ${state.getInt("width")} × ${state.getInt("height")} px · ${if (current?.getBoolean("dirty") == true) "未保存" else "已保存"}")
-        menuBridge.action = { action ->
-            when (action) {
-                "new" -> newCanvas = true
-                "open" -> openDialog = true
-                "undo" -> perform { store.history("AWEI", false) }
-                "redo" -> perform { store.history("AWEI", true) }
-                "fit" -> canvasRef[0]?.fitToWindow()
-                "save" -> saveProject()
-                "png" -> publish("png")
-                "jpeg" -> publish("jpeg")
-                "archive" -> saveProjectCopy()
-                "image" -> import.launch("image/*")
-                "import" -> importProject.launch("*/*")
-                "rename" -> {
-                    projectName = state?.optString("name", "未命名工程") ?: "未命名工程"
-                    projectDialog = true
-                }
-            }
-        }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (current == null) {
-            Text("从右上角菜单新建画布，先选择像素尺寸。", Modifier.padding(top = 72.dp, start = 12.dp))
+            Text("尚未创建画布。", Modifier.padding(top = 72.dp, start = 12.dp))
         } else {
             val state = current.getJSONObject("state")
             val layers = state.getJSONArray("layers")
