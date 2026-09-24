@@ -46,7 +46,8 @@ class ArtStudioEntry : InProcessPluginEntry {
         val read = InProcessCapabilityEffect.READ_ONLY
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
         capability("document.create", "新建画室工程", write) { p ->
-            store.create(p.getInt("width"), p.getInt("height"), p.optString("background", "#FFFFFFFF"))
+            store.create(p.getInt("width"), p.getInt("height"),
+                p.optString("background", "#FFFFFFFF"), p.optString("name", "未命名工程"))
         }
         capability("document.open", "打开画室工程", write) { p -> store.open(p.getString("id")) }
         capability("document.import", "导入画室工程文件", write,
@@ -138,7 +139,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         InProcessCapabilityParameterSpec(key, type, key, !optional)
     val id = p("id")
     return when (name) {
-        "document.create" -> listOf(p("width", "integer"), p("height", "integer"), p("background", optional = true))
+        "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
+            p("background", optional = true), p("name", optional = true))
         "document.import" -> listOf(p("base64"))
         "document.open", "layer.select", "layer.delete", "layer.copy", "layer.set_lock" ->
             listOf(id) + if (name == "layer.set_lock") listOf(p("locked", "boolean")) else emptyList()

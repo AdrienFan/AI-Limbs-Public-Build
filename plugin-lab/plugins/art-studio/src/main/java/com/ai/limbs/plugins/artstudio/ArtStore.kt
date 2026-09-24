@@ -38,12 +38,14 @@ internal class ArtStore(private val root: File) {
         }
     }
 
-    fun create(width: Int, height: Int, background: String = "#FFFFFFFF"): JSONObject = locked {
+    fun create(width: Int, height: Int, background: String = "#FFFFFFFF",
+               name: String = "未命名工程"): JSONObject = locked {
         require(width in 64..4096 && height in 64..4096) { "画布边长需要在 64–4096 像素之间" }
         requireColor(background)
+        require(name.trim().isNotBlank()) { "工程名称不能为空" }
         val id = UUID.randomUUID().toString()
         val firstLayer = UUID.randomUUID().toString()
-        val base = JSONObject().put("width", width).put("height", height)
+        val base = JSONObject().put("width", width).put("height", height).put("name", name.trim().take(100))
             .put("background", background).put("layers", JSONArray().put(newLayer(firstLayer, "paint", "绘画图层", "", "")))
             .put("selectedLayerId", firstLayer)
             .put("selection", JSONObject.NULL)

@@ -17,6 +17,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -28,6 +29,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
@@ -55,6 +57,26 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
         }
         root.addView(content, FrameLayout.LayoutParams(-1, -1))
         val density = pluginContext.resources.displayMetrics.density
+        val status = TextView(pluginContext).apply {
+            textSize = 14f
+            setTextColor(Color.WHITE)
+            gravity = Gravity.CENTER_VERTICAL
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
+            maxWidth = (pluginContext.resources.displayMetrics.widthPixels - 108f * density).toInt()
+            val inset = (10f * density).toInt()
+            setPadding(inset, 0, inset, 0)
+            background = android.graphics.drawable.GradientDrawable().apply {
+                setColor(Color.argb(220, 39, 39, 44))
+                cornerRadius = 12f * density
+            }
+        }
+        root.addView(status, FrameLayout.LayoutParams(-2, (48f * density).toInt(),
+            Gravity.TOP or Gravity.START).apply {
+            topMargin = (8f * density).toInt()
+            leftMargin = (8f * density).toInt()
+        })
+        bridge.showStatus = { status.text = it }
         val button = TextView(pluginContext).apply {
             text = "⋮"
             textSize = 28f
@@ -70,6 +92,9 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                 val labels = listOf(
                     "new" to "新建画布",
                     "open" to "打开工程",
+                    "undo" to "撤销",
+                    "redo" to "重做",
+                    "fit" to "画布适合窗口",
                     "save" to "保存工程",
                     "png" to "另存为 PNG 图片…",
                     "jpeg" to "另存为 JPEG 图片…",
@@ -101,6 +126,7 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
 private class StudioMenuBridge {
     var hasDocument: Boolean = false
     var busy: Boolean = false
+    var showStatus: ((String) -> Unit)? = null
     var action: ((String) -> Unit)? = null
 }
 
@@ -118,6 +144,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var newCanvas by remember { mutableStateOf(false) }
     var canvasWidth by remember { mutableStateOf("1024") }
     var canvasHeight by remember { mutableStateOf("1024") }
+    var canvasProjectName by remember { mutableStateOf("未命名工程") }
     var transparent by remember { mutableStateOf(false) }
     var openDialog by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
@@ -131,7 +158,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var transformY by remember { mutableStateOf("0") }
     var transformScale by remember { mutableStateOf("1") }
     var transformAngle by remember { mutableStateOf("0") }
-    var panel by remember { mutableStateOf("layers") }
+    var panel by remember { mutableStateOf("") }
     var exportPath by remember { mutableStateOf("") }
     var archivePath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
@@ -140,6 +167,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var renderSerial by remember { mutableIntStateOf(0) }
     var revision by remember { mutableStateOf("") }
     var documents by remember { mutableStateOf(JSONArray()) }
+    val canvasRef = remember { arrayOfNulls<StudioCanvas>(1) }
     val mutex = remember { Mutex() }
     val selected = snapshot?.optJSONObject("state")?.optString("selectedLayerId") ?: ""
 
@@ -329,10 +357,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     SideEffect {
         menuBridge.hasDocument = current != null
         menuBridge.busy = busy
+        menuBridge.showStatus?.invoke(if (state == null) "尚未创建画布 · 点右上角菜单新建"
+            else "${state.optString("name", "未命名工程")} · ${state.getInt("width")} × ${state.getInt("height")} px · ${if (current?.getBoolean("dirty") == true) "未保存" else "已保存"}")
         menuBridge.action = { action ->
             when (action) {
                 "new" -> newCanvas = true
                 "open" -> openDialog = true
+                "undo" -> perform { store.history("AWEI", false) }
+                "redo" -> perform { store.history("AWEI", true) }
+                "fit" -> canvasRef[0]?.fitToWindow()
                 "save" -> saveProject()
                 "png" -> publish("png")
                 "jpeg" -> publish("jpeg")
@@ -346,23 +379,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
         }
     }
-    Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(Modifier.fillMaxWidth().height(56.dp).padding(end = 64.dp),
-            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-            Text(state?.optString("name", "未命名工程") ?: "画室", maxLines = 1,
-                style = MaterialTheme.typography.titleMedium)
-        }
+    Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (current == null) {
-            Text("新建画布，即可开始和兰儿共同编辑。", Modifier.padding(12.dp))
+            Text("从右上角菜单新建画布，先选择像素尺寸。", Modifier.padding(top = 72.dp, start = 12.dp))
         } else {
             val state = current.getJSONObject("state")
             val layers = state.getJSONArray("layers")
-            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text("${state.getInt("width")} × ${state.getInt("height")} · ${layers.length()} 层 · ${if (current.getBoolean("dirty")) "未保存" else "已保存"}",
-                    Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { perform { store.history("AWEI", false) } }, enabled = !busy) { Text("撤销") }
-                TextButton(onClick = { perform { store.history("AWEI", true) } }, enabled = !busy) { Text("重做") }
-            }
             Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 Column(Modifier.width(86.dp).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(2.dp)) {
@@ -374,7 +396,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         }
                 }
                 Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
-                AndroidView(factory = { ctx -> StudioCanvas(ctx) }, modifier = Modifier.fillMaxSize(), update = { view ->
+                AndroidView(factory = { ctx -> StudioCanvas(ctx).also { canvasRef[0] = it } },
+                    modifier = Modifier.fillMaxSize(), update = { view ->
+                    view.documentId = current.getString("id")
                     view.image = image
                     view.layers = layers
                     view.selectedId = selected
@@ -511,18 +535,64 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
         }
     }
-    if (newCanvas) AlertDialog(onDismissRequest = { newCanvas = false }, title = { Text("新建画布") },
-        text = { Column {
-            OutlinedTextField(canvasWidth, { canvasWidth = it.filter(Char::isDigit).take(4) }, label = { Text("宽度") })
-            OutlinedTextField(canvasHeight, { canvasHeight = it.filter(Char::isDigit).take(4) }, label = { Text("高度") })
-            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                Text("透明背景")
-                Switch(checked = transparent, onCheckedChange = { transparent = it })
-            }
-        } }, confirmButton = { TextButton(onClick = {
-            newCanvas = false; perform { store.create(canvasWidth.toInt(), canvasHeight.toInt(),
-                if (transparent) "#00000000" else "#FFFFFFFF") }
-        }) { Text("创建") } }, dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
+    if (newCanvas) {
+        val chosenWidth = canvasWidth.toIntOrNull()
+        val chosenHeight = canvasHeight.toIntOrNull()
+        val dimensionsValid = chosenWidth != null && chosenHeight != null &&
+            chosenWidth in 64..4096 && chosenHeight in 64..4096
+        val canCreate = dimensionsValid && canvasProjectName.trim().isNotBlank() && !busy
+        AlertDialog(onDismissRequest = { newCanvas = false },
+            title = { Text("新建画布 · 选择分辨率") },
+            text = { Column(Modifier.heightIn(max = 470.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("像素宽高决定最终图片尺寸；屏幕显示可以缩放，不会改变图片像素。",
+                    style = MaterialTheme.typography.bodySmall)
+                Text("常用尺寸", style = MaterialTheme.typography.titleSmall)
+                Row(Modifier.horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    listOf(Triple(512, 512, "512 方图"), Triple(1024, 1024, "1024 方图"),
+                        Triple(1536, 1024, "横图 3:2"), Triple(1920, 1080, "横图 16:9"),
+                        Triple(1080, 1920, "竖图 9:16"), Triple(2048, 2048, "2048 方图"))
+                        .forEach { (w, h, label) ->
+                            FilterChip(selected = chosenWidth == w && chosenHeight == h,
+                                onClick = { canvasWidth = w.toString(); canvasHeight = h.toString() },
+                                label = { Text(label) })
+                        }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    OutlinedTextField(canvasWidth, { canvasWidth = it.filter(Char::isDigit).take(4) },
+                        modifier = Modifier.weight(1f), singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text("宽度 px") })
+                    OutlinedTextField(canvasHeight, { canvasHeight = it.filter(Char::isDigit).take(4) },
+                        modifier = Modifier.weight(1f), singleLine = true,
+                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                        label = { Text("高度 px") })
+                }
+                Text(if (dimensionsValid) "最终图片：${chosenWidth} × ${chosenHeight} 像素"
+                    else "宽度和高度均需在 64–4096 像素之间",
+                    color = if (dimensionsValid) MaterialTheme.colorScheme.onSurface
+                        else MaterialTheme.colorScheme.error,
+                    style = MaterialTheme.typography.bodySmall)
+                OutlinedTextField(canvasProjectName, { canvasProjectName = it.take(100) },
+                    singleLine = true, label = { Text("工程名称") })
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("透明背景", Modifier.weight(1f))
+                    Switch(checked = transparent, onCheckedChange = { transparent = it })
+                }
+                Text("创建后自动选中第一个绘画图层。", style = MaterialTheme.typography.bodySmall)
+            } },
+            confirmButton = { TextButton(onClick = {
+                val widthPx = chosenWidth ?: return@TextButton
+                val heightPx = chosenHeight ?: return@TextButton
+                if (!canCreate) return@TextButton
+                val background = if (transparent) "#00000000" else "#FFFFFFFF"
+                val name = canvasProjectName.trim()
+                newCanvas = false
+                perform { store.create(widthPx, heightPx, background, name) }
+            }, enabled = canCreate) { Text("创建画布") } },
+            dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
+    }
     if (openDialog) AlertDialog(onDismissRequest = { openDialog = false }, title = { Text("打开工程") },
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
             for (i in 0 until documents.length()) {
@@ -577,6 +647,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
 
 private class StudioCanvas(context: Context) : View(context) {
     init { contentDescription = "画室画布，可使用所选工具绘画" }
+    var documentId: String = ""; set(value) {
+        if (field != value) {
+            field = value
+            fitToWindow()
+        }
+    }
     var image: Bitmap? = null; set(value) { field = value; invalidate() }
     var layers: JSONArray? = null
     var selectedId: String = ""
@@ -600,6 +676,13 @@ private class StudioCanvas(context: Context) : View(context) {
     private var pinchAngle = 0f
     private var points = JSONArray()
     private val matrix = Matrix()
+    fun fitToWindow() {
+        zoom = 1f
+        angle = 0f
+        panX = 0f
+        panY = 0f
+        invalidate()
+    }
     private val checkerPaint = Paint().apply {
         val tile = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
         tile.setPixel(0, 0, Color.rgb(245, 245, 245))
@@ -639,7 +722,7 @@ private class StudioCanvas(context: Context) : View(context) {
         canvas.drawColor(Color.rgb(38, 38, 42))
         val bitmap = image ?: return
         matrix.reset()
-        val fit = minOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height) * 0.92f
+        val fit = minOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height) * 0.98f
         matrix.postTranslate(-bitmap.width / 2f, -bitmap.height / 2f)
         matrix.postScale(fit * zoom, fit * zoom)
         matrix.postRotate(angle)
