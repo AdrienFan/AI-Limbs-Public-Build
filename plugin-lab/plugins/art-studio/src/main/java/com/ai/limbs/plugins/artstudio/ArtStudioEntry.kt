@@ -61,14 +61,36 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("document.info", "读取画室工程", read) { store.current() }
         capability("document.list", "列出画室工程", read) { JSONObject().put("documents", store.list()) }
         capability("canvas.inspect", "查看画布结构", read) { store.current() }
-        capability("layer.list", "列出画室图层", read) { store.current().getJSONObject("state") }
+        capability("layer.list", "列出画室图层", read,
+            "读取当前工程图层、选中图层 ID、画布尺寸、背景和 revision。layers 数组按从底到顶排序；parentId 为空表示根图层，非空表示所属图层组。") {
+            val snapshot = store.current()
+            snapshot.getJSONObject("state").put("revision", snapshot.getJSONArray("operations").length())
+        }
+        capability("layer.search", "按名称搜索画室图层", read,
+            "在当前工程中按名称忽略大小写查找图层，返回底到顶排列的匹配图层、活动图层 ID 和 revision。") { p ->
+            val query = p.getString("query").trim()
+            require(query.isNotBlank()) { "搜索词不能为空" }
+            val snapshot = store.current()
+            val state = snapshot.getJSONObject("state")
+            val layers = state.getJSONArray("layers")
+            val found = JSONArray()
+            for (i in 0 until layers.length()) {
+                val layer = layers.getJSONObject(i)
+                if (layer.getString("name").contains(query, ignoreCase = true)) found.put(layer)
+            }
+            JSONObject().put("layers", found)
+                .put("selectedLayerId", state.getString("selectedLayerId"))
+                .put("revision", snapshot.getInt("revision"))
+        }
         capability("history.list", "列出画室操作历史", read) {
             JSONObject().put("operations", store.current().getJSONArray("operations"))
         }
-        capability("layer.create", "创建画室图层", write) { p ->
+        capability("layer.create", "创建画室绘画图层", write,
+            "创建可绘画图层；可选 parentId 指定已有图层组，可选 select=true 立即设为活动图层。") { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "LAYER_CREATE", p)
         }
-        capability("layer.group", "创建画室图层组", write) { p ->
+        capability("layer.group", "创建画室图层组", write,
+            "创建图层组；可选 parentId 指定父组，可选 select=true 立即设为活动组。") { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "GROUP_CREATE", p)
         }
         mapOf("layer.select" to "LAYER_SELECT", "layer.rename" to "LAYER_RENAME",
@@ -79,10 +101,39 @@ class ArtStudioEntry : InProcessPluginEntry {
             "selection.create" to "SELECTION_CREATE", "selection.clear" to "SELECTION_CLEAR",
             "selection.edit" to "SELECTION_EDIT",
             "canvas.crop" to "CROP").forEach { (name, type) ->
-            capability(name, "画室 ${name.substringAfter('.')}", write) { p -> store.apply("LANER", type, p) }
+            val label = when (name) {
+                "layer.select" -> "选择活动图层"
+                "layer.rename" -> "重命名图层"
+                "layer.move" -> "按索引移动图层"
+                "layer.delete" -> "删除图层"
+                "layer.set_visibility" -> "设置图层可见性"
+                "layer.set_opacity" -> "设置图层不透明度"
+                "layer.set_lock" -> "锁定或解锁图层"
+                "layer.set_blend" -> "设置图层混合模式"
+                "layer.properties" -> "批量修改图层属性"
+                else -> "画室 " + name.substringAfter('.')
+            }
+            val detail = when (name) {
+                "layer.move" -> "index 为 layer.list 返回的 layers 数组中的底到顶绝对索引；只上下挪一格请用 layer.move_up 或 layer.move_down。"
+                "layer.delete" -> "删除指定图层；锁定的图层和含有子层的图层组不可直接删除。"
+                "layer.properties" -> "一次原子操作修改图层名称、0–1 不透明度、混合模式、可见性和锁定状态；只提交需要改变的字段。"
+                "layer.set_blend" -> "支持 normal、multiply、screen、add 四种混合模式。"
+                "layer.set_opacity" -> "图层不透明度范围为 0.0–1.0。"
+                else -> label
+            }
+            capability(name, label, write, detail) { p -> store.apply("LANER", type, p) }
         }
-        capability("layer.copy", "复制画室图层", write) { p ->
+        capability("layer.copy", "复制画室图层", write,
+            "复制指定图层，图层组会连子层一起复制；可选 select=true 自动选中副本。") { p ->
             p.put("newId", UUID.randomUUID().toString()); store.apply("LANER", "LAYER_COPY", p)
+        }
+        capability("layer.move_up", "上移同级图层", write,
+            "把指定图层向合成栈顶移动一格；只与同一父组中的相邻图层交换，返回更新后的工程状态。") { p ->
+            store.apply("LANER", "LAYER_MOVE_STEP", p.put("direction", "up"))
+        }
+        capability("layer.move_down", "下移同级图层", write,
+            "把指定图层向合成栈底移动一格；只与同一父组中的相邻图层交换，返回更新后的工程状态。") { p ->
+            store.apply("LANER", "LAYER_MOVE_STEP", p.put("direction", "down"))
         }
         capability("stroke.add", "添加结构化笔画", write) { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "STROKE_ADD", p)
@@ -136,14 +187,29 @@ class ArtStudioPresentationEntry : InProcessPluginPresentationEntry {
 }
 
 private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> {
-    fun p(key: String, type: String = "string", optional: Boolean = false) =
-        InProcessCapabilityParameterSpec(key, type, key, !optional)
+    fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
+        val description = when (key) {
+            "id" -> "图层或工程 ID；先读取 layer.list 或 document.list 确定真实 ID。"
+            "parentId" -> "可选的父图层组 ID，空字符串表示根层级。"
+            "select" -> "可选；true 表示创建或复制后立即选中该图层。"
+            "index" -> "layer.list 返回的 layers 数组中的位置，从 0 开始，方向为底到顶。"
+            "opacity" -> "不透明度，0.0 表示透明，1.0 表示完全不透明。"
+            "blend" -> "混合模式：normal、multiply、screen 或 add。"
+            "query" -> "图层名称中的文字；按名称筛选且忽略大小写。"
+            "visible" -> "true 显示，false 隐藏。"
+            "locked" -> "true 锁定，false 解锁。"
+            "expectedRevision" -> "可选的操作历史条数；用于拒绝在另一端改动后过期的操作。"
+            else -> key
+        }
+        return InProcessCapabilityParameterSpec(key, type, description, !optional)
+    }
     val id = p("id")
     return when (name) {
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
             p("background", optional = true), p("name", optional = true))
         "document.import" -> listOf(p("base64"))
-        "document.open", "layer.select", "layer.delete", "layer.copy", "layer.set_lock" ->
+        "document.open", "layer.select", "layer.delete", "layer.copy",
+        "layer.move_up", "layer.move_down", "layer.set_lock" ->
             listOf(id) + when (name) {
                 "layer.set_lock" -> listOf(p("locked", "boolean"))
                 "layer.copy" -> listOf(p("select", "boolean", true))
@@ -151,6 +217,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             }
         "layer.create", "layer.group" -> listOf(p("name", optional = true), p("parentId", optional = true),
             p("select", "boolean", true))
+        "layer.search" -> listOf(p("query"))
         "layer.rename" -> listOf(id, p("name"))
         "layer.move" -> listOf(id, p("index", "integer"))
         "layer.set_visibility" -> listOf(id, p("visible", "boolean"))
@@ -176,7 +243,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "export.png", "export.jpeg", "document.rename" -> listOf(p("name", optional = name != "document.rename"))
         else -> emptyList()
     }.let { fields ->
-        if ((name.startsWith("layer.") && name != "layer.list") || name.startsWith("stroke.") || name.startsWith("selection.") ||
+        if ((name.startsWith("layer.") && name !in setOf("layer.list", "layer.search")) ||
+            name.startsWith("stroke.") || name.startsWith("selection.") ||
             name.startsWith("transform.") || name == "canvas.crop" || name == "document.rename") {
             fields + p("expectedRevision", "integer", true)
         } else fields

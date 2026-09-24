@@ -330,6 +330,21 @@ internal class ArtStore(private val root: File) {
                     .put("visible", p.optBoolean("visible", layer.getBoolean("visible")))
                     .put("locked", p.optBoolean("locked", layer.getBoolean("locked")))
             }
+            "LAYER_MOVE_STEP" -> {
+                val (index, layer) = find(p.getString("id"))
+                val direction = p.getString("direction")
+                require(direction == "up" || direction == "down") { "图层移动方向必须是 up 或 down" }
+                val siblings = (0 until layers.length()).filter {
+                    layers.getJSONObject(it).optString("parentId") == layer.optString("parentId")
+                }
+                val siblingPosition = siblings.indexOf(index)
+                val next = siblingPosition + if (direction == "up") 1 else -1
+                require(next in siblings.indices) { "图层已在当前组的最" + if (direction == "up") "上方" else "下方" }
+                val otherIndex = siblings[next]
+                val other = layers.getJSONObject(otherIndex)
+                layers.put(index, other)
+                layers.put(otherIndex, layer)
+            }
             "LAYER_MOVE" -> {
                 val (index, layer) = find(p.getString("id"))
                 val position = p.getInt("index").also { require(it in 0 until layers.length()) }

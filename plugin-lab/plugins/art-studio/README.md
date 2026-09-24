@@ -31,6 +31,9 @@
 | 另存为 PNG、JPEG | `export.png`、`export.jpeg`，返回 `path`、`name`、`mime`、`bytes`；未来页面入口再经系统选择器写入用户指定位置 |
 | 导入图片、工程 | `image.import`、`document.import`，后一项接收 `.ailart` 的 base64 内容并创建独立工程 |
 | 重命名工程 | `document.rename` |
-| 图层：创建绘画层／组、选择、显隐、锁定、混合模式、不透明度、重命名、复制、同级排序、属性、删除 | `layer.create`、`layer.group`、`layer.select`、`layer.set_visibility`、`layer.set_lock`、`layer.set_blend`、`layer.set_opacity`、`layer.rename`、`layer.copy`、`layer.move`、`layer.properties`、`layer.delete` |
+| 按名称查找图层、读取图层结构 | `layer.search`、`layer.list` |
+| 图层：创建绘画层／组、选择、显隐、锁定、混合模式、不透明度、重命名、复制、同级排序、属性、删除 | `layer.create`、`layer.group`、`layer.select`、`layer.set_visibility`、`layer.set_lock`、`layer.set_blend`、`layer.set_opacity`、`layer.rename`、`layer.copy`、`layer.move`、`layer.move_up`、`layer.move_down`、`layer.properties`、`layer.delete` |
+
+兰儿操作图层时，先调用 layer.list 读取当前活动层、图层 ID、parentId、底到顶的顺序和 revision。图层面板的上移／下移按钮与 layer.move_up／layer.move_down 使用相同的同级移动操作；layer.move 可按底到顶的绝对数组索引重排图层，但不改变 parentId。图层名称筛选可调用 layer.search，结构化图层数据可从 layer.list 读取，整图可通过 export.png 导出。要一次修改多个属性可调用 layer.properties；新建／复制时可传 select=true 自动选中。若阿伟与兰儿同时编辑，传入可选 expectedRevision 防止基于旧版本误改。兰儿的写入继续标记为 LANER，阿伟在页面上的写入标记为 AWEI。
 
 系统文件选择器属于手机的交互步骤；兰儿通过能力直接操作相同工程数据，并获得私有导出文件的路径与元数据。后续新增画室动作时，应在界面与能力两端提供入口，并保持操作历史中的执行者身份。

@@ -114,15 +114,6 @@ internal fun StudioLayersPanel(
                 .put("name", name).put("parentId", parent).put("select", true))
     }
 
-    fun move(direction: Int) {
-        val layer = active ?: return
-        val siblings = allLayers.filter { it.optString("parentId") == layer.optString("parentId") }
-        val index = siblings.indexOfFirst { it.getString("id") == selectedId }
-        val neighbour = siblings.getOrNull(index + direction) ?: return
-        val destination = allLayers.indexOfFirst { it.getString("id") == neighbour.getString("id") }
-        onEdit("LAYER_MOVE", JSONObject().put("id", selectedId).put("index", destination))
-    }
-
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
         Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
@@ -287,9 +278,13 @@ internal fun StudioLayersPanel(
                     it.optString("parentId") == active?.optString("parentId")
                 }
                 LayerAction(Icons.Default.ArrowDownward, "下移图层",
-                    enabled = active != null && !busy && siblingIndex > 0) { move(-1) }
+                    enabled = active != null && !busy && siblingIndex > 0) {
+                    onEdit("LAYER_MOVE_STEP", JSONObject().put("id", selectedId).put("direction", "down"))
+                }
                 LayerAction(Icons.Default.ArrowUpward, "上移图层",
-                    enabled = active != null && !busy && siblingIndex < siblingCount - 1) { move(1) }
+                    enabled = active != null && !busy && siblingIndex < siblingCount - 1) {
+                    onEdit("LAYER_MOVE_STEP", JSONObject().put("id", selectedId).put("direction", "up"))
+                }
                 LayerAction(Icons.Default.Tune, "图层属性", enabled = active != null && !busy) {
                     propertiesId = selectedId
                 }
