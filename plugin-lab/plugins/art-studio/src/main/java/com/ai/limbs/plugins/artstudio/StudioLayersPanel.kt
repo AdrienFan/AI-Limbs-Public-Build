@@ -115,14 +115,15 @@ internal fun StudioLayersPanel(
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.fillMaxWidth().height(32.dp).padding(start = 8.dp),
+        Row(Modifier.fillMaxWidth().height(40.dp)
+            .clickable(onClickLabel =
+                if (expanded) "恢复右侧栏分段" else "最大化图层面板", onClick = onExpand)
+            .padding(start = 8.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Text("图层", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            LayerAction(
-                if (expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                if (expanded) "恢复右侧栏分段" else "放大图层面板",
-                modifier = Modifier.size(32.dp), onClick = onExpand
-            )
+            Icon(if (expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                contentDescription = if (expanded) "恢复右侧栏分段" else "最大化图层面板",
+                modifier = Modifier.size(40.dp).padding(8.dp))
         }
         Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {

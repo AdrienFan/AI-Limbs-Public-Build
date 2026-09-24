@@ -25,6 +25,9 @@ import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
@@ -210,6 +213,8 @@ private class StudioMenuBridge {
     var onEditCommand: ((Int) -> Unit)? = null
 }
 
+private enum class RightPane { LAYERS, BRUSHES }
+
 @Composable
 private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val context = LocalContext.current
@@ -271,7 +276,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var transformAngle by remember { mutableStateOf("0") }
     var leftDrawerOpen by remember { mutableStateOf(false) }
     var rightDrawerOpen by remember { mutableStateOf(false) }
-    var layerPanelExpanded by remember { mutableStateOf(false) }
+    var maximizedRightPane by remember { mutableStateOf<RightPane?>(null) }
     var exportPath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -706,60 +711,104 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         .padding(end = railWidth).width(drawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
                         BoxWithConstraints(Modifier.fillMaxSize()) {
-                            // Keep the three panes independent; compact screens allocate enough
-                            // room for actual layer controls, and the title can expand that pane.
+                            // A maximized pane takes the remaining height; the other panes
+                            // retain fixed, tappable title rows so their controls stay reachable.
                             val compact = maxHeight < 600.dp
-                            val colorShare = if (layerPanelExpanded) 0.14f
-                                else if (compact) 0.32f else 0.26f
-                            val layerShare = if (layerPanelExpanded) 0.78f
-                                else if (compact) 0.57f else 0.35f
-                            val brushShare = if (layerPanelExpanded) 0.08f
-                                else if (compact) 0.11f else 0.39f
+                            val colorShare = if (compact) 0.32f else 0.26f
+                            val layerShare = if (compact) 0.57f else 0.35f
+                            val brushShare = if (compact) 0.11f else 0.39f
                             Column(Modifier.fillMaxSize()) {
-                                Column(Modifier.fillMaxWidth().weight(colorShare)
-                                    .verticalScroll(rememberScrollState())
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
-                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Text("多功能拾色器", style = MaterialTheme.typography.titleSmall)
-                                    AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
-                                        modifier = Modifier.fillMaxWidth().height(285.dp),
-                                        update = { picker ->
-                                            picker.selectedColor = Color.parseColor(color)
-                                            picker.onColorSelected = { selected ->
-                                                color = String.format(java.util.Locale.ROOT, "#%08X", selected)
-                                                colorHexInput = color
-                                            }
-                                        })
-                                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Box(Modifier.size(28.dp).background(
-                                            androidx.compose.ui.graphics.Color(Color.parseColor(color))))
-                                        Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
+                                if (maximizedRightPane != null) {
+                                    Row(Modifier.fillMaxWidth().height(40.dp)
+                                        .clickable(onClickLabel = "恢复右侧栏分段并打开多功能拾色器") {
+                                            maximizedRightPane = null
+                                        }.padding(horizontal = 10.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                        Text("多功能拾色器", style = MaterialTheme.typography.titleSmall,
+                                            modifier = Modifier.weight(1f))
+                                        Text("展开", style = MaterialTheme.typography.labelSmall)
                                     }
-                                    OutlinedTextField(colorHexInput, { input ->
-                                        colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
-                                        if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
-                                            color = colorHexInput
+                                } else {
+                                    Column(Modifier.fillMaxWidth().weight(colorShare)
+                                        .verticalScroll(rememberScrollState())
+                                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Text("多功能拾色器", style = MaterialTheme.typography.titleSmall)
+                                        AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
+                                            modifier = Modifier.fillMaxWidth().height(285.dp),
+                                            update = { picker ->
+                                                picker.selectedColor = Color.parseColor(color)
+                                                picker.onColorSelected = { selected ->
+                                                    color = String.format(java.util.Locale.ROOT, "#%08X", selected)
+                                                    colorHexInput = color
+                                                }
+                                            })
+                                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Box(Modifier.size(28.dp).background(
+                                                androidx.compose.ui.graphics.Color(Color.parseColor(color))))
+                                            Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
                                         }
-                                    }, label = { Text("#AARRGGBB") }, singleLine = true,
-                                        modifier = Modifier.fillMaxWidth())
-                                    Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
-                                        style = MaterialTheme.typography.bodySmall)
+                                        OutlinedTextField(colorHexInput, { input ->
+                                            colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
+                                            if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
+                                                color = colorHexInput
+                                            }
+                                        }, label = { Text("#AARRGGBB") }, singleLine = true,
+                                            modifier = Modifier.fillMaxWidth())
+                                        Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
+                                            style = MaterialTheme.typography.bodySmall)
+                                    }
                                 }
                                 Spacer(Modifier.fillMaxWidth().height(1.dp)
                                     .background(MaterialTheme.colorScheme.outlineVariant))
-                                Box(Modifier.fillMaxWidth().weight(layerShare)) {
+                                // Keep the layer docker mounted while folded so its filter and
+                                // view preferences survive switching focus to the brush pane.
+                                Box(Modifier.fillMaxWidth().then(
+                                    if (maximizedRightPane == RightPane.BRUSHES) Modifier.height(40.dp)
+                                    else Modifier.weight(
+                                        if (maximizedRightPane == RightPane.LAYERS) 1f else layerShare))
+                                    .clipToBounds()) {
                                     StudioLayersPanel(state = state, selectedId = selected,
                                         revision = revision, busy = busy, store = store,
-                                        expanded = layerPanelExpanded,
-                                        onExpand = { layerPanelExpanded = !layerPanelExpanded },
-                                        onEdit = ::edit)
+                                        expanded = maximizedRightPane == RightPane.LAYERS,
+                                        onExpand = {
+                                            maximizedRightPane =
+                                                if (maximizedRightPane == RightPane.LAYERS) null
+                                                else RightPane.LAYERS
+                                        }, onEdit = ::edit)
                                 }
                                 Spacer(Modifier.fillMaxWidth().height(1.dp)
                                     .background(MaterialTheme.colorScheme.outlineVariant))
-                                Box(Modifier.fillMaxWidth().weight(brushShare)
-                                    .padding(10.dp)) {
-                                    Text("笔刷预设", style = MaterialTheme.typography.titleSmall)
+                                Column(Modifier.fillMaxWidth().then(
+                                    if (maximizedRightPane == RightPane.LAYERS) Modifier.height(40.dp)
+                                    else Modifier.weight(
+                                        if (maximizedRightPane == RightPane.BRUSHES) 1f else brushShare))) {
+                                    Row(Modifier.fillMaxWidth().height(40.dp)
+                                        .clickable(onClickLabel =
+                                            if (maximizedRightPane == RightPane.BRUSHES)
+                                                "恢复右侧栏分段" else "最大化笔刷预设面板") {
+                                            maximizedRightPane =
+                                                if (maximizedRightPane == RightPane.BRUSHES) null
+                                                else RightPane.BRUSHES
+                                        }.padding(start = 10.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                        Text("笔刷预设", style = MaterialTheme.typography.titleSmall,
+                                            modifier = Modifier.weight(1f))
+                                        Icon(if (maximizedRightPane == RightPane.BRUSHES)
+                                            Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
+                                            contentDescription =
+                                                if (maximizedRightPane == RightPane.BRUSHES)
+                                                    "恢复右侧栏分段" else "最大化笔刷预设面板",
+                                            modifier = Modifier.size(40.dp).padding(8.dp))
+                                    }
+                                    if (maximizedRightPane == RightPane.BRUSHES) {
+                                        Box(Modifier.fillMaxWidth().weight(1f),
+                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                            Text("笔刷预设待添加",
+                                                style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
                                 }
                             }
                         }
