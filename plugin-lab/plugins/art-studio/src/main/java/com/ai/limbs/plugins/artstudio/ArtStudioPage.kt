@@ -412,33 +412,57 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
                         .padding(end = railWidth).width(drawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
-                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                            .padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Text("多功能拾色器", style = MaterialTheme.typography.titleSmall)
-                            AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
-                                modifier = Modifier.fillMaxWidth().height(285.dp),
-                                update = { picker ->
-                                    picker.selectedColor = Color.parseColor(color)
-                                    picker.onColorSelected = { selected ->
-                                        color = String.format(java.util.Locale.ROOT, "#%08X", selected)
-                                        colorHexInput = color
+                        BoxWithConstraints(Modifier.fillMaxSize()) {
+                            // A phone needs more room for the color wheel; each pane keeps its
+                            // own bounds so adding layers or brushes will not scroll the picker.
+                            val compact = maxHeight < 600.dp
+                            val colorShare = if (compact) 0.46f else 0.26f
+                            val layerShare = if (compact) 0.25f else 0.35f
+                            val brushShare = if (compact) 0.29f else 0.39f
+                            Column(Modifier.fillMaxSize()) {
+                                Column(Modifier.fillMaxWidth().weight(colorShare)
+                                    .verticalScroll(rememberScrollState())
+                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text("多功能拾色器", style = MaterialTheme.typography.titleSmall)
+                                    AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
+                                        modifier = Modifier.fillMaxWidth().height(285.dp),
+                                        update = { picker ->
+                                            picker.selectedColor = Color.parseColor(color)
+                                            picker.onColorSelected = { selected ->
+                                                color = String.format(java.util.Locale.ROOT, "#%08X", selected)
+                                                colorHexInput = color
+                                            }
+                                        })
+                                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                        Box(Modifier.size(28.dp).background(
+                                            androidx.compose.ui.graphics.Color(Color.parseColor(color))))
+                                        Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
                                     }
-                                })
-                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                Box(Modifier.size(28.dp).background(
-                                    androidx.compose.ui.graphics.Color(Color.parseColor(color))))
-                                Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
-                            }
-                            OutlinedTextField(colorHexInput, { input ->
-                                colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
-                                if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
-                                    color = colorHexInput
+                                    OutlinedTextField(colorHexInput, { input ->
+                                        colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
+                                        if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
+                                            color = colorHexInput
+                                        }
+                                    }, label = { Text("#AARRGGBB") }, singleLine = true,
+                                        modifier = Modifier.fillMaxWidth())
+                                    Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
+                                        style = MaterialTheme.typography.bodySmall)
                                 }
-                            }, label = { Text("#AARRGGBB") }, singleLine = true,
-                                modifier = Modifier.fillMaxWidth())
-                            Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
-                                style = MaterialTheme.typography.bodySmall)
+                                Spacer(Modifier.fillMaxWidth().height(1.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant))
+                                Box(Modifier.fillMaxWidth().weight(layerShare)
+                                    .padding(10.dp)) {
+                                    Text("图层", style = MaterialTheme.typography.titleSmall)
+                                }
+                                Spacer(Modifier.fillMaxWidth().height(1.dp)
+                                    .background(MaterialTheme.colorScheme.outlineVariant))
+                                Box(Modifier.fillMaxWidth().weight(brushShare)
+                                    .padding(10.dp)) {
+                                    Text("笔刷预设", style = MaterialTheme.typography.titleSmall)
+                                }
+                            }
                         }
                     }
                 }
