@@ -34,7 +34,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             }
             host.registerCapability(InProcessCapabilitySpec(
                 id = "$ART_ID.$name", displayName = title, description = description,
-                invokeAliases = listOf("art.$name"),
+                invokeAliases = listOf("plugin.art.$name"),
                 parameters = fields,
                 inputSchema = JSONObject().put("type", "object").put("properties", properties)
                     .put("required", required).put("additionalProperties", false).toString(),
