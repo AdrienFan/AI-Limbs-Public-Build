@@ -698,6 +698,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                 })
                 }
+                // Intercept taps outside an open drawer before they reach the canvas;
+                // the drawer and its handle are drawn above this transparent dismiss area.
+                if (leftDrawerOpen || rightDrawerOpen) {
+                    Box(Modifier.fillMaxSize().padding(horizontal = railWidth)
+                        .clickable(onClickLabel = "收起侧栏") {
+                            leftDrawerOpen = false
+                            rightDrawerOpen = false
+                        })
+                }
                 // The handles stay visible; only one drawer can cover the canvas at a time.
                 if (leftDrawerOpen) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
