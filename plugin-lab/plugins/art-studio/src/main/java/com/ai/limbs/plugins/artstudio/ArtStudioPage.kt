@@ -229,6 +229,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var opacity by remember { mutableFloatStateOf(1f) }
     var newCanvas by remember { mutableStateOf(false) }
     var presentationDialog by remember { mutableStateOf(false) }
+    var presentationError by remember { mutableStateOf<String?>(null) }
     var canvasTab by remember { mutableIntStateOf(0) }
     var canvasWidth by remember { mutableStateOf("1024") }
     var canvasHeight by remember { mutableStateOf("1024") }
@@ -289,17 +290,23 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val selected = snapshot?.optJSONObject("state")?.optString("selectedLayerId") ?: ""
 
     fun requestPresentationMode(mode: String) {
-        presentationDialog = false
+        presentationError = null
         scope.launch {
             try {
-                host.invokeHostCapability("host.ui.presentation@1", JSONObject()
+                // The Host may return a structured denial without throwing; do not
+                // dismiss the dialog until it confirms the requested mode.
+                val response = JSONObject(host.invokeHostCapability("host.ui.presentation@1", JSONObject()
                     .put("operation", "set_mode")
                     .put("screen_id", ART_SCREEN)
                     .put("mode", mode)
-                    .toString())
+                    .toString()))
+                check(response.optBoolean("ok") && response.optString("mode") == mode) {
+                    response.optString("error").ifBlank { "宿主未确认页面显示模式：$response" }
+                }
+                presentationDialog = false
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Page presentation request failed", error)
-                Toast.makeText(context, error.message ?: "无法切换页面显示", Toast.LENGTH_LONG).show()
+                presentationError = error.message ?: "无法切换页面显示"
             }
         }
     }
@@ -891,6 +898,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     TextButton(onClick = { requestPresentationMode("normal") },
                         modifier = Modifier.fillMaxWidth()) {
                         Text("退出全屏")
+                    }
+                    presentationError?.let { error ->
+                        Text(error, color = MaterialTheme.colorScheme.error,
+                            style = MaterialTheme.typography.bodySmall)
                     }
                 }
             },
