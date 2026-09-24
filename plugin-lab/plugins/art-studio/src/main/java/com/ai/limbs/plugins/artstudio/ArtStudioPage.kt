@@ -13,6 +13,7 @@ import android.view.Gravity
 import android.widget.FrameLayout
 import android.widget.HorizontalScrollView
 import android.widget.LinearLayout
+import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
@@ -91,6 +92,23 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                         isSelected = true
                         setBackgroundColor(Color.rgb(85, 91, 99))
                         setTextColor(Color.WHITE)
+                        if (title == "文件(F)") {
+                            // Keep the file menu limited to commands implemented by the plugin.
+                            val anchor = this
+                            PopupMenu(pluginContext, anchor).apply {
+                                menu.add("新建(N)…").apply { isEnabled = !bridge.busy }
+                                setOnMenuItemClickListener {
+                                    bridge.requestNew?.invoke()
+                                    true
+                                }
+                                setOnDismissListener {
+                                    anchor.isSelected = false
+                                    anchor.setBackgroundColor(Color.TRANSPARENT)
+                                    anchor.setTextColor(Color.rgb(218, 218, 218))
+                                }
+                                show()
+                            }
+                        }
                     }
                 }
             }
@@ -125,6 +143,8 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
 
 private class StudioStatusBridge {
     var showStatus: ((String) -> Unit)? = null
+    var requestNew: (() -> Unit)? = null
+    var busy = false
 }
 
 @Composable
@@ -139,6 +159,7 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
     var width by remember { mutableFloatStateOf(6f) }
     var opacity by remember { mutableFloatStateOf(1f) }
     var newCanvas by remember { mutableStateOf(false) }
+    var canvasTab by remember { mutableIntStateOf(0) }
     var canvasWidth by remember { mutableStateOf("1024") }
     var canvasHeight by remember { mutableStateOf("1024") }
     var canvasProjectName by remember { mutableStateOf("未命名工程") }
@@ -352,6 +373,13 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
         }
     }
     SideEffect {
+        statusBridge.busy = busy
+        statusBridge.requestNew = {
+            if (!busy) {
+                canvasTab = 0
+                newCanvas = true
+            }
+        }
         statusBridge.showStatus?.invoke(if (state == null) "尚未创建画布"
             else "${state.optString("name", "未命名工程")} · ${state.getInt("width")} × ${state.getInt("height")} px · ${if (current?.getBoolean("dirty") == true) "未保存" else "已保存"}")
     }
@@ -518,45 +546,65 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
             chosenWidth in 64..4096 && chosenHeight in 64..4096
         val canCreate = dimensionsValid && canvasProjectName.trim().isNotBlank() && !busy
         AlertDialog(onDismissRequest = { newCanvas = false },
-            title = { Text("新建画布 · 选择分辨率") },
-            text = { Column(Modifier.heightIn(max = 470.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("像素宽高决定最终图片尺寸；屏幕显示可以缩放，不会改变图片像素。",
-                    style = MaterialTheme.typography.bodySmall)
-                Text("常用尺寸", style = MaterialTheme.typography.titleSmall)
-                Row(Modifier.horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    listOf(Triple(512, 512, "512 方图"), Triple(1024, 1024, "1024 方图"),
-                        Triple(1536, 1024, "横图 3:2"), Triple(1920, 1080, "横图 16:9"),
-                        Triple(1080, 1920, "竖图 9:16"), Triple(2048, 2048, "2048 方图"))
-                        .forEach { (w, h, label) ->
-                            FilterChip(selected = chosenWidth == w && chosenHeight == h,
-                                onClick = { canvasWidth = w.toString(); canvasHeight = h.toString() },
-                                label = { Text(label) })
-                        }
-                }
+            title = { Text("新建图像") },
+            text = { Column(Modifier.heightIn(max = 510.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    OutlinedTextField(canvasWidth, { canvasWidth = it.filter(Char::isDigit).take(4) },
-                        modifier = Modifier.weight(1f), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        label = { Text("宽度 px") })
-                    OutlinedTextField(canvasHeight, { canvasHeight = it.filter(Char::isDigit).take(4) },
-                        modifier = Modifier.weight(1f), singleLine = true,
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        label = { Text("高度 px") })
+                    FilterChip(selected = canvasTab == 0, onClick = { canvasTab = 0 },
+                        label = { Text("尺寸") })
+                    FilterChip(selected = canvasTab == 1, onClick = { canvasTab = 1 },
+                        label = { Text("内容") })
                 }
-                Text(if (dimensionsValid) "最终图片：${chosenWidth} × ${chosenHeight} 像素"
-                    else "宽度和高度均需在 64–4096 像素之间",
-                    color = if (dimensionsValid) MaterialTheme.colorScheme.onSurface
-                        else MaterialTheme.colorScheme.error,
-                    style = MaterialTheme.typography.bodySmall)
-                OutlinedTextField(canvasProjectName, { canvasProjectName = it.take(100) },
-                    singleLine = true, label = { Text("工程名称") })
-                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("透明背景", Modifier.weight(1f))
-                    Switch(checked = transparent, onCheckedChange = { transparent = it })
+                if (canvasTab == 0) {
+                    Text("图像大小", style = MaterialTheme.typography.titleSmall)
+                    Text("预设", style = MaterialTheme.typography.bodyMedium)
+                    Row(Modifier.horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf(Triple(512, 512, "512 方图"), Triple(1024, 1024, "1024 方图"),
+                            Triple(1536, 1024, "横图 3:2"), Triple(1920, 1080, "横图 16:9"),
+                            Triple(1080, 1920, "竖图 9:16"), Triple(2480, 3508, "A4 像素尺寸"))
+                            .forEach { (w, h, label) ->
+                                FilterChip(selected = chosenWidth == w && chosenHeight == h,
+                                    onClick = { canvasWidth = w.toString(); canvasHeight = h.toString() },
+                                    label = { Text(label) })
+                            }
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(canvasWidth, { canvasWidth = it.filter(Char::isDigit).take(4) },
+                            modifier = Modifier.weight(1f), singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            label = { Text("宽度 (px)") })
+                        OutlinedTextField(canvasHeight, { canvasHeight = it.filter(Char::isDigit).take(4) },
+                            modifier = Modifier.weight(1f), singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                            label = { Text("高度 (px)") })
+                    }
+                    TextButton(onClick = {
+                        val oldWidth = canvasWidth
+                        canvasWidth = canvasHeight
+                        canvasHeight = oldWidth
+                    }) { Text("交换宽高") }
+                    Text(if (dimensionsValid) "实际图像：" + chosenWidth + " × " + chosenHeight +
+                        " 像素 · 约 " + String.format(java.util.Locale.ROOT, "%.1f",
+                            chosenWidth!!.toDouble() * chosenHeight!! * 4 / 1048576.0) + " MiB/层"
+                        else "宽度和高度均需在 64–4096 像素之间",
+                        color = if (dimensionsValid) MaterialTheme.colorScheme.onSurface
+                            else MaterialTheme.colorScheme.error,
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("当前画室使用 RGB、8 位/通道；尺寸以像素计。分辨率与 ICC 特性文件暂不写入工程。",
+                        style = MaterialTheme.typography.bodySmall)
+                } else {
+                    Text("图像内容", style = MaterialTheme.typography.titleSmall)
+                    OutlinedTextField(canvasProjectName, { canvasProjectName = it.take(100) },
+                        singleLine = true, label = { Text("工程名称") },
+                        modifier = Modifier.fillMaxWidth())
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("透明背景", Modifier.weight(1f))
+                        Switch(checked = transparent, onCheckedChange = { transparent = it })
+                    }
+                    Text("关闭透明背景时使用白色背景；创建后自动选中第一个绘画图层。",
+                        style = MaterialTheme.typography.bodySmall)
                 }
-                Text("创建后自动选中第一个绘画图层。", style = MaterialTheme.typography.bodySmall)
             } },
             confirmButton = { TextButton(onClick = {
                 val widthPx = chosenWidth ?: return@TextButton
@@ -566,7 +614,7 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
                 val name = canvasProjectName.trim()
                 newCanvas = false
                 perform { store.create(widthPx, heightPx, background, name) }
-            }, enabled = canCreate) { Text("创建画布") } },
+            }, enabled = canCreate) { Text("创建") } },
             dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
     }
     if (openDialog) AlertDialog(onDismissRequest = { openDialog = false }, title = { Text("打开工程") },
