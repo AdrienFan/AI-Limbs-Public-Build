@@ -52,7 +52,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 ## 画布与图层
 
-新建支持 64–4096 像素边长、工程名称及透明背景；当前工程只有 RGB 8 位与一个初始绘画图层，不存储 ICC、DPI 或 Krita 原生色彩模型。画布底栏“居中”只重置缩放、旋转、平移；旁边“全屏”通过 host.ui.presentation@1 控制页面。左右抽屉默认收起；右侧依次为多功能拾色器、真实图层管理、尚未实现的笔刷预设。左抽屉暂不显示旧按钮。菜单栏其余十项目前只有标题。
+新建支持 64–4096 像素边长、工程名称及透明背景；当前工程只有 RGB 8 位与一个初始绘画图层，不存储 ICC、DPI 或 Krita 原生色彩模型。画布底栏左侧的 ↩️/↪️ 调用与编辑菜单、兰儿能力相同的撤销/重做历史；没有可撤销或可重做操作时按钮置灰，忙碌时暂停操作。右侧“居中”只重置缩放、旋转、平移；旁边“全屏”通过 host.ui.presentation@1 控制页面。左右抽屉默认收起；右侧依次为多功能拾色器、真实图层管理、尚未实现的笔刷预设。左抽屉暂不显示旧按钮。菜单栏文件和编辑以外的九项目前只有标题。
 
 右侧图层管理参考 Krita 6.0.4 的 plugins/dockers/layerdocker/WdgLayerBox.ui、LayerBox.cpp 和 NodeDelegate.cpp，提供名称筛选、缩略图、显隐、锁定、混合模式、不透明度、绘画层与组、复制、同级排序、属性和删除。兰儿对应使用 layer.list、layer.search、layer.create、layer.group、layer.select、layer.set_visibility、layer.set_lock、layer.set_blend、layer.set_opacity、layer.rename、layer.copy、layer.move_up、layer.move_down、layer.properties 与 layer.delete。底到顶合成；图层背景不是可编辑图层。笔刷仍是基础画笔与喷枪，4K 多层画布可能消耗较多内存。
 

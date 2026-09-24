@@ -31,6 +31,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.KeyboardType
@@ -787,13 +789,29 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             Surface(Modifier.fillMaxWidth().height(48.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant, tonalElevation = 1.dp) {
                 Row(Modifier.fillMaxSize().padding(horizontal = 8.dp),
-                    horizontalArrangement = Arrangement.End,
+                    horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    TextButton(onClick = { canvasRef[0]?.fitToWindow() }, enabled = image != null) {
-                        Text("居中")
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        TextButton(
+                            onClick = { perform { store.history("AWEI", redo = false) } },
+                            modifier = Modifier.widthIn(min = 48.dp)
+                                .semantics { contentDescription = "撤销" },
+                            enabled = !busy && current.optBoolean("canUndo")
+                        ) { Text("↩️") }
+                        TextButton(
+                            onClick = { perform { store.history("AWEI", redo = true) } },
+                            modifier = Modifier.widthIn(min = 48.dp)
+                                .semantics { contentDescription = "重做" },
+                            enabled = !busy && current.optBoolean("canRedo")
+                        ) { Text("↪️") }
                     }
-                    TextButton(onClick = { presentationDialog = true }) {
-                        Text("全屏")
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        TextButton(onClick = { canvasRef[0]?.fitToWindow() }, enabled = image != null) {
+                            Text("居中")
+                        }
+                        TextButton(onClick = { presentationDialog = true }) {
+                            Text("全屏")
+                        }
                     }
                 }
             }
