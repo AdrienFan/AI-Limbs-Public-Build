@@ -11,6 +11,8 @@ import android.view.MotionEvent
 import android.view.View
 import android.view.Gravity
 import android.widget.FrameLayout
+import android.widget.HorizontalScrollView
+import android.widget.LinearLayout
 import android.widget.PopupMenu
 import android.widget.TextView
 import android.widget.Toast
@@ -51,12 +53,53 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
         val pluginContext = host.createPluginContext(context)
         val bridge = StudioMenuBridge()
         val root = FrameLayout(pluginContext)
+        val density = pluginContext.resources.displayMetrics.density
+        val menuHeight = (42f * density).toInt()
         val content = ComposeView(pluginContext).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent { MaterialTheme(colorScheme = darkColorScheme()) { Studio(host, bridge) } }
         }
-        root.addView(content, FrameLayout.LayoutParams(-1, -1))
-        val density = pluginContext.resources.displayMetrics.density
+        // Reserve a real strip above the canvas so the menu remains clickable while the canvas redraws.
+        root.addView(content, FrameLayout.LayoutParams(-1, -1).apply { topMargin = menuHeight })
+        val menuBar = HorizontalScrollView(pluginContext).apply {
+            isHorizontalScrollBarEnabled = false
+            isFillViewport = true
+            setBackgroundColor(Color.rgb(64, 64, 64))
+        }
+        val menuRow = LinearLayout(pluginContext).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+        }
+        val menuItems = mutableListOf<TextView>()
+        listOf("文件(F)", "编辑(E)", "视图(V)", "图像(I)", "图层(L)", "选择(S)",
+            "滤镜(R)", "工具(T)", "设置(N)", "窗口(W)", "帮助(H)").forEach { title ->
+            val item = TextView(pluginContext).apply {
+                text = title
+                textSize = 15f
+                setTextColor(Color.rgb(218, 218, 218))
+                gravity = Gravity.CENTER
+                minHeight = menuHeight
+                setPadding((11f * density).toInt(), 0, (11f * density).toInt(), 0)
+                contentDescription = "$title，菜单标题"
+                setOnClickListener {
+                    val select = !isSelected
+                    menuItems.forEach { menuItem ->
+                        menuItem.isSelected = false
+                        menuItem.setBackgroundColor(Color.TRANSPARENT)
+                        menuItem.setTextColor(Color.rgb(218, 218, 218))
+                    }
+                    if (select) {
+                        isSelected = true
+                        setBackgroundColor(Color.rgb(85, 91, 99))
+                        setTextColor(Color.WHITE)
+                    }
+                }
+            }
+            menuItems += item
+            menuRow.addView(item, LinearLayout.LayoutParams(-2, -1))
+        }
+        menuBar.addView(menuRow, FrameLayout.LayoutParams(-2, -1))
+        root.addView(menuBar, FrameLayout.LayoutParams(-1, menuHeight, Gravity.TOP))
         val status = TextView(pluginContext).apply {
             textSize = 14f
             setTextColor(Color.WHITE)
@@ -73,7 +116,7 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
         }
         root.addView(status, FrameLayout.LayoutParams(-2, (48f * density).toInt(),
             Gravity.TOP or Gravity.START).apply {
-            topMargin = (8f * density).toInt()
+            topMargin = menuHeight + (8f * density).toInt()
             leftMargin = (8f * density).toInt()
         })
         bridge.showStatus = { status.text = it }
@@ -116,7 +159,7 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
         }
         root.addView(button, FrameLayout.LayoutParams((52f * density).toInt(),
             (48f * density).toInt(), Gravity.TOP or Gravity.END).apply {
-            topMargin = (8f * density).toInt()
+            topMargin = menuHeight + (8f * density).toInt()
             rightMargin = (8f * density).toInt()
         })
         return root
