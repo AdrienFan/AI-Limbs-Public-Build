@@ -52,7 +52,7 @@ import kotlin.math.hypot
 internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View {
         val pluginContext = host.createPluginContext(context)
-        val bridge = StudioStatusBridge()
+        val bridge = StudioMenuBridge()
         val root = FrameLayout(pluginContext)
         val density = pluginContext.resources.displayMetrics.density
         val menuHeight = (42f * density).toInt()
@@ -118,38 +118,17 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
         }
         menuBar.addView(menuRow, FrameLayout.LayoutParams(-2, -1))
         root.addView(menuBar, FrameLayout.LayoutParams(-1, menuHeight, Gravity.TOP))
-        val status = TextView(pluginContext).apply {
-            textSize = 14f
-            setTextColor(Color.WHITE)
-            gravity = Gravity.CENTER_VERTICAL
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-            maxWidth = (pluginContext.resources.displayMetrics.widthPixels - 16f * density).toInt()
-            val inset = (10f * density).toInt()
-            setPadding(inset, 0, inset, 0)
-            background = android.graphics.drawable.GradientDrawable().apply {
-                setColor(Color.argb(220, 39, 39, 44))
-                cornerRadius = 12f * density
-            }
-        }
-        root.addView(status, FrameLayout.LayoutParams(-2, (48f * density).toInt(),
-            Gravity.TOP or Gravity.START).apply {
-            topMargin = menuHeight + (8f * density).toInt()
-            leftMargin = (8f * density).toInt()
-        })
-        bridge.showStatus = { status.text = it }
         return root
     }
 }
 
-private class StudioStatusBridge {
-    var showStatus: ((String) -> Unit)? = null
+private class StudioMenuBridge {
     var requestNew: (() -> Unit)? = null
     var busy = false
 }
 
 @Composable
-private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge) {
+private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
@@ -376,15 +355,13 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
         }
     }
     SideEffect {
-        statusBridge.busy = busy
-        statusBridge.requestNew = {
+        menuBridge.busy = busy
+        menuBridge.requestNew = {
             if (!busy) {
                 canvasTab = 0
                 newCanvas = true
             }
         }
-        statusBridge.showStatus?.invoke(if (state == null) "尚未创建画布"
-            else "${state.optString("name", "未命名工程")} · ${state.getInt("width")} × ${state.getInt("height")} px · ${if (current?.getBoolean("dirty") == true) "未保存" else "已保存"}")
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (current == null) {
@@ -393,7 +370,7 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
             val state = current.getJSONObject("state")
             val layers = state.getJSONArray("layers")
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
-                val railWidth = 28.dp
+                val railWidth = 20.dp
                 val drawerWidth = (maxWidth * 0.68f).coerceAtMost(280.dp)
                 Box(Modifier.fillMaxSize().padding(horizontal = railWidth).clipToBounds()) {
                 AndroidView(factory = { ctx -> StudioCanvas(ctx).also { canvasRef[0] = it } },
@@ -427,16 +404,7 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
                         .padding(start = railWidth).width(drawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
-                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
-                            .padding(horizontal = 6.dp)) {
-                            listOf("ink" to "墨笔", "pencil" to "铅笔", "soft" to "软笔",
-                                "spray" to "喷枪", "eraser" to "橡皮", "select" to "选区",
-                                "move" to "移动", "pan" to "视图").forEach { (key, label) ->
-                                FilterChip(selected = tool == key, onClick = { tool = key },
-                                    label = { Text(label, maxLines = 1) },
-                                    modifier = Modifier.fillMaxWidth())
-                            }
-                        }
+                        Box(Modifier.fillMaxSize())
                     }
                 }
                 if (rightDrawerOpen) {
