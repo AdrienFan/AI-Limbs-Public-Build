@@ -19,7 +19,7 @@
     }
   },
   "dependencies": { "plugins": [], "services": [] },
-  "permissions": { "requested_scopes": [] },
+  "permissions": { "requested_scopes": ["host.ui.presentation@1"] },
   "provides": {
     "capabilities": [
       "plugin.art.studio.document.create", "plugin.art.studio.document.open",

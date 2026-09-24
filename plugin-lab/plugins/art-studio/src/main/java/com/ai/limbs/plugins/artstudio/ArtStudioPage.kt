@@ -141,6 +141,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var width by remember { mutableFloatStateOf(6f) }
     var opacity by remember { mutableFloatStateOf(1f) }
     var newCanvas by remember { mutableStateOf(false) }
+    var presentationDialog by remember { mutableStateOf(false) }
     var canvasTab by remember { mutableIntStateOf(0) }
     var canvasWidth by remember { mutableStateOf("1024") }
     var canvasHeight by remember { mutableStateOf("1024") }
@@ -171,6 +172,22 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val canvasRef = remember { arrayOfNulls<StudioCanvas>(1) }
     val mutex = remember { Mutex() }
     val selected = snapshot?.optJSONObject("state")?.optString("selectedLayerId") ?: ""
+
+    fun requestPresentationMode(mode: String) {
+        presentationDialog = false
+        scope.launch {
+            try {
+                host.invokeHostCapability("host.ui.presentation@1", JSONObject()
+                    .put("operation", "set_mode")
+                    .put("screen_id", ART_SCREEN)
+                    .put("mode", mode)
+                    .toString())
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Page presentation request failed", error)
+                Toast.makeText(context, error.message ?: "无法切换页面显示", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
 
     fun refresh() {
         val serial = ++renderSerial
@@ -495,9 +512,35 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     TextButton(onClick = { canvasRef[0]?.fitToWindow() }, enabled = image != null) {
                         Text("居中")
                     }
+                    TextButton(onClick = { presentationDialog = true }) {
+                        Text("全屏")
+                    }
                 }
             }
         }
+    }
+    if (presentationDialog) {
+        AlertDialog(onDismissRequest = { presentationDialog = false },
+            title = { Text("页面显示") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    TextButton(onClick = { requestPresentationMode("fullscreen_portrait") },
+                        modifier = Modifier.fillMaxWidth()) {
+                        Text("竖屏全屏")
+                    }
+                    TextButton(onClick = { requestPresentationMode("fullscreen_landscape") },
+                        modifier = Modifier.fillMaxWidth()) {
+                        Text("横屏全屏")
+                    }
+                    TextButton(onClick = { requestPresentationMode("normal") },
+                        modifier = Modifier.fillMaxWidth()) {
+                        Text("退出全屏")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = { presentationDialog = false }) { Text("取消") }
+            })
     }
     if (newCanvas) {
         val chosenWidth = canvasWidth.toIntOrNull()
