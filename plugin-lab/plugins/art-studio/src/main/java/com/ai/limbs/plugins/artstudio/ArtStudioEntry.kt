@@ -75,6 +75,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             "layer.move" to "LAYER_MOVE", "layer.delete" to "LAYER_DELETE",
             "layer.set_visibility" to "LAYER_VISIBLE", "layer.set_opacity" to "LAYER_OPACITY",
             "layer.set_lock" to "LAYER_LOCK", "layer.set_blend" to "LAYER_BLEND",
+            "layer.properties" to "LAYER_PROPERTIES",
             "selection.create" to "SELECTION_CREATE", "selection.clear" to "SELECTION_CLEAR",
             "selection.edit" to "SELECTION_EDIT",
             "canvas.crop" to "CROP").forEach { (name, type) ->
@@ -143,13 +144,21 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("background", optional = true), p("name", optional = true))
         "document.import" -> listOf(p("base64"))
         "document.open", "layer.select", "layer.delete", "layer.copy", "layer.set_lock" ->
-            listOf(id) + if (name == "layer.set_lock") listOf(p("locked", "boolean")) else emptyList()
-        "layer.create", "layer.group" -> listOf(p("name", optional = true), p("parentId", optional = true))
+            listOf(id) + when (name) {
+                "layer.set_lock" -> listOf(p("locked", "boolean"))
+                "layer.copy" -> listOf(p("select", "boolean", true))
+                else -> emptyList()
+            }
+        "layer.create", "layer.group" -> listOf(p("name", optional = true), p("parentId", optional = true),
+            p("select", "boolean", true))
         "layer.rename" -> listOf(id, p("name"))
         "layer.move" -> listOf(id, p("index", "integer"))
         "layer.set_visibility" -> listOf(id, p("visible", "boolean"))
         "layer.set_opacity" -> listOf(id, p("opacity", "number"))
         "layer.set_blend" -> listOf(id, p("blend"))
+        "layer.properties" -> listOf(id, p("name", optional = true),
+            p("opacity", "number", true), p("blend", optional = true),
+            p("visible", "boolean", true), p("locked", "boolean", true))
         "stroke.add" -> listOf(p("layerId"), p("points", "array"), p("color"), p("width", "number"),
             p("opacity", "number", true), p("tool", optional = true))
         "stroke.erase" -> listOf(p("layerId"), p("strokeId"))

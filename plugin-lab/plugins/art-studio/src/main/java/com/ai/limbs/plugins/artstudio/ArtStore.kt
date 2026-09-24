@@ -309,6 +309,7 @@ internal class ArtStore(private val root: File) {
                 if (parentId.isNotBlank()) require(find(parentId).second.getString("kind") == "group")
                 val kind = if (type == "GROUP_CREATE") "group" else if (type == "IMAGE_IMPORT") "image" else "paint"
                 layers.put(newLayer(id, kind, p.optString("name", if (kind == "group") "图层组" else "图层"), parentId, p.optString("asset")))
+                if (p.optBoolean("select", false)) state.put("selectedLayerId", id)
             }
             "DOCUMENT_RENAME" -> state.put("name", p.getString("name").trim().take(100).also { require(it.isNotBlank()) })
             "LAYER_SELECT" -> state.put("selectedLayerId", find(p.getString("id")).second.getString("id"))
@@ -317,6 +318,18 @@ internal class ArtStore(private val root: File) {
             "LAYER_OPACITY" -> find(p.getString("id")).second.put("opacity", p.getDouble("opacity").also { require(it in 0.0..1.0) })
             "LAYER_LOCK" -> find(p.getString("id")).second.put("locked", p.getBoolean("locked"))
             "LAYER_BLEND" -> find(p.getString("id")).second.put("blend", p.getString("blend").also { require(it in setOf("normal", "multiply", "screen", "add")) })
+            "LAYER_PROPERTIES" -> {
+                val layer = find(p.getString("id")).second
+                val name = p.optString("name", layer.getString("name")).trim().take(100)
+                require(name.isNotBlank()) { "图层名称不能为空" }
+                val opacity = p.optDouble("opacity", layer.getDouble("opacity"))
+                require(opacity in 0.0..1.0) { "图层不透明度必须在 0–100% 之间" }
+                val blend = p.optString("blend", layer.getString("blend"))
+                require(blend in setOf("normal", "multiply", "screen", "add")) { "不支持的混合模式" }
+                layer.put("name", name).put("opacity", opacity).put("blend", blend)
+                    .put("visible", p.optBoolean("visible", layer.getBoolean("visible")))
+                    .put("locked", p.optBoolean("locked", layer.getBoolean("locked")))
+            }
             "LAYER_MOVE" -> {
                 val (index, layer) = find(p.getString("id"))
                 val position = p.getInt("index").also { require(it in 0 until layers.length()) }
@@ -331,7 +344,15 @@ internal class ArtStore(private val root: File) {
                     "请先删除或移出组中的图层"
                 }
                 layers.remove(index)
-                if (state.optString("selectedLayerId") == p.getString("id")) state.put("selectedLayerId", "")
+                if (state.optString("selectedLayerId") == p.getString("id")) {
+                    val remaining = (0 until layers.length()).map { layers.getJSONObject(it) }
+                    val replacement = remaining.lastOrNull {
+                        it.optString("parentId") == layer.optString("parentId")
+                    } ?: remaining.firstOrNull {
+                        it.getString("id") == layer.optString("parentId")
+                    } ?: remaining.lastOrNull()
+                    state.put("selectedLayerId", replacement?.getString("id") ?: "")
+                }
             }
             "LAYER_COPY" -> {
                 val (_, original) = find(p.getString("id"))
@@ -362,6 +383,7 @@ internal class ArtStore(private val root: File) {
                     }
                     layers.put(copy)
                 }
+                if (p.optBoolean("select", false)) state.put("selectedLayerId", p.getString("newId"))
             }
             "STROKE_ADD" -> {
                 val layer = find(p.getString("layerId")).second

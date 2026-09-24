@@ -161,6 +161,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var transformAngle by remember { mutableStateOf("0") }
     var leftDrawerOpen by remember { mutableStateOf(false) }
     var rightDrawerOpen by remember { mutableStateOf(false) }
+    var layerPanelExpanded by remember { mutableStateOf(false) }
     var exportPath by remember { mutableStateOf("") }
     var archivePath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
@@ -430,12 +431,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         .padding(end = railWidth).width(drawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
                         BoxWithConstraints(Modifier.fillMaxSize()) {
-                            // A phone needs more room for the color wheel; each pane keeps its
-                            // own bounds so adding layers or brushes will not scroll the picker.
+                            // Keep the three panes independent; compact screens allocate enough
+                            // room for actual layer controls, and the title can expand that pane.
                             val compact = maxHeight < 600.dp
-                            val colorShare = if (compact) 0.46f else 0.26f
-                            val layerShare = if (compact) 0.25f else 0.35f
-                            val brushShare = if (compact) 0.29f else 0.39f
+                            val colorShare = if (layerPanelExpanded) 0.14f
+                                else if (compact) 0.32f else 0.26f
+                            val layerShare = if (layerPanelExpanded) 0.78f
+                                else if (compact) 0.57f else 0.35f
+                            val brushShare = if (layerPanelExpanded) 0.08f
+                                else if (compact) 0.11f else 0.39f
                             Column(Modifier.fillMaxSize()) {
                                 Column(Modifier.fillMaxWidth().weight(colorShare)
                                     .verticalScroll(rememberScrollState())
@@ -469,9 +473,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 }
                                 Spacer(Modifier.fillMaxWidth().height(1.dp)
                                     .background(MaterialTheme.colorScheme.outlineVariant))
-                                Box(Modifier.fillMaxWidth().weight(layerShare)
-                                    .padding(10.dp)) {
-                                    Text("图层", style = MaterialTheme.typography.titleSmall)
+                                Box(Modifier.fillMaxWidth().weight(layerShare)) {
+                                    StudioLayersPanel(state = state, selectedId = selected,
+                                        revision = revision, busy = busy, store = store,
+                                        expanded = layerPanelExpanded,
+                                        onExpand = { layerPanelExpanded = !layerPanelExpanded },
+                                        onEdit = ::edit)
                                 }
                                 Spacer(Modifier.fillMaxWidth().height(1.dp)
                                     .background(MaterialTheme.colorScheme.outlineVariant))
