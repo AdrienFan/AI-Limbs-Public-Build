@@ -23,7 +23,16 @@
   "provides": {
     "capabilities": [
       "plugin.art.studio.document.create", "plugin.art.studio.document.open",
-      "plugin.art.studio.document.import",
+      "plugin.art.studio.document.import", "plugin.art.studio.document.open_image",
+      "plugin.art.studio.document.recent", "plugin.art.studio.document.save_as",
+      "plugin.art.studio.document.duplicate", "plugin.art.studio.document.close",
+      "plugin.art.studio.document.discard_and_close",
+      "plugin.art.studio.document.incremental_version",
+      "plugin.art.studio.document.incremental_backup",
+      "plugin.art.studio.template.create", "plugin.art.studio.template.list",
+      "plugin.art.studio.template.open", "plugin.art.studio.session.save",
+      "plugin.art.studio.session.list", "plugin.art.studio.session.open",
+      "plugin.art.studio.session.delete",
       "plugin.art.studio.document.save", "plugin.art.studio.document.rename", "plugin.art.studio.document.info",
       "plugin.art.studio.document.list", "plugin.art.studio.canvas.inspect",
       "plugin.art.studio.canvas.crop", "plugin.art.studio.layer.list",

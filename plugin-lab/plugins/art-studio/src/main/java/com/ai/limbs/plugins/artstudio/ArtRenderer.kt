@@ -141,7 +141,8 @@ internal object ArtRenderer {
         }
     }
 
-    fun export(dataDir: File, store: ArtStore, snapshot: JSONObject, format: String, name: String): JSONObject {
+    fun export(dataDir: File, store: ArtStore, snapshot: JSONObject, format: String, name: String,
+               options: JSONObject = JSONObject()): JSONObject {
         require(format == "png" || format == "jpeg")
         val mime = if (format == "png") "image/png" else "image/jpeg"
         val filename = (name.ifBlank { "AI-Limbs-Art-${UUID.randomUUID()}" }
@@ -152,12 +153,36 @@ internal object ArtRenderer {
         val temp = File(directory, ".${UUID.randomUUID()}.tmp")
         try {
             val bitmap = render(store, snapshot, opaque = format == "jpeg")
-            FileOutputStream(temp).use { stream ->
-                require(bitmap.compress(if (format == "png") Bitmap.CompressFormat.PNG
-                    else Bitmap.CompressFormat.JPEG, 95, stream))
-                stream.fd.sync()
+            var output = bitmap
+            try {
+                val x = options.optInt("x", 0)
+                val y = options.optInt("y", 0)
+                val cropWidth = options.optInt("cropWidth", bitmap.width)
+                val cropHeight = options.optInt("cropHeight", bitmap.height)
+                require(x >= 0 && y >= 0 && cropWidth > 0 && cropHeight > 0 &&
+                    x.toLong() + cropWidth <= bitmap.width && y.toLong() + cropHeight <= bitmap.height) {
+                    "导出裁切超出画布边界"
+                }
+                val width = options.optInt("width", cropWidth)
+                val height = options.optInt("height", cropHeight)
+                require(width in 64..4096 && height in 64..4096) { "导出尺寸需要在 64–4096 像素之间" }
+                if (x != 0 || y != 0 || cropWidth != bitmap.width || cropHeight != bitmap.height) {
+                    output = Bitmap.createBitmap(bitmap, x, y, cropWidth, cropHeight)
+                }
+                if (width != output.width || height != output.height) {
+                    val scaled = Bitmap.createScaledBitmap(output, width, height, true)
+                    if (output !== bitmap) output.recycle()
+                    output = scaled
+                }
+                FileOutputStream(temp).use { stream ->
+                    require(output.compress(if (format == "png") Bitmap.CompressFormat.PNG
+                        else Bitmap.CompressFormat.JPEG, 95, stream))
+                    stream.fd.sync()
+                }
+            } finally {
+                if (output !== bitmap) output.recycle()
+                bitmap.recycle()
             }
-            bitmap.recycle()
             require(temp.renameTo(destination)) { "无法保存导出图片" }
         } catch (error: Throwable) {
             throw error

@@ -23,12 +23,19 @@ internal class ArtStore(private val root: File) {
     private val documents = File(root, "documents")
     private val assets = File(root, "assets")
     private val pointer = File(root, "current.txt")
+    private val recentIndex = File(root, "recent.json")
+    private val sessionIndex = File(root, "sessions.json")
+    private val externalLinks = File(root, "external-links.json")
+    private val templates = File(root, "templates")
+    private val backups = File(root, "backups")
     private val lockFile = File(root, "art-studio.lock")
 
     init {
         require(drafts.mkdirs() || drafts.isDirectory)
         require(documents.mkdirs() || documents.isDirectory)
         require(assets.mkdirs() || assets.isDirectory)
+        require(templates.mkdirs() || templates.isDirectory)
+        require(backups.mkdirs() || backups.isDirectory)
     }
 
     private inline fun <T> locked(block: () -> T): T = synchronized(processLock) {
@@ -39,7 +46,7 @@ internal class ArtStore(private val root: File) {
     }
 
     fun create(width: Int, height: Int, background: String = "#FFFFFFFF",
-               name: String = "未命名工程"): JSONObject = locked {
+               name: String = "未命名工程", actor: String = "AWEI"): JSONObject = locked {
         require(width in 64..4096 && height in 64..4096) { "画布边长需要在 64–4096 像素之间" }
         requireColor(background)
         require(name.trim().isNotBlank()) { "工程名称不能为空" }
@@ -50,9 +57,10 @@ internal class ArtStore(private val root: File) {
             .put("selectedLayerId", firstLayer)
             .put("selection", JSONObject.NULL)
         val doc = JSONObject().put("format", 1).put("id", id).put("base", base)
-            .put("operations", JSONArray())
+            .put("createdBy", actor).put("operations", JSONArray())
         atomic(draft(id), doc.toString())
         atomic(pointer, id)
+        markRecent(id)
         snapshot(doc)
     }
 
@@ -63,7 +71,10 @@ internal class ArtStore(private val root: File) {
         else {
             val id = pointer.readText().trim()
             validateId(id)
-            "$id:${draft(id).lastModified()}:${draft(id).length()}"
+            val marker = File(documents, id + ".sha256")
+            "$id:${draft(id).lastModified()}:${draft(id).length()}:" +
+                "${marker.lastModified()}:${marker.length()}:" +
+                "${archive(id).lastModified()}:${externalLink(id)?.optBoolean("pending") == true}"
         }
     }
 
@@ -76,8 +87,12 @@ internal class ArtStore(private val root: File) {
                     .put("name", state.optString("name", "未命名工程"))
                     .put("width", state.getInt("width")).put("height", state.getInt("height"))
                     .put("saved", archive(doc.getString("id")).exists())
-                    .put("dirty", !archive(doc.getString("id")).exists() ||
-                        file.lastModified() > archive(doc.getString("id")).lastModified())
+                    .put("dirty", externalLink(doc.getString("id"))?.optBoolean("pending") == true ||
+                        !archive(doc.getString("id")).exists() ||
+                        File(documents, doc.getString("id") + ".sha256").let { marker ->
+                            if (marker.isFile) marker.readText() != digest(doc.toString())
+                            else file.lastModified() > archive(doc.getString("id")).lastModified()
+                        })
                     .put("modified", file.lastModified()))
             }
         }
@@ -104,11 +119,241 @@ internal class ArtStore(private val root: File) {
         result.put("lastOperationId", operation.getString("id"))
     }
 
-    fun save(): JSONObject = locked {
+    fun save(): JSONObject = locked { saveDocument(loadCurrent()) }
+
+    // Save As changes the active document identity; the previous document stays available.
+    fun saveAs(name: String, activate: Boolean = true, actor: String = "AWEI"): JSONObject = locked {
+        val doc = copyCurrent(name, activate, actor)
+        saveDocument(doc)
+    }
+
+    fun duplicate(name: String, actor: String = "AWEI"): JSONObject = locked {
+        snapshot(copyCurrent(name, actor = actor))
+    }
+
+    fun linkExternal(id: String, uri: String): JSONObject = locked {
+        validateId(id)
+        require(draft(id).isFile && uri.startsWith("content://")) { "无效的外部工程地址" }
+        val links = if (externalLinks.isFile) JSONObject(externalLinks.readText()) else JSONObject()
+        links.put(id, JSONObject().put("uri", uri).put("pending", false))
+        atomic(externalLinks, links.toString())
+        JSONObject().put("id", id).put("uri", uri)
+    }
+
+    fun markExternalSynced(id: String): JSONObject = locked {
+        validateId(id)
+        val links = if (externalLinks.isFile) JSONObject(externalLinks.readText()) else JSONObject()
+        val link = requireNotNull(links.optJSONObject(id)) { "工程没有外部保存位置" }
+        link.put("pending", false)
+        atomic(externalLinks, links.toString())
+        JSONObject().put("id", id).put("uri", link.getString("uri"))
+    }
+
+    private fun externalLink(id: String): JSONObject? {
+        if (!externalLinks.isFile) return null
+        return JSONObject(externalLinks.readText()).optJSONObject(id)
+    }
+
+    fun recent(): JSONArray = locked {
+        val ids = if (recentIndex.isFile) JSONArray(recentIndex.readText()) else JSONArray()
+        val result = JSONArray()
+        for (i in 0 until ids.length()) {
+            val id = ids.getString(i)
+            val file = draft(id)
+            if (!file.isFile) continue
+            val state = replay(JSONObject(file.readText()))
+            result.put(JSONObject().put("id", id).put("name", state.getString("name"))
+                .put("width", state.getInt("width")).put("height", state.getInt("height")))
+        }
+        result
+    }
+
+    fun sessions(): JSONArray = locked {
+        if (sessionIndex.isFile) JSONArray(sessionIndex.readText()) else JSONArray()
+    }
+
+    fun saveSession(name: String): JSONObject = locked {
+        require(name.trim().isNotBlank()) { "会话名称不能为空" }
+        val id = loadCurrent().getString("id")
+        val entries = if (sessionIndex.isFile) JSONArray(sessionIndex.readText()) else JSONArray()
+        val out = JSONArray()
+        for (i in 0 until entries.length()) {
+            val item = entries.getJSONObject(i)
+            if (item.getString("name") != name.trim()) out.put(item)
+        }
+        val entry = JSONObject().put("name", name.trim().take(100)).put("documentId", id)
+        out.put(entry)
+        atomic(sessionIndex, out.toString())
+        entry
+    }
+
+    fun openSession(name: String): JSONObject = locked {
+        val entries = if (sessionIndex.isFile) JSONArray(sessionIndex.readText()) else JSONArray()
+        val item = (0 until entries.length()).map { entries.getJSONObject(it) }
+            .firstOrNull { it.getString("name") == name } ?: error("会话不存在")
+        val id = item.getString("documentId")
+        require(draft(id).isFile) { "会话中的工程已不存在" }
+        val result = snapshot(JSONObject(draft(id).readText()))
+        atomic(pointer, id)
+        markRecent(id)
+        result
+    }
+
+    fun deleteSession(name: String): JSONObject = locked {
+        val entries = if (sessionIndex.isFile) JSONArray(sessionIndex.readText()) else JSONArray()
+        val out = JSONArray()
+        var removed = false
+        for (i in 0 until entries.length()) {
+            val item = entries.getJSONObject(i)
+            if (item.getString("name") == name) removed = true else out.put(item)
+        }
+        require(removed) { "会话不存在" }
+        atomic(sessionIndex, out.toString())
+        JSONObject().put("name", name).put("deleted", true)
+    }
+
+    fun close(): JSONObject = locked {
+        val id = loadCurrent().getString("id")
+        require(pointer.delete()) { "无法关闭工程" }
+        JSONObject().put("closedId", id)
+    }
+
+    fun discardCurrent(): JSONObject = locked {
         val doc = loadCurrent()
         val id = doc.getString("id")
+        require(externalLink(id)?.optBoolean("pending") != true) {
+            "外部工程尚未同步，请先保存到原文件"
+        }
+        val saved = archive(id)
+        if (saved.isFile) {
+            ZipFile(saved).use { zip ->
+                val entry = requireNotNull(zip.getEntry("project.json"))
+                val restored = zip.getInputStream(entry).bufferedReader().use { it.readText() }
+                atomic(draft(id), restored)
+                atomic(File(documents, id + ".sha256"), digest(restored))
+            }
+        } else {
+            require(draft(id).delete()) { "无法舍弃未保存的工程" }
+        }
+        require(pointer.delete()) { "无法关闭工程" }
+        JSONObject().put("closedId", id).put("discarded", true)
+    }
+
+    fun saveIncrementalVersion(actor: String = "AWEI"): JSONObject = locked {
+        val doc = loadCurrent()
+        val baseName = replay(doc).getString("name").replace(Regex("_v[0-9]{3,}$"), "")
+        val names = drafts.listFiles()?.mapNotNull { file ->
+            runCatching { replay(JSONObject(file.readText())).getString("name") }.getOrNull()
+        }?.toSet() ?: emptySet()
+        var number = 1
+        while (baseName + "_v" + number.toString().padStart(3, '0') in names) number++
+        saveDocument(copyCurrent(baseName + "_v" + number.toString().padStart(3, '0'),
+            actor = actor))
+    }
+
+    fun saveIncrementalBackup(): JSONObject = locked {
+        val doc = loadCurrent()
+        val id = doc.getString("id")
+        val saved = archive(id)
+        var number = 1
+        var backup = File(backups, id + "_b" + number.toString().padStart(3, '0') + ".ailart")
+        while (backup.exists()) {
+            number++
+            backup = File(backups, id + "_b" + number.toString().padStart(3, '0') + ".ailart")
+        }
+        if (saved.isFile) atomicBytes(backup, saved.readBytes())
+        val result = saveDocument(doc)
+        result.put("backupPath", if (saved.isFile) backup.absolutePath else JSONObject.NULL)
+    }
+
+    fun createTemplate(name: String): JSONObject = locked {
+        require(name.trim().isNotBlank()) { "模板名称不能为空" }
+        val doc = JSONObject(loadCurrent().toString())
+        val id = UUID.randomUUID().toString()
+        doc.put("id", id)
+        doc.put("base", replay(doc).put("name", name.trim().take(100)))
+        doc.put("operations", JSONArray())
+        val target = File(templates, id + ".ailart")
+        writeArchive(doc, target)
+        JSONObject().put("id", id).put("name", name.trim().take(100))
+    }
+
+    fun templates(): JSONArray = locked {
+        val result = JSONArray()
+        templates.listFiles()?.filter { it.extension == "ailart" }?.sortedBy { it.name }?.forEach { file ->
+            ZipFile(file).use { zip ->
+                val entry = requireNotNull(zip.getEntry("project.json"))
+                val doc = JSONObject(zip.getInputStream(entry).bufferedReader().use { it.readText() })
+                result.put(JSONObject().put("id", doc.getString("id"))
+                    .put("name", doc.getJSONObject("base").getString("name")))
+            }
+        }
+        result
+    }
+
+    fun fromTemplate(id: String, actor: String = "AWEI"): JSONObject = locked {
+        validateId(id)
+        val source = File(templates, id + ".ailart")
+        require(source.isFile) { "模板不存在" }
+        val doc = ZipFile(source).use { zip ->
+            val entry = requireNotNull(zip.getEntry("project.json"))
+            JSONObject(zip.getInputStream(entry).bufferedReader().use { it.readText() })
+        }
+        doc.put("id", UUID.randomUUID().toString()).put("createdBy", actor)
+        val newId = doc.getString("id")
+        val result = snapshot(doc)
+        atomic(draft(newId), doc.toString())
+        atomic(pointer, newId)
+        markRecent(newId)
+        result
+    }
+
+    private fun copyCurrent(name: String, activate: Boolean = true,
+                            actor: String = "AWEI"): JSONObject {
+        require(name.trim().isNotBlank()) { "工程名称不能为空" }
+        val source = loadCurrent()
+        val doc = JSONObject(source.toString())
+        val id = UUID.randomUUID().toString()
+        doc.put("id", id).put("createdBy", actor)
+        // A new document starts with the current composed state so old operations remain immutable.
+        doc.put("base", replay(source).put("name", name.trim().take(100)))
+        doc.put("operations", JSONArray())
+        snapshot(doc)
+        atomic(draft(id), doc.toString())
+        if (activate) {
+            atomic(pointer, id)
+            markRecent(id)
+        }
+        return doc
+    }
+
+    private fun markRecent(id: String) {
+        val existing = if (recentIndex.isFile) JSONArray(recentIndex.readText()) else JSONArray()
+        val entries = JSONArray().put(id)
+        for (i in 0 until existing.length()) {
+            val next = existing.getString(i)
+            if (next != id && entries.length() < 16) entries.put(next)
+        }
+        atomic(recentIndex, entries.toString())
+    }
+
+    private fun saveDocument(doc: JSONObject): JSONObject {
+        val id = doc.getString("id")
         val destination = archive(id)
-        val temp = File(documents, "$id.tmp")
+        writeArchive(doc, destination)
+        atomic(File(documents, id + ".sha256"), digest(doc.toString()))
+        val links = if (externalLinks.isFile) JSONObject(externalLinks.readText()) else JSONObject()
+        links.optJSONObject(id)?.let {
+            it.put("pending", true)
+            atomic(externalLinks, links.toString())
+        }
+        return JSONObject().put("id", id).put("path", destination.absolutePath)
+            .put("externalUri", links.optJSONObject(id)?.optString("uri", "") ?: "")
+            .put("bytes", destination.length())
+    }
+
+    private fun writeArchive(doc: JSONObject, destination: File) {
+        val temp = File(destination.parentFile, "." + UUID.randomUUID() + ".tmp")
         try {
             ZipOutputStream(FileOutputStream(temp)).use { zip ->
                 zip.putNextEntry(ZipEntry("project.json"))
@@ -116,22 +361,31 @@ internal class ArtStore(private val root: File) {
                 zip.closeEntry()
                 val used = mutableSetOf<String>()
                 val operations = doc.getJSONArray("operations")
+                val state = replay(doc)
+                val layers = state.getJSONArray("layers")
+                for (i in 0 until layers.length()) {
+                    val layer = layers.getJSONObject(i)
+                    if (layer.optString("kind") == "image") used.add(layer.getString("asset"))
+                }
                 for (i in 0 until operations.length()) {
                     val operation = operations.getJSONObject(i)
-                    if (operation.getString("type") != "IMAGE_IMPORT") continue
-                    val asset = operation.getJSONObject("parameters").getString("asset")
-                    if (asset.isNotBlank() && used.add(asset)) {
-                        zip.putNextEntry(ZipEntry("assets/$asset.png"))
-                        zip.write(assetFile(asset).readBytes())
-                        zip.closeEntry()
+                    if (operation.getString("type") == "IMAGE_IMPORT") {
+                        used.add(operation.getJSONObject("parameters").getString("asset"))
                     }
+                }
+                used.forEach { asset ->
+                    zip.putNextEntry(ZipEntry("assets/" + asset + ".png"))
+                    zip.write(assetFile(asset).readBytes())
+                    zip.closeEntry()
                 }
             }
             require(temp.renameTo(destination)) { "保存工程文件失败" }
         } finally { temp.delete() }
-        JSONObject().put("id", id).put("path", destination.absolutePath)
-            .put("bytes", destination.length())
     }
+
+    private fun digest(data: String): String =
+        java.security.MessageDigest.getInstance("SHA-256").digest(data.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it) }
 
     fun open(id: String): JSONObject = locked {
         validateId(id)
@@ -159,10 +413,11 @@ internal class ArtStore(private val root: File) {
         val doc = JSONObject(draft(id).readText())
         val result = snapshot(doc)
         atomic(pointer, id)
+        markRecent(id)
         result
     }
 
-    fun importArchive(bytes: ByteArray): JSONObject = locked {
+    fun importArchive(bytes: ByteArray, actor: String = "AWEI"): JSONObject = locked {
         require(bytes.size in 1..64 * 1024 * 1024) { "工程文件超过 64 MB" }
         var project: JSONObject? = null
         val importedAssets = mutableMapOf<String, ByteArray>()
@@ -198,6 +453,15 @@ internal class ArtStore(private val root: File) {
         validateId(doc.getString("id"))
         val operations = doc.getJSONArray("operations")
         val assetIds = importedAssets.keys.associateWith { UUID.randomUUID().toString() }
+        val baseLayers = doc.getJSONObject("base").getJSONArray("layers")
+        for (i in 0 until baseLayers.length()) {
+            val layer = baseLayers.getJSONObject(i)
+            if (layer.optString("kind") == "image") {
+                val oldAsset = layer.getString("asset")
+                require(oldAsset in importedAssets) { "工程图片缺失" }
+                layer.put("asset", assetIds.getValue(oldAsset))
+            }
+        }
         for (i in 0 until operations.length()) {
             val op = operations.getJSONObject(i)
             if (op.getString("type") == "IMAGE_IMPORT") {
@@ -209,12 +473,52 @@ internal class ArtStore(private val root: File) {
             }
         }
         val id = UUID.randomUUID().toString()
-        doc.put("id", id)
+        doc.put("id", id).put("createdBy", actor)
         val result = snapshot(doc)
         importedAssets.forEach { (asset, data) -> atomicBytes(assetFile(assetIds.getValue(asset)), data) }
         atomic(draft(id), doc.toString())
         atomic(pointer, id)
+        markRecent(id)
         result
+    }
+
+    fun openImage(encoded: String, name: String = "未命名图像",
+                  actor: String = "AWEI"): JSONObject = locked {
+        val bytes = Base64.decode(encoded, Base64.DEFAULT)
+        require(bytes.size in 1..MAX_ASSET_BYTES) { "图片大小上限为 8 MB" }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
+        require(bounds.outWidth in 64..4096 && bounds.outHeight in 64..4096) {
+            "图片边长需要在 64–4096 像素之间"
+        }
+        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+            ?: error("图片格式无效，请使用 PNG 或 JPEG")
+        val png = java.io.ByteArrayOutputStream().use { output ->
+            require(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+            output.toByteArray()
+        }
+        bitmap.recycle()
+        require(png.size <= MAX_ASSET_BYTES) { "图片转换后超过 8 MB" }
+        val id = UUID.randomUUID().toString()
+        val asset = UUID.randomUUID().toString()
+        val layer = newLayer(UUID.randomUUID().toString(), "image", "图像图层", "", asset)
+        val base = JSONObject().put("width", bounds.outWidth).put("height", bounds.outHeight)
+            .put("name", name.trim().ifBlank { "未命名图像" }.take(100))
+            .put("background", "#00000000").put("layers", JSONArray().put(layer))
+            .put("selectedLayerId", layer.getString("id")).put("selection", JSONObject.NULL)
+        val doc = JSONObject().put("format", 1).put("id", id)
+            .put("base", base).put("createdBy", actor).put("operations", JSONArray())
+        atomicBytes(assetFile(asset), png)
+        try {
+            val result = snapshot(doc)
+            atomic(draft(id), doc.toString())
+            atomic(pointer, id)
+            markRecent(id)
+            result
+        } catch (error: Throwable) {
+            assetFile(asset).delete()
+            throw error
+        }
     }
 
     fun importImage(actor: String, encoded: String): JSONObject = locked {
@@ -258,7 +562,13 @@ internal class ArtStore(private val root: File) {
         val saved = archive(id)
         return JSONObject().put("id", doc.getString("id"))
             .put("state", state).put("revision", doc.getJSONArray("operations").length())
-            .put("dirty", !saved.exists() || draft(id).lastModified() > saved.lastModified())
+            .put("dirty", externalLink(id)?.optBoolean("pending") == true ||
+                !saved.exists() || File(documents, id + ".sha256").let { marker ->
+                if (marker.isFile) marker.readText() != digest(doc.toString())
+                else draft(id).lastModified() > saved.lastModified()
+            })
+            .put("externalUri", externalLink(id)?.optString("uri", "") ?: "")
+            .put("externalPending", externalLink(id)?.optBoolean("pending") ?: false)
             .put("operations", JSONArray(doc.getJSONArray("operations").toString()))
     }
 

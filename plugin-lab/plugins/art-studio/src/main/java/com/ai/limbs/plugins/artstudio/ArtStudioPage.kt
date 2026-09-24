@@ -95,12 +95,35 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                         setBackgroundColor(Color.rgb(85, 91, 99))
                         setTextColor(Color.WHITE)
                         if (title == "文件(F)") {
-                            // Keep the file menu limited to commands implemented by the plugin.
                             val anchor = this
                             PopupMenu(pluginContext, anchor).apply {
-                                menu.add("新建(N)…").apply { isEnabled = !bridge.busy }
-                                setOnMenuItemClickListener {
-                                    bridge.requestNew?.invoke()
+                                fun add(group: Int, id: Int, label: String, enabled: Boolean = true) {
+                                    menu.add(group, id, id, label).isEnabled = enabled && !bridge.busy
+                                }
+                                val doc = bridge.hasDocument
+                                add(0, 1, "新建(N)…")
+                                add(0, 2, "打开(O)…")
+                                add(0, 3, "打开最近图像(R)", bridge.hasRecent)
+                                add(1, 4, "保存(S)", doc)
+                                add(1, 5, "另存为(A)…", doc)
+                                add(2, 6, "会话管理…")
+                                add(3, 7, "导入 - 打开为无标题图像(I)…")
+                                add(3, 8, "导出(X)…", doc)
+                                add(3, 9, "导出 - 更多选项…", doc)
+                                // Animation needs a timeline and frame data; no fictitious import/export.
+                                add(4, 10, "导入动画 - 逐帧…", false)
+                                add(4, 11, "导出动画(R)…", false)
+                                add(5, 12, "保存增量版本(V)", doc)
+                                add(5, 13, "保存增量备份(B)", doc)
+                                add(6, 14, "新建模板 - 基于当前图像(C)…", doc)
+                                add(6, 15, "新建图像 - 复制当前图像(F)", doc)
+                                add(7, 16, "图像信息(D)", doc)
+                                add(8, 17, "关闭(L)", doc)
+                                add(8, 18, "全部关闭(C)", false)
+                                add(8, 19, "退出(Q)")
+                                if (android.os.Build.VERSION.SDK_INT >= 28) menu.setGroupDividerEnabled(true)
+                                setOnMenuItemClickListener { item ->
+                                    bridge.onFileCommand?.invoke(item.itemId)
                                     true
                                 }
                                 setOnDismissListener {
@@ -124,8 +147,10 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
 }
 
 private class StudioMenuBridge {
-    var requestNew: (() -> Unit)? = null
     var busy = false
+    var hasDocument = false
+    var hasRecent = false
+    var onFileCommand: ((Int) -> Unit)? = null
 }
 
 @Composable
@@ -148,9 +173,34 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var canvasProjectName by remember { mutableStateOf("未命名工程") }
     var transparent by remember { mutableStateOf(false) }
     var openDialog by remember { mutableStateOf(false) }
+    var recentOnly by remember { mutableStateOf(false) }
+    var saveAsDialog by remember { mutableStateOf(false) }
+    var saveAsName by remember { mutableStateOf("") }
+    var pendingSaveAsName by remember { mutableStateOf("") }
+    var sessionDialog by remember { mutableStateOf(false) }
+    var sessionName by remember { mutableStateOf("") }
+    var sessions by remember { mutableStateOf(JSONArray()) }
+    var templateDialog by remember { mutableStateOf(false) }
+    var templateName by remember { mutableStateOf("") }
+    var templateItems by remember { mutableStateOf(JSONArray()) }
+    var duplicateDialog by remember { mutableStateOf(false) }
+    var duplicateName by remember { mutableStateOf("") }
+    var documentInfoDialog by remember { mutableStateOf(false) }
+    var exportDialog by remember { mutableStateOf(false) }
+    var advancedExportDialog by remember { mutableStateOf(false) }
+    var exportFormat by remember { mutableStateOf("png") }
+    var cropX by remember { mutableStateOf("0") }
+    var cropY by remember { mutableStateOf("0") }
+    var cropWidth by remember { mutableStateOf("") }
+    var cropHeight by remember { mutableStateOf("") }
+    var outputWidth by remember { mutableStateOf("") }
+    var outputHeight by remember { mutableStateOf("") }
+    var closeDialog by remember { mutableStateOf(false) }
+    var exitAfterClose by remember { mutableStateOf(false) }
+    var recentDocs by remember { mutableStateOf(JSONArray()) }
+    var importingUntitled by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var layerName by remember { mutableStateOf("") }
-    var projectDialog by remember { mutableStateOf(false) }
     var projectName by remember { mutableStateOf("") }
     var colorDialog by remember { mutableStateOf(false) }
     var colorText by remember { mutableStateOf(color) }
@@ -163,7 +213,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var rightDrawerOpen by remember { mutableStateOf(false) }
     var layerPanelExpanded by remember { mutableStateOf(false) }
     var exportPath by remember { mutableStateOf("") }
-    var archivePath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
     var pendingOperations by remember { mutableIntStateOf(0) }
@@ -238,37 +287,63 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
 
-    val import = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+    val openExternal = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val untitled = importingUntitled
+        importingUntitled = false
         if (uri != null) perform {
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(8 * 1024 * 1024 + 1) }
-                ?: error("无法读取图片")
-            require(bytes.size <= 8 * 1024 * 1024) { "图片大小上限为 8 MB" }
-            store.importImage("AWEI", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
-        }
-    }
-    val importProject = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
-        if (uri != null) perform {
+            val name = context.contentResolver.query(uri, arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null, null, null)?.use { cursor ->
+                if (cursor.moveToFirst()) cursor.getString(0) else null
+            } ?: "未命名图像"
             val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(64 * 1024 * 1024 + 1) }
-                ?: error("无法读取工程文件")
-            store.importArchive(bytes)
+                ?: error("无法读取文件")
+            require(bytes.size <= 64 * 1024 * 1024) { "文件超过 64 MB" }
+            val zip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()
+            if (zip) {
+                val opened = store.importArchive(bytes)
+                if (untitled) store.apply("AWEI", "DOCUMENT_RENAME",
+                    JSONObject().put("name", "未命名图像"))
+                else {
+                    try {
+                        context.contentResolver.takePersistableUriPermission(uri,
+                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        store.linkExternal(opened.getString("id"), uri.toString())
+                    } catch (error: SecurityException) {
+                        host.logger.i("ArtStudio", "Opened read-only document as an independent draft")
+                        scope.launch {
+                            Toast.makeText(context, "该文件只读；修改后请使用另存为", Toast.LENGTH_LONG).show()
+                        }
+                    }
+                    store.current()
+                }
+            } else store.openImage(android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
+                if (untitled) "未命名图像" else name.substringBeforeLast('.').ifBlank { "未命名图像" })
         }
     }
-    val exportProject = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+    val saveAsFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
         if (uri == null) { awaitingExport = false; busy = pendingOperations > 0 }
-        else {
-            val source = archivePath
-            scope.launch {
-                try {
-                    withContext(Dispatchers.IO) {
+        else scope.launch {
+            try {
+                val name = pendingSaveAsName
+                withContext(Dispatchers.IO) {
+                    mutex.withLock {
+                        val created = store.saveAs(name, activate = false)
                         context.contentResolver.openOutputStream(uri)?.use { output ->
-                            java.io.File(source).inputStream().use { it.copyTo(output) }
-                        } ?: error("无法写入工程文件")
+                            java.io.File(created.getString("path")).inputStream().use { it.copyTo(output) }
+                        } ?: error("无法写入所选工程文件")
+                        context.contentResolver.takePersistableUriPermission(uri,
+                            android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                        store.linkExternal(created.getString("id"), uri.toString())
+                        store.open(created.getString("id"))
                     }
-                    Toast.makeText(context, "工程备份已保存", Toast.LENGTH_SHORT).show()
-                } catch (error: Exception) {
-                    Toast.makeText(context, error.message ?: "备份失败", Toast.LENGTH_LONG).show()
-                } finally { awaitingExport = false; busy = pendingOperations > 0 }
-            }
+                }
+                refresh()
+                Toast.makeText(context, "已另存为 " + name, Toast.LENGTH_SHORT).show()
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Save As failed", error)
+                refresh()
+                Toast.makeText(context, error.message ?: "另存为失败", Toast.LENGTH_LONG).show()
+            } finally { awaitingExport = false; busy = pendingOperations > 0 }
         }
     }
     val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
@@ -314,8 +389,19 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             if (!busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
         }
     }
-    LaunchedEffect(openDialog) {
-        if (openDialog) documents = withContext(Dispatchers.IO) { store.list() }
+    LaunchedEffect(openDialog, recentOnly) {
+        if (openDialog) documents = withContext(Dispatchers.IO) {
+            if (recentOnly) store.recent() else store.list()
+        }
+    }
+    LaunchedEffect(sessionDialog) {
+        if (sessionDialog) sessions = withContext(Dispatchers.IO) { store.sessions() }
+    }
+    LaunchedEffect(templateDialog) {
+        if (templateDialog) templateItems = withContext(Dispatchers.IO) { store.templates() }
+    }
+    LaunchedEffect(snapshot?.optString("id")) {
+        recentDocs = withContext(Dispatchers.IO) { store.recent() }
     }
 
     val current = snapshot
@@ -326,14 +412,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     fun edit(type: String, params: JSONObject = JSONObject()) {
         perform { store.apply("AWEI", type, params) }
     }
-    fun publish(format: String) {
+    fun publish(format: String, options: JSONObject = JSONObject()) {
         if (awaitingExport || busy) return
         awaitingExport = true
         busy = true
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    mutex.withLock { ArtRenderer.export(host.dataDir, store, store.current(), format, "") }
+                    mutex.withLock { ArtRenderer.export(host.dataDir, store, store.current(), format, "", options) }
                 }
                 exportPath = result.getString("path")
                 if (format == "png") exportPng.launch(result.getString("name"))
@@ -349,7 +435,19 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         busy = true
         scope.launch {
             try {
-                withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
+                withContext(Dispatchers.IO) {
+                    mutex.withLock {
+                        val result = store.save()
+                        val external = result.optString("externalUri")
+                        if (external.isNotBlank()) {
+                            context.contentResolver.openOutputStream(android.net.Uri.parse(external), "wt")
+                                ?.use { output ->
+                                    java.io.File(result.getString("path")).inputStream().use { it.copyTo(output) }
+                                } ?: error("无法写入外部工程文件")
+                            store.markExternalSynced(result.getString("id"))
+                        }
+                    }
+                }
                 refresh()
                 Toast.makeText(context, "工程已保存", Toast.LENGTH_LONG).show()
             } catch (error: Exception) {
@@ -357,28 +455,103 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             } finally { busy = pendingOperations > 0 || awaitingExport }
         }
     }
-    fun saveProjectCopy() {
-        if (current == null || busy) return
-        awaitingExport = true
+    fun leaveScreen() {
+        var wrapper: Context = context
+        repeat(12) {
+            if (wrapper is androidx.activity.ComponentActivity) {
+                (wrapper as androidx.activity.ComponentActivity).onBackPressedDispatcher.onBackPressed()
+                return
+            }
+            wrapper = (wrapper as? android.content.ContextWrapper)?.baseContext
+                ?: error("无法返回画室上级页面")
+        }
+        error("无法返回画室上级页面")
+    }
+    fun finishCurrent(save: Boolean, discard: Boolean, exit: Boolean) {
+        if (busy) return
+        ++renderSerial
         busy = true
         scope.launch {
             try {
-                val result = withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
-                archivePath = result.getString("path")
-                val name = state?.optString("name", "画室") ?: "画室"
-                exportProject.launch("${name.replace(Regex("[\\\\/:*?\"<>|]"), "_")}.ailart")
+                withContext(Dispatchers.IO) {
+                    mutex.withLock {
+                        if (save) {
+                            val result = store.save()
+                            val external = result.optString("externalUri")
+                            if (external.isNotBlank()) {
+                                context.contentResolver.openOutputStream(android.net.Uri.parse(external), "wt")
+                                    ?.use { output ->
+                                        java.io.File(result.getString("path")).inputStream()
+                                            .use { it.copyTo(output) }
+                                    } ?: error("无法写入外部工程文件")
+                                store.markExternalSynced(result.getString("id"))
+                            }
+                        }
+                        if (discard) store.discardCurrent() else store.close()
+                    }
+                }
+                snapshot = null
+                image?.recycle()
+                image = null
+                revision = ""
+                recentDocs = withContext(Dispatchers.IO) { store.recent() }
+                if (exit) leaveScreen()
             } catch (error: Exception) {
-                awaitingExport = false
-                Toast.makeText(context, error.message ?: "备份工程失败", Toast.LENGTH_LONG).show()
+                host.logger.e("ArtStudio", "Close failed", error)
+                Toast.makeText(context, error.message ?: "无法关闭画室工程", Toast.LENGTH_LONG).show()
             } finally { busy = pendingOperations > 0 || awaitingExport }
         }
     }
+    fun requestClose(exit: Boolean) {
+        if (current == null) {
+            if (exit) leaveScreen()
+            return
+        }
+        if (current.optBoolean("dirty")) {
+            exitAfterClose = exit
+            closeDialog = true
+        } else finishCurrent(save = false, discard = false, exit = exit)
+    }
     SideEffect {
         menuBridge.busy = busy
-        menuBridge.requestNew = {
-            if (!busy) {
-                canvasTab = 0
-                newCanvas = true
+        menuBridge.hasDocument = current != null
+        menuBridge.hasRecent = recentDocs.length() > 0
+        menuBridge.onFileCommand = { command ->
+            if (!busy) when (command) {
+                1 -> { canvasTab = 0; newCanvas = true }
+                2 -> { recentOnly = false; openDialog = true }
+                3 -> { recentOnly = true; openDialog = true }
+                4 -> saveProject()
+                5 -> { saveAsName = state?.optString("name", "未命名工程") ?: "未命名工程"; saveAsDialog = true }
+                6 -> sessionDialog = true
+                7 -> { importingUntitled = true; openExternal.launch(arrayOf("*/*")) }
+                8 -> exportDialog = true
+                9 -> {
+                    cropX = "0"; cropY = "0"
+                    cropWidth = state?.optInt("width")?.toString() ?: ""
+                    cropHeight = state?.optInt("height")?.toString() ?: ""
+                    outputWidth = cropWidth; outputHeight = cropHeight
+                    advancedExportDialog = true
+                }
+                12 -> perform { store.saveIncrementalVersion() }
+                13 -> perform {
+                    val result = store.saveIncrementalBackup()
+                    val external = result.optString("externalUri")
+                    if (external.isNotBlank()) {
+                        context.contentResolver.openOutputStream(android.net.Uri.parse(external), "wt")
+                            ?.use { output ->
+                                java.io.File(result.getString("path")).inputStream().use { it.copyTo(output) }
+                            } ?: error("无法写入外部工程文件")
+                        store.markExternalSynced(result.getString("id"))
+                    }
+                    store.current()
+                }
+                14 -> { templateName = state?.optString("name", "模板") ?: "模板"; templateDialog = true }
+                15 -> { duplicateName = (state?.optString("name", "未命名工程") ?: "未命名工程") + " 副本"
+                    duplicateDialog = true }
+                16 -> documentInfoDialog = true
+                17 -> requestClose(false)
+                19 -> requestClose(true)
             }
         }
     }
@@ -627,13 +800,176 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }, enabled = canCreate) { Text("创建") } },
             dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
     }
-    if (openDialog) AlertDialog(onDismissRequest = { openDialog = false }, title = { Text("打开工程") },
+    if (saveAsDialog) AlertDialog(onDismissRequest = { saveAsDialog = false },
+        title = { Text("另存为工程") },
+        text = { OutlinedTextField(saveAsName, { saveAsName = it.take(100) },
+            label = { Text("新工程名称") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = {
+            val name = saveAsName.trim()
+            if (name.isNotBlank() && !busy) {
+                saveAsDialog = false
+                pendingSaveAsName = name
+                awaitingExport = true
+                busy = true
+                saveAsFile.launch(name.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".ailart")
+            }
+        }, enabled = saveAsName.isNotBlank() && !busy) { Text("选择保存位置") } },
+        dismissButton = { TextButton(onClick = { saveAsDialog = false }) { Text("取消") } })
+    if (exportDialog) AlertDialog(onDismissRequest = { exportDialog = false },
+        title = { Text("导出图像") },
+        text = { Column {
+            Text("导出当前画布；原工程和图层保持不变。")
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = exportFormat == "png", onClick = { exportFormat = "png" },
+                    label = { Text("PNG") })
+                FilterChip(selected = exportFormat == "jpeg", onClick = { exportFormat = "jpeg" },
+                    label = { Text("JPEG") })
+            }
+        } },
+        confirmButton = { TextButton(onClick = { exportDialog = false; publish(exportFormat) }) {
+            Text("选择保存位置")
+        } },
+        dismissButton = { TextButton(onClick = { exportDialog = false }) { Text("取消") } })
+    if (advancedExportDialog) AlertDialog(onDismissRequest = { advancedExportDialog = false },
+        title = { Text("导出 - 更多选项") },
+        text = { Column(Modifier.heightIn(max = 490.dp).verticalScroll(rememberScrollState()),
+            verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("裁切范围（以画布像素为单位）")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(cropX, { cropX = it }, Modifier.weight(1f), label = { Text("X") })
+                OutlinedTextField(cropY, { cropY = it }, Modifier.weight(1f), label = { Text("Y") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(cropWidth, { cropWidth = it }, Modifier.weight(1f), label = { Text("宽") })
+                OutlinedTextField(cropHeight, { cropHeight = it }, Modifier.weight(1f), label = { Text("高") })
+            }
+            Text("输出大小（像素）")
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                OutlinedTextField(outputWidth, { outputWidth = it }, Modifier.weight(1f),
+                    label = { Text("宽") })
+                OutlinedTextField(outputHeight, { outputHeight = it }, Modifier.weight(1f),
+                    label = { Text("高") })
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = exportFormat == "png", onClick = { exportFormat = "png" },
+                    label = { Text("PNG") })
+                FilterChip(selected = exportFormat == "jpeg", onClick = { exportFormat = "jpeg" },
+                    label = { Text("JPEG") })
+            }
+        } },
+        confirmButton = { TextButton(onClick = {
+            val x = cropX.toIntOrNull(); val y = cropY.toIntOrNull()
+            val w = cropWidth.toIntOrNull(); val h = cropHeight.toIntOrNull()
+            val outW = outputWidth.toIntOrNull(); val outH = outputHeight.toIntOrNull()
+            val canvasW = state?.optInt("width") ?: 0
+            val canvasH = state?.optInt("height") ?: 0
+            if (x == null || y == null || w == null || h == null || outW == null || outH == null ||
+                x < 0 || y < 0 || w <= 0 || h <= 0 || x.toLong() + w > canvasW ||
+                y.toLong() + h > canvasH || outW !in 64..4096 || outH !in 64..4096) {
+                Toast.makeText(context, "裁切范围或输出尺寸无效", Toast.LENGTH_LONG).show()
+            } else {
+                advancedExportDialog = false
+                publish(exportFormat, JSONObject().put("x", x).put("y", y)
+                    .put("cropWidth", w).put("cropHeight", h)
+                    .put("width", outW).put("height", outH))
+            }
+        }) { Text("选择保存位置") } },
+        dismissButton = { TextButton(onClick = { advancedExportDialog = false }) { Text("取消") } })
+    if (duplicateDialog) AlertDialog(onDismissRequest = { duplicateDialog = false },
+        title = { Text("复制当前图像") },
+        text = { OutlinedTextField(duplicateName, { duplicateName = it.take(100) },
+            label = { Text("新工程名称") }, singleLine = true) },
+        confirmButton = { TextButton(onClick = {
+            val name = duplicateName.trim()
+            if (name.isNotBlank()) { duplicateDialog = false; perform { store.duplicate(name) } }
+        }, enabled = duplicateName.isNotBlank()) { Text("复制") } },
+        dismissButton = { TextButton(onClick = { duplicateDialog = false }) { Text("取消") } })
+    if (templateDialog) AlertDialog(onDismissRequest = { templateDialog = false },
+        title = { Text("画室模板") },
+        text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+            OutlinedTextField(templateName, { templateName = it.take(100) },
+                label = { Text("基于当前图像创建模板") }, singleLine = true)
+            for (i in 0 until templateItems.length()) {
+                val template = templateItems.getJSONObject(i)
+                TextButton(onClick = {
+                    templateDialog = false
+                    perform { store.fromTemplate(template.getString("id")) }
+                }) { Text("使用模板：" + template.getString("name")) }
+            }
+        } },
+        confirmButton = { TextButton(onClick = {
+            if (templateName.isNotBlank()) {
+                templateDialog = false
+                perform { store.createTemplate(templateName.trim()) }
+            }
+        }, enabled = templateName.isNotBlank()) { Text("保存模板") } },
+        dismissButton = { TextButton(onClick = { templateDialog = false }) { Text("取消") } })
+    if (sessionDialog) AlertDialog(onDismissRequest = { sessionDialog = false },
+        title = { Text("会话管理") },
+        text = { Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+            Text("当前画室每次只显示一个工程；会话记录恢复时要打开的工程。")
+            OutlinedTextField(sessionName, { sessionName = it.take(100) },
+                label = { Text("会话名称") }, singleLine = true)
+            for (i in 0 until sessions.length()) {
+                val session = sessions.getJSONObject(i)
+                Row {
+                    TextButton(onClick = {
+                        sessionDialog = false
+                        perform { store.openSession(session.getString("name")) }
+                    }, modifier = Modifier.weight(1f)) { Text("打开：" + session.getString("name")) }
+                    TextButton(onClick = {
+                        sessionDialog = false
+                        perform { store.deleteSession(session.getString("name")) }
+                    }) { Text("删除") }
+                }
+            }
+        } },
+        confirmButton = { TextButton(onClick = {
+            if (sessionName.isNotBlank() && current != null) {
+                sessionDialog = false
+                perform { store.saveSession(sessionName.trim()) }
+            }
+        }, enabled = sessionName.isNotBlank() && current != null) { Text("保存会话") } },
+        dismissButton = { TextButton(onClick = { sessionDialog = false }) { Text("关闭") } })
+    if (documentInfoDialog && current != null) AlertDialog(
+        onDismissRequest = { documentInfoDialog = false }, title = { Text("图像信息") },
+        text = { Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+            Text("名称：" + state?.optString("name"))
+            Text("尺寸：" + state?.optInt("width") + " × " + state?.optInt("height") + " px")
+            Text("图层：" + (state?.optJSONArray("layers")?.length() ?: 0))
+            Text("色彩：RGB / 8 位通道")
+            Text("背景：" + state?.optString("background"))
+            Text("修订：" + current.optInt("revision"))
+            Text("状态：" + if (current.optBoolean("dirty")) "未保存" else "已保存")
+            Text("工程 ID：" + current.getString("id"))
+        } },
+        confirmButton = { TextButton(onClick = { documentInfoDialog = false }) { Text("关闭") } })
+    if (closeDialog) AlertDialog(onDismissRequest = { closeDialog = false },
+        title = { Text("保存当前工程？") },
+        text = { Text("当前工程有未保存的修改。") },
+        confirmButton = { Row {
+            TextButton(onClick = {
+                closeDialog = false
+                finishCurrent(save = true, discard = false, exit = exitAfterClose)
+            }) { Text("保存并关闭") }
+            TextButton(onClick = {
+                closeDialog = false
+                finishCurrent(save = false, discard = true, exit = exitAfterClose)
+            }, enabled = current?.optBoolean("externalPending") != true) { Text("舍弃修改") }
+        } },
+        dismissButton = { TextButton(onClick = { closeDialog = false }) { Text("取消") } })
+    if (openDialog) AlertDialog(onDismissRequest = { openDialog = false },
+        title = { Text(if (recentOnly) "打开最近图像" else "打开工程") },
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+            if (!recentOnly) TextButton(onClick = {
+                openDialog = false; importingUntitled = false; openExternal.launch(arrayOf("*/*"))
+            }) { Text("选择手机上的工程或图片…") }
+            if (documents.length() == 0) Text("暂无工程")
             for (i in 0 until documents.length()) {
                 val id = documents.getJSONObject(i).getString("id")
                 val item = documents.getJSONObject(i)
                 TextButton(onClick = { openDialog = false; perform { store.open(id) } }) {
-                    Text("${item.optString("name", "未命名工程")} · ${item.getInt("width")}×${item.getInt("height")}${if (item.getBoolean("saved")) " · 已保存" else " · 草稿"}")
+                    Text("${item.optString("name", "未命名工程")} · ${item.getInt("width")}×${item.getInt("height")}${if (item.optBoolean("saved")) " · 已保存" else " · 草稿"}")
                 }
             }
         } }, confirmButton = { TextButton(onClick = { openDialog = false }) { Text("关闭") } })
@@ -643,11 +979,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             renameDialog = false
             if (selected.isNotBlank()) perform { store.apply("AWEI", "LAYER_RENAME", JSONObject().put("id", selected).put("name", layerName)) }
         }) { Text("保存") } }, dismissButton = { TextButton(onClick = { renameDialog = false }) { Text("取消") } })
-    if (projectDialog) AlertDialog(onDismissRequest = { projectDialog = false }, title = { Text("工程名称") },
-        text = { OutlinedTextField(projectName, { projectName = it.take(100) }) },
-        confirmButton = { TextButton(onClick = { projectDialog = false
-            if (projectName.isNotBlank()) perform { store.apply("AWEI", "DOCUMENT_RENAME", JSONObject().put("name", projectName)) }
-        }) { Text("保存") } }, dismissButton = { TextButton(onClick = { projectDialog = false }) { Text("取消") } })
     if (colorDialog) AlertDialog(onDismissRequest = { colorDialog = false }, title = { Text("画笔颜色") },
         text = { Column {
             OutlinedTextField(colorText, { colorText = it.uppercase().take(9) }, label = { Text("#AARRGGBB") })

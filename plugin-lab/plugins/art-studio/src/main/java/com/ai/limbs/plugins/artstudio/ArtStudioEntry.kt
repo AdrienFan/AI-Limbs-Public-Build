@@ -47,16 +47,65 @@ class ArtStudioEntry : InProcessPluginEntry {
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
         capability("document.create", "新建画室工程", write) { p ->
             store.create(p.getInt("width"), p.getInt("height"),
-                p.optString("background", "#FFFFFFFF"), p.optString("name", "未命名工程"))
+                p.optString("background", "#FFFFFFFF"), p.optString("name", "未命名工程"), "LANER")
         }
         capability("document.open", "打开画室工程", write) { p -> store.open(p.getString("id")) }
         capability("document.import", "导入画室工程文件", write,
             "导入 .ailart 工程的 base64 内容，创建独立工程并切换为当前工程。") { p ->
             val encoded = p.getString("base64")
             require(encoded.length <= 90 * 1024 * 1024) { "工程文件超过 64 MB" }
-            store.importArchive(Base64.decode(encoded, Base64.DEFAULT))
+            store.importArchive(Base64.decode(encoded, Base64.DEFAULT), "LANER")
         }
         capability("document.save", "保存画室工程", write) { store.save() }
+        capability("document.recent", "列出最近打开的画室工程", read) {
+            JSONObject().put("documents", store.recent())
+        }
+        capability("document.open_image", "将图片打开为新工程", write,
+            "使用 PNG 或 JPEG 的 base64 数据创建独立工程并切换至它，原工程保持可打开。") { p ->
+            store.openImage(p.getString("base64"), p.optString("name", "未命名图像"), "LANER")
+        }
+        capability("document.save_as", "另存为并切换画室工程", write,
+            "将当前画布复制成新 ID 的 .ailart 工程，保存到画室私有路径并将新工程设为当前；返回路径。") { p ->
+            store.saveAs(p.getString("name"), actor = "LANER")
+        }
+        capability("document.duplicate", "复制当前图像为新工程", write) { p ->
+            store.duplicate(p.getString("name"), actor = "LANER")
+        }
+        capability("document.close", "关闭当前画室工程", write,
+            "保留草稿与已保存档案，清除当前工程指针；未保存修改请先保存或明确调用 discard_and_close。") {
+            store.close()
+        }
+        capability("document.discard_and_close", "舍弃修改并关闭工程", write,
+            "明确舍弃当前未保存的修改：有存档时恢复已保存状态，否则删除草稿，然后关闭。") {
+            store.discardCurrent()
+        }
+        capability("document.incremental_version", "另存工程增量版本", write) {
+            store.saveIncrementalVersion("LANER")
+        }
+        capability("document.incremental_backup", "保存工程增量备份", write) {
+            store.saveIncrementalBackup()
+        }
+        capability("template.create", "从当前图像创建模板", write) { p ->
+            store.createTemplate(p.getString("name"))
+        }
+        capability("template.list", "列出画室模板", read) {
+            JSONObject().put("templates", store.templates())
+        }
+        capability("template.open", "从模板创建新工程", write) { p ->
+            store.fromTemplate(p.getString("id"), "LANER")
+        }
+        capability("session.save", "保存画室会话", write) { p ->
+            store.saveSession(p.getString("name"))
+        }
+        capability("session.list", "列出画室会话", read) {
+            JSONObject().put("sessions", store.sessions())
+        }
+        capability("session.open", "恢复画室会话", write) { p ->
+            store.openSession(p.getString("name"))
+        }
+        capability("session.delete", "删除画室会话", write) { p ->
+            store.deleteSession(p.getString("name"))
+        }
         capability("document.rename", "重命名画室工程", write) { p -> store.apply("LANER", "DOCUMENT_RENAME", p) }
         capability("document.info", "读取画室工程", read) { store.current() }
         capability("document.list", "列出画室工程", read) { JSONObject().put("documents", store.list()) }
@@ -167,10 +216,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.importImage("LANER", p.getString("base64"))
         }
         capability("export.png", "导出 PNG", write) { p ->
-            ArtRenderer.export(host.dataDir, store, store.current(), "png", p.optString("name", ""))
+            ArtRenderer.export(host.dataDir, store, store.current(), "png", p.optString("name", ""), p)
         }
         capability("export.jpeg", "导出 JPEG", write) { p ->
-            ArtRenderer.export(host.dataDir, store, store.current(), "jpeg", p.optString("name", ""))
+            ArtRenderer.export(host.dataDir, store, store.current(), "jpeg", p.optString("name", ""), p)
         }
         host.logger.i("ArtStudio", "Art Studio mounted")
         return InProcessPluginHandle { host.logger.i("ArtStudio", "Art Studio stopped") }
@@ -208,6 +257,10 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
             p("background", optional = true), p("name", optional = true))
         "document.import" -> listOf(p("base64"))
+        "document.open_image" -> listOf(p("base64"), p("name", optional = true))
+        "document.save_as", "document.duplicate", "template.create",
+        "session.save", "session.open", "session.delete" -> listOf(p("name"))
+        "template.open" -> listOf(id)
         "document.open", "layer.select", "layer.delete", "layer.copy",
         "layer.move_up", "layer.move_down", "layer.set_lock" ->
             listOf(id) + when (name) {
@@ -240,7 +293,11 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "transform.rotate" -> listOf(id, p("rotation", "number"))
         "history.revert_actor_operations" -> listOf(id)
         "image.import" -> listOf(p("base64"))
-        "export.png", "export.jpeg", "document.rename" -> listOf(p("name", optional = name != "document.rename"))
+        "export.png", "export.jpeg" -> listOf(p("name", optional = true),
+            p("x", "integer", true), p("y", "integer", true),
+            p("cropWidth", "integer", true), p("cropHeight", "integer", true),
+            p("width", "integer", true), p("height", "integer", true))
+        "document.rename" -> listOf(p("name"))
         else -> emptyList()
     }.let { fields ->
         if ((name.startsWith("layer.") && name !in setOf("layer.list", "layer.search")) ||

@@ -1,39 +1,42 @@
-# AI Limbs 画室 0.2.0
+# AI Limbs 画室（开发中，0.2.0）
 
-独立的 `android_inprocess` 插件。工具箱页面与 AI Capability 操作同一工程目录，Host 与 Resident 用文件锁协调；页面操作记录为 `AWEI`，公开能力修改记录为 `LANER`。本版沿用既有工程格式和能力名称，只迭代插件，不修改基座。
+画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
-新建工程先选像素宽高（64–4096）、工程名称和背景，再自动创建并选中第一个绘画图层；`document.create` 的可选 `name` 参数与页面共用同一创建逻辑。原右上角“⋮”菜单及其弹出项已移除；文件 → 新建现已接入，打开、保存及导出的底层能力保留，待逐项接入顶部菜单。画布左上角不叠放工程状态提示；原有底部颜色、笔刷、图层、属性和历史操作区已从页面移除，把高度留给画布。“居中”只调整画布视图，不改变图片像素。创建工程后，画布左右各显示 20dp 的抽屉把手；抽屉默认收起，展开一侧会收起另一侧。左抽屉暂不显示旧工具按钮，右抽屉分为拾色器、图层、笔刷预设三段；大屏约按 26% / 35% / 39% 分配，手机短屏提高拾色器占比，各段以分隔线区分；目前仅顶部提供按 Krita 色相环与 HSV 三角区交互逻辑重新实现的拾色器（顶部可独立滚动），包含饱和度、明度色条和 #AARRGGBB 输入，中段图层面板已经接入真实图层状态与操作，底段“笔刷预设”仍留空；选色立即更新当前绘画工具颜色；兰儿仍可通过 stroke.add 的同一 #AARRGGBB 颜色参数独立选色；底部仅保留一条底栏，右侧“居中”会重置画布缩放、旋转与平移，使全图适配当前可视区域；旁边独立的“全屏”打开竖屏全屏、横屏全屏和退出全屏选项，通过 host.ui.presentation@1 切换当前画室页面的外壳、系统栏和方向。页面的当前选中图层读取共享工程状态；AI 的 `layer.select` 能同步到页面。透明画布显示棋盘底；拾色器只处理当前 RGB 8 位画笔颜色，不包含 Krita 的 ICC、色域遮罩与颜色历史。PNG、JPEG 的页面导出处理流程已保留，入口待接入顶部菜单后会打开系统保存文件选择器。
+## 文件菜单
 
-草稿位于 `drafts/<id>.json`；显式保存生成 `documents/<id>.ailart`，包含 `project.json` 与引用的 PNG 资源。`export.png` 与 `export.jpeg` 先将结果保存到插件私有 `exports/`，返回 `path`、`name`、`mime`、`bytes`；AI 能力调用返回的文件并不会自动出现在相册。用户在页面导出时选择目标文件，页面写入该目标。页面也可通过系统文件选择器备份和导入 `.ailart`，导入创建独立工程并重新分配资源标识。工程命名通过新增 `document.rename` 能力编辑，旧工程未命名时显示“未命名工程”。
+菜单行为参照手机里解压的 Krita 6.0.4 源码 libs/ui/KisMainWindow.cpp：slotFileOpen、slotFileOpenRecent、slotFileSave、slotFileSaveAs、slotExportFile、slotExportAdvance、slotFileCloseAll、slotFileQuit，以及官方 5.3 文件菜单说明。菜单结构采用 Krita 的顺序，内部实现基于本画室的文档格式与 Android 文件选择器。
 
-每次笔画与图层编辑记录一个 Operation；撤销/重做依操作发生顺序维护历史，指定撤销保留旧接口。重放验证后才落盘；若撤销破坏后续依赖则拒绝并保留原稿。选区碰到折线端点或线段即选择整笔，不切分笔画。组复制会复制子树并更新子图层与笔画 ID；父组锁定会阻止子层编辑；裁剪只平移顶层，以免子层重复位移。可选 `expectedRevision` 与当前操作数比较，拒绝陈旧修改。
+| 菜单项 | 页面执行效果 | 兰儿能力 |
+| --- | --- | --- |
+| 新建 | 设置像素尺寸、名称、透明背景并创建工程 | document.create |
+| 打开、打开最近图像 | 打开本画室工程，或选手机上的 .ailart / PNG / JPEG；最近图像按打开顺序列出 | document.open、document.import、document.open_image、document.recent、document.list |
+| 保存 | 将工程写入私有 .ailart；关联了手机文档时，同步覆盖该文档。同步失败时保留私有稿，标为待同步 | document.save；结果包含 externalUri |
+| 另存为 | 先选手机保存位置，建立新 ID 的工程并切换过去；取消选择则原工程不变 | document.save_as；返回私有 .ailart 路径 |
+| 会话管理 | 命名、查看、恢复或删除当前单工程会话 | session.save、session.list、session.open、session.delete |
+| 导入－打开为无标题图像 | 把外部图像或工程作为独立的未命名工程打开，原工程保留 | document.open_image、document.import、document.rename |
+| 导出、导出－更多选项 | PNG / JPEG；高级导出支持裁切和调整输出像素尺寸，不改原工程 | export.png、export.jpeg；可选 x、y、cropWidth、cropHeight、width、height |
+| 保存增量版本 | 创建并切换到编号为 _v001 等的新工程；旧版本保留 | document.incremental_version |
+| 保存增量备份 | 有上次存档时复制到 backups/ 的编号文件，再保存当前工程 | document.incremental_backup |
+| 新建模板－基于当前图像 | 把完整分层画布保存为画室模板，可从模板创建新工程 | template.create、template.list、template.open |
+| 新建图像－复制当前图像 | 用当前合成状态创建独立的未保存工程，原工程不变 | document.duplicate |
+| 图像信息 | 查看工程名称、像素尺寸、背景、图层数、修订号与保存状态 | document.info、layer.list |
+| 关闭、退出 | 未保存时询问保存、舍弃或取消；退出仅返回宿主上一页，不退出 AI Limbs | document.close、document.discard_and_close |
 
-菜单栏阶段：画室内容区顶部新增可横向滑动的十一项菜单标题（文件、编辑、视图、图像、图层、选择、滤镜、工具、设置、窗口、帮助）。文件标题现在打开仅有“新建”的菜单；点击“新建”弹出尺寸/内容对话框，确认后调用 ArtStore.create。其他十项标题仍仅切换选中样式。原有“⋮”菜单与弹出层已删除。菜单栏由插件页面自己绘制，不增加基座接口，也不发布无实际操作的 AI 能力。
+“全部关闭”保持不可用：画室目前只有一个活动视图；保存的其他工程可以从“打开”访问。逐帧动画导入和动画导出保持不可用：工程没有时间轴与帧数据，不能将静态图层冒充为 Krita 动画。会话管理目前也只保存一个活动工程，不具备 Krita 多文档窗口会话能力。模板使用本画室 .ailart 结构，无法读写 Krita .kra 或 .kpl。
 
-右侧第二段图层面板参考 Krita 6.0.4 的 plugins/dockers/layerdocker/WdgLayerBox.ui、LayerBox.cpp 和 NodeDelegate.cpp：显示混合模式与不透明度、图层名称过滤、带内容预览的层级列表、显隐和锁定，以及底部新增绘画层／图层组、复制、同级上下移动、属性编辑与删除。组可展开收起，删除需要确认；短屏可点击图层标题旁的放大按钮扩大第二段。画室数据从下到上合成，列表从上到下排列；“画布背景”只显示新建时设定的背景，并非可编辑图层。图层属性作为单条 LAYER_PROPERTIES 操作保存；AI 可调用 layer.properties，并继续使用已有的细分图层能力。页面创建或复制图层时会自动选中新层；删除当前层后自动选择相邻可用层。
+## 保存与工程数据
 
-## 已知限制
+草稿位于 drafts/<id>.json，显式保存位于 documents/<id>.ailart，内含 project.json 和图层引用的 PNG 资源；包括由“复制当前图像”生成并写进 base 的图片图层。保存摘要位于 documents/<id>.sha256，用于判断已有存档是否仍对应当前操作。外部文档 URI 存在 external-links.json；文件选择器返回可持久写入权限时才会关联。私有副本已写入但外部同步失败，会显示待同步状态，菜单“保存”可重试。“另存为”在用户选定位置且写入成功后才切换活动工程；新工程有独立 ID 和操作历史。
 
-- 新建对话框的预设、像素宽高、宽高交换、工程名与透明背景真实生效。当前工程模型仅支持 RGB 8 位、像素尺寸及单个初始绘画图层；Krita 的 DPI、ICC 特性文件、色彩模型切换、模板、剪贴板及多图层新建尚未接入，不显示可误操作的设置。
+最近打开的工程 ID 按顺序写入 recent.json。关闭没有改动的工程仅取消当前指针；关闭时明确选择舍弃会恢复上次保存的私有存档，未曾保存的草稿则删除。外部保存待同步时，界面禁止“舍弃修改”，避免把私有唯一有效稿误当成已同步内容丢掉。增量备份和模板存放在插件私有目录；它们不会自动出现于系统相册或手机 Download。
 
-- 图层组已隔离合成并在组边界应用不透明度与混合模式；矩形选区仍不支持笔画切分或图片局部编辑。Krita 的透明度继承、Alpha 锁定、蒙版、多选图层以及颜色标签需要额外的画室数据与渲染语义，本版不显示对应操作。图层过滤只按名称，移动只在同一父组内调整顺序，不能通过拖动改变父组；缩略图按图层内容缩放绘制，图片图层使用降采样预览。
-- 笔刷保留基础效果，喷枪尚不是专业的粒子笔刷。普通尺寸画布按图层渲染，4K 多层画布仍可能占用较多内存。
-- 画室工程仍保存在插件私有目录。卸载并清除插件数据会删除草稿与工程；工程文件的页面备份和导入处理流程已保留，入口待接入；AI 能力目前只返回插件私有路径。
+AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿的 document.save 会写私有存档并留下“外部待同步”状态，阿伟可以打开页面执行“保存”完成 Android URI 写入。兰儿拿到导出结果的私有路径，不会自动将文件复制到系统相册。需要防止双方同时编辑时，对结构化图层编辑使用 expectedRevision。
 
-## 双端入口
+## 画布与图层
 
-页面动作与兰儿能力入口共用 `ArtStore` 工程目录、文件锁与当前工程指针。新增的界面动作在发布前都要检查对应能力：
+新建支持 64–4096 像素边长、工程名称及透明背景；当前工程只有 RGB 8 位与一个初始绘画图层，不存储 ICC、DPI 或 Krita 原生色彩模型。画布底栏“居中”只重置缩放、旋转、平移；旁边“全屏”通过 host.ui.presentation@1 控制页面。左右抽屉默认收起；右侧依次为多功能拾色器、真实图层管理、尚未实现的笔刷预设。左抽屉暂不显示旧按钮。菜单栏其余十项目前只有标题。
 
-| 页面动作 | 兰儿能力 |
-| --- | --- |
-| 文件 → 新建（已接入）、打开工程（待接入） | `document.create`、`document.open` |
-| 保存工程、另存工程副本 | `document.save`，返回当前 `.ailart` 私有文件路径；未来页面“副本”入口再经系统选择器复制到用户指定位置 |
-| 另存为 PNG、JPEG | `export.png`、`export.jpeg`，返回 `path`、`name`、`mime`、`bytes`；未来页面入口再经系统选择器写入用户指定位置 |
-| 导入图片、工程 | `image.import`、`document.import`，后一项接收 `.ailart` 的 base64 内容并创建独立工程 |
-| 重命名工程 | `document.rename` |
-| 按名称查找图层、读取图层结构 | `layer.search`、`layer.list` |
-| 图层：创建绘画层／组、选择、显隐、锁定、混合模式、不透明度、重命名、复制、同级排序、属性、删除 | `layer.create`、`layer.group`、`layer.select`、`layer.set_visibility`、`layer.set_lock`、`layer.set_blend`、`layer.set_opacity`、`layer.rename`、`layer.copy`、`layer.move`、`layer.move_up`、`layer.move_down`、`layer.properties`、`layer.delete` |
+右侧图层管理参考 Krita 6.0.4 的 plugins/dockers/layerdocker/WdgLayerBox.ui、LayerBox.cpp 和 NodeDelegate.cpp，提供名称筛选、缩略图、显隐、锁定、混合模式、不透明度、绘画层与组、复制、同级排序、属性和删除。兰儿对应使用 layer.list、layer.search、layer.create、layer.group、layer.select、layer.set_visibility、layer.set_lock、layer.set_blend、layer.set_opacity、layer.rename、layer.copy、layer.move_up、layer.move_down、layer.properties 与 layer.delete。底到顶合成；图层背景不是可编辑图层。笔刷仍是基础画笔与喷枪，4K 多层画布可能消耗较多内存。
 
-兰儿操作图层时，先调用 layer.list 读取当前活动层、图层 ID、parentId、底到顶的顺序和 revision。图层面板的上移／下移按钮与 layer.move_up／layer.move_down 使用相同的同级移动操作；layer.move 可按底到顶的绝对数组索引重排图层，但不改变 parentId。图层名称筛选可调用 layer.search，结构化图层数据可从 layer.list 读取，整图可通过 export.png 导出。要一次修改多个属性可调用 layer.properties；新建／复制时可传 select=true 自动选中。若阿伟与兰儿同时编辑，传入可选 expectedRevision 防止基于旧版本误改。兰儿的写入继续标记为 LANER，阿伟在页面上的写入标记为 AWEI。
-
-系统文件选择器属于手机的交互步骤；兰儿通过能力直接操作相同工程数据，并获得私有导出文件的路径与元数据。后续新增画室动作时，应在界面与能力两端提供入口，并保持操作历史中的执行者身份。
+源码对照入口：https://invent.kde.org/graphics/krita/-/blob/master/libs/ui/KisMainWindow.cpp
+Krita 文件菜单说明：https://docs.krita.org/en/reference_manual/main_menu/file_menu.html
