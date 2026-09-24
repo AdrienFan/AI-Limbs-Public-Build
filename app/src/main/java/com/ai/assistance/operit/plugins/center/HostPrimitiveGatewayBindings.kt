@@ -207,6 +207,14 @@ internal object HostPrimitiveGatewayBindings {
             ),
             enforceAffinity = true
         ),
+        "host.screen.session@1" to primitive(
+            HostGatewayExecutionAffinity.HOST_FRAMEWORK,
+            kernel("list_targets"),
+            kernel("status"),
+            kernel("start"),
+            kernel("frame"),
+            kernel("stop")
+        ),
         "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), pending("listen")),
         "host.background.runtime@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("acquire_lease"), pending("update_lease"), pending("release_lease"), pending("status")),
         "host.notification@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("publish", "send_notification")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, tool("observe", "get_notifications"))),
@@ -247,7 +255,19 @@ internal object HostPrimitiveGatewayBindings {
         "host.authorization@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, core("describe", "ai_limbs.policy.describe"), kernel("evaluate")),
         "kernel.plugin.trust@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("status"), kernel("verify_package"), kernel("verify_detached"), kernel("install_keyring")),
         "host.ui.widget@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("list"), pending("register"), pending("update"), pending("remove")),
-        "host.camera.capture@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("capture")),
+        "host.camera.capture@1" to primitive(
+            HostGatewayExecutionAffinity.HOST_FRAMEWORK,
+            kernel("capture")
+        ),
+        "host.camera.session@1" to primitive(
+            HostGatewayExecutionAffinity.HOST_FRAMEWORK,
+            kernel("list_sources"),
+            kernel("status"),
+            kernel("start"),
+            kernel("frame"),
+            kernel("configure"),
+            kernel("stop")
+        ),
         "host.custom_access_prompt@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, document("read", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("write", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("snapshots", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("restore", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)),
         "host.work_manual@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, document("read", AiLimbsDocumentId.WORK_MANUAL), document("write", AiLimbsDocumentId.WORK_MANUAL), document("snapshots", AiLimbsDocumentId.WORK_MANUAL), document("restore", AiLimbsDocumentId.WORK_MANUAL)),
         "host.privileged.runtime@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("status")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("pair")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("prepare")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("stop")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("select"))),

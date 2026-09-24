@@ -14,7 +14,7 @@ on:
           - ':app:assembleClone'
           - ':app:bundleRelease'
   push:
-    branches: [main, v0.5.2-dev]
+    branches: [main, v0.5.2-dev, fix/build72-visual-resident-restore]
 
 concurrency:
   group: android-build-${{ github.event_name }}-${{ github.ref }}
@@ -211,6 +211,8 @@ jobs:
             --tests com.ai.assistance.operit.plugins.center.UnknownPluginUnifiedReceiverTest \
             --tests com.ai.assistance.operit.core.tools.defaultTool.UiAutomationBackendPolicyTest \
             --tests com.ai.assistance.operit.core.tools.system.PermissionRoutingPolicyTest \
+            --tests com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntimeDecisionTest \
+            --tests com.ai.assistance.operit.plugins.center.VisualHostPrimitiveReservationTest \
             --stacktrace --no-daemon
 
       - name: Run Gradle build

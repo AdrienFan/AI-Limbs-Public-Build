@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
+import com.ai.assistance.operit.core.tools.system.VisualHostRuntime
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
@@ -49,6 +50,21 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         }
         return when (id) {
             "host.network@1" -> invokeNetwork(op)
+            "host.screen.session@1" ->
+                VisualHostRuntime.invokeScreen(
+                    appContext,
+                    ownerPluginId,
+                    op,
+                    parameters
+                ) { captureScreenFrame(ownerPluginId) }
+            "host.camera.capture@1", "host.camera.session@1" ->
+                VisualHostRuntime.invokeCamera(
+                    appContext,
+                    ownerPluginId,
+                    id,
+                    op,
+                    parameters
+                )
             "host.ui.surface@1" -> invokeUiSurface(op, parameters)
             "host.capability@1" -> invokeCapability(ownerPluginId, parameters)
             "host.plugin.service@1" -> invokePluginService(ownerPluginId, op, parameters)
@@ -67,6 +83,14 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             )
         }
     }
+
+    private suspend fun captureScreenFrame(ownerPluginId: String): JSONObject =
+        dispatcher(ownerPluginId).execute(
+            "ai_limbs.host_tool.execute",
+            JSONObject()
+                .put("name", "capture_screenshot")
+                .put("parameters", JSONObject())
+        )
 
     private suspend fun invokeNetwork(operation: String): JSONObject = when (operation) {
         "listeners" -> snapshotTcpListeners()
@@ -682,6 +706,18 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
         val SUPPORTED = setOf(
             "host.network@1/listeners",
+            "host.screen.session@1/list_targets",
+            "host.screen.session@1/status",
+            "host.screen.session@1/start",
+            "host.screen.session@1/frame",
+            "host.screen.session@1/stop",
+            "host.camera.capture@1/capture",
+            "host.camera.session@1/list_sources",
+            "host.camera.session@1/status",
+            "host.camera.session@1/start",
+            "host.camera.session@1/frame",
+            "host.camera.session@1/configure",
+            "host.camera.session@1/stop",
             "host.ui.surface@1/list",
             "host.ui.surface@1/register",
             "host.ui.surface@1/open",

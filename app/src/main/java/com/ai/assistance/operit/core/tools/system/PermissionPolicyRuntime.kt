@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.core.tools.system
 
 import android.content.Context
+import android.os.Looper
 import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
 import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreProcessIdentity
 import com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy
@@ -19,17 +20,26 @@ data class PermissionPolicyState(
 
 object PermissionPolicyRuntime {
     private const val TAG = "PermissionPolicyRuntime"
+    private const val HOST_POLICY_SYNC_TIMEOUT_MS = 750L
 
-    fun readBlocking(context: Context): PermissionPolicyState =
-        runBlocking { read(context.applicationContext) }
+    fun readBlocking(context: Context): PermissionPolicyState {
+        val appContext = context.applicationContext
+        if (
+            shouldUseLocalBootstrapState(
+                isResidentCore = ResidentCoreProcessIdentity.isCurrentProcessCore(),
+                isMainLooper = Looper.myLooper() === Looper.getMainLooper()
+            )
+        ) {
+            // Plugin Kernel bootstrap owns the Resident Core main looper. It must never wait for
+            // the Host UI proxy, which is attaching during the same ownership transition.
+            return localState("resident_core_bootstrap")
+        }
+        return runBlocking { read(appContext) }
+    }
 
     suspend fun read(context: Context): PermissionPolicyState {
         if (!ResidentCoreProcessIdentity.isCurrentProcessCore()) {
-            return PermissionPolicyState(
-                coexistEnabled = androidPermissionPreferences.getPermissionCoexistEnabled(),
-                legacyPreferred = androidPermissionPreferences.getPreferredPermissionLevel(),
-                source = "android_host"
-            )
+            return localState("android_host")
         }
 
         val hostState =
@@ -37,7 +47,8 @@ object PermissionPolicyRuntime {
                 withContext(Dispatchers.IO) {
                     ResidentHostComponentProxy.request(
                         ResidentComponentProxyBroker.KIND_PERMISSION_POLICY_HOST,
-                        JSONObject().put("action", "state")
+                        JSONObject().put("action", "state"),
+                        timeoutMs = HOST_POLICY_SYNC_TIMEOUT_MS
                     )
                 }
             }.getOrElse { error ->
@@ -60,11 +71,18 @@ object PermissionPolicyRuntime {
                 source = "resident_host"
             )
         }
+        return localState("resident_local_fallback")
+    }
 
-        return PermissionPolicyState(
+    internal fun shouldUseLocalBootstrapState(
+        isResidentCore: Boolean,
+        isMainLooper: Boolean
+    ): Boolean = isResidentCore && isMainLooper
+
+    private fun localState(source: String): PermissionPolicyState =
+        PermissionPolicyState(
             coexistEnabled = androidPermissionPreferences.getPermissionCoexistEnabled(),
             legacyPreferred = androidPermissionPreferences.getPreferredPermissionLevel(),
-            source = "resident_local_fallback"
+            source = source
         )
-    }
 }
