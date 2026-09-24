@@ -156,7 +156,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var transformY by remember { mutableStateOf("0") }
     var transformScale by remember { mutableStateOf("1") }
     var transformAngle by remember { mutableStateOf("0") }
-    var panel by remember { mutableStateOf("") }
     var leftDrawerOpen by remember { mutableStateOf(false) }
     var rightDrawerOpen by remember { mutableStateOf(false) }
     var exportPath by remember { mutableStateOf("") }
@@ -437,113 +436,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                 }
             }
-            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                OutlinedButton(onClick = { colorText = color; colorDialog = true }) {
-                    Text("● 颜色", color = androidx.compose.ui.graphics.Color(Color.parseColor(color)))
-                }
-                Text("笔粗 ${width.toInt()}", style = MaterialTheme.typography.bodySmall)
-                Slider(value = width, onValueChange = { width = it }, valueRange = 1f..80f, modifier = Modifier.weight(1f))
-                Text("${(opacity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
-                Slider(value = opacity, onValueChange = { opacity = it }, modifier = Modifier.weight(1f))
-            }
-            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                listOf("layers" to "图层", "properties" to "属性", "history" to "历史").forEach { (key, label) ->
-                    FilterChip(selected = panel == key, onClick = { panel = if (panel == key) "" else key },
-                        label = { Text(label) })
-                }
-            }
-            if (panel.isNotEmpty()) Column(Modifier.fillMaxWidth().heightIn(max = 184.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                when (panel) {
-                    "layers" -> {
-                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
-                            TextButton(onClick = {
-                                val id = UUID.randomUUID().toString()
-                                perform { store.apply("AWEI", "LAYER_CREATE", JSONObject().put("id", id)
-                                    .put("name", "绘画图层").put("parentId", if (selectedLayer?.optString("kind") == "group") selected else ""))
-                                    .let { store.apply("AWEI", "LAYER_SELECT", JSONObject().put("id", id)) } }
-                            }) { Text("＋图层") }
-                            TextButton(onClick = { val id = UUID.randomUUID().toString(); perform {
-                                store.apply("AWEI", "GROUP_CREATE", JSONObject().put("id", id))
-                                store.apply("AWEI", "LAYER_SELECT", JSONObject().put("id", id))
-                            } }) { Text("＋组") }
-                            TextButton(onClick = { if (selected.isNotBlank()) edit("LAYER_COPY", JSONObject()
-                                .put("id", selected).put("newId", UUID.randomUUID().toString())) }, enabled = selected.isNotBlank()) { Text("复制") }
-                            TextButton(onClick = { if (selected.isNotBlank()) edit("LAYER_DELETE", JSONObject().put("id", selected)) },
-                                enabled = selected.isNotBlank()) { Text("删除") }
-                        }
-                        for (i in 0 until layers.length()) {
-                            val layer = layers.getJSONObject(i)
-                            val id = layer.getString("id")
-                            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                TextButton(onClick = { edit("LAYER_SELECT", JSONObject().put("id", id)) }, Modifier.weight(1f)) {
-                                    Text((if (layer.optString("parentId").isNotBlank()) "  ↳ " else "") +
-                                        (if (layer.getString("kind") == "group") "▣ " else "▤ ") + layer.getString("name"),
-                                        maxLines = 1, color = if (id == selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
-                                }
-                                TextButton(onClick = { edit("LAYER_VISIBLE", JSONObject().put("id", id)
-                                    .put("visible", !layer.getBoolean("visible"))) }) { Text(if (layer.getBoolean("visible")) "◉" else "○") }
-                                TextButton(onClick = { edit("LAYER_LOCK", JSONObject().put("id", id)
-                                    .put("locked", !layer.getBoolean("locked"))) }) { Text(if (layer.getBoolean("locked")) "锁" else "开") }
-                            }
-                        }
-                    }
-                    "properties" -> if (selectedLayer != null) {
-                        Text(selectedLayer.getString("name") + " · " + selectedLayer.getString("kind"))
-                        val siblings = (0 until layers.length()).filter {
-                            layers.getJSONObject(it).optString("parentId") == selectedLayer.optString("parentId")
-                        }
-                        val siblingPosition = siblings.indexOfFirst { layers.getJSONObject(it).getString("id") == selected }
-                        Row(Modifier.horizontalScroll(rememberScrollState())) {
-                            TextButton(onClick = { layerName = selectedLayer.getString("name"); renameDialog = true }) { Text("重命名") }
-                            TextButton(onClick = { edit("LAYER_MOVE", JSONObject().put("id", selected)
-                                .put("index", siblings[(siblingPosition + 1).coerceAtMost(siblings.lastIndex)])) },
-                                enabled = siblingPosition < siblings.lastIndex) { Text("上移") }
-                            TextButton(onClick = { edit("LAYER_MOVE", JSONObject().put("id", selected)
-                                .put("index", siblings[(siblingPosition - 1).coerceAtLeast(0)])) },
-                                enabled = siblingPosition > 0) { Text("下移") }
-                            TextButton(onClick = {
-                                transformX = selectedLayer.getDouble("x").toString()
-                                transformY = selectedLayer.getDouble("y").toString()
-                                transformScale = selectedLayer.getDouble("scale").toString()
-                                transformAngle = selectedLayer.getDouble("rotation").toString()
-                                transformDialog = true
-                            }) { Text("变换…") }
-                        }
-                        val modes = listOf("normal", "multiply", "screen", "add")
-                        TextButton(onClick = { edit("LAYER_BLEND", JSONObject().put("id", selected)
-                            .put("blend", modes[(modes.indexOf(selectedLayer.getString("blend")) + 1) % modes.size])) }) {
-                            Text("混合：${selectedLayer.getString("blend")}")
-                        }
-                        Text("图层不透明度 ${(selectedLayer.getDouble("opacity") * 100).toInt()}%")
-                        Row {
-                            TextButton(onClick = { edit("LAYER_OPACITY", JSONObject().put("id", selected)
-                                .put("opacity", (selectedLayer.getDouble("opacity") - 0.1).coerceIn(0.0, 1.0))) }) { Text("－") }
-                            TextButton(onClick = { edit("LAYER_OPACITY", JSONObject().put("id", selected)
-                                .put("opacity", (selectedLayer.getDouble("opacity") + 0.1).coerceIn(0.0, 1.0))) }) { Text("＋") }
-                        }
-                        val selection = state.optJSONObject("selection")
-                        if (selection != null) Row(Modifier.horizontalScroll(rememberScrollState())) {
-                            listOf("COPY" to "复制选区", "DELETE" to "删除", "SCALE" to "放大", "ROTATE" to "旋转").forEach { (action, label) ->
-                                TextButton(onClick = { edit("SELECTION_EDIT", JSONObject().put("layerId", selected)
-                                    .put("action", action).put("factor", 1.1).put("degrees", 15)) }) { Text(label) }
-                            }
-                            TextButton(onClick = { edit("SELECTION_CLEAR") }) { Text("取消选区") }
-                            TextButton(onClick = { edit("CROP", JSONObject()
-                                .put("x", selection.getDouble("x")).put("y", selection.getDouble("y"))
-                                .put("width", selection.getDouble("width").toInt())
-                                .put("height", selection.getDouble("height").toInt())) },
-                                enabled = selection.getDouble("width") >= 64 && selection.getDouble("height") >= 64) { Text("裁剪画布") }
-                        }
-                    }
-                    "history" -> {
-                        val operations = current.getJSONArray("operations")
-                        for (i in operations.length()-1 downTo maxOf(0, operations.length()-12)) {
-                            val op = operations.getJSONObject(i)
-                            Text("${if (op.getString("actor") == "LANER") "兰儿" else "阿伟"} · ${op.getString("type")}",
-                                style = MaterialTheme.typography.bodySmall)
-                        }
+            Surface(Modifier.fillMaxWidth().height(48.dp),
+                color = MaterialTheme.colorScheme.surfaceVariant, tonalElevation = 1.dp) {
+                Row(Modifier.fillMaxSize().padding(horizontal = 8.dp),
+                    horizontalArrangement = Arrangement.End,
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    TextButton(onClick = { canvasRef[0]?.fitToWindow() }, enabled = image != null) {
+                        Text("居中")
                     }
                 }
             }
