@@ -18,6 +18,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
@@ -177,6 +178,8 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
     var transformScale by remember { mutableStateOf("1") }
     var transformAngle by remember { mutableStateOf("0") }
     var panel by remember { mutableStateOf("") }
+    var leftDrawerOpen by remember { mutableStateOf(false) }
+    var rightDrawerOpen by remember { mutableStateOf(false) }
     var exportPath by remember { mutableStateOf("") }
     var archivePath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
@@ -389,17 +392,10 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
         } else {
             val state = current.getJSONObject("state")
             val layers = state.getJSONArray("layers")
-            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                Column(Modifier.width(86.dp).verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    listOf("ink" to "墨笔", "pencil" to "铅笔", "soft" to "软笔", "spray" to "喷枪",
-                        "eraser" to "橡皮", "select" to "选区", "move" to "移动", "pan" to "视图")
-                        .forEach { (key, label) ->
-                            FilterChip(selected = tool == key, onClick = { tool = key },
-                                label = { Text(label, maxLines = 1) }, modifier = Modifier.fillMaxWidth())
-                        }
-                }
-                Box(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+                val railWidth = 28.dp
+                val drawerWidth = (maxWidth * 0.68f).coerceAtMost(280.dp)
+                Box(Modifier.fillMaxSize().padding(horizontal = railWidth).clipToBounds()) {
                 AndroidView(factory = { ctx -> StudioCanvas(ctx).also { canvasRef[0] = it } },
                     modifier = Modifier.fillMaxSize(), update = { view ->
                     view.documentId = current.getString("id")
@@ -425,6 +421,52 @@ private fun Studio(host: InProcessPluginUiHost, statusBridge: StudioStatusBridge
                         }
                     }
                 })
+                }
+                // The handles stay visible; only one drawer can cover the canvas at a time.
+                if (leftDrawerOpen) {
+                    Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
+                        .padding(start = railWidth).width(drawerWidth).fillMaxHeight()
+                        .clickable { }, tonalElevation = 3.dp) {
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                            .padding(horizontal = 6.dp)) {
+                            listOf("ink" to "墨笔", "pencil" to "铅笔", "soft" to "软笔",
+                                "spray" to "喷枪", "eraser" to "橡皮", "select" to "选区",
+                                "move" to "移动", "pan" to "视图").forEach { (key, label) ->
+                                FilterChip(selected = tool == key, onClick = { tool = key },
+                                    label = { Text(label, maxLines = 1) },
+                                    modifier = Modifier.fillMaxWidth())
+                            }
+                        }
+                    }
+                }
+                if (rightDrawerOpen) {
+                    Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
+                        .padding(end = railWidth).width(drawerWidth).fillMaxHeight()
+                        .clickable { }, tonalElevation = 3.dp) {
+                        Box(Modifier.fillMaxSize().padding(16.dp)) {
+                            Text("右侧面板", style = MaterialTheme.typography.titleSmall)
+                        }
+                    }
+                }
+                Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
+                    .width(railWidth).fillMaxHeight()
+                    .clickable(onClickLabel = if (leftDrawerOpen) "收起左侧工具栏" else "展开左侧工具栏") {
+                        leftDrawerOpen = !leftDrawerOpen
+                        if (leftDrawerOpen) rightDrawerOpen = false
+                    }, tonalElevation = 3.dp) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text(if (leftDrawerOpen) "‹" else "›", style = MaterialTheme.typography.titleLarge)
+                    }
+                }
+                Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
+                    .width(railWidth).fillMaxHeight()
+                    .clickable(onClickLabel = if (rightDrawerOpen) "收起右侧面板" else "展开右侧面板") {
+                        rightDrawerOpen = !rightDrawerOpen
+                        if (rightDrawerOpen) leftDrawerOpen = false
+                    }, tonalElevation = 3.dp) {
+                    Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
+                        Text(if (rightDrawerOpen) "›" else "‹", style = MaterialTheme.typography.titleLarge)
+                    }
                 }
             }
             Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
