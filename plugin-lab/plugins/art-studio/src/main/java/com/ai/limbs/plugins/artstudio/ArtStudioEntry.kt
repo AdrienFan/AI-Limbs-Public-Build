@@ -1,6 +1,7 @@
 package com.ai.limbs.plugins.artstudio
 
 import com.ai.limbs.plugin.runtime.*
+import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -48,6 +49,12 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.create(p.getInt("width"), p.getInt("height"), p.optString("background", "#FFFFFFFF"))
         }
         capability("document.open", "打开画室工程", write) { p -> store.open(p.getString("id")) }
+        capability("document.import", "导入画室工程文件", write,
+            "导入 .ailart 工程的 base64 内容，创建独立工程并切换为当前工程。") { p ->
+            val encoded = p.getString("base64")
+            require(encoded.length <= 90 * 1024 * 1024) { "工程文件超过 64 MB" }
+            store.importArchive(Base64.decode(encoded, Base64.DEFAULT))
+        }
         capability("document.save", "保存画室工程", write) { store.save() }
         capability("document.rename", "重命名画室工程", write) { p -> store.apply("LANER", "DOCUMENT_RENAME", p) }
         capability("document.info", "读取画室工程", read) { store.current() }
@@ -132,6 +139,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
     val id = p("id")
     return when (name) {
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"), p("background", optional = true))
+        "document.import" -> listOf(p("base64"))
         "document.open", "layer.select", "layer.delete", "layer.copy", "layer.set_lock" ->
             listOf(id) + if (name == "layer.set_lock") listOf(p("locked", "boolean")) else emptyList()
         "layer.create", "layer.group" -> listOf(p("name", optional = true), p("parentId", optional = true))

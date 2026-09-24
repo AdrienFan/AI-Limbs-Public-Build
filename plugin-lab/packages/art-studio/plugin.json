@@ -23,6 +23,7 @@
   "provides": {
     "capabilities": [
       "plugin.art.studio.document.create", "plugin.art.studio.document.open",
+      "plugin.art.studio.document.import",
       "plugin.art.studio.document.save", "plugin.art.studio.document.rename", "plugin.art.studio.document.info",
       "plugin.art.studio.document.list", "plugin.art.studio.canvas.inspect",
       "plugin.art.studio.canvas.crop", "plugin.art.studio.layer.list",
