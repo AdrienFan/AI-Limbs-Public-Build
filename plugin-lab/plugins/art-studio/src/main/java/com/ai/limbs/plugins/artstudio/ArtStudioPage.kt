@@ -18,6 +18,7 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.text.KeyboardOptions
@@ -136,6 +137,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var image by remember { mutableStateOf<Bitmap?>(null) }
     var tool by remember { mutableStateOf("ink") }
     var color by remember { mutableStateOf("#FF161616") }
+    var colorHexInput by remember { mutableStateOf(color) }
     var width by remember { mutableFloatStateOf(6f) }
     var opacity by remember { mutableFloatStateOf(1f) }
     var newCanvas by remember { mutableStateOf(false) }
@@ -410,8 +412,33 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
                         .padding(end = railWidth).width(drawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
-                        Box(Modifier.fillMaxSize().padding(16.dp)) {
-                            Text("右侧面板", style = MaterialTheme.typography.titleSmall)
+                        Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())
+                            .padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text("多功能拾色器", style = MaterialTheme.typography.titleSmall)
+                            AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
+                                modifier = Modifier.fillMaxWidth().height(285.dp),
+                                update = { picker ->
+                                    picker.selectedColor = Color.parseColor(color)
+                                    picker.onColorSelected = { selected ->
+                                        color = String.format(java.util.Locale.ROOT, "#%08X", selected)
+                                        colorHexInput = color
+                                    }
+                                })
+                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Box(Modifier.size(28.dp).background(
+                                    androidx.compose.ui.graphics.Color(Color.parseColor(color))))
+                                Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
+                            }
+                            OutlinedTextField(colorHexInput, { input ->
+                                colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
+                                if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
+                                    color = colorHexInput
+                                }
+                            }, label = { Text("#AARRGGBB") }, singleLine = true,
+                                modifier = Modifier.fillMaxWidth())
+                            Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
+                                style = MaterialTheme.typography.bodySmall)
                         }
                     }
                 }
