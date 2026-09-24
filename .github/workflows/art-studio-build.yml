@@ -44,13 +44,13 @@ jobs:
           AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
         run: python3 tools/plugin_lab/package_art_studio.py
       - name: Record source provenance
-        run: python3 tools/plugin_lab/source_provenance.py record --manifest plugin-lab/packages/art-studio/plugin.json --package dist/AI-Limbs-Art-Studio-v0.1.1.ailp
+        run: python3 tools/plugin_lab/source_provenance.py record --manifest plugin-lab/packages/art-studio/plugin.json --package dist/AI-Limbs-Art-Studio-v0.2.0.ailp
       - name: Upload plugin
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: art-studio-v0.1.1-${{ github.run_number }}
+          name: art-studio-v0.2.0-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-Art-Studio-v0.1.1.ailp
-            dist/AI-Limbs-Art-Studio-v0.1.1.ailp.sha256
-            dist/AI-Limbs-Art-Studio-v0.1.1.ailp.source.json
+            dist/AI-Limbs-Art-Studio-v0.2.0.ailp
+            dist/AI-Limbs-Art-Studio-v0.2.0.ailp.sha256
+            dist/AI-Limbs-Art-Studio-v0.2.0.ailp.source.json
           if-no-files-found: error

@@ -13,6 +13,7 @@ import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -31,6 +32,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -63,42 +66,73 @@ private fun Studio(host: InProcessPluginUiHost) {
     var openDialog by remember { mutableStateOf(false) }
     var renameDialog by remember { mutableStateOf(false) }
     var layerName by remember { mutableStateOf("") }
-    var selected by remember { mutableStateOf("") }
+    var projectDialog by remember { mutableStateOf(false) }
+    var projectName by remember { mutableStateOf("") }
+    var colorDialog by remember { mutableStateOf(false) }
+    var colorText by remember { mutableStateOf(color) }
+    var transformDialog by remember { mutableStateOf(false) }
+    var transformX by remember { mutableStateOf("0") }
+    var transformY by remember { mutableStateOf("0") }
+    var transformScale by remember { mutableStateOf("1") }
+    var transformAngle by remember { mutableStateOf("0") }
+    var panel by remember { mutableStateOf("layers") }
+    var moreMenu by remember { mutableStateOf(false) }
+    var exportPath by remember { mutableStateOf("") }
+    var archivePath by remember { mutableStateOf("") }
+    var awaitingExport by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
+    var pendingOperations by remember { mutableIntStateOf(0) }
+    var renderSerial by remember { mutableIntStateOf(0) }
     var revision by remember { mutableStateOf("") }
+    var documents by remember { mutableStateOf(JSONArray()) }
+    val mutex = remember { Mutex() }
+    val selected = snapshot?.optJSONObject("state")?.optString("selectedLayerId") ?: ""
 
     fun refresh() {
+        val serial = ++renderSerial
         scope.launch {
             try {
                 val pair = withContext(Dispatchers.IO) {
-                    val state = store.current()
-                    state to ArtRenderer.render(store, state)
+                    mutex.withLock {
+                        val state = store.current()
+                        Triple(state, ArtRenderer.render(store, state), store.revision())
+                    }
                 }
-                snapshot = pair.first
-                image = pair.second
-                revision = withContext(Dispatchers.IO) { store.revision() }
+                if (serial == renderSerial) {
+                    snapshot = pair.first
+                    image?.recycle()
+                    image = pair.second
+                    revision = pair.third
+                } else pair.second.recycle()
             } catch (error: Exception) {
-                snapshot = null
-                image = null
+                if (serial == renderSerial) { snapshot = null; image = null }
             }
         }
     }
 
     fun perform(action: () -> JSONObject) {
+        val serial = ++renderSerial
+        pendingOperations++
+        busy = true
         scope.launch {
-            busy = true
             try {
                 val pair = withContext(Dispatchers.IO) {
-                    val state = action()
-                    state to ArtRenderer.render(store, state)
+                    mutex.withLock {
+                        action()
+                        val state = store.current()
+                        Triple(state, ArtRenderer.render(store, state), store.revision())
+                    }
                 }
-                snapshot = pair.first
-                image = pair.second
-                revision = withContext(Dispatchers.IO) { store.revision() }
+                if (serial == renderSerial) {
+                    snapshot = pair.first
+                    image?.recycle()
+                    image = pair.second
+                    revision = pair.third
+                } else pair.second.recycle()
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Edit failed", error)
                 Toast.makeText(context, error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
-            } finally { busy = false }
+            } finally { pendingOperations--; busy = pendingOperations > 0 || awaitingExport }
         }
     }
 
@@ -110,6 +144,46 @@ private fun Studio(host: InProcessPluginUiHost) {
             store.importImage("AWEI", android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP))
         }
     }
+    val importProject = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri ->
+        if (uri != null) perform {
+            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(64 * 1024 * 1024 + 1) }
+                ?: error("无法读取工程文件")
+            store.importArchive(bytes)
+        }
+    }
+    val exportProject = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
+        awaitingExport = false; busy = pendingOperations > 0
+        if (uri != null) scope.launch {
+            try { withContext(Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    java.io.File(archivePath).inputStream().use { it.copyTo(output) }
+                } ?: error("无法写入工程文件")
+            }; Toast.makeText(context, "工程备份已保存", Toast.LENGTH_SHORT).show() }
+            catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+    val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        awaitingExport = false; busy = pendingOperations > 0
+        if (uri != null) scope.launch {
+            try { withContext(Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    java.io.File(exportPath).inputStream().use { it.copyTo(output) }
+                } ?: error("无法写入所选文件")
+            }; Toast.makeText(context, "PNG 已保存", Toast.LENGTH_SHORT).show() }
+            catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
+    val exportJpeg = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { uri ->
+        awaitingExport = false; busy = pendingOperations > 0
+        if (uri != null) scope.launch {
+            try { withContext(Dispatchers.IO) {
+                context.contentResolver.openOutputStream(uri)?.use { output ->
+                    java.io.File(exportPath).inputStream().use { it.copyTo(output) }
+                } ?: error("无法写入所选文件")
+            }; Toast.makeText(context, "JPEG 已保存", Toast.LENGTH_SHORT).show() }
+            catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
+        }
+    }
     LaunchedEffect(store) {
         refresh()
         while (true) {
@@ -117,175 +191,229 @@ private fun Studio(host: InProcessPluginUiHost) {
             if (!busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
         }
     }
+    LaunchedEffect(openDialog) {
+        if (openDialog) documents = withContext(Dispatchers.IO) { store.list() }
+    }
 
-    Column(Modifier.fillMaxSize().padding(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            Text("画室", style = MaterialTheme.typography.titleLarge)
-            Button(onClick = { newCanvas = true }, enabled = !busy) { Text("新建") }
-            OutlinedButton(onClick = { openDialog = true }, enabled = !busy) { Text("打开") }
-            OutlinedButton(onClick = { scope.launch(Dispatchers.IO) {
-                try { store.save(); withContext(Dispatchers.Main) { Toast.makeText(context, "工程已保存", Toast.LENGTH_SHORT).show() } }
-                catch (e: Exception) { withContext(Dispatchers.Main) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() } }
-            } }, enabled = snapshot != null && !busy) { Text("保存") }
-            OutlinedButton(onClick = { perform { history(store, "REVERT") } }, enabled = snapshot != null && !busy) { Text("撤销") }
-            OutlinedButton(onClick = { perform { history(store, "RESTORE") } }, enabled = snapshot != null && !busy) { Text("重做") }
-            OutlinedButton(onClick = { import.launch("image/*") }, enabled = snapshot != null) { Text("导入图片") }
-            OutlinedButton(onClick = { scope.launch(Dispatchers.IO) {
-                try {
-                    val result = ArtRenderer.export(context.applicationContext, store, store.current(), "png", "")
-                    withContext(Dispatchers.Main) { Toast.makeText(context, "已导出：${result.getString("name")}", Toast.LENGTH_LONG).show() }
-                } catch (e: Exception) { withContext(Dispatchers.Main) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() } }
-            } }, enabled = snapshot != null) { Text("导出 PNG") }
-        }
-        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-            listOf("ink" to "墨笔", "pencil" to "铅笔", "soft" to "软笔", "spray" to "喷枪",
-                "eraser" to "橡皮", "select" to "矩形选区", "move" to "移动图层", "pan" to "移动视图")
-                .forEach { (key, label) ->
-                    FilterChip(selected = tool == key, onClick = { tool = key }, label = { Text(label) })
+    val current = snapshot
+    val state = current?.getJSONObject("state")
+    val layers = state?.getJSONArray("layers")
+    val selectedLayer = (0 until (layers?.length() ?: 0)).map { layers!!.getJSONObject(it) }
+        .firstOrNull { it.getString("id") == selected }
+    fun edit(type: String, params: JSONObject = JSONObject()) {
+        perform { store.apply("AWEI", type, params) }
+    }
+    fun publish(format: String) {
+        if (awaitingExport || busy) return
+        awaitingExport = true
+        busy = true
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    mutex.withLock { ArtRenderer.export(host.dataDir, store, store.current(), format, "") }
                 }
+                exportPath = result.getString("path")
+                if (format == "png") exportPng.launch(result.getString("name"))
+                else exportJpeg.launch(result.getString("name"))
+            } catch (e: Exception) {
+                awaitingExport = false
+                Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
+            } finally { busy = pendingOperations > 0 || awaitingExport }
         }
-        val current = snapshot
+    }
+    Column(Modifier.fillMaxSize().padding(horizontal = 8.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+            Text(state?.optString("name", "画室") ?: "画室", Modifier.weight(1f),
+                maxLines = 1, style = MaterialTheme.typography.titleMedium)
+            TextButton(onClick = { newCanvas = true }, enabled = !busy) { Text("新建") }
+            TextButton(onClick = { openDialog = true }, enabled = !busy) { Text("打开") }
+            TextButton(onClick = { scope.launch {
+                try { withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
+                    refresh(); Toast.makeText(context, "工程已保存", Toast.LENGTH_SHORT).show() }
+                catch (e: Exception) { Toast.makeText(context, e.message, Toast.LENGTH_LONG).show() }
+            } }, enabled = current != null && !busy) { Text("保存") }
+            Box {
+                TextButton(onClick = { moreMenu = true }, enabled = !busy) { Text("⋮ 更多") }
+                DropdownMenu(expanded = moreMenu, onDismissRequest = { moreMenu = false }) {
+                    DropdownMenuItem(text = { Text("重命名工程") }, onClick = {
+                        moreMenu = false; projectName = state?.optString("name", "未命名工程") ?: ""; projectDialog = true
+                    }, enabled = current != null)
+                    DropdownMenuItem(text = { Text("导入图片") }, onClick = { moreMenu = false; import.launch("image/*") }, enabled = current != null)
+                    DropdownMenuItem(text = { Text("导入工程") }, onClick = { moreMenu = false; importProject.launch("*/*") })
+                    DropdownMenuItem(text = { Text("备份工程 .ailart") }, onClick = { moreMenu = false
+                        if (!busy) {
+                            awaitingExport = true; busy = true
+                            scope.launch {
+                                try {
+                                    val result = withContext(Dispatchers.IO) { mutex.withLock { store.save() } }
+                                    archivePath = result.getString("path")
+                                    exportProject.launch("${state?.optString("name", "画室") ?: "画室"}.ailart")
+                                } catch (e: Exception) {
+                                    awaitingExport = false; busy = false
+                                    Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
+                                }
+                            }
+                        }
+                    }, enabled = current != null)
+                    DropdownMenuItem(text = { Text("导出 PNG") }, onClick = { moreMenu = false; publish("png") }, enabled = current != null)
+                    DropdownMenuItem(text = { Text("导出 JPEG") }, onClick = { moreMenu = false; publish("jpeg") }, enabled = current != null)
+                }
+            }
+        }
         if (current == null) {
-            Text("新建画布，阿伟和兰儿就能编辑同一个工程。")
+            Text("新建画布，即可开始和兰儿共同编辑。", Modifier.padding(12.dp))
         } else {
             val state = current.getJSONObject("state")
-            Text("${state.getInt("width")} × ${state.getInt("height")} · 阿伟：$tool · 兰儿：通过画室能力编辑",
-                style = MaterialTheme.typography.bodySmall)
-            AndroidView(factory = { ctx -> StudioCanvas(ctx) }, modifier = Modifier.fillMaxWidth().weight(1f), update = { view ->
-                view.image = image
-                view.tool = tool
-                view.color = color
-                view.brushWidth = width
-                view.opacity = opacity
-                view.onStroke = { points ->
-                    if (selected.isBlank()) Toast.makeText(context, "先创建并选中绘画图层", Toast.LENGTH_SHORT).show()
-                    else perform { store.apply("AWEI", "STROKE_ADD", JSONObject().put("id", UUID.randomUUID().toString())
-                        .put("layerId", selected).put("tool", tool).put("color", color)
-                        .put("width", width.toDouble()).put("opacity", opacity.toDouble()).put("points", points)) }
+            val layers = state.getJSONArray("layers")
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                Text("${state.getInt("width")} × ${state.getInt("height")} · ${layers.length()} 层 · ${if (current.getBoolean("dirty")) "未保存" else "已保存"}",
+                    Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                TextButton(onClick = { perform { store.history("AWEI", false) } }, enabled = !busy) { Text("撤销") }
+                TextButton(onClick = { perform { store.history("AWEI", true) } }, enabled = !busy) { Text("重做") }
+            }
+            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                Column(Modifier.width(86.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    listOf("ink" to "墨笔", "pencil" to "铅笔", "soft" to "软笔", "spray" to "喷枪",
+                        "eraser" to "橡皮", "select" to "选区", "move" to "移动", "pan" to "视图")
+                        .forEach { (key, label) ->
+                            FilterChip(selected = tool == key, onClick = { tool = key },
+                                label = { Text(label, maxLines = 1) }, modifier = Modifier.fillMaxWidth())
+                        }
                 }
-                view.onSelection = { rect -> perform { store.apply("AWEI", "SELECTION_CREATE", rect) } }
-                view.onMove = { dx, dy -> if (selected.isNotBlank()) {
-                    if (state.optJSONObject("selection") != null) perform { store.apply("AWEI", "SELECTION_EDIT",
-                        JSONObject().put("layerId", selected).put("action", "MOVE").put("dx", dx).put("dy", dy)) }
-                    else {
-                        val layer = (0 until state.getJSONArray("layers").length()).map { state.getJSONArray("layers").getJSONObject(it) }
-                            .firstOrNull { it.getString("id") == selected }
-                        if (layer != null) perform { store.apply("AWEI", "TRANSFORM", JSONObject()
-                            .put("id", selected).put("x", layer.getDouble("x") + dx).put("y", layer.getDouble("y") + dy)) }
+                AndroidView(factory = { ctx -> StudioCanvas(ctx) }, modifier = Modifier.fillMaxSize().weight(1f), update = { view ->
+                    view.image = image
+                    view.layers = layers
+                    view.selectedId = selected
+                    view.selection = state.optJSONObject("selection")
+                    view.tool = tool; view.color = color; view.brushWidth = width; view.opacity = opacity
+                    view.onStroke = { points ->
+                        if (selectedLayer?.getString("kind") != "paint")
+                            Toast.makeText(context, "请选择绘画图层", Toast.LENGTH_SHORT).show()
+                        else edit("STROKE_ADD", JSONObject().put("id", UUID.randomUUID().toString())
+                            .put("layerId", selected).put("tool", tool).put("color", color)
+                            .put("width", width.toDouble()).put("opacity", opacity.toDouble()).put("points", points))
                     }
-                } }
-            })
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                listOf("#FF161616", "#FFFFFFFF", "#FFD94343", "#FF387ADB", "#FF55A765", "#FFF1C84A")
-                    .forEach { shade -> FilterChip(selected = color == shade, onClick = { color = shade }, label = { Text("●", color = androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(shade))) }) }
-                Text("笔粗 ${width.toInt()}")
-                Slider(value = width, onValueChange = { width = it }, valueRange = 1f..80f, modifier = Modifier.width(130.dp))
-                Text("透明度 ${(opacity * 100).toInt()}%")
-                Slider(value = opacity, onValueChange = { opacity = it }, modifier = Modifier.width(110.dp))
-            }
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                Button(onClick = {
-                    val id = UUID.randomUUID().toString()
-                    val layers = state.getJSONArray("layers")
-                    val parent = (0 until layers.length()).map { layers.getJSONObject(it) }
-                        .firstOrNull { it.getString("id") == selected && it.getString("kind") == "group" }
-                    selected = id
-                    perform { store.apply("AWEI", "LAYER_CREATE", JSONObject().put("id", id)
-                        .put("name", "绘画图层").put("parentId", parent?.getString("id") ?: "")) }
-                }) { Text("＋图层") }
-                OutlinedButton(onClick = { val id = UUID.randomUUID().toString(); selected = id
-                    perform { store.apply("AWEI", "GROUP_CREATE", JSONObject().put("id", id)) } }) { Text("＋组") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform { store.apply("AWEI", "LAYER_COPY", JSONObject().put("id", selected).put("newId", UUID.randomUUID().toString())) } }) { Text("复制") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform { store.apply("AWEI", "LAYER_DELETE", JSONObject().put("id", selected)) } }) { Text("删除") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
-                    val layers = store.current().getJSONObject("state").getJSONArray("layers")
-                    val index = (0 until layers.length()).first { layers.getJSONObject(it).getString("id") == selected }
-                    store.apply("AWEI", "LAYER_MOVE", JSONObject().put("id", selected)
-                        .put("index", (index + 1).coerceAtMost(layers.length() - 1)))
-                } }) { Text("上移") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
-                    val layers = store.current().getJSONObject("state").getJSONArray("layers")
-                    val index = (0 until layers.length()).first { layers.getJSONObject(it).getString("id") == selected }
-                    store.apply("AWEI", "LAYER_MOVE", JSONObject().put("id", selected)
-                        .put("index", (index - 1).coerceAtLeast(0)))
-                } }) { Text("下移") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
-                    val layer = store.current().getJSONObject("state").getJSONArray("layers")
-                    val target = (0 until layer.length()).map { layer.getJSONObject(it) }.first { it.getString("id") == selected }
-                    store.apply("AWEI", "TRANSFORM", JSONObject().put("id", selected).put("scale", target.getDouble("scale") * 1.1))
-                } }) { Text("放大") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
-                    val layers = store.current().getJSONObject("state").getJSONArray("layers")
-                    val target = (0 until layers.length()).map { layers.getJSONObject(it) }.first { it.getString("id") == selected }
-                    store.apply("AWEI", "TRANSFORM", JSONObject().put("id", selected).put("rotation", target.getDouble("rotation") + 15.0))
-                } }) { Text("旋转") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) {
-                    val layers = state.getJSONArray("layers")
-                    val layer = (0 until layers.length()).map { layers.getJSONObject(it) }.first { it.getString("id") == selected }
-                    layerName = layer.getString("name"); renameDialog = true
-                } }) { Text("重命名") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
-                    val layers = store.current().getJSONObject("state").getJSONArray("layers")
-                    val layer = (0 until layers.length()).map { layers.getJSONObject(it) }.first { it.getString("id") == selected }
-                    store.apply("AWEI", "LAYER_VISIBLE", JSONObject().put("id", selected).put("visible", !layer.getBoolean("visible")))
-                } }) { Text("显隐") }
-                OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
-                    val layers = store.current().getJSONObject("state").getJSONArray("layers")
-                    val layer = (0 until layers.length()).map { layers.getJSONObject(it) }.first { it.getString("id") == selected }
-                    store.apply("AWEI", "LAYER_LOCK", JSONObject().put("id", selected).put("locked", !layer.getBoolean("locked")))
-                } }) { Text("锁定") }
-            }
-            Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                val layers = state.getJSONArray("layers")
-                for (i in 0 until layers.length()) {
-                    val layer = layers.getJSONObject(i)
-                    val id = layer.getString("id")
-                    FilterChip(selected = selected == id, onClick = { selected = id },
-                        label = { Text((if (layer.getString("kind") == "group") "▣ " else if (layer.optString("parentId").isNotBlank()) "↳ " else "") +
-                            layer.getString("name") + if (layer.getBoolean("visible")) "" else "（隐藏）") })
-                }
-            }
-            if (selected.isNotBlank()) {
-                val layers = state.getJSONArray("layers")
-                val layer = (0 until layers.length()).map { layers.getJSONObject(it) }
-                    .firstOrNull { it.getString("id") == selected }
-                if (layer != null) Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                    Text("图层透明度 ${(layer.getDouble("opacity") * 100).toInt()}%")
-                    for ((label, delta) in listOf("－" to -0.1, "＋" to 0.1)) {
-                        TextButton(onClick = { perform { store.apply("AWEI", "LAYER_OPACITY", JSONObject()
-                            .put("id", selected).put("opacity", (layer.getDouble("opacity") + delta).coerceIn(0.0, 1.0))) } }) {
-                            Text(label)
+                    view.onSelection = { rect -> edit("SELECTION_CREATE", rect) }
+                    view.onMove = { dx, dy ->
+                        if (selectedLayer != null) {
+                            if (state.optJSONObject("selection") != null) edit("SELECTION_EDIT", JSONObject()
+                                .put("layerId", selected).put("action", "MOVE").put("dx", dx).put("dy", dy))
+                            else edit("TRANSFORM", JSONObject().put("id", selected)
+                                .put("x", selectedLayer.getDouble("x") + dx).put("y", selectedLayer.getDouble("y") + dy))
                         }
                     }
-                }
+                })
             }
-            val selection = state.optJSONObject("selection")
-            if (selection != null) Row(Modifier.horizontalScroll(rememberScrollState()),
+            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(5.dp)) {
-                Text("选区：${selection.getInt("width")}×${selection.getInt("height")}")
-                for ((label, action, value) in listOf(
-                    Triple("复制内容", "COPY", 0.0), Triple("删除内容", "DELETE", 0.0),
-                    Triple("放大内容", "SCALE", 1.1), Triple("旋转内容", "ROTATE", 15.0))) {
-                    OutlinedButton(onClick = { if (selected.isNotBlank()) perform {
-                        val p = JSONObject().put("layerId", selected).put("action", action)
-                        if (action == "SCALE") p.put("factor", value)
-                        if (action == "ROTATE") p.put("degrees", value)
-                        store.apply("AWEI", "SELECTION_EDIT", p)
-                    } }) { Text(label) }
+                OutlinedButton(onClick = { colorText = color; colorDialog = true }) {
+                    Text("● 颜色", color = androidx.compose.ui.graphics.Color(Color.parseColor(color)))
                 }
-                OutlinedButton(onClick = { perform { store.apply("AWEI", "CROP", JSONObject()
-                    .put("x", selection.getDouble("x")).put("y", selection.getDouble("y"))
-                    .put("width", selection.getDouble("width").toInt())
-                    .put("height", selection.getDouble("height").toInt())) } }) { Text("裁剪画布") }
-                TextButton(onClick = { perform { store.apply("AWEI", "SELECTION_CLEAR", JSONObject()) } }) { Text("取消选区") }
+                Text("笔粗 ${width.toInt()}", style = MaterialTheme.typography.bodySmall)
+                Slider(value = width, onValueChange = { width = it }, valueRange = 1f..80f, modifier = Modifier.weight(1f))
+                Text("${(opacity * 100).toInt()}%", style = MaterialTheme.typography.bodySmall)
+                Slider(value = opacity, onValueChange = { opacity = it }, modifier = Modifier.weight(1f))
             }
-            val operations = current.getJSONArray("operations")
-            val lastLaner = (operations.length() - 1 downTo 0).map { operations.getJSONObject(it) }
-                .firstOrNull { it.getString("actor") == "LANER" && it.getString("type") !in setOf("REVERT", "RESTORE") }
-            if (lastLaner != null) Row {
-                Text("兰儿最近操作：${lastLaner.getString("type")}", style = MaterialTheme.typography.bodySmall)
-                TextButton(onClick = { perform { store.apply("AWEI", "REVERT", JSONObject().put("targetId", lastLaner.getString("id"))) } }) {
-                    Text("单独撤销")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                listOf("layers" to "图层", "properties" to "属性", "history" to "历史").forEach { (key, label) ->
+                    FilterChip(selected = panel == key, onClick = { panel = if (panel == key) "" else key },
+                        label = { Text(label) })
+                }
+            }
+            if (panel.isNotEmpty()) Column(Modifier.fillMaxWidth().heightIn(max = 184.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                when (panel) {
+                    "layers" -> {
+                        Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(3.dp)) {
+                            TextButton(onClick = {
+                                val id = UUID.randomUUID().toString()
+                                perform { store.apply("AWEI", "LAYER_CREATE", JSONObject().put("id", id)
+                                    .put("name", "绘画图层").put("parentId", if (selectedLayer?.optString("kind") == "group") selected else ""))
+                                    .let { store.apply("AWEI", "LAYER_SELECT", JSONObject().put("id", id)) } }
+                            }) { Text("＋图层") }
+                            TextButton(onClick = { val id = UUID.randomUUID().toString(); perform {
+                                store.apply("AWEI", "GROUP_CREATE", JSONObject().put("id", id))
+                                store.apply("AWEI", "LAYER_SELECT", JSONObject().put("id", id))
+                            } }) { Text("＋组") }
+                            TextButton(onClick = { if (selected.isNotBlank()) edit("LAYER_COPY", JSONObject()
+                                .put("id", selected).put("newId", UUID.randomUUID().toString())) }, enabled = selected.isNotBlank()) { Text("复制") }
+                            TextButton(onClick = { if (selected.isNotBlank()) edit("LAYER_DELETE", JSONObject().put("id", selected)) },
+                                enabled = selected.isNotBlank()) { Text("删除") }
+                        }
+                        for (i in 0 until layers.length()) {
+                            val layer = layers.getJSONObject(i)
+                            val id = layer.getString("id")
+                            Row(Modifier.fillMaxWidth(), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                TextButton(onClick = { edit("LAYER_SELECT", JSONObject().put("id", id)) }, Modifier.weight(1f)) {
+                                    Text((if (layer.optString("parentId").isNotBlank()) "  ↳ " else "") +
+                                        (if (layer.getString("kind") == "group") "▣ " else "▤ ") + layer.getString("name"),
+                                        maxLines = 1, color = if (id == selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface)
+                                }
+                                TextButton(onClick = { edit("LAYER_VISIBLE", JSONObject().put("id", id)
+                                    .put("visible", !layer.getBoolean("visible"))) }) { Text(if (layer.getBoolean("visible")) "◉" else "○") }
+                                TextButton(onClick = { edit("LAYER_LOCK", JSONObject().put("id", id)
+                                    .put("locked", !layer.getBoolean("locked"))) }) { Text(if (layer.getBoolean("locked")) "锁" else "开") }
+                            }
+                        }
+                    }
+                    "properties" -> if (selectedLayer != null) {
+                        Text(selectedLayer.getString("name") + " · " + selectedLayer.getString("kind"))
+                        val siblings = (0 until layers.length()).filter {
+                            layers.getJSONObject(it).optString("parentId") == selectedLayer.optString("parentId")
+                        }
+                        val siblingPosition = siblings.indexOfFirst { layers.getJSONObject(it).getString("id") == selected }
+                        Row(Modifier.horizontalScroll(rememberScrollState())) {
+                            TextButton(onClick = { layerName = selectedLayer.getString("name"); renameDialog = true }) { Text("重命名") }
+                            TextButton(onClick = { edit("LAYER_MOVE", JSONObject().put("id", selected)
+                                .put("index", siblings[(siblingPosition + 1).coerceAtMost(siblings.lastIndex)])) },
+                                enabled = siblingPosition < siblings.lastIndex) { Text("上移") }
+                            TextButton(onClick = { edit("LAYER_MOVE", JSONObject().put("id", selected)
+                                .put("index", siblings[(siblingPosition - 1).coerceAtLeast(0)])) },
+                                enabled = siblingPosition > 0) { Text("下移") }
+                            TextButton(onClick = {
+                                transformX = selectedLayer.getDouble("x").toString()
+                                transformY = selectedLayer.getDouble("y").toString()
+                                transformScale = selectedLayer.getDouble("scale").toString()
+                                transformAngle = selectedLayer.getDouble("rotation").toString()
+                                transformDialog = true
+                            }) { Text("变换…") }
+                        }
+                        val modes = listOf("normal", "multiply", "screen", "add")
+                        TextButton(onClick = { edit("LAYER_BLEND", JSONObject().put("id", selected)
+                            .put("blend", modes[(modes.indexOf(selectedLayer.getString("blend")) + 1) % modes.size])) }) {
+                            Text("混合：${selectedLayer.getString("blend")}")
+                        }
+                        Text("图层不透明度 ${(selectedLayer.getDouble("opacity") * 100).toInt()}%")
+                        Row {
+                            TextButton(onClick = { edit("LAYER_OPACITY", JSONObject().put("id", selected)
+                                .put("opacity", (selectedLayer.getDouble("opacity") - 0.1).coerceIn(0.0, 1.0))) }) { Text("－") }
+                            TextButton(onClick = { edit("LAYER_OPACITY", JSONObject().put("id", selected)
+                                .put("opacity", (selectedLayer.getDouble("opacity") + 0.1).coerceIn(0.0, 1.0))) }) { Text("＋") }
+                        }
+                        val selection = state.optJSONObject("selection")
+                        if (selection != null) Row(Modifier.horizontalScroll(rememberScrollState())) {
+                            listOf("COPY" to "复制选区", "DELETE" to "删除", "SCALE" to "放大", "ROTATE" to "旋转").forEach { (action, label) ->
+                                TextButton(onClick = { edit("SELECTION_EDIT", JSONObject().put("layerId", selected)
+                                    .put("action", action).put("factor", 1.1).put("degrees", 15)) }) { Text(label) }
+                            }
+                            TextButton(onClick = { edit("SELECTION_CLEAR") }) { Text("取消选区") }
+                            TextButton(onClick = { edit("CROP", JSONObject()
+                                .put("x", selection.getDouble("x")).put("y", selection.getDouble("y"))
+                                .put("width", selection.getDouble("width").toInt())
+                                .put("height", selection.getDouble("height").toInt())) },
+                                enabled = selection.getDouble("width") >= 64 && selection.getDouble("height") >= 64) { Text("裁剪画布") }
+                        }
+                    }
+                    "history" -> {
+                        val operations = current.getJSONArray("operations")
+                        for (i in operations.length()-1 downTo maxOf(0, operations.length()-12)) {
+                            val op = operations.getJSONObject(i)
+                            Text("${if (op.getString("actor") == "LANER") "兰儿" else "阿伟"} · ${op.getString("type")}",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                    }
                 }
             }
         }
@@ -299,15 +427,17 @@ private fun Studio(host: InProcessPluginUiHost) {
                 Switch(checked = transparent, onCheckedChange = { transparent = it })
             }
         } }, confirmButton = { TextButton(onClick = {
-            newCanvas = false; selected = ""; perform { store.create(canvasWidth.toInt(), canvasHeight.toInt(),
+            newCanvas = false; perform { store.create(canvasWidth.toInt(), canvasHeight.toInt(),
                 if (transparent) "#00000000" else "#FFFFFFFF") }
         }) { Text("创建") } }, dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
     if (openDialog) AlertDialog(onDismissRequest = { openDialog = false }, title = { Text("打开工程") },
         text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            val docs = remember(openDialog) { store.list() }
-            for (i in 0 until docs.length()) {
-                val id = docs.getJSONObject(i).getString("id")
-                TextButton(onClick = { openDialog = false; selected = ""; perform { store.open(id) } }) { Text(id) }
+            for (i in 0 until documents.length()) {
+                val id = documents.getJSONObject(i).getString("id")
+                val item = documents.getJSONObject(i)
+                TextButton(onClick = { openDialog = false; perform { store.open(id) } }) {
+                    Text("${item.optString("name", "未命名工程")} · ${item.getInt("width")}×${item.getInt("height")}${if (item.getBoolean("saved")) " · 已保存" else " · 草稿"}")
+                }
             }
         } }, confirmButton = { TextButton(onClick = { openDialog = false }) { Text("关闭") } })
     if (renameDialog) AlertDialog(onDismissRequest = { renameDialog = false }, title = { Text("图层名称") },
@@ -316,26 +446,48 @@ private fun Studio(host: InProcessPluginUiHost) {
             renameDialog = false
             if (selected.isNotBlank()) perform { store.apply("AWEI", "LAYER_RENAME", JSONObject().put("id", selected).put("name", layerName)) }
         }) { Text("保存") } }, dismissButton = { TextButton(onClick = { renameDialog = false }) { Text("取消") } })
-}
-
-private fun history(store: ArtStore, action: String): JSONObject {
-    val ops = store.current().getJSONArray("operations")
-    val disabled = mutableSetOf<String>()
-    for (i in 0 until ops.length()) {
-        val op = ops.getJSONObject(i)
-        when (op.getString("type")) {
-            "REVERT" -> disabled.add(op.getJSONObject("parameters").getString("targetId"))
-            "RESTORE" -> disabled.remove(op.getJSONObject("parameters").getString("targetId"))
-        }
-    }
-    val target = (ops.length() - 1 downTo 0).map { ops.getJSONObject(it) }
-        .firstOrNull { it.getString("type") !in setOf("REVERT", "RESTORE") &&
-            (it.getString("id") in disabled) == (action == "RESTORE") } ?: error("没有可${if (action == "REVERT") "撤销" else "重做"}的操作")
-    return store.apply("AWEI", action, JSONObject().put("targetId", target.getString("id")))
+    if (projectDialog) AlertDialog(onDismissRequest = { projectDialog = false }, title = { Text("工程名称") },
+        text = { OutlinedTextField(projectName, { projectName = it.take(100) }) },
+        confirmButton = { TextButton(onClick = { projectDialog = false
+            if (projectName.isNotBlank()) perform { store.apply("AWEI", "DOCUMENT_RENAME", JSONObject().put("name", projectName)) }
+        }) { Text("保存") } }, dismissButton = { TextButton(onClick = { projectDialog = false }) { Text("取消") } })
+    if (colorDialog) AlertDialog(onDismissRequest = { colorDialog = false }, title = { Text("画笔颜色") },
+        text = { Column {
+            OutlinedTextField(colorText, { colorText = it.uppercase().take(9) }, label = { Text("#AARRGGBB") })
+            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                listOf("#FF161616", "#FFFFFFFF", "#FFD94343", "#FF387ADB", "#FF55A765", "#FFF1C84A")
+                    .forEach { shade -> TextButton(onClick = { colorText = shade }) {
+                        Text("●", color = androidx.compose.ui.graphics.Color(Color.parseColor(shade)))
+                    } }
+            }
+        } }, confirmButton = { TextButton(onClick = {
+            if (colorText.matches(Regex("#[A-F0-9]{8}"))) { color = colorText; colorDialog = false }
+            else Toast.makeText(context, "颜色需为 #AARRGGBB", Toast.LENGTH_SHORT).show()
+        }) { Text("确定") } }, dismissButton = { TextButton(onClick = { colorDialog = false }) { Text("取消") } })
+    if (transformDialog) AlertDialog(onDismissRequest = { transformDialog = false }, title = { Text("图层变换") },
+        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
+            OutlinedTextField(transformX, { transformX = it }, label = { Text("X 位置") })
+            OutlinedTextField(transformY, { transformY = it }, label = { Text("Y 位置") })
+            OutlinedTextField(transformScale, { transformScale = it }, label = { Text("缩放（0.01–100）") })
+            OutlinedTextField(transformAngle, { transformAngle = it }, label = { Text("旋转角度") })
+        } }, confirmButton = { TextButton(onClick = {
+            val x = transformX.toDoubleOrNull(); val y = transformY.toDoubleOrNull()
+            val scale = transformScale.toDoubleOrNull(); val angle = transformAngle.toDoubleOrNull()
+            if (x != null && y != null && scale != null && angle != null &&
+                x.isFinite() && y.isFinite() && scale in 0.01..100.0 && angle.isFinite()) {
+                transformDialog = false
+                edit("TRANSFORM", JSONObject().put("id", selected).put("x", x).put("y", y)
+                    .put("scale", scale).put("rotation", angle))
+            } else Toast.makeText(context, "请输入有效的位置、缩放和角度", Toast.LENGTH_SHORT).show()
+        }) { Text("应用") } }, dismissButton = { TextButton(onClick = { transformDialog = false }) { Text("取消") } })
 }
 
 private class StudioCanvas(context: Context) : View(context) {
+    init { contentDescription = "画室画布，可使用所选工具绘画" }
     var image: Bitmap? = null; set(value) { field = value; invalidate() }
+    var layers: JSONArray? = null
+    var selectedId: String = ""
+    var selection: JSONObject? = null
     var tool: String = "ink"
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
@@ -355,6 +507,39 @@ private class StudioCanvas(context: Context) : View(context) {
     private var pinchAngle = 0f
     private var points = JSONArray()
     private val matrix = Matrix()
+    private val checkerPaint = Paint().apply {
+        val tile = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
+        tile.setPixel(0, 0, Color.rgb(245, 245, 245))
+        tile.setPixel(1, 1, Color.rgb(245, 245, 245))
+        tile.setPixel(1, 0, Color.rgb(225, 225, 225))
+        tile.setPixel(0, 1, Color.rgb(225, 225, 225))
+        shader = android.graphics.BitmapShader(tile, android.graphics.Shader.TileMode.REPEAT,
+            android.graphics.Shader.TileMode.REPEAT).apply {
+            setLocalMatrix(Matrix().apply { setScale(24f, 24f) })
+        }
+    }
+
+    private fun layerMatrix(): Matrix {
+        val all = layers ?: return Matrix()
+        val selected = (0 until all.length()).map { all.getJSONObject(it) }
+            .firstOrNull { it.getString("id") == selectedId } ?: return Matrix()
+        val chain = mutableListOf(selected)
+        var parentId = selected.optString("parentId")
+        repeat(all.length()) {
+            if (parentId.isBlank()) return@repeat
+            val parent = (0 until all.length()).map { all.getJSONObject(it) }
+                .firstOrNull { it.getString("id") == parentId } ?: return@repeat
+            chain.add(parent)
+            parentId = parent.optString("parentId")
+        }
+        val m = Matrix()
+        for (layer in chain) {
+            m.postScale(layer.getDouble("scale").toFloat(), layer.getDouble("scale").toFloat())
+            m.postRotate(layer.getDouble("rotation").toFloat())
+            m.postTranslate(layer.getDouble("x").toFloat(), layer.getDouble("y").toFloat())
+        }
+        return m
+    }
 
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
@@ -366,20 +551,25 @@ private class StudioCanvas(context: Context) : View(context) {
         matrix.postScale(fit * zoom, fit * zoom)
         matrix.postRotate(angle)
         matrix.postTranslate(width / 2f + panX, height / 2f + panY)
+        canvas.save(); canvas.concat(matrix)
+        canvas.drawRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(), checkerPaint)
+        canvas.restore()
         canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
-        if (points.length() > 0 && tool !in listOf("pan", "move", "select")) {
-            val path = Path()
-            for (i in 0 until points.length()) {
-                val point = points.getJSONArray(i)
-                if (i == 0) path.moveTo(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
-                else path.lineTo(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
-            }
+        selection?.let { rect ->
             canvas.save(); canvas.concat(matrix)
-            canvas.drawPath(path, Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style = Paint.Style.STROKE; strokeWidth = brushWidth
-                strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
-                color = Color.parseColor(this@StudioCanvas.color)
-            })
+            val x = rect.getDouble("x").toFloat(); val y = rect.getDouble("y").toFloat()
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(52, 150, 255); style = Paint.Style.STROKE
+                strokeWidth = 2f / (fit * zoom); pathEffect = android.graphics.DashPathEffect(floatArrayOf(8f, 5f), 0f)
+            }
+            canvas.drawRect(x, y, x + rect.getDouble("width").toFloat(),
+                y + rect.getDouble("height").toFloat(), paint)
+            canvas.restore()
+        }
+        if (points.length() > 0 && tool !in listOf("pan", "move", "select")) {
+            canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
+            ArtRenderer.drawStroke(canvas, JSONObject().put("points", points).put("tool", tool)
+                .put("color", color).put("width", brushWidth.toDouble()).put("opacity", opacity.toDouble()))
             canvas.restore()
         }
     }
@@ -402,15 +592,18 @@ private class StudioCanvas(context: Context) : View(context) {
         matrix.invert(inverse)
         val xy = floatArrayOf(event.x, event.y)
         inverse.mapPoints(xy)
+        val local = floatArrayOf(xy[0], xy[1])
+        val inverseLayer = Matrix()
+        if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 startX = xy[0]; startY = xy[1]; lastX = event.x; lastY = event.y
                 points = JSONArray()
-                if (tool !in listOf("pan", "move", "select")) points.put(JSONArray().put(xy[0]).put(xy[1]).put(event.pressure.coerceIn(0.1f, 1f)))
+                if (tool !in listOf("pan", "move", "select")) points.put(JSONArray().put(local[0]).put(local[1]).put(event.pressure.coerceIn(0.1f, 1f)))
             }
             MotionEvent.ACTION_MOVE -> {
                 if (tool == "pan") { panX += event.x - lastX; panY += event.y - lastY }
-                else if (tool !in listOf("move", "select")) points.put(JSONArray().put(xy[0]).put(xy[1]).put(event.pressure.coerceIn(0.1f, 1f)))
+                else if (tool !in listOf("move", "select")) points.put(JSONArray().put(local[0]).put(local[1]).put(event.pressure.coerceIn(0.1f, 1f)))
                 lastX = event.x; lastY = event.y
             }
             MotionEvent.ACTION_UP -> {

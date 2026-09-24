@@ -1,15 +1,18 @@
 package com.ai.limbs.plugins.artstudio
 
 import android.graphics.BitmapFactory
+import android.graphics.Matrix
 import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.io.FileOutputStream
+import java.io.ByteArrayInputStream
 import java.nio.channels.FileLock
 import java.util.UUID
 import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
+import java.util.zip.ZipInputStream
 import java.util.zip.ZipOutputStream
 import kotlin.math.cos
 import kotlin.math.sin
@@ -39,8 +42,10 @@ internal class ArtStore(private val root: File) {
         require(width in 64..4096 && height in 64..4096) { "画布边长需要在 64–4096 像素之间" }
         requireColor(background)
         val id = UUID.randomUUID().toString()
+        val firstLayer = UUID.randomUUID().toString()
         val base = JSONObject().put("width", width).put("height", height)
-            .put("background", background).put("layers", JSONArray())
+            .put("background", background).put("layers", JSONArray().put(newLayer(firstLayer, "paint", "绘画图层", "", "")))
+            .put("selectedLayerId", firstLayer)
             .put("selection", JSONObject.NULL)
         val doc = JSONObject().put("format", 1).put("id", id).put("base", base)
             .put("operations", JSONArray())
@@ -64,8 +69,14 @@ internal class ArtStore(private val root: File) {
         JSONArray().also { out ->
             drafts.listFiles()?.filter { it.extension == "json" }?.sortedBy { it.name }?.forEach { file ->
                 val doc = JSONObject(file.readText())
+                val state = replay(doc)
                 out.put(JSONObject().put("id", doc.getString("id"))
-                    .put("saved", archive(doc.getString("id")).exists()))
+                    .put("name", state.optString("name", "未命名工程"))
+                    .put("width", state.getInt("width")).put("height", state.getInt("height"))
+                    .put("saved", archive(doc.getString("id")).exists())
+                    .put("dirty", !archive(doc.getString("id")).exists() ||
+                        file.lastModified() > archive(doc.getString("id")).lastModified())
+                    .put("modified", file.lastModified()))
             }
         }
     }
@@ -73,6 +84,9 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
+        if (params.has("expectedRevision")) {
+            require(params.getInt("expectedRevision") == doc.getJSONArray("operations").length()) { "工程已被另一端修改，请刷新后重试" }
+        }
         val operationId = UUID.randomUUID().toString()
         val normalized = JSONObject(params.toString())
         if (type == "SELECTION_EDIT" && normalized.optString("action") == "COPY") {
@@ -146,6 +160,61 @@ internal class ArtStore(private val root: File) {
         result
     }
 
+    fun importArchive(bytes: ByteArray): JSONObject = locked {
+        require(bytes.size in 1..64 * 1024 * 1024) { "工程文件超过 64 MB" }
+        var project: JSONObject? = null
+        val importedAssets = mutableMapOf<String, ByteArray>()
+        ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
+            var count = 0
+            while (true) {
+                val entry = zip.nextEntry ?: break
+                require(++count <= 128) { "工程条目过多" }
+                val path = entry.name
+                when {
+                    path == "project.json" -> {
+                        require(project == null) { "工程数据重复" }
+                        val data = zip.readNBytes(32 * 1024 * 1024 + 1)
+                        require(data.size <= 32 * 1024 * 1024)
+                        project = JSONObject(String(data, Charsets.UTF_8))
+                    }
+                    path.startsWith("assets/") -> {
+                        val asset = path.removePrefix("assets/").removeSuffix(".png")
+                        require(path == "assets/$asset.png") { "工程资源路径无效" }
+                        validateId(asset)
+                        require(asset !in importedAssets) { "工程资源重复" }
+                        val data = zip.readNBytes(MAX_ASSET_BYTES + 1)
+                        require(data.size <= MAX_ASSET_BYTES) { "工程图片过大" }
+                        importedAssets[asset] = data
+                    }
+                    else -> error("工程中含有未知条目")
+                }
+                zip.closeEntry()
+            }
+        }
+        val doc = requireNotNull(project) { "工程缺少 project.json" }
+        require(doc.getInt("format") == 1) { "工程格式不受支持" }
+        validateId(doc.getString("id"))
+        val operations = doc.getJSONArray("operations")
+        val assetIds = importedAssets.keys.associateWith { UUID.randomUUID().toString() }
+        for (i in 0 until operations.length()) {
+            val op = operations.getJSONObject(i)
+            if (op.getString("type") == "IMAGE_IMPORT") {
+                val parameters = op.getJSONObject("parameters")
+                val oldId = parameters.getString("asset")
+                require(oldId in importedAssets) { "工程图片缺失" }
+                parameters.put("id", parameters.optString("id").ifBlank { oldId })
+                parameters.put("asset", assetIds.getValue(oldId))
+            }
+        }
+        val id = UUID.randomUUID().toString()
+        doc.put("id", id)
+        val result = snapshot(doc)
+        importedAssets.forEach { (asset, data) -> atomicBytes(assetFile(assetIds.getValue(asset)), data) }
+        atomic(draft(id), doc.toString())
+        atomic(pointer, id)
+        result
+    }
+
     fun importImage(actor: String, encoded: String): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val bytes = Base64.decode(encoded, Base64.DEFAULT)
@@ -183,8 +252,12 @@ internal class ArtStore(private val root: File) {
 
     private fun snapshot(doc: JSONObject): JSONObject {
         val state = replay(doc)
+        val id = doc.getString("id")
+        val saved = archive(id)
         return JSONObject().put("id", doc.getString("id"))
-            .put("state", state).put("operations", JSONArray(doc.getJSONArray("operations").toString()))
+            .put("state", state).put("revision", doc.getJSONArray("operations").length())
+            .put("dirty", !saved.exists() || draft(id).lastModified() > saved.lastModified())
+            .put("operations", JSONArray(doc.getJSONArray("operations").toString()))
     }
 
     private fun replay(doc: JSONObject): JSONObject {
@@ -233,15 +306,9 @@ internal class ArtStore(private val root: File) {
                 val parentId = p.optString("parentId")
                 if (parentId.isNotBlank()) require(find(parentId).second.getString("kind") == "group")
                 val kind = if (type == "GROUP_CREATE") "group" else if (type == "IMAGE_IMPORT") "image" else "paint"
-                layers.put(JSONObject().put("id", id).put("kind", kind)
-                    .put("name", p.optString("name", if (kind == "group") "图层组" else "图层"))
-                    .put("parentId", parentId)
-                    .put("visible", true).put("opacity", 1.0).put("locked", false)
-                    .put("blend", "normal").put("x", 0.0).put("y", 0.0)
-                    .put("scale", 1.0).put("rotation", 0.0)
-                    .put("asset", p.optString("asset"))
-                    .put("strokes", JSONArray()))
+                layers.put(newLayer(id, kind, p.optString("name", if (kind == "group") "图层组" else "图层"), parentId, p.optString("asset")))
             }
+            "DOCUMENT_RENAME" -> state.put("name", p.getString("name").trim().take(100).also { require(it.isNotBlank()) })
             "LAYER_SELECT" -> state.put("selectedLayerId", find(p.getString("id")).second.getString("id"))
             "LAYER_RENAME" -> find(p.getString("id")).second.put("name", p.getString("name").take(100))
             "LAYER_VISIBLE" -> find(p.getString("id")).second.put("visible", p.getBoolean("visible"))
@@ -262,16 +329,41 @@ internal class ArtStore(private val root: File) {
                     "请先删除或移出组中的图层"
                 }
                 layers.remove(index)
+                if (state.optString("selectedLayerId") == p.getString("id")) state.put("selectedLayerId", "")
             }
             "LAYER_COPY" -> {
                 val (_, original) = find(p.getString("id"))
-                val copy = JSONObject(original.toString()).put("id", p.getString("newId"))
-                    .put("name", original.getString("name") + " 副本")
-                layers.put(copy)
+                val mapping = mutableMapOf(original.getString("id") to p.getString("newId"))
+                val subtree = mutableListOf(original)
+                var cursor = 0
+                while (cursor < subtree.size) {
+                    val parent = subtree[cursor++]
+                    for (i in 0 until layers.length()) {
+                        val child = layers.getJSONObject(i)
+                        if (child.optString("parentId") == parent.getString("id")) {
+                            mapping[child.getString("id")] = UUID.nameUUIDFromBytes(
+                                "${p.getString("newId")}:${child.getString("id")}".toByteArray()).toString()
+                            subtree.add(child)
+                        }
+                    }
+                }
+                subtree.forEach { source ->
+                    val copy = JSONObject(source.toString())
+                    copy.put("id", mapping.getValue(source.getString("id")))
+                    copy.put("parentId", mapping[source.optString("parentId")] ?: source.optString("parentId"))
+                    copy.put("name", source.getString("name") + " 副本")
+                    val strokes = copy.getJSONArray("strokes")
+                    for (i in 0 until strokes.length()) {
+                        val stroke = strokes.getJSONObject(i)
+                        stroke.put("id", UUID.nameUUIDFromBytes("${copy.getString("id")}:$i".toByteArray()).toString())
+                        stroke.put("layerId", copy.getString("id"))
+                    }
+                    layers.put(copy)
+                }
             }
             "STROKE_ADD" -> {
                 val layer = find(p.getString("layerId")).second
-                require(layer.getString("kind") == "paint" && !layer.getBoolean("locked"))
+                require(layer.getString("kind") == "paint" && !lockedByParent(layer, layers))
                 val points = p.getJSONArray("points")
                 require(points.length() in 1..10000)
                 for (i in 0 until points.length()) {
@@ -288,7 +380,7 @@ internal class ArtStore(private val root: File) {
             }
             "STROKE_ERASE" -> {
                 val layer = find(p.getString("layerId")).second
-                require(!layer.getBoolean("locked"))
+                require(!lockedByParent(layer, layers))
                 val strokes = layer.getJSONArray("strokes")
                 val index = (0 until strokes.length()).firstOrNull { strokes.getJSONObject(it).getString("id") == p.getString("strokeId") }
                     ?: error("笔画不存在")
@@ -296,7 +388,7 @@ internal class ArtStore(private val root: File) {
             }
             "TRANSFORM" -> {
                 val layer = find(p.getString("id")).second
-                require(!layer.getBoolean("locked"))
+                require(!lockedByParent(layer, layers))
                 for (field in listOf("x", "y", "rotation", "scale")) if (p.has(field)) {
                     val value = p.getDouble(field)
                     require(value.isFinite() && (field != "scale" || value in 0.01..100.0))
@@ -312,20 +404,24 @@ internal class ArtStore(private val root: File) {
             "SELECTION_EDIT" -> {
                 val selection = state.optJSONObject("selection") ?: error("请先创建矩形选区")
                 val layer = find(p.getString("layerId")).second
-                require(layer.getString("kind") == "paint" && !layer.getBoolean("locked"))
+                require(layer.getString("kind") == "paint" && !lockedByParent(layer, layers))
+                val transform = layerMatrix(layer, layers)
+                val inverse = Matrix().also { require(transform.invert(it)) { "图层变换不可逆" } }
                 val strokes = layer.getJSONArray("strokes")
                 val chosen = (0 until strokes.length()).filter { index ->
-                    val points = strokes.getJSONObject(index).getJSONArray("points")
-                    val x = (0 until points.length()).sumOf { points.getJSONArray(it).getDouble(0) } / points.length()
-                    val y = (0 until points.length()).sumOf { points.getJSONArray(it).getDouble(1) } / points.length()
-                    x >= selection.getDouble("x") && y >= selection.getDouble("y") &&
-                        x <= selection.getDouble("x") + selection.getDouble("width") &&
-                        y <= selection.getDouble("y") + selection.getDouble("height")
+                    intersects(strokes.getJSONObject(index).getJSONArray("points"), selection, transform)
                 }
                 require(chosen.isNotEmpty()) { "选区中没有笔画" }
                 val action = p.getString("action")
-                val centerX = selection.getDouble("x") + selection.getDouble("width") / 2.0
-                val centerY = selection.getDouble("y") + selection.getDouble("height") / 2.0
+                val canvasCenterX = selection.getDouble("x") + selection.getDouble("width") / 2.0
+                val canvasCenterY = selection.getDouble("y") + selection.getDouble("height") / 2.0
+                val center = floatArrayOf(canvasCenterX.toFloat(), canvasCenterY.toFloat())
+                inverse.mapPoints(center)
+                val centerX = center[0].toDouble(); val centerY = center[1].toDouble()
+                val movement = floatArrayOf(p.optDouble("dx", 0.0).toFloat(), p.optDouble("dy", 0.0).toFloat())
+                inverse.mapVectors(movement)
+                val copyOffset = floatArrayOf(20f, 20f)
+                inverse.mapVectors(copyOffset)
                 when (action) {
                     "DELETE" -> for (index in chosen.asReversed()) strokes.remove(index)
                     "COPY", "MOVE", "SCALE", "ROTATE" -> {
@@ -337,7 +433,7 @@ internal class ArtStore(private val root: File) {
                                 val x = point.getDouble(0)
                                 val y = point.getDouble(1)
                                 val transformed = when (action) {
-                                    "MOVE" -> (x + p.getDouble("dx")) to (y + p.getDouble("dy"))
+                                    "MOVE" -> (x + movement[0]) to (y + movement[1])
                                     "SCALE" -> {
                                         val factor = p.getDouble("factor").also { require(it in 0.01..100.0) }
                                         (centerX + (x - centerX) * factor) to (centerY + (y - centerY) * factor)
@@ -348,7 +444,7 @@ internal class ArtStore(private val root: File) {
                                         (centerX + dx * cos(angle) - dy * sin(angle)) to
                                             (centerY + dx * sin(angle) + dy * cos(angle))
                                     }
-                                    else -> (x + 20.0) to (y + 20.0)
+                                    else -> (x + copyOffset[0]) to (y + copyOffset[1])
                                 }
                                 require(transformed.first.isFinite() && transformed.second.isFinite())
                                 point.put(0, transformed.first).put(1, transformed.second)
@@ -369,8 +465,8 @@ internal class ArtStore(private val root: File) {
                         val factor = p.getDouble("factor")
                         selection.put("width", selection.getDouble("width") * factor)
                         selection.put("height", selection.getDouble("height") * factor)
-                        selection.put("x", centerX - selection.getDouble("width") / 2)
-                        selection.put("y", centerY - selection.getDouble("height") / 2)
+                        selection.put("x", canvasCenterX - selection.getDouble("width") / 2)
+                        selection.put("y", canvasCenterY - selection.getDouble("height") / 2)
                     }
                     "COPY" -> {
                         selection.put("x", selection.getDouble("x") + 20.0)
@@ -385,13 +481,116 @@ internal class ArtStore(private val root: File) {
                 require(dx.isFinite() && dy.isFinite())
                 for (i in 0 until layers.length()) {
                     val layer = layers.getJSONObject(i)
-                    layer.put("x", layer.getDouble("x") - dx)
-                    layer.put("y", layer.getDouble("y") - dy)
+                    if (layer.optString("parentId").isBlank()) {
+                        layer.put("x", layer.getDouble("x") - dx)
+                        layer.put("y", layer.getDouble("y") - dy)
+                    }
                 }
                 state.put("selection", JSONObject.NULL)
             }
             else -> error("未知画室操作：$type")
         }
+    }
+
+    fun history(actor: String, redo: Boolean): JSONObject = locked {
+        val operations = loadCurrent().getJSONArray("operations")
+        val disabled = mutableSetOf<String>()
+        val undoStack = mutableListOf<String>()
+        val redoStack = mutableListOf<String>()
+        for (i in 0 until operations.length()) {
+            val op = operations.getJSONObject(i)
+            val id = op.getString("id")
+            val target = op.optJSONObject("parameters")?.optString("targetId") ?: ""
+            when (op.getString("type")) {
+                "REVERT" -> { disabled.add(target); undoStack.remove(target); redoStack.add(target) }
+                "RESTORE" -> { disabled.remove(target); redoStack.remove(target); undoStack.add(target) }
+                else -> { undoStack.add(id); redoStack.clear() }
+            }
+        }
+        val target = if (redo) redoStack.lastOrNull() else undoStack.lastOrNull()
+        require(target != null) { if (redo) "没有可重做的操作" else "没有可撤销的操作" }
+        // History commits under the same lock; the replay validates dependencies before writing.
+        appendToCurrent(actor, if (redo) "RESTORE" else "REVERT", JSONObject().put("targetId", target))
+    }
+
+    private fun appendToCurrent(actor: String, type: String, params: JSONObject): JSONObject {
+        val doc = loadCurrent()
+        val op = JSONObject().put("id", UUID.randomUUID().toString()).put("actor", actor)
+            .put("type", type).put("parameters", params).put("timestamp", System.currentTimeMillis())
+        doc.getJSONArray("operations").put(op)
+        val result = snapshot(doc)
+        atomic(draft(doc.getString("id")), doc.toString())
+        return result.put("lastOperationId", op.getString("id"))
+    }
+
+    private fun newLayer(id: String, kind: String, name: String, parent: String, asset: String): JSONObject =
+        JSONObject().put("id", id).put("kind", kind).put("name", name).put("parentId", parent)
+            .put("visible", true).put("opacity", 1.0).put("locked", false).put("blend", "normal")
+            .put("x", 0.0).put("y", 0.0).put("scale", 1.0).put("rotation", 0.0)
+            .put("asset", asset).put("strokes", JSONArray())
+
+    private fun lockedByParent(layer: JSONObject, layers: JSONArray): Boolean {
+        var parent = layer
+        repeat(layers.length() + 1) {
+            if (parent.getBoolean("locked")) return true
+            val id = parent.optString("parentId")
+            if (id.isBlank()) return false
+            parent = (0 until layers.length()).map { layers.getJSONObject(it) }
+                .firstOrNull { it.getString("id") == id } ?: error("图层组不存在")
+        }
+        error("图层组存在循环引用")
+    }
+
+    private fun layerMatrix(layer: JSONObject, layers: JSONArray): Matrix {
+        val chain = mutableListOf(layer)
+        var parentId = layer.optString("parentId")
+        repeat(layers.length()) {
+            if (parentId.isNotBlank()) {
+                val parent = (0 until layers.length()).map { layers.getJSONObject(it) }
+                    .firstOrNull { it.getString("id") == parentId } ?: error("图层组不存在")
+                chain.add(parent)
+                parentId = parent.optString("parentId")
+            }
+        }
+        require(parentId.isBlank()) { "图层组存在循环引用" }
+        return Matrix().also { matrix ->
+            for (item in chain) {
+                matrix.postScale(item.getDouble("scale").toFloat(), item.getDouble("scale").toFloat())
+                matrix.postRotate(item.getDouble("rotation").toFloat())
+                matrix.postTranslate(item.getDouble("x").toFloat(), item.getDouble("y").toFloat())
+            }
+        }
+    }
+
+    private fun intersects(points: JSONArray, rect: JSONObject, matrix: Matrix): Boolean {
+        val left = rect.getDouble("x"); val top = rect.getDouble("y")
+        val right = left + rect.getDouble("width"); val bottom = top + rect.getDouble("height")
+        fun inside(x: Double, y: Double) = x in left..right && y in top..bottom
+        var previous: JSONArray? = null
+        for (i in 0 until points.length()) {
+            val point = points.getJSONArray(i)
+            val mapped = floatArrayOf(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
+            matrix.mapPoints(mapped)
+            val x = mapped[0].toDouble(); val y = mapped[1].toDouble()
+            if (inside(x, y)) return true
+            previous?.let { old ->
+                val previousMapped = floatArrayOf(old.getDouble(0).toFloat(), old.getDouble(1).toFloat())
+                matrix.mapPoints(previousMapped)
+                val px = previousMapped[0].toDouble(); val py = previousMapped[1].toDouble()
+                val dx = x - px; val dy = y - py
+                fun cross(a: Double, b: Double, c: Double, d: Double): Boolean {
+                    val denominator = dx * (d - b) - dy * (c - a)
+                    if (denominator == 0.0) return false
+                    val t = ((a - px) * (d - b) - (b - py) * (c - a)) / denominator
+                    val u = ((a - px) * dy - (b - py) * dx) / denominator
+                    return t in 0.0..1.0 && u in 0.0..1.0
+                }
+                if (cross(left, top, right, top) || cross(right, top, right, bottom) ||
+                    cross(right, bottom, left, bottom) || cross(left, bottom, left, top)) return true
+            }
+            previous = point
+        }
+        return false
     }
 
     private fun loadCurrent(): JSONObject {

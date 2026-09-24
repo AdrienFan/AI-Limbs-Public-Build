@@ -1,7 +1,5 @@
 package com.ai.limbs.plugins.artstudio
 
-import android.content.ContentValues
-import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
@@ -11,11 +9,14 @@ import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.os.Build
-import android.os.Environment
-import android.provider.MediaStore
+import java.io.File
+import java.io.FileOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
+import kotlin.math.hypot
+import kotlin.math.cos
+import kotlin.math.sin
 
 internal object ArtRenderer {
     fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false): Bitmap {
@@ -29,64 +30,58 @@ internal object ArtRenderer {
         if (opaque) canvas.drawColor(Color.WHITE)
         canvas.drawColor(background)
         val layers = state.getJSONArray("layers")
-        for (i in 0 until layers.length()) {
-            val layer = layers.getJSONObject(i)
-            if (layer.getString("kind") == "group" || !layer.getBoolean("visible")) continue
-            val parents = ancestors(layer, layers) ?: continue
-            if (parents.any { !it.getBoolean("visible") }) continue
-            val buffer = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-            val local = Canvas(buffer)
-            if (layer.getString("kind") == "image") {
-                BitmapFactory.decodeFile(store.assetFile(layer.getString("asset")).absolutePath)?.let { image ->
-                    local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
-                    image.recycle()
-                }
-            } else {
-                val strokes = layer.getJSONArray("strokes")
-                for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s))
+        fun compositePaint(layer: JSONObject): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
+            alpha = (layer.getDouble("opacity") * 255).toInt().coerceIn(0, 255)
+            if (Build.VERSION.SDK_INT >= 29) blendMode = when (layer.getString("blend")) {
+                "multiply" -> android.graphics.BlendMode.MULTIPLY
+                "screen" -> android.graphics.BlendMode.SCREEN
+                "add" -> android.graphics.BlendMode.PLUS
+                else -> android.graphics.BlendMode.SRC_OVER
             }
-            canvas.save()
-            for (parent in parents) {
-                canvas.translate(parent.getDouble("x").toFloat(), parent.getDouble("y").toFloat())
-                canvas.rotate(parent.getDouble("rotation").toFloat())
-                val parentScale = parent.getDouble("scale").toFloat()
-                canvas.scale(parentScale, parentScale)
-            }
-            canvas.translate(layer.getDouble("x").toFloat(), layer.getDouble("y").toFloat())
-            canvas.rotate(layer.getDouble("rotation").toFloat())
-            val scale = layer.getDouble("scale").toFloat()
-            canvas.scale(scale, scale)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-                alpha = (parents.fold(layer.getDouble("opacity")) { value, parent ->
-                    value * parent.getDouble("opacity") } * 255).toInt().coerceIn(0, 255)
-                if (Build.VERSION.SDK_INT >= 29) blendMode = when (layer.getString("blend")) {
-                    "multiply" -> android.graphics.BlendMode.MULTIPLY
-                    "screen" -> android.graphics.BlendMode.SCREEN
-                    "add" -> android.graphics.BlendMode.PLUS
-                    else -> android.graphics.BlendMode.SRC_OVER
-                }
-            }
-            canvas.drawBitmap(buffer, 0f, 0f, paint)
-            canvas.restore()
-            buffer.recycle()
         }
+        fun drawChildren(target: Canvas, parentId: String, depth: Int, draw: (Canvas, String, Int) -> Unit) {
+            require(depth <= layers.length()) { "图层组存在循环引用" }
+            for (i in 0 until layers.length()) {
+                val layer = layers.getJSONObject(i)
+                if (layer.optString("parentId") != parentId || !layer.getBoolean("visible")) continue
+                target.save()
+                target.translate(layer.getDouble("x").toFloat(), layer.getDouble("y").toFloat())
+                target.rotate(layer.getDouble("rotation").toFloat())
+                val scale = layer.getDouble("scale").toFloat()
+                target.scale(scale, scale)
+                val paint = compositePaint(layer)
+                if (layer.getString("kind") == "group") {
+                    // Isolate the complete group before applying opacity or blend once.
+                    target.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), paint)
+                    draw(target, layer.getString("id"), depth + 1)
+                    target.restore()
+                } else {
+                    val buffer = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    try {
+                        val local = Canvas(buffer)
+                        if (layer.getString("kind") == "image") {
+                            BitmapFactory.decodeFile(store.assetFile(layer.getString("asset")).absolutePath)?.let { image ->
+                                local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
+                                image.recycle()
+                            }
+                        } else {
+                            val strokes = layer.getJSONArray("strokes")
+                            for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s))
+                        }
+                        target.drawBitmap(buffer, 0f, 0f, paint)
+                    } finally { buffer.recycle() }
+                }
+                target.restore()
+            }
+        }
+        // Kotlin local functions cannot refer forward to themselves, so pass the renderer explicitly.
+        lateinit var draw: (Canvas, String, Int) -> Unit
+        draw = { target, parent, depth -> drawChildren(target, parent, depth, draw) }
+        draw(canvas, "", 0)
         return bitmap
     }
 
-    private fun ancestors(layer: JSONObject, layers: JSONArray): List<JSONObject>? {
-        var parentId = layer.optString("parentId")
-        val path = mutableListOf<JSONObject>()
-        repeat(layers.length()) {
-            if (parentId.isBlank()) return path.reversed()
-            val parent = (0 until layers.length()).map { layers.getJSONObject(it) }
-                .firstOrNull { it.getString("id") == parentId } ?: return null
-            path.add(parent)
-            parentId = parent.optString("parentId")
-        }
-        return null
-    }
-
-    private fun drawStroke(canvas: Canvas, stroke: JSONObject) {
+    fun drawStroke(canvas: Canvas, stroke: JSONObject) {
         val points = stroke.getJSONArray("points")
         if (points.length() == 0) return
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -101,9 +96,34 @@ internal object ArtRenderer {
         }
         val tool = stroke.optString("tool", "pencil")
         val width = stroke.getDouble("width").toFloat()
-        if (tool == "soft" || tool == "spray") {
+        if (tool == "soft") {
             paint.setShadowLayer(width * 0.7f, 0f, 0f, paint.color)
             paint.alpha = (paint.alpha * 0.45f).toInt()
+        } else if (tool == "pencil") {
+            paint.alpha = (paint.alpha * 0.58f).toInt()
+        }
+        if (tool == "spray") {
+            paint.style = Paint.Style.FILL
+            paint.alpha = (paint.alpha * 0.45f).toInt()
+            val random = java.util.Random(0xA11L)
+            for (i in 0 until points.length()) {
+                val point = points.getJSONArray(i)
+                val before = points.getJSONArray((i - 1).coerceAtLeast(0))
+                val x = point.getDouble(0); val y = point.getDouble(1)
+                val px = before.getDouble(0); val py = before.getDouble(1)
+                val steps = (hypot(x - px, y - py) / width).toInt().coerceIn(1, 8)
+                for (step in 1..steps) {
+                    val centerX = px + (x - px) * step / steps
+                    val centerY = py + (y - py) * step / steps
+                    repeat(8) {
+                        val angle = random.nextDouble() * Math.PI * 2
+                        val radius = kotlin.math.sqrt(random.nextDouble()) * width * point.optDouble(2, 1.0) / 2
+                        canvas.drawCircle((centerX + cos(angle) * radius).toFloat(),
+                            (centerY + sin(angle) * radius).toFloat(), (width * 0.035f).coerceAtLeast(0.5f), paint)
+                    }
+                }
+            }
+            return
         }
         var previous = points.getJSONArray(0)
         if (points.length() == 1) {
@@ -121,33 +141,30 @@ internal object ArtRenderer {
         }
     }
 
-    fun export(context: Context, store: ArtStore, snapshot: JSONObject, format: String, name: String): JSONObject {
+    fun export(dataDir: File, store: ArtStore, snapshot: JSONObject, format: String, name: String): JSONObject {
         require(format == "png" || format == "jpeg")
         val mime = if (format == "png") "image/png" else "image/jpeg"
         val filename = (name.ifBlank { "AI-Limbs-Art-${UUID.randomUUID()}" }
             .replace(Regex("[^A-Za-z0-9_-]"), "_").take(80)) + ".$format"
-        val values = ContentValues().apply {
-            put(MediaStore.Images.Media.DISPLAY_NAME, filename)
-            put(MediaStore.Images.Media.MIME_TYPE, mime)
-            put(MediaStore.Images.Media.RELATIVE_PATH, Environment.DIRECTORY_PICTURES + "/AI Limbs Art Studio")
-            put(MediaStore.Images.Media.IS_PENDING, 1)
-        }
-        val resolver = context.contentResolver
-        val uri = requireNotNull(resolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)) {
-            "无法创建图片文件"
-        }
+        val directory = File(dataDir, "exports")
+        require(directory.mkdirs() || directory.isDirectory)
+        val destination = File(directory, filename)
+        val temp = File(directory, ".${UUID.randomUUID()}.tmp")
         try {
             val bitmap = render(store, snapshot, opaque = format == "jpeg")
-            resolver.openOutputStream(uri)?.use { stream ->
+            FileOutputStream(temp).use { stream ->
                 require(bitmap.compress(if (format == "png") Bitmap.CompressFormat.PNG
                     else Bitmap.CompressFormat.JPEG, 95, stream))
-            } ?: error("无法写入导出图片")
+                stream.fd.sync()
+            }
             bitmap.recycle()
-            resolver.update(uri, ContentValues().apply { put(MediaStore.Images.Media.IS_PENDING, 0) }, null, null)
+            require(temp.renameTo(destination)) { "无法保存导出图片" }
         } catch (error: Throwable) {
-            resolver.delete(uri, null, null)
             throw error
+        } finally {
+            temp.delete()
         }
-        return JSONObject().put("uri", uri.toString()).put("name", filename)
+        return JSONObject().put("path", destination.absolutePath).put("name", filename)
+            .put("mime", mime).put("bytes", destination.length())
     }
 }

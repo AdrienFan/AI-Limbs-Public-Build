@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "api": { "target": 1, "min": 1 },
   "display": {
     "name": "AI Limbs 画室",
@@ -23,7 +23,7 @@
   "provides": {
     "capabilities": [
       "plugin.art.studio.document.create", "plugin.art.studio.document.open",
-      "plugin.art.studio.document.save", "plugin.art.studio.document.info",
+      "plugin.art.studio.document.save", "plugin.art.studio.document.rename", "plugin.art.studio.document.info",
       "plugin.art.studio.document.list", "plugin.art.studio.canvas.inspect",
       "plugin.art.studio.canvas.crop", "plugin.art.studio.layer.list",
       "plugin.art.studio.layer.create", "plugin.art.studio.layer.group",

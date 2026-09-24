@@ -49,6 +49,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         capability("document.open", "打开画室工程", write) { p -> store.open(p.getString("id")) }
         capability("document.save", "保存画室工程", write) { store.save() }
+        capability("document.rename", "重命名画室工程", write) { p -> store.apply("LANER", "DOCUMENT_RENAME", p) }
         capability("document.info", "读取画室工程", read) { store.current() }
         capability("document.list", "列出画室工程", read) { JSONObject().put("documents", store.list()) }
         capability("canvas.inspect", "查看画布结构", read) { store.current() }
@@ -97,43 +98,19 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.apply("LANER", "REVERT", JSONObject().put("targetId", id))
         }
         capability("history.undo", "撤销最近一次画室操作", write) {
-            val ops = store.current().getJSONArray("operations")
-            val disabled = mutableSetOf<String>()
-            for (i in 0 until ops.length()) {
-                val op = ops.getJSONObject(i)
-                when (op.getString("type")) {
-                    "REVERT" -> disabled.add(op.getJSONObject("parameters").getString("targetId"))
-                    "RESTORE" -> disabled.remove(op.getJSONObject("parameters").getString("targetId"))
-                }
-            }
-            val target = (ops.length() - 1 downTo 0).map { ops.getJSONObject(it) }
-                .firstOrNull { it.getString("type") !in setOf("REVERT", "RESTORE") && it.getString("id") !in disabled }
-                ?: error("没有可撤销的操作")
-            store.apply("LANER", "REVERT", JSONObject().put("targetId", target.getString("id")))
+            store.history("LANER", redo = false)
         }
         capability("history.redo", "重做画室操作", write) {
-            val ops = store.current().getJSONArray("operations")
-            val disabled = mutableSetOf<String>()
-            for (i in 0 until ops.length()) {
-                val op = ops.getJSONObject(i)
-                when (op.getString("type")) {
-                    "REVERT" -> disabled.add(op.getJSONObject("parameters").getString("targetId"))
-                    "RESTORE" -> disabled.remove(op.getJSONObject("parameters").getString("targetId"))
-                }
-            }
-            val target = (ops.length() - 1 downTo 0).map { ops.getJSONObject(it) }
-                .firstOrNull { it.getString("type") !in setOf("REVERT", "RESTORE") && it.getString("id") in disabled }
-                ?: error("没有可重做的操作")
-            store.apply("LANER", "RESTORE", JSONObject().put("targetId", target.getString("id")))
+            store.history("LANER", redo = true)
         }
         capability("image.import", "导入 PNG 或 JPEG", write) { p ->
             store.importImage("LANER", p.getString("base64"))
         }
         capability("export.png", "导出 PNG", write) { p ->
-            ArtRenderer.export(host.applicationContext, store, store.current(), "png", p.optString("name", ""))
+            ArtRenderer.export(host.dataDir, store, store.current(), "png", p.optString("name", ""))
         }
         capability("export.jpeg", "导出 JPEG", write) { p ->
-            ArtRenderer.export(host.applicationContext, store, store.current(), "jpeg", p.optString("name", ""))
+            ArtRenderer.export(host.dataDir, store, store.current(), "jpeg", p.optString("name", ""))
         }
         host.logger.i("ArtStudio", "Art Studio mounted")
         return InProcessPluginHandle { host.logger.i("ArtStudio", "Art Studio stopped") }
@@ -177,7 +154,12 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "transform.rotate" -> listOf(id, p("rotation", "number"))
         "history.revert_actor_operations" -> listOf(id)
         "image.import" -> listOf(p("base64"))
-        "export.png", "export.jpeg" -> listOf(p("name", optional = true))
+        "export.png", "export.jpeg", "document.rename" -> listOf(p("name", optional = name != "document.rename"))
         else -> emptyList()
+    }.let { fields ->
+        if ((name.startsWith("layer.") && name != "layer.list") || name.startsWith("stroke.") || name.startsWith("selection.") ||
+            name.startsWith("transform.") || name == "canvas.crop" || name == "document.rename") {
+            fields + p("expectedRevision", "integer", true)
+        } else fields
     }
 }
