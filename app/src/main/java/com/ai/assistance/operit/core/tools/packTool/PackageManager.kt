@@ -22,6 +22,8 @@ import com.ai.assistance.operit.core.tools.skill.SkillManager
 import com.ai.assistance.operit.data.security.PluginDenylistRepository
 import com.ai.assistance.operit.data.preferences.SkillVisibilityPreferences
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
+import com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntime
+import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
 import com.ai.assistance.operit.data.preferences.DisplayPreferencesManager
 import com.ai.assistance.operit.data.model.Workflow
@@ -3421,8 +3423,16 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
     }
 
     private fun buildConditionCapabilitiesSnapshot(): Map<String, Any?> {
+        val permissionPolicy =
+            runCatching { PermissionPolicyRuntime.readBlocking(context) }
+                .getOrNull()
+        val coexistEnabled = permissionPolicy?.coexistEnabled ?: false
         val level = try {
-            androidPermissionPreferences.getPreferredPermissionLevel() ?: AndroidPermissionLevel.STANDARD
+            if (coexistEnabled) {
+                ShellExecutorFactory.getRoutedPermissionLevel(context)
+            } else {
+                permissionPolicy?.legacyPreferred ?: AndroidPermissionLevel.STANDARD
+            }
         } catch (_: Exception) {
             AndroidPermissionLevel.STANDARD
         }
@@ -3456,6 +3466,7 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
             "platform.macos" to false,
             "ui.virtual_display" to virtualDisplayCapable,
             "android.permission_level" to level,
+            "android.permission_coexist" to coexistEnabled,
             "android.shizuku_available" to shizukuAvailable,
             "ui.shower_display" to (try { ShowerController.getDisplayId("default") != null } catch (_: Exception) { false })
         )

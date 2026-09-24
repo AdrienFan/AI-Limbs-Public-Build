@@ -589,10 +589,14 @@ class MainActivity : ComponentActivity() {
 
     // ======== 检查权限级别设置 ========
     private fun checkPermissionLevelSet() {
-        // 检查是否已设置权限级别
         val permissionLevel = androidPermissionPreferences.getPreferredPermissionLevel()
-        AppLogger.d(TAG, "当前权限级别: $permissionLevel")
-        showPermissionGuide = permissionLevel == null
+        val coexistEnabled = androidPermissionPreferences.getPermissionCoexistEnabled()
+        val permissionPolicyConfigured = androidPermissionPreferences.isPermissionLevelSet()
+        AppLogger.d(
+            TAG,
+            "当前权限策略: preferred=$permissionLevel, coexist=$coexistEnabled"
+        )
+        showPermissionGuide = !permissionPolicyConfigured
         AppLogger.d(
                 TAG,
                 "权限级别检查: 已设置=${!showPermissionGuide}, 将${if(showPermissionGuide) "" else "不"}显示权限引导界面"

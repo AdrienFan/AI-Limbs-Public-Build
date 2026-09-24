@@ -21,6 +21,7 @@ import kotlinx.coroutines.withContext
 
 data class AiLimbsUiCapabilityStatus(
     val preferredPermissionLevel: AndroidPermissionLevel,
+    val permissionCoexistEnabled: Boolean,
     val activeBackend: String,
     val selectedBackendAvailable: Boolean,
     val directUiReady: Boolean,
@@ -97,7 +98,10 @@ class AiLimbsUiCapabilityService(context: Context) {
                 uiControllerImageEnabled
         val nextAction =
             when {
-                preferredLevel == AndroidPermissionLevel.STANDARD ->
+                runtimeState.permissionCoexistEnabled && !directUiReady ->
+                    "Authorize Accessibility, Shizuku/Debugger, or Root so UI routing has an available provider."
+                !runtimeState.permissionCoexistEnabled &&
+                    preferredLevel == AndroidPermissionLevel.STANDARD ->
                     "Select ACCESSIBILITY, DEBUGGER, ADMIN, or ROOT as the UI permission level."
                 preferredLevel == AndroidPermissionLevel.ACCESSIBILITY && providerVersion == null ->
                     "Install the accessibility provider app."
@@ -112,6 +116,7 @@ class AiLimbsUiCapabilityService(context: Context) {
 
         AiLimbsUiCapabilityStatus(
             preferredPermissionLevel = preferredLevel,
+            permissionCoexistEnabled = runtimeState.permissionCoexistEnabled,
             activeBackend = activeBackend,
             selectedBackendAvailable = selectedBackendAvailable,
             directUiReady = directUiReady,

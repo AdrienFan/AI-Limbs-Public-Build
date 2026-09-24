@@ -4,6 +4,7 @@ import android.content.Context
 import com.ai.assistance.operit.util.AppLogger
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
+import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
@@ -58,6 +59,7 @@ class AndroidPermissionPreferences(private val context: Context) {
 
         // 权限相关键
         private val PREFERRED_PERMISSION_LEVEL = stringPreferencesKey("preferred_permission_level")
+        private val PERMISSION_COEXIST_ENABLED = booleanPreferencesKey("permission_coexist_enabled")
         private val ROOT_EXECUTION_MODE = stringPreferencesKey("root_execution_mode")
         private val CUSTOM_SU_COMMAND = stringPreferencesKey("custom_su_command")
     }
@@ -72,6 +74,12 @@ class AndroidPermissionPreferences(private val context: Context) {
             context.androidPermissionDataStore.data.map { preferences ->
                 val levelString = preferences[PREFERRED_PERMISSION_LEVEL]
                 if (levelString != null) AndroidPermissionLevel.fromString(levelString) else null
+            }
+
+    /** Multiple permission providers may stay online and be routed by capability. */
+    val permissionCoexistEnabledFlow: Flow<Boolean> =
+            context.androidPermissionDataStore.data.map { preferences ->
+                preferences[PERMISSION_COEXIST_ENABLED] ?: false
             }
 
     val rootExecutionModeFlow: Flow<RootCommandExecutionMode> =
@@ -92,6 +100,13 @@ class AndroidPermissionPreferences(private val context: Context) {
         AppLogger.d(TAG, "Saving preferred permission level: $permissionLevel")
         context.androidPermissionDataStore.edit { preferences ->
             preferences[PREFERRED_PERMISSION_LEVEL] = permissionLevel.name
+        }
+    }
+
+    suspend fun savePermissionCoexistEnabled(enabled: Boolean) {
+        AppLogger.d(TAG, "Saving permission coexist policy: $enabled")
+        context.androidPermissionDataStore.edit { preferences ->
+            preferences[PERMISSION_COEXIST_ENABLED] = enabled
         }
     }
 
@@ -125,6 +140,17 @@ class AndroidPermissionPreferences(private val context: Context) {
         }
     }
 
+    fun getPermissionCoexistEnabled(): Boolean {
+        return runBlocking {
+            try {
+                permissionCoexistEnabledFlow.first()
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error getting permission coexist policy", e)
+                false
+            }
+        }
+    }
+
     fun getRootExecutionMode(): RootCommandExecutionMode {
         return runBlocking {
             try {
@@ -154,9 +180,9 @@ class AndroidPermissionPreferences(private val context: Context) {
     fun isPermissionLevelSet(): Boolean {
         return runBlocking {
             try {
-                preferredPermissionLevelFlow.first() != null
+                permissionCoexistEnabledFlow.first() || preferredPermissionLevelFlow.first() != null
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Error checking if permission level is set", e)
+                AppLogger.e(TAG, "Error checking if permission policy is configured", e)
                 false
             }
         }

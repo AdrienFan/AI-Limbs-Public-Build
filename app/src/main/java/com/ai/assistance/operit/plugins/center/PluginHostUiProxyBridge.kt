@@ -1065,6 +1065,26 @@ private class ResidentHostComponentExecutor(
             }
             JSONObject().put("ok", true).put("results", results)
         }
+        ResidentComponentProxyBroker.KIND_PERMISSION_POLICY_HOST -> {
+            when (payload.getString("action")) {
+                "state" ->
+                    JSONObject()
+                        .put("ok", true)
+                        .put(
+                            "preferred_permission_level",
+                            androidPermissionPreferences.getPreferredPermissionLevel()?.name
+                                ?: JSONObject.NULL
+                        )
+                        .put(
+                            "permission_coexist_enabled",
+                            androidPermissionPreferences.getPermissionCoexistEnabled()
+                        )
+                else ->
+                    JSONObject()
+                        .put("ok", false)
+                        .put("error", "UNKNOWN_PERMISSION_POLICY_ACTION")
+            }
+        }
         ResidentComponentProxyBroker.KIND_UI_AUTOMATION_HOST -> {
             when (payload.getString("action")) {
                 "state" -> {
@@ -1085,6 +1105,10 @@ private class ResidentHostComponentExecutor(
                         .put(
                             "preferred_permission_level",
                             preferred?.name ?: JSONObject.NULL
+                        )
+                        .put(
+                            "permission_coexist_enabled",
+                            androidPermissionPreferences.getPermissionCoexistEnabled()
                         )
                         .put("accessibility_available", accessibilityAvailable)
                 }

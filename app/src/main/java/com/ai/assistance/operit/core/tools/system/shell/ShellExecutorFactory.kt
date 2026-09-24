@@ -3,6 +3,9 @@ package com.ai.assistance.operit.core.tools.system.shell
 import android.content.Context
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
+import com.ai.assistance.operit.core.tools.system.PermissionRoutingPolicy
+import com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntime
+import com.ai.assistance.operit.core.tools.system.PermissionPolicyState
 import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
 
 /** Shell执行器工厂类 根据权限级别提供相应的执行器实例 */
@@ -87,16 +90,53 @@ class ShellExecutorFactory {
          * @param context Android上下文
          * @return 用户首选的Shell执行器
          */
-        fun getUserPreferredExecutor(context: Context): ShellExecutor {
-            try {
-                val preferredLevel = androidPermissionPreferences.getPreferredPermissionLevel()
-                // 如果preferredLevel为null，使用标准权限级别
-                val actualLevel = preferredLevel ?: AndroidPermissionLevel.STANDARD
-                return getExecutor(context, actualLevel)
+        fun getRoutingCandidates(context: Context): List<AndroidPermissionLevel> {
+            return try {
+                val policy = PermissionPolicyRuntime.readBlocking(context)
+                PermissionRoutingPolicy.shellCandidates(
+                    coexistEnabled = policy.coexistEnabled,
+                    legacyPreferred = policy.legacyPreferred
+                )
             } catch (e: Exception) {
-                AppLogger.e(TAG, "Error getting preferred permission level, falling back to STANDARD", e)
-                return getExecutor(context, AndroidPermissionLevel.STANDARD)
+                AppLogger.e(TAG, "Error resolving shell routing policy", e)
+                listOf(AndroidPermissionLevel.STANDARD)
             }
+        }
+
+        fun getRoutedPermissionLevel(context: Context): AndroidPermissionLevel {
+            val policy =
+                runCatching { PermissionPolicyRuntime.readBlocking(context) }
+                    .getOrElse {
+                        PermissionPolicyState(
+                            coexistEnabled = false,
+                            legacyPreferred = AndroidPermissionLevel.STANDARD,
+                            source = "factory_fallback"
+                        )
+                    }
+            val candidates =
+                PermissionRoutingPolicy.shellCandidates(
+                    coexistEnabled = policy.coexistEnabled,
+                    legacyPreferred = policy.legacyPreferred
+                )
+
+            if (!policy.coexistEnabled) {
+                return candidates.firstOrNull() ?: AndroidPermissionLevel.STANDARD
+            }
+
+            for (level in candidates) {
+                val executor = getExecutor(context, level)
+                val status = executor.hasPermission()
+                if (executor.isAvailable() && status.granted) {
+                    AppLogger.d(TAG, "Coexist shell route selected: $level")
+                    return level
+                }
+            }
+
+            return AndroidPermissionLevel.STANDARD
+        }
+
+        fun getUserPreferredExecutor(context: Context): ShellExecutor {
+            return getExecutor(context, getRoutedPermissionLevel(context))
         }
 
         /**

@@ -50,6 +50,8 @@ import androidx.compose.ui.unit.sp
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
+import com.ai.assistance.operit.core.tools.system.action.ActionListenerFactory
+import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
 import com.ai.assistance.operit.util.AppLogger
 import kotlinx.coroutines.launch
@@ -81,6 +83,7 @@ fun PermissionLevelCard(
         onRootClick: () -> Unit,
         isRefreshing: Boolean = false,
         onRefresh: () -> Unit,
+        onPermissionCoexistChange: (Boolean) -> Unit = {},
         onPermissionLevelChange: (AndroidPermissionLevel) -> Unit = {},
         onPermissionLevelSet: (AndroidPermissionLevel) -> Unit = {}
 ) {
@@ -91,6 +94,11 @@ fun PermissionLevelCard(
     val preferredPermissionLevel =
             androidPermissionPreferences.preferredPermissionLevelFlow.collectAsState(
                     initial = AndroidPermissionLevel.STANDARD
+            )
+
+    val permissionCoexistEnabled =
+            androidPermissionPreferences.permissionCoexistEnabledFlow.collectAsState(
+                    initial = false
             )
 
     // 当前显示的权限级别（可能与实际使用的不同）
@@ -174,6 +182,49 @@ fun PermissionLevelCard(
                         style = MaterialTheme.typography.titleMedium,
                         color = MaterialTheme.colorScheme.primary
                 )
+
+                Spacer(modifier = Modifier.weight(1f))
+
+                Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Text(
+                            text = "权限共存",
+                            style = MaterialTheme.typography.labelLarge,
+                            color =
+                                    if (permissionCoexistEnabled.value) {
+                                        Color(0xFF2E7D32)
+                                    } else {
+                                        Color(0xFFC62828)
+                                    }
+                    )
+                    Switch(
+                            checked = permissionCoexistEnabled.value,
+                            onCheckedChange = { enabled ->
+                                coroutineScope.launch {
+                                    androidPermissionPreferences.savePermissionCoexistEnabled(enabled)
+                                    AndroidShellExecutor.clearPreferredPermissionLevelCache()
+                                    ShellExecutorFactory.clearCache()
+                                    ActionListenerFactory.clearCache()
+                                    AppLogger.d(
+                                            "PermissionLevelCard",
+                                            "Permission coexist switched to: " + enabled
+                                    )
+                                    onPermissionCoexistChange(enabled)
+                                }
+                            },
+                            colors =
+                                    SwitchDefaults.colors(
+                                            checkedThumbColor = Color.White,
+                                            checkedTrackColor = Color(0xFF2E7D32),
+                                            checkedBorderColor = Color(0xFF2E7D32),
+                                            uncheckedThumbColor = Color.White,
+                                            uncheckedTrackColor = Color(0xFFC62828),
+                                            uncheckedBorderColor = Color(0xFFC62828)
+                                    )
+                    )
+                }
             }
 
             // 添加分割线
@@ -185,7 +236,12 @@ fun PermissionLevelCard(
             // 权限级别选择器 - 更紧凑的选项卡
             PermissionLevelSelector(
                     currentLevel = displayedPermissionLevel,
-                    activeLevel = preferredPermissionLevel.value,
+                    activeLevel =
+                            if (permissionCoexistEnabled.value) {
+                                null
+                            } else {
+                                preferredPermissionLevel.value
+                            },
                     onLevelSelected = { level -> displayedPermissionLevel = level }
             )
 
@@ -205,8 +261,16 @@ fun PermissionLevelCard(
 
             // 显示状态指示条 - 更紧凑的状态条
             Box(modifier = Modifier.fillMaxWidth().padding(vertical = 6.dp)) {
-                // 当显示的权限级别与当前活动级别不同时显示设置按钮
-                if (displayedPermissionLevel != preferredPermissionLevel.value) {
+                // 共存模式没有“主权限”；Tab 仅用于浏览每个 Provider 的状态。
+                if (permissionCoexistEnabled.value) {
+                    Text(
+                            text = "多权限共存已开启 · 系统按能力自动选路",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color(0xFF2E7D32),
+                            fontWeight = FontWeight.Medium,
+                            modifier = Modifier.align(Alignment.Center)
+                    )
+                } else if (displayedPermissionLevel != preferredPermissionLevel.value) {
                     Button(
                             onClick = {
                                 // 将当前选择的权限级别设置为激活状态
@@ -305,6 +369,7 @@ fun PermissionLevelCard(
                     AndroidPermissionLevel.STANDARD -> {
                         PermissionSectionContainer(
                                 isActive =
+                                        !permissionCoexistEnabled.value &&
                                         preferredPermissionLevel.value ==
                                                 AndroidPermissionLevel.STANDARD,
                                 isCurrentlyDisplayed = true,
@@ -328,6 +393,7 @@ fun PermissionLevelCard(
                     AndroidPermissionLevel.ACCESSIBILITY -> {
                         PermissionSectionContainer(
                                 isActive =
+                                        !permissionCoexistEnabled.value &&
                                         preferredPermissionLevel.value ==
                                                 AndroidPermissionLevel.ACCESSIBILITY,
                                 isCurrentlyDisplayed = true,
@@ -357,6 +423,7 @@ fun PermissionLevelCard(
                     AndroidPermissionLevel.ADMIN -> {
                         PermissionSectionContainer(
                                 isActive =
+                                        !permissionCoexistEnabled.value &&
                                         preferredPermissionLevel.value ==
                                                 AndroidPermissionLevel.ADMIN,
                                 isCurrentlyDisplayed = true,
@@ -380,6 +447,7 @@ fun PermissionLevelCard(
                     AndroidPermissionLevel.DEBUGGER -> {
                         PermissionSectionContainer(
                                 isActive =
+                                        !permissionCoexistEnabled.value &&
                                         preferredPermissionLevel.value ==
                                                 AndroidPermissionLevel.DEBUGGER,
                                 isCurrentlyDisplayed = true,
@@ -407,6 +475,7 @@ fun PermissionLevelCard(
                     AndroidPermissionLevel.ROOT -> {
                         PermissionSectionContainer(
                                 isActive =
+                                        !permissionCoexistEnabled.value &&
                                         preferredPermissionLevel.value ==
                                                 AndroidPermissionLevel.ROOT,
                                 isCurrentlyDisplayed = true,

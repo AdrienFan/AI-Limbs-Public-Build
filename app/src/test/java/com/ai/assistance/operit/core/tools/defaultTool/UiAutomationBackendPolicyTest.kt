@@ -101,4 +101,67 @@ class UiAutomationBackendPolicyTest {
 
         assertEquals(UiAutomationBackend.UNSUPPORTED, selection.backend)
     }
+
+    @Test
+    fun coexistPrefersAccessibilityWhenAvailable() {
+        val selection = selectCoexistingUiAutomationBackend(
+            accessibilityAvailable = true,
+            debuggerAvailable = true,
+            rootAvailable = true,
+            allowAccessibility = true
+        )
+
+        assertEquals(UiAutomationBackend.ACCESSIBILITY, selection.backend)
+        assertEquals("coexist_auto", selection.fallbackReason)
+    }
+
+    @Test
+    fun coexistUsesDebuggerWhenAccessibilityUnavailable() {
+        val selection = selectCoexistingUiAutomationBackend(
+            accessibilityAvailable = false,
+            debuggerAvailable = true,
+            rootAvailable = true,
+            allowAccessibility = true
+        )
+
+        assertEquals(UiAutomationBackend.DEBUGGER, selection.backend)
+        assertEquals(AndroidPermissionLevel.DEBUGGER, selection.shellPermissionLevel)
+    }
+
+    @Test
+    fun coexistExplicitDisplaySkipsAccessibility() {
+        val selection = selectCoexistingUiAutomationBackend(
+            accessibilityAvailable = true,
+            debuggerAvailable = true,
+            rootAvailable = true,
+            allowAccessibility = false
+        )
+
+        assertEquals(UiAutomationBackend.DEBUGGER, selection.backend)
+    }
+
+    @Test
+    fun coexistFallsBackToRootWhenNeeded() {
+        val selection = selectCoexistingUiAutomationBackend(
+            accessibilityAvailable = false,
+            debuggerAvailable = false,
+            rootAvailable = true,
+            allowAccessibility = true
+        )
+
+        assertEquals(UiAutomationBackend.ROOT, selection.backend)
+    }
+
+    @Test
+    fun coexistIsUnsupportedWhenNoProviderAvailable() {
+        val selection = selectCoexistingUiAutomationBackend(
+            accessibilityAvailable = false,
+            debuggerAvailable = false,
+            rootAvailable = false,
+            allowAccessibility = true
+        )
+
+        assertEquals(UiAutomationBackend.UNSUPPORTED, selection.backend)
+        assertEquals("coexist_no_provider", selection.fallbackReason)
+    }
 }

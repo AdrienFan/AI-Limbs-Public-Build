@@ -17,6 +17,8 @@ import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.core.tools.AppListData
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
+import com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntime
+import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
@@ -71,10 +73,18 @@ private fun resolvePrivilegedExecutionState(
     checkDebuggerShizuku: Boolean = true,
     onExperimentalFlagReadError: ((Exception) -> Unit)? = null
 ): PrivilegedExecutionState {
-    val preferredLevel = androidPermissionPreferences.getPreferredPermissionLevel()
-        ?: AndroidPermissionLevel.STANDARD
+    val permissionPolicy = PermissionPolicyRuntime.readBlocking(context)
+    val coexistEnabled = permissionPolicy.coexistEnabled
+    val preferredLevel =
+        permissionPolicy.legacyPreferred ?: AndroidPermissionLevel.STANDARD
+    val effectiveLevel =
+        if (coexistEnabled) {
+            ShellExecutorFactory.getRoutedPermissionLevel(context)
+        } else {
+            preferredLevel
+        }
 
-    var isAdbOrHigher = when (preferredLevel) {
+    var isAdbOrHigher = when (effectiveLevel) {
         AndroidPermissionLevel.DEBUGGER,
         AndroidPermissionLevel.ADMIN,
         AndroidPermissionLevel.ROOT -> true
@@ -95,7 +105,7 @@ private fun resolvePrivilegedExecutionState(
 
     val hasDebuggerShizukuAccess = if (checkDebuggerShizuku &&
         isAdbOrHigher &&
-        preferredLevel == AndroidPermissionLevel.DEBUGGER
+        effectiveLevel == AndroidPermissionLevel.DEBUGGER
     ) {
         val isShizukuRunning = ShizukuAuthorizer.isShizukuServiceRunning()
         val hasShizukuPermission = if (isShizukuRunning) ShizukuAuthorizer.hasShizukuPermission() else false

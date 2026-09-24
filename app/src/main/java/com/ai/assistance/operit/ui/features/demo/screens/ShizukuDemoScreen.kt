@@ -259,6 +259,11 @@ fun ShizukuDemoScreen(
                         viewModel.toggleRootWizard()
                     }
                 },
+                onPermissionCoexistChange = { _ ->
+                    scope.launch {
+                        viewModel.refreshTools(context)
+                    }
+                },
                 onPermissionLevelChange = { level -> currentDisplayedPermissionLevel = level },
                 onPermissionLevelSet = { _ ->
                     // 当设置了新的权限级别时，刷新工具

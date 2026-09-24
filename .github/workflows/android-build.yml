@@ -210,6 +210,7 @@ jobs:
             --tests com.ai.assistance.operit.plugins.center.PluginHostCapabilityRegistryUnifiedHostEntryTest \
             --tests com.ai.assistance.operit.plugins.center.UnknownPluginUnifiedReceiverTest \
             --tests com.ai.assistance.operit.core.tools.defaultTool.UiAutomationBackendPolicyTest \
+            --tests com.ai.assistance.operit.core.tools.system.PermissionRoutingPolicyTest \
             --stacktrace --no-daemon
 
       - name: Run Gradle build

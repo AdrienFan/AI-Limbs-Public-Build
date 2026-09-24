@@ -74,6 +74,21 @@ class AndroidShellExecutor {
             return "Current ${getPermissionLevelLabel(level)} unavailable: $reasonText"
         }
 
+        private fun isProviderTransportFailure(result: ShellExecutor.CommandResult): Boolean {
+            if (result.success) return false
+            val text = (result.stderr + "\n" + result.stdout).lowercase()
+            return listOf(
+                "service not available",
+                "remote exception",
+                "failed to create process",
+                "dead object",
+                "binder",
+                "not connected",
+                "connection reset",
+                "connection refused"
+            ).any { marker -> text.contains(marker) }
+        }
+
         /**
          * 封装执行命令的函数
          * @param command 要执行的命令
@@ -85,45 +100,111 @@ class AndroidShellExecutor {
 
         suspend fun executeShellCommand(command: String, identityOverride: ShellIdentity?): CommandResult {
             val ctx = context ?: return CommandResult(false, "", "Context not initialized")
-
-            // 如果调用方显式指定了身份，就直接向下传递；否则使用默认身份
             val identity = identityOverride ?: ShellIdentity.DEFAULT
+            val policy = PermissionPolicyRuntime.read(ctx)
+            val coexistEnabled = policy.coexistEnabled
+            val levels =
+                PermissionRoutingPolicy.shellCandidates(
+                    coexistEnabled = coexistEnabled,
+                    legacyPreferred = policy.legacyPreferred
+                )
 
-            val preferredLevel = getPreferredPermissionLevelCached()
-            val actualLevel = preferredLevel ?: AndroidPermissionLevel.STANDARD
+            val unavailableReasons = mutableListOf<String>()
+            var lastInfrastructureFailure: CommandResult? = null
 
-            val preferredExecutor = ShellExecutorFactory.getExecutor(ctx, actualLevel)
-            val permStatus = preferredExecutor.hasPermission()
-            val executorAvailable = preferredExecutor.isAvailable()
+            for (level in levels) {
+                val executor = ShellExecutorFactory.getExecutor(ctx, level)
+                val permStatus = executor.hasPermission()
+                val executorAvailable = executor.isAvailable()
 
-            if (executorAvailable && permStatus.granted) {
-                val result = preferredExecutor.executeCommand(command, identity)
-                return CommandResult(result.success, result.stdout, result.stderr, result.exitCode)
+                if (!executorAvailable || !permStatus.granted) {
+                    unavailableReasons +=
+                        buildStrictUnavailableReason(level, executorAvailable, permStatus)
+                    continue
+                }
+
+                try {
+                    val result = executor.executeCommand(command, identity)
+                    val commandResult =
+                        CommandResult(
+                            result.success,
+                            result.stdout,
+                            result.stderr,
+                            result.exitCode
+                        )
+
+                    if (
+                        coexistEnabled &&
+                        !result.success &&
+                        isProviderTransportFailure(result)
+                    ) {
+                        lastInfrastructureFailure = commandResult
+                        AppLogger.w(
+                            TAG,
+                            "Coexist shell provider $level failed at transport level; trying next provider"
+                        )
+                        continue
+                    }
+
+                    if (coexistEnabled) {
+                        AppLogger.d(TAG, "Coexist shell command executed via $level")
+                    }
+                    return commandResult
+                } catch (error: Exception) {
+                    if (!coexistEnabled) {
+                        return CommandResult(false, "", error.message ?: error.javaClass.simpleName, -1)
+                    }
+                    unavailableReasons +=
+                        "$level execution exception: " +
+                            (error.message ?: error.javaClass.simpleName)
+                    AppLogger.w(TAG, "Coexist shell provider $level threw; trying next provider", error)
+                }
             }
 
-            val reason = buildStrictUnavailableReason(actualLevel, executorAvailable, permStatus)
+            lastInfrastructureFailure?.let { return it }
 
-            AppLogger.d(TAG, "Strict permission mode enabled. $reason")
+            val reason =
+                unavailableReasons.distinct().joinToString(" | ")
+                    .ifBlank { "No coexist shell provider is available" }
             return CommandResult(false, "", reason, -1)
         }
 
         suspend fun startShellProcess(command: String): ShellProcess {
             val ctx = context ?: throw IllegalStateException("Context not initialized")
+            val policy = PermissionPolicyRuntime.read(ctx)
+            val coexistEnabled = policy.coexistEnabled
+            val levels =
+                PermissionRoutingPolicy.shellCandidates(
+                    coexistEnabled = coexistEnabled,
+                    legacyPreferred = policy.legacyPreferred
+                )
 
-            val preferredLevel = getPreferredPermissionLevelCached()
-            val actualLevel = preferredLevel ?: AndroidPermissionLevel.STANDARD
-            val preferredExecutor = ShellExecutorFactory.getExecutor(ctx, actualLevel)
-            val permStatus = preferredExecutor.hasPermission()
-            val executorAvailable = preferredExecutor.isAvailable()
-
-            if (executorAvailable && permStatus.granted) {
-                return preferredExecutor.startProcess(command)
+            val reasons = mutableListOf<String>()
+            for (level in levels) {
+                val executor = ShellExecutorFactory.getExecutor(ctx, level)
+                val status = executor.hasPermission()
+                val available = executor.isAvailable()
+                if (!available || !status.granted) {
+                    reasons += buildStrictUnavailableReason(level, available, status)
+                    continue
+                }
+                try {
+                    if (coexistEnabled) {
+                        AppLogger.d(TAG, "Coexist shell process starting via $level")
+                    }
+                    return executor.startProcess(command)
+                } catch (error: Exception) {
+                    if (!coexistEnabled) throw error
+                    reasons +=
+                        "$level start exception: " +
+                            (error.message ?: error.javaClass.simpleName)
+                }
             }
 
-            val reason = buildStrictUnavailableReason(actualLevel, executorAvailable, permStatus)
-
-            AppLogger.d(TAG, "Strict permission mode enabled. $reason")
-            throw SecurityException(reason)
+            throw SecurityException(
+                reasons.distinct().joinToString(" | ")
+                    .ifBlank { "No coexist shell provider is available" }
+            )
         }
     }
 

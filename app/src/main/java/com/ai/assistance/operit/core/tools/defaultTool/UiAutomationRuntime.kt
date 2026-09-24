@@ -9,6 +9,8 @@ import com.ai.assistance.operit.core.tools.defaultTool.debugger.DebuggerUITools
 import com.ai.assistance.operit.core.tools.defaultTool.root.RootUITools
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
+import com.ai.assistance.operit.core.tools.system.PermissionRoutingPolicy
+import com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntime
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
 import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreProcessIdentity
@@ -55,9 +57,67 @@ internal data class UiAutomationBackendSelection(
 
 internal data class UiAutomationRuntimeState(
     val preferredPermissionLevel: AndroidPermissionLevel?,
+    val permissionCoexistEnabled: Boolean,
     val accessibilityAvailable: Boolean,
     val source: String
 )
+
+internal fun selectCoexistingUiAutomationBackend(
+    accessibilityAvailable: Boolean,
+    debuggerAvailable: Boolean,
+    rootAvailable: Boolean,
+    allowAccessibility: Boolean
+): UiAutomationBackendSelection {
+    val availability =
+        mapOf(
+            AndroidPermissionLevel.ACCESSIBILITY to accessibilityAvailable,
+            AndroidPermissionLevel.DEBUGGER to debuggerAvailable,
+            AndroidPermissionLevel.ROOT to rootAvailable
+        )
+
+    for (
+        level in PermissionRoutingPolicy.uiCandidates(
+            coexistEnabled = true,
+            legacyPreferred = null,
+            allowAccessibility = allowAccessibility
+        )
+    ) {
+        if (availability[level] != true) continue
+        when (level) {
+            AndroidPermissionLevel.ACCESSIBILITY ->
+                return UiAutomationBackendSelection(
+                    backend = UiAutomationBackend.ACCESSIBILITY,
+                    preferredPermissionLevel = null,
+                    preferredAvailable = true,
+                    fallbackReason = "coexist_auto"
+                )
+            AndroidPermissionLevel.DEBUGGER ->
+                return UiAutomationBackendSelection(
+                    backend = UiAutomationBackend.DEBUGGER,
+                    shellPermissionLevel = AndroidPermissionLevel.DEBUGGER,
+                    preferredPermissionLevel = null,
+                    preferredAvailable = true,
+                    fallbackReason = "coexist_auto"
+                )
+            AndroidPermissionLevel.ROOT ->
+                return UiAutomationBackendSelection(
+                    backend = UiAutomationBackend.ROOT,
+                    shellPermissionLevel = AndroidPermissionLevel.ROOT,
+                    preferredPermissionLevel = null,
+                    preferredAvailable = true,
+                    fallbackReason = "coexist_auto"
+                )
+            else -> continue
+        }
+    }
+
+    return UiAutomationBackendSelection(
+        backend = UiAutomationBackend.UNSUPPORTED,
+        preferredPermissionLevel = null,
+        preferredAvailable = false,
+        fallbackReason = "coexist_no_provider"
+    )
+}
 
 internal fun selectUiAutomationBackend(
     preferredPermissionLevel: AndroidPermissionLevel?,
@@ -161,6 +221,8 @@ internal object UiAutomationRuntime {
      */
     suspend fun runtimeState(context: Context): UiAutomationRuntimeState {
         val appContext = context.applicationContext
+        val policy = PermissionPolicyRuntime.read(appContext)
+
         if (ResidentCoreProcessIdentity.isCurrentProcessCore()) {
             val hostState =
                 runCatching {
@@ -173,41 +235,25 @@ internal object UiAutomationRuntime {
                 }.getOrElse { error ->
                     AppLogger.w(
                         TAG,
-                        "Host UI automation state unavailable; preserving local shell preference only: " +
-                            error.message
+                        "Host UI automation state unavailable: " + error.message
                     )
                     null
                 }
 
-            if (hostState != null && hostState.optBoolean("ok", false)) {
-                val preferred =
-                    if (hostState.isNull("preferred_permission_level")) {
-                        null
-                    } else {
-                        AndroidPermissionLevel.fromString(
-                            hostState.optString("preferred_permission_level")
-                        )
-                    }
-                return UiAutomationRuntimeState(
-                    preferredPermissionLevel = preferred,
-                    accessibilityAvailable = hostState.optBoolean("accessibility_available", false),
-                    source = "resident_host"
-                )
-            }
-
-            // Fail closed for Accessibility. A process-local preference may still preserve a
-            // Debugger/Admin/Root session while Host reconnects, but Resident never binds A11y.
             return UiAutomationRuntimeState(
-                preferredPermissionLevel = androidPermissionPreferences.getPreferredPermissionLevel(),
-                accessibilityAvailable = false,
-                source = "resident_local_fallback"
+                preferredPermissionLevel = policy.legacyPreferred,
+                permissionCoexistEnabled = policy.coexistEnabled,
+                accessibilityAvailable =
+                    hostState?.optBoolean("accessibility_available", false) ?: false,
+                source = policy.source
             )
         }
 
         return UiAutomationRuntimeState(
-            preferredPermissionLevel = androidPermissionPreferences.getPreferredPermissionLevel(),
+            preferredPermissionLevel = policy.legacyPreferred,
+            permissionCoexistEnabled = policy.coexistEnabled,
             accessibilityAvailable = isAccessibilityBackendAvailable(appContext),
-            source = "android_host"
+            source = policy.source
         )
     }
 
@@ -222,6 +268,31 @@ internal object UiAutomationRuntime {
         tool: AITool,
         state: UiAutomationRuntimeState
     ): UiAutomationBackendSelection {
+        val allowAccessibilityFallback = !hasExplicitDisplay(tool)
+
+        if (state.permissionCoexistEnabled) {
+            val debuggerAvailable =
+                isShellBackendAvailable(context, AndroidPermissionLevel.DEBUGGER)
+            val rootAvailable =
+                isShellBackendAvailable(context, AndroidPermissionLevel.ROOT)
+            val selection =
+                selectCoexistingUiAutomationBackend(
+                    accessibilityAvailable = state.accessibilityAvailable,
+                    debuggerAvailable = debuggerAvailable,
+                    rootAvailable = rootAvailable,
+                    allowAccessibility = allowAccessibilityFallback
+                )
+            AppLogger.d(
+                TAG,
+                "Resolved coexist UI route source=" + state.source +
+                    " accessibility=" + state.accessibilityAvailable +
+                    " debugger=" + debuggerAvailable +
+                    " root=" + rootAvailable +
+                    " effective=" + selection.backend
+            )
+            return selection
+        }
+
         val preferred = state.preferredPermissionLevel
         val preferredAvailable =
             when (preferred) {
@@ -236,7 +307,6 @@ internal object UiAutomationRuntime {
                 AndroidPermissionLevel.STANDARD, null -> false
             }
 
-        val allowAccessibilityFallback = !hasExplicitDisplay(tool)
         val accessibilityAvailable =
             when {
                 preferred == AndroidPermissionLevel.ACCESSIBILITY -> preferredAvailable
