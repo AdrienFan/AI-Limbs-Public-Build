@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.tools.defaultTool
 
 import android.content.Context
 import com.ai.assistance.operit.core.tools.StringResultData
+import com.ai.assistance.operit.core.tools.ToolResultData
 import com.ai.assistance.operit.core.tools.defaultTool.accessbility.AccessibilityUITools
 import com.ai.assistance.operit.core.tools.defaultTool.admin.AdminUITools
 import com.ai.assistance.operit.core.tools.defaultTool.debugger.DebuggerUITools
@@ -19,7 +20,12 @@ import com.ai.assistance.operit.data.repository.UIHierarchyManager
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.ui.common.displays.UIOperationOverlay
 import com.ai.assistance.operit.util.AppLogger
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.decodeFromString
+import kotlinx.serialization.json.Json
+import org.json.JSONArray
 import org.json.JSONObject
 
 internal enum class UiAutomationOperation {
@@ -45,6 +51,12 @@ internal data class UiAutomationBackendSelection(
     val preferredPermissionLevel: AndroidPermissionLevel? = null,
     val preferredAvailable: Boolean = true,
     val fallbackReason: String? = null
+)
+
+internal data class UiAutomationRuntimeState(
+    val preferredPermissionLevel: AndroidPermissionLevel?,
+    val accessibilityAvailable: Boolean,
+    val source: String
 )
 
 internal fun selectUiAutomationBackend(
@@ -135,16 +147,82 @@ internal object UiAutomationRuntime {
         }.getOrElse { error ->
             AppLogger.w(
                 TAG,
-                "Accessibility backend availability probe failed: ${error.message}"
+                "Accessibility backend availability probe failed: " + error.message
             )
             false
         }
 
+    /**
+     * Returns the authoritative UI permission/backend state.
+     *
+     * Resident Core must not trust its process-local Preferences DataStore cache after Host changes
+     * the preferred permission level, and it cannot bind Android Accessibility services directly.
+     * Therefore Resident obtains both facts from the AMS-owned Host process.
+     */
+    suspend fun runtimeState(context: Context): UiAutomationRuntimeState {
+        val appContext = context.applicationContext
+        if (ResidentCoreProcessIdentity.isCurrentProcessCore()) {
+            val hostState =
+                runCatching {
+                    withContext(Dispatchers.IO) {
+                        ResidentHostComponentProxy.request(
+                            ResidentComponentProxyBroker.KIND_UI_AUTOMATION_HOST,
+                            JSONObject().put("action", "state")
+                        )
+                    }
+                }.getOrElse { error ->
+                    AppLogger.w(
+                        TAG,
+                        "Host UI automation state unavailable; preserving local shell preference only: " +
+                            error.message
+                    )
+                    null
+                }
+
+            if (hostState != null && hostState.optBoolean("ok", false)) {
+                val preferred =
+                    if (hostState.isNull("preferred_permission_level")) {
+                        null
+                    } else {
+                        AndroidPermissionLevel.fromString(
+                            hostState.optString("preferred_permission_level")
+                        )
+                    }
+                return UiAutomationRuntimeState(
+                    preferredPermissionLevel = preferred,
+                    accessibilityAvailable = hostState.optBoolean("accessibility_available", false),
+                    source = "resident_host"
+                )
+            }
+
+            // Fail closed for Accessibility. A process-local preference may still preserve a
+            // Debugger/Admin/Root session while Host reconnects, but Resident never binds A11y.
+            return UiAutomationRuntimeState(
+                preferredPermissionLevel = androidPermissionPreferences.getPreferredPermissionLevel(),
+                accessibilityAvailable = false,
+                source = "resident_local_fallback"
+            )
+        }
+
+        return UiAutomationRuntimeState(
+            preferredPermissionLevel = androidPermissionPreferences.getPreferredPermissionLevel(),
+            accessibilityAvailable = isAccessibilityBackendAvailable(appContext),
+            source = "android_host"
+        )
+    }
+
     suspend fun resolveBackend(
         context: Context,
         tool: AITool
+    ): UiAutomationBackendSelection =
+        resolveBackend(context, tool, runtimeState(context))
+
+    suspend fun resolveBackend(
+        context: Context,
+        tool: AITool,
+        state: UiAutomationRuntimeState
     ): UiAutomationBackendSelection {
-        val preferred = androidPermissionPreferences.getPreferredPermissionLevel()
+        val preferred = state.preferredPermissionLevel
         val preferredAvailable =
             when (preferred) {
                 AndroidPermissionLevel.DEBUGGER ->
@@ -154,7 +232,7 @@ internal object UiAutomationRuntime {
                 AndroidPermissionLevel.ROOT ->
                     isShellBackendAvailable(context, AndroidPermissionLevel.ROOT)
                 AndroidPermissionLevel.ACCESSIBILITY ->
-                    isAccessibilityBackendAvailable(context)
+                    state.accessibilityAvailable
                 AndroidPermissionLevel.STANDARD, null -> false
             }
 
@@ -164,8 +242,15 @@ internal object UiAutomationRuntime {
                 preferred == AndroidPermissionLevel.ACCESSIBILITY -> preferredAvailable
                 preferredAvailable -> false
                 !allowAccessibilityFallback -> false
-                else -> isAccessibilityBackendAvailable(context)
+                else -> state.accessibilityAvailable
             }
+
+        AppLogger.d(
+            TAG,
+            "Resolved UI runtime state source=" + state.source +
+                " preferred=" + preferred +
+                " accessibilityAvailable=" + state.accessibilityAvailable
+        )
 
         return selectUiAutomationBackend(
             preferredPermissionLevel = preferred,
@@ -189,7 +274,13 @@ internal object UiAutomationRuntime {
                 error = "UI automation requires Accessibility, Debugger/Admin, or Root backend"
             )
         }
-        val tools = createBackend(context.applicationContext, selection)
+        val residentCore = ResidentCoreProcessIdentity.isCurrentProcessCore()
+        val tools =
+            if (residentCore && selection.backend == UiAutomationBackend.ACCESSIBILITY) {
+                null
+            } else {
+                createBackend(context.applicationContext, selection)
+            }
         val presentation = UiAutomationPresentation(context.applicationContext)
 
         AppLogger.d(
@@ -205,18 +296,71 @@ internal object UiAutomationRuntime {
         presentation.beginTool(showStatusIndicator = true)
         return try {
             delay(50)
-            when (operation) {
-                UiAutomationOperation.SNAPSHOT -> tools.getPageInfo(tool)
-                UiAutomationOperation.CLICK -> tools.clickElement(tool)
-                UiAutomationOperation.TAP -> tools.tap(tool)
-                UiAutomationOperation.LONG_PRESS -> tools.longPress(tool)
-                UiAutomationOperation.SET_TEXT -> tools.setInputText(tool)
-                UiAutomationOperation.KEY -> tools.pressKey(tool)
-                UiAutomationOperation.SWIPE -> tools.swipe(tool)
+            if (residentCore && selection.backend == UiAutomationBackend.ACCESSIBILITY) {
+                executeAccessibilityInHost(tool, operation)
+            } else {
+                val localTools = checkNotNull(tools)
+                when (operation) {
+                    UiAutomationOperation.SNAPSHOT -> localTools.getPageInfo(tool)
+                    UiAutomationOperation.CLICK -> localTools.clickElement(tool)
+                    UiAutomationOperation.TAP -> localTools.tap(tool)
+                    UiAutomationOperation.LONG_PRESS -> localTools.longPress(tool)
+                    UiAutomationOperation.SET_TEXT -> localTools.setInputText(tool)
+                    UiAutomationOperation.KEY -> localTools.pressKey(tool)
+                    UiAutomationOperation.SWIPE -> localTools.swipe(tool)
+                }
             }
         } finally {
             presentation.endTool()
         }
+    }
+
+    private val toolResultJson = Json {
+        ignoreUnknownKeys = true
+        classDiscriminator = "__type"
+    }
+
+    private suspend fun executeAccessibilityInHost(
+        tool: AITool,
+        operation: UiAutomationOperation
+    ): ToolResult {
+        val parameters =
+            JSONArray().apply {
+                tool.parameters.forEach { parameter ->
+                    put(
+                        JSONObject()
+                            .put("name", parameter.name)
+                            .put("value", parameter.value)
+                    )
+                }
+            }
+        val response =
+            withContext(Dispatchers.IO) {
+                ResidentHostComponentProxy.request(
+                    ResidentComponentProxyBroker.KIND_UI_AUTOMATION_HOST,
+                    JSONObject()
+                        .put("action", "execute_accessibility")
+                        .put("operation", operation.name)
+                        .put("tool_name", tool.name)
+                        .put("parameters", parameters)
+                )
+            }
+        check(response.optBoolean("ok", false)) {
+            response.optString(
+                "error",
+                "Host Accessibility execution failed: " + operation.name.lowercase()
+            )
+        }
+        val resultData =
+            toolResultJson.decodeFromString<ToolResultData>(
+                response.getString("result_data")
+            )
+        return ToolResult(
+            toolName = response.optString("tool_name", tool.name),
+            success = response.optBoolean("success", false),
+            result = resultData,
+            error = if (response.isNull("error")) null else response.optString("error")
+        )
     }
 
     private fun createBackend(

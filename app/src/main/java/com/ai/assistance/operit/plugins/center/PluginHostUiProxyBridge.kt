@@ -10,10 +10,13 @@ import androidx.activity.result.contract.ActivityResultContracts
 import com.ai.assistance.operit.core.application.ActivityLifecycleManager
 import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
+import com.ai.assistance.operit.core.tools.defaultTool.accessbility.AccessibilityUITools
 import com.ai.assistance.operit.services.FloatingChatService
 import com.ai.assistance.operit.ui.common.displays.UIOperationOverlay
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
+import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
+import com.ai.assistance.operit.data.repository.UIHierarchyManager
 import com.ai.assistance.operit.ui.permissions.PermissionRequestOverlay
 import com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime
 import com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker
@@ -1061,6 +1064,65 @@ private class ResidentHostComponentExecutor(
                 )
             }
             JSONObject().put("ok", true).put("results", results)
+        }
+        ResidentComponentProxyBroker.KIND_UI_AUTOMATION_HOST -> {
+            when (payload.getString("action")) {
+                "state" -> {
+                    val preferred = androidPermissionPreferences.getPreferredPermissionLevel()
+                    val accessibilityAvailable =
+                        runCatching {
+                            UIHierarchyManager.isAccessibilityServiceEnabled(appContext)
+                        }.getOrElse { error ->
+                            com.ai.assistance.operit.util.AppLogger.w(
+                                "ResidentHostComponentExecutor",
+                                "Host Accessibility state probe failed: " + error.message,
+                                error
+                            )
+                            false
+                        }
+                    JSONObject()
+                        .put("ok", true)
+                        .put(
+                            "preferred_permission_level",
+                            preferred?.name ?: JSONObject.NULL
+                        )
+                        .put("accessibility_available", accessibilityAvailable)
+                }
+                "execute_accessibility" -> {
+                    val toolName = payload.getString("tool_name").trim()
+                    val operation = payload.getString("operation").trim().uppercase()
+                    val parameters =
+                        payload.optJSONArray("parameters")?.objects().orEmpty().map { item ->
+                            ToolParameter(
+                                name = item.getString("name"),
+                                value = item.optString("value")
+                            )
+                        }
+                    val tool = AITool(name = toolName, parameters = parameters)
+                    val accessibilityTools = AccessibilityUITools(appContext)
+                    val result =
+                        when (operation) {
+                            "SNAPSHOT" -> accessibilityTools.getPageInfo(tool)
+                            "CLICK" -> accessibilityTools.clickElement(tool)
+                            "TAP" -> accessibilityTools.tap(tool)
+                            "LONG_PRESS" -> accessibilityTools.longPress(tool)
+                            "SET_TEXT" -> accessibilityTools.setInputText(tool)
+                            "KEY" -> accessibilityTools.pressKey(tool)
+                            "SWIPE" -> accessibilityTools.swipe(tool)
+                            else -> error("Unknown Host Accessibility operation: " + operation)
+                        }
+                    JSONObject()
+                        .put("ok", true)
+                        .put("tool_name", result.toolName)
+                        .put("success", result.success)
+                        .put("result_data", result.result.toJson())
+                        .put("error", result.error ?: JSONObject.NULL)
+                }
+                else ->
+                    JSONObject()
+                        .put("ok", false)
+                        .put("error", "UNKNOWN_UI_AUTOMATION_HOST_ACTION")
+            }
         }
         ResidentComponentProxyBroker.KIND_UI_AUTOMATION_PRESENTATION -> {
             val action = payload.getString("action")

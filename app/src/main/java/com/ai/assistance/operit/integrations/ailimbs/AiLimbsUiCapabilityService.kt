@@ -4,17 +4,18 @@ import android.content.Context
 import android.content.Intent
 import android.provider.Settings
 import com.ai.assistance.operit.core.tools.AIToolHandler
-import com.ai.assistance.operit.core.tools.defaultTool.ToolGetter
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationBackend
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationRuntime
 import com.ai.assistance.operit.core.tools.system.AccessibilityProviderInstaller
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.AndroidShellExecutor
 import com.ai.assistance.operit.core.tools.system.action.ActionListenerFactory
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
+import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.FunctionType
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
 import com.ai.assistance.operit.data.preferences.androidPermissionPreferences
-import com.ai.assistance.operit.data.repository.UIHierarchyManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 
@@ -39,21 +40,31 @@ class AiLimbsUiCapabilityService(context: Context) {
     private val appContext = context.applicationContext
 
     suspend fun readStatus(): AiLimbsUiCapabilityStatus = withContext(Dispatchers.IO) {
+        val runtimeState = UiAutomationRuntime.runtimeState(appContext)
         val preferredLevel =
-            androidPermissionPreferences.getPreferredPermissionLevel()
-                ?: AndroidPermissionLevel.STANDARD
-        val activeBackend = ToolGetter.getUITools(appContext)::class.java.simpleName
-        val selectedExecutor = ShellExecutorFactory.getExecutor(appContext, preferredLevel)
-        val selectedPermission = selectedExecutor.hasPermission()
-        val selectedBackendAvailable =
-            selectedExecutor.isAvailable() && selectedPermission.granted
+            runtimeState.preferredPermissionLevel ?: AndroidPermissionLevel.STANDARD
+        val backendSelection =
+            UiAutomationRuntime.resolveBackend(
+                appContext,
+                AITool(name = "get_page_info"),
+                runtimeState
+            )
+        val activeBackend =
+            when (backendSelection.backend) {
+                UiAutomationBackend.ACCESSIBILITY -> "AccessibilityUITools"
+                UiAutomationBackend.DEBUGGER ->
+                    if (backendSelection.shellPermissionLevel == AndroidPermissionLevel.ADMIN) {
+                        "AdminUITools"
+                    } else {
+                        "DebuggerUITools"
+                    }
+                UiAutomationBackend.ROOT -> "RootUITools"
+                UiAutomationBackend.UNSUPPORTED -> "StandardUITools"
+            }
+        val selectedBackendAvailable = backendSelection.preferredAvailable
         val providerVersion = AccessibilityProviderInstaller.getInstalledVersion(appContext)
         val accessibilityEnabled =
-            if (providerVersion == null) {
-                false
-            } else {
-                UIHierarchyManager.isAccessibilityServiceEnabled(appContext)
-            }
+            providerVersion != null && runtimeState.accessibilityAvailable
 
         val packageManager = AIToolHandler.getInstance(appContext).getOrCreatePackageManager()
         val baseEnabled =
@@ -74,11 +85,11 @@ class AiLimbsUiCapabilityService(context: Context) {
             uiControllerConfig?.enableDirectImageProcessing == true
 
         val directUiReady =
-            when (preferredLevel) {
-                AndroidPermissionLevel.STANDARD -> false
-                AndroidPermissionLevel.ACCESSIBILITY -> accessibilityEnabled
-                else -> selectedBackendAvailable
-            }
+            backendSelection.backend != UiAutomationBackend.UNSUPPORTED &&
+                (
+                    backendSelection.preferredAvailable ||
+                        backendSelection.fallbackReason != null
+                )
         val subagentReady =
             directUiReady &&
                 subagentEnabled &&
