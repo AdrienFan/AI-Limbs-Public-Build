@@ -27,8 +27,6 @@ import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.FilterList
-import androidx.compose.material.icons.filled.Fullscreen
-import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.LockOpen
 import androidx.compose.material.icons.filled.Tune
@@ -63,8 +61,6 @@ internal fun StudioLayersPanel(
     revision: String,
     busy: Boolean,
     store: ArtStore,
-    expanded: Boolean,
-    onExpand: () -> Unit,
     onEdit: (String, JSONObject) -> Unit
 ) {
     val context = LocalContext.current
@@ -115,16 +111,6 @@ internal fun StudioLayersPanel(
     }
 
     Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.surface)) {
-        Row(Modifier.fillMaxWidth().height(40.dp)
-            .clickable(onClickLabel =
-                if (expanded) "恢复右侧栏分段" else "最大化图层面板", onClick = onExpand)
-            .padding(start = 8.dp),
-            verticalAlignment = Alignment.CenterVertically) {
-            Text("图层", style = MaterialTheme.typography.titleSmall, modifier = Modifier.weight(1f))
-            Icon(if (expanded) Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                contentDescription = if (expanded) "恢复右侧栏分段" else "最大化图层面板",
-                modifier = Modifier.size(40.dp).padding(8.dp))
-        }
         Row(Modifier.fillMaxWidth().height(40.dp).padding(horizontal = 4.dp),
             verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.weight(1f)) {

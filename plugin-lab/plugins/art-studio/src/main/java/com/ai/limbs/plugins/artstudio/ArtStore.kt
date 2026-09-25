@@ -631,6 +631,7 @@ internal class ArtStore(private val root: File) {
                 if (marker.isFile) marker.readText() != digest(doc.toString())
                 else draft(id).lastModified() > saved.lastModified()
             })
+            .put("storagePath", if (saved.isFile) saved.absolutePath else "")
             .put("externalUri", externalLink(id)?.optString("uri", "") ?: "")
             .put("externalPending", externalLink(id)?.optBoolean("pending") ?: false)
             .put("operations", JSONArray(doc.getJSONArray("operations").toString()))

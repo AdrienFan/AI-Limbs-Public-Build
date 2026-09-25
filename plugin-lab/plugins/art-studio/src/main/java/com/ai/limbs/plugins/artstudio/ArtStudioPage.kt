@@ -18,9 +18,12 @@ import android.widget.TextView
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
@@ -32,8 +35,11 @@ import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.input.pointer.pointerInteropFilter
+
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -41,7 +47,10 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.ViewCompositionStrategy
+
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
@@ -111,9 +120,10 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                                 add(0, 1, "新建(N)…")
                                 add(0, 2, "打开(O)…")
                                 add(0, 3, "打开最近图像(R)", bridge.hasRecent)
-                                add(1, 4, "保存(S)", doc)
+                                add(1, 4, "保存(S)", bridge.canSave)
                                 add(1, 5, "另存为(A)…", doc)
                                 add(2, 6, "会话管理…")
+
                                 add(3, 7, "导入 - 打开为无标题图像(I)…")
                                 add(3, 8, "导出(X)…", doc)
                                 add(3, 9, "导出 - 更多选项…", doc)
@@ -201,8 +211,10 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
 private class StudioMenuBridge {
     var busy = false
     var hasDocument = false
+    var canSave = false
     var hasRecent = false
     var canUndo = false
+
     var canRedo = false
     var undoLabel = ""
     var redoLabel = ""
@@ -215,10 +227,11 @@ private class StudioMenuBridge {
     var onEditCommand: ((Int) -> Unit)? = null
 }
 
-private enum class RightPane { LAYERS, BRUSHES }
-
+private enum class RightPane { COLOR, LAYERS, BRUSHES }
+@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
 @Composable
 private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
+
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
@@ -284,7 +297,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var rightDrawerOpen by rememberSaveable { mutableStateOf(false) }
     var leftDrawerPinned by rememberSaveable { mutableStateOf(false) }
     var rightDrawerPinned by rememberSaveable { mutableStateOf(false) }
-    var maximizedRightPane by remember { mutableStateOf<RightPane?>(null) }
+    var activeRightPane by remember { mutableStateOf(RightPane.COLOR) }
     var exportPath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -600,8 +613,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     SideEffect {
         menuBridge.busy = busy
         menuBridge.hasDocument = current != null
+        menuBridge.canSave = current?.optBoolean("dirty") == true
         menuBridge.hasRecent = recentDocs.length() > 0
         menuBridge.canUndo = current?.optBoolean("canUndo") == true
+
         menuBridge.canRedo = current?.optBoolean("canRedo") == true
         menuBridge.undoLabel = current?.optString("undoLabel") ?: ""
         menuBridge.redoLabel = current?.optString("redoLabel") ?: ""
@@ -784,6 +799,41 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 Triple("zoom", "缩放画布", "⌕"),
                                 Triple("measure", "测量距离", "⌁")
                             )
+                            var hoveredTool by remember { mutableStateOf<String?>(null) }
+                            var touchToolHint by remember { mutableStateOf<String?>(null) }
+                            val selectedToolName = availableTools.firstOrNull { it.first == tool }?.second ?: tool
+                            val displayedToolName = hoveredTool ?: touchToolHint ?: selectedToolName
+
+                            Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 4.dp, end = 2.dp),
+                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Box(Modifier.weight(1f).fillMaxHeight(),
+                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                    Text(displayedToolName,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        textAlign = TextAlign.Center,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis,
+                                        modifier = Modifier.fillMaxWidth())
+                                }
+                                Box(Modifier.size(36.dp)
+                                    .clickable(onClickLabel = if (leftDrawerPinned)
+                                        "取消固定左侧工具栏" else "固定左侧工具栏") {
+                                        leftDrawerPinned = !leftDrawerPinned
+                                        if (!leftDrawerPinned) leftDrawerOpen = false
+                                    }
+                                    .semantics {
+                                        contentDescription = if (leftDrawerPinned)
+                                            "取消固定左侧工具栏" else "固定左侧工具栏"
+                                    },
+                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                    Icon(Icons.Default.PushPin,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(17.dp),
+                                        tint = if (leftDrawerPinned) MaterialTheme.colorScheme.primary
+                                            else MaterialTheme.colorScheme.onSurfaceVariant)
+                                }
+                            }
+
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -798,9 +848,30 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                     Row(Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceEvenly) {
                                         pair.forEach { (id, label, glyph) ->
-                                            Surface(Modifier.size(40.dp).clickable(onClickLabel = label) {
-                                                tool = id
-                                            }, shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                                            Surface(Modifier.size(40.dp)
+                                                .pointerInteropFilter { event ->
+                                                    when (event.actionMasked) {
+                                                        MotionEvent.ACTION_HOVER_ENTER -> hoveredTool = label
+                                                        MotionEvent.ACTION_HOVER_EXIT -> if (hoveredTool == label)
+                                                            hoveredTool = null
+                                                    }
+                                                    false
+                                                }
+                                                .combinedClickable(
+                                                    onClickLabel = label,
+                                                    onLongClickLabel = "显示$label",
+                                                    onLongClick = {
+                                                        touchToolHint = label
+                                                        scope.launch {
+                                                            delay(1200)
+                                                            if (touchToolHint == label) touchToolHint = null
+                                                        }
+                                                    },
+                                                    onClick = {
+                                                        touchToolHint = null
+                                                        tool = id
+                                                    }),
+                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
                                                 color = if (tool == id)
                                                     MaterialTheme.colorScheme.primaryContainer
                                                 else MaterialTheme.colorScheme.surfaceVariant) {
@@ -816,17 +887,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                     }
                                 }
                             }
-                            IconButton(onClick = {
-                                leftDrawerPinned = !leftDrawerPinned
-                                if (!leftDrawerPinned) leftDrawerOpen = false
-                            }, modifier = Modifier.align(androidx.compose.ui.Alignment.TopEnd)) {
-                                Icon(Icons.Default.PushPin,
-                                    contentDescription = if (leftDrawerPinned)
-                                        "取消固定左侧工具栏" else "固定左侧工具栏",
-                                    tint = if (leftDrawerPinned) MaterialTheme.colorScheme.primary
-                                        else MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
+
                     }
                 }
                 if (rightDrawerOpen) {
@@ -834,114 +895,148 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         .padding(end = railWidth).width(rightDrawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
                         BoxWithConstraints(Modifier.fillMaxSize()) {
-                            // A maximized pane takes the remaining height; the other panes
-                            // retain fixed, tappable title rows so their controls stay reachable.
-                            val compact = maxHeight < 600.dp
-                            val colorShare = if (compact) 0.32f else 0.26f
-                            val layerShare = if (compact) 0.57f else 0.35f
-                            val brushShare = if (compact) 0.11f else 0.39f
+                            val paneHeaderHeight = 40.dp
+                            val accordionViewportHeight = (maxHeight - 40.dp).coerceAtLeast(120.dp)
+                            val activePaneBodyHeight = (
+                                accordionViewportHeight - paneHeaderHeight * 3 - 2.dp
+                            ).coerceAtLeast(120.dp)
+                            val rightDrawerScroll = rememberScrollState()
+
                             Column(Modifier.fillMaxSize()) {
                                 Row(Modifier.fillMaxWidth().height(40.dp),
                                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                    IconButton(onClick = {
-                                        rightDrawerPinned = !rightDrawerPinned
-                                        if (!rightDrawerPinned) rightDrawerOpen = false
-                                    }) {
-                                        Icon(Icons.Default.PushPin,
+                                    Box(Modifier.size(36.dp)
+                                        .clickable(onClickLabel = if (rightDrawerPinned)
+                                            "取消固定右侧面板" else "固定右侧面板") {
+                                            rightDrawerPinned = !rightDrawerPinned
+                                            if (!rightDrawerPinned) rightDrawerOpen = false
+                                        }
+                                        .semantics {
                                             contentDescription = if (rightDrawerPinned)
-                                                "取消固定右侧面板" else "固定右侧面板",
+                                                "取消固定右侧面板" else "固定右侧面板"
+                                        },
+                                        contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                        Icon(Icons.Default.PushPin,
+                                            contentDescription = null,
+                                            modifier = Modifier.size(17.dp),
                                             tint = if (rightDrawerPinned) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
                                     Text(if (rightDrawerPinned) "已固定" else "固定侧栏",
                                         style = MaterialTheme.typography.labelSmall)
                                 }
-                                if (maximizedRightPane != null) {
-                                    Row(Modifier.fillMaxWidth().height(40.dp)
-                                        .clickable(onClickLabel = "恢复右侧栏分段并打开多功能拾色器") {
-                                            maximizedRightPane = null
-                                        }.padding(horizontal = 10.dp),
+
+                                Column(Modifier.fillMaxWidth().weight(1f)
+                                    .verticalScroll(rightDrawerScroll)) {
+                                    Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
+                                        .background(if (activeRightPane == RightPane.COLOR)
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                            else MaterialTheme.colorScheme.surface)
+                                        .clickable(onClickLabel = "展开多功能拾色器") {
+                                            activeRightPane = RightPane.COLOR
+                                        }.padding(start = 10.dp),
                                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                         Text("多功能拾色器", style = MaterialTheme.typography.titleSmall,
                                             modifier = Modifier.weight(1f))
-                                        Text("展开", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                } else {
-                                    Column(Modifier.fillMaxWidth().weight(colorShare)
-                                        .verticalScroll(rememberScrollState())
-                                        .padding(horizontal = 10.dp, vertical = 8.dp),
-                                        verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Text("多功能拾色器", style = MaterialTheme.typography.titleSmall)
-                                        AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
-                                            modifier = Modifier.fillMaxWidth().height(285.dp),
-                                            update = { picker ->
-                                                picker.selectedColor = Color.parseColor(color)
-                                                picker.onColorSelected = { selected ->
-                                                    color = String.format(java.util.Locale.ROOT, "#%08X", selected)
-                                                    colorHexInput = color
-                                                }
-                                            })
-                                        Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            Box(Modifier.size(28.dp).background(
-                                                androidx.compose.ui.graphics.Color(Color.parseColor(color))))
-                                            Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
+                                        Box(Modifier.size(36.dp)
+                                            .clickable(onClickLabel = "隐藏多功能拾色器（待视图菜单完成）") { }
+                                            .semantics {
+                                                contentDescription = "隐藏多功能拾色器（待视图菜单完成）"
+                                            },
+                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                            Text("×", style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
                                         }
-                                        OutlinedTextField(colorHexInput, { input ->
-                                            colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
-                                            if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
-                                                color = colorHexInput
-                                            }
-                                        }, label = { Text("#AARRGGBB") }, singleLine = true,
-                                            modifier = Modifier.fillMaxWidth())
-                                        Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
-                                            style = MaterialTheme.typography.bodySmall)
                                     }
-                                }
-                                Spacer(Modifier.fillMaxWidth().height(1.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant))
-                                // Keep the layer docker mounted while folded so its filter and
-                                // view preferences survive switching focus to the brush pane.
-                                Box(Modifier.fillMaxWidth().then(
-                                    if (maximizedRightPane == RightPane.BRUSHES) Modifier.height(40.dp)
-                                    else Modifier.weight(
-                                        if (maximizedRightPane == RightPane.LAYERS) 1f else layerShare))
-                                    .clipToBounds()) {
-                                    StudioLayersPanel(state = state, selectedId = selected,
-                                        revision = revision, busy = busy, store = store,
-                                        expanded = maximizedRightPane == RightPane.LAYERS,
-                                        onExpand = {
-                                            maximizedRightPane =
-                                                if (maximizedRightPane == RightPane.LAYERS) null
-                                                else RightPane.LAYERS
-                                        }, onEdit = ::edit)
-                                }
-                                Spacer(Modifier.fillMaxWidth().height(1.dp)
-                                    .background(MaterialTheme.colorScheme.outlineVariant))
-                                Column(Modifier.fillMaxWidth().then(
-                                    if (maximizedRightPane == RightPane.LAYERS) Modifier.height(40.dp)
-                                    else Modifier.weight(
-                                        if (maximizedRightPane == RightPane.BRUSHES) 1f else brushShare))) {
-                                    Row(Modifier.fillMaxWidth().height(40.dp)
-                                        .clickable(onClickLabel =
-                                            if (maximizedRightPane == RightPane.BRUSHES)
-                                                "恢复右侧栏分段" else "最大化笔刷预设面板") {
-                                            maximizedRightPane =
-                                                if (maximizedRightPane == RightPane.BRUSHES) null
-                                                else RightPane.BRUSHES
+                                    if (activeRightPane == RightPane.COLOR) {
+                                        Column(Modifier.fillMaxWidth().height(activePaneBodyHeight)
+                                            .verticalScroll(rememberScrollState())
+                                            .padding(horizontal = 10.dp, vertical = 8.dp),
+                                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
+                                                modifier = Modifier.fillMaxWidth().height(285.dp),
+                                                update = { picker ->
+                                                    picker.selectedColor = Color.parseColor(color)
+                                                    picker.onColorSelected = { selected ->
+                                                        color = String.format(java.util.Locale.ROOT, "#%08X", selected)
+                                                        colorHexInput = color
+                                                    }
+                                                })
+                                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Box(Modifier.size(28.dp).background(
+                                                    androidx.compose.ui.graphics.Color(Color.parseColor(color))))
+                                                Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
+                                            }
+                                            OutlinedTextField(colorHexInput, { input ->
+                                                colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
+                                                if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
+                                                    color = colorHexInput
+                                                }
+                                            }, label = { Text("#AARRGGBB") }, singleLine = true,
+                                                modifier = Modifier.fillMaxWidth())
+                                            Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
+                                                style = MaterialTheme.typography.bodySmall)
+                                        }
+                                    }
+
+                                    Spacer(Modifier.fillMaxWidth().height(1.dp)
+                                        .background(MaterialTheme.colorScheme.outlineVariant))
+
+                                    Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
+                                        .background(if (activeRightPane == RightPane.LAYERS)
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                            else MaterialTheme.colorScheme.surface)
+                                        .clickable(onClickLabel = "展开图层") {
+                                            activeRightPane = RightPane.LAYERS
+                                        }.padding(start = 10.dp),
+                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                        Text("图层", style = MaterialTheme.typography.titleSmall,
+                                            modifier = Modifier.weight(1f))
+                                        Box(Modifier.size(36.dp)
+                                            .clickable(onClickLabel = "隐藏图层（待视图菜单完成）") { }
+                                            .semantics {
+                                                contentDescription = "隐藏图层（待视图菜单完成）"
+                                            },
+                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                            Text("×", style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
+                                    }
+                                    if (activeRightPane == RightPane.LAYERS) {
+                                        Box(Modifier.fillMaxWidth().height(activePaneBodyHeight)
+                                            .clipToBounds()) {
+                                            StudioLayersPanel(state = state, selectedId = selected,
+                                                revision = revision, busy = busy, store = store,
+                                                onEdit = ::edit)
+                                        }
+                                    }
+
+                                    Spacer(Modifier.fillMaxWidth().height(1.dp)
+                                        .background(MaterialTheme.colorScheme.outlineVariant))
+
+                                    Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
+                                        .background(if (activeRightPane == RightPane.BRUSHES)
+                                            MaterialTheme.colorScheme.surfaceVariant
+                                            else MaterialTheme.colorScheme.surface)
+                                        .clickable(onClickLabel = "展开笔刷预设") {
+                                            activeRightPane = RightPane.BRUSHES
                                         }.padding(start = 10.dp),
                                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                         Text("笔刷预设", style = MaterialTheme.typography.titleSmall,
                                             modifier = Modifier.weight(1f))
-                                        Icon(if (maximizedRightPane == RightPane.BRUSHES)
-                                            Icons.Default.FullscreenExit else Icons.Default.Fullscreen,
-                                            contentDescription =
-                                                if (maximizedRightPane == RightPane.BRUSHES)
-                                                    "恢复右侧栏分段" else "最大化笔刷预设面板",
-                                            modifier = Modifier.size(40.dp).padding(8.dp))
+                                        Box(Modifier.size(36.dp)
+                                            .clickable(onClickLabel = "隐藏笔刷预设（待视图菜单完成）") { }
+                                            .semantics {
+                                                contentDescription = "隐藏笔刷预设（待视图菜单完成）"
+                                            },
+                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                            Text("×", style = MaterialTheme.typography.titleMedium,
+                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        }
                                     }
-                                    if (maximizedRightPane == RightPane.BRUSHES) {
-                                        Box(Modifier.fillMaxWidth().weight(1f),
+                                    if (activeRightPane == RightPane.BRUSHES) {
+                                        Box(Modifier.fillMaxWidth().height(activePaneBodyHeight),
                                             contentAlignment = androidx.compose.ui.Alignment.Center) {
                                             Text("笔刷预设待添加",
                                                 style = MaterialTheme.typography.bodySmall)
@@ -1297,8 +1392,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             Text("背景：" + state?.optString("background"))
             Text("修订：" + current.optInt("revision"))
             Text("状态：" + if (current.optBoolean("dirty")) "未保存" else "已保存")
+            Text("存储地址：" + current.optString("storagePath").ifBlank { "尚未保存" })
+            current.optString("externalUri").takeIf { it.isNotBlank() }?.let {
+                Text("外部地址：" + it)
+            }
             Text("工程 ID：" + current.getString("id"))
         } },
+
         confirmButton = { TextButton(onClick = { documentInfoDialog = false }) { Text("关闭") } })
     if (closeDialog) AlertDialog(onDismissRequest = { closeDialog = false },
         title = { Text("保存当前工程？") },
