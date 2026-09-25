@@ -2,6 +2,9 @@ package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
 import com.ai.assistance.operit.core.tools.system.VisualHostRuntime
+import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
+import com.ai.assistance.operit.data.model.AITool
+
 import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
@@ -27,6 +30,7 @@ import org.json.JSONObject
 internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST) {
     private val appContext = context.applicationContext
     private val gatewayBindings = ConcurrentHashMap<String, ExtensionBindingHandle>()
+    private val hostScreenCaptureTools by lazy { StandardUITools(appContext) }
 
     fun isAvailable(primitiveId: String, operation: String): Boolean =
         "${primitiveId.trim().lowercase()}/${operation.trim().lowercase()}" in SUPPORTED
@@ -50,7 +54,9 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         }
         return when (id) {
             "host.network@1" -> invokeNetwork(op)
+            "host.screen.capture@1" -> captureScreenFrame(ownerPluginId)
             "host.screen.session@1" ->
+
                 VisualHostRuntime.invokeScreen(
                     appContext,
                     ownerPluginId,
@@ -83,14 +89,24 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             )
         }
     }
-
-    private suspend fun captureScreenFrame(ownerPluginId: String): JSONObject =
-        dispatcher(ownerPluginId).execute(
-            "ai_limbs.host_tool.execute",
-            JSONObject()
-                .put("name", "capture_screenshot")
-                .put("parameters", JSONObject())
+    private suspend fun captureScreenFrame(ownerPluginId: String): JSONObject {
+        // This is already the Host Primitive execution boundary. Re-entering AiLimbsDispatcher
+        // here would incorrectly create a second AI/Policy authorization cycle in Host while
+        // Resident Core owns policy authority. Only Android MediaProjection consent belongs here.
+        val (path, dimensions) = hostScreenCaptureTools.captureScreenshot(
+            AITool(name = "capture_screenshot", parameters = emptyList())
         )
+        val success = !path.isNullOrBlank()
+        return JSONObject()
+            .put("ok", true)
+            .put("success", success)
+            .put("path", path.orEmpty())
+            .put("owner_plugin_id", ownerPluginId)
+            .put("width", dimensions?.first ?: JSONObject.NULL)
+            .put("height", dimensions?.second ?: JSONObject.NULL)
+            .put("error", if (success) JSONObject.NULL else "Screenshot failed")
+    }
+
 
     private suspend fun invokeNetwork(operation: String): JSONObject = when (operation) {
         "listeners" -> snapshotTcpListeners()
@@ -706,7 +722,9 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
         val SUPPORTED = setOf(
             "host.network@1/listeners",
+            "host.screen.capture@1/capture",
             "host.screen.session@1/list_targets",
+
             "host.screen.session@1/status",
             "host.screen.session@1/start",
             "host.screen.session@1/frame",

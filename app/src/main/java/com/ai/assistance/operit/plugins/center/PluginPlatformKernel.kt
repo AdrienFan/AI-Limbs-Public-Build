@@ -471,13 +471,17 @@ internal object PluginPlatformKernel {
             "presentation_plugin_capability" -> {
                 val owner = request.getString("owner_plugin_id").trim()
                 val capabilityId = request.getString("capability_id").trim().lowercase()
-                capabilityRegistryInstance.requireOwnedCapability(owner, capabilityId)
-                val authorization = managerInstance.activeAuthorization(owner)
-                capabilityRegistryInstance.invokeDelegated(
-                    authorization.pluginId, authorization.grantedScopes, capabilityId,
+                // A signed presentation entry invoking a capability owned by the same active plugin
+                // is an explicit user-UI action, not a new AI/Bridge delegation. Ownership is
+                // re-checked by invokeOwnedUiDirect, while Host scopes remain enforced downstream.
+                managerInstance.activeAuthorization(owner)
+                capabilityRegistryInstance.invokeOwnedUiDirect(
+                    owner,
+                    capabilityId,
                     request.optJSONObject("parameters") ?: JSONObject()
                 )
             }
+
             "presentation_child_capability" -> {
                 val extensionId = request.getString("extension_id").trim()
                 val capabilityId = request.getString("capability_id").trim().lowercase()
