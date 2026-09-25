@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.9",
+  "version": "0.2.10",
   "api": { "target": 1, "min": 1 },
   "display": {
     "name": "AI Limbs 画室",
