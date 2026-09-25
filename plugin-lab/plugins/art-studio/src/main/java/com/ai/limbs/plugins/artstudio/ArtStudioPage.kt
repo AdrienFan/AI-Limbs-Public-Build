@@ -47,6 +47,7 @@ import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.IntOffset
@@ -924,35 +925,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         .padding(start = railWidth).width(leftDrawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
                         Box(Modifier.fillMaxSize()) {
-                            val availableTools = listOf(
-                                Triple("ink", "自由画笔", "✎"),
-                                Triple("pencil", "铅笔", "✏"),
-                                Triple("soft", "软笔", "◌"),
-                                Triple("spray", "喷枪", "☷"),
-                                Triple("eraser", "橡皮擦", "▱"),
-                                Triple("mirror", "多重画笔", "⇄"),
-                                Triple("dyna", "动态画笔", "⌁"),
-                                Triple("calligraphy", "斜头书法笔", "✒"),
-                                Triple("line", "直线", "╱"),
-                                Triple("rectangle", "矩形", "□"),
-                                Triple("ellipse", "椭圆", "○"),
-                                Triple("polygon", "多边形", "⬠"),
-                                Triple("polyline", "折线", "⌁"),
-                                Triple("bezier", "三次贝塞尔曲线", "∿"),
-                                Triple("sampler", "颜色取样", "◉"),
-                                Triple("fill", "连续区域填充", "▨"),
-                                Triple("gradient", "线性渐变", "◩"),
-                                Triple("select", "矩形选区", "▣"),
-                                Triple("select_ellipse", "椭圆选区", "◯"),
-                                Triple("select_polygon", "多边形选区", "⬡"),
-                                Triple("select_freehand", "自由套索选区", "〰"),
-                                Triple("crop", "裁剪画布", "⛶"),
-                                Triple("move", "移动图层", "✥"),
-                                Triple("transform", "图层变换", "⤡"),
-                                Triple("pan", "平移画布", "✋"),
-                                Triple("zoom", "缩放画布", "⌕"),
-                                Triple("measure", "测量距离", "⌁")
-                            )
+                            val availableTools = ArtToolCatalog.implemented
+                            val plannedTools = ArtToolCatalog.pending
                             val selectedToolName = availableTools.firstOrNull { it.first == tool }?.second ?: tool
 
                             Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 4.dp, end = 2.dp),
@@ -1091,6 +1065,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         Text("动态选项", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
+                                Text("可使用", modifier = Modifier.padding(start = 5.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 availableTools.chunked(2).forEach { pair ->
                                     Row(Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -1119,6 +1096,50 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                             modifier = Modifier.semantics {
                                                                 contentDescription = label
                                                             })
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalDivider(Modifier.padding(top = 8.dp, bottom = 4.dp))
+                                Text("待实现（${plannedTools.size}）",
+                                    modifier = Modifier.padding(start = 5.dp, bottom = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                plannedTools.chunked(2).forEach { pair ->
+                                    Row(Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceEvenly) {
+                                        pair.forEach { item ->
+                                            TooltipBox(
+                                                positionProvider =
+                                                    TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                                                tooltip = {
+                                                    PlainTooltip {
+                                                        Text("${item.label} · 尚未实现")
+                                                    }
+                                                },
+                                                state = rememberTooltipState(),
+                                                enableUserInput = true
+                                            ) {
+                                                Surface(Modifier.size(40.dp).semantics {
+                                                    disabled()
+                                                    contentDescription = "${item.label}，尚未实现"
+                                                },
+                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                                                    color = MaterialTheme.colorScheme.surfaceVariant
+                                                        .copy(alpha = 0.45f)) {
+                                                    Box(Modifier.fillMaxSize(),
+                                                        contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                        Text(item.glyph,
+                                                            color = MaterialTheme.colorScheme
+                                                                .onSurfaceVariant.copy(alpha = 0.45f),
+                                                            style = MaterialTheme.typography.titleMedium)
+                                                        Text("未", Modifier.align(
+                                                            androidx.compose.ui.Alignment.BottomEnd),
+                                                            color = MaterialTheme.colorScheme
+                                                                .onSurfaceVariant.copy(alpha = 0.7f),
+                                                            style = MaterialTheme.typography.labelSmall)
                                                     }
                                                 }
                                             }

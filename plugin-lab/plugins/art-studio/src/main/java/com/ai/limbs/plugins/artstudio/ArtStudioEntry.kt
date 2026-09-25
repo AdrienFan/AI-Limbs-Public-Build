@@ -45,6 +45,10 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         val read = InProcessCapabilityEffect.READ_ONLY
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
+        capability("toolbox.catalog", "读取画室工具清单", read,
+            "列出可用的画室基础工具和已预留的 Krita 工具位置；planned 项只用于识别后续工作，没有执行入口。") {
+            ArtToolCatalog.describe()
+        }
         capability("document.create", "新建画室工程", write) { p ->
             store.create(p.getInt("width"), p.getInt("height"),
                 p.optString("background", "#FFFFFFFF"), p.optString("name", "未命名工程"), "LANER")
