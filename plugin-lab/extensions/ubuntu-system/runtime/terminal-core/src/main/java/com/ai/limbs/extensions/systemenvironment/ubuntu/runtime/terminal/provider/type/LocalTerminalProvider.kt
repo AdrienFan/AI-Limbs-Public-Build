@@ -65,6 +65,8 @@ class LocalTerminalProvider(
         private const val END_MARKER_PREFIX = "__OPERIT_HIDDEN_END__:"
         private const val PID_MARKER_PREFIX = "__OPERIT_HIDDEN_PID__:"
         private const val HIDDEN_EXEC_CANCEL_SETTLE_TIMEOUT_MS = 3_000L
+        private const val HIDDEN_EXEC_SHELL_TERM_TIMEOUT_MS = 1_500L
+        private const val HIDDEN_EXEC_SHELL_KILL_TIMEOUT_MS = 1_500L
         private const val NO_ACTIVE_PROCESS_GROUP = -1L
     }
 
@@ -257,7 +259,7 @@ class LocalTerminalProvider(
 
         val readyResult = awaitHiddenExecReady(shell)
         if (!readyResult.isOk) {
-            closeHiddenExecShell(executorKey)
+            disposeHiddenExecShell(shell)
             throw IllegalStateException(
                 readyResult.error.ifBlank { "Hidden exec shell did not become ready" }
             )
@@ -506,18 +508,70 @@ class LocalTerminalProvider(
 
     private suspend fun closeHiddenExecShell(executorKey: String) {
         hiddenExecShells.remove(executorKey)?.let { shell ->
-            withContext(Dispatchers.IO) {
-                val activeProcessGroupId =
-                    shell.activeProcessGroupId.getAndSet(NO_ACTIVE_PROCESS_GROUP)
-                if (activeProcessGroupId > 0L) {
-                    terminateHiddenExecProcessGroup(activeProcessGroupId)
-                }
-                runCatching { shell.writer.close() }
-                runCatching { shell.process.destroy() }
-                runCatching { shell.readJob.cancel() }
-                runCatching { shell.outputChannel.close() }
+            disposeHiddenExecShell(shell)
+        }
+    }
+
+    private suspend fun disposeHiddenExecShell(shell: HiddenExecShell) {
+        withContext(Dispatchers.IO) {
+            val activeProcessGroupId =
+                shell.activeProcessGroupId.getAndSet(NO_ACTIVE_PROCESS_GROUP)
+            if (activeProcessGroupId > 0L) {
+                terminateHiddenExecProcessGroup(activeProcessGroupId)
             }
-            Log.d(TAG, "Closed hidden exec shell: $executorKey")
+
+            runCatching { shell.writer.close() }
+            reapHiddenExecShell(shell)
+            runCatching { shell.readJob.cancel() }
+            runCatching { shell.outputChannel.close() }
+        }
+        Log.d(TAG, "Closed hidden exec shell: ${shell.key}")
+    }
+
+    private fun reapHiddenExecShell(shell: HiddenExecShell) {
+        val process = shell.process
+
+        if (process.isAlive) {
+            runCatching { process.destroy() }
+                .onFailure { error ->
+                    Log.w(TAG, "Failed to terminate hidden exec shell ${shell.key}", error)
+                }
+        }
+
+        val reaped =
+            runCatching {
+                process.waitFor(
+                    HIDDEN_EXEC_SHELL_TERM_TIMEOUT_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS
+                )
+            }.getOrElse { error ->
+                Log.w(TAG, "Failed while reaping hidden exec shell ${shell.key}", error)
+                false
+            }
+
+        if (reaped) {
+            return
+        }
+
+        Log.w(TAG, "Hidden exec shell ${shell.key} did not exit within the graceful timeout")
+        runCatching { process.destroyForcibly() }
+            .onFailure { error ->
+                Log.w(TAG, "Failed to force-stop hidden exec shell ${shell.key}", error)
+            }
+
+        val forceReaped =
+            runCatching {
+                process.waitFor(
+                    HIDDEN_EXEC_SHELL_KILL_TIMEOUT_MS,
+                    java.util.concurrent.TimeUnit.MILLISECONDS
+                )
+            }.getOrElse { error ->
+                Log.w(TAG, "Failed while reaping forced hidden exec shell ${shell.key}", error)
+                false
+            }
+
+        if (!forceReaped) {
+            Log.e(TAG, "Hidden exec shell ${shell.key} is still alive after forced termination")
         }
     }
 
