@@ -111,10 +111,10 @@ private fun ubuntuToolDiscovery(): ChildAiIngressDiscovery =
             .put("cleanup_install_artifacts_after_verified", true)
             .put(
                 "instruction",
-                "Before installing a new Ubuntu tool, query ail-tool first and prefer an existing suitable tool. " +
-                    "If GitHub or other external network access fails or times out, retry the network command through /root/laner/bin/laner-net first " +
-                    "(for example: laner-net git ..., laner-net gh ..., or laner-net curl ...). " +
-                    "Install only when no suitable match exists; after verification, clean expendable packages, caches, and temporary files."
+                "Ubuntu rules: tools -> ail-tool first; network failure -> /root/laner/bin/laner-net first; " +
+                    "Laner/AI Limbs development -> /root/laner/bin/ail-source first. " +
+                    "Do not guess source identity from /root/laner/projects directory names."
+
             )
             .toString()
     )
