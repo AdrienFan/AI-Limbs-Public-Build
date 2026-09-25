@@ -362,7 +362,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("x1", "number"), p("y1", "number"))
         "fill.contiguous" -> listOf(p("x", "integer"), p("y", "integer"), p("color"),
             p("expectedRevision", "integer", true), p("tolerance", "integer", true),
-            p("referenceAllLayers", "boolean", true))
+            p("referenceAllLayers", "boolean", true), p("erase", "boolean", true))
         "layer.rename" -> listOf(id, p("name"))
         "layer.move" -> listOf(id, p("index", "integer"))
         "layer.set_visibility" -> listOf(id, p("visible", "boolean"))
