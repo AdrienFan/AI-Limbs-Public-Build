@@ -14,7 +14,7 @@ on:
           - ':app:assembleClone'
           - ':app:bundleRelease'
   push:
-    branches: [main, v0.5.2-dev, fix/build72-visual-resident-restore]
+    branches: [main, v0.5.2-dev, fix/build72-visual-resident-restore, fix/build73-official-identity-resident-sync]
 
 concurrency:
   group: android-build-${{ github.event_name }}-${{ github.ref }}
