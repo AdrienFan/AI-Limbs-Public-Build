@@ -234,7 +234,7 @@ private class StudioMenuBridge {
     var onEditCommand: ((Int) -> Unit)? = null
 }
 
-private enum class RightPane { COLOR, LAYERS, BRUSHES }
+private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS }
 @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
@@ -1137,12 +1137,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         BoxWithConstraints(Modifier.fillMaxSize()) {
                             val paneHeaderHeight = 40.dp
                             val pinHeaderHeight = 40.dp
-                            val activePaneBodyHeight =
-                                (maxHeight - pinHeaderHeight - paneHeaderHeight).coerceAtLeast(120.dp)
                             val rightAccordionState = rememberLazyListState()
                             val paneOrder = rightPaneOrderNames.mapNotNull { name ->
                                 RightPane.values().firstOrNull { it.name == name }
                             }
+                            val activePaneBodyHeight =
+                                (maxHeight - pinHeaderHeight -
+                                    paneHeaderHeight * paneOrder.size.toFloat()).coerceAtLeast(120.dp)
                             val activeHeaderIndex =
                                 paneOrder.indexOf(activeRightPane).coerceAtLeast(0)
 
@@ -1188,6 +1189,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                             RightPane.COLOR -> "多功能拾色器"
                                             RightPane.LAYERS -> "图层"
                                             RightPane.BRUSHES -> "笔刷预设"
+                                            RightPane.FOOTPRINTS -> "足迹"
                                         }
 
                                         val header: @Composable () -> Unit = {
@@ -1399,6 +1401,104 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                                 style =
                                                                     MaterialTheme.typography
                                                                         .bodySmall)
+                                                        }
+                                                    }
+                                                    RightPane.FOOTPRINTS -> {
+                                                        val timeline = current.getJSONArray("timeline")
+                                                        val position = current.getInt("timelinePosition")
+                                                        val observedRevision = current.getInt("revision")
+                                                        val historyScroll = rememberLazyListState()
+                                                        val timeFormat = remember {
+                                                            java.text.SimpleDateFormat("HH:mm:ss",
+                                                                java.util.Locale.getDefault())
+                                                        }
+                                                        LaunchedEffect(current.getString("id"),
+                                                            observedRevision, activeRightPane) {
+                                                            historyScroll.scrollToItem(position)
+                                                        }
+                                                        LazyColumn(Modifier.fillMaxWidth()
+                                                            .height(activePaneBodyHeight),
+                                                            state = historyScroll) {
+                                                            items(timeline.length(),
+                                                                key = { index ->
+                                                                    "footprint_" + timeline
+                                                                        .getJSONObject(index)
+                                                                        .getString("id")
+                                                                }) { index ->
+                                                                val step = timeline.getJSONObject(index)
+                                                                val currentStep = index == position
+                                                                val future = index > position
+                                                                val label = step.getString("label")
+                                                                val actor = when (step.getString("actor")) {
+                                                                    "AWEI" -> "阿伟"
+                                                                    "LANER" -> "兰儿"
+                                                                    else -> "工程"
+                                                                }
+                                                                val time = step.optLong("timestamp")
+                                                                Row(Modifier.fillMaxWidth()
+                                                                    .background(if (currentStep)
+                                                                        MaterialTheme.colorScheme
+                                                                            .surfaceVariant
+                                                                    else MaterialTheme.colorScheme
+                                                                        .surface)
+                                                                    .clickable(
+                                                                        enabled = !busy && !currentStep,
+                                                                        onClickLabel = "查看第$index步：$label") {
+                                                                        perform {
+                                                                            store.historyJump(
+                                                                                "AWEI",
+                                                                                step.getString("id"),
+                                                                                observedRevision)
+                                                                        }
+                                                                    }
+                                                                    .padding(horizontal = 12.dp,
+                                                                        vertical = 9.dp),
+                                                                    verticalAlignment =
+                                                                        androidx.compose.ui.Alignment
+                                                                            .CenterVertically) {
+                                                                    Text(if (currentStep) "●" else "○",
+                                                                        color = if (currentStep)
+                                                                            MaterialTheme.colorScheme
+                                                                                .primary
+                                                                        else MaterialTheme.colorScheme
+                                                                            .onSurfaceVariant,
+                                                                        modifier = Modifier
+                                                                            .padding(end = 8.dp))
+                                                                    if (step.has("color")) {
+                                                                        Box(Modifier.padding(end = 8.dp)
+                                                                            .size(12.dp)
+                                                                            .background(
+                                                                                androidx.compose.ui.graphics
+                                                                                    .Color(Color.parseColor(
+                                                                                        step.getString("color"))),
+                                                                                androidx.compose.foundation
+                                                                                    .shape.CircleShape))
+                                                                    }
+                                                                    Column(Modifier.weight(1f)) {
+                                                                        Text("$index · $label",
+                                                                            maxLines = 1,
+                                                                            overflow = TextOverflow
+                                                                                .Ellipsis,
+                                                                            color = MaterialTheme
+                                                                                .colorScheme.onSurface
+                                                                                .copy(alpha =
+                                                                                    if (future)
+                                                                                        0.55f
+                                                                                    else 1f))
+                                                                        Text(if (time > 0L)
+                                                                            "$actor · " +
+                                                                                timeFormat.format(
+                                                                                    java.util.Date(time))
+                                                                        else actor,
+                                                                            style = MaterialTheme
+                                                                                .typography.bodySmall,
+                                                                            color = MaterialTheme
+                                                                                .colorScheme
+                                                                                .onSurfaceVariant)
+                                                                    }
+                                                                }
+                                                                HorizontalDivider()
+                                                            }
                                                         }
                                                     }
                                                 }

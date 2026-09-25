@@ -598,21 +598,50 @@ internal class ArtStore(private val root: File) {
         val saved = archive(id)
         val operations = doc.getJSONArray("operations")
         val (undoStack, redoStack) = historyStacks(operations)
+        val operationById = (0 until operations.length())
+            .map { operations.getJSONObject(it) }
+            .filter { it.getString("type") !in setOf("REVERT", "RESTORE") }
+            .associateBy { it.getString("id") }
         fun operationLabel(id: String?): String {
             if (id == null) return ""
-            val operation = (0 until operations.length()).map { operations.getJSONObject(it) }
-                .firstOrNull { it.getString("id") == id } ?: return ""
+            val operation = operationById[id] ?: return ""
             return when (operation.getString("type")) {
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
-                "LAYER_DELETE" -> "移除图层节点"
+                "GROUP_CREATE" -> "新建图层组"
+                "LAYER_DELETE" -> "删除图层"
                 "STROKE_ADD" -> when (operation.getJSONObject("parameters").optString("tool")) {
-                    "gradient" -> "绘制线性渐变"
-                    "mirror" -> "绘制多重笔画"
-                    "dyna" -> "绘制动态笔画"
-                    "calligraphy" -> "绘制书法笔画"
-                    "line", "rectangle", "ellipse", "polygon", "polyline", "bezier" -> "绘制形状"
+                    "gradient" -> when (operation.getJSONObject("parameters").optString("gradientMode", "linear")) {
+                        "radial" -> "径向渐变"
+                        "angular" -> "角度渐变"
+                        else -> "线性渐变"
+                    }
+                    "mirror" -> "多重画笔"
+                    "dyna" -> "动态画笔"
+                    "calligraphy" -> "斜头书法笔"
+                    "line" -> "直线"
+                    "rectangle" -> "矩形"
+                    "ellipse" -> "椭圆"
+                    "polygon" -> "多边形"
+                    "polyline" -> "折线"
+                    "bezier" -> "贝塞尔曲线"
+                    "ink" -> "自由画笔"
+                    "pencil" -> "铅笔"
+                    "soft" -> "软笔"
+                    "spray" -> "喷枪"
+                    "eraser" -> "橡皮擦"
                     else -> "绘制笔画"
                 }
+                "STROKE_ERASE" -> "删除笔画"
+                "TRANSFORM" -> "变换图层"
+                "CROP" -> "裁剪画布"
+                "LAYER_RENAME" -> "重命名图层"
+                "LAYER_SELECT" -> "选择图层"
+                "LAYER_VISIBLE" -> "显示或隐藏图层"
+                "LAYER_LOCK" -> "锁定或解锁图层"
+                "LAYER_OPACITY" -> "调整图层不透明度"
+                "LAYER_BLEND" -> "调整图层混合模式"
+                "LAYER_PROPERTIES" -> "修改图层属性"
+                "LAYER_MOVE", "LAYER_MOVE_STEP" -> "调整图层顺序"
                 "PIXEL_EDIT" -> if (operation.getJSONObject("parameters").optString("mode") == "CLEAR")
                     "清除像素" else "填充像素"
                 "PIXEL_PASTE" -> if (operation.getJSONObject("parameters")
@@ -624,8 +653,35 @@ internal class ArtStore(private val root: File) {
                 else -> "画室操作"
             }
         }
+        // A state represents the first N currently reachable edits. Redone edits stay
+        // visible as future states until a new edit starts a different branch.
+        val reachableIds = undoStack + redoStack.asReversed()
+        val originalOrder = operationById.keys.withIndex().associate { it.value to it.index }
+        var newestOriginalIndex = -1
+        val timeline = JSONArray().put(JSONObject().put("id", "")
+            .put("label", "初始画布").put("actor", doc.getString("createdBy"))
+            .put("timestamp", 0L))
+        for (operationId in reachableIds) {
+            val operation = operationById.getValue(operationId)
+            val originalIndex = originalOrder.getValue(operationId)
+            val reappliedOutOfOrder = originalIndex < newestOriginalIndex
+            newestOriginalIndex = maxOf(newestOriginalIndex, originalIndex)
+            val entry = JSONObject().put("id", operationId)
+                .put("label", if (reappliedOutOfOrder)
+                    "重新应用 · " + operationLabel(operationId) else operationLabel(operationId))
+                .put("actor", operation.getString("actor"))
+                .put("type", operation.getString("type"))
+                .put("timestamp", operation.optLong("timestamp", 0L))
+            if (operation.getString("type") == "STROKE_ADD") {
+                val stroke = operation.getJSONObject("parameters")
+                entry.put("tool", stroke.optString("tool", "ink"))
+                    .put("color", stroke.getString("color"))
+            }
+            timeline.put(entry)
+        }
         return JSONObject().put("id", doc.getString("id"))
             .put("state", state).put("revision", doc.getJSONArray("operations").length())
+            .put("timeline", timeline).put("timelinePosition", undoStack.size)
             .put("canUndo", undoStack.isNotEmpty()).put("canRedo", redoStack.isNotEmpty())
             .put("undoLabel", operationLabel(undoStack.lastOrNull()))
             .put("redoLabel", operationLabel(redoStack.lastOrNull()))
@@ -1097,6 +1153,38 @@ internal class ArtStore(private val root: File) {
         require(target != null) { if (redo) "没有可重做的操作" else "没有可撤销的操作" }
         // History commits under the same lock; the replay validates dependencies before writing.
         appendToCurrent(actor, if (redo) "RESTORE" else "REVERT", JSONObject().put("targetId", target))
+    }
+
+    /** Jump between reachable states as one atomic history change. */
+    fun historyJump(actor: String, targetId: String, expectedRevision: Int): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        val doc = loadCurrent()
+        val operations = doc.getJSONArray("operations")
+        require(expectedRevision == operations.length()) {
+            "工程已由另一端更新，请刷新足迹再操作"
+        }
+        val (undoStack, redoStack) = historyStacks(operations)
+        val reachable = undoStack + redoStack.asReversed()
+        val destination = if (targetId.isEmpty()) 0 else reachable.indexOf(targetId) + 1
+        require(destination in 0..reachable.size &&
+            (targetId.isEmpty() || destination > 0)) { "足迹状态已不在当前分支" }
+        val current = undoStack.size
+        if (destination == current) return@locked snapshot(doc)
+        val changes = if (destination < current) {
+            undoStack.subList(destination, current).asReversed().map { "REVERT" to it }
+        } else {
+            redoStack.asReversed().take(destination - current).map { "RESTORE" to it }
+        }
+        for ((type, id) in changes) {
+            operations.put(JSONObject().put("id", UUID.randomUUID().toString())
+                .put("actor", actor).put("type", type)
+                .put("parameters", JSONObject().put("targetId", id))
+                .put("timestamp", System.currentTimeMillis()))
+        }
+        // Replay validates every dependency before the draft is written.
+        val result = snapshot(doc)
+        atomic(draft(doc.getString("id")), doc.toString())
+        result.put("lastOperationId", operations.getJSONObject(operations.length() - 1).getString("id"))
     }
 
     fun clipboardInfo(): JSONObject = locked {

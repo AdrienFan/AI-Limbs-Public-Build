@@ -179,6 +179,17 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("history.list", "列出画室操作历史", read) {
             JSONObject().put("operations", store.current().getJSONArray("operations"))
         }
+        capability("history.timeline", "读取足迹状态列表", read,
+            "按当前可到达的状态排序；position 指向当前状态，后续状态可重做。每项含 id、操作名称、执行者和时间。") {
+            val snapshot = store.current()
+            JSONObject().put("timeline", snapshot.getJSONArray("timeline"))
+                .put("position", snapshot.getInt("timelinePosition"))
+                .put("revision", snapshot.getInt("revision"))
+        }
+        capability("history.goto", "切换到指定足迹状态", write,
+            "传 history.timeline 的状态 id；初始画布传空字符串。必须携带 revision，以免覆盖阿伟或兰儿的新改动。") { p ->
+            store.historyJump("LANER", p.getString("id"), p.getInt("expectedRevision"))
+        }
         capability("layer.create", "创建画室绘画图层", write,
             "创建可绘画图层；可选 parentId 指定已有图层组，可选 select=true 立即设为活动图层。") { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "LAYER_CREATE", p)
@@ -395,6 +406,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "transform.move" -> listOf(id, p("x", "number"), p("y", "number"))
         "transform.scale" -> listOf(id, p("scale", "number"))
         "transform.rotate" -> listOf(id, p("rotation", "number"))
+        "history.goto" -> listOf(id, p("expectedRevision", "integer"))
         "history.revert_actor_operations" -> listOf(id)
         "image.import" -> listOf(p("base64"))
         "export.png", "export.jpeg" -> listOf(p("name", optional = true),
