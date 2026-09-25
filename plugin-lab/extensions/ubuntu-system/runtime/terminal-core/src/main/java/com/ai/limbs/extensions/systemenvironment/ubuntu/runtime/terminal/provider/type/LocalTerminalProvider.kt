@@ -526,6 +526,11 @@ class LocalTerminalProvider(
 
     private fun reapHiddenExecShell(shell: HiddenExecShell) {
         val process = shell.process
+        val rootPid = runCatching { process.pid() }.getOrDefault(-1L)
+        val descendants =
+            if (rootPid > 0L) collectProcessDescendants(rootPid) else emptyList()
+
+        signalProcesses(descendants, OsConstants.SIGTERM)
 
         if (process.isAlive) {
             runCatching { process.destroy() }
@@ -544,6 +549,10 @@ class LocalTerminalProvider(
                 Log.w(TAG, "Failed while reaping hidden exec shell ${shell.key}", error)
                 false
             }
+
+        // A proot parent can exit before one of its traced bash children. Keep the original
+        // descendant snapshot and force-stop any survivor even if the parent was reaped.
+        signalProcesses(descendants, OsConstants.SIGKILL)
 
         if (reaped) {
             return
@@ -569,6 +578,42 @@ class LocalTerminalProvider(
         if (!forceReaped) {
             Log.e(TAG, "Hidden exec shell ${shell.key} is still alive after forced termination")
         }
+    }
+
+    private fun signalProcesses(processIds: List<Long>, signal: Int) {
+        processIds.forEach { pid ->
+            runCatching { Os.kill(pid.toInt(), signal) }
+                .onFailure { error ->
+                    if (error !is android.system.ErrnoException ||
+                        error.errno != OsConstants.ESRCH
+                    ) {
+                        Log.w(TAG, "Failed to signal hidden exec descendant pid=$pid signal=$signal", error)
+                    }
+                }
+        }
+    }
+
+    private fun collectProcessDescendants(rootPid: Long): List<Long> {
+        val result = mutableListOf<Long>()
+        val visited = mutableSetOf<Long>()
+
+        fun visit(pid: Long) {
+            if (!visited.add(pid)) return
+            val childrenFile = File("/proc/$pid/task/$pid/children")
+            val children =
+                runCatching { childrenFile.readText() }
+                    .getOrDefault("")
+                    .trim()
+                    .split(Regex("\\s+"))
+                    .mapNotNull { it.toLongOrNull() }
+            children.forEach { childPid ->
+                visit(childPid)
+                result.add(childPid)
+            }
+        }
+
+        visit(rootPid)
+        return result
     }
 
     private fun buildVisibleSessionCommand(showDevelopmentPrompt: Boolean): Array<String> {
