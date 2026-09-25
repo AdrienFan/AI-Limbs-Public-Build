@@ -318,12 +318,21 @@ internal object ArtRenderer {
             val reverse = stroke.optBoolean("gradientReverse", false)
             val nearColor = if (reverse) endColor else startColor
             val farColor = if (reverse) startColor else endColor
-            paint.shader = if (stroke.optString("gradientMode", "linear") == "radial")
-                android.graphics.RadialGradient(x0, y0,
+            paint.shader = when (stroke.optString("gradientMode", "linear")) {
+                "radial" -> android.graphics.RadialGradient(x0, y0,
                     hypot((x1 - x0).toDouble(), (y1 - y0).toDouble()).toFloat(),
                     nearColor, farColor, android.graphics.Shader.TileMode.CLAMP)
-            else android.graphics.LinearGradient(x0, y0, x1, y1,
-                nearColor, farColor, android.graphics.Shader.TileMode.CLAMP)
+                "angular" -> android.graphics.SweepGradient(x0, y0,
+                    nearColor, farColor).apply {
+                    val degrees = Math.toDegrees(kotlin.math.atan2(
+                        (y1 - y0).toDouble(), (x1 - x0).toDouble())).toFloat()
+                    setLocalMatrix(android.graphics.Matrix().apply {
+                        setRotate(degrees, x0, y0)
+                    })
+                }
+                else -> android.graphics.LinearGradient(x0, y0, x1, y1,
+                    nearColor, farColor, android.graphics.Shader.TileMode.CLAMP)
+            }
             val boundsWidth = stroke.optInt("previewWidth", canvas.width)
             val boundsHeight = stroke.optInt("previewHeight", canvas.height)
             canvas.drawRect(0f, 0f, boundsWidth.toFloat(), boundsHeight.toFloat(), paint)

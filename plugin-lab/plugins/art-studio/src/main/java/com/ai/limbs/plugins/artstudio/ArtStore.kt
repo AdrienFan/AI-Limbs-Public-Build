@@ -927,7 +927,7 @@ internal class ArtStore(private val root: File) {
                 }
                 if (tool == "gradient") {
                     val mode = p.optString("gradientMode", "linear")
-                    require(mode == "linear" || mode == "radial") { "渐变模式无效" }
+                    require(mode in setOf("linear", "radial", "angular")) { "渐变模式无效" }
                     p.put("gradientMode", mode)
                     val a = points.getJSONArray(0); val b = points.getJSONArray(1)
                     require(kotlin.math.hypot(b.getDouble(0) - a.getDouble(0),

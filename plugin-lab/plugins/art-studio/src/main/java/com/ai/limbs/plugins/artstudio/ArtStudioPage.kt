@@ -251,6 +251,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var opacity by remember { mutableFloatStateOf(1f) }
     var sampleRadius by remember { mutableIntStateOf(0) }
     var sampleBlend by remember { mutableIntStateOf(100) }
+    var sampleMerged by remember { mutableStateOf(true) }
     var samplerOptionsDialog by remember { mutableStateOf(false) }
     var fillTolerance by remember { mutableIntStateOf(0) }
     var fillReferenceAll by remember { mutableStateOf(false) }
@@ -811,7 +812,26 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.nibAngle = nibAngle
                     view.fillShape = fillShape
                     view.gradientMode = gradientMode; view.gradientReverse = gradientReverse
-                    view.sampleRadius = sampleRadius
+                    view.sampleRadius = sampleRadius; view.sampleMerged = sampleMerged
+                    view.onSampleCoordinate = { x, y ->
+                        scope.launch {
+                            try {
+                                val pixel = withContext(Dispatchers.IO) {
+                                    mutex.withLock {
+                                        val source = ArtColorSampler.renderSource(
+                                            store, store.current(), selected)
+                                        try { ArtColorSampler.sample(source, x, y, sampleRadius) }
+                                        finally { source.recycle() }
+                                    }
+                                }
+                                view.onSampleColor(pixel)
+                            } catch (error: Exception) {
+                                host.logger.e("ArtStudio", "Layer color sampling failed", error)
+                                Toast.makeText(context, error.toString(),
+                                    Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    }
                     view.onStroke = { points ->
                         if (selectedLayer?.getString("kind") != "paint")
                             Toast.makeText(context, "请选择绘画图层", Toast.LENGTH_SHORT).show()
@@ -843,8 +863,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onSampleColor = { pixel ->
                         val sampled = if (sampleBlend == 100) pixel else
                             ArtColorSampler.blend(Color.parseColor(color), pixel, sampleBlend)
-                        color = String.format(java.util.Locale.ROOT, "#%08X", sampled)
-                        colorHexInput = color
+                        if (Color.alpha(sampled) == 0)
+                            Toast.makeText(context, "透明区域没有可取的颜色", Toast.LENGTH_SHORT).show()
+                        else {
+                            color = String.format(java.util.Locale.ROOT, "#%08X", sampled)
+                            colorHexInput = color
+                        }
                     }
                     view.onSelection = { rect -> edit("SELECTION_CREATE", rect) }
                     view.onFill = { x, y ->
@@ -1502,7 +1526,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     if (samplerOptionsDialog) {
         AlertDialog(onDismissRequest = { samplerOptionsDialog = false },
             title = { Text("取色器选项") },
-            text = { Column {
+            text = { Column(Modifier.heightIn(max = 360.dp)
+                .verticalScroll(rememberScrollState())) {
+                FilterChip(selected = sampleMerged, onClick = { sampleMerged = true },
+                    label = { Text("合成画布") })
+                FilterChip(selected = !sampleMerged, onClick = { sampleMerged = false },
+                    label = { Text("当前图层") })
+                if (!sampleMerged) Text("当前仅支持可见根绘画层或图像层。",
+                    style = MaterialTheme.typography.bodySmall)
                 Text("取色半径：$sampleRadius px")
                 Slider(value = sampleRadius.toFloat(),
                     onValueChange = { sampleRadius = it.roundToInt().coerceIn(0, 32) },
@@ -1525,10 +1556,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     onClick = { gradientMode = "linear" }, label = { Text("线性") })
                 FilterChip(selected = gradientMode == "radial",
                     onClick = { gradientMode = "radial" }, label = { Text("径向") })
+                FilterChip(selected = gradientMode == "angular",
+                    onClick = { gradientMode = "angular" }, label = { Text("角度") })
                 FilterChip(selected = gradientReverse,
                     onClick = { gradientReverse = !gradientReverse },
                     label = { Text("反向颜色") })
-                Text("默认从起点前景色过渡到终点透明；反向会互换颜色。",
+                Text("线性／径向用终点定范围，角度用终点定方向；反向会互换颜色。",
                     style = MaterialTheme.typography.bodySmall)
             } }, confirmButton = {
                 TextButton(onClick = { gradientOptionsDialog = false }) { Text("完成") }
@@ -1950,6 +1983,8 @@ private class StudioCanvas(context: Context) : View(context) {
             }
         }
     var sampleRadius: Int = 0
+    var sampleMerged: Boolean = true
+    var onSampleCoordinate: (Int, Int) -> Unit = { _, _ -> }
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
     var opacity: Float = 1f
@@ -2373,8 +2408,10 @@ private class StudioCanvas(context: Context) : View(context) {
                         val sampled = image
                         if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
                             xy[0] < sampled.width && xy[1] < sampled.height)
-                            onSampleColor(ArtColorSampler.sample(sampled,
-                                xy[0].toInt(), xy[1].toInt(), sampleRadius))
+                            if (sampleMerged)
+                                onSampleColor(ArtColorSampler.sample(sampled,
+                                    xy[0].toInt(), xy[1].toInt(), sampleRadius))
+                            else onSampleCoordinate(xy[0].toInt(), xy[1].toInt())
                     }
                     "dyna" -> {
                         if (points.length() > 0) {

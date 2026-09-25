@@ -130,9 +130,11 @@ class ArtStudioEntry : InProcessPluginEntry {
                 p.optInt("tolerance", 0), p.optBoolean("referenceAllLayers", false))
         }
         capability("color.sample", "从画布合成结果取色", read,
-            "输入画布像素坐标；可选 radius=0–32、blend=0–100。blend<100 时需传当前 baseColor（#AARRGGBB），返回与左侧取色工具相同的颜色。") { p ->
+            "输入画布像素坐标；可选 radius=0–32、blend=0–100。sampleMerged=false 时传根绘画／图像层 layerId；blend<100 时需传当前 baseColor（#AARRGGBB），返回与左侧取色工具相同的颜色。") { p ->
             val snapshot = store.current()
-            val bitmap = ArtRenderer.render(store, snapshot)
+            val merged = p.optBoolean("sampleMerged", true)
+            val sourceId = if (merged) null else p.getString("layerId")
+            val bitmap = ArtColorSampler.renderSource(store, snapshot, sourceId)
             try {
                 val x = p.getInt("x"); val y = p.getInt("y")
                 val radius = p.optInt("radius", 0)
@@ -144,9 +146,10 @@ class ArtStudioEntry : InProcessPluginEntry {
                     require(baseColor.matches(Regex("#[A-Fa-f0-9]{8}"))) { "当前颜色必须是 #AARRGGBB" }
                     ArtColorSampler.blend(android.graphics.Color.parseColor(baseColor), sampled, blend)
                 }
+                require(android.graphics.Color.alpha(color) > 0) { "透明区域没有可取的颜色" }
                 JSONObject().put("color", String.format(java.util.Locale.ROOT,
                     "#%08X", color)).put("x", x).put("y", y).put("radius", radius)
-                    .put("blend", blend)
+                    .put("blend", blend).put("sampleMerged", merged)
             } finally {
                 bitmap.recycle()
             }
@@ -352,7 +355,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "layer.search" -> listOf(p("query"))
         "color.sample" -> listOf(p("x", "integer"), p("y", "integer"),
             p("radius", "integer", true), p("blend", "integer", true),
-            p("baseColor", optional = true))
+            p("baseColor", optional = true), p("sampleMerged", "boolean", true),
+            p("layerId", optional = true))
         "canvas.measure" -> listOf(p("x0", "number"), p("y0", "number"),
             p("x1", "number"), p("y1", "number"))
         "fill.contiguous" -> listOf(p("x", "integer"), p("y", "integer"), p("color"),

@@ -2,9 +2,32 @@ package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
 import android.graphics.Color
+import org.json.JSONObject
 
 /** Radius sampling shared by touch and LANER color.sample; transparent pixels keep their alpha. */
 internal object ArtColorSampler {
+    fun renderSource(store: ArtStore, snapshot: JSONObject, layerId: String?): Bitmap {
+        if (layerId == null) return ArtRenderer.render(store, snapshot)
+        val isolated = JSONObject(snapshot.toString())
+        val state = isolated.getJSONObject("state")
+        val layers = state.getJSONArray("layers")
+        val layer = (0 until layers.length()).map { layers.getJSONObject(it) }
+            .firstOrNull { it.getString("id") == layerId }
+            ?: error("取色图层不存在")
+        require(layer.getString("kind") in setOf("paint", "image") &&
+            layer.optString("parentId").isBlank() && layer.getBoolean("visible")) {
+            "当前图层取色需要可见的根绘画层或图像层"
+        }
+        state.put("background", "#00000000")
+        for (i in 0 until layers.length()) {
+            val candidate = layers.getJSONObject(i)
+            if (candidate.getString("id") == layerId)
+                candidate.put("opacity", 1.0).put("blend", "normal")
+            else candidate.put("visible", false)
+        }
+        return ArtRenderer.render(store, isolated)
+    }
+
     fun sample(bitmap: Bitmap, x: Int, y: Int, radius: Int): Int {
         require(x in 0 until bitmap.width && y in 0 until bitmap.height) { "坐标不在画布内" }
         require(radius in 0..32) { "取色半径必须在 0–32 px 之间" }
