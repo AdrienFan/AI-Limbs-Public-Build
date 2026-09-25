@@ -1464,7 +1464,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                                         .surface)
                                                                     .clickable(
                                                                         enabled = !busy && !currentStep,
-                                                                        onClickLabel = "查看第$index步：$label") {
+                                                                        onClickLabel = "查看第${index}步：$label") {
                                                                         perform {
                                                                             store.historyJump(
                                                                                 "AWEI",
