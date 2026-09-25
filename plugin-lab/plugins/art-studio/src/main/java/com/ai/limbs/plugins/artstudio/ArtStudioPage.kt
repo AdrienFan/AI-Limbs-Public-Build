@@ -876,6 +876,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
 
                     }
                 }
+                }
                 if (rightDrawerOpen) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
                         .padding(end = railWidth).width(rightDrawerWidth).fillMaxHeight()
@@ -1019,7 +1020,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             }
                         }
                     }
-                }
                 }
                 Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
                     .width(railWidth).fillMaxHeight()
