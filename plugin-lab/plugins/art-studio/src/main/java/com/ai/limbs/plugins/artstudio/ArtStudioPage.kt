@@ -21,6 +21,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -39,16 +40,22 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.ViewCompositionStrategy
+import androidx.compose.ui.zIndex
 
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
@@ -64,6 +71,7 @@ import org.json.JSONObject
 import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.hypot
+import kotlin.math.roundToInt
 
 internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View {
@@ -297,6 +305,20 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var leftDrawerPinned by rememberSaveable { mutableStateOf(false) }
     var rightDrawerPinned by rememberSaveable { mutableStateOf(false) }
     var activeRightPane by remember { mutableStateOf(RightPane.COLOR) }
+    val rightPanePrefs = remember(context) {
+        context.getSharedPreferences("art_studio_ui", Context.MODE_PRIVATE)
+    }
+    var rightPaneOrderNames by rememberSaveable {
+        val defaults = RightPane.values().map { it.name }
+        val saved = rightPanePrefs.getString("right_pane_order", null)
+            ?.split(',')?.filter { it.isNotBlank() }.orEmpty()
+        val normalized = (saved.filter { it in defaults } +
+            defaults.filterNot { it in saved }).distinct()
+        mutableStateOf(normalized)
+    }
+    var draggingRightPane by remember { mutableStateOf<RightPane?>(null) }
+    var draggingRightPaneOffset by remember { mutableFloatStateOf(0f) }
+    val rightPaneHaptics = LocalHapticFeedback.current
     var exportPath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
     var busy by remember { mutableStateOf(false) }
@@ -845,7 +867,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                     contentAlignment = androidx.compose.ui.Alignment.Center) {
                                     Icon(Icons.Default.PushPin,
                                         contentDescription = null,
-                                        modifier = Modifier.size(17.dp),
+                                        modifier = Modifier.size(17.dp)
+                                            .rotate(if (leftDrawerPinned) 0f else -45f),
                                         tint = if (leftDrawerPinned) MaterialTheme.colorScheme.primary
                                             else MaterialTheme.colorScheme.onSurfaceVariant)
                                 }
@@ -910,19 +933,25 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             val activePaneBodyHeight =
                                 (maxHeight - pinHeaderHeight - paneHeaderHeight).coerceAtLeast(120.dp)
                             val rightAccordionState = rememberLazyListState()
-                            val activeHeaderIndex = when (activeRightPane) {
-                                RightPane.COLOR -> 0
-                                RightPane.LAYERS -> 2
-                                RightPane.BRUSHES -> 4
+                            val paneOrder = rightPaneOrderNames.mapNotNull { name ->
+                                RightPane.values().firstOrNull { it.name == name }
                             }
+                            val activeHeaderIndex =
+                                paneOrder.indexOf(activeRightPane).coerceAtLeast(0)
 
-                            LaunchedEffect(activeRightPane) {
-                                rightAccordionState.animateScrollToItem(activeHeaderIndex)
+                            LaunchedEffect(activeRightPane, rightPaneOrderNames, draggingRightPane) {
+                                if (draggingRightPane == null) {
+                                    rightAccordionState.animateScrollToItem(activeHeaderIndex)
+                                }
                             }
 
                             Column(Modifier.fillMaxSize()) {
-                                Row(Modifier.fillMaxWidth().height(pinHeaderHeight),
+                                Row(Modifier.fillMaxWidth().height(pinHeaderHeight)
+                                    .padding(start = 10.dp, end = 2.dp),
                                     verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    Text("视图列表",
+                                        style = MaterialTheme.typography.titleSmall,
+                                        modifier = Modifier.weight(1f))
                                     Box(Modifier.size(36.dp)
                                         .clickable(onClickLabel = if (rightDrawerPinned)
                                             "取消固定右侧面板" else "固定右侧面板") {
@@ -936,205 +965,236 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         contentAlignment = androidx.compose.ui.Alignment.Center) {
                                         Icon(Icons.Default.PushPin,
                                             contentDescription = null,
-                                            modifier = Modifier.size(17.dp),
+                                            modifier = Modifier.size(17.dp)
+                                                .rotate(if (rightDrawerPinned) 0f else -45f),
                                             tint = if (rightDrawerPinned) MaterialTheme.colorScheme.primary
                                                 else MaterialTheme.colorScheme.onSurfaceVariant)
                                     }
-                                    Text(if (rightDrawerPinned) "已固定" else "固定侧栏",
-                                        style = MaterialTheme.typography.labelSmall)
                                 }
 
                                 LazyColumn(Modifier.fillMaxWidth().weight(1f),
                                     state = rightAccordionState) {
-                                    if (activeRightPane == RightPane.COLOR) {
-                                        stickyHeader {
-                                            Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                                .clickable(onClickLabel = "多功能拾色器已展开") { }
-                                                .padding(start = 10.dp),
-                                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                                Text("多功能拾色器",
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.weight(1f))
-                                                Box(Modifier.size(36.dp)
-                                                    .clickable(onClickLabel = "隐藏多功能拾色器（待视图菜单完成）") { }
-                                                    .semantics {
-                                                        contentDescription = "隐藏多功能拾色器（待视图菜单完成）"
-                                                    },
-                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                    Text("×", style = MaterialTheme.typography.titleMedium,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
+                                    paneOrder.forEach { pane ->
+                                        val isActive = activeRightPane == pane
+                                        val isDragging = draggingRightPane == pane
+                                        val label = when (pane) {
+                                            RightPane.COLOR -> "多功能拾色器"
+                                            RightPane.LAYERS -> "图层"
+                                            RightPane.BRUSHES -> "笔刷预设"
                                         }
-                                    } else {
-                                        item {
+
+                                        val header: @Composable () -> Unit = {
                                             Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                                .background(MaterialTheme.colorScheme.surface)
-                                                .clickable(onClickLabel = "展开多功能拾色器") {
-                                                    activeRightPane = RightPane.COLOR
-                                                }.padding(start = 10.dp),
-                                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                                Text("多功能拾色器",
-                                                    style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.weight(1f))
-                                                Box(Modifier.size(36.dp)
-                                                    .clickable(onClickLabel = "隐藏多功能拾色器（待视图菜单完成）") { }
-                                                    .semantics {
-                                                        contentDescription = "隐藏多功能拾色器（待视图菜单完成）"
-                                                    },
-                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                    Text("×", style = MaterialTheme.typography.titleMedium,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if (activeRightPane == RightPane.COLOR) {
-                                        item {
-                                            Column(Modifier.fillMaxWidth().height(activePaneBodyHeight)
-                                                .verticalScroll(rememberScrollState())
-                                                .padding(horizontal = 10.dp, vertical = 8.dp),
-                                                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
-                                                    modifier = Modifier.fillMaxWidth().height(285.dp),
-                                                    update = { picker ->
-                                                        picker.selectedColor = Color.parseColor(color)
-                                                        picker.onColorSelected = { selected ->
-                                                            color = String.format(java.util.Locale.ROOT, "#%08X", selected)
-                                                            colorHexInput = color
-                                                        }
-                                                    })
-                                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                    Box(Modifier.size(28.dp).background(
-                                                        androidx.compose.ui.graphics.Color(Color.parseColor(color))))
-                                                    Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
-                                                }
-                                                OutlinedTextField(colorHexInput, { input ->
-                                                    colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
-                                                    if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
-                                                        color = colorHexInput
+                                                .then(if (isDragging) Modifier
+                                                    .offset {
+                                                        IntOffset(
+                                                            0,
+                                                            draggingRightPaneOffset.roundToInt())
                                                     }
-                                                }, label = { Text("#AARRGGBB") }, singleLine = true,
-                                                    modifier = Modifier.fillMaxWidth())
-                                                Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
-                                                    style = MaterialTheme.typography.bodySmall)
-                                            }
-                                        }
-                                    }
-
-                                    item {
-                                        Spacer(Modifier.fillMaxWidth().height(1.dp)
-                                            .background(MaterialTheme.colorScheme.outlineVariant))
-                                    }
-
-                                    if (activeRightPane == RightPane.LAYERS) {
-                                        stickyHeader {
-                                            Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                                .clickable(onClickLabel = "图层已展开") { }
-                                                .padding(start = 10.dp),
-                                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                                Text("图层", style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.weight(1f))
+                                                    .zIndex(1f) else Modifier)
+                                                .background(if (isActive)
+                                                    MaterialTheme.colorScheme.surfaceVariant
+                                                    else MaterialTheme.colorScheme.surface),
+                                                verticalAlignment =
+                                                    androidx.compose.ui.Alignment.CenterVertically) {
+                                                Box(Modifier.weight(1f).fillMaxHeight()
+                                                    .pointerInput(pane) {
+                                                        detectDragGesturesAfterLongPress(
+                                                            onDragStart = {
+                                                                draggingRightPane = pane
+                                                                draggingRightPaneOffset = 0f
+                                                                rightPaneHaptics.performHapticFeedback(
+                                                                    HapticFeedbackType.LongPress)
+                                                            },
+                                                            onDragEnd = {
+                                                                draggingRightPane = null
+                                                                draggingRightPaneOffset = 0f
+                                                                rightPanePrefs.edit()
+                                                                    .putString("right_pane_order",
+                                                                        rightPaneOrderNames
+                                                                            .joinToString(","))
+                                                                    .apply()
+                                                            },
+                                                            onDragCancel = {
+                                                                draggingRightPane = null
+                                                                draggingRightPaneOffset = 0f
+                                                            },
+                                                            onDrag = { change, dragAmount ->
+                                                                change.consume()
+                                                                draggingRightPaneOffset += dragAmount.y
+                                                                val threshold =
+                                                                    paneHeaderHeight.toPx()
+                                                                val names =
+                                                                    rightPaneOrderNames.toMutableList()
+                                                                var index = names.indexOf(pane.name)
+                                                                var changed = false
+                                                                while (
+                                                                    draggingRightPaneOffset >=
+                                                                        threshold &&
+                                                                    index >= 0 &&
+                                                                    index < names.lastIndex
+                                                                ) {
+                                                                    val next = names[index + 1]
+                                                                    names[index + 1] = names[index]
+                                                                    names[index] = next
+                                                                    index++
+                                                                    draggingRightPaneOffset -= threshold
+                                                                    changed = true
+                                                                }
+                                                                while (
+                                                                    draggingRightPaneOffset <=
+                                                                        -threshold &&
+                                                                    index > 0
+                                                                ) {
+                                                                    val previous = names[index - 1]
+                                                                    names[index - 1] = names[index]
+                                                                    names[index] = previous
+                                                                    index--
+                                                                    draggingRightPaneOffset += threshold
+                                                                    changed = true
+                                                                }
+                                                                if (changed) {
+                                                                    rightPaneOrderNames = names
+                                                                }
+                                                            }
+                                                        )
+                                                    }
+                                                    .clickable(
+                                                        onClickLabel = if (isActive)
+                                                            "$label 已展开"
+                                                        else "展开$label"
+                                                    ) {
+                                                        if (draggingRightPane == null) {
+                                                            activeRightPane = pane
+                                                        }
+                                                    }
+                                                    .padding(start = 10.dp),
+                                                    contentAlignment =
+                                                        androidx.compose.ui.Alignment.CenterStart) {
+                                                    Text(label,
+                                                        style =
+                                                            MaterialTheme.typography.titleSmall)
+                                                }
                                                 Box(Modifier.size(36.dp)
-                                                    .clickable(onClickLabel = "隐藏图层（待视图菜单完成）") { }
+                                                    .clickable(onClickLabel =
+                                                        "隐藏$label（待视图菜单完成）") { }
                                                     .semantics {
-                                                        contentDescription = "隐藏图层（待视图菜单完成）"
+                                                        contentDescription =
+                                                            "隐藏$label（待视图菜单完成）"
                                                     },
-                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                    Text("×", style = MaterialTheme.typography.titleMedium,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                                    contentAlignment =
+                                                        androidx.compose.ui.Alignment.Center) {
+                                                    Text("×",
+                                                        style =
+                                                            MaterialTheme.typography.titleMedium,
+                                                        color =
+                                                            MaterialTheme.colorScheme
+                                                                .onSurfaceVariant)
                                                 }
                                             }
+                                            HorizontalDivider(
+                                                color =
+                                                    MaterialTheme.colorScheme.outlineVariant)
                                         }
-                                    } else {
-                                        item {
-                                            Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                                .background(MaterialTheme.colorScheme.surface)
-                                                .clickable(onClickLabel = "展开图层") {
-                                                    activeRightPane = RightPane.LAYERS
-                                                }.padding(start = 10.dp),
-                                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                                Text("图层", style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.weight(1f))
-                                                Box(Modifier.size(36.dp)
-                                                    .clickable(onClickLabel = "隐藏图层（待视图菜单完成）") { }
-                                                    .semantics {
-                                                        contentDescription = "隐藏图层（待视图菜单完成）"
-                                                    },
-                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                    Text("×", style = MaterialTheme.typography.titleMedium,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if (activeRightPane == RightPane.LAYERS) {
-                                        item {
-                                            Box(Modifier.fillMaxWidth().height(activePaneBodyHeight)
-                                                .clipToBounds()) {
-                                                StudioLayersPanel(state = state, selectedId = selected,
-                                                    revision = revision, busy = busy, store = store,
-                                                    onEdit = ::edit)
-                                            }
-                                        }
-                                    }
 
-                                    item {
-                                        Spacer(Modifier.fillMaxWidth().height(1.dp)
-                                            .background(MaterialTheme.colorScheme.outlineVariant))
-                                    }
+                                        if (isActive && draggingRightPane == null) {
+                                            stickyHeader { header() }
+                                        } else {
+                                            item(key = "header_" + pane.name) { header() }
+                                        }
 
-                                    if (activeRightPane == RightPane.BRUSHES) {
-                                        stickyHeader {
-                                            Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                                .clickable(onClickLabel = "笔刷预设已展开") { }
-                                                .padding(start = 10.dp),
-                                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                                Text("笔刷预设", style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.weight(1f))
-                                                Box(Modifier.size(36.dp)
-                                                    .clickable(onClickLabel = "隐藏笔刷预设（待视图菜单完成）") { }
-                                                    .semantics {
-                                                        contentDescription = "隐藏笔刷预设（待视图菜单完成）"
-                                                    },
-                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                    Text("×", style = MaterialTheme.typography.titleMedium,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        if (isActive && draggingRightPane == null) {
+                                            item(key = "body_" + pane.name) {
+                                                when (pane) {
+                                                    RightPane.COLOR -> {
+                                                        Column(Modifier.fillMaxWidth()
+                                                            .height(activePaneBodyHeight)
+                                                            .verticalScroll(rememberScrollState())
+                                                            .padding(
+                                                                horizontal = 10.dp,
+                                                                vertical = 8.dp),
+                                                            verticalArrangement =
+                                                                Arrangement.spacedBy(8.dp)) {
+                                                            AndroidView(
+                                                                factory = { ctx ->
+                                                                    StudioColorSelector(ctx)
+                                                                },
+                                                                modifier = Modifier.fillMaxWidth()
+                                                                    .height(285.dp),
+                                                                update = { picker ->
+                                                                    picker.selectedColor =
+                                                                        Color.parseColor(color)
+                                                                    picker.onColorSelected =
+                                                                        { selected ->
+                                                                            color = String.format(
+                                                                                java.util.Locale.ROOT,
+                                                                                "#%08X", selected)
+                                                                            colorHexInput = color
+                                                                        }
+                                                                })
+                                                            Row(verticalAlignment =
+                                                                androidx.compose.ui.Alignment
+                                                                    .CenterVertically,
+                                                                horizontalArrangement =
+                                                                    Arrangement.spacedBy(8.dp)) {
+                                                                Box(Modifier.size(28.dp).background(
+                                                                    androidx.compose.ui.graphics.Color(
+                                                                        Color.parseColor(color))))
+                                                                Text("当前画笔颜色",
+                                                                    style =
+                                                                        MaterialTheme.typography
+                                                                            .bodySmall)
+                                                            }
+                                                            OutlinedTextField(
+                                                                colorHexInput,
+                                                                { input ->
+                                                                    colorHexInput =
+                                                                        input.uppercase(
+                                                                            java.util.Locale.ROOT)
+                                                                            .take(9)
+                                                                    if (colorHexInput.matches(
+                                                                            Regex(
+                                                                                "#[0-9A-F]{8}"))) {
+                                                                        color = colorHexInput
+                                                                    }
+                                                                },
+                                                                label = { Text("#AARRGGBB") },
+                                                                singleLine = true,
+                                                                modifier =
+                                                                    Modifier.fillMaxWidth())
+                                                            Text(
+                                                                "色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
+                                                                style =
+                                                                    MaterialTheme.typography
+                                                                        .bodySmall)
+                                                        }
+                                                    }
+                                                    RightPane.LAYERS -> {
+                                                        Box(Modifier.fillMaxWidth()
+                                                            .height(activePaneBodyHeight)
+                                                            .clipToBounds()) {
+                                                            StudioLayersPanel(
+                                                                state = state,
+                                                                selectedId = selected,
+                                                                revision = revision,
+                                                                busy = busy,
+                                                                store = store,
+                                                                onEdit = ::edit)
+                                                        }
+                                                    }
+                                                    RightPane.BRUSHES -> {
+                                                        Box(Modifier.fillMaxWidth()
+                                                            .height(activePaneBodyHeight),
+                                                            contentAlignment =
+                                                                androidx.compose.ui.Alignment
+                                                                    .Center) {
+                                                            Text("笔刷预设待添加",
+                                                                style =
+                                                                    MaterialTheme.typography
+                                                                        .bodySmall)
+                                                        }
+                                                    }
                                                 }
-                                            }
-                                        }
-                                    } else {
-                                        item {
-                                            Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                                .background(MaterialTheme.colorScheme.surface)
-                                                .clickable(onClickLabel = "展开笔刷预设") {
-                                                    activeRightPane = RightPane.BRUSHES
-                                                }.padding(start = 10.dp),
-                                                verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                                Text("笔刷预设", style = MaterialTheme.typography.titleSmall,
-                                                    modifier = Modifier.weight(1f))
-                                                Box(Modifier.size(36.dp)
-                                                    .clickable(onClickLabel = "隐藏笔刷预设（待视图菜单完成）") { }
-                                                    .semantics {
-                                                        contentDescription = "隐藏笔刷预设（待视图菜单完成）"
-                                                    },
-                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                    Text("×", style = MaterialTheme.typography.titleMedium,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                                }
-                                            }
-                                        }
-                                    }
-                                    if (activeRightPane == RightPane.BRUSHES) {
-                                        item {
-                                            Box(Modifier.fillMaxWidth().height(activePaneBodyHeight),
-                                                contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                Text("笔刷预设待添加",
-                                                    style = MaterialTheme.typography.bodySmall)
                                             }
                                         }
                                     }
