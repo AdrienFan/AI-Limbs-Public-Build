@@ -356,7 +356,16 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("opacity", "number", true), p("blend", optional = true),
             p("visible", "boolean", true), p("locked", "boolean", true))
         "stroke.add" -> listOf(p("layerId"), p("points", "array"), p("color"), p("width", "number"),
-            p("opacity", "number", true), p("tool", optional = true))
+            p("opacity", "number", true), p("tool", optional = true),
+            p("fillShape", "boolean", true), p("gradientMode", optional = true),
+            p("gradientReverse", "boolean", true),
+            p("mirrorDirection", optional = true), p("mirrorCount", "integer", true),
+            p("mirrorRadius", "number", true), p("mirrorSeed", "integer", true),
+            p("mirrorCenters", "array", true),
+            p("mirrorIntervalX", "integer", true), p("mirrorIntervalY", "integer", true),
+            p("axisX", "number", true),
+            p("axisY", "number", true), p("mass", "number", true),
+            p("drag", "number", true))
         "stroke.erase" -> listOf(p("layerId"), p("strokeId"))
         "selection.create", "selection.ellipse" -> listOf(p("x", "number"), p("y", "number"),
             p("width", "number"), p("height", "number"))

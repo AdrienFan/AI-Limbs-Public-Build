@@ -607,6 +607,8 @@ internal class ArtStore(private val root: File) {
                 "LAYER_DELETE" -> "移除图层节点"
                 "STROKE_ADD" -> when (operation.getJSONObject("parameters").optString("tool")) {
                     "gradient" -> "绘制线性渐变"
+                    "mirror" -> "绘制多重笔画"
+                    "dyna" -> "绘制动态笔画"
                     "line", "rectangle", "ellipse", "polygon", "polyline", "bezier" -> "绘制形状"
                     else -> "绘制笔画"
                 }
@@ -844,7 +846,7 @@ internal class ArtStore(private val root: File) {
                 require(p.getDouble("width") in 0.1..512.0)
                 require(p.optDouble("opacity", 1.0) in 0.0..1.0)
                 val tool = p.optString("tool", "pencil")
-                require(tool in setOf("pencil", "ink", "eraser", "soft", "spray",
+                require(tool in setOf("pencil", "ink", "eraser", "soft", "spray", "mirror", "dyna",
                     "line", "rectangle", "ellipse", "polygon", "polyline", "bezier", "gradient"))
                 require(when (tool) {
                     "line", "rectangle", "ellipse", "gradient" -> points.length() == 2
@@ -853,7 +855,72 @@ internal class ArtStore(private val root: File) {
                     "bezier" -> points.length() == 4
                     else -> true
                 }) { "形状顶点数量无效" }
+                if (p.optBoolean("fillShape", false))
+                    require(tool in setOf("rectangle", "ellipse", "polygon")) {
+                        "只有闭合形状可使用前景色填充"
+                    }
+                if (tool == "dyna") {
+                    val mass = p.optDouble("mass", 0.5)
+                    val drag = p.optDouble("drag", 0.15)
+                    require(mass.isFinite() && mass in 0.0..1.0 &&
+                        drag.isFinite() && drag in 0.0..1.0) { "动态画笔的惯性和阻力必须在 0–1 之间" }
+                    p.put("mass", mass).put("drag", drag)
+                }
+                if (tool == "mirror") {
+                    val direction = p.optString("mirrorDirection", "vertical")
+                    require(direction in setOf("vertical", "horizontal", "quad", "radial", "snowflake",
+                        "translate", "copytranslate", "interval")) {
+                        "对称方式无效"
+                    }
+                    val count = p.optInt("mirrorCount", 6)
+                    require(count in 2..12) { "旋转对称画笔数必须在 2–12 之间" }
+                    // Store the axis in the stroke event so history, export and AI replay
+                    // retain the original mirror center even after the canvas is cropped.
+                    val radius = p.optDouble("mirrorRadius", 80.0)
+                    require(radius.isFinite() && radius in 0.0..512.0) {
+                        "随机平移半径必须在 0–512 px 之间"
+                    }
+                    val seed = if (p.has("mirrorSeed")) p.getInt("mirrorSeed")
+                        else kotlin.random.Random.nextInt(Int.MAX_VALUE)
+                    require(seed >= 0) { "随机种子不能为负数" }
+                    val centers = p.optJSONArray("mirrorCenters") ?: JSONArray()
+                    require(centers.length() <= 11) { "子画笔数量不能超过 11 支" }
+                    for (i in 0 until centers.length()) {
+                        val point = centers.getJSONArray(i)
+                        require(point.length() == 2 && point.getDouble(0).isFinite() &&
+                            point.getDouble(1).isFinite()) { "子画笔位置无效" }
+                        require(point.getDouble(0) in 0.0..state.getDouble("width") &&
+                            point.getDouble(1) in 0.0..state.getDouble("height")) {
+                            "子画笔位置不在画布范围内"
+                        }
+                    }
+                    p.put("mirrorCenters", centers)
+                    val intervalX = p.optInt("mirrorIntervalX", 1024)
+                    val intervalY = p.optInt("mirrorIntervalY", 1024)
+                    require(intervalX in 128..2048 && intervalY in 128..2048) {
+                        "横纵间隔必须在 128–2048 px 之间"
+                    }
+                    val canvasWidth = state.getInt("width")
+                    val canvasHeight = state.getInt("height")
+                    if (direction == "interval") require(
+                        (canvasWidth / intervalX + 1) * (canvasHeight / intervalY + 1) <= 48
+                    ) { "间隔复制画笔超过 48 支，请加大间隔" }
+                    p.put("mirrorIntervalX", intervalX).put("mirrorIntervalY", intervalY)
+                        .put("canvasWidth", canvasWidth).put("canvasHeight", canvasHeight)
+                    p.put("mirrorDirection", direction).put("mirrorCount", count)
+                        .put("mirrorRadius", radius).put("mirrorSeed", seed)
+                    val axisX = p.optDouble("axisX", state.getInt("width") / 2.0)
+                    val axisY = p.optDouble("axisY", state.getInt("height") / 2.0)
+                    require(axisX.isFinite() && axisX in 0.0..state.getDouble("width") &&
+                        axisY.isFinite() && axisY in 0.0..state.getDouble("height")) {
+                        "镜像轴不在画布范围内"
+                    }
+                    p.put("axisX", axisX).put("axisY", axisY)
+                }
                 if (tool == "gradient") {
+                    val mode = p.optString("gradientMode", "linear")
+                    require(mode == "linear" || mode == "radial") { "渐变模式无效" }
+                    p.put("gradientMode", mode)
                     val a = points.getJSONArray(0); val b = points.getJSONArray(1)
                     require(kotlin.math.hypot(b.getDouble(0) - a.getDouble(0),
                         b.getDouble(1) - a.getDouble(1)) >= 0.01) { "请拖出渐变方向" }

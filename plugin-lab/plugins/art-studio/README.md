@@ -61,18 +61,20 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 | 已接通的工具 | 操作 | 兰儿入口 |
 | --- | --- | --- |
 | 自由画笔、铅笔、软笔、喷枪、橡皮擦 | 在绘画图层记录笔画；笔压供基本笔宽使用 | stroke.add，tool=ink/pencil/soft/spray/eraser |
-| 直线、矩形、椭圆 | 拖动生成线框；以两端点记录到当前绘画层 | stroke.add，tool=line/rectangle/ellipse |
-| 多边形、折线 | 逐点点击，至少 3 / 2 个顶点后双击最后一个点结束；多边形闭合 | stroke.add，tool=polygon/polyline |
+| 多重画笔 | 拖动画笔生成原笔画和镜像笔画；左侧「多重画笔选项」切换左右、上下、四象限镜像，或 2–12 支旋转对称、4 倍画笔数的雪花对称，以及按固定随机种子重现的平移画笔、自定位置的子画笔、横纵间隔复制画笔（最多 48 支），对称模式显示轴线；左栏「移动中心」可点画布设置中心，中心随图层变换 | stroke.add，tool=mirror，可选 mirrorDirection=vertical/horizontal/quad/radial/snowflake/translate/copytranslate/interval、mirrorCount、mirrorRadius、mirrorSeed、mirrorCenters、mirrorIntervalX/Y、axisX、axisY |
+| 动态画笔 | 左侧「动态选项」调惯性和阻力，按 Krita 动态工具的质量与阻力模型过滤采样轨迹，预览和重放共用同一处理 | stroke.add，tool=dyna，可选 mass、drag（0–1） |
+| 直线、矩形、椭圆 | 拖动生成线框；矩形、椭圆可用前景色填充；以两端点记录到当前绘画层 | stroke.add，tool=line/rectangle/ellipse，闭合形状可选 fillShape |
+| 多边形、折线 | 逐点点击，至少 3 / 2 个顶点后双击最后一个点结束；多边形闭合后可用前景色填充 | stroke.add，tool=polygon/polyline，多边形可选 fillShape |
 | 三次贝塞尔曲线 | 依次点起点、两处控制点与终点；点击时预览控制点连线，第四点落下后保存曲线笔画 | stroke.add，tool=bezier，points 恰好 4 点 |
 | 颜色取样 | 点击合成画布采样像素，更新当前笔色 | color.sample（画布像素坐标） |
 | 连续区域填充 | 选中工具后从左侧栏「填充选项」设置颜色容差（0–100）及参考当前图层/所有可见图层；遵循当前选区，填色仍写入可编辑根图层并记录可撤销的 PNG 像素编辑 | fill.contiguous（x/y/color，可选 tolerance、referenceAllLayers、expectedRevision） |
-| 线性渐变 | 拖动定义前景色至透明的线性渐变，在当前绘画层记录渐变事件 | stroke.add，tool=gradient |
+| 线性、径向渐变 | 拖动定义前景色至透明的渐变距离；可切换线性／径向和反向，在当前绘画层记录渐变事件 | stroke.add，tool=gradient，可选 gradientMode=linear/radial、gradientReverse |
 | 矩形、椭圆、多边形、自由套索选区 | 拖动创建矩形/椭圆/套索；逐点点击、双击最后一点结束多边形；复制/清除/填充沿真实边界裁剪 | selection.create、selection.ellipse、selection.polygon、selection.freehand |
 | 裁剪画布 | 拖动矩形裁剪；裁到画布范围且边长至少 64 px，保留操作历史 | canvas.crop |
 | 移动图层、平移画布 | 拖动当前图层或画布视图；有选区时沿用当前选区移动操作 | transform.move、selection.edit；视图平移只属于当前页面 |
 | 测量距离、缩放画布 | 拖动可读两点距离与角度；点击缩放画布视图，双指缩放沿用已有手势 | canvas.measure；视图缩放只属于当前页面 |
 
-这仅是 Krita 左侧工具的第一批真实操作：尚缺区域填充的透明色擦除、颜色标签图层参考及边界填充、渐变预设与色彩空间、多段可编辑贝塞尔/自由路径、矢量形状、文字、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；透明颜色填充会拒绝；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变只提供前景色到透明的基础模式，不具备 Krita 的预设和混合选项。手机端、构建与触屏操作仍待验证，当前源码修改没有编译。
+这仅是 Krita 左侧工具的第一批真实操作：尚缺区域填充的透明色擦除、颜色标签图层参考及边界填充、渐变预设与色彩空间、多段可编辑贝塞尔/自由路径、矢量形状、文字、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；透明颜色填充会拒绝；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变只提供前景色到透明的线性／径向基础模式，不具备 Krita 的预设和混合选项。手机端、构建与触屏操作仍待验证，当前源码修改没有编译。
 
 右侧图层管理参考 Krita 6.0.4 的 plugins/dockers/layerdocker/WdgLayerBox.ui、LayerBox.cpp 和 NodeDelegate.cpp，提供名称筛选、缩略图、显隐、锁定、混合模式、不透明度、绘画层与组、复制、同级排序、属性和删除。兰儿对应使用 layer.list、layer.search、layer.create、layer.group、layer.select、layer.set_visibility、layer.set_lock、layer.set_blend、layer.set_opacity、layer.rename、layer.copy、layer.move_up、layer.move_down、layer.properties 与 layer.delete。底到顶合成；图层背景不是可编辑图层。笔刷仍是基础画笔与喷枪，4K 多层画布可能消耗较多内存。
 

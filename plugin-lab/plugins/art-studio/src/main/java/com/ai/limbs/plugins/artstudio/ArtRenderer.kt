@@ -134,6 +134,134 @@ internal object ArtRenderer {
         }
         val tool = stroke.optString("tool", "pencil")
         val width = stroke.getDouble("width").toFloat()
+        if (tool == "dyna") {
+            val mass = 1.0 + 159.0 * stroke.optDouble("mass", 0.5)
+            val drag = 0.5 * stroke.optDouble("drag", 0.15).let { it * it }
+            val first = points.getJSONArray(0)
+            var cursorX = first.getDouble(0)
+            var cursorY = first.getDouble(1)
+            var velocityX = 0.0
+            var velocityY = 0.0
+            val filtered = JSONArray().put(JSONArray(first.toString()))
+            for (i in 1 until points.length()) {
+                val target = points.getJSONArray(i)
+                val forceX = target.getDouble(0) - cursorX
+                val forceY = target.getDouble(1) - cursorY
+                if (hypot(forceX, forceY) < 0.000001) continue
+                velocityX += forceX / mass
+                velocityY += forceY / mass
+                if (hypot(velocityX, velocityY) < 0.000001) continue
+                velocityX *= 1.0 - drag
+                velocityY *= 1.0 - drag
+                cursorX += velocityX
+                cursorY += velocityY
+                val point = JSONArray().put(cursorX).put(cursorY)
+                if (target.length() > 2) point.put(target.getDouble(2))
+                filtered.put(point)
+            }
+            drawStroke(canvas, JSONObject(stroke.toString()).put("tool", "ink")
+                .put("points", filtered))
+            return
+        }
+        if (tool == "mirror") {
+            val regular = JSONObject(stroke.toString()).put("tool", "ink")
+            if (stroke.getString("mirrorDirection") != "translate" &&
+                stroke.getString("mirrorDirection") != "interval")
+                drawStroke(canvas, regular)
+            if (stroke.getString("mirrorDirection") == "translate") {
+                val random = java.util.Random(stroke.getInt("mirrorSeed").toLong())
+                val radius = stroke.getDouble("mirrorRadius")
+                for (arm in 0 until stroke.getInt("mirrorCount")) {
+                    val angle = random.nextDouble() * 2.0 * Math.PI
+                    val distance = random.nextDouble() * radius
+                    canvas.save()
+                    try {
+                        canvas.translate((distance * kotlin.math.cos(angle)).toFloat(),
+                            (distance * kotlin.math.sin(angle)).toFloat())
+                        drawStroke(canvas, regular)
+                    } finally { canvas.restore() }
+                }
+            } else if (stroke.getString("mirrorDirection") == "interval") {
+                val stepX = stroke.getInt("mirrorIntervalX")
+                val stepY = stroke.getInt("mirrorIntervalY")
+                val origin = points.getJSONArray(0)
+                val anchorX = kotlin.math.floor(origin.getDouble(0) / stepX) * stepX
+                val anchorY = kotlin.math.floor(origin.getDouble(1) / stepY) * stepY
+                for (x in 0..stroke.getInt("canvasWidth") step stepX) {
+                    for (y in 0..stroke.getInt("canvasHeight") step stepY) {
+                        canvas.save()
+                        try {
+                            canvas.translate((x - anchorX).toFloat(), (y - anchorY).toFloat())
+                            drawStroke(canvas, regular)
+                        } finally { canvas.restore() }
+                    }
+                }
+            } else if (stroke.getString("mirrorDirection") == "copytranslate") {
+                val axesX = stroke.getDouble("axisX").toFloat()
+                val axesY = stroke.getDouble("axisY").toFloat()
+                val centers = stroke.getJSONArray("mirrorCenters")
+                for (i in 0 until centers.length()) {
+                    val point = centers.getJSONArray(i)
+                    canvas.save()
+                    try {
+                        canvas.translate(point.getDouble(0).toFloat() - axesX,
+                            point.getDouble(1).toFloat() - axesY)
+                        drawStroke(canvas, regular)
+                    } finally { canvas.restore() }
+                }
+            } else if (stroke.getString("mirrorDirection") == "radial" ||
+                stroke.getString("mirrorDirection") == "snowflake") {
+                val snowflake = stroke.getString("mirrorDirection") == "snowflake"
+                val count = stroke.getInt("mirrorCount")
+                val arms = if (snowflake) count * 2 else count
+                for (arm in 1 until arms) {
+                    canvas.save()
+                    try {
+                        canvas.rotate(360f * arm / arms,
+                            stroke.getDouble("axisX").toFloat(),
+                            stroke.getDouble("axisY").toFloat())
+                        drawStroke(canvas, regular)
+                    } finally { canvas.restore() }
+                }
+                if (snowflake) for (arm in 0 until arms) {
+                    // Krita's snowflake mode alternates rotations with reflected arms.
+                    val axisX = stroke.getDouble("axisX").toFloat()
+                    val axisY = stroke.getDouble("axisY").toFloat()
+                    val wedge = 180f / arms
+                    canvas.save()
+                    try {
+                        canvas.rotate((2f * arm - 1f) * wedge, axisX, axisY)
+                        canvas.scale(-1f, 1f, axisX, axisY)
+                        canvas.rotate(wedge, axisX, axisY)
+                        drawStroke(canvas, regular)
+                    } finally { canvas.restore() }
+                }
+            } else {
+                val direction = stroke.getString("mirrorDirection")
+                canvas.save()
+                try {
+                    if (direction == "vertical" || direction == "quad")
+                        canvas.scale(-1f, 1f, stroke.getDouble("axisX").toFloat(), 0f)
+                    else
+                        canvas.scale(1f, -1f, 0f, stroke.getDouble("axisY").toFloat())
+                    drawStroke(canvas, regular)
+                } finally { canvas.restore() }
+                if (direction == "quad") {
+                    canvas.save()
+                    try {
+                        canvas.scale(1f, -1f, 0f, stroke.getDouble("axisY").toFloat())
+                        drawStroke(canvas, regular)
+                    } finally { canvas.restore() }
+                    canvas.save()
+                    try {
+                        canvas.scale(-1f, -1f, stroke.getDouble("axisX").toFloat(),
+                            stroke.getDouble("axisY").toFloat())
+                        drawStroke(canvas, regular)
+                    } finally { canvas.restore() }
+                }
+            }
+            return
+        }
         if (tool == "soft") {
             paint.setShadowLayer(width * 0.7f, 0f, 0f, paint.color)
             paint.alpha = (paint.alpha * 0.45f).toInt()
@@ -154,8 +282,16 @@ internal object ArtRenderer {
                 .toInt().coerceIn(0, 255)
             val startColor = (foreground and 0x00FFFFFF) or (alpha shl 24)
             paint.alpha = 255
-            paint.shader = android.graphics.LinearGradient(x0, y0, x1, y1,
-                startColor, foreground and 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP)
+            val endColor = foreground and 0x00FFFFFF
+            val reverse = stroke.optBoolean("gradientReverse", false)
+            val nearColor = if (reverse) endColor else startColor
+            val farColor = if (reverse) startColor else endColor
+            paint.shader = if (stroke.optString("gradientMode", "linear") == "radial")
+                android.graphics.RadialGradient(x0, y0,
+                    hypot((x1 - x0).toDouble(), (y1 - y0).toDouble()).toFloat(),
+                    nearColor, farColor, android.graphics.Shader.TileMode.CLAMP)
+            else android.graphics.LinearGradient(x0, y0, x1, y1,
+                nearColor, farColor, android.graphics.Shader.TileMode.CLAMP)
             val boundsWidth = stroke.optInt("previewWidth", canvas.width)
             val boundsHeight = stroke.optInt("previewHeight", canvas.height)
             canvas.drawRect(0f, 0f, boundsWidth.toFloat(), boundsHeight.toFloat(), paint)
@@ -199,6 +335,9 @@ internal object ArtRenderer {
                 if (tool == "polygon" && points.length() >= 3 && !stroke.optBoolean("previewOpen")) close()
             }
             paint.strokeWidth = width
+            if (tool == "polygon" && points.length() >= 3 &&
+                !stroke.optBoolean("previewOpen") && stroke.optBoolean("fillShape"))
+                paint.style = Paint.Style.FILL_AND_STROKE
             canvas.drawPath(path, paint)
             return
         }
@@ -212,6 +351,8 @@ internal object ArtRenderer {
             val x1 = last.getDouble(0).toFloat()
             val y1 = last.getDouble(1).toFloat()
             paint.strokeWidth = width
+            if (tool != "line" && stroke.optBoolean("fillShape"))
+                paint.style = Paint.Style.FILL_AND_STROKE
             when (tool) {
                 "line" -> canvas.drawLine(x0, y0, x1, y1, paint)
                 "rectangle" -> canvas.drawRect(minOf(x0, x1), minOf(y0, y1),

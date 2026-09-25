@@ -252,6 +252,24 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var fillTolerance by remember { mutableIntStateOf(0) }
     var fillReferenceAll by remember { mutableStateOf(false) }
     var fillOptionsDialog by remember { mutableStateOf(false) }
+    var mirrorDirection by remember { mutableStateOf("vertical") }
+    var mirrorCount by remember { mutableIntStateOf(6) }
+    var mirrorRadius by remember { mutableFloatStateOf(80f) }
+    var mirrorPlacement by remember { mutableStateOf(false) }
+    var mirrorOriginPlacement by remember { mutableStateOf(false) }
+    var mirrorCenterX by remember { mutableFloatStateOf(0.5f) }
+    var mirrorCenterY by remember { mutableFloatStateOf(0.5f) }
+    var mirrorCenters by remember { mutableStateOf(JSONArray()) }
+    var mirrorIntervalX by remember { mutableIntStateOf(1024) }
+    var mirrorIntervalY by remember { mutableIntStateOf(1024) }
+    var mirrorOptionsDialog by remember { mutableStateOf(false) }
+    var dynaMass by remember { mutableFloatStateOf(0.5f) }
+    var dynaDrag by remember { mutableFloatStateOf(0.15f) }
+    var dynaOptionsDialog by remember { mutableStateOf(false) }
+    var fillShape by remember { mutableStateOf(false) }
+    var gradientMode by remember { mutableStateOf("linear") }
+    var gradientReverse by remember { mutableStateOf(false) }
+    var gradientOptionsDialog by remember { mutableStateOf(false) }
     var newCanvas by remember { mutableStateOf(false) }
     var presentationDialog by remember { mutableStateOf(false) }
     var presentationError by remember { mutableStateOf<String?>(null) }
@@ -760,13 +778,58 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.layers = layers
                     view.selectedId = selected
                     view.selection = state.optJSONObject("selection")
-                    view.tool = tool; view.color = color; view.brushWidth = width; view.opacity = opacity
+                    view.tool = tool; view.color = color; view.brushWidth = width
+                    view.opacity = opacity; view.mirrorDirection = mirrorDirection
+                    view.mirrorCount = mirrorCount; view.mirrorRadius = mirrorRadius
+                    view.mirrorPlacement = mirrorPlacement; view.mirrorCenters = mirrorCenters
+                    view.mirrorIntervalX = mirrorIntervalX; view.mirrorIntervalY = mirrorIntervalY
+                    view.mirrorAxisX = state.getInt("width") * mirrorCenterX
+                    view.mirrorAxisY = state.getInt("height") * mirrorCenterY
+                    view.mirrorOriginPlacement = mirrorOriginPlacement
+                    view.onMirrorOrigin = { x, y ->
+                        if (x >= 0.0 && x <= state.getInt("width") &&
+                            y >= 0.0 && y <= state.getInt("height")) {
+                            mirrorCenterX = (x / state.getInt("width")).toFloat()
+                            mirrorCenterY = (y / state.getInt("height")).toFloat()
+                            mirrorOriginPlacement = false
+                        }
+                    }
+                    view.onMirrorPoint = { x, y ->
+                        if (mirrorCenters.length() < 11 && x >= 0.0 && y >= 0.0 &&
+                            x <= state.getDouble("width") && y <= state.getDouble("height"))
+                            mirrorCenters = JSONArray(mirrorCenters.toString()).put(
+                                JSONArray().put(x).put(y))
+                        else if (mirrorCenters.length() >= 11)
+                            Toast.makeText(context, "最多添加 11 支子画笔", Toast.LENGTH_SHORT).show()
+                    }
+                    view.dynaMass = dynaMass; view.dynaDrag = dynaDrag
+                    view.fillShape = fillShape
+                    view.gradientMode = gradientMode; view.gradientReverse = gradientReverse
                     view.onStroke = { points ->
                         if (selectedLayer?.getString("kind") != "paint")
                             Toast.makeText(context, "请选择绘画图层", Toast.LENGTH_SHORT).show()
-                        else edit("STROKE_ADD", JSONObject().put("id", UUID.randomUUID().toString())
-                            .put("layerId", selected).put("tool", tool).put("color", color)
-                            .put("width", width.toDouble()).put("opacity", opacity.toDouble()).put("points", points))
+                        else {
+                            val stroke = JSONObject().put("id", UUID.randomUUID().toString())
+                                .put("layerId", selected).put("tool", tool).put("color", color)
+                                .put("width", width.toDouble()).put("opacity", opacity.toDouble())
+                                .put("points", points)
+                            if (tool == "mirror") stroke.put("mirrorDirection", mirrorDirection)
+                                .put("mirrorCount", mirrorCount)
+                                .put("mirrorRadius", mirrorRadius.toDouble())
+                                .put("mirrorSeed", view.mirrorSeed)
+                                .put("mirrorCenters", JSONArray(mirrorCenters.toString()))
+                                .put("mirrorIntervalX", mirrorIntervalX)
+                                .put("mirrorIntervalY", mirrorIntervalY)
+                                .put("axisX", state.getInt("width") * mirrorCenterX.toDouble())
+                                .put("axisY", state.getInt("height") * mirrorCenterY.toDouble())
+                            if (tool in setOf("rectangle", "ellipse", "polygon"))
+                                stroke.put("fillShape", fillShape)
+                            if (tool == "gradient") stroke.put("gradientMode", gradientMode)
+                                .put("gradientReverse", gradientReverse)
+                            if (tool == "dyna") stroke.put("mass", dynaMass.toDouble())
+                                .put("drag", dynaDrag.toDouble())
+                            edit("STROKE_ADD", stroke)
+                        }
                     }
                     view.onCursor = { x, y -> canvasCursor = x to y }
                     view.onSampleColor = { pixel ->
@@ -822,6 +885,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 Triple("soft", "软笔", "◌"),
                                 Triple("spray", "喷枪", "☷"),
                                 Triple("eraser", "橡皮擦", "▱"),
+                                Triple("mirror", "多重画笔", "⇄"),
+                                Triple("dyna", "动态画笔", "⌁"),
                                 Triple("line", "直线", "╱"),
                                 Triple("rectangle", "矩形", "□"),
                                 Triple("ellipse", "椭圆", "○"),
@@ -882,6 +947,62 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         modifier = Modifier.fillMaxWidth()
                                             .semantics { contentDescription = "连续区域填充选项" }) {
                                         Text("填充选项", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "mirror") {
+                                    TextButton(onClick = { mirrorOptionsDialog = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                            .semantics { contentDescription = "多重画笔选项" }) {
+                                        Text("多重画笔选项", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "mirror") {
+                                    TextButton(onClick = {
+                                        mirrorOriginPlacement = !mirrorOriginPlacement
+                                        if (mirrorOriginPlacement) mirrorPlacement = false
+                                    }, modifier = Modifier.fillMaxWidth().semantics {
+                                        contentDescription = if (mirrorOriginPlacement)
+                                            "取消移动对称中心" else "点画布移动对称中心"
+                                    }) {
+                                        Text(if (mirrorOriginPlacement) "取消移动中心" else "移动中心",
+                                            style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "mirror" && mirrorDirection == "copytranslate") {
+                                    TextButton(onClick = {
+                                        mirrorPlacement = !mirrorPlacement
+                                        if (mirrorPlacement) mirrorOriginPlacement = false
+                                    },
+                                        modifier = Modifier.fillMaxWidth().semantics {
+                                            contentDescription = if (mirrorPlacement)
+                                                "完成子画笔布置" else "点击画布添加子画笔"
+                                        }) {
+                                        Text(if (mirrorPlacement) "完成布置" else "添加子画笔",
+                                            style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool in setOf("rectangle", "ellipse", "polygon")) {
+                                    TextButton(onClick = { fillShape = !fillShape },
+                                        modifier = Modifier.fillMaxWidth().semantics {
+                                            contentDescription = if (fillShape) "取消形状填充" else "填充形状"
+                                        }) {
+                                        Text(if (fillShape) "填充：前景色" else "填充：无",
+                                            style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "gradient") {
+                                    TextButton(onClick = { gradientOptionsDialog = true },
+                                        modifier = Modifier.fillMaxWidth().semantics {
+                                            contentDescription = "渐变选项"
+                                        }) {
+                                        Text("渐变选项", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "dyna") {
+                                    TextButton(onClick = { dynaOptionsDialog = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                            .semantics { contentDescription = "动态画笔选项" }) {
+                                        Text("动态选项", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                                 availableTools.chunked(2).forEach { pair ->
@@ -1268,6 +1389,107 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
             }
         }
+    }
+    if (mirrorOptionsDialog) {
+        AlertDialog(onDismissRequest = { mirrorOptionsDialog = false },
+            title = { Text("多重画笔选项") },
+            text = {
+                Column(Modifier.verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    FilterChip(selected = mirrorDirection == "vertical",
+                        onClick = { mirrorDirection = "vertical"; mirrorPlacement = false },
+                        label = { Text("左右镜像") })
+                    FilterChip(selected = mirrorDirection == "horizontal",
+                        onClick = { mirrorDirection = "horizontal"; mirrorPlacement = false },
+                        label = { Text("上下镜像") })
+                    FilterChip(selected = mirrorDirection == "quad",
+                        onClick = { mirrorDirection = "quad"; mirrorPlacement = false },
+                        label = { Text("四象限镜像") })
+                    FilterChip(selected = mirrorDirection == "radial",
+                        onClick = { mirrorDirection = "radial"; mirrorPlacement = false },
+                        label = { Text("旋转对称") })
+                    FilterChip(selected = mirrorDirection == "snowflake",
+                        onClick = { mirrorDirection = "snowflake"; mirrorPlacement = false },
+                        label = { Text("雪花对称") })
+                    FilterChip(selected = mirrorDirection == "translate",
+                        onClick = { mirrorDirection = "translate"; mirrorPlacement = false },
+                        label = { Text("随机平移") })
+                    FilterChip(selected = mirrorDirection == "copytranslate",
+                        onClick = { mirrorDirection = "copytranslate" },
+                        label = { Text("自定子画笔") })
+                    FilterChip(selected = mirrorDirection == "interval",
+                        onClick = { mirrorDirection = "interval"; mirrorPlacement = false },
+                        label = { Text("间隔复制") })
+                    if (mirrorDirection == "radial" || mirrorDirection == "snowflake" ||
+                        mirrorDirection == "translate") {
+                        Text("基础画笔数：$mirrorCount" +
+                            if (mirrorDirection == "snowflake") "（共 ${mirrorCount * 4} 支）" else "")
+                        Slider(value = mirrorCount.toFloat(),
+                            onValueChange = { mirrorCount = it.roundToInt().coerceIn(2, 12) },
+                            valueRange = 2f..12f, steps = 9)
+                    }
+                    if (mirrorDirection == "translate") {
+                        Text("平移半径：${mirrorRadius.roundToInt()} px")
+                        Slider(value = mirrorRadius,
+                            onValueChange = { mirrorRadius = it }, valueRange = 0f..512f)
+                    }
+                    if (mirrorDirection == "copytranslate") {
+                        Text("已添加 ${mirrorCenters.length()} 支子画笔；关闭选项后从左栏进入布置模式，点击画布放置。")
+                        TextButton(onClick = { mirrorCenters = JSONArray() }) {
+                            Text("清空子画笔")
+                        }
+                    }
+                    if (mirrorDirection == "interval") {
+                        Text("横向间隔：$mirrorIntervalX px")
+                        Slider(value = mirrorIntervalX.toFloat(),
+                            onValueChange = { mirrorIntervalX = it.roundToInt().coerceIn(128, 2048) },
+                            valueRange = 128f..2048f)
+                        Text("纵向间隔：$mirrorIntervalY px")
+                        Slider(value = mirrorIntervalY.toFloat(),
+                            onValueChange = { mirrorIntervalY = it.roundToInt().coerceIn(128, 2048) },
+                            valueRange = 128f..2048f)
+                        Text("横纵网格最多 48 支画笔，超过时需加大间隔。",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    Text("对称中心随当前图层移动或变换。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }, confirmButton = {
+                TextButton(onClick = { mirrorOptionsDialog = false }) { Text("完成") }
+            })
+    }
+    if (gradientOptionsDialog) {
+        AlertDialog(onDismissRequest = { gradientOptionsDialog = false },
+            title = { Text("渐变选项") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                FilterChip(selected = gradientMode == "linear",
+                    onClick = { gradientMode = "linear" }, label = { Text("线性") })
+                FilterChip(selected = gradientMode == "radial",
+                    onClick = { gradientMode = "radial" }, label = { Text("径向") })
+                FilterChip(selected = gradientReverse,
+                    onClick = { gradientReverse = !gradientReverse },
+                    label = { Text("反向颜色") })
+                Text("默认从起点前景色过渡到终点透明；反向会互换颜色。",
+                    style = MaterialTheme.typography.bodySmall)
+            } }, confirmButton = {
+                TextButton(onClick = { gradientOptionsDialog = false }) { Text("完成") }
+            })
+    }
+    if (dynaOptionsDialog) {
+        AlertDialog(onDismissRequest = { dynaOptionsDialog = false },
+            title = { Text("动态画笔选项") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("惯性：${(dynaMass * 100).toInt()}%")
+                Slider(value = dynaMass, onValueChange = { dynaMass = it },
+                    valueRange = 0f..1f)
+                Text("阻力：${(dynaDrag * 100).toInt()}%")
+                Slider(value = dynaDrag, onValueChange = { dynaDrag = it },
+                    valueRange = 0f..1f)
+                Text("按 Krita 动态工具的质量与阻力公式平滑轨迹；同一笔画保留绘制时参数。",
+                    style = MaterialTheme.typography.bodySmall)
+            } }, confirmButton = {
+                TextButton(onClick = { dynaOptionsDialog = false }) { Text("完成") }
+            })
     }
     if (fillOptionsDialog) {
         AlertDialog(onDismissRequest = { fillOptionsDialog = false },
@@ -1658,6 +1880,32 @@ private class StudioCanvas(context: Context) : View(context) {
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
     var opacity: Float = 1f
+    var gradientMode: String = "linear"
+    var gradientReverse: Boolean = false
+    var fillShape: Boolean = false
+    var dynaMass: Float = 0.5f
+    var dynaDrag: Float = 0.15f
+    var mirrorCount: Int = 6
+        set(value) { if (field != value) { field = value; invalidate() } }
+    var mirrorRadius: Float = 80f
+    var mirrorAxisX: Float = 0f
+    var mirrorAxisY: Float = 0f
+    var mirrorOriginPlacement: Boolean = false
+    var onMirrorOrigin: (Double, Double) -> Unit = { _, _ -> }
+    var mirrorIntervalX: Int = 1024
+    var mirrorIntervalY: Int = 1024
+    var mirrorPlacement: Boolean = false
+    var mirrorCenters: JSONArray = JSONArray()
+        set(value) { field = value; invalidate() }
+    var onMirrorPoint: (Double, Double) -> Unit = { _, _ -> }
+    var mirrorSeed: Int = 0
+    var mirrorDirection: String = "vertical"
+        set(value) {
+            if (field != value) {
+                field = value
+                invalidate()
+            }
+        }
     var onStroke: (JSONArray) -> Unit = {}
     var onSelection: (JSONObject) -> Unit = {}
     var onCrop: (JSONObject) -> Unit = {}
@@ -1751,6 +1999,49 @@ private class StudioCanvas(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(), checkerPaint)
         canvas.restore()
         canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        if (tool == "mirror") {
+            canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
+            val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(90, 167, 255)
+                style = Paint.Style.STROKE
+                strokeWidth = 1.5f / (fit * zoom)
+                pathEffect = android.graphics.DashPathEffect(floatArrayOf(9f, 6f), 0f)
+            }
+            if (mirrorDirection == "vertical")
+                canvas.drawLine(mirrorAxisX, 0f,
+                    mirrorAxisX, bitmap.height.toFloat(), guide)
+            else if (mirrorDirection == "horizontal")
+                canvas.drawLine(0f, mirrorAxisY,
+                    bitmap.width.toFloat(), mirrorAxisY, guide)
+            else if (mirrorDirection == "quad") {
+                canvas.drawLine(mirrorAxisX, 0f,
+                    mirrorAxisX, bitmap.height.toFloat(), guide)
+                canvas.drawLine(0f, mirrorAxisY,
+                    bitmap.width.toFloat(), mirrorAxisY, guide)
+            }
+            else if (mirrorDirection == "copytranslate") {
+                val center = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.rgb(90, 167, 255)
+                    style = Paint.Style.STROKE
+                    strokeWidth = 2f / (fit * zoom)
+                }
+                for (i in 0 until mirrorCenters.length()) {
+                    val point = mirrorCenters.getJSONArray(i)
+                    canvas.drawCircle(point.getDouble(0).toFloat(),
+                        point.getDouble(1).toFloat(), 8f / (fit * zoom), center)
+                }
+            } else if (mirrorDirection != "translate" && mirrorDirection != "interval") {
+                val arms = if (mirrorDirection == "snowflake") mirrorCount * 2 else mirrorCount
+                for (arm in 0 until arms) {
+                    canvas.save()
+                    canvas.rotate(360f * arm / arms, mirrorAxisX, mirrorAxisY)
+                    canvas.drawLine(mirrorAxisX, mirrorAxisY,
+                        mirrorAxisX + bitmap.width, mirrorAxisY, guide)
+                    canvas.restore()
+                }
+            }
+            canvas.restore()
+        }
         (selectionPreview ?: selection)?.let { selectedArea ->
             canvas.save(); canvas.concat(matrix)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -1813,10 +2104,25 @@ private class StudioCanvas(context: Context) : View(context) {
         }
         if (points.length() > 0 && tool !in listOf("pan", "move", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
-            ArtRenderer.drawStroke(canvas, JSONObject().put("points", points).put("tool", tool)
+            val preview = JSONObject().put("points", points).put("tool", tool)
                 .put("color", color).put("width", brushWidth.toDouble()).put("opacity", opacity.toDouble())
                 .put("previewOpen", true)
-                .put("previewWidth", bitmap.width).put("previewHeight", bitmap.height))
+                .put("previewWidth", bitmap.width).put("previewHeight", bitmap.height)
+            if (tool in setOf("rectangle", "ellipse", "polygon"))
+                preview.put("fillShape", fillShape)
+            if (tool == "gradient") preview.put("gradientMode", gradientMode)
+                .put("gradientReverse", gradientReverse)
+            if (tool == "dyna") preview.put("mass", dynaMass.toDouble())
+                .put("drag", dynaDrag.toDouble())
+            if (tool == "mirror") preview.put("mirrorDirection", mirrorDirection)
+                .put("mirrorCount", mirrorCount)
+                .put("mirrorRadius", mirrorRadius.toDouble())
+                .put("mirrorSeed", mirrorSeed)
+                .put("mirrorCenters", mirrorCenters)
+                .put("mirrorIntervalX", mirrorIntervalX).put("mirrorIntervalY", mirrorIntervalY)
+                .put("canvasWidth", bitmap.width).put("canvasHeight", bitmap.height)
+                .put("axisX", mirrorAxisX.toDouble()).put("axisY", mirrorAxisY.toDouble())
+            ArtRenderer.drawStroke(canvas, preview)
             canvas.restore()
         }
     }
@@ -1857,11 +2163,24 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if (tool == "mirror" && mirrorOriginPlacement) {
+            if (event.actionMasked == MotionEvent.ACTION_UP)
+                onMirrorOrigin(local[0].toDouble(), local[1].toDouble())
+            invalidate()
+            return true
+        }
+        if (tool == "mirror" && mirrorDirection == "copytranslate" && mirrorPlacement) {
+            if (event.actionMasked == MotionEvent.ACTION_UP)
+                onMirrorPoint(local[0].toDouble(), local[1].toDouble())
+            invalidate()
+            return true
+        }
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
                 multitouch = false
                 startX = xy[0]; startY = xy[1]; lastX = event.x; lastY = event.y
                 points = JSONArray()
+                if (tool == "mirror") mirrorSeed = kotlin.random.Random.nextInt(Int.MAX_VALUE)
                 shapeStartX = local[0]; shapeStartY = local[1]
                 cropPreview = null
                 selectionPreview = null
@@ -1883,6 +2202,20 @@ private class StudioCanvas(context: Context) : View(context) {
                         pathVertices = reduced
                     }
                     pathVertices.put(JSONArray().put(xy[0]).put(xy[1]).put(1f))
+                }
+                else if (tool == "dyna") {
+                    // Historical touch samples matter to the inertial brush; using only
+                    // the latest batched point would make heavy strokes nearly stationary.
+                    for (index in 0 until event.historySize) {
+                        val sample = floatArrayOf(event.getHistoricalX(index),
+                            event.getHistoricalY(index))
+                        inverse.mapPoints(sample)
+                        inverseLayer.mapPoints(sample)
+                        points.put(JSONArray().put(sample[0]).put(sample[1])
+                            .put(event.getHistoricalPressure(index).coerceIn(0.1f, 1f)))
+                    }
+                    points.put(JSONArray().put(local[0]).put(local[1])
+                        .put(event.pressure.coerceIn(0.1f, 1f)))
                 }
                 else if (tool == "measure")
                     measurement = floatArrayOf(startX, startY, xy[0], xy[1])
@@ -1966,6 +2299,16 @@ private class StudioCanvas(context: Context) : View(context) {
                         if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
                             xy[0] < sampled.width && xy[1] < sampled.height)
                             onSampleColor(sampled.getPixel(xy[0].toInt(), xy[1].toInt()))
+                    }
+                    "dyna" -> {
+                        if (points.length() > 0) {
+                            val last = points.getJSONArray(points.length() - 1)
+                            if (hypot(local[0] - last.getDouble(0).toFloat(),
+                                    local[1] - last.getDouble(1).toFloat()) > 0.1f)
+                                points.put(JSONArray().put(local[0]).put(local[1])
+                                    .put(event.pressure.coerceIn(0.1f, 1f)))
+                            onStroke(JSONArray(points.toString()))
+                        }
                     }
                     "line", "rectangle", "ellipse", "gradient" -> {
                         points = shapePoints(local[0], local[1])
