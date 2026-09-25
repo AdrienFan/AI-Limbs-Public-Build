@@ -13,8 +13,8 @@ internal const val VISUAL_TILE_ID = "$VISUAL_PLUGIN_ID.tile"
 
 internal class VisualManagerController(
     private val host: InProcessPluginUiHost
-) {
-    suspend fun dashboard(): JSONObject = JSONObject()
+) : VisualManagerPageActions {
+    override suspend fun dashboard(): JSONObject = JSONObject()
         .put("screen", safeHost(HOST_SCREEN_SESSION, "status"))
         .put("screen_targets", safeHost(HOST_SCREEN_SESSION, "list_targets"))
         .put("camera", safeHost(HOST_CAMERA_SESSION, "status"))
@@ -24,12 +24,12 @@ internal class VisualManagerController(
     suspend fun screenTargets(): JSONObject =
         invokeHost(HOST_SCREEN_SESSION, "list_targets")
 
-    suspend fun screenCapture(parameters: JSONObject = JSONObject()): JSONObject {
+    override suspend fun screenCapture(parameters: JSONObject): JSONObject {
         val result = invokeHost(HOST_SCREEN_CAPTURE, "capture", parameters)
         return attachManagedAsset("screen", result)
     }
 
-    suspend fun screenStart(parameters: JSONObject): JSONObject {
+    override suspend fun screenStart(parameters: JSONObject): JSONObject {
         val request = JSONObject(parameters.toString())
         val prime = if (request.has("prime")) request.optBoolean("prime", true) else true
         request.remove("prime")
@@ -53,10 +53,10 @@ internal class VisualManagerController(
         return started
     }
 
-    suspend fun screenStop(parameters: JSONObject): JSONObject =
+    override suspend fun screenStop(parameters: JSONObject): JSONObject =
         invokeHost(HOST_SCREEN_SESSION, "stop", parameters)
 
-    suspend fun screenFrame(parameters: JSONObject): JSONObject {
+    override suspend fun screenFrame(parameters: JSONObject): JSONObject {
         val result = invokeHost(HOST_SCREEN_SESSION, "frame", parameters)
         return attachManagedAsset("screen", result)
     }
@@ -64,26 +64,26 @@ internal class VisualManagerController(
     suspend fun cameraSources(): JSONObject =
         invokeHost(HOST_CAMERA_SESSION, "list_sources")
 
-    suspend fun cameraStart(parameters: JSONObject): JSONObject =
+    override suspend fun cameraStart(parameters: JSONObject): JSONObject =
         invokeHost(HOST_CAMERA_SESSION, "start", parameters)
 
     suspend fun cameraConfigure(parameters: JSONObject): JSONObject =
         invokeHost(HOST_CAMERA_SESSION, "configure", parameters)
 
-    suspend fun cameraStop(parameters: JSONObject): JSONObject =
+    override suspend fun cameraStop(parameters: JSONObject): JSONObject =
         invokeHost(HOST_CAMERA_SESSION, "stop", parameters)
 
-    suspend fun cameraFrame(parameters: JSONObject): JSONObject {
+    override suspend fun cameraFrame(parameters: JSONObject): JSONObject {
         val result = invokeHost(HOST_CAMERA_SESSION, "frame", parameters)
         return attachManagedAsset("camera", result)
     }
 
-    suspend fun cameraCapture(parameters: JSONObject): JSONObject {
+    override suspend fun cameraCapture(parameters: JSONObject): JSONObject {
         val result = invokeHost(HOST_CAMERA_CAPTURE, "capture", parameters)
         return attachManagedAsset("camera", result)
     }
 
-    suspend fun stopAll(): JSONObject {
+    override suspend fun stopAll(): JSONObject {
         val screen = runCatching {
             invokeHost(HOST_SCREEN_SESSION, "stop")
         }.fold(
@@ -135,7 +135,7 @@ internal class VisualManagerController(
             .put("items", array)
     }
 
-    fun deleteAsset(parameters: JSONObject): JSONObject {
+    override suspend fun deleteAsset(parameters: JSONObject): JSONObject {
         val assetId = required(parameters, "asset_id")
         require(assetId.matches(Regex("[A-Za-z0-9._-]{1,160}"))) {
             "Invalid visual asset id"
@@ -157,7 +157,7 @@ internal class VisualManagerController(
             .put("asset_id", assetId)
     }
 
-    fun clearAssets(): JSONObject {
+    override suspend fun clearAssets(): JSONObject {
         val root = assetsRoot()
         val count = listAssets().optInt("count", 0)
         root.deleteRecursively()

@@ -22,7 +22,7 @@ class VisualManagerEntry : InProcessPluginEntry {
         val controller = VisualManagerController(host)
         host.registerProvider(
             VISUAL_PAGE_ID,
-            VisualManagerPageProvider(host),
+            VisualManagerPageProvider(host, controller),
             mapOf("kind" to "plugin_page", "screen_id" to VISUAL_SCREEN_ID)
         )
         host.registerScreen(

@@ -25,7 +25,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
@@ -43,24 +42,24 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal class VisualManagerPageProvider(
-    private val host: InProcessPluginUiHost
+    private val host: InProcessPluginUiHost,
+    private val actions: VisualManagerPageActions
 ) : InProcessPageProvider {
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
         ComposeView(host.createPluginContext(context)).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
-                    VisualManagerPage(host)
+                    VisualManagerPage(actions)
                 }
             }
         }
 }
 
 @Composable
-private fun VisualManagerPage(host: InProcessPluginUiHost) {
+private fun VisualManagerPage(actions: VisualManagerPageActions) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
-    val controller = remember(host) { VisualManagerController(host) }
     var dashboard by remember { mutableStateOf<JSONObject?>(null) }
     var busy by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
@@ -76,7 +75,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
     fun refresh() {
         scope.launch {
             busy = true
-            runCatching { controller.dashboard() }
+            runCatching { actions.dashboard() }
                 .onSuccess {
                     dashboard = it
                     lastError = null
@@ -95,7 +94,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
             runCatching { block() }
                 .onSuccess {
                     toast(success)
-                    runCatching { controller.dashboard() }
+                    runCatching { actions.dashboard() }
                         .onSuccess { dashboard = it; lastError = null }
                         .onFailure { lastError = it.message ?: "刷新视觉状态失败" }
                 }
@@ -179,7 +178,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                         modifier = Modifier.weight(1f),
                         enabled = !busy && (screenActive || cameraActive),
                         onClick = {
-                            act("全部视觉会话已停止") { controller.stopAll() }
+                            act("全部视觉会话已停止") { actions.stopAll() }
                         }
                     ) { Text("全部停止") }
                 }
@@ -199,7 +198,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
             enabled = !busy,
             onClick = {
                 act("屏幕截图已保存到视觉缓存") {
-                    controller.screenCapture()
+                    actions.screenCapture()
                 }
             }
         ) { Text("单次截图") }
@@ -220,7 +219,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                         enabled = !busy,
                         onClick = {
                             act("屏幕共享已开始") {
-                                controller.screenStart(
+                                actions.screenStart(
                                     JSONObject()
                                         .put("target_id", targetId)
                                         .put("prime", true)
@@ -259,7 +258,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                             enabled = !busy,
                             onClick = {
                                 act("屏幕帧已保存到视觉缓存") {
-                                    controller.screenFrame(
+                                    actions.screenFrame(
                                         JSONObject().put("session_id", sessionId)
                                     )
                                 }
@@ -270,7 +269,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                             enabled = !busy,
                             onClick = {
                                 act("共享会话已停止") {
-                                    controller.screenStop(
+                                    actions.screenStop(
                                         JSONObject().put("session_id", sessionId)
                                     )
                                 }
@@ -310,7 +309,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                             enabled = !busy,
                             onClick = {
                                 act("摄像头会话已开始") {
-                                    controller.cameraStart(
+                                    actions.cameraStart(
                                         JSONObject().put("source_id", sourceId)
                                     )
                                 }
@@ -321,7 +320,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                             enabled = !busy,
                             onClick = {
                                 act("照片已保存到视觉缓存") {
-                                    controller.cameraCapture(
+                                    actions.cameraCapture(
                                         JSONObject().put("source_id", sourceId)
                                     )
                                 }
@@ -353,7 +352,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                             enabled = !busy,
                             onClick = {
                                 act("摄像头帧已保存到视觉缓存") {
-                                    controller.cameraFrame(
+                                    actions.cameraFrame(
                                         JSONObject().put("session_id", sessionId)
                                     )
                                 }
@@ -364,7 +363,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                             enabled = !busy,
                             onClick = {
                                 act("摄像头会话已停止") {
-                                    controller.cameraStop(
+                                    actions.cameraStop(
                                         JSONObject().put("session_id", sessionId)
                                     )
                                 }
@@ -403,7 +402,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
                             enabled = !busy,
                             onClick = {
                                 act("视觉缓存已删除") {
-                                    controller.deleteAsset(
+                                    actions.deleteAsset(
                                         JSONObject().put("asset_id", assetId)
                                     )
                                 }
@@ -416,7 +415,7 @@ private fun VisualManagerPage(host: InProcessPluginUiHost) {
             OutlinedButton(
                 enabled = !busy,
                 onClick = {
-                    act("视觉缓存已清空") { controller.clearAssets() }
+                    act("视觉缓存已清空") { actions.clearAssets() }
                 }
             ) { Text("清空全部视觉缓存") }
         }

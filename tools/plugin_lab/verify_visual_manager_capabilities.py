@@ -38,4 +38,17 @@ if missing or extra:
             print(f"  - {item}", file=sys.stderr)
     sys.exit(1)
 
-print(f"Visual Manager capability declarations OK: {len(runtime)} capabilities.")
+page = (ROOT / "plugin-lab/plugins/visual-manager/src/main/java/com/ai/limbs/plugins/visualmanager/VisualManagerPageProvider.kt").read_text(encoding="utf-8")
+actions = (ROOT / "plugin-lab/plugins/visual-manager/src/main/java/com/ai/limbs/plugins/visualmanager/VisualManagerPageActions.kt").read_text(encoding="utf-8")
+controller = (ROOT / "plugin-lab/plugins/visual-manager/src/main/java/com/ai/limbs/plugins/visualmanager/VisualManagerController.kt").read_text(encoding="utf-8")
+if "invokeHostCapability" in page or "invokeHostCapability" in actions:
+    print("Visual Manager presentation/page must not invoke Host primitives directly.", file=sys.stderr)
+    sys.exit(1)
+if "invokePluginCapability" not in actions:
+    print("Visual Manager presentation must route UI actions through Core-owned plugin capabilities.", file=sys.stderr)
+    sys.exit(1)
+if "invokeHostCapability" not in controller:
+    print("Visual Manager Core controller must own Host primitive invocation.", file=sys.stderr)
+    sys.exit(1)
+
+print(f"Visual Manager capability declarations OK: {len(runtime)} capabilities; presentation routing OK.")

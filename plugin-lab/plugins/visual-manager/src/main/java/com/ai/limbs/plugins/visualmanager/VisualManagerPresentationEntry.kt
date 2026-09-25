@@ -13,7 +13,7 @@ class VisualManagerPresentationEntry : InProcessPluginPresentationEntry {
         }
         val registration = host.registerPageProvider(
             VISUAL_PAGE_ID,
-            VisualManagerPageProvider(host),
+            VisualManagerPageProvider(host, VisualManagerPresentationClient(host)),
             mapOf("kind" to "plugin_page", "screen_id" to VISUAL_SCREEN_ID)
         )
         return InProcessPluginPresentationHandle { registration.close() }
