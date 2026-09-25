@@ -159,9 +159,7 @@ class LocalTerminalProvider(
             shell.activeProcessGroupId.set(NO_ACTIVE_PROCESS_GROUP)
             result
         } catch (e: TimeoutCancellationException) {
-            hiddenExecScope.launch {
-                closeHiddenExecShell(executorKey)
-            }
+            closeHiddenExecShell(executorKey)
             HiddenExecResult(
                 output = "",
                 exitCode = -1,
@@ -169,9 +167,7 @@ class LocalTerminalProvider(
                 error = "Hidden exec command timed out after ${timeoutMs}ms"
             )
         } catch (e: Exception) {
-            hiddenExecScope.launch {
-                closeHiddenExecShell(executorKey)
-            }
+            closeHiddenExecShell(executorKey)
             Log.e(TAG, "Failed to execute hidden command in shell: $executorKey", e)
             HiddenExecResult(
                 output = "",
