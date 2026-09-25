@@ -83,9 +83,15 @@ internal object ArtRenderer {
                                         if (event.getString("kind") == "clear") {
                                             editPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
                                         } else editPaint.color = Color.parseColor(event.getString("color"))
+                                        val clip = event.optJSONObject("selection")
+                                        if (clip != null) {
+                                            local.save()
+                                            local.clipPath(ArtSelection.path(clip))
+                                        }
                                         local.drawRect(event.getInt("x").toFloat(), event.getInt("y").toFloat(),
                                             (event.getInt("x") + event.getInt("width")).toFloat(),
                                             (event.getInt("y") + event.getInt("height")).toFloat(), editPaint)
+                                        if (clip != null) local.restore()
                                     }
                                     "paste" -> {
                                         val inserted = BitmapFactory.decodeFile(
@@ -118,7 +124,7 @@ internal object ArtRenderer {
         if (points.length() == 0) return
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.parseColor(stroke.optString("color", "#FF000000"))
-            alpha = (stroke.optDouble("opacity", 1.0) * 255).toInt().coerceIn(0, 255)
+            alpha = (Color.alpha(color) * stroke.optDouble("opacity", 1.0)).toInt().coerceIn(0, 255)
             style = Paint.Style.STROKE
             strokeJoin = Paint.Join.ROUND
             strokeCap = Paint.Cap.ROUND
@@ -133,6 +139,87 @@ internal object ArtRenderer {
             paint.alpha = (paint.alpha * 0.45f).toInt()
         } else if (tool == "pencil") {
             paint.alpha = (paint.alpha * 0.58f).toInt()
+        }
+        if (tool == "gradient") {
+            val first = points.getJSONArray(0)
+            val last = points.getJSONArray(points.length() - 1)
+            val x0 = first.getDouble(0).toFloat()
+            val y0 = first.getDouble(1).toFloat()
+            val x1 = last.getDouble(0).toFloat()
+            val y1 = last.getDouble(1).toFloat()
+            if (hypot((x1 - x0).toDouble(), (y1 - y0).toDouble()) < 0.01) return
+            paint.style = Paint.Style.FILL
+            val foreground = Color.parseColor(stroke.optString("color", "#FF000000"))
+            val alpha = (Color.alpha(foreground) * stroke.optDouble("opacity", 1.0))
+                .toInt().coerceIn(0, 255)
+            val startColor = (foreground and 0x00FFFFFF) or (alpha shl 24)
+            paint.alpha = 255
+            paint.shader = android.graphics.LinearGradient(x0, y0, x1, y1,
+                startColor, foreground and 0x00FFFFFF, android.graphics.Shader.TileMode.CLAMP)
+            val boundsWidth = stroke.optInt("previewWidth", canvas.width)
+            val boundsHeight = stroke.optInt("previewHeight", canvas.height)
+            canvas.drawRect(0f, 0f, boundsWidth.toFloat(), boundsHeight.toFloat(), paint)
+            return
+        }
+        if (tool == "bezier") {
+            val first = points.getJSONArray(0)
+            val path = Path().apply {
+                moveTo(first.getDouble(0).toFloat(), first.getDouble(1).toFloat())
+                if (points.length() == 4) {
+                    val control1 = points.getJSONArray(1)
+                    val control2 = points.getJSONArray(2)
+                    val end = points.getJSONArray(3)
+                    cubicTo(control1.getDouble(0).toFloat(), control1.getDouble(1).toFloat(),
+                        control2.getDouble(0).toFloat(), control2.getDouble(1).toFloat(),
+                        end.getDouble(0).toFloat(), end.getDouble(1).toFloat())
+                } else {
+                    // Before the fourth tap, show the handle chain as an editable preview.
+                    for (i in 1 until points.length()) {
+                        val handle = points.getJSONArray(i)
+                        lineTo(handle.getDouble(0).toFloat(), handle.getDouble(1).toFloat())
+                    }
+                }
+            }
+            paint.strokeWidth = width
+            if (points.length() == 1)
+                canvas.drawCircle(first.getDouble(0).toFloat(), first.getDouble(1).toFloat(),
+                    (width / 2f).coerceAtLeast(1f), paint)
+            else canvas.drawPath(path, paint)
+            return
+        }
+        if (tool == "polyline" || tool == "polygon") {
+            if (points.length() < 2) return
+            val first = points.getJSONArray(0)
+            val path = Path().apply {
+                moveTo(first.getDouble(0).toFloat(), first.getDouble(1).toFloat())
+                for (i in 1 until points.length()) {
+                    val point = points.getJSONArray(i)
+                    lineTo(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
+                }
+                if (tool == "polygon" && points.length() >= 3 && !stroke.optBoolean("previewOpen")) close()
+            }
+            paint.strokeWidth = width
+            canvas.drawPath(path, paint)
+            return
+        }
+        if (tool in setOf("line", "rectangle", "ellipse")) {
+            // Keep shapes as two endpoint events in the shared stroke history, so
+            // previews, undo, export and the AI stroke.add capability render identically.
+            val first = points.getJSONArray(0)
+            val last = points.getJSONArray(points.length() - 1)
+            val x0 = first.getDouble(0).toFloat()
+            val y0 = first.getDouble(1).toFloat()
+            val x1 = last.getDouble(0).toFloat()
+            val y1 = last.getDouble(1).toFloat()
+            paint.strokeWidth = width
+            when (tool) {
+                "line" -> canvas.drawLine(x0, y0, x1, y1, paint)
+                "rectangle" -> canvas.drawRect(minOf(x0, x1), minOf(y0, y1),
+                    maxOf(x0, x1), maxOf(y0, y1), paint)
+                "ellipse" -> canvas.drawOval(minOf(x0, x1), minOf(y0, y1),
+                    maxOf(x0, x1), maxOf(y0, y1), paint)
+            }
+            return
         }
         if (tool == "spray") {
             paint.style = Paint.Style.FILL

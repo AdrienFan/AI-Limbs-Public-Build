@@ -2,6 +2,12 @@ package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.Canvas
+import android.graphics.Paint
+import android.graphics.PorterDuff
+import android.graphics.PorterDuffXfermode
+import android.graphics.Region
+import android.graphics.Color
 import java.io.ByteArrayOutputStream
 import android.graphics.Matrix
 import android.util.Base64
@@ -599,10 +605,15 @@ internal class ArtStore(private val root: File) {
             return when (operation.getString("type")) {
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
                 "LAYER_DELETE" -> "移除图层节点"
-                "STROKE_ADD" -> "绘制笔画"
+                "STROKE_ADD" -> when (operation.getJSONObject("parameters").optString("tool")) {
+                    "gradient" -> "绘制线性渐变"
+                    "line", "rectangle", "ellipse", "polygon", "polyline", "bezier" -> "绘制形状"
+                    else -> "绘制笔画"
+                }
                 "PIXEL_EDIT" -> if (operation.getJSONObject("parameters").optString("mode") == "CLEAR")
                     "清除像素" else "填充像素"
-                "PIXEL_PASTE" -> "粘贴像素"
+                "PIXEL_PASTE" -> if (operation.getJSONObject("parameters")
+                    .optString("action") == "FILL_CONTIGUOUS") "填充相连区域" else "粘贴像素"
                 "LAYER_COPY" -> "复制图层"
                 "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
                 "DOCUMENT_RENAME" -> "重命名工程"
@@ -707,9 +718,11 @@ internal class ArtStore(private val root: File) {
                     val mode = p.getString("mode")
                     require(mode == "CLEAR" || mode == "FILL")
                     if (mode == "FILL") requireColor(p.getString("color"))
-                    order.put(JSONObject().put("kind", mode.lowercase()).put("x", x).put("y", y)
+                    val event = JSONObject().put("kind", mode.lowercase()).put("x", x).put("y", y)
                         .put("width", width).put("height", height)
-                        .put("color", p.optString("color")))
+                        .put("color", p.optString("color"))
+                    p.optJSONObject("selection")?.let { event.put("selection", JSONObject(it.toString())) }
+                    order.put(event)
                 }
             }
             "DOCUMENT_RENAME" -> state.put("name", p.getString("name").trim().take(100).also { require(it.isNotBlank()) })
@@ -829,7 +842,21 @@ internal class ArtStore(private val root: File) {
                 requireColor(p.optString("color", "#FF000000"))
                 require(p.getDouble("width") in 0.1..512.0)
                 require(p.optDouble("opacity", 1.0) in 0.0..1.0)
-                require(p.optString("tool", "pencil") in setOf("pencil", "ink", "eraser", "soft", "spray"))
+                val tool = p.optString("tool", "pencil")
+                require(tool in setOf("pencil", "ink", "eraser", "soft", "spray",
+                    "line", "rectangle", "ellipse", "polygon", "polyline", "bezier", "gradient"))
+                require(when (tool) {
+                    "line", "rectangle", "ellipse", "gradient" -> points.length() == 2
+                    "polygon" -> points.length() >= 3
+                    "polyline" -> points.length() >= 2
+                    "bezier" -> points.length() == 4
+                    else -> true
+                }) { "形状顶点数量无效" }
+                if (tool == "gradient") {
+                    val a = points.getJSONArray(0); val b = points.getJSONArray(1)
+                    require(kotlin.math.hypot(b.getDouble(0) - a.getDouble(0),
+                        b.getDouble(1) - a.getDouble(1)) >= 0.01) { "请拖出渐变方向" }
+                }
                 layer.getJSONArray("strokes").put(JSONObject(p.toString()))
                 layer.optJSONArray("contentOrder")?.put(JSONObject().put("kind", "stroke")
                     .put("id", p.getString("id")))
@@ -853,12 +880,25 @@ internal class ArtStore(private val root: File) {
             }
             "SELECTION_CREATE" -> {
                 for (field in listOf("x", "y", "width", "height")) require(p.getDouble(field).isFinite())
+                val shape = p.optString("shape", "rect")
+                require(shape in setOf("rect", "ellipse", "polygon")) { "选区形状无效" }
                 require(p.getDouble("width") >= 0 && p.getDouble("height") >= 0)
+                if (shape != "rect") require(p.getDouble("width") > 0 && p.getDouble("height") > 0)
+                if (shape == "polygon") {
+                    val vertices = p.getJSONArray("vertices")
+                    require(vertices.length() in 3..2048) { "多边形选区需要 3–2048 个顶点" }
+                    for (index in 0 until vertices.length()) {
+                        val vertex = vertices.getJSONArray(index)
+                        require(vertex.length() == 2 &&
+                            vertex.getDouble(0) in 0.0..1.0 &&
+                            vertex.getDouble(1) in 0.0..1.0) { "选区顶点范围无效" }
+                    }
+                }
                 state.put("selection", JSONObject(p.toString()))
             }
             "SELECTION_CLEAR" -> state.put("selection", JSONObject.NULL)
             "SELECTION_EDIT" -> {
-                val selection = state.optJSONObject("selection") ?: error("请先创建矩形选区")
+                val selection = state.optJSONObject("selection") ?: error("请先创建选区")
                 val layer = find(p.getString("layerId")).second
                 require(layer.getString("kind") == "paint" && !lockedByParent(layer, layers))
                 val transform = layerMatrix(layer, layers)
@@ -869,6 +909,9 @@ internal class ArtStore(private val root: File) {
                 }
                 require(chosen.isNotEmpty()) { "选区中没有笔画" }
                 val action = p.getString("action")
+                require(action != "ROTATE" || selection.optString("shape", "rect") == "rect") {
+                    "非矩形选区的旋转需要可旋转蒙版，暂不可用"
+                }
                 val canvasCenterX = selection.getDouble("x") + selection.getDouble("width") / 2.0
                 val canvasCenterY = selection.getDouble("y") + selection.getDouble("height") / 2.0
                 val center = floatArrayOf(canvasCenterX.toFloat(), canvasCenterY.toFloat())
@@ -1050,13 +1093,38 @@ internal class ArtStore(private val root: File) {
         }
         val bitmap = ArtRenderer.render(this, view)
         val bytes = try {
-            val clipped = Bitmap.createBitmap(bitmap, area[0], area[1], area[2], area[3])
+            val clipped = Bitmap.createBitmap(area[2], area[3], Bitmap.Config.ARGB_8888)
             try {
+                Canvas(clipped).drawBitmap(bitmap, -area[0].toFloat(), -area[1].toFloat(), Paint())
+                state.optJSONObject("selection")?.takeIf {
+                    it.optString("shape", "rect") != "rect"
+                }?.let { selected ->
+                    // A small reusable strip avoids allocating a second full 4K bitmap.
+                    val mask = Bitmap.createBitmap(area[2], minOf(area[3], 128),
+                        Bitmap.Config.ARGB_8888)
+                    try {
+                        val maskCanvas = Canvas(mask)
+                        val destination = Canvas(clipped)
+                        val selectionPath = ArtSelection.path(selected)
+                        val shapePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE }
+                        val clipPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                            xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
+                        }
+                        for (row in 0 until area[3] step mask.height) {
+                            mask.eraseColor(Color.TRANSPARENT)
+                            maskCanvas.save()
+                            maskCanvas.translate(-area[0].toFloat(), -(area[1] + row).toFloat())
+                            maskCanvas.drawPath(selectionPath, shapePaint)
+                            maskCanvas.restore()
+                            destination.drawBitmap(mask, 0f, row.toFloat(), clipPaint)
+                        }
+                    } finally { mask.recycle() }
+                }
                 ByteArrayOutputStream().use { stream ->
                     require(clipped.compress(Bitmap.CompressFormat.PNG, 100, stream))
                     stream.toByteArray()
                 }
-            } finally { if (clipped !== bitmap) clipped.recycle() }
+            } finally { clipped.recycle() }
         } finally { bitmap.recycle() }
         require(bytes.size <= 8 * 1024 * 1024) { "选区图片超过 8 MB" }
         val asset = UUID.randomUUID().toString()
@@ -1064,9 +1132,15 @@ internal class ArtStore(private val root: File) {
         val clipboard = JSONObject().put("asset", asset).put("width", area[2]).put("height", area[3])
             .put("sourceActor", actor).put("sourceDocument", doc.getString("id"))
         atomic(editClipboard, clipboard.toString())
-        if (cut) appendToCurrent(actor, "PIXEL_EDIT", JSONObject().put("layerId", layer!!.getString("id"))
-            .put("mode", "CLEAR").put("x", area[0]).put("y", area[1])
-            .put("width", area[2]).put("height", area[3]))
+        if (cut) {
+            val params = JSONObject().put("layerId", layer!!.getString("id"))
+                .put("mode", "CLEAR").put("x", area[0]).put("y", area[1])
+                .put("width", area[2]).put("height", area[3])
+            state.optJSONObject("selection")?.let {
+                params.put("selection", JSONObject(it.toString()))
+            }
+            appendToCurrent(actor, "PIXEL_EDIT", params)
+        }
         clipboard.put("cut", cut)
     }
 
@@ -1104,6 +1178,138 @@ internal class ArtStore(private val root: File) {
         return openImage(Base64.encodeToString(bytes, Base64.NO_WRAP), "粘贴图像", actor)
     }
 
+    /**
+     * Flood fill the connected region of the active, untransformed root layer.
+     * A transparent PNG overlay is recorded as PIXEL_PASTE, so undo, archive
+     * import and the compositing order all use the established asset pipeline.
+     */
+    fun fillContiguous(actor: String, x: Int, y: Int, color: String,
+                       expectedRevision: Int? = null, tolerance: Int = 0,
+                       referenceAllLayers: Boolean = false): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        requireColor(color)
+        require(tolerance in 0..100) { "颜色容差必须在 0–100 之间" }
+        val fill = Color.parseColor(color)
+        require(Color.alpha(fill) > 0) { "透明连通区域填充暂不支持" }
+        val doc = loadCurrent()
+        if (expectedRevision != null) require(doc.getJSONArray("operations").length() == expectedRevision) {
+            "工程已由另一位编辑者更新，请重新读取画布"
+        }
+        val state = replay(doc)
+        val layer = editableLayer(state)
+        val canvasWidth = state.getInt("width")
+        val canvasHeight = state.getInt("height")
+        require(x in 0 until canvasWidth && y in 0 until canvasHeight) { "填充位置不在画布内" }
+        val area = editingRectangle(state)
+        val shapedSelection = state.optJSONObject("selection")?.takeIf {
+            it.optString("shape", "rect") != "rect"
+        }
+        val region = shapedSelection?.let {
+            Region().apply {
+                setPath(ArtSelection.path(it), Region(0, 0, canvasWidth, canvasHeight))
+            }
+        }
+        if (region != null) require(region.contains(x, y)) {
+            "填充位置不在当前选区内"
+        }
+        val leftLimit = area[0]
+        val topLimit = area[1]
+        val rightLimit = leftLimit + area[2]
+        val bottomLimit = topLimit + area[3]
+        require(x in leftLimit until rightLimit && y in topLimit until bottomLimit) {
+            "填充位置不在选区内"
+        }
+        val view = snapshot(doc)
+        if (!referenceAllLayers) {
+            val isolated = view.getJSONObject("state")
+            isolated.put("background", "#00000000")
+            val visibleLayers = isolated.getJSONArray("layers")
+            for (i in 0 until visibleLayers.length()) {
+                val candidate = visibleLayers.getJSONObject(i)
+                if (candidate.getString("id") != layer.getString("id")) {
+                    candidate.put("visible", false)
+                } else {
+                    candidate.put("opacity", 1.0).put("blend", "normal")
+                }
+            }
+        }
+        val source = ArtRenderer.render(this, view)
+        try {
+            val target = source.getPixel(x, y)
+            if (!referenceAllLayers && tolerance == 0 && target == fill &&
+                Color.alpha(fill) == 255) return@locked snapshot(doc)
+            val channelLimit = tolerance * 255 / 100
+            // Use a separate visited mask: mutating reference pixels is unsafe as
+            // soon as tolerance can match the marker color.
+            val visited = java.util.BitSet(canvasWidth * canvasHeight)
+            var stack = IntArray(2048)
+            var count = 0
+            fun push(px: Int, py: Int) {
+                if (count == stack.size) stack = stack.copyOf(stack.size * 2)
+                stack[count++] = py * canvasWidth + px
+            }
+            fun matches(px: Int, py: Int): Boolean {
+                if (px !in leftLimit until rightLimit || py !in topLimit until bottomLimit ||
+                    visited.get(py * canvasWidth + px) ||
+                    (region != null && !region.contains(px, py))) return false
+                val pixel = source.getPixel(px, py)
+                return kotlin.math.abs(Color.alpha(pixel) - Color.alpha(target)) <= channelLimit &&
+                    kotlin.math.abs(Color.red(pixel) - Color.red(target)) <= channelLimit &&
+                    kotlin.math.abs(Color.green(pixel) - Color.green(target)) <= channelLimit &&
+                    kotlin.math.abs(Color.blue(pixel) - Color.blue(target)) <= channelLimit
+            }
+            var minX = x; var maxX = x
+            var minY = y; var maxY = y
+            push(x, y)
+            while (count > 0) {
+                val position = stack[--count]
+                val row = position / canvasWidth
+                val seed = position % canvasWidth
+                if (!matches(seed, row)) continue
+                var begin = seed
+                while (begin > leftLimit && matches(begin - 1, row)) begin--
+                var end = seed
+                while (end + 1 < rightLimit && matches(end + 1, row)) end++
+                for (column in begin..end) {
+                    visited.set(row * canvasWidth + column)
+                }
+                minX = minOf(minX, begin); maxX = maxOf(maxX, end)
+                minY = minOf(minY, row); maxY = maxOf(maxY, row)
+                for (neighbor in intArrayOf(row - 1, row + 1)) {
+                    if (neighbor !in topLimit until bottomLimit) continue
+                    var column = begin
+                    while (column <= end) {
+                        if (matches(column, neighbor)) {
+                            push(column, neighbor)
+                            do { column++ } while (column <= end && matches(column, neighbor))
+                        } else column++
+                    }
+                }
+            }
+            val clipped = Bitmap.createBitmap(maxX - minX + 1, maxY - minY + 1,
+                Bitmap.Config.ARGB_8888)
+            val bytes = try {
+                for (row in minY..maxY) {
+                    for (column in minX..maxX) {
+                        if (visited.get(row * canvasWidth + column))
+                            clipped.setPixel(column - minX, row - minY, fill)
+                    }
+                }
+                ByteArrayOutputStream().use { stream ->
+                    require(clipped.compress(Bitmap.CompressFormat.PNG, 100, stream))
+                    stream.toByteArray()
+                }
+            } finally { clipped.recycle() }
+            require(bytes.size <= MAX_ASSET_BYTES) { "填充区域图片超过 8 MB" }
+            val asset = UUID.randomUUID().toString()
+            atomicBytes(assetFile(asset), bytes)
+            appendToCurrent(actor, "PIXEL_PASTE", JSONObject()
+                .put("asset", asset).put("layerId", layer.getString("id"))
+                .put("action", "FILL_CONTIGUOUS")
+                .put("x", minX).put("y", minY))
+        } finally { source.recycle() }
+    }
+
     fun editPixels(actor: String, mode: String, color: String = ""): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         require(mode == "CLEAR" || mode == "FILL")
@@ -1111,9 +1317,13 @@ internal class ArtStore(private val root: File) {
         val layer = editableLayer(state)
         val area = editingRectangle(state)
         if (mode == "FILL") requireColor(color)
-        appendToCurrent(actor, "PIXEL_EDIT", JSONObject().put("layerId", layer.getString("id"))
+        val params = JSONObject().put("layerId", layer.getString("id"))
             .put("mode", mode).put("color", color).put("x", area[0]).put("y", area[1])
-            .put("width", area[2]).put("height", area[3]))
+            .put("width", area[2]).put("height", area[3])
+        state.optJSONObject("selection")?.let {
+            params.put("selection", JSONObject(it.toString()))
+        }
+        appendToCurrent(actor, "PIXEL_EDIT", params)
     }
 
     private fun appendToCurrent(actor: String, type: String, params: JSONObject): JSONObject {
@@ -1176,33 +1386,20 @@ internal class ArtStore(private val root: File) {
         }
     }
 
-    private fun intersects(points: JSONArray, rect: JSONObject, matrix: Matrix): Boolean {
-        val left = rect.getDouble("x"); val top = rect.getDouble("y")
-        val right = left + rect.getDouble("width"); val bottom = top + rect.getDouble("height")
-        fun inside(x: Double, y: Double) = x in left..right && y in top..bottom
-        var previous: JSONArray? = null
+    private fun intersects(points: JSONArray, selection: JSONObject, matrix: Matrix): Boolean {
+        var previous: FloatArray? = null
         for (i in 0 until points.length()) {
             val point = points.getJSONArray(i)
             val mapped = floatArrayOf(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
             matrix.mapPoints(mapped)
-            val x = mapped[0].toDouble(); val y = mapped[1].toDouble()
-            if (inside(x, y)) return true
+            if (ArtSelection.contains(selection, mapped[0].toDouble(), mapped[1].toDouble()))
+                return true
             previous?.let { old ->
-                val previousMapped = floatArrayOf(old.getDouble(0).toFloat(), old.getDouble(1).toFloat())
-                matrix.mapPoints(previousMapped)
-                val px = previousMapped[0].toDouble(); val py = previousMapped[1].toDouble()
-                val dx = x - px; val dy = y - py
-                fun cross(a: Double, b: Double, c: Double, d: Double): Boolean {
-                    val denominator = dx * (d - b) - dy * (c - a)
-                    if (denominator == 0.0) return false
-                    val t = ((a - px) * (d - b) - (b - py) * (c - a)) / denominator
-                    val u = ((a - px) * dy - (b - py) * dx) / denominator
-                    return t in 0.0..1.0 && u in 0.0..1.0
-                }
-                if (cross(left, top, right, top) || cross(right, top, right, bottom) ||
-                    cross(right, bottom, left, bottom) || cross(left, bottom, left, top)) return true
+                if (ArtSelection.intersectsSegment(selection,
+                        old[0].toDouble(), old[1].toDouble(),
+                        mapped[0].toDouble(), mapped[1].toDouble())) return true
             }
-            previous = point
+            previous = mapped
         }
         return false
     }

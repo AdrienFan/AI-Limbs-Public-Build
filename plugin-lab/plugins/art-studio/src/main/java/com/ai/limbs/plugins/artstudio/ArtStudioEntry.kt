@@ -110,6 +110,38 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("document.info", "读取画室工程", read) { store.current() }
         capability("document.list", "列出画室工程", read) { JSONObject().put("documents", store.list()) }
         capability("canvas.inspect", "查看画布结构", read) { store.current() }
+        capability("canvas.measure", "测量画布两点", read,
+            "以画布像素坐标返回距离与屏幕坐标系顺时针角度。") { p ->
+            val x0 = p.getDouble("x0"); val y0 = p.getDouble("y0")
+            val x1 = p.getDouble("x1"); val y1 = p.getDouble("y1")
+            require(listOf(x0, y0, x1, y1).all { it.isFinite() })
+            val snapshot = store.current().getJSONObject("state")
+            require(x0 in 0.0..snapshot.getDouble("width") &&
+                x1 in 0.0..snapshot.getDouble("width") &&
+                y0 in 0.0..snapshot.getDouble("height") &&
+                y1 in 0.0..snapshot.getDouble("height")) { "测量坐标不在画布内" }
+            JSONObject().put("distancePx", kotlin.math.hypot(x1 - x0, y1 - y0))
+                .put("degrees", Math.toDegrees(kotlin.math.atan2(y1 - y0, x1 - x0)))
+        }
+        capability("fill.contiguous", "填充当前图层连通区域", write,
+            "连通填色，遵循当前选区；tolerance 为每个 RGBA 通道允许的最大差值百分比（0–100），referenceAllLayers 决定从所有可见层取参考色。目标仍是当前可编辑根图层。") { p ->
+            store.fillContiguous("LANER", p.getInt("x"), p.getInt("y"), p.getString("color"),
+                if (p.has("expectedRevision")) p.getInt("expectedRevision") else null,
+                p.optInt("tolerance", 0), p.optBoolean("referenceAllLayers", false))
+        }
+        capability("color.sample", "从画布合成结果取色", read,
+            "输入画布像素坐标，返回与左侧颜色取样工具相同的 #AARRGGBB 颜色。") { p ->
+            val snapshot = store.current()
+            val bitmap = ArtRenderer.render(store, snapshot)
+            try {
+                val x = p.getInt("x"); val y = p.getInt("y")
+                require(x in 0 until bitmap.width && y in 0 until bitmap.height) { "坐标不在画布内" }
+                JSONObject().put("color", String.format(java.util.Locale.ROOT,
+                    "#%08X", bitmap.getPixel(x, y))).put("x", x).put("y", y)
+            } finally {
+                bitmap.recycle()
+            }
+        }
         capability("layer.list", "列出画室图层", read,
             "读取当前工程图层、选中图层 ID、画布尺寸、背景和 revision。layers 数组按从底到顶排序；parentId 为空表示根图层，非空表示所属图层组。") {
             val snapshot = store.current()
@@ -141,6 +173,23 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("layer.group", "创建画室图层组", write,
             "创建图层组；可选 parentId 指定父组，可选 select=true 立即设为活动组。") { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "GROUP_CREATE", p)
+        }
+        capability("selection.freehand", "创建自由套索选区", write,
+            "提供自由描画得到的画布坐标点，使用真实闭合边界。") { p ->
+            val params = ArtSelection.fromVertices(p.getJSONArray("points"))
+            if (p.has("expectedRevision")) params.put("expectedRevision", p.getInt("expectedRevision"))
+            store.apply("LANER", "SELECTION_CREATE", params)
+        }
+        capability("selection.polygon", "创建多边形选区", write,
+            "提供画布坐标下的 3–2048 个顶点；复制、清除和填充沿多边形边界执行。") { p ->
+            val params = ArtSelection.fromVertices(p.getJSONArray("points"))
+            if (p.has("expectedRevision")) params.put("expectedRevision", p.getInt("expectedRevision"))
+            store.apply("LANER", "SELECTION_CREATE", params)
+        }
+        capability("selection.ellipse", "创建椭圆形选区", write,
+            "选区为真实椭圆边界；复制、剪切、填充和连通填充使用相同形状。") { p ->
+            p.put("shape", "ellipse")
+            store.apply("LANER", "SELECTION_CREATE", p)
         }
         mapOf("layer.select" to "LAYER_SELECT", "layer.rename" to "LAYER_RENAME",
             "layer.move" to "LAYER_MOVE", "layer.delete" to "LAYER_DELETE",
@@ -292,6 +341,12 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "layer.create", "layer.group" -> listOf(p("name", optional = true), p("parentId", optional = true),
             p("select", "boolean", true))
         "layer.search" -> listOf(p("query"))
+        "color.sample" -> listOf(p("x", "integer"), p("y", "integer"))
+        "canvas.measure" -> listOf(p("x0", "number"), p("y0", "number"),
+            p("x1", "number"), p("y1", "number"))
+        "fill.contiguous" -> listOf(p("x", "integer"), p("y", "integer"), p("color"),
+            p("expectedRevision", "integer", true), p("tolerance", "integer", true),
+            p("referenceAllLayers", "boolean", true))
         "layer.rename" -> listOf(id, p("name"))
         "layer.move" -> listOf(id, p("index", "integer"))
         "layer.set_visibility" -> listOf(id, p("visible", "boolean"))
@@ -303,7 +358,9 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "stroke.add" -> listOf(p("layerId"), p("points", "array"), p("color"), p("width", "number"),
             p("opacity", "number", true), p("tool", optional = true))
         "stroke.erase" -> listOf(p("layerId"), p("strokeId"))
-        "selection.create" -> listOf(p("x", "number"), p("y", "number"), p("width", "number"), p("height", "number"))
+        "selection.create", "selection.ellipse" -> listOf(p("x", "number"), p("y", "number"),
+            p("width", "number"), p("height", "number"))
+        "selection.polygon", "selection.freehand" -> listOf(p("points", "array"))
         "selection.edit" -> listOf(p("layerId"), p("action"), p("dx", "number", true),
             p("dy", "number", true), p("factor", "number", true), p("degrees", "number", true),
             p("copyId", optional = true))

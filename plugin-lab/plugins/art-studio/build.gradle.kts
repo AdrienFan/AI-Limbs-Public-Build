@@ -13,8 +13,8 @@ android {
         applicationId = "com.ai.limbs.payload.artstudio.v01"
         minSdk = 29
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.2.2"
+        versionCode = 6
+        versionName = "0.2.3"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

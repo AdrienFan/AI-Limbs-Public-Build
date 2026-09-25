@@ -28,8 +28,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.ComposeView
@@ -227,6 +229,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var colorHexInput by remember { mutableStateOf(color) }
     var width by remember { mutableFloatStateOf(6f) }
     var opacity by remember { mutableFloatStateOf(1f) }
+    var fillTolerance by remember { mutableIntStateOf(0) }
+    var fillReferenceAll by remember { mutableStateOf(false) }
+    var fillOptionsDialog by remember { mutableStateOf(false) }
     var newCanvas by remember { mutableStateOf(false) }
     var presentationDialog by remember { mutableStateOf(false) }
     var presentationError by remember { mutableStateOf<String?>(null) }
@@ -275,8 +280,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var transformY by remember { mutableStateOf("0") }
     var transformScale by remember { mutableStateOf("1") }
     var transformAngle by remember { mutableStateOf("0") }
-    var leftDrawerOpen by remember { mutableStateOf(false) }
-    var rightDrawerOpen by remember { mutableStateOf(false) }
+    var leftDrawerOpen by rememberSaveable { mutableStateOf(false) }
+    var rightDrawerOpen by rememberSaveable { mutableStateOf(false) }
+    var leftDrawerPinned by rememberSaveable { mutableStateOf(false) }
+    var rightDrawerPinned by rememberSaveable { mutableStateOf(false) }
     var maximizedRightPane by remember { mutableStateOf<RightPane?>(null) }
     var exportPath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
@@ -676,8 +683,19 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             val layers = state.getJSONArray("layers")
             BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
                 val railWidth = 20.dp
+                // Tool icons need only a narrow rail; color and layer controls keep a wider panel.
+                val leftDrawerWidth = (maxWidth * 0.25f).coerceIn(84.dp, 96.dp)
                 val drawerWidth = (maxWidth * 0.68f).coerceAtMost(280.dp)
-                Box(Modifier.fillMaxSize().padding(horizontal = railWidth).clipToBounds()) {
+                // A pinned panel must leave space to draw; both open panels share that space.
+                val leftOccupied = if (leftDrawerOpen) leftDrawerWidth else 0.dp
+                val rightDrawerWidth = if (rightDrawerPinned || leftDrawerOpen) {
+                    drawerWidth.coerceAtMost(
+                        (maxWidth - leftOccupied - railWidth * 2 - 112.dp).coerceAtLeast(0.dp))
+                } else drawerWidth
+                Box(Modifier.fillMaxSize().padding(
+                    start = railWidth + if (leftDrawerOpen && leftDrawerPinned) leftDrawerWidth else 0.dp,
+                    end = railWidth + if (rightDrawerOpen && rightDrawerPinned) rightDrawerWidth else 0.dp
+                ).clipToBounds()) {
                 AndroidView(factory = { ctx -> StudioCanvas(ctx).also { canvasRef[0] = it } },
                     modifier = Modifier.fillMaxSize(), update = { view ->
                     view.documentId = current.getString("id")
@@ -694,7 +712,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             .put("width", width.toDouble()).put("opacity", opacity.toDouble()).put("points", points))
                     }
                     view.onCursor = { x, y -> canvasCursor = x to y }
+                    view.onSampleColor = { pixel ->
+                        color = String.format(java.util.Locale.ROOT, "#%08X", pixel)
+                        colorHexInput = color
+                    }
                     view.onSelection = { rect -> edit("SELECTION_CREATE", rect) }
+                    view.onFill = { x, y ->
+                        perform { store.fillContiguous("AWEI", x, y, color,
+                            tolerance = fillTolerance, referenceAllLayers = fillReferenceAll) }
+                    }
+                    view.onCrop = { rect ->
+                        val x = rect.getDouble("x").toInt().coerceIn(0, state.getInt("width"))
+                        val y = rect.getDouble("y").toInt().coerceIn(0, state.getInt("height"))
+                        val right = (rect.getDouble("x") + rect.getDouble("width")).toInt()
+                            .coerceIn(0, state.getInt("width"))
+                        val bottom = (rect.getDouble("y") + rect.getDouble("height")).toInt()
+                            .coerceIn(0, state.getInt("height"))
+                        if (right - x in 64..4096 && bottom - y in 64..4096)
+                            edit("CROP", JSONObject().put("x", x).put("y", y)
+                                .put("width", right - x).put("height", bottom - y))
+                        else Toast.makeText(context, "裁剪区域至少 64 × 64 像素", Toast.LENGTH_SHORT).show()
+                    }
                     view.onMove = { dx, dy ->
                         if (selectedLayer != null) {
                             if (state.optJSONObject("selection") != null) edit("SELECTION_EDIT", JSONObject()
@@ -707,24 +745,93 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 // Intercept taps outside an open drawer before they reach the canvas;
                 // the drawer and its handle are drawn above this transparent dismiss area.
-                if (leftDrawerOpen || rightDrawerOpen) {
+                if ((leftDrawerOpen && !leftDrawerPinned) ||
+                    (rightDrawerOpen && !rightDrawerPinned)) {
                     Box(Modifier.fillMaxSize().padding(horizontal = railWidth)
-                        .clickable(onClickLabel = "收起侧栏") {
-                            leftDrawerOpen = false
-                            rightDrawerOpen = false
+                        .clickable(onClickLabel = "收起未固定侧栏") {
+                            if (!leftDrawerPinned) leftDrawerOpen = false
+                            if (!rightDrawerPinned) rightDrawerOpen = false
                         })
                 }
-                // The handles stay visible; only one drawer can cover the canvas at a time.
+                // Handles remain reachable; pinned drawers may stay open together.
                 if (leftDrawerOpen) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
-                        .padding(start = railWidth).width(drawerWidth).fillMaxHeight()
+                        .padding(start = railWidth).width(leftDrawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
-                        Box(Modifier.fillMaxSize())
+                        Box(Modifier.fillMaxSize()) {
+                            val availableTools = listOf(
+                                Triple("ink", "自由画笔", "✎"),
+                                Triple("pencil", "铅笔", "✏"),
+                                Triple("soft", "软笔", "◌"),
+                                Triple("spray", "喷枪", "☷"),
+                                Triple("eraser", "橡皮擦", "▱"),
+                                Triple("line", "直线", "╱"),
+                                Triple("rectangle", "矩形", "□"),
+                                Triple("ellipse", "椭圆", "○"),
+                                Triple("polygon", "多边形", "⬠"),
+                                Triple("polyline", "折线", "⌁"),
+                                Triple("bezier", "三次贝塞尔曲线", "∿"),
+                                Triple("sampler", "颜色取样", "◉"),
+                                Triple("fill", "连续区域填充", "▨"),
+                                Triple("gradient", "线性渐变", "◩"),
+                                Triple("select", "矩形选区", "▣"),
+                                Triple("select_ellipse", "椭圆选区", "◯"),
+                                Triple("select_polygon", "多边形选区", "⬡"),
+                                Triple("select_freehand", "自由套索选区", "〰"),
+                                Triple("crop", "裁剪画布", "⛶"),
+                                Triple("move", "移动图层", "✥"),
+                                Triple("pan", "平移画布", "✋"),
+                                Triple("zoom", "缩放画布", "⌕"),
+                                Triple("measure", "测量距离", "⌁")
+                            )
+                            Column(Modifier.fillMaxSize().padding(top = 48.dp)
+                                .verticalScroll(rememberScrollState()),
+                                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (tool == "fill") {
+                                    TextButton(onClick = { fillOptionsDialog = true },
+                                        modifier = Modifier.fillMaxWidth()
+                                            .semantics { contentDescription = "连续区域填充选项" }) {
+                                        Text("填充选项", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                availableTools.chunked(2).forEach { pair ->
+                                    Row(Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceEvenly) {
+                                        pair.forEach { (id, label, glyph) ->
+                                            Surface(Modifier.size(40.dp).clickable(onClickLabel = label) {
+                                                tool = id
+                                            }, shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                                                color = if (tool == id)
+                                                    MaterialTheme.colorScheme.primaryContainer
+                                                else MaterialTheme.colorScheme.surfaceVariant) {
+                                                Box(Modifier.fillMaxSize(),
+                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                    Text(glyph, style = MaterialTheme.typography.titleMedium,
+                                                        modifier = Modifier.semantics {
+                                                            contentDescription = label
+                                                        })
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            IconButton(onClick = {
+                                leftDrawerPinned = !leftDrawerPinned
+                                if (!leftDrawerPinned) leftDrawerOpen = false
+                            }, modifier = Modifier.align(androidx.compose.ui.Alignment.TopEnd)) {
+                                Icon(Icons.Default.PushPin,
+                                    contentDescription = if (leftDrawerPinned)
+                                        "取消固定左侧工具栏" else "固定左侧工具栏",
+                                    tint = if (leftDrawerPinned) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.onSurfaceVariant)
+                            }
+                        }
                     }
                 }
                 if (rightDrawerOpen) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
-                        .padding(end = railWidth).width(drawerWidth).fillMaxHeight()
+                        .padding(end = railWidth).width(rightDrawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
                         BoxWithConstraints(Modifier.fillMaxSize()) {
                             // A maximized pane takes the remaining height; the other panes
@@ -734,6 +841,21 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             val layerShare = if (compact) 0.57f else 0.35f
                             val brushShare = if (compact) 0.11f else 0.39f
                             Column(Modifier.fillMaxSize()) {
+                                Row(Modifier.fillMaxWidth().height(40.dp),
+                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                    IconButton(onClick = {
+                                        rightDrawerPinned = !rightDrawerPinned
+                                        if (!rightDrawerPinned) rightDrawerOpen = false
+                                    }) {
+                                        Icon(Icons.Default.PushPin,
+                                            contentDescription = if (rightDrawerPinned)
+                                                "取消固定右侧面板" else "固定右侧面板",
+                                            tint = if (rightDrawerPinned) MaterialTheme.colorScheme.primary
+                                                else MaterialTheme.colorScheme.onSurfaceVariant)
+                                    }
+                                    Text(if (rightDrawerPinned) "已固定" else "固定侧栏",
+                                        style = MaterialTheme.typography.labelSmall)
+                                }
                                 if (maximizedRightPane != null) {
                                     Row(Modifier.fillMaxWidth().height(40.dp)
                                         .clickable(onClickLabel = "恢复右侧栏分段并打开多功能拾色器") {
@@ -832,9 +954,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
                     .width(railWidth).fillMaxHeight()
-                    .clickable(onClickLabel = if (leftDrawerOpen) "收起左侧工具栏" else "展开左侧工具栏") {
-                        leftDrawerOpen = !leftDrawerOpen
-                        if (leftDrawerOpen) rightDrawerOpen = false
+                    .clickable(onClickLabel = if (leftDrawerOpen && leftDrawerPinned)
+                        "取消固定并收起左侧工具栏" else if (leftDrawerOpen)
+                        "收起左侧工具栏" else "展开左侧工具栏") {
+                        if (leftDrawerOpen) {
+                            leftDrawerOpen = false
+                            leftDrawerPinned = false
+                        } else {
+                            leftDrawerOpen = true
+                            if (!rightDrawerPinned) rightDrawerOpen = false
+                        }
                     }, tonalElevation = 3.dp) {
                     Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                         Text(if (leftDrawerOpen) "‹" else "›", style = MaterialTheme.typography.titleLarge)
@@ -842,9 +971,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
                     .width(railWidth).fillMaxHeight()
-                    .clickable(onClickLabel = if (rightDrawerOpen) "收起右侧面板" else "展开右侧面板") {
-                        rightDrawerOpen = !rightDrawerOpen
-                        if (rightDrawerOpen) leftDrawerOpen = false
+                    .clickable(onClickLabel = if (rightDrawerOpen && rightDrawerPinned)
+                        "取消固定并收起右侧面板" else if (rightDrawerOpen)
+                        "收起右侧面板" else "展开右侧面板") {
+                        if (rightDrawerOpen) {
+                            rightDrawerOpen = false
+                            rightDrawerPinned = false
+                        } else {
+                            rightDrawerOpen = true
+                            if (!leftDrawerPinned) leftDrawerOpen = false
+                        }
                     }, tonalElevation = 3.dp) {
                     Box(Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                         Text(if (rightDrawerOpen) "›" else "‹", style = MaterialTheme.typography.titleLarge)
@@ -881,6 +1017,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
             }
         }
+    }
+    if (fillOptionsDialog) {
+        AlertDialog(onDismissRequest = { fillOptionsDialog = false },
+            title = { Text("连续区域填充选项") },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("颜色容差：$fillTolerance%")
+                    Slider(value = fillTolerance.toFloat(),
+                        onValueChange = { fillTolerance = it.toInt().coerceIn(0, 100) },
+                        valueRange = 0f..100f, steps = 99)
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("参考所有可见图层", modifier = Modifier.weight(1f))
+                        Switch(checked = fillReferenceAll,
+                            onCheckedChange = { fillReferenceAll = it })
+                    }
+                    Text("填色仍写入当前图层；容差按每个 RGBA 通道比较。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+            }, confirmButton = {
+                TextButton(onClick = { fillOptionsDialog = false }) { Text("完成") }
+            })
     }
     if (presentationDialog) {
         AlertDialog(onDismissRequest = { presentationDialog = false },
@@ -1222,11 +1379,26 @@ private class StudioCanvas(context: Context) : View(context) {
     var selectedId: String = ""
     var selection: JSONObject? = null
     var tool: String = "ink"
+        set(value) {
+            if (field != value) {
+                field = value
+                points = JSONArray()
+                pathVertices = JSONArray()
+                cropPreview = null
+                selectionPreview = null
+                measurement = null
+                lastPathTap = 0L
+                invalidate()
+            }
+        }
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
     var opacity: Float = 1f
     var onStroke: (JSONArray) -> Unit = {}
     var onSelection: (JSONObject) -> Unit = {}
+    var onCrop: (JSONObject) -> Unit = {}
+    var onSampleColor: (Int) -> Unit = {}
+    var onFill: (Int, Int) -> Unit = { _, _ -> }
     var onCursor: (Int, Int) -> Unit = { _, _ -> }
     var onMove: (Float, Float) -> Unit = { _, _ -> }
     private var zoom = 1f
@@ -1235,12 +1407,25 @@ private class StudioCanvas(context: Context) : View(context) {
     private var panY = 0f
     private var startX = 0f
     private var startY = 0f
+    private var shapeStartX = 0f
+    private var shapeStartY = 0f
     private var lastX = 0f
     private var lastY = 0f
     private var pinch = 0f
     private var pinchAngle = 0f
+    private var multitouch = false
     private var points = JSONArray()
+    private var pathVertices = JSONArray()
+    private var cropPreview: JSONObject? = null
+    private var selectionPreview: JSONObject? = null
+    private var measurement: FloatArray? = null
+    private var lastPathTap = 0L
+    private var lastPathTapX = 0f
+    private var lastPathTapY = 0f
     private val matrix = Matrix()
+    private fun shapePoints(x: Float, y: Float): JSONArray = JSONArray()
+        .put(JSONArray().put(shapeStartX).put(shapeStartY).put(1f))
+        .put(JSONArray().put(x).put(y).put(1f))
     fun fitToWindow() {
         zoom = 1f
         angle = 0f
@@ -1296,21 +1481,72 @@ private class StudioCanvas(context: Context) : View(context) {
         canvas.drawRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(), checkerPaint)
         canvas.restore()
         canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
-        selection?.let { rect ->
+        (selectionPreview ?: selection)?.let { selectedArea ->
             canvas.save(); canvas.concat(matrix)
-            val x = rect.getDouble("x").toFloat(); val y = rect.getDouble("y").toFloat()
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.rgb(52, 150, 255); style = Paint.Style.STROKE
                 strokeWidth = 2f / (fit * zoom); pathEffect = android.graphics.DashPathEffect(floatArrayOf(8f, 5f), 0f)
             }
-            canvas.drawRect(x, y, x + rect.getDouble("width").toFloat(),
-                y + rect.getDouble("height").toFloat(), paint)
+            canvas.drawPath(ArtSelection.path(selectedArea), paint)
             canvas.restore()
         }
-        if (points.length() > 0 && tool !in listOf("pan", "move", "select")) {
+        if (tool in listOf("select_polygon", "select_freehand") && pathVertices.length() > 0) {
+            val vertices = if (points.length() > pathVertices.length()) points else pathVertices
+            val outline = Path()
+            for (index in 0 until vertices.length()) {
+                val point = vertices.getJSONArray(index)
+                if (index == 0) outline.moveTo(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
+                else outline.lineTo(point.getDouble(0).toFloat(), point.getDouble(1).toFloat())
+            }
+            canvas.save(); canvas.concat(matrix)
+            canvas.drawPath(outline, Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(52, 150, 255)
+                style = Paint.Style.STROKE
+                strokeWidth = 2f / (fit * zoom)
+            })
+            canvas.restore()
+        }
+        cropPreview?.let { rect ->
+            canvas.save(); canvas.concat(matrix)
+            val outline = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(240, 240, 240)
+                style = Paint.Style.STROKE
+                strokeWidth = 2f / (fit * zoom)
+                pathEffect = android.graphics.DashPathEffect(floatArrayOf(9f, 5f), 0f)
+            }
+            canvas.drawRect(rect.getDouble("x").toFloat(), rect.getDouble("y").toFloat(),
+                (rect.getDouble("x") + rect.getDouble("width")).toFloat(),
+                (rect.getDouble("y") + rect.getDouble("height")).toFloat(), outline)
+            canvas.restore()
+        }
+        measurement?.let { mark ->
+            canvas.save(); canvas.concat(matrix)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(238, 238, 238)
+                style = Paint.Style.STROKE
+                strokeWidth = 2f / (fit * zoom)
+            }
+            canvas.drawLine(mark[0], mark[1], mark[2], mark[3], paint)
+            canvas.restore()
+            val endpoint = floatArrayOf(mark[2], mark[3])
+            matrix.mapPoints(endpoint)
+            val distance = hypot(mark[2] - mark[0], mark[3] - mark[1])
+            val degrees = Math.toDegrees(atan2(
+                (mark[3] - mark[1]).toDouble(), (mark[2] - mark[0]).toDouble()))
+            canvas.drawText("%.1f px  %.1f°".format(java.util.Locale.ROOT, distance, degrees),
+                endpoint[0] + 12f, endpoint[1] - 12f,
+                Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                    color = Color.WHITE
+                    textSize = 14f * resources.displayMetrics.scaledDensity
+                    setShadowLayer(3f, 0f, 0f, Color.BLACK)
+                })
+        }
+        if (points.length() > 0 && tool !in listOf("pan", "move", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             ArtRenderer.drawStroke(canvas, JSONObject().put("points", points).put("tool", tool)
-                .put("color", color).put("width", brushWidth.toDouble()).put("opacity", opacity.toDouble()))
+                .put("color", color).put("width", brushWidth.toDouble()).put("opacity", opacity.toDouble())
+                .put("previewOpen", true)
+                .put("previewWidth", bitmap.width).put("previewHeight", bitmap.height))
             canvas.restore()
         }
     }
@@ -1318,6 +1554,7 @@ private class StudioCanvas(context: Context) : View(context) {
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (image == null) return true
         if (event.pointerCount >= 2) {
+            multitouch = true
             val dx = event.getX(1) - event.getX(0)
             val dy = event.getY(1) - event.getY(0)
             val distance = hypot(dx, dy)
@@ -1326,9 +1563,23 @@ private class StudioCanvas(context: Context) : View(context) {
                 zoom = (zoom * distance / pinch).coerceIn(0.1f, 16f)
                 angle += rotation - pinchAngle
             }
-            pinch = distance; pinchAngle = rotation; points = JSONArray(); invalidate(); return true
+            pinch = distance; pinchAngle = rotation
+            points = JSONArray(); pathVertices = JSONArray(); lastPathTap = 0L
+            selectionPreview = null; cropPreview = null
+            invalidate(); return true
         }
         pinch = 0f
+        if (multitouch && event.actionMasked != MotionEvent.ACTION_DOWN) {
+            if (event.actionMasked == MotionEvent.ACTION_UP ||
+                event.actionMasked == MotionEvent.ACTION_CANCEL) {
+                multitouch = false
+                points = JSONArray()
+                cropPreview = null
+                selectionPreview = null
+                invalidate()
+            }
+            return true
+        }
         val inverse = Matrix()
         matrix.invert(inverse)
         val xy = floatArrayOf(event.x, event.y)
@@ -1338,13 +1589,56 @@ private class StudioCanvas(context: Context) : View(context) {
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
         when (event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
+                multitouch = false
                 startX = xy[0]; startY = xy[1]; lastX = event.x; lastY = event.y
                 points = JSONArray()
-                if (tool !in listOf("pan", "move", "select")) points.put(JSONArray().put(local[0]).put(local[1]).put(event.pressure.coerceIn(0.1f, 1f)))
+                shapeStartX = local[0]; shapeStartY = local[1]
+                cropPreview = null
+                selectionPreview = null
+                if (tool == "select_freehand") {
+                    pathVertices = JSONArray()
+                        .put(JSONArray().put(xy[0]).put(xy[1]).put(1f))
+                }
+                if (tool !in listOf("pan", "move", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
+                    points.put(JSONArray().put(local[0]).put(local[1])
+                        .put(event.pressure.coerceIn(0.1f, 1f)))
             }
             MotionEvent.ACTION_MOVE -> {
                 if (tool == "pan") { panX += event.x - lastX; panY += event.y - lastY }
-                else if (tool !in listOf("move", "select")) points.put(JSONArray().put(local[0]).put(local[1]).put(event.pressure.coerceIn(0.1f, 1f)))
+                else if (tool == "select_freehand") {
+                    if (pathVertices.length() >= 2048) {
+                        val reduced = JSONArray()
+                        for (index in 0 until pathVertices.length() step 2)
+                            reduced.put(pathVertices.getJSONArray(index))
+                        pathVertices = reduced
+                    }
+                    pathVertices.put(JSONArray().put(xy[0]).put(xy[1]).put(1f))
+                }
+                else if (tool == "measure")
+                    measurement = floatArrayOf(startX, startY, xy[0], xy[1])
+                else if (tool == "select" || tool == "select_ellipse")
+                    selectionPreview = JSONObject()
+                        .put("shape", if (tool == "select_ellipse") "ellipse" else "rect")
+                        .put("x", minOf(startX, xy[0])).put("y", minOf(startY, xy[1]))
+                        .put("width", kotlin.math.abs(xy[0] - startX))
+                        .put("height", kotlin.math.abs(xy[1] - startY))
+                else if (tool == "crop") cropPreview = JSONObject()
+                    .put("x", minOf(startX, xy[0])).put("y", minOf(startY, xy[1]))
+                    .put("width", kotlin.math.abs(xy[0] - startX))
+                    .put("height", kotlin.math.abs(xy[1] - startY))
+                else if (tool in listOf("line", "rectangle", "ellipse", "gradient"))
+                    points = shapePoints(local[0], local[1])
+                else if (tool == "bezier")
+                    points = JSONArray(pathVertices.toString()).put(JSONArray()
+                        .put(local[0]).put(local[1]).put(1f))
+                else if (tool in listOf("polygon", "polyline", "select_polygon") && pathVertices.length() > 0)
+                    points = JSONArray(pathVertices.toString()).apply {
+                        val vertex = if (tool == "select_polygon") xy else local
+                        put(JSONArray().put(vertex[0]).put(vertex[1]).put(1f))
+                    }
+                else if (tool !in listOf("move", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
+                    points.put(JSONArray().put(local[0]).put(local[1])
+                        .put(event.pressure.coerceIn(0.1f, 1f)))
                 lastX = event.x; lastY = event.y
             }
             MotionEvent.ACTION_UP -> {
@@ -1354,15 +1648,107 @@ private class StudioCanvas(context: Context) : View(context) {
                     onCursor(xy[0].toInt(), xy[1].toInt())
                 }
                 when (tool) {
-                    "select" -> onSelection(JSONObject().put("x", minOf(startX, xy[0])).put("y", minOf(startY, xy[1]))
-                        .put("width", kotlin.math.abs(xy[0] - startX)).put("height", kotlin.math.abs(xy[1] - startY)))
+                    "select_freehand" -> {
+                        val endpoint = JSONArray().put(xy[0]).put(xy[1]).put(1f)
+                        if (pathVertices.length() >= 2048)
+                            pathVertices.put(pathVertices.length() - 1, endpoint)
+                        else pathVertices.put(endpoint)
+                        if (pathVertices.length() >= 3) {
+                            val vertices = pathVertices
+                            val xs = (0 until vertices.length()).map { vertices.getJSONArray(it).getDouble(0) }
+                            val ys = (0 until vertices.length()).map { vertices.getJSONArray(it).getDouble(1) }
+                            if (xs.maxOrNull()!! > xs.minOrNull()!! &&
+                                ys.maxOrNull()!! > ys.minOrNull()!!)
+                                onSelection(ArtSelection.fromVertices(vertices))
+                        }
+                        pathVertices = JSONArray()
+                    }
+                    "select", "select_ellipse" -> {
+                        val selectedArea = JSONObject()
+                            .put("shape", if (tool == "select_ellipse") "ellipse" else "rect")
+                            .put("x", minOf(startX, xy[0])).put("y", minOf(startY, xy[1]))
+                            .put("width", kotlin.math.abs(xy[0] - startX))
+                            .put("height", kotlin.math.abs(xy[1] - startY))
+                        if (tool == "select" || (selectedArea.getDouble("width") > 0 &&
+                            selectedArea.getDouble("height") > 0)) onSelection(selectedArea)
+                    }
+                    "crop" -> onCrop(JSONObject().put("x", minOf(startX, xy[0]))
+                        .put("y", minOf(startY, xy[1])).put("width", kotlin.math.abs(xy[0] - startX))
+                        .put("height", kotlin.math.abs(xy[1] - startY)))
                     "move" -> onMove(xy[0] - startX, xy[1] - startY)
                     "pan" -> Unit
+                    "zoom" -> {
+                        val previous = zoom
+                        zoom = (zoom * 1.5f).coerceAtMost(16f)
+                        val factor = zoom / previous
+                        panX = event.x - width / 2f - factor * (event.x - width / 2f - panX)
+                        panY = event.y - height / 2f - factor * (event.y - height / 2f - panY)
+                    }
+                    "measure" -> measurement = floatArrayOf(startX, startY, xy[0], xy[1])
+                    "fill" -> {
+                        val sampled = image
+                        if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
+                            xy[0] < sampled.width && xy[1] < sampled.height)
+                            onFill(xy[0].toInt(), xy[1].toInt())
+                    }
+                    "sampler" -> {
+                        val sampled = image
+                        if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
+                            xy[0] < sampled.width && xy[1] < sampled.height)
+                            onSampleColor(sampled.getPixel(xy[0].toInt(), xy[1].toInt()))
+                    }
+                    "line", "rectangle", "ellipse", "gradient" -> {
+                        points = shapePoints(local[0], local[1])
+                        onStroke(JSONArray(points.toString()))
+                    }
+                    "bezier" -> {
+                        // Four taps preserve both control handles in the shared stroke log.
+                        // A drag only previews its next control point, never commits a freehand stroke.
+                        pathVertices.put(JSONArray().put(local[0]).put(local[1]).put(1f))
+                        if (pathVertices.length() == 4) {
+                            onStroke(JSONArray(pathVertices.toString()))
+                            pathVertices = JSONArray()
+                        }
+                        points = JSONArray(pathVertices.toString())
+                    }
+                    "polygon", "polyline", "select_polygon" -> {
+                        val doubleTap = event.eventTime - lastPathTap in 1L..350L &&
+                            hypot(event.x - lastPathTapX, event.y - lastPathTapY) < 32f * resources.displayMetrics.density
+                        val minimum = if (tool == "polyline") 2 else 3
+                        if (doubleTap && pathVertices.length() >= minimum) {
+                            if (tool == "select_polygon") {
+                                val vertices = pathVertices
+                                val xs = (0 until vertices.length()).map { vertices.getJSONArray(it).getDouble(0) }
+                                val ys = (0 until vertices.length()).map { vertices.getJSONArray(it).getDouble(1) }
+                                if (xs.maxOrNull()!! > xs.minOrNull()!! &&
+                                    ys.maxOrNull()!! > ys.minOrNull()!!)
+                                    onSelection(ArtSelection.fromVertices(vertices))
+                            } else onStroke(JSONArray(pathVertices.toString()))
+                            pathVertices = JSONArray()
+                        } else {
+                            if (tool != "select_polygon" || pathVertices.length() < 2048) {
+                                val vertex = if (tool == "select_polygon") xy else local
+                                pathVertices.put(JSONArray().put(vertex[0]).put(vertex[1]).put(1f))
+                            }
+                        }
+                        lastPathTap = event.eventTime
+                        lastPathTapX = event.x
+                        lastPathTapY = event.y
+                        points = JSONArray(pathVertices.toString())
+                    }
                     else -> if (points.length() > 0) onStroke(JSONArray(points.toString()))
                 }
-                points = JSONArray()
+                if (tool !in listOf("polygon", "polyline", "bezier")) points = JSONArray()
+                cropPreview = null
+                selectionPreview = null
             }
-            MotionEvent.ACTION_CANCEL -> points = JSONArray()
+            MotionEvent.ACTION_CANCEL -> {
+                multitouch = false
+                points = JSONArray()
+                pathVertices = JSONArray()
+                cropPreview = null
+                selectionPreview = null
+            }
         }
         invalidate(); return true
     }
