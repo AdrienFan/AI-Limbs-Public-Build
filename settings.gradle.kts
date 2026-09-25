@@ -91,3 +91,5 @@ project(":permission-service-plugin").projectDir = file("plugin-lab/plugins/perm
 
 include(":art-studio-plugin")
 project(":art-studio-plugin").projectDir = file("plugin-lab/plugins/art-studio")
+include(":visual-manager-plugin")
+project(":visual-manager-plugin").projectDir = file("plugin-lab/plugins/visual-manager")

@@ -1,0 +1,55 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.system.visual_manager",
+  "version": "0.1.0",
+  "api": { "target": 1, "min": 1 },
+  "display": {
+    "name": "视觉管理",
+    "description": "统一管理 AI Limbs 的屏幕共享、摄像头视觉会话和视觉缓存。"
+  },
+  "roles": ["system_plugin"],
+  "activation": { "mode": "hot" },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.visualmanager.VisualManagerEntry",
+      "presentation_entry_class": "com.ai.limbs.plugins.visualmanager.VisualManagerPresentationEntry"
+    }
+  },
+  "dependencies": { "plugins": [], "services": [] },
+  "permissions": {
+    "requested_scopes": [
+      "host.screen.capture@1",
+      "host.screen.session@1",
+      "host.camera.capture@1",
+      "host.camera.session@1"
+    ]
+  },
+  "provides": {
+    "capabilities": [
+      "plugin.system.visual_manager.status",
+      "plugin.system.visual_manager.screen.list_targets",
+      "plugin.system.visual_manager.screen.capture",
+      "plugin.system.visual_manager.screen.start",
+      "plugin.system.visual_manager.screen.stop",
+      "plugin.system.visual_manager.screen.frame",
+      "plugin.system.visual_manager.camera.list_sources",
+      "plugin.system.visual_manager.camera.start",
+      "plugin.system.visual_manager.camera.configure",
+      "plugin.system.visual_manager.camera.stop",
+      "plugin.system.visual_manager.camera.frame",
+      "plugin.system.visual_manager.camera.capture",
+      "plugin.system.visual_manager.assets.list",
+      "plugin.system.visual_manager.assets.delete",
+      "plugin.system.visual_manager.assets.clear"
+    ],
+    "services": [],
+    "providers": ["plugin.system.visual_manager.page"],
+    "extensions": [
+      { "point": "ai_limbs.ui.home_tile", "id": "plugin.system.visual_manager.tile", "api": 1 },
+      { "point": "ai_limbs.ui.screen", "id": "plugin.system.visual_manager.screen", "api": 2 }
+    ]
+  }
+}
