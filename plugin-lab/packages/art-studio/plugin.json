@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.10",
+  "version": "0.2.11",
   "api": { "target": 1, "min": 1 },
   "display": {
     "name": "AI Limbs 画室",
@@ -22,6 +22,7 @@
   "permissions": { "requested_scopes": ["host.ui.presentation@1"] },
   "provides": {
     "capabilities": [
+      "plugin.art.studio.toolbox.catalog",
       "plugin.art.studio.document.create", "plugin.art.studio.document.open",
       "plugin.art.studio.document.import", "plugin.art.studio.document.open_image",
       "plugin.art.studio.document.recent", "plugin.art.studio.document.save_as",
@@ -53,7 +54,8 @@
       "plugin.art.studio.selection.clear", "plugin.art.studio.selection.edit",
       "plugin.art.studio.transform.move",
       "plugin.art.studio.transform.scale", "plugin.art.studio.transform.rotate",
-      "plugin.art.studio.history.list", "plugin.art.studio.history.undo",
+      "plugin.art.studio.history.list", "plugin.art.studio.history.timeline",
+      "plugin.art.studio.history.goto", "plugin.art.studio.history.undo",
       "plugin.art.studio.history.redo", "plugin.art.studio.history.revert_actor_operations",
       "plugin.art.studio.edit.clipboard_info", "plugin.art.studio.edit.cut",
       "plugin.art.studio.edit.copy", "plugin.art.studio.edit.copy_merged",

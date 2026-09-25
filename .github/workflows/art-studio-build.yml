@@ -20,6 +20,8 @@ jobs:
           persist-credentials: false
       - name: Verify source and manifest versions
         run: python3 tools/plugin_lab/source_provenance.py check --output dist/source-inventory.json
+      - name: Verify Art Studio capability declarations
+        run: python3 tools/plugin_lab/verify_art_studio_capabilities.py
       - name: Resolve Art Studio package version
         id: art_version
         shell: bash
