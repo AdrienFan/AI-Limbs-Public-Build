@@ -10,11 +10,11 @@ android {
     namespace = "com.ai.limbs.plugins.artstudio"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.artstudio.v025"
+        applicationId = "com.ai.limbs.payload.artstudio.v026"
         minSdk = 29
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.2.5"
+        versionCode = 9
+        versionName = "0.2.6"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
