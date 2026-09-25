@@ -342,19 +342,21 @@ internal object ArtRenderer {
             val first = points.getJSONArray(0)
             val path = Path().apply {
                 moveTo(first.getDouble(0).toFloat(), first.getDouble(1).toFloat())
-                if (points.length() == 4) {
-                    val control1 = points.getJSONArray(1)
-                    val control2 = points.getJSONArray(2)
-                    val end = points.getJSONArray(3)
+                var index = 1
+                while (index + 2 < points.length()) {
+                    val control1 = points.getJSONArray(index)
+                    val control2 = points.getJSONArray(index + 1)
+                    val end = points.getJSONArray(index + 2)
                     cubicTo(control1.getDouble(0).toFloat(), control1.getDouble(1).toFloat(),
                         control2.getDouble(0).toFloat(), control2.getDouble(1).toFloat(),
                         end.getDouble(0).toFloat(), end.getDouble(1).toFloat())
-                } else {
-                    // Before the fourth tap, show the handle chain as an editable preview.
-                    for (i in 1 until points.length()) {
-                        val handle = points.getJSONArray(i)
-                        lineTo(handle.getDouble(0).toFloat(), handle.getDouble(1).toFloat())
-                    }
+                    index += 3
+                }
+                // Show any incomplete segment's handles without persisting them.
+                while (index < points.length()) {
+                    val handle = points.getJSONArray(index)
+                    lineTo(handle.getDouble(0).toFloat(), handle.getDouble(1).toFloat())
+                    index++
                 }
             }
             paint.strokeWidth = width

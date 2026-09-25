@@ -853,7 +853,7 @@ internal class ArtStore(private val root: File) {
                     "line", "rectangle", "ellipse", "gradient" -> points.length() == 2
                     "polygon" -> points.length() >= 3
                     "polyline" -> points.length() >= 2
-                    "bezier" -> points.length() == 4
+                    "bezier" -> points.length() in 4..1024 && (points.length() - 1) % 3 == 0
                     else -> true
                 }) { "形状顶点数量无效" }
                 if (p.optBoolean("fillShape", false))

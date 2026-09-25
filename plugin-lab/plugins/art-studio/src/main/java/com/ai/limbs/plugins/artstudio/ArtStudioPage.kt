@@ -273,6 +273,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var nibAngle by remember { mutableFloatStateOf(45f) }
     var nibOptionsDialog by remember { mutableStateOf(false) }
     var fillShape by remember { mutableStateOf(false) }
+    var bezierContinuous by remember { mutableStateOf(false) }
     var gradientMode by remember { mutableStateOf("linear") }
     var gradientReverse by remember { mutableStateOf(false) }
     var gradientOptionsDialog by remember { mutableStateOf(false) }
@@ -811,6 +812,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.dynaMass = dynaMass; view.dynaDrag = dynaDrag
                     view.nibAngle = nibAngle
                     view.fillShape = fillShape
+                    view.bezierContinuous = bezierContinuous
                     view.gradientMode = gradientMode; view.gradientReverse = gradientReverse
                     view.sampleRadius = sampleRadius; view.sampleMerged = sampleMerged
                     view.onSampleCoordinate = { x, y ->
@@ -1031,6 +1033,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                             contentDescription = if (fillShape) "取消形状填充" else "填充形状"
                                         }) {
                                         Text(if (fillShape) "填充：前景色" else "填充：无",
+                                            style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "bezier") {
+                                    TextButton(onClick = { bezierContinuous = !bezierContinuous },
+                                        modifier = Modifier.fillMaxWidth().semantics {
+                                            contentDescription = if (bezierContinuous)
+                                                "关闭连续曲线模式" else "开启连续曲线模式"
+                                        }) {
+                                        Text(if (bezierContinuous) "连续曲线：双击结束" else "单段曲线：四点完成",
                                             style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
@@ -1991,6 +2003,16 @@ private class StudioCanvas(context: Context) : View(context) {
     var gradientMode: String = "linear"
     var gradientReverse: Boolean = false
     var fillShape: Boolean = false
+    var bezierContinuous: Boolean = false
+        set(value) {
+            if (field != value) {
+                field = value
+                points = JSONArray()
+                pathVertices = JSONArray()
+                lastPathTap = 0L
+                invalidate()
+            }
+        }
     var nibAngle: Float = 45f
     var dynaMass: Float = 0.5f
     var dynaDrag: Float = 0.15f
@@ -2428,12 +2450,27 @@ private class StudioCanvas(context: Context) : View(context) {
                         onStroke(JSONArray(points.toString()))
                     }
                     "bezier" -> {
-                        // Four taps preserve both control handles in the shared stroke log.
-                        // A drag only previews its next control point, never commits a freehand stroke.
-                        pathVertices.put(JSONArray().put(local[0]).put(local[1]).put(1f))
-                        if (pathVertices.length() == 4) {
+                        // The path is one anchor followed by triples of two handles and an endpoint.
+                        // In continuous mode a double tap on the last endpoint finishes the path.
+                        val doubleTap = event.eventTime - lastPathTap in 1L..350L &&
+                            hypot(event.x - lastPathTapX, event.y - lastPathTapY) <
+                                32f * resources.displayMetrics.density
+                        val complete = pathVertices.length() >= 4 &&
+                            (pathVertices.length() - 1) % 3 == 0
+                        if (bezierContinuous && doubleTap && complete) {
                             onStroke(JSONArray(pathVertices.toString()))
                             pathVertices = JSONArray()
+                            lastPathTap = 0L
+                        } else {
+                            if (pathVertices.length() < 1024)
+                                pathVertices.put(JSONArray().put(local[0]).put(local[1]).put(1f))
+                            if (!bezierContinuous && pathVertices.length() == 4) {
+                                onStroke(JSONArray(pathVertices.toString()))
+                                pathVertices = JSONArray()
+                            }
+                            lastPathTap = event.eventTime
+                            lastPathTapX = event.x
+                            lastPathTapY = event.y
                         }
                         points = JSONArray(pathVertices.toString())
                     }
