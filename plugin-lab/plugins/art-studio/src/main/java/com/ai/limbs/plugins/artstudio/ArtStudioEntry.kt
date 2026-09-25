@@ -130,14 +130,23 @@ class ArtStudioEntry : InProcessPluginEntry {
                 p.optInt("tolerance", 0), p.optBoolean("referenceAllLayers", false))
         }
         capability("color.sample", "从画布合成结果取色", read,
-            "输入画布像素坐标，返回与左侧颜色取样工具相同的 #AARRGGBB 颜色。") { p ->
+            "输入画布像素坐标；可选 radius=0–32、blend=0–100。blend<100 时需传当前 baseColor（#AARRGGBB），返回与左侧取色工具相同的颜色。") { p ->
             val snapshot = store.current()
             val bitmap = ArtRenderer.render(store, snapshot)
             try {
                 val x = p.getInt("x"); val y = p.getInt("y")
-                require(x in 0 until bitmap.width && y in 0 until bitmap.height) { "坐标不在画布内" }
+                val radius = p.optInt("radius", 0)
+                val sampled = ArtColorSampler.sample(bitmap, x, y, radius)
+                val blend = p.optInt("blend", 100)
+                require(blend in 0..100) { "取色混合必须在 0–100% 之间" }
+                val color = if (blend == 100) sampled else {
+                    val baseColor = p.getString("baseColor")
+                    require(baseColor.matches(Regex("#[A-Fa-f0-9]{8}"))) { "当前颜色必须是 #AARRGGBB" }
+                    ArtColorSampler.blend(android.graphics.Color.parseColor(baseColor), sampled, blend)
+                }
                 JSONObject().put("color", String.format(java.util.Locale.ROOT,
-                    "#%08X", bitmap.getPixel(x, y))).put("x", x).put("y", y)
+                    "#%08X", color)).put("x", x).put("y", y).put("radius", radius)
+                    .put("blend", blend)
             } finally {
                 bitmap.recycle()
             }
@@ -341,7 +350,9 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "layer.create", "layer.group" -> listOf(p("name", optional = true), p("parentId", optional = true),
             p("select", "boolean", true))
         "layer.search" -> listOf(p("query"))
-        "color.sample" -> listOf(p("x", "integer"), p("y", "integer"))
+        "color.sample" -> listOf(p("x", "integer"), p("y", "integer"),
+            p("radius", "integer", true), p("blend", "integer", true),
+            p("baseColor", optional = true))
         "canvas.measure" -> listOf(p("x0", "number"), p("y0", "number"),
             p("x1", "number"), p("y1", "number"))
         "fill.contiguous" -> listOf(p("x", "integer"), p("y", "integer"), p("color"),
@@ -365,7 +376,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("mirrorIntervalX", "integer", true), p("mirrorIntervalY", "integer", true),
             p("axisX", "number", true),
             p("axisY", "number", true), p("mass", "number", true),
-            p("drag", "number", true))
+            p("drag", "number", true), p("nibAngle", "number", true))
         "stroke.erase" -> listOf(p("layerId"), p("strokeId"))
         "selection.create", "selection.ellipse" -> listOf(p("x", "number"), p("y", "number"),
             p("width", "number"), p("height", "number"))

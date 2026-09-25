@@ -609,6 +609,7 @@ internal class ArtStore(private val root: File) {
                     "gradient" -> "绘制线性渐变"
                     "mirror" -> "绘制多重笔画"
                     "dyna" -> "绘制动态笔画"
+                    "calligraphy" -> "绘制书法笔画"
                     "line", "rectangle", "ellipse", "polygon", "polyline", "bezier" -> "绘制形状"
                     else -> "绘制笔画"
                 }
@@ -846,7 +847,7 @@ internal class ArtStore(private val root: File) {
                 require(p.getDouble("width") in 0.1..512.0)
                 require(p.optDouble("opacity", 1.0) in 0.0..1.0)
                 val tool = p.optString("tool", "pencil")
-                require(tool in setOf("pencil", "ink", "eraser", "soft", "spray", "mirror", "dyna",
+                require(tool in setOf("pencil", "ink", "eraser", "soft", "spray", "mirror", "dyna", "calligraphy",
                     "line", "rectangle", "ellipse", "polygon", "polyline", "bezier", "gradient"))
                 require(when (tool) {
                     "line", "rectangle", "ellipse", "gradient" -> points.length() == 2
@@ -859,6 +860,13 @@ internal class ArtStore(private val root: File) {
                     require(tool in setOf("rectangle", "ellipse", "polygon")) {
                         "只有闭合形状可使用前景色填充"
                     }
+                if (tool == "calligraphy") {
+                    val angle = p.optDouble("nibAngle", 45.0)
+                    require(angle.isFinite() && angle in 0.0..180.0) {
+                        "书法笔尖角度必须在 0–180° 之间"
+                    }
+                    p.put("nibAngle", angle)
+                }
                 if (tool == "dyna") {
                     val mass = p.optDouble("mass", 0.5)
                     val drag = p.optDouble("drag", 0.15)

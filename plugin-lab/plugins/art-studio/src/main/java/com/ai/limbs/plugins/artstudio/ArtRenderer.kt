@@ -262,6 +262,38 @@ internal object ArtRenderer {
             }
             return
         }
+        if (tool == "calligraphy") {
+            val radians = Math.toRadians(stroke.optDouble("nibAngle", 45.0))
+            val nibX = cos(radians).toFloat()
+            val nibY = sin(radians).toFloat()
+            paint.style = Paint.Style.FILL
+            for (i in 0 until points.length()) {
+                val current = points.getJSONArray(i)
+                val x = current.getDouble(0).toFloat()
+                val y = current.getDouble(1).toFloat()
+                val radius = width * current.optDouble(2, 1.0).toFloat() / 2f
+                if (i > 0) {
+                    val previous = points.getJSONArray(i - 1)
+                    val px = previous.getDouble(0).toFloat()
+                    val py = previous.getDouble(1).toFloat()
+                    val pr = width * previous.optDouble(2, 1.0).toFloat() / 2f
+                    val ribbon = Path().apply {
+                        moveTo(px + nibX * pr, py + nibY * pr)
+                        lineTo(x + nibX * radius, y + nibY * radius)
+                        lineTo(x - nibX * radius, y - nibY * radius)
+                        lineTo(px - nibX * pr, py - nibY * pr)
+                        close()
+                    }
+                    canvas.drawPath(ribbon, paint)
+                }
+                paint.style = Paint.Style.STROKE
+                paint.strokeWidth = (width * 0.04f).coerceAtLeast(0.5f)
+                canvas.drawLine(x - nibX * radius, y - nibY * radius,
+                    x + nibX * radius, y + nibY * radius, paint)
+                paint.style = Paint.Style.FILL
+            }
+            return
+        }
         if (tool == "soft") {
             paint.setShadowLayer(width * 0.7f, 0f, 0f, paint.color)
             paint.alpha = (paint.alpha * 0.45f).toInt()

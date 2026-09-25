@@ -249,6 +249,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var colorHexInput by remember { mutableStateOf(color) }
     var width by remember { mutableFloatStateOf(6f) }
     var opacity by remember { mutableFloatStateOf(1f) }
+    var sampleRadius by remember { mutableIntStateOf(0) }
+    var sampleBlend by remember { mutableIntStateOf(100) }
+    var samplerOptionsDialog by remember { mutableStateOf(false) }
     var fillTolerance by remember { mutableIntStateOf(0) }
     var fillReferenceAll by remember { mutableStateOf(false) }
     var fillOptionsDialog by remember { mutableStateOf(false) }
@@ -266,6 +269,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var dynaMass by remember { mutableFloatStateOf(0.5f) }
     var dynaDrag by remember { mutableFloatStateOf(0.15f) }
     var dynaOptionsDialog by remember { mutableStateOf(false) }
+    var nibAngle by remember { mutableFloatStateOf(45f) }
+    var nibOptionsDialog by remember { mutableStateOf(false) }
     var fillShape by remember { mutableStateOf(false) }
     var gradientMode by remember { mutableStateOf("linear") }
     var gradientReverse by remember { mutableStateOf(false) }
@@ -803,8 +808,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Toast.makeText(context, "最多添加 11 支子画笔", Toast.LENGTH_SHORT).show()
                     }
                     view.dynaMass = dynaMass; view.dynaDrag = dynaDrag
+                    view.nibAngle = nibAngle
                     view.fillShape = fillShape
                     view.gradientMode = gradientMode; view.gradientReverse = gradientReverse
+                    view.sampleRadius = sampleRadius
                     view.onStroke = { points ->
                         if (selectedLayer?.getString("kind") != "paint")
                             Toast.makeText(context, "请选择绘画图层", Toast.LENGTH_SHORT).show()
@@ -826,6 +833,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 stroke.put("fillShape", fillShape)
                             if (tool == "gradient") stroke.put("gradientMode", gradientMode)
                                 .put("gradientReverse", gradientReverse)
+                            if (tool == "calligraphy") stroke.put("nibAngle", nibAngle.toDouble())
                             if (tool == "dyna") stroke.put("mass", dynaMass.toDouble())
                                 .put("drag", dynaDrag.toDouble())
                             edit("STROKE_ADD", stroke)
@@ -833,7 +841,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                     view.onCursor = { x, y -> canvasCursor = x to y }
                     view.onSampleColor = { pixel ->
-                        color = String.format(java.util.Locale.ROOT, "#%08X", pixel)
+                        val sampled = if (sampleBlend == 100) pixel else
+                            ArtColorSampler.blend(Color.parseColor(color), pixel, sampleBlend)
+                        color = String.format(java.util.Locale.ROOT, "#%08X", sampled)
                         colorHexInput = color
                     }
                     view.onSelection = { rect -> edit("SELECTION_CREATE", rect) }
@@ -887,6 +897,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 Triple("eraser", "橡皮擦", "▱"),
                                 Triple("mirror", "多重画笔", "⇄"),
                                 Triple("dyna", "动态画笔", "⌁"),
+                                Triple("calligraphy", "斜头书法笔", "✒"),
                                 Triple("line", "直线", "╱"),
                                 Triple("rectangle", "矩形", "□"),
                                 Triple("ellipse", "椭圆", "○"),
@@ -902,6 +913,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 Triple("select_freehand", "自由套索选区", "〰"),
                                 Triple("crop", "裁剪画布", "⛶"),
                                 Triple("move", "移动图层", "✥"),
+                                Triple("transform", "图层变换", "⤡"),
                                 Triple("pan", "平移画布", "✋"),
                                 Triple("zoom", "缩放画布", "⌕"),
                                 Triple("measure", "测量距离", "⌁")
@@ -942,6 +954,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (tool == "sampler") {
+                                    TextButton(onClick = { samplerOptionsDialog = true },
+                                        modifier = Modifier.fillMaxWidth().semantics {
+                                            contentDescription = "取色器选项"
+                                        }) {
+                                        Text("取色选项", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
                                 if (tool == "fill") {
                                     TextButton(onClick = { fillOptionsDialog = true },
                                         modifier = Modifier.fillMaxWidth()
@@ -996,6 +1016,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                             contentDescription = "渐变选项"
                                         }) {
                                         Text("渐变选项", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "transform" && selectedLayer != null) {
+                                    TextButton(onClick = {
+                                        transformX = selectedLayer.getDouble("x").toString()
+                                        transformY = selectedLayer.getDouble("y").toString()
+                                        transformScale = selectedLayer.getDouble("scale").toString()
+                                        transformAngle = selectedLayer.getDouble("rotation").toString()
+                                        transformDialog = true
+                                    }, modifier = Modifier.fillMaxWidth().semantics {
+                                        contentDescription = "设置图层位置缩放旋转"
+                                    }) {
+                                        Text("变换参数", style = MaterialTheme.typography.labelSmall)
+                                    }
+                                }
+                                if (tool == "calligraphy") {
+                                    TextButton(onClick = { nibOptionsDialog = true },
+                                        modifier = Modifier.fillMaxWidth().semantics {
+                                            contentDescription = "书法笔尖角度"
+                                        }) {
+                                        Text("笔尖角度", style = MaterialTheme.typography.labelSmall)
                                     }
                                 }
                                 if (tool == "dyna") {
@@ -1458,6 +1499,24 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 TextButton(onClick = { mirrorOptionsDialog = false }) { Text("完成") }
             })
     }
+    if (samplerOptionsDialog) {
+        AlertDialog(onDismissRequest = { samplerOptionsDialog = false },
+            title = { Text("取色器选项") },
+            text = { Column {
+                Text("取色半径：$sampleRadius px")
+                Slider(value = sampleRadius.toFloat(),
+                    onValueChange = { sampleRadius = it.roundToInt().coerceIn(0, 32) },
+                    valueRange = 0f..32f, steps = 31)
+                Text("混合当前颜色：$sampleBlend%（100% 为纯取样）")
+                Slider(value = sampleBlend.toFloat(),
+                    onValueChange = { sampleBlend = it.roundToInt().coerceIn(0, 100) },
+                    valueRange = 0f..100f)
+                Text("半径内的像素按透明度混合；0 px 精确取单个像素。",
+                    style = MaterialTheme.typography.bodySmall)
+            } }, confirmButton = {
+                TextButton(onClick = { samplerOptionsDialog = false }) { Text("完成") }
+            })
+    }
     if (gradientOptionsDialog) {
         AlertDialog(onDismissRequest = { gradientOptionsDialog = false },
             title = { Text("渐变选项") },
@@ -1473,6 +1532,19 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     style = MaterialTheme.typography.bodySmall)
             } }, confirmButton = {
                 TextButton(onClick = { gradientOptionsDialog = false }) { Text("完成") }
+            })
+    }
+    if (nibOptionsDialog) {
+        AlertDialog(onDismissRequest = { nibOptionsDialog = false },
+            title = { Text("书法笔尖") },
+            text = { Column {
+                Text("固定角度：${nibAngle.roundToInt()}°")
+                Slider(value = nibAngle, onValueChange = { nibAngle = it },
+                    valueRange = 0f..180f)
+                Text("笔尖宽度使用当前笔粗；触笔压力控制实际宽度。",
+                    style = MaterialTheme.typography.bodySmall)
+            } }, confirmButton = {
+                TextButton(onClick = { nibOptionsDialog = false }) { Text("完成") }
             })
     }
     if (dynaOptionsDialog) {
@@ -1877,12 +1949,14 @@ private class StudioCanvas(context: Context) : View(context) {
                 invalidate()
             }
         }
+    var sampleRadius: Int = 0
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
     var opacity: Float = 1f
     var gradientMode: String = "linear"
     var gradientReverse: Boolean = false
     var fillShape: Boolean = false
+    var nibAngle: Float = 45f
     var dynaMass: Float = 0.5f
     var dynaDrag: Float = 0.15f
     var mirrorCount: Int = 6
@@ -2102,7 +2176,7 @@ private class StudioCanvas(context: Context) : View(context) {
                     setShadowLayer(3f, 0f, 0f, Color.BLACK)
                 })
         }
-        if (points.length() > 0 && tool !in listOf("pan", "move", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
+        if (points.length() > 0 && tool !in listOf("pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val preview = JSONObject().put("points", points).put("tool", tool)
                 .put("color", color).put("width", brushWidth.toDouble()).put("opacity", opacity.toDouble())
@@ -2112,6 +2186,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 preview.put("fillShape", fillShape)
             if (tool == "gradient") preview.put("gradientMode", gradientMode)
                 .put("gradientReverse", gradientReverse)
+            if (tool == "calligraphy") preview.put("nibAngle", nibAngle.toDouble())
             if (tool == "dyna") preview.put("mass", dynaMass.toDouble())
                 .put("drag", dynaDrag.toDouble())
             if (tool == "mirror") preview.put("mirrorDirection", mirrorDirection)
@@ -2188,7 +2263,7 @@ private class StudioCanvas(context: Context) : View(context) {
                     pathVertices = JSONArray()
                         .put(JSONArray().put(xy[0]).put(xy[1]).put(1f))
                 }
-                if (tool !in listOf("pan", "move", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
+                if (tool !in listOf("pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
                     points.put(JSONArray().put(local[0]).put(local[1])
                         .put(event.pressure.coerceIn(0.1f, 1f)))
             }
@@ -2239,7 +2314,7 @@ private class StudioCanvas(context: Context) : View(context) {
                         val vertex = if (tool == "select_polygon") xy else local
                         put(JSONArray().put(vertex[0]).put(vertex[1]).put(1f))
                     }
-                else if (tool !in listOf("move", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
+                else if (tool !in listOf("move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
                     points.put(JSONArray().put(local[0]).put(local[1])
                         .put(event.pressure.coerceIn(0.1f, 1f)))
                 lastX = event.x; lastY = event.y
@@ -2278,7 +2353,7 @@ private class StudioCanvas(context: Context) : View(context) {
                     "crop" -> onCrop(JSONObject().put("x", minOf(startX, xy[0]))
                         .put("y", minOf(startY, xy[1])).put("width", kotlin.math.abs(xy[0] - startX))
                         .put("height", kotlin.math.abs(xy[1] - startY)))
-                    "move" -> onMove(xy[0] - startX, xy[1] - startY)
+                    "move", "transform" -> onMove(xy[0] - startX, xy[1] - startY)
                     "pan" -> Unit
                     "zoom" -> {
                         val previous = zoom
@@ -2298,7 +2373,8 @@ private class StudioCanvas(context: Context) : View(context) {
                         val sampled = image
                         if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
                             xy[0] < sampled.width && xy[1] < sampled.height)
-                            onSampleColor(sampled.getPixel(xy[0].toInt(), xy[1].toInt()))
+                            onSampleColor(ArtColorSampler.sample(sampled,
+                                xy[0].toInt(), xy[1].toInt(), sampleRadius))
                     }
                     "dyna" -> {
                         if (points.length() > 0) {
