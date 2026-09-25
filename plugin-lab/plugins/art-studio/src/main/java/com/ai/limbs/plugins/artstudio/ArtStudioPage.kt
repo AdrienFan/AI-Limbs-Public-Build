@@ -1047,6 +1047,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         }
                     }
                 }
+                }
                 Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
                     .width(railWidth).fillMaxHeight()
                     .clickable(onClickLabel = if (leftDrawerOpen && leftDrawerPinned)
