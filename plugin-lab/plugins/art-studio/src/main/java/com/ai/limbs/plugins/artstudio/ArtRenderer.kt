@@ -93,13 +93,16 @@ internal object ArtRenderer {
                                             (event.getInt("y") + event.getInt("height")).toFloat(), editPaint)
                                         if (clip != null) local.restore()
                                     }
-                                    "paste" -> {
+                                    "paste", "erase" -> {
                                         val inserted = BitmapFactory.decodeFile(
                                             store.assetFile(event.getString("asset")).absolutePath)
                                             ?: error("工程粘贴资源已丢失")
                                         try {
+                                            val insertPaint = Paint(Paint.FILTER_BITMAP_FLAG)
+                                            if (event.getString("kind") == "erase")
+                                                insertPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
                                             local.drawBitmap(inserted, event.getInt("x").toFloat(),
-                                                event.getInt("y").toFloat(), Paint(Paint.FILTER_BITMAP_FLAG))
+                                                event.getInt("y").toFloat(), insertPaint)
                                         } finally { inserted.recycle() }
                                     }
                                     else -> error("未知像素编辑记录")

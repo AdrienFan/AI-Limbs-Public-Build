@@ -255,6 +255,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var samplerOptionsDialog by remember { mutableStateOf(false) }
     var fillTolerance by remember { mutableIntStateOf(0) }
     var fillReferenceAll by remember { mutableStateOf(false) }
+    var fillErase by remember { mutableStateOf(false) }
     var fillOptionsDialog by remember { mutableStateOf(false) }
     var mirrorDirection by remember { mutableStateOf("vertical") }
     var mirrorCount by remember { mutableIntStateOf(6) }
@@ -875,7 +876,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onSelection = { rect -> edit("SELECTION_CREATE", rect) }
                     view.onFill = { x, y ->
                         perform { store.fillContiguous("AWEI", x, y, color,
-                            tolerance = fillTolerance, referenceAllLayers = fillReferenceAll) }
+                            tolerance = fillTolerance, referenceAllLayers = fillReferenceAll,
+                            erase = fillErase) }
                     }
                     view.onCrop = { rect ->
                         val x = rect.getDouble("x").toInt().coerceIn(0, state.getInt("width"))
@@ -1622,7 +1624,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         Switch(checked = fillReferenceAll,
                             onCheckedChange = { fillReferenceAll = it })
                     }
-                    Text("填色仍写入当前图层；容差按每个 RGBA 通道比较。",
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("擦除连续区域", modifier = Modifier.weight(1f))
+                        Switch(checked = fillErase, onCheckedChange = { fillErase = it })
+                    }
+                    Text("填色或擦除只修改当前图层；容差按每个 RGBA 通道比较。",
                         style = MaterialTheme.typography.bodySmall)
                 }
             }, confirmButton = {

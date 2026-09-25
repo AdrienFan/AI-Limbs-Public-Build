@@ -387,7 +387,7 @@ internal class ArtStore(private val root: File) {
                     layer.optJSONArray("contentOrder")?.let { order ->
                         for (n in 0 until order.length()) {
                             val event = order.getJSONObject(n)
-                            if (event.optString("kind") == "paste") used.add(event.getString("asset"))
+                            if (event.optString("kind") in setOf("paste", "erase")) used.add(event.getString("asset"))
                         }
                     }
                 }
@@ -490,7 +490,7 @@ internal class ArtStore(private val root: File) {
             baseLayers.getJSONObject(i).optJSONArray("contentOrder")?.let { order ->
                 for (n in 0 until order.length()) {
                     val event = order.getJSONObject(n)
-                    if (event.optString("kind") == "paste") {
+                    if (event.optString("kind") in setOf("paste", "erase")) {
                         val old = event.getString("asset")
                         require(old in importedAssets) { "工程剪贴资源缺失" }
                         event.put("asset", assetIds.getValue(old))
@@ -616,7 +616,8 @@ internal class ArtStore(private val root: File) {
                 "PIXEL_EDIT" -> if (operation.getJSONObject("parameters").optString("mode") == "CLEAR")
                     "清除像素" else "填充像素"
                 "PIXEL_PASTE" -> if (operation.getJSONObject("parameters")
-                    .optString("action") == "FILL_CONTIGUOUS") "填充相连区域" else "粘贴像素"
+                    .optString("action") == "FILL_CONTIGUOUS") "填充相连区域" else if (operation.getJSONObject("parameters")
+                    .optString("action") == "FILL_CONTIGUOUS_ERASE") "擦除相连区域" else "粘贴像素"
                 "LAYER_COPY" -> "复制图层"
                 "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
                 "DOCUMENT_RENAME" -> "重命名工程"
@@ -711,7 +712,8 @@ internal class ArtStore(private val root: File) {
                 val order = contentOrder(layer)
                 if (type == "PIXEL_PASTE") {
                     validateId(p.getString("asset"))
-                    order.put(JSONObject().put("kind", "paste").put("asset", p.getString("asset"))
+                    val kind = if (p.optString("action") == "FILL_CONTIGUOUS_ERASE") "erase" else "paste"
+                    order.put(JSONObject().put("kind", kind).put("asset", p.getString("asset"))
                         .put("x", p.getInt("x")).put("y", p.getInt("y")))
                 } else {
                     val x = p.getInt("x"); val y = p.getInt("y")
@@ -1261,12 +1263,13 @@ internal class ArtStore(private val root: File) {
      */
     fun fillContiguous(actor: String, x: Int, y: Int, color: String,
                        expectedRevision: Int? = null, tolerance: Int = 0,
-                       referenceAllLayers: Boolean = false): JSONObject = locked {
+                       referenceAllLayers: Boolean = false,
+                       erase: Boolean = false): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         requireColor(color)
         require(tolerance in 0..100) { "颜色容差必须在 0–100 之间" }
         val fill = Color.parseColor(color)
-        require(Color.alpha(fill) > 0) { "透明连通区域填充暂不支持" }
+        if (!erase) require(Color.alpha(fill) > 0) { "填充色不能完全透明；擦除区域请启用擦除模式" }
         val doc = loadCurrent()
         if (expectedRevision != null) require(doc.getJSONArray("operations").length() == expectedRevision) {
             "工程已由另一位编辑者更新，请重新读取画布"
@@ -1312,7 +1315,7 @@ internal class ArtStore(private val root: File) {
         val source = ArtRenderer.render(this, view)
         try {
             val target = source.getPixel(x, y)
-            if (!referenceAllLayers && tolerance == 0 && target == fill &&
+            if (!erase && !referenceAllLayers && tolerance == 0 && target == fill &&
                 Color.alpha(fill) == 255) return@locked snapshot(doc)
             val channelLimit = tolerance * 255 / 100
             // Use a separate visited mask: mutating reference pixels is unsafe as
@@ -1368,7 +1371,8 @@ internal class ArtStore(private val root: File) {
                 for (row in minY..maxY) {
                     for (column in minX..maxX) {
                         if (visited.get(row * canvasWidth + column))
-                            clipped.setPixel(column - minX, row - minY, fill)
+                            clipped.setPixel(column - minX, row - minY,
+                                if (erase) Color.WHITE else fill)
                     }
                 }
                 ByteArrayOutputStream().use { stream ->
@@ -1381,7 +1385,7 @@ internal class ArtStore(private val root: File) {
             atomicBytes(assetFile(asset), bytes)
             appendToCurrent(actor, "PIXEL_PASTE", JSONObject()
                 .put("asset", asset).put("layerId", layer.getString("id"))
-                .put("action", "FILL_CONTIGUOUS")
+                .put("action", if (erase) "FILL_CONTIGUOUS_ERASE" else "FILL_CONTIGUOUS")
                 .put("x", minX).put("y", minY))
         } finally { source.recycle() }
     }

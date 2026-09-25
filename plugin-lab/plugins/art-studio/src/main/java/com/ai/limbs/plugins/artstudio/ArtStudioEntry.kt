@@ -124,10 +124,11 @@ class ArtStudioEntry : InProcessPluginEntry {
                 .put("degrees", Math.toDegrees(kotlin.math.atan2(y1 - y0, x1 - x0)))
         }
         capability("fill.contiguous", "填充当前图层连通区域", write,
-            "连通填色，遵循当前选区；tolerance 为每个 RGBA 通道允许的最大差值百分比（0–100），referenceAllLayers 决定从所有可见层取参考色。目标仍是当前可编辑根图层。") { p ->
+            "连通填色，遵循当前选区；tolerance 为每个 RGBA 通道允许的最大差值百分比（0–100），referenceAllLayers 决定从所有可见层取参考色；erase=true 时擦除匹配区域的当前图层像素。目标仍是当前可编辑根图层。") { p ->
             store.fillContiguous("LANER", p.getInt("x"), p.getInt("y"), p.getString("color"),
                 if (p.has("expectedRevision")) p.getInt("expectedRevision") else null,
-                p.optInt("tolerance", 0), p.optBoolean("referenceAllLayers", false))
+                p.optInt("tolerance", 0), p.optBoolean("referenceAllLayers", false),
+                p.optBoolean("erase", false))
         }
         capability("color.sample", "从画布合成结果取色", read,
             "输入画布像素坐标；可选 radius=0–32、blend=0–100。sampleMerged=false 时传根绘画／图像层 layerId；blend<100 时需传当前 baseColor（#AARRGGBB），返回与左侧取色工具相同的颜色。") { p ->
