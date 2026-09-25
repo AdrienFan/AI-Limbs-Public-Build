@@ -91,7 +91,6 @@ class VisualManagerEntry : InProcessPluginEntry {
                     id = "$VISUAL_PLUGIN_ID.$name",
                     displayName = title,
                     description = description,
-                    invokeAliases = listOf("visual.$name"),
                     keywords = listOf("视觉", "屏幕", "摄像头", "共享"),
                     parameters = parameters,
                     inputSchema = JSONObject()
