@@ -21,8 +21,8 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.lazy.LazyColumn
 
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.layout.*
@@ -38,8 +38,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
-import androidx.compose.ui.input.pointer.pointerInteropFilter
-
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.semantics.contentDescription
@@ -228,7 +226,7 @@ private class StudioMenuBridge {
 }
 
 private enum class RightPane { COLOR, LAYERS, BRUSHES }
-@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class)
+@OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
 
@@ -799,16 +797,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 Triple("zoom", "缩放画布", "⌕"),
                                 Triple("measure", "测量距离", "⌁")
                             )
-                            var hoveredTool by remember { mutableStateOf<String?>(null) }
-                            var touchToolHint by remember { mutableStateOf<String?>(null) }
                             val selectedToolName = availableTools.firstOrNull { it.first == tool }?.second ?: tool
-                            val displayedToolName = hoveredTool ?: touchToolHint ?: selectedToolName
 
                             Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 4.dp, end = 2.dp),
                                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                                 Box(Modifier.weight(1f).fillMaxHeight(),
                                     contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                    Text(displayedToolName,
+                                    Text(selectedToolName,
                                         style = MaterialTheme.typography.labelSmall,
                                         textAlign = TextAlign.Center,
                                         maxLines = 2,
@@ -848,39 +843,31 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                     Row(Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceEvenly) {
                                         pair.forEach { (id, label, glyph) ->
-                                            Surface(Modifier.size(40.dp)
-                                                .pointerInteropFilter { event ->
-                                                    when (event.actionMasked) {
-                                                        MotionEvent.ACTION_HOVER_ENTER -> hoveredTool = label
-                                                        MotionEvent.ACTION_HOVER_EXIT -> if (hoveredTool == label)
-                                                            hoveredTool = null
+                                            TooltipBox(
+                                                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                                                tooltip = {
+                                                    PlainTooltip {
+                                                        Text(label)
                                                     }
-                                                    false
-                                                }
-                                                .combinedClickable(
-                                                    onClickLabel = label,
-                                                    onLongClickLabel = "显示$label",
-                                                    onLongClick = {
-                                                        touchToolHint = label
-                                                        scope.launch {
-                                                            delay(1200)
-                                                            if (touchToolHint == label) touchToolHint = null
-                                                        }
-                                                    },
-                                                    onClick = {
-                                                        touchToolHint = null
+                                                },
+                                                state = rememberTooltipState(),
+                                                enableUserInput = true
+                                            ) {
+                                                Surface(Modifier.size(40.dp)
+                                                    .clickable(onClickLabel = label) {
                                                         tool = id
-                                                    }),
-                                                shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
-                                                color = if (tool == id)
-                                                    MaterialTheme.colorScheme.primaryContainer
-                                                else MaterialTheme.colorScheme.surfaceVariant) {
-                                                Box(Modifier.fillMaxSize(),
-                                                    contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                    Text(glyph, style = MaterialTheme.typography.titleMedium,
-                                                        modifier = Modifier.semantics {
-                                                            contentDescription = label
-                                                        })
+                                                    },
+                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                                                    color = if (tool == id)
+                                                        MaterialTheme.colorScheme.primaryContainer
+                                                    else MaterialTheme.colorScheme.surfaceVariant) {
+                                                    Box(Modifier.fillMaxSize(),
+                                                        contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                        Text(glyph, style = MaterialTheme.typography.titleMedium,
+                                                            modifier = Modifier.semantics {
+                                                                contentDescription = label
+                                                            })
+                                                    }
                                                 }
                                             }
                                         }
@@ -900,7 +887,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             val activePaneBodyHeight = (
                                 accordionViewportHeight - paneHeaderHeight * 3 - 2.dp
                             ).coerceAtLeast(120.dp)
-                            val rightDrawerScroll = rememberScrollState()
 
                             Column(Modifier.fillMaxSize()) {
                                 Row(Modifier.fillMaxWidth().height(40.dp),
@@ -926,120 +912,135 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         style = MaterialTheme.typography.labelSmall)
                                 }
 
-                                Column(Modifier.fillMaxWidth().weight(1f)
-                                    .verticalScroll(rightDrawerScroll)) {
-                                    Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                        .background(if (activeRightPane == RightPane.COLOR)
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                            else MaterialTheme.colorScheme.surface)
-                                        .clickable(onClickLabel = "展开多功能拾色器") {
-                                            activeRightPane = RightPane.COLOR
-                                        }.padding(start = 10.dp),
-                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                        Text("多功能拾色器", style = MaterialTheme.typography.titleSmall,
-                                            modifier = Modifier.weight(1f))
-                                        Box(Modifier.size(36.dp)
-                                            .clickable(onClickLabel = "隐藏多功能拾色器（待视图菜单完成）") { }
-                                            .semantics {
-                                                contentDescription = "隐藏多功能拾色器（待视图菜单完成）"
-                                            },
-                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                            Text("×", style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                LazyColumn(Modifier.fillMaxWidth().weight(1f)) {
+                                    item(key = "color_header") {
+                                        Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
+                                            .background(if (activeRightPane == RightPane.COLOR)
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                                else MaterialTheme.colorScheme.surface)
+                                            .clickable(onClickLabel = "展开多功能拾色器") {
+                                                activeRightPane = RightPane.COLOR
+                                            }.padding(start = 10.dp),
+                                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                            Text("多功能拾色器", style = MaterialTheme.typography.titleSmall,
+                                                modifier = Modifier.weight(1f))
+                                            Box(Modifier.size(36.dp)
+                                                .clickable(onClickLabel = "隐藏多功能拾色器（待视图菜单完成）") { }
+                                                .semantics {
+                                                    contentDescription = "隐藏多功能拾色器（待视图菜单完成）"
+                                                },
+                                                contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                Text("×", style = MaterialTheme.typography.titleMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
                                         }
                                     }
                                     if (activeRightPane == RightPane.COLOR) {
-                                        Column(Modifier.fillMaxWidth().height(activePaneBodyHeight)
-                                            .verticalScroll(rememberScrollState())
-                                            .padding(horizontal = 10.dp, vertical = 8.dp),
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                            AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
-                                                modifier = Modifier.fillMaxWidth().height(285.dp),
-                                                update = { picker ->
-                                                    picker.selectedColor = Color.parseColor(color)
-                                                    picker.onColorSelected = { selected ->
-                                                        color = String.format(java.util.Locale.ROOT, "#%08X", selected)
-                                                        colorHexInput = color
-                                                    }
-                                                })
-                                            Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                                Box(Modifier.size(28.dp).background(
-                                                    androidx.compose.ui.graphics.Color(Color.parseColor(color))))
-                                                Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
-                                            }
-                                            OutlinedTextField(colorHexInput, { input ->
-                                                colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
-                                                if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
-                                                    color = colorHexInput
+                                        item(key = "color_body") {
+                                            Column(Modifier.fillMaxWidth().height(activePaneBodyHeight)
+                                                .verticalScroll(rememberScrollState())
+                                                .padding(horizontal = 10.dp, vertical = 8.dp),
+                                                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                AndroidView(factory = { ctx -> StudioColorSelector(ctx) },
+                                                    modifier = Modifier.fillMaxWidth().height(285.dp),
+                                                    update = { picker ->
+                                                        picker.selectedColor = Color.parseColor(color)
+                                                        picker.onColorSelected = { selected ->
+                                                            color = String.format(java.util.Locale.ROOT, "#%08X", selected)
+                                                            colorHexInput = color
+                                                        }
+                                                    })
+                                                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                    Box(Modifier.size(28.dp).background(
+                                                        androidx.compose.ui.graphics.Color(Color.parseColor(color))))
+                                                    Text("当前画笔颜色", style = MaterialTheme.typography.bodySmall)
                                                 }
-                                            }, label = { Text("#AARRGGBB") }, singleLine = true,
-                                                modifier = Modifier.fillMaxWidth())
-                                            Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
-                                                style = MaterialTheme.typography.bodySmall)
+                                                OutlinedTextField(colorHexInput, { input ->
+                                                    colorHexInput = input.uppercase(java.util.Locale.ROOT).take(9)
+                                                    if (colorHexInput.matches(Regex("#[0-9A-F]{8}"))) {
+                                                        color = colorHexInput
+                                                    }
+                                                }, label = { Text("#AARRGGBB") }, singleLine = true,
+                                                    modifier = Modifier.fillMaxWidth())
+                                                Text("色环选择色相，三角区调整饱和度与明度；下方两条色条也可拖动。",
+                                                    style = MaterialTheme.typography.bodySmall)
+                                            }
                                         }
                                     }
 
-                                    Spacer(Modifier.fillMaxWidth().height(1.dp)
-                                        .background(MaterialTheme.colorScheme.outlineVariant))
+                                    item(key = "divider_1") {
+                                        Spacer(Modifier.fillMaxWidth().height(1.dp)
+                                            .background(MaterialTheme.colorScheme.outlineVariant))
+                                    }
 
-                                    Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                        .background(if (activeRightPane == RightPane.LAYERS)
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                            else MaterialTheme.colorScheme.surface)
-                                        .clickable(onClickLabel = "展开图层") {
-                                            activeRightPane = RightPane.LAYERS
-                                        }.padding(start = 10.dp),
-                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                        Text("图层", style = MaterialTheme.typography.titleSmall,
-                                            modifier = Modifier.weight(1f))
-                                        Box(Modifier.size(36.dp)
-                                            .clickable(onClickLabel = "隐藏图层（待视图菜单完成）") { }
-                                            .semantics {
-                                                contentDescription = "隐藏图层（待视图菜单完成）"
-                                            },
-                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                            Text("×", style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    item(key = "layers_header") {
+                                        Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
+                                            .background(if (activeRightPane == RightPane.LAYERS)
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                                else MaterialTheme.colorScheme.surface)
+                                            .clickable(onClickLabel = "展开图层") {
+                                                activeRightPane = RightPane.LAYERS
+                                            }.padding(start = 10.dp),
+                                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                            Text("图层", style = MaterialTheme.typography.titleSmall,
+                                                modifier = Modifier.weight(1f))
+                                            Box(Modifier.size(36.dp)
+                                                .clickable(onClickLabel = "隐藏图层（待视图菜单完成）") { }
+                                                .semantics {
+                                                    contentDescription = "隐藏图层（待视图菜单完成）"
+                                                },
+                                                contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                Text("×", style = MaterialTheme.typography.titleMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
                                         }
                                     }
                                     if (activeRightPane == RightPane.LAYERS) {
-                                        Box(Modifier.fillMaxWidth().height(activePaneBodyHeight)
-                                            .clipToBounds()) {
-                                            StudioLayersPanel(state = state, selectedId = selected,
-                                                revision = revision, busy = busy, store = store,
-                                                onEdit = ::edit)
+                                        item(key = "layers_body") {
+                                            Box(Modifier.fillMaxWidth().height(activePaneBodyHeight)
+                                                .clipToBounds()) {
+                                                StudioLayersPanel(state = state, selectedId = selected,
+                                                    revision = revision, busy = busy, store = store,
+                                                    onEdit = ::edit)
+                                            }
                                         }
                                     }
 
-                                    Spacer(Modifier.fillMaxWidth().height(1.dp)
-                                        .background(MaterialTheme.colorScheme.outlineVariant))
+                                    item(key = "divider_2") {
+                                        Spacer(Modifier.fillMaxWidth().height(1.dp)
+                                            .background(MaterialTheme.colorScheme.outlineVariant))
+                                    }
 
-                                    Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
-                                        .background(if (activeRightPane == RightPane.BRUSHES)
-                                            MaterialTheme.colorScheme.surfaceVariant
-                                            else MaterialTheme.colorScheme.surface)
-                                        .clickable(onClickLabel = "展开笔刷预设") {
-                                            activeRightPane = RightPane.BRUSHES
-                                        }.padding(start = 10.dp),
-                                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                                        Text("笔刷预设", style = MaterialTheme.typography.titleSmall,
-                                            modifier = Modifier.weight(1f))
-                                        Box(Modifier.size(36.dp)
-                                            .clickable(onClickLabel = "隐藏笔刷预设（待视图菜单完成）") { }
-                                            .semantics {
-                                                contentDescription = "隐藏笔刷预设（待视图菜单完成）"
-                                            },
-                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                            Text("×", style = MaterialTheme.typography.titleMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    item(key = "brush_header") {
+                                        Row(Modifier.fillMaxWidth().height(paneHeaderHeight)
+                                            .background(if (activeRightPane == RightPane.BRUSHES)
+                                                MaterialTheme.colorScheme.surfaceVariant
+                                                else MaterialTheme.colorScheme.surface)
+                                            .clickable(onClickLabel = "展开笔刷预设") {
+                                                activeRightPane = RightPane.BRUSHES
+                                            }.padding(start = 10.dp),
+                                            verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                            Text("笔刷预设", style = MaterialTheme.typography.titleSmall,
+                                                modifier = Modifier.weight(1f))
+                                            Box(Modifier.size(36.dp)
+                                                .clickable(onClickLabel = "隐藏笔刷预设（待视图菜单完成）") { }
+                                                .semantics {
+                                                    contentDescription = "隐藏笔刷预设（待视图菜单完成）"
+                                                },
+                                                contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                Text("×", style = MaterialTheme.typography.titleMedium,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                            }
                                         }
                                     }
                                     if (activeRightPane == RightPane.BRUSHES) {
-                                        Box(Modifier.fillMaxWidth().height(activePaneBodyHeight),
-                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                            Text("笔刷预设待添加",
-                                                style = MaterialTheme.typography.bodySmall)
+                                        item(key = "brush_body") {
+                                            Box(Modifier.fillMaxWidth().height(activePaneBodyHeight),
+                                                contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                Text("笔刷预设待添加",
+                                                    style = MaterialTheme.typography.bodySmall)
+                                            }
                                         }
                                     }
                                 }
