@@ -44,7 +44,8 @@ class LocalTerminalProvider(
         val outputChannel: Channel<String>,
         val readJob: kotlinx.coroutines.Job,
         val mutex: Mutex = Mutex(),
-        val activeProcessGroupId: AtomicLong = AtomicLong(-1L)
+        val activeProcessGroupId: AtomicLong = AtomicLong(-1L),
+        val rootProcessId: AtomicLong = AtomicLong(-1L)
     )
 
     private val filesDir: File = context.filesDir
@@ -64,6 +65,7 @@ class LocalTerminalProvider(
         private const val BEGIN_MARKER_PREFIX = "__OPERIT_HIDDEN_BEGIN__:"
         private const val END_MARKER_PREFIX = "__OPERIT_HIDDEN_END__:"
         private const val PID_MARKER_PREFIX = "__OPERIT_HIDDEN_PID__:"
+        private const val ROOT_PID_MARKER_PREFIX = "__OPERIT_HIDDEN_ROOT_PID__:"
         private const val HIDDEN_EXEC_CANCEL_SETTLE_TIMEOUT_MS = 3_000L
         private const val HIDDEN_EXEC_SHELL_TERM_TIMEOUT_MS = 1_500L
         private const val HIDDEN_EXEC_SHELL_KILL_TIMEOUT_MS = 1_500L
@@ -276,6 +278,11 @@ class LocalTerminalProvider(
                                 ?: break
                         logHiddenExecChunk(shell.key, "ready", chunk)
                         builder.append(chunk)
+                        if (shell.rootProcessId.get() <= 0L) {
+                            extractHiddenExecRootPid(builder.toString())?.let { rootPid ->
+                                shell.rootProcessId.set(rootPid)
+                            }
+                        }
                         if (builder.indexOf(READY_MARKER) >= 0) {
                             break
                         }
@@ -482,6 +489,20 @@ class LocalTerminalProvider(
         return pidText?.toLongOrNull()
     }
 
+    private fun extractHiddenExecRootPid(rawOutput: String): Long? {
+        val markerIndex = rawOutput.indexOf(ROOT_PID_MARKER_PREFIX)
+        if (markerIndex < 0) {
+            return null
+        }
+        val pidText =
+            rawOutput
+                .substring(markerIndex + ROOT_PID_MARKER_PREFIX.length)
+                .lineSequence()
+                .map { it.trim() }
+                .firstOrNull { it.isNotEmpty() }
+        return pidText?.toLongOrNull()
+    }
+
     private fun extractHiddenExecOutput(rawOutput: String, token: String): String {
         val beginMarker = "$BEGIN_MARKER_PREFIX$token"
         val beginIndex = rawOutput.indexOf(beginMarker)
@@ -526,7 +547,7 @@ class LocalTerminalProvider(
 
     private fun reapHiddenExecShell(shell: HiddenExecShell) {
         val process = shell.process
-        val rootPid = runCatching { process.pid() }.getOrDefault(-1L)
+        val rootPid = shell.rootProcessId.get()
         val descendants =
             if (rootPid > 0L) collectProcessDescendants(rootPid) else emptyList()
 
@@ -625,7 +646,9 @@ class LocalTerminalProvider(
 
     private fun buildHiddenExecStartupCommand(): Array<String> {
         val bash = File(binDir, "bash").absolutePath
-        val startScript = "source \$HOME/common.sh && login_ubuntu '/bin/bash --noprofile --norc'"
+        val startScript =
+            "printf '%s%s\\n' '$ROOT_PID_MARKER_PREFIX' \"\$\$\"; " +
+                "source \$HOME/common.sh && login_ubuntu '/bin/bash --noprofile --norc'"
         return arrayOf(bash, "-c", startScript)
     }
 
