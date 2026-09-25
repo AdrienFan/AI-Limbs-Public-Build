@@ -609,29 +609,45 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             closeDialog = true
         } else finishCurrent(save = false, discard = false, exit = exit)
     }
-    SideEffect {
-        menuBridge.busy = busy
-        menuBridge.hasDocument = current != null
-        menuBridge.canSave = current?.optBoolean("dirty") == true
-        menuBridge.hasRecent = recentDocs.length() > 0
-        menuBridge.canUndo = current?.optBoolean("canUndo") == true
+    // Observe every Android menu bridge state during composition. SideEffect itself does
+    // not register snapshot reads, so states that change after the last document closes
+    // must be read here to guarantee a follow-up recomposition and bridge refresh.
+    val menuBusy = busy
+    val menuHasDocument = current != null
+    val menuCanSave = current?.optBoolean("dirty") == true
+    val menuHasRecent = recentDocs.length() > 0
+    val menuCanUndo = current?.optBoolean("canUndo") == true
+    val menuCanRedo = current?.optBoolean("canRedo") == true
+    val menuUndoLabel = current?.optString("undoLabel") ?: ""
+    val menuRedoLabel = current?.optString("redoLabel") ?: ""
+    val menuHasClipboard = clipboardSize.first > 0 && clipboardSize.second > 0
+    val menuHasCanvasCursor = canvasCursor != null
+    val menuActive = selectedLayer
+    val menuCanCopyPixels = current != null && menuActive != null &&
+        menuActive.optString("kind") in setOf("paint", "image") &&
+        menuActive.optString("parentId").isBlank() && menuActive.optBoolean("visible")
+    val menuCanEditPixels = current != null && menuActive != null &&
+        menuActive.optString("kind") in setOf("paint", "image") &&
+        menuActive.optString("parentId").isBlank() && menuActive.optBoolean("visible") &&
+        !menuActive.optBoolean("locked") &&
+        menuActive.optDouble("x") == 0.0 && menuActive.optDouble("y") == 0.0 &&
+        menuActive.optDouble("scale") == 1.0 && menuActive.optDouble("rotation") == 0.0
+    val menuClipboardCanNew = clipboardSize.first in 64..4096 && clipboardSize.second in 64..4096
 
-        menuBridge.canRedo = current?.optBoolean("canRedo") == true
-        menuBridge.undoLabel = current?.optString("undoLabel") ?: ""
-        menuBridge.redoLabel = current?.optString("redoLabel") ?: ""
-        menuBridge.hasClipboard = clipboardSize.first > 0 && clipboardSize.second > 0
-        menuBridge.hasCanvasCursor = canvasCursor != null
-        val active = selectedLayer
-        menuBridge.canCopyPixels = current != null && active != null &&
-            active.optString("kind") in setOf("paint", "image") &&
-            active.optString("parentId").isBlank() && active.optBoolean("visible")
-        menuBridge.canEditPixels = current != null && active != null &&
-            active.optString("kind") in setOf("paint", "image") &&
-            active.optString("parentId").isBlank() && active.optBoolean("visible") &&
-            !active.optBoolean("locked") &&
-            active.optDouble("x") == 0.0 && active.optDouble("y") == 0.0 &&
-            active.optDouble("scale") == 1.0 && active.optDouble("rotation") == 0.0
-        menuBridge.clipboardCanNew = clipboardSize.first in 64..4096 && clipboardSize.second in 64..4096
+    SideEffect {
+        menuBridge.busy = menuBusy
+        menuBridge.hasDocument = menuHasDocument
+        menuBridge.canSave = menuCanSave
+        menuBridge.hasRecent = menuHasRecent
+        menuBridge.canUndo = menuCanUndo
+        menuBridge.canRedo = menuCanRedo
+        menuBridge.undoLabel = menuUndoLabel
+        menuBridge.redoLabel = menuRedoLabel
+        menuBridge.hasClipboard = menuHasClipboard
+        menuBridge.hasCanvasCursor = menuHasCanvasCursor
+        menuBridge.canCopyPixels = menuCanCopyPixels
+        menuBridge.canEditPixels = menuCanEditPixels
+        menuBridge.clipboardCanNew = menuClipboardCanNew
         menuBridge.onEditCommand = { command ->
             if (!busy) when (command) {
                 101 -> perform { store.history("AWEI", redo = false) }
