@@ -20,6 +20,13 @@ jobs:
           persist-credentials: false
       - name: Verify source and manifest versions
         run: python3 tools/plugin_lab/source_provenance.py check --output dist/source-inventory.json
+      - name: Resolve Art Studio package version
+        id: art_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("plugin-lab/packages/art-studio/plugin.json"))["version"])')"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - name: Set up Java
         uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
         with:
@@ -44,13 +51,13 @@ jobs:
           AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
         run: python3 tools/plugin_lab/package_art_studio.py
       - name: Record source provenance
-        run: python3 tools/plugin_lab/source_provenance.py record --manifest plugin-lab/packages/art-studio/plugin.json --package dist/AI-Limbs-Art-Studio-v0.2.1.ailp
+        run: python3 tools/plugin_lab/source_provenance.py record --manifest plugin-lab/packages/art-studio/plugin.json --package dist/AI-Limbs-Art-Studio-v${{ steps.art_version.outputs.value }}.ailp
       - name: Upload plugin
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: art-studio-v0.2.1-${{ github.run_number }}
+          name: art-studio-v${{ steps.art_version.outputs.value }}-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-Art-Studio-v0.2.1.ailp
-            dist/AI-Limbs-Art-Studio-v0.2.1.ailp.sha256
-            dist/AI-Limbs-Art-Studio-v0.2.1.ailp.source.json
+            dist/AI-Limbs-Art-Studio-v${{ steps.art_version.outputs.value }}.ailp
+            dist/AI-Limbs-Art-Studio-v${{ steps.art_version.outputs.value }}.ailp.sha256
+            dist/AI-Limbs-Art-Studio-v${{ steps.art_version.outputs.value }}.ailp.source.json
           if-no-files-found: error

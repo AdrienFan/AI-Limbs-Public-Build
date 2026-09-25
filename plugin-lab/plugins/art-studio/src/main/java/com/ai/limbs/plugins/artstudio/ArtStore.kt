@@ -158,20 +158,27 @@ internal class ArtStore(private val root: File) {
         if (!externalLinks.isFile) return null
         return JSONObject(externalLinks.readText()).optJSONObject(id)
     }
-
     fun recent(): JSONArray = locked {
         val ids = if (recentIndex.isFile) JSONArray(recentIndex.readText()) else JSONArray()
         val result = JSONArray()
         for (i in 0 until ids.length()) {
-            val id = ids.getString(i)
-            val file = draft(id)
-            if (!file.isFile) continue
-            val state = replay(JSONObject(file.readText()))
-            result.put(JSONObject().put("id", id).put("name", state.getString("name"))
-                .put("width", state.getInt("width")).put("height", state.getInt("height")))
+            val item = runCatching {
+                val id = ids.getString(i)
+                val file = draft(id)
+                if (!file.isFile) null
+                else {
+                    val state = replay(JSONObject(file.readText()))
+                    JSONObject().put("id", id)
+                        .put("name", state.optString("name", "未命名工程"))
+                        .put("width", state.getInt("width"))
+                        .put("height", state.getInt("height"))
+                }
+            }.getOrNull()
+            if (item != null) result.put(item)
         }
         result
     }
+
 
     fun sessions(): JSONArray = locked {
         if (sessionIndex.isFile) JSONArray(sessionIndex.readText()) else JSONArray()
