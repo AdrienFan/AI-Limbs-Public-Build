@@ -375,6 +375,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("opacity", "number", true), p("tool", optional = true),
             p("fillShape", "boolean", true), p("gradientMode", optional = true),
             p("gradientReverse", "boolean", true),
+            p("gradientEndColor", optional = true),
             p("mirrorDirection", optional = true), p("mirrorCount", "integer", true),
             p("mirrorRadius", "number", true), p("mirrorSeed", "integer", true),
             p("mirrorCenters", "array", true),

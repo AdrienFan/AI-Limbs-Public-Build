@@ -277,6 +277,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var bezierContinuous by remember { mutableStateOf(false) }
     var gradientMode by remember { mutableStateOf("linear") }
     var gradientReverse by remember { mutableStateOf(false) }
+    var gradientToColor by remember { mutableStateOf(false) }
+    var gradientEndInput by remember { mutableStateOf("#FFFFFFFF") }
+    var gradientEndColor by remember { mutableStateOf("#FFFFFFFF") }
     var gradientOptionsDialog by remember { mutableStateOf(false) }
     var newCanvas by remember { mutableStateOf(false) }
     var presentationDialog by remember { mutableStateOf(false) }
@@ -815,6 +818,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.fillShape = fillShape
                     view.bezierContinuous = bezierContinuous
                     view.gradientMode = gradientMode; view.gradientReverse = gradientReverse
+                    view.gradientEndColor = if (gradientToColor) gradientEndColor else null
                     view.sampleRadius = sampleRadius; view.sampleMerged = sampleMerged
                     view.onSampleCoordinate = { x, y ->
                         scope.launch {
@@ -854,8 +858,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 .put("axisY", state.getInt("height") * mirrorCenterY.toDouble())
                             if (tool in setOf("rectangle", "ellipse", "polygon"))
                                 stroke.put("fillShape", fillShape)
-                            if (tool == "gradient") stroke.put("gradientMode", gradientMode)
-                                .put("gradientReverse", gradientReverse)
+                            if (tool == "gradient") {
+                                stroke.put("gradientMode", gradientMode)
+                                    .put("gradientReverse", gradientReverse)
+                                if (gradientToColor) stroke.put("gradientEndColor", gradientEndColor)
+                            }
                             if (tool == "calligraphy") stroke.put("nibAngle", nibAngle.toDouble())
                             if (tool == "dyna") stroke.put("mass", dynaMass.toDouble())
                                 .put("drag", dynaDrag.toDouble())
@@ -1565,13 +1572,29 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     if (gradientOptionsDialog) {
         AlertDialog(onDismissRequest = { gradientOptionsDialog = false },
             title = { Text("渐变选项") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            text = { Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 FilterChip(selected = gradientMode == "linear",
                     onClick = { gradientMode = "linear" }, label = { Text("线性") })
                 FilterChip(selected = gradientMode == "radial",
                     onClick = { gradientMode = "radial" }, label = { Text("径向") })
                 FilterChip(selected = gradientMode == "angular",
                     onClick = { gradientMode = "angular" }, label = { Text("角度") })
+                FilterChip(selected = !gradientToColor,
+                    onClick = { gradientToColor = false }, label = { Text("前景色 → 透明") })
+                FilterChip(selected = gradientToColor,
+                    onClick = { gradientToColor = true }, label = { Text("前景色 → 终点色") })
+                if (gradientToColor) {
+                    OutlinedTextField(gradientEndInput, { gradientEndInput = it.take(9) },
+                        label = { Text("终点颜色 #AARRGGBB") }, singleLine = true)
+                    TextButton(onClick = {
+                        if (gradientEndInput.matches(Regex("#[0-9A-Fa-f]{8}")))
+                            gradientEndColor = gradientEndInput.uppercase(java.util.Locale.ROOT)
+                        else Toast.makeText(context, "请输入 #AARRGGBB 格式颜色",
+                            Toast.LENGTH_SHORT).show()
+                    }) { Text("应用终点色") }
+                    Text("当前终点色：$gradientEndColor", style = MaterialTheme.typography.bodySmall)
+                }
                 FilterChip(selected = gradientReverse,
                     onClick = { gradientReverse = !gradientReverse },
                     label = { Text("反向颜色") })
@@ -2008,6 +2031,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var opacity: Float = 1f
     var gradientMode: String = "linear"
     var gradientReverse: Boolean = false
+    var gradientEndColor: String? = null
     var fillShape: Boolean = false
     var bezierContinuous: Boolean = false
         set(value) {
@@ -2247,8 +2271,11 @@ private class StudioCanvas(context: Context) : View(context) {
                 .put("previewWidth", bitmap.width).put("previewHeight", bitmap.height)
             if (tool in setOf("rectangle", "ellipse", "polygon"))
                 preview.put("fillShape", fillShape)
-            if (tool == "gradient") preview.put("gradientMode", gradientMode)
-                .put("gradientReverse", gradientReverse)
+            if (tool == "gradient") {
+                preview.put("gradientMode", gradientMode)
+                    .put("gradientReverse", gradientReverse)
+                gradientEndColor?.let { preview.put("gradientEndColor", it) }
+            }
             if (tool == "calligraphy") preview.put("nibAngle", nibAngle.toDouble())
             if (tool == "dyna") preview.put("mass", dynaMass.toDouble())
                 .put("drag", dynaDrag.toDouble())

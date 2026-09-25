@@ -931,6 +931,8 @@ internal class ArtStore(private val root: File) {
                     val mode = p.optString("gradientMode", "linear")
                     require(mode in setOf("linear", "radial", "angular")) { "渐变模式无效" }
                     p.put("gradientMode", mode)
+                    if (p.has("gradientEndColor"))
+                        requireColor(p.getString("gradientEndColor"))
                     val a = points.getJSONArray(0); val b = points.getJSONArray(1)
                     require(kotlin.math.hypot(b.getDouble(0) - a.getDouble(0),
                         b.getDouble(1) - a.getDouble(1)) >= 0.01) { "请拖出渐变方向" }

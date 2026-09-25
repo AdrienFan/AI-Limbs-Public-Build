@@ -317,7 +317,12 @@ internal object ArtRenderer {
                 .toInt().coerceIn(0, 255)
             val startColor = (foreground and 0x00FFFFFF) or (alpha shl 24)
             paint.alpha = 255
-            val endColor = foreground and 0x00FFFFFF
+            val endColor = if (stroke.has("gradientEndColor")) {
+                val specified = Color.parseColor(stroke.getString("gradientEndColor"))
+                (specified and 0x00FFFFFF) or
+                    ((Color.alpha(specified) * stroke.optDouble("opacity", 1.0))
+                        .toInt().coerceIn(0, 255) shl 24)
+            } else foreground and 0x00FFFFFF
             val reverse = stroke.optBoolean("gradientReverse", false)
             val nearColor = if (reverse) endColor else startColor
             val farColor = if (reverse) startColor else endColor
