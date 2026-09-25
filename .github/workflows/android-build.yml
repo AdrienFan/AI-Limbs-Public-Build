@@ -597,11 +597,11 @@ jobs:
             plugin-lab/packages/sentinelx/extension.json
           if-no-files-found: error
           retention-days: 14
-
   ubuntu_system:
     needs: source_inventory
     if: inputs.target == 'ubuntu-system'
-    name: Build Ubuntu System v0.1.10 child extension
+    name: Build Ubuntu System child extension
+
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -633,7 +633,15 @@ jobs:
       - name: Configure Android SDK
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Resolve Ubuntu package version
+        id: ubuntu_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("plugin-lab/packages/ubuntu-system/extension.json"))["version"])')"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
       - name: Build Ubuntu System child extension payload
+
         shell: bash
         run: |
           set -euo pipefail
@@ -647,15 +655,16 @@ jobs:
         run: >-
           python3 tools/plugin_lab/source_provenance.py record
           --manifest plugin-lab/packages/ubuntu-system/extension.json
-          --package dist/AI-Limbs-Ubuntu-v0.1.10.ailx
+          --package dist/AI-Limbs-Ubuntu-v${{ steps.ubuntu_version.outputs.value }}.ailx
       - name: Upload Ubuntu System child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: ubuntu-system-v0.1.10-${{ github.run_number }}
+          name: ubuntu-system-v${{ steps.ubuntu_version.outputs.value }}-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-Ubuntu-v0.1.10.ailx
-            dist/AI-Limbs-Ubuntu-v0.1.10.ailx.sha256
-            dist/AI-Limbs-Ubuntu-v0.1.10.ailx.source.json
+            dist/AI-Limbs-Ubuntu-v${{ steps.ubuntu_version.outputs.value }}.ailx
+            dist/AI-Limbs-Ubuntu-v${{ steps.ubuntu_version.outputs.value }}.ailx.sha256
+            dist/AI-Limbs-Ubuntu-v${{ steps.ubuntu_version.outputs.value }}.ailx.source.json
+
             plugin-lab/extensions/ubuntu-system/build/outputs/apk/debug/*.apk
             plugin-lab/packages/ubuntu-system/extension.json
           if-no-files-found: error
