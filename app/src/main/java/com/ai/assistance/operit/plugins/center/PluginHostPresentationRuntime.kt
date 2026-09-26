@@ -300,12 +300,27 @@ internal class ResidentPluginPresentationRuntime(
 
         override fun createPluginContext(baseContext: Context): Context =
             PresentationArchiveContext(baseContext, runtimeEntryFile, runtimeClassLoader)
+        override fun registerPresentationProvider(
+            id: String,
+            payload: Any,
+            metadata: Map<String, String>
+        ): AutoCloseable {
+            val delegate =
+                providerDirectory.registerLocalPresentationProvider(pluginId, id, payload, metadata)
+            pageProviderHandles += delegate
+            return AutoCloseable {
+                if (pageProviderHandles.remove(delegate)) {
+                    delegate.close()
+                }
+            }
+        }
 
         override fun registerPageProvider(
             id: String,
             provider: com.ai.limbs.plugin.runtime.InProcessPageProvider,
             metadata: Map<String, String>
         ): AutoCloseable {
+
             val delegate =
                 providerDirectory.registerLocalPageProvider(pluginId, id, provider, metadata)
             pageProviderHandles += delegate

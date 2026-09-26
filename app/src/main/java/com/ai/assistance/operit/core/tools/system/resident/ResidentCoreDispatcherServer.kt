@@ -156,8 +156,12 @@ internal class ResidentCoreDispatcherServer(
                         requirePluginWorkerPeer(peer.pid)
                         dispatcher.invokePluginDelegated(request.optJSONObject("payload") ?: JSONObject())
                     }
-                    "plugin_service_describe" -> {
+                    "plugin_trust_attest" -> {
                         requirePluginWorkerPeer(peer.pid)
+                        dispatcher.attestPluginWorker(request.optJSONObject("payload") ?: JSONObject())
+                    }
+                    "plugin_service_describe" -> {
+
                         dispatcher.describePluginService(request.optJSONObject("payload") ?: JSONObject())
                     }
                     "plugin_service_invoke" -> {

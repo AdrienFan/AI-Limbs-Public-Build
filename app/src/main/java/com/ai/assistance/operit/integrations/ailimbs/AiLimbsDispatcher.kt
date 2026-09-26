@@ -10,13 +10,8 @@ import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ToolInvocation
 import com.ai.assistance.operit.data.model.ToolParameter
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatManagedTurnReplyRequiredException
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatRequest
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.center.PluginChatModeRuntime
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
 import java.text.SimpleDateFormat
@@ -41,7 +36,6 @@ class AiLimbsDispatcher(
     private val capabilityResolver = AiLimbsCapabilityResolver(appContext, policyEngine)
     private val developerCatalog = AiLimbsDeveloperCatalogService()
     private val storageIndex = AiLimbsStorageIndex(appContext)
-    private val lanerChat = LanerChatBridgeService.getInstance(appContext)
     private val subsystemIngressGate = AiLimbsSubsystemIngressGate(policyEngine)
     private val gson = Gson()
 
@@ -93,7 +87,8 @@ class AiLimbsDispatcher(
             is AiLimbsCoreRoute.Local -> executeLocalOperation(route.operation, args)
             is AiLimbsCoreRoute.ManagedDocumentRead -> executeManagedDocumentRead(route.documentId)
             is AiLimbsCoreRoute.ManagedDocumentWrite -> executeManagedDocumentWrite(route.documentId, args)
-            is AiLimbsCoreRoute.LanerChat -> executeLanerChatOperation(route.operation, args)
+            is AiLimbsCoreRoute.PluginChatModeCompatibility ->
+                executePluginChatModeCompatibility(route.operation, args)
             AiLimbsCoreRoute.ForwardHostTool ->
                 error("ForwardHostTool must be normalized to HostTool before dispatch")
                     .put("error_code", "INVALID_CAPABILITY_ROUTE")
@@ -210,26 +205,20 @@ class AiLimbsDispatcher(
             }
         }
 
-    private suspend fun executeLanerChatOperation(
-        operation: AiLimbsLanerChatOperation,
+    private suspend fun executePluginChatModeCompatibility(
+        operation: String,
         args: JSONObject
     ): JSONObject =
         when (operation) {
-            AiLimbsLanerChatOperation.STATUS -> lanerChatStatus()
-            AiLimbsLanerChatOperation.SESSION_OPEN -> lanerChatSessionOpen(args)
-            AiLimbsLanerChatOperation.SESSION_CLOSE -> lanerChatSessionClose(args)
-            AiLimbsLanerChatOperation.NOTIFICATION_CHECK -> lanerChatNotificationCheck(args)
-            AiLimbsLanerChatOperation.NOTIFICATION_WAIT -> lanerChatNotificationWait(args)
-            AiLimbsLanerChatOperation.INBOX_FETCH -> lanerChatInboxFetch(args)
-            AiLimbsLanerChatOperation.ATTACHMENT_FETCH -> lanerChatAttachmentFetch(args)
-            AiLimbsLanerChatOperation.TURN_STATUS -> lanerChatTurnStatus(args)
-            AiLimbsLanerChatOperation.TURN_CLAIM -> lanerChatTurnClaim(args)
-            AiLimbsLanerChatOperation.TURN_REPLY -> lanerChatTurnReply(args)
-            AiLimbsLanerChatOperation.TURN_RESOLVE -> lanerChatTurnResolve(args)
-            AiLimbsLanerChatOperation.TURN_CANCEL -> lanerChatTurnCancel(args)
-            AiLimbsLanerChatOperation.TURN_RESUME -> lanerChatTurnResume(args)
-            AiLimbsLanerChatOperation.LEGACY_REPLY -> lanerChatReply(args)
-            AiLimbsLanerChatOperation.SEND -> lanerChatSend(args)
+            "attachment.fetch" -> pluginChatModeAttachmentFetch(args)
+            "turn.reply" -> pluginChatModeTurnReply(args)
+            "reply" -> pluginChatModeReply(args)
+            "send" -> pluginChatModeSend(args)
+            else ->
+                flattenPluginChatCompatibility(
+                    operation,
+                    PluginChatModeRuntime.invokeBusinessCompatibility(operation, args)
+                )
         }
 
     private suspend fun executeHostTool(args: JSONObject): JSONObject {
@@ -347,7 +336,7 @@ class AiLimbsDispatcher(
                         "AI Limbs Execution Policy Engine",
                         "AI Limbs Storage Index",
                         "AI Limbs System Environment Capability Bus",
-                        "AI Limbs Laner Chat Bridge"
+                        "AI Limbs Plugin Chat Mode Compatibility"
                     )
                 )
             )
@@ -372,393 +361,287 @@ class AiLimbsDispatcher(
             .put("transport_neutral", true)
     }
 
-    private fun lanerChatStatus(): JSONObject {
-        // A remote status query is itself verified agent activity. Renew presence before snapshotting
-        // so a reconnecting Laner does not remain visibly stale until another chat operation occurs.
-        lanerChat.markAgentSeen()
-        val mailbox = lanerChat.snapshot()
-        val bridgePluginActive = isBridgePluginActive()
-        val agentPresence =
-            LanerChatContract.presenceState(
-                activeSessionId = mailbox.activeSessionId,
-                lastAgentSeenAtMs = mailbox.lastAgentSeenAtMs
-            )
-        val agentOnline = agentPresence != LanerChatPresenceState.WAITING
-        return ok()
-            .put("module", "AI Limbs Laner Chat Bridge")
-            .put("protocol_version", 6)
-            .put("provider_type_id", LanerChatContract.PROVIDER_TYPE_ID)
-            .put("bridge_provider", if (bridgePluginActive) "plugin.bridge" else JSONObject.NULL)
-            .put(
-                "bridge_phase",
-                when {
-                    agentOnline -> "ONLINE"
-                    bridgePluginActive -> "CONNECTING"
-                    else -> "STOPPED"
-                }
-            )
-            .put("active_session_id", mailbox.activeSessionId ?: JSONObject.NULL)
-            .put("bound_chat_id", mailbox.boundChatId ?: JSONObject.NULL)
-            .put("agent_session_online", agentOnline)
-            .put("agent_session_presence", agentPresence.wireValue)
-            .put("last_agent_seen_at", isoTime(mailbox.lastAgentSeenAtMs))
-            .put("latest_seq", mailbox.latestSeq)
-            .put("unread_count", mailbox.pendingCount)
-            .put("attention_count", mailbox.unresolvedCount)
-            .put("pending_reply_count", mailbox.unresolvedCount)
-            .put("answered_count", mailbox.answeredCount)
-            .put("resolved_no_reply_count", mailbox.resolvedNoReplyCount)
-            .put("canceled_count", mailbox.canceledCount)
-            .put("proactive_pending_count", mailbox.proactivePendingCount)
-            .put("proactive_delivered_count", mailbox.proactiveDeliveredCount)
-            .put("active_turn_id", mailbox.activeTurnId ?: JSONObject.NULL)
-            .put("active_turn_request_count", mailbox.activeTurnRequestCount)
-            .put("active_turn_highest_priority", mailbox.activeTurnHighestPriority?.name ?: JSONObject.NULL)
-            .put("scheduler_paused", mailbox.schedulerPaused)
-            .put("supports_proactive_send", true)
-            .put("supports_attachments", true)
-            .put("supports_priority", true)
-            .put("supports_turn_scheduler", true)
-            .put("supports_batch_claim", true)
-            .put("supports_no_reply_resolution", true)
-            .put("notification_contains_body", false)
-    }
+    private fun flattenPluginChatCompatibility(
+        operation: String,
+        raw: JSONObject
+    ): JSONObject {
+        val out = JSONObject(raw.toString())
 
-    private fun lanerChatSessionOpen(args: JSONObject): JSONObject {
-        val opened =
-            lanerChat.openSession(
-                requestedSessionId = args.optString("session_id").ifBlank { null },
-                agentSessionId = args.optString("agent_session_id").ifBlank { null }
-            )
-        return ok()
-            .put("session_id", opened.session.sessionId)
-            .put("status", opened.session.status.name)
-            .put("last_user_seq", opened.lastUserSeq)
-            .put("last_reply_seq", opened.lastReplySeq)
-            .put("pending_reply_count", opened.pendingRequests)
-            .put("bound_chat_id", opened.session.chatId ?: JSONObject.NULL)
-            .put("last_agent_seen_at", isoTime(opened.session.lastAgentSeenAtMs))
-    }
-
-    private fun lanerChatSessionClose(args: JSONObject): JSONObject {
-        val closed = lanerChat.closeSession(args.optString("session_id").ifBlank { null })
-        return ok()
-            .put("session_id", closed.sessionId)
-            .put("status", closed.status.name)
-            .put("closed_at", isoTime(closed.closedAtMs))
-    }
-
-    private fun lanerChatNotificationCheck(args: JSONObject): JSONObject {
-        val notification =
-            lanerChat.notification(
-                afterSeq = args.optLong("after_seq", 0L),
-                sessionId = args.optString("session_id").ifBlank { null }
-            )
-        return notificationJson(notification)
-    }
-
-    private suspend fun lanerChatNotificationWait(args: JSONObject): JSONObject {
-        val timeoutMs =
-            if (args.has("timeout_ms")) {
-                args.optLong("timeout_ms")
-            } else {
-                args.optLong("timeout_seconds", 25L).coerceIn(0L, 30L) * 1_000L
+        fun copy(source: JSONObject?) {
+            if (source == null) return
+            val keys = source.keys()
+            while (keys.hasNext()) {
+                val key = keys.next()
+                out.put(key, source.opt(key))
             }
-        val notification =
-            lanerChat.waitForNotification(
-                afterSeq = args.optLong("after_seq", 0L),
-                timeoutMs = timeoutMs,
-                sessionId = args.optString("session_id").ifBlank { null }
-            )
-        return notificationJson(notification)
-    }
+        }
 
-    private fun notificationJson(
-        notification: com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatNotification
-    ): JSONObject =
-        ok()
-            .put("event", notification.event)
-            .put("unread_count", notification.unreadCount)
-            .put("pending_reply_count", notification.pendingReplyCount)
-            .put("latest_seq", notification.latestSeq)
-            .put("highest_priority", notification.highestPriority?.name ?: JSONObject.NULL)
-            .put("high_count", notification.highCount)
-            .put("normal_count", notification.normalCount)
-            .put("low_count", notification.lowCount)
-            .put("contains_body", false)
+        when (operation) {
+            "status" -> {
+                copy(raw.optJSONObject("mailbox"))
+                val queue = raw.optJSONObject("queue")
+                if (queue != null) {
+                    out.put("unread_count", queue.optInt("pending_count", 0))
+                    out.put("attention_count", queue.optInt("unresolved_count", 0))
+                    out.put("pending_reply_count", queue.optInt("unresolved_count", 0))
+                    out.put("highest_priority", queue.opt("highest_priority") ?: JSONObject.NULL)
+                }
+            }
+            "session.open" -> {
+                val result = raw.optJSONObject("result")
+                copy(result)
+                val session = result?.optJSONObject("session")
+                copy(session)
+                if (session != null) {
+                    out.put("bound_chat_id", session.opt("chat_id") ?: JSONObject.NULL)
+                }
+                if (result != null) {
+                    out.put("pending_reply_count", result.optInt("pending_requests", 0))
+                }
+            }
+            "session.close" -> copy(raw.optJSONObject("session"))
+            "notification.check", "notification.wait" ->
+                copy(raw.optJSONObject("notification"))
+            "inbox.fetch",
+            "turn.status",
+            "turn.claim",
+            "turn.resolve",
+            "turn.cancel",
+            "turn.resume" -> copy(raw.optJSONObject("result"))
+        }
 
-    private fun lanerChatInboxFetch(args: JSONObject): JSONObject {
-        val fetched =
-            lanerChat.fetchInbox(
-                requestedSessionId = args.optString("session_id").ifBlank { null },
-                requestId = args.optString("request_id").ifBlank { null },
-                afterSeq = args.optLong("after_seq", 0L),
-                requestedLimit = args.optInt("limit", 10),
-                requestedPriority = parseLanerChatPriority(args.optString("priority"))
-            )
-        return ok()
-            .put("session_id", fetched.sessionId ?: JSONObject.NULL)
-            .put("latest_seq", fetched.latestSeq)
-            .put("messages", JSONArray(fetched.requests.map(::lanerChatRequestJson)))
-            .put("count", fetched.requests.size)
-    }
-
-    private fun lanerChatTurnStatus(args: JSONObject): JSONObject {
-        val status = lanerChat.turnStatus(args.optString("session_id").ifBlank { null })
-        return lanerChatTurnStatusJson(status)
-    }
-
-    private fun lanerChatTurnClaim(args: JSONObject): JSONObject {
-        val claimed = lanerChat.claimTurn(
-            requestedSessionId = args.optString("session_id").ifBlank { null },
-            requestedLimit = args.optInt("limit", LanerChatBridgeService.MAX_TURN_REQUESTS)
-        ) ?: return ok()
-            .put("claimed", false)
-            .put("reason", "no_eligible_messages")
-            .put("contains_body", false)
-        return ok()
-            .put("claimed", true)
-            .put("duplicate", claimed.duplicate)
-            .put("turn", lanerChatTurnJson(claimed.turn))
-            .put("messages", JSONArray(claimed.requests.map(::lanerChatRequestJson)))
-            .put("count", claimed.requests.size)
-            .put(
+        if (operation == "turn.claim" && out.optBoolean("claimed", false)) {
+            out.put(
                 "terminal_actions",
                 JSONArray(listOf("ai_limbs.chat.turn.reply", "ai_limbs.chat.turn.resolve"))
             )
-            .put("contains_body", true)
+        }
+        return out
     }
 
-    private suspend fun lanerChatTurnReply(args: JSONObject): JSONObject {
-        val replied = lanerChat.completeTurn(
-            turnId = args.optString("turn_id"),
-            replyId = args.optString("reply_id").ifBlank { null },
-            content = args.optString("content")
-        )
-        val chatId = replied.requests.firstOrNull()?.chatId
-            ?: throw IllegalStateException("Laner chat turn has no bound requests")
-        val core = ChatRuntimeHolder.getInstance(appContext).getCore(ChatRuntimeSlot.MAIN)
-        val chatHistory = core.getChatHistoryDelegate()
-        chatHistory.addMessageToChat(
-            message = ChatMessage(
-                sender = "ai",
-                content = replied.turn.replyContent.orEmpty(),
-                timestamp = replied.turn.chatMessageTimestamp,
-                roleName = LanerChatContract.DEFAULT_AGENT_NAME,
-                provider = LanerChatContract.PROVIDER_MODEL,
-                modelName = LanerChatContract.MODEL_ID,
-                completedAt = replied.turn.completedAtMs ?: System.currentTimeMillis()
-            ),
-            chatIdOverride = chatId
-        )
-        return ok()
-            .put("turn_id", replied.turn.turnId)
-            .put("reply_id", replied.turn.replyId ?: JSONObject.NULL)
-            .put("status", replied.turn.status.name)
-            .put("covered_request_ids", JSONArray(replied.turn.requestIds))
-            .put("covered_request_count", replied.turn.requestIds.size)
-            .put("duplicate", replied.duplicate)
-            .put("delivered_to_chat", true)
-            .put("completed_at", isoTime(replied.turn.completedAtMs))
-    }
-
-    private fun lanerChatTurnResolve(args: JSONObject): JSONObject {
-        val resolved = lanerChat.resolveTurnWithoutReply(args.optString("turn_id"))
-        return ok()
-            .put("turn_id", resolved.turn.turnId)
-            .put("status", resolved.turn.status.name)
-            .put("covered_request_ids", JSONArray(resolved.turn.requestIds))
-            .put("covered_request_count", resolved.turn.requestIds.size)
-            .put("duplicate", resolved.duplicate)
-            .put("delivered_to_chat", false)
-            .put("completed_at", isoTime(resolved.turn.completedAtMs))
-    }
-
-    private fun lanerChatTurnCancel(args: JSONObject): JSONObject {
-        val result = lanerChat.cancelActiveTurn(args.optString("session_id").ifBlank { null })
-        return ok()
-            .put("turn_id", result.turn?.turnId ?: JSONObject.NULL)
-            .put("turn_status", result.turn?.status?.name ?: JSONObject.NULL)
-            .put("scheduler_paused", result.schedulerPaused)
-            .put("changed", result.changed)
-            .put("requests_preserved", true)
-    }
-
-    private fun lanerChatTurnResume(args: JSONObject): JSONObject =
-        lanerChatTurnStatusJson(
-            lanerChat.resumeScheduler(args.optString("session_id").ifBlank { null })
-        )
-
-    private fun lanerChatTurnStatusJson(
-        status: com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatTurnStatusSnapshot
-    ): JSONObject =
-        ok()
-            .put("session_id", status.sessionId ?: JSONObject.NULL)
-            .put("active_turn", status.activeTurn?.let(::lanerChatTurnJson) ?: JSONObject.NULL)
-            .put("active_turn_id", status.activeTurn?.turnId ?: JSONObject.NULL)
-            .put("scheduler_paused", status.schedulerPaused)
-            .put("eligible_request_count", status.eligibleRequestCount)
-            .put("latest_seq", status.latestSeq)
-            .put("contains_body", false)
-
-    private fun lanerChatTurnJson(
-        turn: com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatAssistantTurn
-    ): JSONObject =
-        JSONObject()
-            .put("turn_id", turn.turnId)
-            .put("session_id", turn.sessionId)
-            .put("request_ids", JSONArray(turn.requestIds))
-            .put("first_seq", turn.firstSeq)
-            .put("last_seq", turn.lastSeq)
-            .put("highest_priority", turn.highestPriority.name)
-            .put("status", turn.status.name)
-            .put("claimed_at", isoTime(turn.claimedAtMs))
-            .put("completed_at", isoTime(turn.completedAtMs))
-            .put("canceled_at", isoTime(turn.canceledAtMs))
-            .put("reply_id", turn.replyId ?: JSONObject.NULL)
-
-    private suspend fun lanerChatAttachmentFetch(args: JSONObject): JSONObject {
+    private suspend fun pluginChatModeAttachmentFetch(args: JSONObject): JSONObject {
         val requestId = args.optString("request_id").trim()
         val attachmentId = args.optString("attachment_id").trim()
-        val attachment = lanerChat.attachment(requestId, attachmentId)
-        val isImage = attachment.mimeType.startsWith("image/", ignoreCase = true)
-        val readResult = execute(
-            AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
-                AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
-            ),
-            JSONObject()
-                .put("name", "read_file_full")
-                .put("parameters", JSONObject()
-                    .put("path", attachment.filePath)
-                    .put("direct_image", isImage)
-                )
-        )
-        val response = if (readResult.optBoolean("success", false)) ok() else error("Unable to read Laner chat attachment")
+        val raw =
+            PluginChatModeRuntime.invokeBusinessCompatibility(
+                "attachment.fetch",
+                JSONObject(args.toString())
+            )
+        val attachment = raw.getJSONObject("attachment")
+        val filePath = attachment.getString("file_path")
+        val mimeType = attachment.optString("mime_type", "application/octet-stream")
+        val isImage = mimeType.startsWith("image/", ignoreCase = true)
+        val readResult =
+            execute(
+                AiLimbsCoreCapabilityRegistry.invokeNameForLocalOperation(
+                    AiLimbsCoreLocalOperation.HOST_TOOL_EXECUTE
+                ),
+                JSONObject()
+                    .put("name", "read_file_full")
+                    .put(
+                        "parameters",
+                        JSONObject()
+                            .put("path", filePath)
+                            .put("direct_image", isImage)
+                    )
+            )
+        val response =
+            if (readResult.optBoolean("success", false)) {
+                ok()
+            } else {
+                error("Unable to read plugin chat attachment")
+            }
         return response
             .put("request_id", requestId)
             .put("attachment_id", attachmentId)
-            .put("file_path", attachment.filePath)
-            .put("filename", attachment.fileName)
-            .put("mime_type", attachment.mimeType)
-            .put("size", attachment.fileSize)
+            .put("file_path", filePath)
+            .put(
+                "filename",
+                attachment.optString("file_name").ifBlank {
+                    attachment.optString("filename")
+                }
+            )
+            .put("mime_type", mimeType)
+            .put(
+                "size",
+                if (attachment.has("file_size")) {
+                    attachment.optLong("file_size")
+                } else {
+                    attachment.optLong("size")
+                }
+            )
             .put("content_mode", if (isImage) "multimodal_image" else "text_or_document")
             .put("payload", readResult.opt("result") ?: JSONObject.NULL)
             .put("read_error", readResult.opt("error") ?: JSONObject.NULL)
             .put("events", readResult.optJSONArray("events") ?: JSONArray())
     }
 
-    private fun lanerChatReply(args: JSONObject): JSONObject {
-        val replied =
-            try {
-                lanerChat.reply(
-                    requestId = args.optString("request_id"),
-                    replyId = args.optString("reply_id").ifBlank { null },
-                    content = args.optString("content")
-                )
-            } catch (failure: LanerChatManagedTurnReplyRequiredException) {
-                return error(failure.message ?: "Managed turn reply is required")
-                    .put("error_code", "TURN_REPLY_REQUIRED")
-                    .put("reply_via", "ai_limbs.chat.turn.reply")
-                    .put("resolve_via", "ai_limbs.chat.turn.resolve")
-            }
-        return ok()
-            .put("request_id", replied.request.requestId)
-            .put("reply_id", replied.request.replyId)
-            .put("status", replied.request.status.name)
-            .put("duplicate", replied.duplicate)
-            .put("delivered_to_live_stream", replied.deliveredToLiveStream)
-            .put("answered_at", isoTime(replied.request.answeredAtMs))
+    private suspend fun pluginChatModeTurnReply(args: JSONObject): JSONObject {
+        val raw =
+            PluginChatModeRuntime.invokeBusinessCompatibility(
+                "turn.reply",
+                JSONObject(args.toString())
+            )
+        val result = raw.getJSONObject("result")
+        val turn = result.getJSONObject("turn")
+        val covered = result.optJSONArray("covered_requests") ?: JSONArray()
+        val firstRequest = covered.optJSONObject(0)
+        val chatId = firstRequest?.optString("chat_id").orEmpty().trim()
+        val content = turn.optString("reply_content")
+        if (chatId.isNotEmpty() && content.isNotBlank()) {
+            mirrorPluginChatAssistantMessage(
+                chatId = chatId,
+                content = content,
+                timestamp = turn.optLong("chat_message_timestamp", System.currentTimeMillis()),
+                completedAt = nullableLong(turn, "completed_at_ms")
+            )
+        }
+        return JSONObject(raw.toString())
+            .put("turn_id", turn.optString("turn_id"))
+            .put("reply_id", turn.opt("reply_id") ?: JSONObject.NULL)
+            .put("status", turn.optString("status"))
+            .put("covered_request_ids", turn.optJSONArray("request_ids") ?: JSONArray())
+            .put("covered_request_count", result.optInt("covered_request_count", covered.length()))
+            .put("duplicate", result.optBoolean("duplicate", false))
+            .put("delivered_to_chat", chatId.isNotEmpty() && content.isNotBlank())
+            .put("delivery_pending", false)
+            .put("completed_at", isoTime(nullableLong(turn, "completed_at_ms")))
     }
 
-
-    private suspend fun lanerChatSend(args: JSONObject): JSONObject {
-        val requestedSessionId = args.optString("session_id").ifBlank { null }
-        val opened =
-            lanerChat.openSession(
-                requestedSessionId = requestedSessionId,
-                agentSessionId = null
+    private suspend fun pluginChatModeReply(args: JSONObject): JSONObject {
+        val raw =
+            PluginChatModeRuntime.invokeBusinessCompatibility(
+                "reply",
+                JSONObject(args.toString())
             )
+        val result = raw.getJSONObject("result")
+        val request = result.getJSONObject("request")
+        val chatId = request.optString("chat_id").trim()
+        val content = request.optString("reply_content")
+        if (chatId.isNotEmpty() && content.isNotBlank()) {
+            mirrorPluginChatAssistantMessage(
+                chatId = chatId,
+                content = content,
+                timestamp = request.optLong("chat_message_timestamp", System.currentTimeMillis()),
+                completedAt = nullableLong(request, "answered_at_ms")
+            )
+        }
+        return JSONObject(raw.toString())
+            .put("request_id", request.optString("request_id"))
+            .put("reply_id", request.opt("reply_id") ?: JSONObject.NULL)
+            .put("status", request.optString("status"))
+            .put("duplicate", result.optBoolean("duplicate", false))
+            .put("delivered_to_live_stream", result.optBoolean("delivered_to_live_stream", false))
+            .put("delivered_to_chat", chatId.isNotEmpty() && content.isNotBlank())
+            .put("answered_at", isoTime(nullableLong(request, "answered_at_ms")))
+    }
+
+    private suspend fun pluginChatModeSend(args: JSONObject): JSONObject {
+        val openedRaw =
+            PluginChatModeRuntime.invokeBusinessCompatibility(
+                "session.open",
+                JSONObject()
+                    .put("session_id", args.optString("session_id").ifBlank { JSONObject.NULL })
+            )
+        val opened = openedRaw.getJSONObject("result")
+        val session = opened.getJSONObject("session")
+        val sessionId = session.getString("session_id")
+        var chatId = session.optString("chat_id").trim()
+
         val core = ChatRuntimeHolder.getInstance(appContext).getCore(ChatRuntimeSlot.MAIN)
         val chatHistory = core.getChatHistoryDelegate()
-
-        if (opened.session.chatId.isNullOrBlank()) {
+        if (chatId.isEmpty()) {
             val apiConfig = core.getApiConfigDelegate()
             val currentChatId = chatHistory.currentChatId.value?.takeIf { it.isNotBlank() }
-            val isAlreadyBridge = LanerChatContract.isBridgeConfig(apiConfig.activeChatModelConfig.value)
-            val bridgeChatId =
+            val activeIsChatMode =
+                PluginChatModeRuntime.isChatModeConfig(apiConfig.activeChatModelConfig.value)
+            chatId =
                 when {
-                    isAlreadyBridge && currentChatId != null -> currentChatId
+                    activeIsChatMode && currentChatId != null -> currentChatId
                     currentChatId == null -> {
-                        apiConfig.activateLanerBridgeConfiguration()
+                        apiConfig.activateChatModeConfiguration(
+                            PluginChatModeRuntime.businessConfigurationTemplate()
+                        )
                         chatHistory.ensureCurrentChat(5_000L)
                     }
                     else -> {
-                        apiConfig.activateLanerBridgeConfiguration()
+                        apiConfig.activateChatModeConfiguration(
+                            PluginChatModeRuntime.businessConfigurationTemplate()
+                        )
                         chatHistory.createAndSelectNewChat(5_000L)
                     }
                 }
-            lanerChat.bindUiChat(bridgeChatId)
+            PluginChatModeRuntime.invokeBusinessCompatibility(
+                "ui.bind_chat",
+                JSONObject().put("chat_id", chatId)
+            )
         }
 
-        val prepared =
-            lanerChat.prepareProactiveMessage(
-                requestedSessionId = opened.session.sessionId,
-                requestedMessageId = args.optString("message_id").ifBlank { null },
-                content = args.optString("content")
+        val preparedRaw =
+            PluginChatModeRuntime.invokeBusinessCompatibility(
+                "proactive.prepare",
+                JSONObject()
+                    .put("session_id", sessionId)
+                    .put("message_id", args.optString("message_id").ifBlank { JSONObject.NULL })
+                    .put("content", args.optString("content"))
             )
-        val proactive = prepared.message
-        chatHistory.addMessageToChat(
+        val prepared = preparedRaw.getJSONObject("result")
+        val message = prepared.getJSONObject("message")
+        mirrorPluginChatAssistantMessage(
+            chatId = message.getString("chat_id"),
+            content = message.getString("content"),
+            timestamp = message.optLong("chat_message_timestamp", System.currentTimeMillis()),
+            completedAt = System.currentTimeMillis()
+        )
+
+        val deliveredRaw =
+            PluginChatModeRuntime.invokeBusinessCompatibility(
+                "proactive.delivered",
+                JSONObject().put("message_id", message.getString("message_id"))
+            )
+        val delivered = deliveredRaw.getJSONObject("message")
+        return ok()
+            .put("message_id", delivered.getString("message_id"))
+            .put("session_id", delivered.getString("session_id"))
+            .put("chat_id", delivered.getString("chat_id"))
+            .put("status", delivered.optString("status"))
+            .put("duplicate", prepared.optBoolean("duplicate", false))
+            .put("created_at", isoTime(nullableLong(delivered, "created_at_ms")))
+            .put("delivered_at", isoTime(nullableLong(delivered, "delivered_at_ms")))
+    }
+
+    private suspend fun mirrorPluginChatAssistantMessage(
+        chatId: String,
+        content: String,
+        timestamp: Long,
+        completedAt: Long?
+    ) {
+        val binding = PluginChatModeRuntime.businessBinding()
+        val providerTypeId = binding.metadata["provider_type_id"].orEmpty()
+        val modelName =
+            binding.metadata["model_name"]?.takeIf { it.isNotBlank() }
+                ?: providerTypeId
+        val roleName =
+            binding.metadata["display_name"]?.takeIf { it.isNotBlank() }
+                ?: "AI"
+        val core = ChatRuntimeHolder.getInstance(appContext).getCore(ChatRuntimeSlot.MAIN)
+        core.getChatHistoryDelegate().addMessageToChat(
             message =
                 ChatMessage(
                     sender = "ai",
-                    content = proactive.content,
-                    timestamp = proactive.chatMessageTimestamp,
-                    roleName = LanerChatContract.DEFAULT_AGENT_NAME,
-                    provider = LanerChatContract.PROVIDER_MODEL,
-                    modelName = LanerChatContract.MODEL_ID,
-                    completedAt = System.currentTimeMillis()
+                    content = content,
+                    timestamp = timestamp,
+                    roleName = roleName,
+                    provider = providerTypeId,
+                    modelName = modelName,
+                    completedAt = completedAt ?: System.currentTimeMillis()
                 ),
-            chatIdOverride = proactive.chatId
+            chatIdOverride = chatId
         )
-        val delivered = lanerChat.markProactiveMessageDelivered(proactive.messageId)
-        return ok()
-            .put("message_id", delivered.messageId)
-            .put("session_id", delivered.sessionId)
-            .put("chat_id", delivered.chatId)
-            .put("status", delivered.status.name)
-            .put("duplicate", prepared.duplicate)
-            .put("created_at", isoTime(delivered.createdAtMs))
-            .put("delivered_at", isoTime(delivered.deliveredAtMs))
     }
 
-    private fun lanerChatRequestJson(request: LanerChatRequest): JSONObject =
-        JSONObject()
-            .put("request_id", request.requestId)
-            .put("session_id", request.sessionId)
-            .put("seq", request.seq)
-            .put("chat_id", request.chatId)
-            .put("sender", request.sender)
-            .put("priority", request.priority.name)
-            .put("text", request.text)
-            .put("attachment_count", request.attachments.size)
-            .put("attachments", JSONArray(request.attachments.map { attachment ->
-                JSONObject()
-                    .put("attachment_id", attachment.attachmentId)
-                    .put("filename", attachment.fileName)
-                    .put("mime_type", attachment.mimeType)
-                    .put("size", attachment.fileSize)
-            }))
-            .put("created_at", isoTime(request.createdAtMs))
-            .put("status", request.status.name)
-            .put("delivery_count", request.deliveryCount)
-
-
-    private fun parseLanerChatPriority(raw: String): LanerChatPriority? {
-        val normalized = raw.trim().uppercase(Locale.US)
-        if (normalized.isEmpty()) return null
-        return runCatching { LanerChatPriority.valueOf(normalized) }
-            .getOrElse { throw IllegalArgumentException("priority must be HIGH, NORMAL, or LOW") }
-    }
+    private fun nullableLong(value: JSONObject, key: String): Long? =
+        if (value.has(key) && !value.isNull(key)) value.optLong(key) else null
 
     private fun isoTime(timestampMs: Long?): Any {
         if (timestampMs == null) return JSONObject.NULL

@@ -15,7 +15,8 @@ import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.plugins.center.PluginChatModeRuntime
+import org.json.JSONObject
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -56,7 +57,7 @@ class ApiConfigDelegate(
 ) {
     companion object {
         private const val TAG = "ApiConfigDelegate"
-        private const val LANER_CHAT_PREFERENCES = "ai_limbs_laner_chat_mode"
+        private const val CHAT_MODE_PREFERENCES = "ai_limbs_chat_mode"
         private const val KEY_LAST_API_CHAT_CONFIG_ID = "last_api_chat_config_id"
     }
 
@@ -64,9 +65,9 @@ class ApiConfigDelegate(
     private val apiPreferences = ApiPreferences.getInstance(context)
     private val modelConfigManager = ModelConfigManager(context)
     private val functionalConfigManager = FunctionalConfigManager(context)
-    private val lanerChatPreferences =
+    private val chatModePreferences =
             context.applicationContext.getSharedPreferences(
-                    LANER_CHAT_PREFERENCES,
+                    CHAT_MODE_PREFERENCES,
                     Context.MODE_PRIVATE
             )
     private val characterCardManager = CharacterCardManager.getInstance(context)
@@ -598,72 +599,86 @@ class ApiConfigDelegate(
         }
     }
 
-    suspend fun activateLanerBridgeConfiguration() {
+    suspend fun activateChatModeConfiguration(templateJson: String) {
         modelConfigManager.initializeIfNeeded()
         functionalConfigManager.initializeIfNeeded()
-        val currentConfigId = _activeConfigId.value
-        val currentConfig = modelConfigManager.getModelConfig(currentConfigId)
-        if (currentConfig != null && !LanerChatContract.isBridgeConfig(currentConfig)) {
+
+        val template = JSONObject(templateJson.ifBlank { "{}" })
+        val configId = template.getString("config_id").trim()
+        val name = template.optString("name", configId).trim().ifEmpty { configId }
+        val modelName = template.optString("model_name").trim()
+        val providerTypeId = template.getString("api_provider_type_id").trim()
+        require(configId.isNotEmpty()) { "Chat mode config_id is required" }
+        require(providerTypeId.isNotEmpty()) { "Chat mode api_provider_type_id is required" }
+
+        val currentConfig = modelConfigManager.getModelConfig(_activeConfigId.value)
+        if (currentConfig != null && !PluginChatModeRuntime.isChatModeConfig(currentConfig)) {
             check(
-                    lanerChatPreferences.edit()
-                            .putString(KEY_LAST_API_CHAT_CONFIG_ID, currentConfig.id)
-                            .commit()
+                chatModePreferences.edit()
+                    .putString(KEY_LAST_API_CHAT_CONFIG_ID, currentConfig.id)
+                    .commit()
             ) {
                 "Unable to persist the previous API chat configuration"
             }
         }
-        val bridgeConfig =
-                ModelConfigData(
-                        id = LanerChatContract.CONFIG_ID,
-                        name = "兰儿桥接聊天",
-                        apiKey = "",
-                        apiEndpoint = "",
-                        modelName = LanerChatContract.MODEL_ID,
-                        apiProviderType = ApiProviderType.OTHER,
-                        apiProviderTypeId = LanerChatContract.PROVIDER_TYPE_ID,
-                        enableToolCall = false,
-                        enableSummary = false,
-                        enableSummaryByMessageCount = false,
-                        enableDirectImageProcessing = false,
-                        enableDirectAudioProcessing = false,
-                        enableDirectVideoProcessing = false
-                )
-        modelConfigManager.saveModelConfig(bridgeConfig)
-        functionalConfigManager.setConfigForFunction(
-                FunctionType.CHAT,
-                LanerChatContract.CONFIG_ID,
-                0
-        )
-        publishActivatedChatConfig(bridgeConfig)
+
+        val modeConfig =
+            ModelConfigData(
+                id = configId,
+                name = name,
+                apiKey = template.optString("api_key"),
+                apiEndpoint = template.optString("api_endpoint"),
+                modelName = modelName,
+                apiProviderType =
+                    ApiProviderType.fromProviderTypeId(providerTypeId) ?: ApiProviderType.OTHER,
+                apiProviderTypeId = providerTypeId,
+                enableToolCall = template.optBoolean("enable_tool_call", false),
+                enableSummary = template.optBoolean("enable_summary", false),
+                enableSummaryByMessageCount =
+                    template.optBoolean("enable_summary_by_message_count", false),
+                enableDirectImageProcessing =
+                    template.optBoolean("enable_direct_image_processing", false),
+                enableDirectAudioProcessing =
+                    template.optBoolean("enable_direct_audio_processing", false),
+                enableDirectVideoProcessing =
+                    template.optBoolean("enable_direct_video_processing", false)
+            )
+        modelConfigManager.saveModelConfig(modeConfig)
+        functionalConfigManager.setConfigForFunction(FunctionType.CHAT, modeConfig.id, 0)
+        publishActivatedChatConfig(modeConfig)
     }
 
     suspend fun activateApiChatConfiguration(): String {
         modelConfigManager.initializeIfNeeded()
         functionalConfigManager.initializeIfNeeded()
         val currentConfig = modelConfigManager.getModelConfig(_activeConfigId.value)
-        val targetConfigId =
-                if (currentConfig != null && !LanerChatContract.isBridgeConfig(currentConfig)) {
-                    currentConfig.id
-                } else {
-                    lanerChatPreferences.getString(
-                            KEY_LAST_API_CHAT_CONFIG_ID,
-                            ModelConfigManager.DEFAULT_CONFIG_ID
-                    )?.trim().orEmpty()
-                }
-        require(targetConfigId.isNotEmpty()) { "Saved API chat configuration ID is empty" }
         val knownConfigIds = modelConfigManager.configListFlow.first()
-        check(targetConfigId in knownConfigIds) {
-            "Saved API chat configuration no longer exists: $targetConfigId"
-        }
-        val targetConfig = checkNotNull(modelConfigManager.getModelConfig(targetConfigId)) {
-            "API chat configuration not found: $targetConfigId"
-        }
-        check(!LanerChatContract.isBridgeConfig(targetConfig)) {
-            "Saved API chat configuration points to Laner Bridge"
-        }
-        functionalConfigManager.setConfigForFunction(FunctionType.CHAT, targetConfigId, 0)
+        val savedId =
+            chatModePreferences.getString(
+                KEY_LAST_API_CHAT_CONFIG_ID,
+                ModelConfigManager.DEFAULT_CONFIG_ID
+            )?.trim().orEmpty()
+
+        val candidateIds =
+            buildList {
+                if (currentConfig != null && !PluginChatModeRuntime.isChatModeConfig(currentConfig)) {
+                    add(currentConfig.id)
+                }
+                if (savedId.isNotEmpty()) add(savedId)
+                add(ModelConfigManager.DEFAULT_CONFIG_ID)
+                addAll(knownConfigIds)
+            }.distinct()
+
+        val targetConfig =
+            candidateIds.asSequence()
+                .filter { it in knownConfigIds }
+                .mapNotNull { modelConfigManager.getModelConfig(it) }
+                .firstOrNull { !PluginChatModeRuntime.isChatModeConfig(it) }
+                ?: throw IllegalStateException("No API chat configuration is available")
+
+        functionalConfigManager.setConfigForFunction(FunctionType.CHAT, targetConfig.id, 0)
         publishActivatedChatConfig(targetConfig)
-        return targetConfigId
+        return targetConfig.id
     }
 
     private suspend fun publishActivatedChatConfig(config: ModelConfigData) {

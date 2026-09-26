@@ -33,7 +33,28 @@ internal class PluginRuntimeCoreClient(
         check(result.getString("core_session") == ownerCoreSession) { "Resident Core session changed" }
         return result.getJSONObject("result")
     }
+    fun attestPluginTrust(pluginId: String, version: String): JSONObject {
+        val response = ResidentCoreDispatchWire.request(
+            ownerCoreSession,
+            ownerCorePid,
+            "plugin_trust_attest",
+            JSONObject()
+                .put("plugin_id", pluginId)
+                .put("version", version)
+        )
+        check(response.optBoolean("success", false)) {
+            response.optString("error", "Resident Core rejected plugin trust attestation")
+        }
+        val result = response.getJSONObject("result")
+        check(result.optBoolean("trusted", false)) { "Resident Core did not attest plugin trust" }
+        check(result.getString("plugin_id") == pluginId) { "Attested plugin identity changed" }
+        check(result.getString("version") == version) { "Attested plugin version changed" }
+        check(result.getString("core_session") == ownerCoreSession) { "Resident Core session changed" }
+        return result
+    }
+
     fun describeService(
+
         pluginId: String,
         version: String,
         serviceId: String,

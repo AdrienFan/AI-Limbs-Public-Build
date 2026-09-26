@@ -83,8 +83,7 @@ import java.io.File
 import com.ai.assistance.operit.services.core.MessageProcessingDelegate
 import com.ai.assistance.operit.services.core.ChatHistoryDelegate
 import com.ai.assistance.operit.services.core.ApiConfigDelegate
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
+import com.ai.assistance.operit.plugins.center.PluginChatModeRuntime
 import com.ai.assistance.operit.services.core.TokenStatisticsDelegate
 import com.ai.assistance.operit.services.core.AttachmentDelegate
 import com.ai.assistance.operit.services.core.MessageCoordinationDelegate
@@ -560,8 +559,8 @@ class ChatViewModel(private val context: Context) : ViewModel() {
     suspend fun saveDeepSeekConfiguration(configId: String, apiKey: String) {
         apiConfigDelegate.saveDeepSeekConfiguration(configId, apiKey)
     }
-    suspend fun activateLanerBridgeConfiguration() {
-        apiConfigDelegate.activateLanerBridgeConfiguration()
+    suspend fun activateChatModeConfiguration(templateJson: String) {
+        apiConfigDelegate.activateChatModeConfiguration(templateJson)
     }
     suspend fun activateApiChatConfiguration(): String =
         apiConfigDelegate.activateApiChatConfiguration()
@@ -1470,9 +1469,9 @@ class ChatViewModel(private val context: Context) : ViewModel() {
         )
     }
 
-    fun sendLanerBridgeMessage(priority: LanerChatPriority) {
+    fun sendActiveChatModeMessage() {
         hideMentionSuggestionPanel()
-        messageCoordinationDelegate.sendLanerBridgeMessage(priority)
+        messageCoordinationDelegate.sendActiveChatModeMessage()
     }
 
     fun sendTextMessage(text: String, promptFunctionType: PromptFunctionType = PromptFunctionType.CHAT) {
@@ -1557,10 +1556,12 @@ class ChatViewModel(private val context: Context) : ViewModel() {
             chatId
         )
         fallbackTitle?.let { titleToPreserve ->
-            if (LanerChatContract.isBridgeConfig(activeChatModelConfig.value)) {
+            if (PluginChatModeRuntime.isChatModeConfig(activeChatModelConfig.value)) {
                 chatHistoryDelegate.updateChatTitle(
                     chatId,
-                    LanerChatContract.localConversationTitle(messageText)
+                    messageText.lineSequence().firstOrNull()?.trim()?.take(48)
+                        ?.takeIf { it.isNotEmpty() }
+                        ?: titleToPreserve
                 )
             } else {
                 viewModelScope.launch(Dispatchers.IO) {

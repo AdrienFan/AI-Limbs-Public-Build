@@ -71,11 +71,14 @@ internal class PluginHostUiProxyRuntime(
     internal fun setUiReady(ready: Boolean) {
         uiReadyFlow.value = ready
     }
-
     fun dispatchNotificationAction(bindingId: String, actionId: String) =
         residentClient.dispatchNotificationAction(bindingId, actionId)
 
+    internal fun presentationProviders(): List<com.ai.assistance.operit.plugins.system.SystemPluginProviderBindingV2> =
+        residentClient.providers().snapshot()
+
     fun updateAttachment(next: ResidentHostRuntimeAttachment) {
+
         check(next.usesUiProxy) { "UI proxy cannot transition to LEGACY_HOST in-process" }
         val currentSession = attachment.coreSessionId
         val nextSession = next.coreSessionId

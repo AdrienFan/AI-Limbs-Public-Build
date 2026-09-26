@@ -47,7 +47,6 @@ import com.ai.assistance.operit.data.preferences.CharacterCardManager
 import com.ai.assistance.operit.data.preferences.ExternalHttpApiPreferences
 import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.data.preferences.WakeWordPreferences
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPlugin
 import com.ai.assistance.operit.data.preferences.initAndroidPermissionPreferences
 import com.ai.assistance.operit.data.preferences.initUserPreferencesManager
 import com.ai.assistance.operit.data.preferences.preferencesManager
@@ -261,7 +260,6 @@ class OperitApplication : Application(), ImageLoaderFactory, WorkConfiguration.P
 
         // Initialize AIMessageManager
         AIMessageManager.initialize(this)
-        LanerChatPlugin.register()
         AppLogger.d(TAG, "【启动计时】AIMessageManager初始化完成 - ${System.currentTimeMillis() - startTime}ms")
         PluginPlatformKernel.initialize(applicationContext)
         runBlocking(Dispatchers.IO) { PluginPlatformKernel.start() }

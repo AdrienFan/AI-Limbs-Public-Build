@@ -26,7 +26,7 @@ import com.ai.assistance.operit.data.model.PromptFunctionType
 import com.ai.assistance.operit.data.model.FunctionType
 import com.ai.assistance.operit.data.preferences.FunctionalConfigManager
 import com.ai.assistance.operit.data.preferences.ModelConfigManager
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
+import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.data.preferences.ApiPreferences
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceAttachmentProcessor
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.process.WorkspaceChangeTracker
@@ -426,7 +426,7 @@ object AIMessageManager {
                     "Active chat model configuration not found: ${activeChatMapping.configId}"
                 }
             val processingConfig =
-                if (LanerChatContract.isBridgeConfig(activeChatConfig)) {
+                if (PluginPlatformKernel.matchesBusinessChatModeConfig(activeChatConfig)) {
                     activeChatConfig
                 } else {
                     chatModelConfigIdOverride

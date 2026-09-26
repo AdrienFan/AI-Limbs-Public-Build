@@ -25,7 +25,6 @@ data class ChatMessage(
         val completedAt: Long = 0L, // 本轮消息完成时间（时间戳）
         val displayMode: ChatMessageDisplayMode = ChatMessageDisplayMode.NORMAL,
         val isFavorite: Boolean = false,
-        val lanerPriority: String = "",
         @Transient
         val isVariantPreview: Boolean = false,
         @Transient
@@ -56,8 +55,13 @@ data class ChatMessage(
         displayMode = readDisplayModeFromParcel(parcel),
         isFavorite = readBooleanFromParcel(parcel),
         completedAt = if (parcel.dataAvail() > 0) parcel.readLong() else 0L,
-        lanerPriority = if (parcel.dataAvail() > 0) parcel.readString().orEmpty() else "",
-    )
+    ) {
+        // build74 and older appended one chat-mode-specific String after completedAt.
+        // Consume that legacy Parcelable tail without retaining it in the generic message model.
+        if (parcel.dataAvail() > 0) {
+            parcel.readString()
+        }
+    }
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         parcel.writeString(sender)
@@ -77,7 +81,6 @@ data class ChatMessage(
         parcel.writeString(displayMode.name)
         parcel.writeInt(if (isFavorite) 1 else 0)
         parcel.writeLong(completedAt)
-        parcel.writeString(lanerPriority)
         // 不需要序列化contentStream，因为它是暂时性的
     }
 

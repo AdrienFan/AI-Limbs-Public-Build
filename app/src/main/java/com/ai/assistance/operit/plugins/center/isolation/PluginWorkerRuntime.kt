@@ -120,8 +120,13 @@ internal class PluginWorkerRuntime(
             contributions = contributions,
             notificationBindingProvider = notificationRegistry::bindingFor,
             identityRegistry = identityRegistry,
-            childRuntimeProvider = { childRuntime }
+            childRuntimeProvider = { childRuntime },
+            trustAttestor = { context ->
+                coreClient.attestPluginTrust(context.manifest.pluginId, context.manifest.version)
+                true
+            }
         )
+
     }
 
     @Volatile private var childStarted = false
@@ -195,9 +200,9 @@ internal class PluginWorkerRuntime(
         check(metadata.grantedScopes == manifest.permissions.requestedScopes) {
             "Worker scope approval does not match manifest"
         }
-        check(identityRegistry.isTrusted(manifest, metadata)) {
-            "Worker refused untrusted android_inprocess identity: $pluginId"
-        }
+        // Official android_inprocess trust is attested by the one authoritative Resident Core.
+        // Worker deliberately does not re-read a second identity registry view here.
+        coreClient.attestPluginTrust(pluginId, version)
         surfacePolicy.requireManifestAllowed(manifest)
 
         val ownerBinding = capabilityGateway.bindTopLevel(pluginId, version)

@@ -112,11 +112,12 @@ import com.ai.assistance.operit.ui.theme.getTextColorForBackground
 import com.ai.assistance.operit.plugins.chatview.ChatViewEvent
 import com.ai.assistance.operit.plugins.chatview.ChatViewHookParams
 import com.ai.assistance.operit.plugins.chatview.ChatViewHookPluginRegistry
-import com.ai.assistance.operit.integrations.ailimbs.isBridgePluginActive
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPresenceState
+import com.ai.assistance.operit.plugins.center.PluginChatModeRuntime
+import com.ai.limbs.plugin.runtime.InProcessChatModeBehaviorKeys
+import com.ai.limbs.plugin.runtime.InProcessChatModeExtensionProvider
+import com.ai.limbs.plugin.runtime.InProcessChatModeSlotIds
+import androidx.compose.ui.viewinterop.AndroidView
+import org.json.JSONObject
 import java.util.UUID
 
 
@@ -264,18 +265,41 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     val isApiConfigInitialized by actualViewModel.isApiConfigInitialized.collectAsState()
     val activeChatConfigId by actualViewModel.activeChatConfigId.collectAsState()
     val activeChatModelConfig by actualViewModel.activeChatModelConfig.collectAsState()
-    val isLanerBridgeMode = LanerChatContract.isBridgeConfig(activeChatModelConfig)
-    val effectiveInputStyle =
-        if (isLanerBridgeMode) {
-            UserPreferencesManager.INPUT_STYLE_CLASSIC
-        } else {
-            inputStyle
-        }
-    val lanerChatService = remember(context.applicationContext) {
-        LanerChatBridgeService.getInstance(context.applicationContext)
+    val currentChatId by actualViewModel.currentChatId.collectAsState()
+    var activeChatModeBinding by remember(activeChatConfigId) {
+        mutableStateOf(PluginChatModeRuntime.resolvePresentation(activeChatModelConfig))
     }
-    val lanerMailboxStatus by lanerChatService.status.collectAsState()
-    val bridgePluginActive = isBridgePluginActive()
+    LaunchedEffect(activeChatConfigId, activeChatModelConfig?.id) {
+        while (true) {
+            activeChatModeBinding =
+                PluginChatModeRuntime.resolvePresentation(activeChatModelConfig)
+            delay(1_000L)
+        }
+    }
+    val activeChatModeProvider = activeChatModeBinding?.provider
+    val activeChatModeContextJson =
+        remember(activeChatModelConfig, currentChatId) {
+            PluginChatModeRuntime.contextJson(activeChatModelConfig, currentChatId)
+        }
+    val activeChatModeBehavior =
+        remember(activeChatModeProvider, activeChatModeContextJson) {
+            activeChatModeProvider
+                ?.let { provider ->
+                    runCatching { JSONObject(provider.behavior(activeChatModeContextJson)) }
+                        .getOrDefault(JSONObject())
+                }
+                ?: JSONObject()
+        }
+    val effectiveInputStyle =
+        activeChatModeBehavior
+            .optString(InProcessChatModeBehaviorKeys.PREFERRED_INPUT_STYLE)
+            .takeIf { it.isNotBlank() }
+            ?: inputStyle
+    val suppressLocalAgentFeatures =
+        activeChatModeBehavior.optBoolean(
+            InProcessChatModeBehaviorKeys.SUPPRESS_LOCAL_AGENT_FEATURES,
+            false
+        )
     val modelName by actualViewModel.modelName.collectAsState()
     val chatHistory by actualViewModel.chatHistory.collectAsState()
     // 仅对当前会话显示处理中状态（影响“停止/发送”按钮）
@@ -299,7 +323,6 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
     val isAutoReadEnabled by actualViewModel.isAutoReadEnabled.collectAsState()
     val showChatHistorySelector by actualViewModel.showChatHistorySelector.collectAsState()
     val chatHistories by actualViewModel.chatHistories.collectAsState()
-    val currentChatId by actualViewModel.currentChatId.collectAsState()
     val hasNewerDisplayHistory by actualViewModel.hasNewerDisplayHistory.collectAsState()
     val isLoadingDisplayWindow by actualViewModel.isLoadingDisplayWindow.collectAsState()
     val popupMessage by actualViewModel.popupMessage.collectAsState()
@@ -733,65 +756,22 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
             shouldShowConfigDialog ||
             isSavingInitialConfiguration ||
             initialConfigurationSaveFailed
-    var lanerStatusClockMs by remember { mutableStateOf(System.currentTimeMillis()) }
-    LaunchedEffect(showConfig, isLanerBridgeMode) {
-        if (!showConfig && !isLanerBridgeMode) return@LaunchedEffect
-        while (true) {
-            lanerStatusClockMs = System.currentTimeMillis()
-            delay(LanerChatContract.PRESENCE_UI_TICK_MS)
-        }
-    }
-    val lanerAgentPresence =
-        LanerChatContract.presenceState(
-            activeSessionId = lanerMailboxStatus.activeSessionId,
-            lastAgentSeenAtMs = lanerMailboxStatus.lastAgentSeenAtMs,
-            nowMs = lanerStatusClockMs
-        )
-    val isLanerFullyOnline =
-        bridgePluginActive && lanerAgentPresence == LanerChatPresenceState.ACTIVE
-
     LaunchedEffect(
         isCurrentScreen,
         showConfig,
-        isApiConfigInitialized,
+        activeChatModeBinding?.id,
         activeChatConfigId,
-        activeChatModelConfig?.id,
         currentChatId
     ) {
-        if (
-            !isCurrentScreen ||
-                showConfig ||
-                !isApiConfigInitialized ||
-                activeChatModelConfig == null ||
-                !currentChatId.isNullOrBlank()
-        ) {
-            return@LaunchedEffect
-        }
-        try {
-            actualViewModel.ensureCurrentChat()
-        } catch (error: CancellationException) {
-            throw error
-        } catch (error: Exception) {
-            AppLogger.e("AIChatScreen", "Failed to initialize the first Chat", error)
-            actualViewModel.showErrorMessage(
-                context.getString(
-                    R.string.laner_chat_initialization_failed,
-                    error.message.orEmpty()
-                )
+        val binding = activeChatModeBinding ?: return@LaunchedEffect
+        if (!isCurrentScreen || showConfig) return@LaunchedEffect
+        runCatching {
+            binding.provider.onChatContextChanged(
+                PluginChatModeRuntime.contextJson(activeChatModelConfig, currentChatId)
             )
+        }.onFailure { error ->
+            AppLogger.e("AIChatScreen", "Chat mode context update failed", error)
         }
-    }
-
-    LaunchedEffect(
-        isCurrentScreen,
-        showConfig,
-        isLanerBridgeMode,
-        currentChatId,
-        lanerMailboxStatus.activeSessionId
-    ) {
-        val chatId = currentChatId?.takeIf { it.isNotBlank() } ?: return@LaunchedEffect
-        if (!isCurrentScreen || showConfig || !isLanerBridgeMode) return@LaunchedEffect
-        lanerChatService.bindUiChat(chatId)
     }
 
     // 添加手势状态
@@ -897,7 +877,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                     ) {
                         Icon(
                             imageVector = Icons.Default.Home,
-                            contentDescription = stringResource(R.string.laner_chat_return_home),
+                            contentDescription = "返回聊天首页",
                             tint = appBarContentColor
                         )
                     }
@@ -972,8 +952,6 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                 ConfigurationScreen(
                         apiKey = apiKey,
                         isSaving = isSavingInitialConfiguration,
-                        bridgeAgentPresence = lanerAgentPresence,
-                        bridgePendingCount = lanerMailboxStatus.unresolvedCount,
                         onSaveApiKey = { normalizedApiKey ->
                             if (!isSavingInitialConfiguration) {
                                 coroutineScope.launch {
@@ -1021,13 +999,13 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 }
                             }
                         },
-                        onUseLanerBridge = {
+                        onUseChatMode = { templateJson ->
                             if (!isSavingInitialConfiguration) {
                                 coroutineScope.launch {
                                     isSavingInitialConfiguration = true
                                     initialConfigurationSaveFailed = false
                                     try {
-                                        actualViewModel.activateLanerBridgeConfiguration()
+                                        actualViewModel.activateChatModeConfiguration(templateJson)
                                         forceShowChatHome = false
                                     } catch (e: CancellationException) {
                                         throw e
@@ -1141,8 +1119,8 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                 showChatFloatingDotsAnimation = showChatFloatingDotsAnimation,
                         )
 
-                        if (isLanerBridgeMode) {
-                            Surface(
+                        if (activeChatModeProvider != null) {
+                            AndroidView(
                                 modifier =
                                     Modifier
                                         .align(Alignment.BottomEnd)
@@ -1153,44 +1131,13 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                         .graphicsLayer {
                                             translationY = -inputBarTranslationYPx
                                         },
-                                shape = RoundedCornerShape(18.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.94f)
-                            ) {
-                                Text(
-                                    text =
-                                        when {
-                                            !bridgePluginActive ->
-                                                stringResource(
-                                                    R.string.laner_chat_status_offline,
-                                                    lanerMailboxStatus.unresolvedCount
-                                                )
-                                            lanerAgentPresence == LanerChatPresenceState.ACTIVE ->
-                                                stringResource(
-                                                    R.string.laner_chat_status_online,
-                                                    lanerMailboxStatus.unresolvedCount
-                                                )
-                                            lanerAgentPresence == LanerChatPresenceState.RECENT ->
-                                                stringResource(
-                                                    R.string.laner_chat_status_recent,
-                                                    lanerMailboxStatus.unresolvedCount
-                                                )
-                                            else ->
-                                                stringResource(
-                                                    R.string.laner_chat_status_waiting_agent,
-                                                    lanerMailboxStatus.unresolvedCount
-                                                )
-                                        },
-                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
-                                    style = MaterialTheme.typography.labelMedium,
-                                    color =
-                                        when {
-                                            !bridgePluginActive -> Color.Gray
-                                            lanerAgentPresence == LanerChatPresenceState.ACTIVE -> Color(0xFF00E676)
-                                            lanerAgentPresence == LanerChatPresenceState.RECENT -> Color(0xFFFFC107)
-                                            else -> Color.Gray
-                                        }
-                                )
-                            }
+                                factory = { baseContext ->
+                                    activeChatModeProvider.createSlotView(
+                                        InProcessChatModeSlotIds.STATUS_OVERLAY,
+                                        baseContext
+                                    ) ?: android.view.Space(baseContext)
+                                }
+                            )
                         } else if (effectiveInputStyle == UserPreferencesManager.INPUT_STYLE_CLASSIC) {
                             ClassicChatSettingsBar(
                                     modifier =
@@ -1301,14 +1248,16 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                         strokeWidth = 2.dp
                                     )
                                     Spacer(modifier = Modifier.width(12.dp))
-                                    Text(stringResource(R.string.laner_chat_creating_first_chat))
+                                    Text("正在创建对话…")
                                 }
                             }
                         } else {
                             ChatInputBottomBar(
                                 actualViewModel = actualViewModel,
                                 inputStyle = effectiveInputStyle,
-                                disableLocalAgentFeatures = isLanerBridgeMode,
+                                disableLocalAgentFeatures = suppressLocalAgentFeatures,
+                                chatModeProvider = activeChatModeProvider,
+                                chatModeContextJson = activeChatModeContextJson,
                                 currentChatId = currentChatId,
                                 inputMenuRuntime = chatViewRuntime,
                                 enableEnterToSend = enableEnterToSend,
@@ -1707,6 +1656,8 @@ private fun ChatInputBottomBar(
     actualViewModel: ChatViewModel,
     inputStyle: String,
     disableLocalAgentFeatures: Boolean,
+    chatModeProvider: InProcessChatModeExtensionProvider?,
+    chatModeContextJson: String,
     currentChatId: String?,
     inputMenuRuntime: String,
     enableEnterToSend: Boolean,
@@ -1743,23 +1694,9 @@ private fun ChatInputBottomBar(
     val context = LocalContext.current
     val focusManager = LocalFocusManager.current
     val coroutineScope = rememberCoroutineScope()
-    val lanerBridgeService = remember(context) {
-        LanerChatBridgeService.getInstance(context.applicationContext)
-    }
-    val lanerMailboxStatus by lanerBridgeService.status.collectAsState()
-    val lanerTurnActive =
-        disableLocalAgentFeatures &&
-            currentChatId != null &&
-            lanerMailboxStatus.activeTurnChatId == currentChatId &&
-            lanerMailboxStatus.activeTurnId != null
-    val lanerSchedulerPausedForCurrentChat =
-        disableLocalAgentFeatures &&
-            currentChatId != null &&
-            lanerMailboxStatus.boundChatId == currentChatId &&
-            lanerMailboxStatus.schedulerPaused
-    val effectiveIsLoading = if (disableLocalAgentFeatures) lanerTurnActive else isLoading
+    val effectiveIsLoading = if (chatModeProvider != null) false else isLoading
     val effectiveInputState =
-        if (disableLocalAgentFeatures) InputProcessingState.Idle else inputState
+        if (chatModeProvider != null) InputProcessingState.Idle else inputState
     val waifuPreferences = remember(context) { WaifuPreferences.getInstance(context) }
     val userPreferences = remember(context) { UserPreferencesManager.getInstance(context) }
     val clipboardManager = remember(context) {
@@ -1804,9 +1741,6 @@ private fun ChatInputBottomBar(
     val pendingQueueMessages = pendingQueueState.messages
     val isPendingQueueExpanded = pendingQueueState.isExpanded
     val waifuMergeBuffer = remember(currentChatId) { mutableStateListOf<String>() }
-    var lanerMessagePriority by rememberSaveable(currentChatId) {
-        mutableStateOf(LanerChatPriority.NORMAL)
-    }
     val latestQueueBlocked = rememberUpdatedState(isQueueBlocked)
     val latestCurrentChatId = rememberUpdatedState(currentChatId)
 
@@ -2048,18 +1982,10 @@ private fun ChatInputBottomBar(
                         error
                     )
                     actualViewModel.showErrorMessage(
-                        context.getString(
-                            R.string.laner_chat_initialization_failed,
-                            error.message.orEmpty()
-                        )
+                        error.message ?: "Chat initialization failed"
                     )
                     return@launch
                 }
-            if (disableLocalAgentFeatures) {
-                LanerChatBridgeService.getInstance(context.applicationContext)
-                    .bindUiChat(ensuredChatId)
-            }
-
             val submitDecision =
                 ChatInputHookRegistry.dispatchSubmitRequested(
                     buildChatInputHookContext(
@@ -2111,10 +2037,8 @@ private fun ChatInputBottomBar(
                 return@launch
             }
             focusManager.clearFocus()
-            if (disableLocalAgentFeatures) {
-                val priority = lanerMessagePriority
-                lanerMessagePriority = LanerChatPriority.NORMAL
-                actualViewModel.sendLanerBridgeMessage(priority)
+            if (chatModeProvider != null) {
+                actualViewModel.sendActiveChatModeMessage()
             } else {
                 actualViewModel.sendUserMessage()
                 actualViewModel.resetAttachmentPanelState()
@@ -2134,8 +2058,10 @@ private fun ChatInputBottomBar(
     }
 
     val cancelCurrentAction: () -> Unit = {
-        if (disableLocalAgentFeatures) {
-            lanerBridgeService.cancelActiveTurn()
+        if (chatModeProvider != null) {
+            coroutineScope.launch {
+                runCatching { chatModeProvider.cancel(chatModeContextJson) }
+            }
         } else {
             actualViewModel.cancelCurrentMessage()
         }
@@ -2144,27 +2070,16 @@ private fun ChatInputBottomBar(
     val inputPendingQueueExpanded = !disableLocalAgentFeatures && isPendingQueueExpanded
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        if (disableLocalAgentFeatures) {
-            LanerChatPrioritySelector(
-                priority = lanerMessagePriority,
-                onPriorityChange = { lanerMessagePriority = it }
-            )
-            if (lanerTurnActive || lanerSchedulerPausedForCurrentChat) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp),
-                    horizontalArrangement = Arrangement.End,
-                ) {
-                    if (lanerTurnActive) {
-                        TextButton(onClick = cancelCurrentAction) {
-                            Text(stringResource(R.string.service_stop))
-                        }
-                    } else {
-                        TextButton(onClick = { lanerBridgeService.resumeScheduler() }) {
-                            Text(stringResource(R.string.webvisit_button_continue))
-                        }
-                    }
+        if (chatModeProvider != null) {
+            AndroidView(
+                modifier = Modifier.fillMaxWidth(),
+                factory = { baseContext ->
+                    chatModeProvider.createSlotView(
+                        InProcessChatModeSlotIds.COMPOSER_ACCESSORY,
+                        baseContext
+                    ) ?: android.view.Space(baseContext)
                 }
-            }
+            )
         }
 
         if (inputStyle == UserPreferencesManager.INPUT_STYLE_AGENT) {
@@ -2329,34 +2244,6 @@ private fun ChatInputBottomBar(
                 },
         )
         }
-    }
-}
-
-@Composable
-private fun LanerChatPrioritySelector(
-    priority: LanerChatPriority,
-    onPriorityChange: (LanerChatPriority) -> Unit,
-) {
-    Row(
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.spacedBy(6.dp),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        FilterChip(
-            selected = priority == LanerChatPriority.HIGH,
-            onClick = { onPriorityChange(LanerChatPriority.HIGH) },
-            label = { Text("🔴 " + stringResource(R.string.laner_priority_high)) },
-        )
-        FilterChip(
-            selected = priority == LanerChatPriority.NORMAL,
-            onClick = { onPriorityChange(LanerChatPriority.NORMAL) },
-            label = { Text("🔵 " + stringResource(R.string.laner_priority_normal)) },
-        )
-        FilterChip(
-            selected = priority == LanerChatPriority.LOW,
-            onClick = { onPriorityChange(LanerChatPriority.LOW) },
-            label = { Text("🟢 " + stringResource(R.string.laner_priority_low)) },
-        )
     }
 }
 

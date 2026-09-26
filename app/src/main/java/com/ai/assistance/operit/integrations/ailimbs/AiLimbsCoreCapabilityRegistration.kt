@@ -20,29 +20,11 @@ internal enum class AiLimbsCoreLocalOperation {
     STORAGE_PROJECT_FILES
 }
 
-internal enum class AiLimbsLanerChatOperation {
-    STATUS,
-    SESSION_OPEN,
-    SESSION_CLOSE,
-    NOTIFICATION_CHECK,
-    NOTIFICATION_WAIT,
-    INBOX_FETCH,
-    ATTACHMENT_FETCH,
-    TURN_STATUS,
-    TURN_CLAIM,
-    TURN_REPLY,
-    TURN_RESOLVE,
-    TURN_CANCEL,
-    TURN_RESUME,
-    LEGACY_REPLY,
-    SEND
-}
-
 internal sealed interface AiLimbsCoreRoute {
     data class Local(val operation: AiLimbsCoreLocalOperation) : AiLimbsCoreRoute
     data class ManagedDocumentRead(val documentId: AiLimbsDocumentId) : AiLimbsCoreRoute
     data class ManagedDocumentWrite(val documentId: AiLimbsDocumentId) : AiLimbsCoreRoute
-    data class LanerChat(val operation: AiLimbsLanerChatOperation) : AiLimbsCoreRoute
+    data class PluginChatModeCompatibility(val operation: String) : AiLimbsCoreRoute
     object ForwardHostTool : AiLimbsCoreRoute
 }
 

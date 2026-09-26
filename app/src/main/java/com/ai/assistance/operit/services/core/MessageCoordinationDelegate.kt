@@ -36,9 +36,8 @@ import com.ai.assistance.operit.util.ChatMarkupRegex
 import com.ai.assistance.operit.util.ChatUtils
 import com.ai.assistance.operit.util.LocaleUtils
 import com.ai.assistance.operit.data.repository.MemoryAutoSaveCandidateRepository
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatBridgeService
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatContract
-import com.ai.assistance.operit.integrations.ailimbs.chat.LanerChatPriority
+import com.ai.assistance.operit.plugins.center.PluginChatModeRuntime
+import com.ai.limbs.plugin.runtime.InProcessChatModeExtensionProvider
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -110,15 +109,15 @@ class MessageCoordinationDelegate(
     private val activePromptManager = ActivePromptManager.getInstance(context)
     private val displayPreferencesManager = DisplayPreferencesManager.getInstance(context)
     private val plannerServiceManager = MultiServiceManager(context)
-    private data class LanerBridgeQueuedSend(
+    private data class ChatModeQueuedSend(
+        val provider: InProcessChatModeExtensionProvider,
         val chatId: String,
         val originalText: String,
         val attachments: List<com.ai.assistance.operit.data.model.AttachmentInfo>,
-        val replyToMessage: ChatMessage?,
-        val priority: LanerChatPriority
+        val replyToMessage: ChatMessage?
     )
 
-    private val lanerBridgeSendQueue = Channel<LanerBridgeQueuedSend>(Channel.UNLIMITED)
+    private val chatModeSendQueue = Channel<ChatModeQueuedSend>(Channel.UNLIMITED)
 
     private data class PendingAutoContinuationRequest(
         val chatId: String,
@@ -138,8 +137,8 @@ class MessageCoordinationDelegate(
     init {
         ensureNonFatalErrorCollectorStarted()
         coroutineScope.launch(Dispatchers.IO) {
-            for (pending in lanerBridgeSendQueue) {
-                processLanerBridgeQueuedSend(pending)
+            for (pending in chatModeSendQueue) {
+                processChatModeQueuedSend(pending)
             }
         }
     }
@@ -339,41 +338,38 @@ class MessageCoordinationDelegate(
     }
 
     /**
-     * Laner Bridge messages are durable mailbox writes, not model-provider turns.
-     * Snapshot and release the composer immediately so the user can keep sending while an
-     * Assistant Turn is active. AI Limbs owns batching and turn scheduling separately.
+     * Plugin chat modes own their business semantics and embedded UI. The Host only snapshots the
+     * generic composer payload, preserves FIFO ordering, and mirrors the provider receipt into the
+     * ordinary chat history.
      */
-    fun sendLanerBridgeMessage(
-        priority: LanerChatPriority,
-        chatIdOverride: String? = null
-    ) {
+    fun sendActiveChatModeMessage(chatIdOverride: String? = null) {
         val chatId = chatIdOverride ?: chatHistoryDelegate.currentChatId.value
         if (chatId.isNullOrBlank()) {
             uiStateDelegate.showErrorMessage(context.getString(R.string.chat_no_active_conversation))
             return
         }
-        check(LanerChatContract.isBridgeConfig(apiConfigDelegate.activeChatModelConfig.value)) {
-            "Laner direct send requires the Laner Bridge configuration"
-        }
+        val binding =
+            PluginChatModeRuntime.resolvePresentation(apiConfigDelegate.activeChatModelConfig.value)
+                ?: run {
+                    uiStateDelegate.showErrorMessage("Active chat mode extension is unavailable")
+                    return
+                }
 
         val originalText = messageProcessingDelegate.userMessage.value.text.trim()
         val attachments = attachmentDelegate.attachments.value.toList()
         val replyToMessage = uiBridge.getReplyToMessage()
         if (originalText.isBlank() && attachments.isEmpty()) return
 
-        // Capture one immutable send snapshot on the caller thread. Channel is FIFO and has one
-        // consumer, so rapid M1/M2/M3 sends cannot be reordered by Dispatchers.IO scheduling.
-        val queued = LanerBridgeQueuedSend(
-            chatId = chatId,
-            originalText = originalText,
-            attachments = attachments,
-            replyToMessage = replyToMessage,
-            priority = priority
-        )
-        if (!lanerBridgeSendQueue.trySend(queued).isSuccess) {
-            uiStateDelegate.showErrorMessage(
-                context.getString(R.string.laner_chat_initialization_failed, "send queue unavailable")
+        val queued =
+            ChatModeQueuedSend(
+                provider = binding.provider,
+                chatId = chatId,
+                originalText = originalText,
+                attachments = attachments,
+                replyToMessage = replyToMessage
             )
+        if (!chatModeSendQueue.trySend(queued).isSuccess) {
+            uiStateDelegate.showErrorMessage("Chat mode send queue is unavailable")
             return
         }
 
@@ -383,60 +379,88 @@ class MessageCoordinationDelegate(
         uiBridge.clearReplyToMessage()
     }
 
-    private suspend fun processLanerBridgeQueuedSend(pending: LanerBridgeQueuedSend) {
-        var mailboxPersisted = false
+    private suspend fun processChatModeQueuedSend(pending: ChatModeQueuedSend) {
+        var providerPersisted = false
         try {
-            val currentChat = chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == pending.chatId }
+            val currentChat =
+                chatHistoryDelegate.chatHistories.value.firstOrNull { it.id == pending.chatId }
             val isFirstMessage = !chatHistoryDelegate.hasUserMessage(pending.chatId)
-            val finalContent = messageProcessingDelegate.buildUserMessageContentForGroupOrchestration(
-                messageText = pending.originalText,
-                attachments = pending.attachments,
-                workspacePath = currentChat?.workspace,
-                workspaceEnv = currentChat?.workspaceEnv,
-                replyToMessage = pending.replyToMessage,
-                chatId = pending.chatId
-            )
-            val mailbox = LanerChatBridgeService.getInstance(context.applicationContext)
-            mailbox.bindUiChat(pending.chatId)
-            val request = mailbox.enqueueMailbox(
-                chatId = pending.chatId,
-                text = finalContent,
-                attachments = pending.attachments,
-                priority = pending.priority
-            )
-            mailboxPersisted = true
-            chatHistoryDelegate.addMessageToChat(
-                ChatMessage(
-                    sender = "user",
-                    content = finalContent,
-                    timestamp = request.chatMessageTimestamp,
-                    roleName = context.getString(R.string.message_role_user),
-                    lanerPriority = pending.priority.name
-                ),
-                pending.chatId
-            )
-            if (isFirstMessage) {
-                chatHistoryDelegate.updateChatTitle(
-                    pending.chatId,
-                    LanerChatContract.localConversationTitle(
-                        pending.originalText,
-                        pending.attachments.map { it.fileName }
+            val finalContent =
+                messageProcessingDelegate.buildUserMessageContentForGroupOrchestration(
+                    messageText = pending.originalText,
+                    attachments = pending.attachments,
+                    workspacePath = currentChat?.workspace,
+                    workspaceEnv = currentChat?.workspaceEnv,
+                    replyToMessage = pending.replyToMessage,
+                    chatId = pending.chatId
+                )
+            val attachmentJson =
+                JSONArray().apply {
+                    pending.attachments.forEach { attachment ->
+                        put(
+                            JSONObject()
+                                .put("file_path", attachment.filePath)
+                                .put("file_name", attachment.fileName)
+                                .put("mime_type", attachment.mimeType)
+                                .put("file_size", attachment.fileSize)
+                        )
+                    }
+                }
+            val receipt =
+                JSONObject(
+                    pending.provider.submit(
+                        JSONObject()
+                            .put("chat_id", pending.chatId)
+                            .put("content", finalContent)
+                            .put("original_text", pending.originalText)
+                            .put("attachments", attachmentJson)
+                            .toString()
                     )
                 )
+            check(receipt.optBoolean("success", true)) {
+                receipt.optString("error", "Chat mode submission failed")
+            }
+            providerPersisted = true
+            val timestamp = receipt.optLong("message_timestamp", 0L)
+            val message =
+                if (timestamp > 0L) {
+                    ChatMessage(
+                        sender = "user",
+                        content = finalContent,
+                        timestamp = timestamp,
+                        roleName = context.getString(R.string.message_role_user)
+                    )
+                } else {
+                    ChatMessage(
+                        sender = "user",
+                        content = finalContent,
+                        roleName = context.getString(R.string.message_role_user)
+                    )
+                }
+            chatHistoryDelegate.addMessageToChat(message, pending.chatId)
+            if (isFirstMessage) {
+                val title =
+                    receipt.optString("title").trim().takeIf { it.isNotEmpty() }
+                        ?: fallbackConversationTitle(pending.originalText, pending.attachments)
+                chatHistoryDelegate.updateChatTitle(pending.chatId, title)
             }
         } catch (error: CancellationException) {
             throw error
         } catch (error: Exception) {
-            AppLogger.e(TAG, "Laner direct mailbox send failed", error)
+            AppLogger.e(TAG, "Plugin chat mode submit failed", error)
             withContext(Dispatchers.Main) {
-                if (!mailboxPersisted && messageProcessingDelegate.userMessage.value.text.isBlank()) {
+                if (!providerPersisted && messageProcessingDelegate.userMessage.value.text.isBlank()) {
                     messageProcessingDelegate.updateUserMessage(pending.originalText)
                 }
-                if (!mailboxPersisted && attachmentDelegate.attachments.value.isEmpty() && pending.attachments.isNotEmpty()) {
+                if (
+                    !providerPersisted &&
+                        attachmentDelegate.attachments.value.isEmpty() &&
+                        pending.attachments.isNotEmpty()
+                ) {
                     attachmentDelegate.addAttachments(pending.attachments)
                 }
                 uiStateDelegate.showErrorMessage(
-                    error.message ?: context.getString(R.string.laner_chat_initialization_failed, "")
+                    error.message ?: "Chat mode submission failed"
                 )
             }
         }
@@ -672,16 +696,16 @@ class MessageCoordinationDelegate(
             uiStateDelegate.showErrorMessage(context.getString(R.string.chat_no_active_conversation))
             return
         }
-        val isLanerBridgeTurn =
+        val isPluginChatModeTurn =
             promptFunctionType == PromptFunctionType.CHAT &&
-                LanerChatContract.isBridgeConfig(apiConfigDelegate.activeChatModelConfig.value)
+                PluginChatModeRuntime.isChatModeConfig(apiConfigDelegate.activeChatModelConfig.value)
         if (!isAutoContinuation) {
             cancelPendingAutoContinuation(chatId, restoreIdleIfPendingState = false)
         }
         if (
             turnOptions.persistTurn &&
             enableGroupOrchestration &&
-            !isLanerBridgeTurn &&
+            !isPluginChatModeTurn &&
             shouldRunGroupOrchestration(
                 promptFunctionType = promptFunctionType,
                 isContinuation = isContinuation,
@@ -750,7 +774,7 @@ class MessageCoordinationDelegate(
             if (promptFunctionType == PromptFunctionType.CHAT) {
                 val (resolvedChatModelConfigIdOverride, resolvedChatModelIndexOverride) =
                     when {
-                        isLanerBridgeTurn -> Pair(null, null)
+                        isPluginChatModeTurn -> Pair(null, null)
                         !chatModelConfigIdOverride.isNullOrBlank() -> {
                             Pair(chatModelConfigIdOverride, (chatModelIndexOverride ?: 0).coerceAtLeast(0))
                         }
@@ -763,7 +787,7 @@ class MessageCoordinationDelegate(
                     }
                 val resolvedMemorySpaceIdOverride =
                     when {
-                        isLanerBridgeTurn -> null
+                        isPluginChatModeTurn -> null
                         !memorySpaceIdOverride.isNullOrBlank() -> memorySpaceIdOverride
                         isAutoContinuation -> currentMemorySpaceIdOverride
                         else -> roleCardId?.let { resolveRoleCardMemoryProfileOverride(it) }
@@ -808,7 +832,7 @@ class MessageCoordinationDelegate(
         // 如果不是续写，检查是否需要总结
         if (
             turnOptions.persistTurn &&
-                !isLanerBridgeTurn &&
+                !isPluginChatModeTurn &&
                 !isBackgroundSend &&
                 !isContinuation &&
                 !skipSummaryCheck
@@ -852,7 +876,7 @@ class MessageCoordinationDelegate(
         val proxySenderName = proxySenderNameOverride?.takeIf { it.isNotBlank() }
 
         // 如果是proxy sender，视为关闭记忆自动更新
-        val shouldEnableMemoryAutoUpdate = if (!isLanerBridgeTurn && proxySenderName.isNullOrBlank()) {
+        val shouldEnableMemoryAutoUpdate = if (!isPluginChatModeTurn && proxySenderName.isNullOrBlank()) {
             apiConfigDelegate.enableMemoryAutoUpdate.value
         } else {
             false
@@ -868,14 +892,14 @@ class MessageCoordinationDelegate(
             workspaceEnv = workspaceEnv,
             promptFunctionType = promptFunctionType,
             roleCardId = roleCardId,
-            enableThinking = !isLanerBridgeTurn && apiConfigDelegate.enableThinkingMode.value,
+            enableThinking = !isPluginChatModeTurn && apiConfigDelegate.enableThinkingMode.value,
             enableMemoryAutoUpdate = shouldEnableMemoryAutoUpdate,
             maxTokens = maxTokensForSend,
             tokenUsageThreshold = tokenUsageThresholdForSend,
             replyToMessage = if (shouldReadComposerState) uiBridge.getReplyToMessage() else null,
             isAutoContinuation = isAutoContinuation,
             enableSummary =
-                !isLanerBridgeTurn &&
+                !isPluginChatModeTurn &&
                     !forceDisableSummary &&
                     !isBackgroundSend &&
                     chatContextSettings.enableSummary,
@@ -883,8 +907,8 @@ class MessageCoordinationDelegate(
             chatModelIndexOverride = resolvedChatModelIndexOverride,
             memorySpaceIdOverride = resolvedMemorySpaceIdOverride,
             suppressUserMessageInHistory = suppressUserMessageInHistory,
-            isGroupOrchestrationTurn = isGroupOrchestrationTurn && !isLanerBridgeTurn,
-            groupParticipantNamesText = groupParticipantNamesText.takeUnless { isLanerBridgeTurn },
+            isGroupOrchestrationTurn = isGroupOrchestrationTurn && !isPluginChatModeTurn,
+            groupParticipantNamesText = groupParticipantNamesText.takeUnless { isPluginChatModeTurn },
             turnOptions = turnOptions
         )
 

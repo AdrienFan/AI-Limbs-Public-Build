@@ -251,29 +251,29 @@ object AiLimbsCoreCapabilityRegistry {
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.STATUS),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("status"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.status",
-                        displayName = "AI Limbs Laner Chat Bridge 状态",
+                        displayName = "AI Limbs 插件聊天模式兼容状态",
                         description =
-                            "Read Laner Chat mailbox, active-session, priority, unread, pending-reply, and Bridge readiness metadata without returning message bodies.",
-                        keywords = listOf("兰儿聊天", "Laner Chat", "聊天桥", "收件箱", "未读消息")
+                            "Read plugin chat mode mailbox, active-session, priority, unread, pending-reply, and Bridge readiness metadata without returning message bodies.",
+                        keywords = listOf("插件聊天模式", "plugin chat mode", "聊天桥", "收件箱", "未读消息")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.SESSION_OPEN),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("session.open"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.session.open",
-                        displayName = "打开或恢复兰儿聊天会话",
+                        displayName = "打开或恢复插件聊天模式会话",
                         description =
-                            "Open the active Laner Chat session, resume a specified session, or create one when none exists.",
+                            "Open the active plugin chat mode session, resume a specified session, or create one when none exists.",
                         parameters = listOf(
                             ToolParameterSchema(
                                 "session_id",
                                 "string",
-                                "Optional existing Laner Chat session ID to resume",
+                                "Optional existing plugin chat mode session ID to resume",
                                 false
                             ),
                             ToolParameterSchema(
@@ -283,36 +283,36 @@ object AiLimbsCoreCapabilityRegistry {
                                 false
                             )
                         ),
-                        keywords = listOf("兰儿聊天", "session", "会话恢复", "resume", "Laner Chat")
+                        keywords = listOf("插件聊天模式", "session", "会话恢复", "resume", "plugin chat mode")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.SESSION_CLOSE),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("session.close"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.session.close",
-                        displayName = "关闭兰儿聊天会话",
+                        displayName = "关闭插件聊天模式会话",
                         description =
-                            "Close a specified Laner Chat session, or the currently active session when omitted.",
+                            "Close a specified plugin chat mode session, or the currently active session when omitted.",
                         parameters = listOf(
                             ToolParameterSchema(
                                 "session_id",
                                 "string",
-                                "Optional Laner Chat session ID; defaults to the active session",
+                                "Optional plugin chat mode session ID; defaults to the active session",
                                 false
                             )
                         ),
-                        keywords = listOf("兰儿聊天", "session", "关闭会话", "Laner Chat")
+                        keywords = listOf("插件聊天模式", "session", "关闭会话", "plugin chat mode")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.NOTIFICATION_CHECK),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("notification.check"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.notification.check",
-                        displayName = "检查兰儿聊天通知",
+                        displayName = "检查插件聊天模式通知",
                         description =
-                            "Check for unanswered Laner Chat messages after a cursor; returns sequence and HIGH/NORMAL/LOW priority counts only, never message bodies.",
+                            "Check for unanswered plugin chat mode messages after a cursor; returns sequence and HIGH/NORMAL/LOW priority counts only, never message bodies.",
                         parameters = listOf(
                             ToolParameterSchema(
                                 "after_seq",
@@ -328,17 +328,17 @@ object AiLimbsCoreCapabilityRegistry {
                                 false
                             )
                         ),
-                        keywords = listOf("兰儿聊天", "通知", "新消息", "unread", "notification")
+                        keywords = listOf("插件聊天模式", "通知", "新消息", "unread", "notification")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.NOTIFICATION_WAIT),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("notification.wait"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.notification.wait",
-                        displayName = "短时等待兰儿聊天通知",
+                        displayName = "短时等待插件聊天模式通知",
                         description =
-                            "Wait for Laner Chat notification metadata for at most 30 seconds; returns new_message or idle plus priority counts, never message bodies.",
+                            "Wait for plugin chat mode notification metadata for at most 30 seconds; returns new_message or idle plus priority counts, never message bodies.",
                         parameters = listOf(
                             ToolParameterSchema(
                                 "after_seq",
@@ -361,17 +361,17 @@ object AiLimbsCoreCapabilityRegistry {
                                 false
                             )
                         ),
-                        keywords = listOf("兰儿聊天", "等待消息", "bounded wait", "notification", "空闲")
+                        keywords = listOf("插件聊天模式", "等待消息", "bounded wait", "notification", "空闲")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.INBOX_FETCH),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("inbox.fetch"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.inbox.fetch",
-                        displayName = "读取兰儿聊天收件箱",
+                        displayName = "读取插件聊天模式收件箱",
                         description =
-                            "Explicitly fetch unanswered Laner Chat message bodies and mark them delivered; delivered but unanswered messages remain fetchable.",
+                            "Explicitly fetch unanswered plugin chat mode message bodies and mark them delivered; delivered but unanswered messages remain fetchable.",
                         parameters = listOf(
                             ToolParameterSchema(
                                 "session_id",
@@ -406,59 +406,59 @@ object AiLimbsCoreCapabilityRegistry {
                                 false
                             )
                         ),
-                        keywords = listOf("兰儿聊天", "收件箱", "读取正文", "inbox", "fetch")
+                        keywords = listOf("插件聊天模式", "收件箱", "读取正文", "inbox", "fetch")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.ATTACHMENT_FETCH),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("attachment.fetch"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.attachment.fetch",
-                        displayName = "读取兰儿聊天附件",
+                        displayName = "读取插件聊天模式附件",
                         description =
-                            "Fetch one attachment from a previously fetched Laner Chat request. Image responses include file_path for the RDC read_file multimodal handoff; text and documents use the native file reader.",
+                            "Fetch one attachment from a previously fetched plugin chat mode request. Image responses include file_path for the RDC read_file multimodal handoff; text and documents use the native file reader.",
                         parameters = listOf(
                             ToolParameterSchema("request_id", "string", "Request ID returned by inbox.fetch", true),
                             ToolParameterSchema("attachment_id", "string", "Attachment ID returned in the message attachments array", true)
                         ),
-                        keywords = listOf("兰儿聊天", "附件", "图片", "文件", "attachment", "multimodal")
+                        keywords = listOf("插件聊天模式", "附件", "图片", "文件", "attachment", "multimodal")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_STATUS),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("turn.status"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.turn.status",
-                        displayName = "查询 Laner Chat Assistant Turn 状态",
+                        displayName = "查询 plugin chat mode Assistant Turn 状态",
                         description =
                             "Read the AI Limbs-managed Assistant Turn scheduler state without returning message bodies.",
                         parameters = listOf(
-                            ToolParameterSchema("session_id", "string", "Optional Laner Chat session filter", false)
+                            ToolParameterSchema("session_id", "string", "Optional plugin chat mode session filter", false)
                         ),
-                        keywords = listOf("Laner Chat", "Assistant Turn", "scheduler", "调度", "状态")
+                        keywords = listOf("plugin chat mode", "Assistant Turn", "scheduler", "调度", "状态")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_CLAIM),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("turn.claim"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.turn.claim",
-                        displayName = "领取下一批 Laner Chat 用户消息",
+                        displayName = "领取下一批 plugin chat mode 用户消息",
                         description =
-                            "Atomically claim the current eligible Laner Chat message snapshot as one Assistant Turn. Existing active turns are returned idempotently; messages arriving after claim remain pending for the next turn.",
+                            "Atomically claim the current eligible plugin chat mode message snapshot as one Assistant Turn. Existing active turns are returned idempotently; messages arriving after claim remain pending for the next turn.",
                         parameters = listOf(
-                            ToolParameterSchema("session_id", "string", "Optional Laner Chat session; defaults to active", false),
+                            ToolParameterSchema("session_id", "string", "Optional plugin chat mode session; defaults to active", false),
                             ToolParameterSchema("limit", "integer", "Maximum messages to claim from 1 to 50", false, "50")
                         ),
-                        keywords = listOf("Laner Chat", "Assistant Turn", "claim", "batch", "批量消息", "scheduler")
+                        keywords = listOf("plugin chat mode", "Assistant Turn", "claim", "batch", "批量消息", "scheduler")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_REPLY),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("turn.reply"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.turn.reply",
-                        displayName = "完成 Laner Chat Assistant Turn",
+                        displayName = "完成 plugin chat mode Assistant Turn",
                         description =
                             "Atomically complete one Assistant Turn, mark all covered user requests answered, and deliver one idempotent user-visible assistant reply to the bound Bridge Chat.",
                         parameters = listOf(
@@ -466,57 +466,57 @@ object AiLimbsCoreCapabilityRegistry {
                             ToolParameterSchema("reply_id", "string", "Optional stable reply ID for retry idempotence", false),
                             ToolParameterSchema("content", "string", "Complete assistant reply text for the whole turn", true)
                         ),
-                        keywords = listOf("Laner Chat", "Assistant Turn", "reply", "covered requests", "批量回复", "幂等")
+                        keywords = listOf("plugin chat mode", "Assistant Turn", "reply", "covered requests", "批量回复", "幂等")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_RESOLVE),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("turn.resolve"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.turn.resolve",
-                        displayName = "无需回复地完成 Laner Chat Assistant Turn",
+                        displayName = "无需回复地完成 plugin chat mode Assistant Turn",
                         description =
                             "Complete one active Assistant Turn without sending a user-visible reply. All covered requests become resolved-no-reply and leave the unresolved attention set.",
                         parameters = listOf(
                             ToolParameterSchema("turn_id", "string", "Active Assistant Turn ID returned by turn.claim", true)
                         ),
-                        keywords = listOf("Laner Chat", "Assistant Turn", "resolve", "no reply", "无需回复", "处理完成")
+                        keywords = listOf("plugin chat mode", "Assistant Turn", "resolve", "no reply", "无需回复", "处理完成")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_CANCEL),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("turn.cancel"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.turn.cancel",
-                        displayName = "停止当前 Laner Chat Assistant Turn",
+                        displayName = "停止当前 plugin chat mode Assistant Turn",
                         description =
                             "Cancel only the current Assistant Turn and pause the scheduler while preserving all covered user messages as unresolved.",
                         parameters = listOf(
-                            ToolParameterSchema("session_id", "string", "Optional Laner Chat session; defaults to active", false)
+                            ToolParameterSchema("session_id", "string", "Optional plugin chat mode session; defaults to active", false)
                         ),
-                        keywords = listOf("Laner Chat", "Assistant Turn", "cancel", "停止", "暂停调度", "保留消息")
+                        keywords = listOf("plugin chat mode", "Assistant Turn", "cancel", "停止", "暂停调度", "保留消息")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_RESUME),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("turn.resume"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.turn.resume",
-                        displayName = "恢复 Laner Chat Assistant Turn 调度",
+                        displayName = "恢复 plugin chat mode Assistant Turn 调度",
                         description =
-                            "Resume the AI Limbs-managed Laner Chat scheduler after a user stop without discarding unresolved messages.",
+                            "Resume the AI Limbs-managed plugin chat mode scheduler after a user stop without discarding unresolved messages.",
                         parameters = listOf(
-                            ToolParameterSchema("session_id", "string", "Optional Laner Chat session; defaults to active", false)
+                            ToolParameterSchema("session_id", "string", "Optional plugin chat mode session; defaults to active", false)
                         ),
-                        keywords = listOf("Laner Chat", "Assistant Turn", "resume", "继续处理", "scheduler")
+                        keywords = listOf("plugin chat mode", "Assistant Turn", "resume", "继续处理", "scheduler")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.LEGACY_REPLY),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("reply"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.reply",
-                        displayName = "回复兰儿聊天消息",
+                        displayName = "回复插件聊天模式消息",
                         description =
                             "Legacy single-request reply compatibility path. Assistant Turn clients should use ai_limbs.chat.turn.reply or ai_limbs.chat.turn.resolve.",
                         parameters = listOf(
@@ -529,22 +529,22 @@ object AiLimbsCoreCapabilityRegistry {
                             ),
                             ToolParameterSchema("content", "string", "Complete reply text", true)
                         ),
-                        keywords = listOf("兰儿聊天", "回复", "reply", "request_id", "幂等")
+                        keywords = listOf("插件聊天模式", "回复", "reply", "request_id", "幂等")
                     )
         ),
         registration(
-            route = AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.SEND),
+            route = AiLimbsCoreRoute.PluginChatModeCompatibility("send"),
             catalogEntry =
-            lanerChatEntry(
+            chatModeCompatibilityEntry(
                         name = "ai_limbs.chat.send",
-                        displayName = "主动发送兰儿聊天消息",
+                        displayName = "主动发送插件聊天模式消息",
                         description =
-                            "Send an AI-originated message without a user request ID; automatically open a Laner session and bootstrap a dedicated Bridge Chat when needed.",
+                            "Send an AI-originated message without a user request ID; automatically open a plugin session and bootstrap a dedicated Bridge Chat when needed.",
                         parameters = listOf(
                             ToolParameterSchema(
                                 "session_id",
                                 "string",
-                                "Optional Laner Chat session; defaults to or automatically creates the active session",
+                                "Optional plugin chat mode session; defaults to or automatically creates the active session",
                                 false
                             ),
                             ToolParameterSchema(
@@ -555,7 +555,7 @@ object AiLimbsCoreCapabilityRegistry {
                             ),
                             ToolParameterSchema("content", "string", "Complete proactive message text", true)
                         ),
-                        keywords = listOf("兰儿聊天", "主动消息", "主动发送", "proactive", "send", "幂等")
+                        keywords = listOf("插件聊天模式", "主动消息", "主动发送", "proactive", "send", "幂等")
                     )
         ),
         registration(
@@ -700,7 +700,7 @@ object AiLimbsCoreCapabilityRegistry {
         sourceLocator = "ai-limbs://bridge/${name.removePrefix("ai_limbs.bridge.")}"
     )
 
-    private fun lanerChatEntry(
+    private fun chatModeCompatibilityEntry(
         name: String,
         displayName: String,
         description: String,
@@ -712,7 +712,7 @@ object AiLimbsCoreCapabilityRegistry {
         description = description,
         parameters = parameters,
         keywords = keywords,
-        sourceName = "ai_limbs_laner_chat",
+        sourceName = "ai_limbs_chat_compat",
         sourceLocator = "ai-limbs://chat/${name.removePrefix("ai_limbs.chat.")}"
     )
 

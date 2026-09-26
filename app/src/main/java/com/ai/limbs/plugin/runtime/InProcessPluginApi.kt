@@ -162,6 +162,41 @@ interface InProcessPageProvider {
     fun createView(context: Context, sharedUi: InProcessSharedUiHost): View
 }
 
+/**
+ * Host-embedded chat mode extension.
+ *
+ * The Host owns only generic chat composition slots and submit/cancel plumbing. Concrete mode
+ * concepts remain inside the plugin presentation payload.
+ */
+interface InProcessChatModeExtensionProvider {
+    val stateJson: StateFlow<String?>
+    fun matches(contextJson: String): Boolean
+    fun behavior(contextJson: String): String = "{}"
+    /** Generic model/config template used by the Host when this mode is selected. */
+    fun configurationTemplate(): String = "{}"
+    fun createSlotView(slotId: String, context: Context): View?
+
+    suspend fun onChatContextChanged(contextJson: String): String = "{}"
+    suspend fun submit(requestJson: String): String
+    suspend fun cancel(contextJson: String): String = "{}"
+    suspend fun resume(contextJson: String): String = "{}"
+}
+object InProcessChatModeSlotIds {
+    const val CONFIGURATION_CARD = "chat.configuration_card"
+    const val STATUS_OVERLAY = "chat.status_overlay"
+    const val COMPOSER_ACCESSORY = "chat.composer_accessory"
+}
+
+
+object InProcessChatModeBehaviorKeys {
+    const val PREFERRED_INPUT_STYLE = "preferred_input_style"
+    const val SUPPRESS_LOCAL_AGENT_FEATURES = "suppress_local_agent_features"
+    const val DIRECT_SEND_WHILE_PROCESSING = "direct_send_while_processing"
+    const val SUPPRESS_PENDING_QUEUE = "suppress_pending_queue"
+    const val HANDLES_CANCEL = "handles_cancel"
+    const val HANDLES_RESUME = "handles_resume"
+}
+
 /** Optional host-owned components that a plugin page may embed without giving up page ownership. */
 interface InProcessSharedUiHost {
     fun supports(componentId: String): Boolean
@@ -309,10 +344,17 @@ interface InProcessPluginUiHost {
     /** Executes only through the Core-owned authorization/capability path. */
     suspend fun invokeHostCapability(id: String, parametersJson: String = "{}"): String
 }
-
 interface InProcessPluginPresentationHost : InProcessPluginUiHost {
+    /** Host-local presentation object publication; never crosses the Resident business wire. */
+    fun registerPresentationProvider(
+        id: String,
+        payload: Any,
+        metadata: Map<String, String> = emptyMap()
+    ): AutoCloseable
+
     /** Host-local View provider registration. The payload never crosses the process boundary. */
     fun registerPageProvider(
+
         id: String,
         provider: InProcessPageProvider,
         metadata: Map<String, String> = emptyMap()

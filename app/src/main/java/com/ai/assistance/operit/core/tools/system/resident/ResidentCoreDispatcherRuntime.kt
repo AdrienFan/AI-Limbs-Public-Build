@@ -81,8 +81,29 @@ internal class ResidentCoreDispatcherRuntime(
             .put("owner_pid", Process.myPid())
             .put("core_session", coreSessionId)
     }
+    fun attestPluginWorker(payload: JSONObject): JSONObject {
+        val pluginId = payload.getString("plugin_id").trim()
+        val version = payload.getString("version").trim()
+        require(pluginId.isNotBlank() && version.isNotBlank()) {
+            "Plugin Worker attestation identity is incomplete"
+        }
+        val authorization = runBlocking {
+            com.ai.assistance.operit.plugins.center.PluginPlatformKernel.manager
+                .attestWorkerIdentity(pluginId, version)
+        }
+        return JSONObject()
+            .put("trusted", true)
+            .put("plugin_id", authorization.pluginId)
+            .put("version", authorization.version)
+            .put("roles", org.json.JSONArray(authorization.roles.sorted()))
+            .put("granted_scopes", org.json.JSONArray(authorization.grantedScopes.sorted()))
+            .put("dispatcher_owner", "resident_core")
+            .put("owner_pid", Process.myPid())
+            .put("core_session", coreSessionId)
+    }
 
     fun describePluginService(payload: JSONObject): JSONObject {
+
         val pluginId = payload.getString("plugin_id").trim()
         val version = payload.getString("version").trim()
         val serviceId = payload.getString("service_id").trim()

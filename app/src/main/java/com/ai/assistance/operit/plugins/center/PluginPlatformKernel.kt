@@ -175,6 +175,58 @@ internal object PluginPlatformKernel {
         get() = requireInitialized().let { officialIdentitiesInstance }
 
     /**
+     * Read-only Host presentation provider discovery.
+     *
+     * BUSINESS Core contributions are used in legacy in-process mode; when Resident owns business,
+     * the Host reads its local presentation directory maintained by the UI proxy.
+     */
+    internal fun presentationProvidersSnapshot(): List<com.ai.limbs.plugin.runtime.InProcessProviderBinding> {
+        if (!initialized) {
+            return PluginHostUiProxyRuntimeHolder.requireRuntime()
+                .presentationProviders()
+                .map { binding ->
+                    com.ai.limbs.plugin.runtime.InProcessProviderBinding(
+                        ownerPluginId = binding.ownerPluginId,
+                        id = binding.id,
+                        metadata = binding.metadata.toMap(),
+                        payload = binding.payload
+                    )
+                }
+        }
+        return contributionsInstance.listAll()
+            .filter { it.kind == PluginContributionKind.PROVIDER }
+            .map { record ->
+                com.ai.limbs.plugin.runtime.InProcessProviderBinding(
+                    ownerPluginId = record.ownerPluginId,
+                    id = record.id,
+                    metadata = record.metadata.toMap(),
+                    payload = record.payload
+                )
+            }
+            .sortedBy { it.id }
+    }
+
+    internal fun matchesBusinessChatModeConfig(
+        config: com.ai.assistance.operit.data.model.ModelConfigData
+    ): Boolean {
+        if (!initialized) return false
+        val configId = config.id.trim()
+        val providerTypeId = config.apiProviderTypeId.trim()
+        return contributionsInstance.listAll()
+            .asSequence()
+            .filter { it.kind == PluginContributionKind.PROVIDER }
+            .filter { it.metadata["kind"] == PluginChatModeRuntime.BUSINESS_KIND }
+            .any { record ->
+                val declaredConfigId = record.metadata["config_id"].orEmpty().trim()
+                val declaredProviderTypeId = record.metadata["provider_type_id"].orEmpty().trim()
+                (declaredConfigId.isNotEmpty() && declaredConfigId == configId) ||
+                    (declaredProviderTypeId.isNotEmpty() &&
+                        declaredProviderTypeId.equals(providerTypeId, ignoreCase = true))
+            }
+    }
+
+    /**
+
      * Runtime hand-off for an already admitted system plugin. Trust/signature admission must happen
      * before this internal boundary is called. Only the plugin_center role receives this control plane.
      */

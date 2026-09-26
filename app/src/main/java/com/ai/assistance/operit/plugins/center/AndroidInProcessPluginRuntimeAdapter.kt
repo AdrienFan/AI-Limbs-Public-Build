@@ -40,13 +40,16 @@ import kotlinx.coroutines.flow.stateIn
 import org.json.JSONObject
 
 internal object BusinessPageProviderMetadata
-
 internal class AndroidInProcessPluginRuntimeAdapter(
     private val contributions: PluginContributionRegistry,
     private val notificationBindingProvider: (String, Set<String>) -> InProcessProviderBinding?,
     private val identityRegistry: OfficialPluginIdentityRegistry,
-    private val childRuntimeProvider: () -> ChildExtensionRuntimeOwner
+    private val childRuntimeProvider: () -> ChildExtensionRuntimeOwner,
+    private val trustAttestor: suspend (PluginRuntimeAdapterContext) -> Boolean = { context ->
+        identityRegistry.isTrusted(context.manifest, context.installMetadata)
+    }
 ) : PluginRuntimeAdapter {
+
     override val kind: String = "android_inprocess"
 
     override suspend fun mount(context: PluginRuntimeAdapterContext): PluginRuntimeHandle {
@@ -169,9 +172,9 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             private val CHILD_FIRST_PACKAGE_PREFIXES = arrayOf("org.bouncycastle.")
         }
     }
+    private suspend fun requireSystemPlugin(context: PluginRuntimeAdapterContext) {
+        if (!trustAttestor(context)) {
 
-    private fun requireSystemPlugin(context: PluginRuntimeAdapterContext) {
-        if (!identityRegistry.isTrusted(context.manifest, context.installMetadata)) {
             throw PluginInstallException(
                 "INPROCESS_SYSTEM_IDENTITY_REQUIRED",
                 "android_inprocess requires Plugin Center approval and the official plugin signer"

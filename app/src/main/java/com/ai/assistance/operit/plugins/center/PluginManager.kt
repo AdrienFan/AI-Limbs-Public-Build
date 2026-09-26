@@ -273,7 +273,6 @@ internal class PluginManager(
             grantedScopes = metadata.grantedScopes.toSet()
         )
     }
-
     internal suspend fun workerAuthorization(pluginId: String, version: String): PluginActiveAuthorization {
         val snapshot = workerAuthorizations[pluginId]
             ?: throw PluginInstallException("PLUGIN_WORKER_NOT_AUTHORIZED", "Worker has no active Core authorization: $pluginId")
@@ -283,6 +282,37 @@ internal class PluginManager(
         }
         return authorization
     }
+
+    /**
+     * Worker mount attestation from the one authoritative Core view.
+     *
+     * Do not acquire [mutex] here: Core may be waiting for this exact Worker mount while the
+     * install/enable transaction already owns it. The worker authorization is published before
+     * remote mount starts, and install metadata/version files are committed before that publication.
+     */
+    internal suspend fun attestWorkerIdentity(
+        pluginId: String,
+        version: String
+    ): PluginActiveAuthorization {
+        val authorization = workerAuthorization(pluginId, version)
+        val manifest = stateRepository.readInstalledManifest(pluginId, version)
+        val metadata = stateRepository.readInstallMetadata(pluginId, version)
+            ?: throw PluginInstallException(
+                "PLUGIN_WORKER_METADATA_MISSING",
+                "Core has no install metadata for Worker attestation: $pluginId $version"
+            )
+        check(manifest.pluginId == authorization.pluginId && manifest.version == authorization.version) {
+            "Worker attestation manifest identity mismatch"
+        }
+        check(metadata.grantedScopes == manifest.permissions.requestedScopes) {
+            "Worker attestation scope approval does not match manifest"
+        }
+        check(identityRegistry.isTrusted(manifest, metadata)) {
+            "Core refused untrusted android_inprocess identity: $pluginId"
+        }
+        return authorization
+    }
+
 
     internal suspend fun workerServiceAuthorization(
         pluginId: String,
