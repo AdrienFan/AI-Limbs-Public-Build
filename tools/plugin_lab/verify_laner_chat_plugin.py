@@ -23,6 +23,13 @@ if len(declared) != len(declared_list):
     sys.exit(1)
 
 source = ENTRY.read_text(encoding="utf-8")
+if "InProcessMetadataOnlyProvider" not in source:
+    print("Laner Chat discovery provider must use the metadata-only Resident transport marker.", file=sys.stderr)
+    sys.exit(1)
+if re.search(r"registerProvider\(\s*LANER_CHAT_PROVIDER_ID,\s*controller", source):
+    print("LanerChatController must stay Worker-local and must not cross the Provider transport.", file=sys.stderr)
+    sys.exit(1)
+
 runtime_names = set(re.findall(r'\bcapability\(\s*"([^"]+)"', source))
 runtime = {f"{plugin_id}.{name}" for name in runtime_names}
 

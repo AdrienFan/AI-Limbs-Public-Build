@@ -5,6 +5,7 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityEffect
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
+import com.ai.limbs.plugin.runtime.InProcessMetadataOnlyProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
@@ -25,7 +26,7 @@ class LanerChatEntry : InProcessPluginEntry {
 
         host.registerProvider(
             LANER_CHAT_PROVIDER_ID,
-            controller,
+            InProcessMetadataOnlyProvider,
             mapOf(
                 "kind" to "chat_mode_runtime",
                 "api" to "1",
