@@ -1,0 +1,78 @@
+name: AI Limbs Laner Chat
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - feat/laner-chat-plugin-v01
+
+permissions:
+  contents: read
+
+jobs:
+  laner_chat:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: Verify source and manifest versions
+        run: python3 tools/plugin_lab/source_provenance.py check --output dist/source-inventory.json
+
+      - name: Verify Laner Chat extraction contracts
+        run: python3 tools/plugin_lab/verify_laner_chat_plugin.py
+
+      - name: Resolve Laner Chat package version
+        id: laner_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("plugin-lab/packages/laner-chat/plugin.json"))["version"])')"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Set up Java
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
+
+      - name: Install Android toolchain
+        run: |
+          set -euo pipefail
+          sdkmanager --install "platform-tools" "platforms;android-34" "platforms;android-36" "build-tools;35.0.0"
+          printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+
+      - name: Test extracted Laner Chat core
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :laner-chat-plugin:testDebugUnitTest --stacktrace --no-daemon
+
+      - name: Compile plugin payload
+        run: ./gradlew :laner-chat-plugin:assembleDebug --stacktrace --no-daemon
+
+      - name: Sign installable plugin
+        env:
+          AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+        run: python3 tools/plugin_lab/package_laner_chat.py
+
+      - name: Record source provenance
+        run: python3 tools/plugin_lab/source_provenance.py record --manifest plugin-lab/packages/laner-chat/plugin.json --package dist/AI-Limbs-Laner-Chat-v${{ steps.laner_version.outputs.value }}.ailp
+
+      - name: Upload plugin
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: laner-chat-v${{ steps.laner_version.outputs.value }}-${{ github.run_number }}
+          path: |
+            dist/AI-Limbs-Laner-Chat-v${{ steps.laner_version.outputs.value }}.ailp
+            dist/AI-Limbs-Laner-Chat-v${{ steps.laner_version.outputs.value }}.ailp.sha256
+            dist/AI-Limbs-Laner-Chat-v${{ steps.laner_version.outputs.value }}.ailp.source.json
+          if-no-files-found: error

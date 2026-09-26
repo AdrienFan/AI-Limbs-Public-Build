@@ -1,0 +1,48 @@
+{
+  "format": "AIL_PLUGIN_V1",
+  "schema_version": 1,
+  "plugin_id": "plugin.chat.laner_bridge",
+  "version": "0.1.0",
+  "api": { "target": 1, "min": 1 },
+  "display": {
+    "name": "Laner Chat",
+    "description": "兰儿聊天桥的独立 durable mailbox、Session、Priority 与 Assistant Turn 业务核心。"
+  },
+  "roles": ["system_plugin"],
+  "activation": { "mode": "hot" },
+  "runtime": {
+    "kind": "android_inprocess",
+    "entry": "payload/plugin.apk",
+    "config": {
+      "entry_class": "com.ai.limbs.plugins.lanerchat.LanerChatEntry"
+    }
+  },
+  "dependencies": { "plugins": [], "services": [] },
+  "permissions": { "requested_scopes": [] },
+  "provides": {
+    "capabilities": [
+      "plugin.chat.laner_bridge.status",
+      "plugin.chat.laner_bridge.session.open",
+      "plugin.chat.laner_bridge.session.close",
+      "plugin.chat.laner_bridge.ui.bind_chat",
+      "plugin.chat.laner_bridge.notification.check",
+      "plugin.chat.laner_bridge.notification.wait",
+      "plugin.chat.laner_bridge.inbox.fetch",
+      "plugin.chat.laner_bridge.attachment.fetch",
+      "plugin.chat.laner_bridge.turn.status",
+      "plugin.chat.laner_bridge.turn.claim",
+      "plugin.chat.laner_bridge.turn.reply",
+      "plugin.chat.laner_bridge.turn.resolve",
+      "plugin.chat.laner_bridge.turn.cancel",
+      "plugin.chat.laner_bridge.turn.resume",
+      "plugin.chat.laner_bridge.reply",
+      "plugin.chat.laner_bridge.mailbox.enqueue",
+      "plugin.chat.laner_bridge.mailbox.cancel",
+      "plugin.chat.laner_bridge.proactive.prepare",
+      "plugin.chat.laner_bridge.proactive.delivered"
+    ],
+    "services": [],
+    "providers": ["plugin.chat.laner_bridge.runtime"],
+    "extensions": []
+  }
+}
