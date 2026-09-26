@@ -45,6 +45,20 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         val read = InProcessCapabilityEffect.READ_ONLY
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
+        capability("image.set_background", "设置图像背景色与透明度", write,
+            "与图像菜单共用工程操作日志；color 是 #AARRGGBB，00 为全透明。") { p ->
+            store.apply("LANER", "IMAGE_BACKGROUND", JSONObject().put("color", p.getString("color")))
+        }
+        capability("image.crop_to_selection", "裁切图像到选区边界", write,
+            "按当前选区的边界矩形裁切画布；没有选区或尺寸不足 64 像素时拒绝。") {
+            store.cropToSelection("LANER")
+        }
+        capability("image.resize_canvas", "更改画室画布大小", write,
+            "不缩放图层；offsetX/offsetY 是旧图像左上角在新画布中的位置，默认 0。") { p ->
+            store.apply("LANER", "CANVAS_RESIZE", JSONObject()
+                .put("width", p.getInt("width")).put("height", p.getInt("height"))
+                .put("x", -p.optInt("offsetX", 0)).put("y", -p.optInt("offsetY", 0)))
+        }
         capability("view.state", "读取画室视图状态", read,
             "查看面板、状态栏、网格、像素网格和宿主页面模式的当前状态。") {
             ArtStudioViewControl.state.value.describe()
@@ -377,6 +391,9 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
     }
     val id = p("id")
     return when (name) {
+        "image.set_background" -> listOf(p("color"))
+        "image.resize_canvas" -> listOf(p("width", "integer"), p("height", "integer"),
+            p("offsetX", "integer", true), p("offsetY", "integer", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
         "view.presentation" -> listOf(p("mode"))

@@ -122,3 +122,19 @@ Krita 文件菜单说明：https://docs.krita.org/en/reference_manual/main_menu/
 | 围绕光标／画布镜像、标尺及游标、参考线及锁定、吸附全部子项、辅助尺及预览、参考图像、色板操作菜单 | 灰色。需要各自的锚点变换、标尺与参考线数据、吸附引擎、辅助对象或色板模块。 |
 
 兰儿可用 `view.state` 读当前状态；`view.set(option, enabled)` 控制 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；`view.command(command)` 逐条执行缩放、旋转、镜像和刷新，画布未打开时明确报错；`view.presentation(mode)` 请求宿主确认 normal、fullscreen_portrait、fullscreen_landscape。灰色项目没有执行能力入口。连续命令使用事件队列，不会把两次放大合并成一次。
+
+## 图像菜单（Krita 6.0.4 对照）
+
+按手机所示菜单顺序与 Krita 的 `krita/krita5.xmlgui` Image 节点列出项目。此阶段仍以画室自己的结构化工程为数据模型，灰色项目不会误把预览变换当成像素/图层变换。
+
+| 项目 | 画室行为 |
+| --- | --- |
+| 图像属性 | 可用，展示当前名称、像素尺寸、图层数、RGB 8 位、背景、修订及保存状态。兰儿用已有 `document.info` 读取同一工程快照。 |
+| 图像背景色与透明度 | 可用，输入 `#AARRGGBB` 或切换完全透明/不透明。写入 `IMAGE_BACKGROUND` 操作，参与撤销、保存与渲染；兰儿用 `image.set_background(color)`。 |
+| 更改画布大小 | 可用，设置 64–4096 px 宽高和旧图像左上角在新画布中的偏移；不重采样图层，内容按新边界裁切。写入 `CANVAS_RESIZE` 操作；兰儿用 `image.resize_canvas(width,height,offsetX?,offsetY?)`。 |
+| 裁切至选区大小 | 有选区且与画布相交的边界宽高均至少 64 px 时可用。按选区的边界矩形裁切，清除选区并写入可撤销的 CROP 操作；兰儿用 `image.crop_to_selection`。 |
+| 转换图像色彩空间、裁切至图像／当前图层、清理未使用数据 | 灰色。需要色彩管理、图层内容边界或资产回收语义。 |
+| 旋转图像子菜单、斜切、水平／垂直翻转、缩放图像大小、偏移图像 | 灰色。需对结构化笔画、图层变换、图片资产和后续编辑坐标一致地变换。 |
+| 切割图像、小波分解、分离图像通道 | 灰色。需要分片、滤波器或通道工程模型。 |
+
+这里的“更改画布大小”对应 Krita 的 Canvas Size，不等于“缩放图像大小”（像素重采样）。操作记录保留了阿伟和兰儿各自的 actor。

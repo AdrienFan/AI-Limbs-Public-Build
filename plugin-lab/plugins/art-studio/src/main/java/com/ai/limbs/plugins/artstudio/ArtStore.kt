@@ -130,6 +130,25 @@ internal class ArtStore(private val root: File) {
         result.put("lastOperationId", operation.getString("id"))
     }
 
+    fun cropToSelection(actor: String): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        val state = replay(loadCurrent())
+        val selection = state.optJSONObject("selection") ?: error("请先创建选区")
+        val width = state.getInt("width")
+        val height = state.getInt("height")
+        val left = kotlin.math.floor(selection.getDouble("x")).toInt().coerceIn(0, width)
+        val top = kotlin.math.floor(selection.getDouble("y")).toInt().coerceIn(0, height)
+        val right = kotlin.math.ceil(selection.getDouble("x") +
+            selection.getDouble("width")).toInt().coerceIn(0, width)
+        val bottom = kotlin.math.ceil(selection.getDouble("y") +
+            selection.getDouble("height")).toInt().coerceIn(0, height)
+        require(right - left in 64..4096 && bottom - top in 64..4096) {
+            "选区边界须至少 64 × 64 像素，且与画布相交"
+        }
+        appendToCurrent(actor, "CROP", JSONObject().put("width", right - left)
+            .put("height", bottom - top).put("x", left).put("y", top))
+    }
+
     fun save(): JSONObject = locked { saveDocument(loadCurrent()) }
 
     // Save As changes the active document identity; the previous document stays available.
@@ -634,6 +653,8 @@ internal class ArtStore(private val root: File) {
                 "STROKE_ERASE" -> "删除笔画"
                 "TRANSFORM" -> "变换图层"
                 "CROP" -> "裁剪画布"
+                "CANVAS_RESIZE" -> "更改画布大小"
+                "IMAGE_BACKGROUND" -> "更改图像背景色与透明度"
                 "LAYER_RENAME" -> "重命名图层"
                 "LAYER_SELECT" -> "选择图层"
                 "LAYER_VISIBLE" -> "显示或隐藏图层"
@@ -788,6 +809,8 @@ internal class ArtStore(private val root: File) {
                 }
             }
             "DOCUMENT_RENAME" -> state.put("name", p.getString("name").trim().take(100).also { require(it.isNotBlank()) })
+            "IMAGE_BACKGROUND" -> state.put("background",
+                p.getString("color").also { requireColor(it) })
             "LAYER_SELECT" -> state.put("selectedLayerId", find(p.getString("id")).second.getString("id"))
             "LAYER_RENAME" -> find(p.getString("id")).second.put("name", p.getString("name").take(100))
             "LAYER_VISIBLE" -> find(p.getString("id")).second.put("visible", p.getBoolean("visible"))
@@ -1113,11 +1136,13 @@ internal class ArtStore(private val root: File) {
                     }
                 }
             }
-            "CROP" -> {
+            "CROP", "CANVAS_RESIZE" -> {
                 state.put("width", p.getInt("width").also { require(it in 64..4096) })
                 state.put("height", p.getInt("height").also { require(it in 64..4096) })
                 val dx = p.optDouble("x", 0.0); val dy = p.optDouble("y", 0.0)
                 require(dx.isFinite() && dy.isFinite())
+                if (type == "CANVAS_RESIZE") require(dx in -4096.0..4096.0 &&
+                    dy in -4096.0..4096.0) { "画布偏移必须在 -4096–4096 像素之间" }
                 for (i in 0 until layers.length()) {
                     val layer = layers.getJSONObject(i)
                     if (layer.optString("parentId").isBlank()) {

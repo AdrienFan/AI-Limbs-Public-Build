@@ -282,6 +282,47 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                                 }
                                 show()
                             }
+                        } else if (title == "图像(I)") {
+                            val anchor = this
+                            PopupMenu(pluginContext, anchor).apply {
+                                fun add(group: Int, id: Int, label: String, enabled: Boolean = true) {
+                                    menu.add(group, id, id, label).isEnabled = enabled && !bridge.busy
+                                }
+                                val doc = bridge.hasDocument
+                                add(0, 301, "图像属性(P)…", doc)
+                                add(0, 302, "图像背景色与透明度(I)…", doc)
+                                add(0, 303, "转换图像色彩空间(C)…", false)
+                                add(1, 304, "裁切至图像大小(T)", false)
+                                add(1, 305, "裁切至当前图层大小(L)", false)
+                                add(1, 306, "裁切至选区大小(E)", bridge.canCropSelection)
+                                add(1, 307, "清理未使用的图像数据", false)
+                                menu.addSubMenu(2, 308, 308, "旋转(R)").apply {
+                                    add(2, 309, 309, "旋转图像…").isEnabled = false
+                                    add(2, 310, 310, "顺时针旋转 90°").isEnabled = false
+                                    add(2, 311, 311, "逆时针旋转 90°").isEnabled = false
+                                    add(2, 312, 312, "旋转 180°").isEnabled = false
+                                }.item.isEnabled = false
+                                add(2, 313, "斜切图像(S)…", false)
+                                add(3, 314, "翻转图像（水平）(M)", false)
+                                add(3, 315, "翻转图像（垂直）(V)", false)
+                                add(4, 316, "缩放图像大小(N)…    Ctrl+Alt+I", false)
+                                add(4, 317, "偏移图像(O)…", false)
+                                add(4, 318, "更改画布大小(E)…    Ctrl+Alt+C", doc)
+                                add(5, 319, "切割图像(A)", false)
+                                add(5, 320, "小波分解…", false)
+                                add(5, 321, "分离图像通道(G)…", false)
+                                if (android.os.Build.VERSION.SDK_INT >= 28) menu.setGroupDividerEnabled(true)
+                                setOnMenuItemClickListener { selected ->
+                                    bridge.onImageCommand?.invoke(selected.itemId)
+                                    true
+                                }
+                                setOnDismissListener {
+                                    anchor.isSelected = false
+                                    anchor.setBackgroundColor(Color.TRANSPARENT)
+                                    anchor.setTextColor(Color.rgb(218, 218, 218))
+                                }
+                                show()
+                            }
                         }
                     }
                 }
@@ -310,9 +351,11 @@ private class StudioMenuBridge {
     var hasCanvasCursor = false
     var hasClipboard = false
     var clipboardCanNew = false
+    var canCropSelection = false
     var onFileCommand: ((Int) -> Unit)? = null
     var onEditCommand: ((Int) -> Unit)? = null
     var onViewCommand: ((Int) -> Unit)? = null
+    var onImageCommand: ((Int) -> Unit)? = null
 }
 
 private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS }
@@ -385,6 +428,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var duplicateDialog by remember { mutableStateOf(false) }
     var duplicateName by remember { mutableStateOf("") }
     var documentInfoDialog by remember { mutableStateOf(false) }
+    var imageBackgroundDialog by remember { mutableStateOf(false) }
+    var imageBackgroundColor by remember { mutableStateOf("#FFFFFFFF") }
+    var canvasResizeDialog by remember { mutableStateOf(false) }
+    var resizeWidth by remember { mutableStateOf("") }
+    var resizeHeight by remember { mutableStateOf("") }
+    var resizeOffsetX by remember { mutableStateOf("0") }
+    var resizeOffsetY by remember { mutableStateOf("0") }
     var exportDialog by remember { mutableStateOf(false) }
     var advancedExportDialog by remember { mutableStateOf(false) }
     var exportFormat by remember { mutableStateOf("png") }
@@ -754,6 +804,19 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val menuCanRedo = current?.optBoolean("canRedo") == true
     val menuUndoLabel = current?.optString("undoLabel") ?: ""
     val menuRedoLabel = current?.optString("redoLabel") ?: ""
+    val menuCanCropSelection = state?.let { imageState ->
+        imageState.optJSONObject("selection")?.let { selection ->
+            val left = kotlin.math.floor(selection.getDouble("x")).toInt()
+                .coerceIn(0, imageState.getInt("width"))
+            val top = kotlin.math.floor(selection.getDouble("y")).toInt()
+                .coerceIn(0, imageState.getInt("height"))
+            val right = kotlin.math.ceil(selection.getDouble("x") + selection.getDouble("width"))
+                .toInt().coerceIn(0, imageState.getInt("width"))
+            val bottom = kotlin.math.ceil(selection.getDouble("y") + selection.getDouble("height"))
+                .toInt().coerceIn(0, imageState.getInt("height"))
+            right - left >= 64 && bottom - top >= 64
+        }
+    } == true
     val menuHasClipboard = clipboardSize.first > 0 && clipboardSize.second > 0
     val menuHasCanvasCursor = canvasCursor != null
     val menuActive = selectedLayer
@@ -782,6 +845,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         menuBridge.canCopyPixels = menuCanCopyPixels
         menuBridge.canEditPixels = menuCanEditPixels
         menuBridge.clipboardCanNew = menuClipboardCanNew
+        menuBridge.canCropSelection = menuCanCropSelection
         menuBridge.onEditCommand = { command ->
             if (!busy) when (command) {
                 101 -> perform { store.history("AWEI", redo = false) }
@@ -836,6 +900,24 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 16 -> documentInfoDialog = true
                 17 -> requestClose(false)
                 19 -> requestClose(true)
+            }
+        }
+        menuBridge.onImageCommand = { command ->
+            if (!busy && current != null) when (command) {
+                301 -> documentInfoDialog = true
+                306 -> perform { store.cropToSelection("AWEI") }
+                302 -> {
+                    imageBackgroundColor = current.getJSONObject("state").getString("background")
+                    imageBackgroundDialog = true
+                }
+                318 -> {
+                    val imageState = current.getJSONObject("state")
+                    resizeWidth = imageState.getInt("width").toString()
+                    resizeHeight = imageState.getInt("height").toString()
+                    resizeOffsetX = "0"
+                    resizeOffsetY = "0"
+                    canvasResizeDialog = true
+                }
             }
         }
         menuBridge.onViewCommand = { command ->
@@ -2159,6 +2241,76 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
         }, enabled = sessionName.isNotBlank() && current != null) { Text("保存会话") } },
         dismissButton = { TextButton(onClick = { sessionDialog = false }) { Text("关闭") } })
+    if (imageBackgroundDialog && current != null) {
+        val validColor = imageBackgroundColor.matches(Regex("#[A-Fa-f0-9]{8}"))
+        AlertDialog(onDismissRequest = { imageBackgroundDialog = false },
+            title = { Text("图像背景色与透明度") },
+            text = { Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text("背景色采用 #AARRGGBB，前两位是透明度。修改会进入工程历史，不会覆盖绘画图层。")
+                OutlinedTextField(imageBackgroundColor,
+                    { imageBackgroundColor = it.take(9) },
+                    singleLine = true, label = { Text("背景色") })
+                Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                    Text("透明背景", Modifier.weight(1f))
+                    Switch(checked = imageBackgroundColor.startsWith("#00"),
+                        onCheckedChange = { transparentBackground ->
+                            if (imageBackgroundColor.length == 9)
+                                imageBackgroundColor = if (transparentBackground)
+                                    "#00" + imageBackgroundColor.drop(3)
+                                else "#FF" + imageBackgroundColor.drop(3)
+                        })
+                }
+                if (!validColor) Text("请输入 8 位十六进制颜色，例如 #FFFFFFFF 或 #00000000",
+                    color = MaterialTheme.colorScheme.error)
+            } },
+            confirmButton = { TextButton(onClick = {
+                val color = imageBackgroundColor
+                imageBackgroundDialog = false
+                perform { store.apply("AWEI", "IMAGE_BACKGROUND", JSONObject().put("color", color)) }
+            }, enabled = validColor && !busy) { Text("确定") } },
+            dismissButton = { TextButton(onClick = { imageBackgroundDialog = false }) {
+                Text("取消")
+            } })
+    }
+    if (canvasResizeDialog && current != null) {
+        val widthPx = resizeWidth.toIntOrNull()
+        val heightPx = resizeHeight.toIntOrNull()
+        val offsetX = resizeOffsetX.toIntOrNull()
+        val offsetY = resizeOffsetY.toIntOrNull()
+        val valid = widthPx != null && widthPx in 64..4096 &&
+            heightPx != null && heightPx in 64..4096 &&
+            offsetX != null && offsetX in -4096..4096 &&
+            offsetY != null && offsetY in -4096..4096
+        AlertDialog(onDismissRequest = { canvasResizeDialog = false },
+            title = { Text("更改画布大小") },
+            text = { Column(Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("调整画布边界，不缩放图层。偏移表示旧图像左上角在新画布中的位置；负值会裁掉边缘。")
+                OutlinedTextField(resizeWidth, { resizeWidth = it.filter(Char::isDigit).take(4) },
+                    singleLine = true, label = { Text("新宽度 (px)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(resizeHeight, { resizeHeight = it.filter(Char::isDigit).take(4) },
+                    singleLine = true, label = { Text("新高度 (px)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
+                OutlinedTextField(resizeOffsetX,
+                    { resizeOffsetX = it.filterIndexed { index, c -> c.isDigit() || (index == 0 && c == '-') }.take(5) },
+                    singleLine = true, label = { Text("水平偏移 (px)") })
+                OutlinedTextField(resizeOffsetY,
+                    { resizeOffsetY = it.filterIndexed { index, c -> c.isDigit() || (index == 0 && c == '-') }.take(5) },
+                    singleLine = true, label = { Text("垂直偏移 (px)") })
+                if (!valid) Text("边长须在 64–4096 px，偏移须在 -4096–4096 px",
+                    color = MaterialTheme.colorScheme.error)
+            } },
+            confirmButton = { TextButton(onClick = {
+                val params = JSONObject().put("width", widthPx!!).put("height", heightPx!!)
+                    .put("x", -offsetX!!).put("y", -offsetY!!)
+                canvasResizeDialog = false
+                perform { store.apply("AWEI", "CANVAS_RESIZE", params) }
+            }, enabled = valid && !busy) { Text("确定") } },
+            dismissButton = { TextButton(onClick = { canvasResizeDialog = false }) {
+                Text("取消")
+            } })
+    }
     if (documentInfoDialog && current != null) AlertDialog(
         onDismissRequest = { documentInfoDialog = false }, title = { Text("图像信息") },
         text = { Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
