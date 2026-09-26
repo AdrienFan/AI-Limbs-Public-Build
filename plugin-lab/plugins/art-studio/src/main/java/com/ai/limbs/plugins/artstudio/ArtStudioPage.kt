@@ -1162,9 +1162,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             val paneOrder = rightPaneOrderNames.mapNotNull { name ->
                                 RightPane.values().firstOrNull { it.name == name }
                             }
+                            // Collapsed headers scroll out of view; reserve room only for the active header.
                             val activePaneBodyHeight =
-                                (maxHeight - pinHeaderHeight -
-                                    paneHeaderHeight * paneOrder.size.toFloat()).coerceAtLeast(120.dp)
+                                (maxHeight - pinHeaderHeight - paneHeaderHeight).coerceAtLeast(120.dp)
                             val activeHeaderIndex =
                                 paneOrder.indexOf(activeRightPane).coerceAtLeast(0)
 
@@ -1175,13 +1175,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             }
 
                             Column(Modifier.fillMaxSize()) {
-                                Row(Modifier.fillMaxWidth().height(pinHeaderHeight)
-                                    .padding(start = 10.dp, end = 2.dp),
-                                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                                Box(Modifier.fillMaxWidth().height(pinHeaderHeight)) {
                                     Text("视图列表",
                                         style = MaterialTheme.typography.titleSmall,
-                                        modifier = Modifier.weight(1f))
-                                    Box(Modifier.size(36.dp)
+                                        modifier = Modifier.align(androidx.compose.ui.Alignment.Center))
+                                    Box(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
+                                        .padding(start = 2.dp).size(36.dp)
                                         .clickable(onClickLabel = if (rightDrawerPinned)
                                             "取消固定右侧面板" else "固定右侧面板") {
                                             rightDrawerPinned = !rightDrawerPinned
