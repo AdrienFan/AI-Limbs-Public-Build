@@ -69,11 +69,17 @@ if missing_tokens:
         print(f"  - {token}", file=sys.stderr)
     sys.exit(1)
 
-if "PREFERENCES_NAME" in service or "getSharedPreferences" in service:
-    print("Shadow plugin must use plugin-owned dataDir, not base SharedPreferences.", file=sys.stderr)
+if service.count("getSharedPreferences") > 1:
+    print("Laner Chat runtime may read legacy SharedPreferences only once for migration.", file=sys.stderr)
+    sys.exit(1)
+if "laner_chat_mailbox_v1.json" not in service or "stateFile" not in service:
+    print("Laner Chat runtime must persist in plugin-owned dataDir state.", file=sys.stderr)
+    sys.exit(1)
+if "LEGACY_PREFERENCES_NAME" in service and "getSharedPreferences" not in service:
+    print("Legacy migration declaration is incomplete.", file=sys.stderr)
     sys.exit(1)
 
 print(
     f"Laner Chat plugin contract OK: {len(runtime)} capabilities; "
-    "base imports absent; core mailbox/turn operations preserved."
+    "base imports absent; plugin-owned persistence and legacy migration verified."
 )

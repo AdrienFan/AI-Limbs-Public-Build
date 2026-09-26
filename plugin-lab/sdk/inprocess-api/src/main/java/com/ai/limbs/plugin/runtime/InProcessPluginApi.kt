@@ -162,6 +162,57 @@ interface InProcessPageProvider {
     fun createView(context: Context, sharedUi: InProcessSharedUiHost): View
 }
 
+/**
+ * Host-embedded chat mode extension.
+ *
+ * The Host owns only generic chat composition slots and submit/cancel plumbing.  Concrete mode
+ * concepts (priority, presence, scheduler, etc.) remain inside the plugin presentation payload.
+ * JSON keeps this ABI open-ended so adding a new chat mode does not require a Stable Kernel enum.
+ */
+interface InProcessChatModeExtensionProvider {
+    /** Emits presentation-local state changes that may affect generic Host behavior or slot views. */
+    val stateJson: StateFlow<String?>
+
+    /** Returns true when this extension owns the supplied generic chat configuration context. */
+    fun matches(contextJson: String): Boolean
+    /** Generic behavior hints understood by the Host chat shell. */
+    fun behavior(contextJson: String): String = "{}"
+
+    /** Generic model/config template used by the Host when this mode is selected. */
+    fun configurationTemplate(): String = "{}"
+
+    /** Optional plugin-owned embedded View for a named Host chat slot. */
+
+    fun createSlotView(slotId: String, context: Context): View?
+
+    /** Notifies the extension that the active chat/config context changed. */
+    suspend fun onChatContextChanged(contextJson: String): String = "{}"
+
+    /** Handles one composer submission when this chat mode is active. */
+    suspend fun submit(requestJson: String): String
+
+    /** Handles the generic stop/cancel affordance when this chat mode owns it. */
+    suspend fun cancel(contextJson: String): String = "{}"
+
+    /** Handles the generic resume/continue affordance when this chat mode owns it. */
+    suspend fun resume(contextJson: String): String = "{}"
+}
+object InProcessChatModeSlotIds {
+    const val CONFIGURATION_CARD = "chat.configuration_card"
+    const val STATUS_OVERLAY = "chat.status_overlay"
+    const val COMPOSER_ACCESSORY = "chat.composer_accessory"
+}
+
+
+object InProcessChatModeBehaviorKeys {
+    const val PREFERRED_INPUT_STYLE = "preferred_input_style"
+    const val SUPPRESS_LOCAL_AGENT_FEATURES = "suppress_local_agent_features"
+    const val DIRECT_SEND_WHILE_PROCESSING = "direct_send_while_processing"
+    const val SUPPRESS_PENDING_QUEUE = "suppress_pending_queue"
+    const val HANDLES_CANCEL = "handles_cancel"
+    const val HANDLES_RESUME = "handles_resume"
+}
+
 /** Optional host-owned components that a plugin page may embed without giving up page ownership. */
 interface InProcessSharedUiHost {
     fun supports(componentId: String): Boolean
@@ -306,9 +357,16 @@ interface InProcessPluginUiHost {
     /** Executes only through the Core-owned authorization/capability path. */
     suspend fun invokeHostCapability(id: String, parametersJson: String = "{}"): String
 }
-
 interface InProcessPluginPresentationHost : InProcessPluginUiHost {
+    /** Host-local presentation object publication; never crosses the Resident business wire. */
+    fun registerPresentationProvider(
+        id: String,
+        payload: Any,
+        metadata: Map<String, String> = emptyMap()
+    ): AutoCloseable
+
     /** Host-local View provider registration. The payload never crosses the process boundary. */
+
     fun registerPageProvider(
         id: String,
         provider: InProcessPageProvider,

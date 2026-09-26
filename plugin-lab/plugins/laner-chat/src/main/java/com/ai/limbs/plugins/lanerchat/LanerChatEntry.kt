@@ -19,18 +19,20 @@ class LanerChatEntry : InProcessPluginEntry {
         require(host.pluginId == LANER_CHAT_PLUGIN_ID) {
             "Unexpected Laner Chat identity: ${host.pluginId}"
         }
+        val service = LanerChatBridgeService.create(host.dataDir, host.applicationContext)
 
-        val service = LanerChatBridgeService.create(host.dataDir)
         val controller = LanerChatController(service)
 
         host.registerProvider(
             LANER_CHAT_PROVIDER_ID,
             controller,
             mapOf(
-                "kind" to "laner_chat_runtime",
+                "kind" to "chat_mode_runtime",
                 "api" to "1",
-                "shadow_mode" to "true"
+                "config_id" to LanerChatContract.CONFIG_ID,
+                "provider_type_id" to LanerChatContract.PROVIDER_TYPE_ID
             )
+
         )
 
         fun parameter(

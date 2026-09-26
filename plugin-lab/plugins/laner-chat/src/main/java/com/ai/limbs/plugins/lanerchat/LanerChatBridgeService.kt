@@ -1,6 +1,8 @@
 package com.ai.limbs.plugins.lanerchat
 
+import android.content.Context
 import java.io.File
+
 import java.io.FileOutputStream
 import java.nio.file.AtomicMoveNotSupportedException
 import java.nio.file.Files
@@ -956,8 +958,36 @@ internal class LanerChatBridgeService(
         const val MAX_FETCH_LIMIT = 20
         const val MAX_TURN_REQUESTS = 50
         private const val AGENT_SEEN_WRITE_INTERVAL_MS = 10_000L
+        private const val LEGACY_PREFERENCES_NAME = "ai_limbs_laner_chat"
+        private const val LEGACY_STATE_KEY = "mailbox_state"
 
         fun create(dataDir: File): LanerChatBridgeService =
             LanerChatBridgeService(File(dataDir, "laner_chat_mailbox_v1.json"))
+
+        fun create(dataDir: File, context: Context): LanerChatBridgeService {
+            val stateFile = File(dataDir, "laner_chat_mailbox_v1.json")
+            if (!stateFile.isFile) {
+                val legacyRaw =
+                    context.applicationContext
+                        .getSharedPreferences(LEGACY_PREFERENCES_NAME, Context.MODE_PRIVATE)
+                        .getString(LEGACY_STATE_KEY, null)
+                        ?.takeIf { it.isNotBlank() }
+                if (legacyRaw != null) {
+                    val migrationJson = Json {
+                        encodeDefaults = true
+                        ignoreUnknownKeys = true
+                    }
+                    // Validate before copying; the legacy store remains untouched as rollback evidence.
+                    migrationJson.decodeFromString<LanerChatStoredState>(legacyRaw)
+                    val parent = stateFile.parentFile ?: error("Laner chat state has no parent directory")
+                    check(parent.isDirectory || parent.mkdirs()) {
+                        "Unable to create Laner chat plugin data directory"
+                    }
+                    stateFile.writeText(legacyRaw, Charsets.UTF_8)
+                }
+            }
+            return LanerChatBridgeService(stateFile)
+        }
+
     }
 }

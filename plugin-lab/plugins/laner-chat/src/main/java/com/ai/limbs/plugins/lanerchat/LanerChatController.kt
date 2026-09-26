@@ -16,7 +16,7 @@ internal class LanerChatController(
         return ok()
             .put("module", "AI Limbs Laner Chat Plugin")
             .put("protocol_version", 1)
-            .put("shadow_mode", true)
+            .put("shadow_mode", false)
             .put("active_session_id", mailbox.activeSessionId ?: JSONObject.NULL)
             .put("bound_chat_id", mailbox.boundChatId ?: JSONObject.NULL)
             .put("agent_session_presence", presence.wireValue)
@@ -135,7 +135,7 @@ internal class LanerChatController(
             .put("delivery_pending", true)
             .put(
                 "note",
-                "Shadow plugin v0.1 stores the completed reply but does not yet replace the base chat delivery adapter."
+                "Business reply is durable in the Laner Chat plugin; the generic Host compatibility adapter mirrors it into chat history."
             )
     }
 

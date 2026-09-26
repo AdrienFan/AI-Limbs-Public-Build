@@ -2,11 +2,11 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.chat.laner_bridge",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "api": { "target": 1, "min": 1 },
   "display": {
     "name": "Laner Chat",
-    "description": "兰儿聊天桥的独立 durable mailbox、Session、Priority 与 Assistant Turn 业务核心。"
+    "description": "兰儿聊天桥：独立 durable mailbox、Session、Priority、Assistant Turn 与聊天模式 UI。"
   },
   "roles": ["system_plugin"],
   "activation": { "mode": "hot" },
@@ -14,7 +14,8 @@
     "kind": "android_inprocess",
     "entry": "payload/plugin.apk",
     "config": {
-      "entry_class": "com.ai.limbs.plugins.lanerchat.LanerChatEntry"
+      "entry_class": "com.ai.limbs.plugins.lanerchat.LanerChatEntry",
+      "presentation_entry_class": "com.ai.limbs.plugins.lanerchat.LanerChatPresentationEntry"
     }
   },
   "dependencies": { "plugins": [], "services": [] },
