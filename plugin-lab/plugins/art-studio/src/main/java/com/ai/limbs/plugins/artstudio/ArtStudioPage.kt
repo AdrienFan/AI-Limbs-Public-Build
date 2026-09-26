@@ -1162,7 +1162,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             val paneOrder = rightPaneOrderNames.mapNotNull { name ->
                                 RightPane.values().firstOrNull { it.name == name }
                             }
-                            // Collapsed headers scroll out of view; reserve room only for the active header.
+                            // Headers before and after the active pane share one scroll list; neither reserves viewport space.
                             val activePaneBodyHeight =
                                 (maxHeight - pinHeaderHeight - paneHeaderHeight).coerceAtLeast(120.dp)
                             val activeHeaderIndex =
