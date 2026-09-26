@@ -730,6 +730,7 @@ internal class ResidentProviderDirectory(
                 ProviderProxyProtocol.PAGE_METADATA ->
                     nextPageMetadata[id] = RemoteMetadata(owner, metadata)
                 ProviderProxyProtocol.CAPABILITY_EXECUTOR -> Unit // Not part of Host presentation state.
+                ProviderProxyProtocol.METADATA_ONLY -> Unit // Business discovery metadata stays Core-owned.
             }
         }
         proxies.keys.retainAll(next.keys)
