@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins.center
 import com.ai.assistance.operit.plugins.center.isolation.ProviderContributionTransportCodec
 import com.ai.assistance.operit.plugins.center.isolation.ProviderProxyProtocol
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessMetadataOnlyProvider
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -81,6 +82,49 @@ class ProviderContributionTransportTest {
             integrity = null,
             signature = null
         )
+
+    @Test
+    fun metadataOnlyProviderCrossesResidentBoundaryWithoutPluginPayload() {
+        val registry = PluginContributionRegistry()
+        val handles = mutableListOf<AutoCloseable>()
+        val registrar = PluginRegistrar(
+            manifest = syntheticManifest(providerId),
+            registry = registry,
+            extensionRouter = Mockito.mock(ExtensionRouter::class.java),
+            capabilityBinder = Mockito.mock(PluginCapabilityBinder::class.java),
+            surfacePolicy = Mockito.mock(HostSurfacePolicy::class.java),
+            track = handles::add
+        )
+
+        registrar.registerProvider(
+            providerId,
+            InProcessMetadataOnlyProvider,
+            mapOf("kind" to "descriptor", "config_id" to "example")
+        )
+        val record = checkNotNull(registry.find(PluginContributionKind.PROVIDER, providerId))
+        val envelope = ProviderContributionTransportCodec.decode(
+            JSONObject(ProviderContributionTransportCodec.encode(record).toString())
+        )
+
+        assertEquals(ProviderProxyProtocol.METADATA_ONLY, envelope.protocol)
+        assertEquals("descriptor", envelope.contract.metadata["kind"])
+        assertEquals("example", envelope.contract.metadata["config_id"])
+
+        val resident = PluginContributionRegistry()
+        val residentHandles = mutableListOf<AutoCloseable>()
+        CanonicalContributionRestoreSink(
+            expectedOwnerPluginId = unseenPluginId,
+            registry = resident,
+            track = residentHandles::add
+        ).registerProvider(envelope.contract, InProcessMetadataOnlyProvider)
+
+        val restored = checkNotNull(resident.find(PluginContributionKind.PROVIDER, providerId))
+        assertSame(InProcessMetadataOnlyProvider, restored.payload)
+        assertEquals(record.contract, restored.contract)
+
+        residentHandles.single().close()
+        handles.single().close()
+    }
 
     @Test
     fun residentRestoreRejectsOnlyGenericSessionOwnerMismatch() {

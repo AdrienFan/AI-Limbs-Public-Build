@@ -274,7 +274,9 @@ internal class KernelPluginAdminJsonServiceV1(
             )
             identityChanged = true
         }
+        var installCommitted = false
         return try {
+            val enableAfterInstall = parameters.optBoolean("enable_after_install", false)
             val result = manager.install(
                 file,
                 PluginInstallOptions(
@@ -282,18 +284,30 @@ internal class KernelPluginAdminJsonServiceV1(
                         "allow_untrusted_for_development",
                         false
                     ),
-                    enableAfterInstall = parameters.optBoolean("enable_after_install", false),
+                    // Identity approval belongs to the installed executable identity, not to a
+                    // successful mount. Commit the package first, then activate it separately.
+                    enableAfterInstall = false,
                     approvedScopes = parameters.optJSONArray("approved_scopes").toAdminStringSet()
                 )
             )
+            installCommitted = true
+            val state =
+                if (enableAfterInstall && !result.state.enabled) {
+                    manager.enable(result.pluginId)
+                } else {
+                    result.state
+                }
             JSONObject()
                 .put("disposition", result.disposition.name)
                 .put("plugin_id", result.pluginId)
                 .put("version", result.version)
                 .put("package_sha256", result.packageSha256)
-                .put("state", stateJson(result.state))
+                .put("state", stateJson(state))
         } catch (error: Throwable) {
-            if (identityChanged) {
+            // Before the package commit, approval is transactional. After commit, keep the
+            // approved identity even if activation/mount fails so an installed official package
+            // cannot become spuriously "untrusted" on the next mount attempt.
+            if (identityChanged && !installCommitted) {
                 identityRegistry.restore(manifest.pluginId, previousIdentity)
             }
             throw error

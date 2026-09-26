@@ -17,6 +17,7 @@ import com.ai.limbs.plugin.runtime.InProcessNotificationAction
 import com.ai.limbs.plugin.runtime.InProcessNotificationActionHandler
 import com.ai.limbs.plugin.runtime.InProcessNotificationHost
 import com.ai.limbs.plugin.runtime.InProcessNotificationState
+import com.ai.limbs.plugin.runtime.InProcessMetadataOnlyProvider
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import com.ai.limbs.plugin.runtime.ChildExtensionSnapshot
@@ -263,6 +264,7 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
                     ProviderProxyProtocol.UI_STATE ->
                         RemoteUiStateProvider(id, envelope.proxy.optNullableString("state_json"))
                     ProviderProxyProtocol.PAGE_METADATA -> RemotePageProviderMetadata
+                    ProviderProxyProtocol.METADATA_ONLY -> InProcessMetadataOnlyProvider
 
                 }
 

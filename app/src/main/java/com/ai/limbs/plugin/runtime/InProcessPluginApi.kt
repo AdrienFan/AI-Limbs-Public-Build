@@ -140,6 +140,15 @@ interface InProcessProviderDirectory {
 }
 
 /**
+ * Marker payload for provider contributions whose canonical metadata is their entire cross-process API.
+ *
+ * Use this when a provider exists only for discovery/routing and all executable behavior is exposed
+ * through capabilities or services. Resident transport carries the canonical provider contract only;
+ * no plugin-owned object crosses the process boundary.
+ */
+object InProcessMetadataOnlyProvider
+
+/**
  * Generic opaque state/event channel for Plugin Center-owned UI components.
  *
  * Stable Kernel deliberately does not define fields, buttons, selectors, queues or any other widget
