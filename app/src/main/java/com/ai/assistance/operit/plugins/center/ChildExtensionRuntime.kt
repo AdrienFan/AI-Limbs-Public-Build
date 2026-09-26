@@ -420,8 +420,13 @@ internal class ChildExtensionRuntime(
     suspend fun deleteVersion(extensionId: String, version: String): Boolean {
         val current = records[extensionId]?.manifest?.version
         require(version != current) { "Cannot delete active child extension version" }
-        require(version != rollbackVersions[extensionId]) { "Cannot delete immediate rollback version" }
-        return File(versionHistoryDir(extensionId), safePath(version)).deleteRecursively()
+        val target = File(versionHistoryDir(extensionId), safePath(version))
+        val deleted = target.isDirectory && target.deleteRecursively()
+        if (deleted && rollbackVersions.remove(extensionId, version)) {
+            // A deleted package cannot remain the immediate rollback target across restarts.
+            persistVersionPolicy()
+        }
+        return deleted
     }
 
     suspend fun setVersionRetention(extensionId: String, limit: Int) {

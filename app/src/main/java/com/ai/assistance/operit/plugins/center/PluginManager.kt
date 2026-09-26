@@ -148,9 +148,13 @@ internal class PluginManager(
     suspend fun deleteVersion(pluginId: String, version: String): PluginPersistentState = locked {
         val state = requireState(pluginId)
         if (version == state.activeVersion) throw PluginInstallException("ACTIVE_VERSION_DELETE_FORBIDDEN", "Cannot delete active plugin version")
-        if (version == state.rollbackVersion) throw PluginInstallException("ROLLBACK_VERSION_DELETE_FORBIDDEN", "Cannot delete the immediate rollback version")
+        if (version == activeMounts[pluginId]?.version) throw PluginInstallException("MOUNTED_VERSION_DELETE_FORBIDDEN", "Cannot delete mounted plugin version")
         if (!store.deleteVersion(pluginId, version)) throw PluginInstallException("VERSION_NOT_INSTALLED", "Plugin version is not installed: $pluginId $version")
-        writeState(state.copy(previousVersion = state.previousVersion?.takeUnless { it == version }))
+        // Manual deletion can consume the rollback target. Clear both pointers only after storage deletion succeeds.
+        writeState(state.copy(
+            previousVersion = state.previousVersion?.takeUnless { it == version },
+            rollbackVersion = state.rollbackVersion?.takeUnless { it == version }
+        ))
     }
 
     suspend fun uninstall(
