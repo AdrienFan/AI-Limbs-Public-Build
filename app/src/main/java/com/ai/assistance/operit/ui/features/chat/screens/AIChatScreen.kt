@@ -1135,7 +1135,7 @@ val actualViewModel: ChatViewModel = viewModel ?: viewModel { ChatViewModel(cont
                                     activeChatModeProvider.createSlotView(
                                         InProcessChatModeSlotIds.STATUS_OVERLAY,
                                         baseContext
-                                    ) ?: android.view.Space(baseContext)
+                                    ) ?: android.widget.Space(baseContext)
                                 }
                             )
                         } else if (effectiveInputStyle == UserPreferencesManager.INPUT_STYLE_CLASSIC) {
@@ -2077,7 +2077,7 @@ private fun ChatInputBottomBar(
                     chatModeProvider.createSlotView(
                         InProcessChatModeSlotIds.COMPOSER_ACCESSORY,
                         baseContext
-                    ) ?: android.view.Space(baseContext)
+                    ) ?: android.widget.Space(baseContext)
                 }
             )
         }

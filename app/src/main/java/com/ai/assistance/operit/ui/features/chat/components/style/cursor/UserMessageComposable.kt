@@ -66,7 +66,6 @@ import com.ai.assistance.operit.data.model.ChatMessageDisplayMode
 import com.ai.assistance.operit.ui.features.chat.components.attachments.AttachmentViewerDialog
 import com.ai.assistance.operit.ui.features.chat.components.attachments.ChatAttachment
 import com.ai.assistance.operit.ui.features.chat.components.style.common.HiddenUserMessagePlaceholderContent
-import com.ai.assistance.operit.ui.features.chat.components.style.common.resolveLanerChatPriorityVisuals
 import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
 import com.ai.assistance.operit.ui.theme.isLiquidGlassSupported
 import com.ai.assistance.operit.ui.theme.isWaterGlassSupported
@@ -125,23 +124,16 @@ fun UserMessageComposable(
     val imageLinks = parseResult.imageLinks
     val proxySenderName = if (isHiddenPlaceholder) null else parseResult.proxySenderName
     val isProxySender = !proxySenderName.isNullOrBlank()
-    val priorityVisuals =
-        resolveLanerChatPriorityVisuals(
-            priority = message.lanerPriority,
-            defaultBackgroundColor = backgroundColor,
-            defaultTextColor = textColor,
-        )
     val effectiveBackgroundColor =
         when {
             isHiddenPlaceholder -> Color.Transparent
             isProxySender -> MaterialTheme.colorScheme.secondaryContainer
-            else -> priorityVisuals.backgroundColor
+            else -> backgroundColor
         }
     val effectiveTextColor =
         when {
-            isHiddenPlaceholder -> textColor
             isProxySender -> MaterialTheme.colorScheme.onSecondaryContainer
-            else -> priorityVisuals.textColor
+            else -> textColor
         }
 
     Column(modifier = Modifier

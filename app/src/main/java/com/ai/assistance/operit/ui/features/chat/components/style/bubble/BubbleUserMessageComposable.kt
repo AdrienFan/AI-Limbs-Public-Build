@@ -54,7 +54,6 @@ import com.ai.assistance.operit.data.preferences.UserPreferencesManager
 import com.ai.assistance.operit.ui.features.chat.components.attachments.AttachmentViewerDialog
 import com.ai.assistance.operit.ui.features.chat.components.attachments.ChatAttachment
 import com.ai.assistance.operit.ui.features.chat.components.style.common.HiddenUserMessagePlaceholderContent
-import com.ai.assistance.operit.ui.features.chat.components.style.common.resolveLanerChatPriorityVisuals
 import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
 import com.ai.assistance.operit.util.ImageBitmapLimiter
 import com.ai.assistance.operit.util.ImagePoolManager
@@ -92,16 +91,9 @@ fun BubbleUserMessageComposable(
     val isHiddenPlaceholder =
         message.sender == "user" &&
             message.displayMode == ChatMessageDisplayMode.HIDDEN_PLACEHOLDER
-    val priorityVisuals =
-        resolveLanerChatPriorityVisuals(
-            priority = message.lanerPriority,
-            defaultBackgroundColor = backgroundColor,
-            defaultTextColor = textColor,
-        )
     val effectiveBackgroundColor =
-        if (isHiddenPlaceholder) Color.Transparent else priorityVisuals.backgroundColor
-    val effectiveTextColor =
-        if (isHiddenPlaceholder) textColor else priorityVisuals.textColor
+        if (isHiddenPlaceholder) Color.Transparent else backgroundColor
+    val effectiveTextColor = textColor
     val preferencesManager = remember { UserPreferencesManager.getInstance(context) }
     val displayPreferencesManager = remember { DisplayPreferencesManager.getInstance(context) }
     val characterCardManager = remember { CharacterCardManager.getInstance(context) }

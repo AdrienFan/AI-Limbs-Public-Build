@@ -668,17 +668,22 @@ class ApiConfigDelegate(
                 add(ModelConfigManager.DEFAULT_CONFIG_ID)
                 addAll(knownConfigIds)
             }.distinct()
+        var targetConfig: ModelConfigData? = null
+        for (candidateId in candidateIds) {
+            if (candidateId !in knownConfigIds) continue
+            val candidate = modelConfigManager.getModelConfig(candidateId) ?: continue
+            if (!PluginChatModeRuntime.isChatModeConfig(candidate)) {
+                targetConfig = candidate
+                break
+            }
+        }
+        val selectedConfig =
+            targetConfig ?: throw IllegalStateException("No API chat configuration is available")
 
-        val targetConfig =
-            candidateIds.asSequence()
-                .filter { it in knownConfigIds }
-                .mapNotNull { modelConfigManager.getModelConfig(it) }
-                .firstOrNull { !PluginChatModeRuntime.isChatModeConfig(it) }
-                ?: throw IllegalStateException("No API chat configuration is available")
+        functionalConfigManager.setConfigForFunction(FunctionType.CHAT, selectedConfig.id, 0)
+        publishActivatedChatConfig(selectedConfig)
+        return selectedConfig.id
 
-        functionalConfigManager.setConfigForFunction(FunctionType.CHAT, targetConfig.id, 0)
-        publishActivatedChatConfig(targetConfig)
-        return targetConfig.id
     }
 
     private suspend fun publishActivatedChatConfig(config: ModelConfigData) {

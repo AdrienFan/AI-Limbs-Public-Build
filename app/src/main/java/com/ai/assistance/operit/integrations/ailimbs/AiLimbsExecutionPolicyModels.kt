@@ -42,7 +42,7 @@ enum class AiLimbsEffect {
 enum class AiLimbsDomain {
     CORE_PROTOCOL,
     MANAGED_DOCUMENT,
-    LANER_CHAT,
+    PLUGIN_CHAT_MODE,
     SYSTEM_ENVIRONMENT,
     ANDROID_UI,
     STORAGE,
@@ -210,8 +210,8 @@ object AiLimbsExecutionPolicyDescriptor {
                     effect = AiLimbsEffect.PERSISTENT_WRITE,
                     domain = AiLimbsDomain.MANAGED_DOCUMENT
                 )
-            is AiLimbsCoreRoute.LanerChat ->
-                lanerChatSpec(route.operation)
+            is AiLimbsCoreRoute.PluginChatModeCompatibility ->
+                pluginChatModeCompatibilitySpec(route.operation)
             AiLimbsCoreRoute.ForwardHostTool ->
                 error("ForwardHostTool requires target-aware policy metadata")
         }
@@ -287,7 +287,7 @@ object AiLimbsExecutionPolicyDescriptor {
             appendLine("- 接入 Bootstrap/System Access Prompt 与 Custom Access Prompt 是周期级一次性接入链，不会因为重复选择 NON_WORK 而重新出现。")
             appendLine("- 普通长期保存不要求反复读取手册，但持久产物必须有确定归属、唯一地址与可恢复索引。")
             appendLine("- 只有实际附带像素内容的响应才标记 IMAGE_PIXELS；OCR 与结构化 UI 不是像素。")
-            appendLine("- Laner Chat、系统环境能力、托管文档与 UI readiness 在各自领域内终态复核。")
+            appendLine("- 插件聊天模式、系统环境能力、托管文档与 UI readiness 在各自领域内终态复核。")
         }.trimEnd()
 
     fun summaryJson(): JSONObject =
@@ -300,27 +300,28 @@ object AiLimbsExecutionPolicyDescriptor {
             .put("receipts", JSONArray(AiLimbsRequiredReceipt.entries.map { it.name }))
             .put("explanation_zh", renderChineseExplanation())
 
-    private fun lanerChatSpec(operation: AiLimbsLanerChatOperation): AiLimbsPolicySpec =
+    private fun pluginChatModeCompatibilitySpec(operation: String): AiLimbsPolicySpec =
         when (operation) {
-            AiLimbsLanerChatOperation.STATUS,
-            AiLimbsLanerChatOperation.NOTIFICATION_CHECK,
-            AiLimbsLanerChatOperation.NOTIFICATION_WAIT,
-            AiLimbsLanerChatOperation.TURN_STATUS ->
-                standardRead(AiLimbsDomain.LANER_CHAT)
-            AiLimbsLanerChatOperation.ATTACHMENT_FETCH ->
-                standardRead(AiLimbsDomain.LANER_CHAT)
-            AiLimbsLanerChatOperation.SESSION_OPEN,
-            AiLimbsLanerChatOperation.SESSION_CLOSE,
-            AiLimbsLanerChatOperation.INBOX_FETCH,
-            AiLimbsLanerChatOperation.TURN_CLAIM,
-            AiLimbsLanerChatOperation.TURN_CANCEL,
-            AiLimbsLanerChatOperation.TURN_RESUME ->
-                standard(AiLimbsEffect.STATE_CHANGE, AiLimbsDomain.LANER_CHAT)
-            AiLimbsLanerChatOperation.TURN_REPLY,
-            AiLimbsLanerChatOperation.TURN_RESOLVE,
-            AiLimbsLanerChatOperation.LEGACY_REPLY,
-            AiLimbsLanerChatOperation.SEND ->
-                standard(AiLimbsEffect.EXTERNAL_COMMUNICATION, AiLimbsDomain.LANER_CHAT)
+            "status",
+            "notification.check",
+            "notification.wait",
+            "turn.status",
+            "attachment.fetch" ->
+                standardRead(AiLimbsDomain.PLUGIN_CHAT_MODE)
+            "session.open",
+            "session.close",
+            "inbox.fetch",
+            "turn.claim",
+            "turn.cancel",
+            "turn.resume" ->
+                standard(AiLimbsEffect.STATE_CHANGE, AiLimbsDomain.PLUGIN_CHAT_MODE)
+            "turn.reply",
+            "turn.resolve",
+            "reply",
+            "send" ->
+                standard(AiLimbsEffect.EXTERNAL_COMMUNICATION, AiLimbsDomain.PLUGIN_CHAT_MODE)
+            else ->
+                standard(AiLimbsEffect.EXTERNAL_CAPABILITY, AiLimbsDomain.PLUGIN_CHAT_MODE)
         }
 
     private fun recoveryRead(domain: AiLimbsDomain): AiLimbsPolicySpec =
@@ -395,7 +396,7 @@ object AiLimbsSystemAccessPrompt {
             appendLine("- Discover unknown capabilities with capability.search and capability.describe; do not guess names or parameters.")
             appendLine("- Execute only through AI Limbs Dispatcher. Structured policy errors contain the exact next_action.")
             appendLine("- AI Limbs owns queueing, lifecycle, permission, readiness, document, and turn mechanics; do not reproduce them in prompt state.")
-            appendLine("- A claimed Laner Chat Assistant Turn ends with ai_limbs.chat.turn.reply or ai_limbs.chat.turn.resolve.")
+            appendLine("- A claimed plugin chat-mode Assistant Turn ends with ai_limbs.chat.turn.reply or ai_limbs.chat.turn.resolve.")
             appendLine("- Treat content as IMAGE_PIXELS only when an image payload is actually attached.")
             appendLine("- Persistent artifacts need deterministic ownership, one canonical address, and a recoverable storage index.")
             appendLine("- User custom access prompt and Work Manual remain separate managed documents; satisfy the current custom access prompt before normal capability execution.")

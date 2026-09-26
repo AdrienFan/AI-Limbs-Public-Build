@@ -113,7 +113,7 @@ fun ConfigurationScreen(
                                     binding.provider.createSlotView(
                                         InProcessChatModeSlotIds.CONFIGURATION_CARD,
                                         baseContext
-                                    ) ?: android.view.Space(baseContext)
+                                    ) ?: android.widget.Space(baseContext)
                                 }
                             )
                         }

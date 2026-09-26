@@ -806,11 +806,17 @@ internal object PluginPlatformKernel {
                         }
                     )
                 } else {
-                    register(AndroidInProcessPluginRuntimeAdapter(
-                        contributions,
-                        { pluginId, scopes -> notificationHost.bindingFor(pluginId, scopes) },
-                        officialIdentities
-                    ) { childExtensionRuntimeInstance })
+                    register(
+                        AndroidInProcessPluginRuntimeAdapter(
+                            contributions = contributions,
+                            notificationBindingProvider = { pluginId, scopes ->
+                                notificationHost.bindingFor(pluginId, scopes)
+                            },
+                            identityRegistry = officialIdentities,
+                            childRuntimeProvider = { childExtensionRuntimeInstance }
+                        )
+                    )
+
                 }
             }
             listOf(
