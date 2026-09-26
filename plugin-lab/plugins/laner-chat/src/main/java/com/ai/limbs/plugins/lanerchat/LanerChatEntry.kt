@@ -246,11 +246,27 @@ class LanerChatEntry : InProcessPluginEntry {
             "迁移/验收接口。把用户消息写入插件自己的 durable mailbox，不影响当前基座 LanerChat。",
             write,
             listOf(
-                parameter("chat_id", description = "关联 chat_id"),
-                parameter("text", description = "消息正文", required = false),
-                parameter("sender", description = "发送者", false, LanerChatContract.DEFAULT_SENDER),
-                parameter("priority", description = "HIGH/NORMAL/LOW", false, "NORMAL"),
-                parameter("attachments", "array", "附件元数据数组", false)
+                parameter(name = "chat_id", description = "关联 chat_id"),
+                parameter(name = "text", description = "消息正文", required = false),
+                parameter(
+                    name = "sender",
+                    description = "发送者",
+                    required = false,
+                    default = LanerChatContract.DEFAULT_SENDER
+                ),
+                parameter(
+                    name = "priority",
+                    description = "HIGH/NORMAL/LOW",
+                    required = false,
+                    default = "NORMAL"
+                ),
+                parameter(
+                    name = "attachments",
+                    type = "array",
+                    description = "附件元数据数组",
+                    required = false
+                )
+
             )
         ) { controller.enqueue(it) }
 
