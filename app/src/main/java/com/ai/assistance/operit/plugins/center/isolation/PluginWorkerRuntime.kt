@@ -412,7 +412,7 @@ internal class PluginWorkerRuntime(
         )
         val extensionId = payload.optString("extension_id").trim()
         return when (operation) {
-            "uninstall" -> JSONObject().put("removed", runtime.uninstall(extensionId))
+            "uninstall" -> JSONObject().put("removed", childRuntime.uninstall(extensionId, payload.optBoolean("remove_data", false)))
             "set_enabled" -> childSnapshotJson(runtime.setEnabled(extensionId, payload.getBoolean("enabled")))
             "backup" -> childBackupJson(runtime.backup(extensionId))
             "restore_backup" -> childSnapshotJson(runtime.restoreBackup(extensionId))

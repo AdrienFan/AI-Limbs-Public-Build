@@ -279,19 +279,33 @@ internal class ChildExtensionRuntime(
         }
     }
 
-    private suspend fun uninstallInternal(extensionId: String): Boolean {
-        val record = records.remove(extensionId) ?: return false
-        stopChild(extensionId)
-        extensionDir(extensionId).deleteRecursively()
-        File(versionHistoryRoot, extensionId).deleteRecursively()
-        retentionLimits.remove(extensionId)
-        rollbackVersions.remove(extensionId)
-        persistVersionPolicy()
-        File(dataRoot, extensionId).deleteRecursively()
-        publishSnapshots()
-        publishBackupSnapshots()
-        return record.manifest.extensionId == extensionId
-    }
+    override suspend fun uninstall(extensionId: String, removeData: Boolean): Boolean =
+        lifecycleLock(extensionId).withLock {
+            val record = records[extensionId] ?: return@withLock false
+            // Retain the installation record if retiring the runtime fails.
+            stopChildLocked(extensionId)
+            record.enabled = false
+            record.lifecycle = ChildExtensionLifecycle.INSTALLED
+            persistState(record)
+            publishSnapshots()
+            fun removeOwnedDirectory(directory: File) {
+                check(!directory.exists() || directory.deleteRecursively()) {
+                    "Could not remove child extension directory: ${directory.path}"
+                }
+            }
+            // Delete the install record last so failed cleanup remains visible and retryable.
+            if (removeData) removeOwnedDirectory(File(dataRoot, extensionId))
+            removeOwnedDirectory(File(appContext.cacheDir, "ai_limbs/child_runtime/$extensionId"))
+            removeOwnedDirectory(File(versionHistoryRoot, extensionId))
+            removeOwnedDirectory(extensionDir(extensionId))
+            records.remove(extensionId, record)
+            retentionLimits.remove(extensionId)
+            rollbackVersions.remove(extensionId)
+            persistVersionPolicy()
+            publishSnapshots()
+            publishBackupSnapshots()
+            true
+        }
 
     private suspend fun setEnabledInternal(extensionId: String, enabled: Boolean): ChildExtensionSnapshot {
         val record = records[extensionId] ?: error("Unknown child extension: $extensionId")
@@ -1425,7 +1439,7 @@ internal class ChildExtensionRuntime(
                 requireAdmissionAuthority(roles)
                 return installAdmittedInternal(packageFile, expectedParentPluginId, expectedPoint)
             }
-            override suspend fun uninstall(extensionId: String): Boolean { requireRuntimeController(roles); return uninstallInternal(extensionId) }
+            override suspend fun uninstall(extensionId: String): Boolean { requireRuntimeController(roles); return this@ChildExtensionRuntime.uninstall(extensionId, removeData = false) }
             override suspend fun setEnabled(extensionId: String, enabled: Boolean): ChildExtensionSnapshot { requireRuntimeController(roles); return setEnabledInternal(extensionId, enabled) }
             override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { requireRuntimeController(roles); return backupInternal(extensionId) }
             override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { requireRuntimeController(roles); return restoreBackupInternal(extensionId) }

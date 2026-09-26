@@ -31,7 +31,8 @@ internal class KernelPluginAdminJsonServiceV1(
     private val surfacePolicy: HostSurfacePolicy,
     private val inactivityPolicy: PluginInactivityPolicyStore,
     private val backupPolicy: PluginBackupPolicyStore,
-    private val identityRegistry: OfficialPluginIdentityRegistry
+    private val identityRegistry: OfficialPluginIdentityRegistry,
+    private val childRuntime: com.ai.assistance.operit.plugins.center.ChildExtensionRuntimeOwner
 ) : SystemJsonServiceV1 {
     private val appContext = context.applicationContext
     private val importDir = File(appContext.cacheDir, "plugin-center-imports").apply { mkdirs() }
@@ -78,6 +79,13 @@ internal class KernelPluginAdminJsonServiceV1(
         )
         "delete_version" -> stateJson(
             manager.deleteVersion(parameters.requireAdminText("plugin_id"), parameters.requireAdminText("version"))
+        )
+        "uninstall_child" -> JSONObject().put(
+            "removed",
+            childRuntime.uninstall(
+                parameters.requireAdminText("extension_id"),
+                parameters.optBoolean("remove_data", false)
+            )
         )
         "uninstall" -> {
             manager.uninstall(

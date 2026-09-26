@@ -285,7 +285,8 @@ internal object PluginPlatformKernel {
             surfacePolicy = surfacePolicyInstance,
             inactivityPolicy = inactivityPolicyInstance,
             backupPolicy = backupPolicyInstance,
-            identityRegistry = officialIdentitiesInstance
+            identityRegistry = officialIdentitiesInstance,
+            childRuntime = childExtensionRuntimeInstance
         )
         val adminSecurity = com.ai.assistance.operit.plugins.system.KernelAdminSecurityJsonServiceV1(adminSecurityInstance)
         val selfMaintenance = com.ai.assistance.operit.plugins.system.KernelSelfMaintenanceJsonServiceV1(systemPluginControllerInstance)
@@ -608,7 +609,7 @@ internal object PluginPlatformKernel {
             emptySet()
         )
         return when (request.getString("operation")) {
-            "uninstall" -> JSONObject().put("removed", controller.uninstall(id))
+            "uninstall" -> JSONObject().put("removed", childExtensionRuntimeInstance.uninstall(id, request.optBoolean("remove_data", false)))
             "set_enabled" -> childSnapshotJson(controller.setEnabled(id, request.getBoolean("enabled")))
             "backup" -> childBackupJson(controller.backup(id))
             "restore_backup" -> childSnapshotJson(controller.restoreBackup(id))

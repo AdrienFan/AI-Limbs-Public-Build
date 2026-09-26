@@ -100,9 +100,16 @@ class PluginStore(
     }
 
     fun deletePlugin(pluginId: String, removeData: Boolean) {
-        pluginDir(pluginId).deleteRecursively()
-        cacheDir(pluginId).deleteRecursively()
-        if (removeData) dataDir(pluginId).deleteRecursively()
+        fun removeOwnedDirectory(directory: File) {
+            if (directory.exists() && !directory.deleteRecursively()) {
+                throw PluginInstallException("STORE_DELETE_FAILED", "Could not remove plugin directory: ${directory.path}")
+            }
+        }
+        // Keep installation metadata until owned data and caches have been removed successfully.
+        if (removeData) removeOwnedDirectory(dataDir(pluginId))
+        removeOwnedDirectory(cacheDir(pluginId))
+        removeOwnedDirectory(File(quarantineRoot, safeSegment(pluginId)))
+        removeOwnedDirectory(pluginDir(pluginId))
     }
 
     fun cleanupStaging() {

@@ -106,6 +106,12 @@ internal class RemoteChildExtensionRuntimeOwner(
             override fun uiContributions(): StateFlow<List<ChildUiContributionSnapshot>> { controller(roles); return ui.asStateFlow() }
         }
 
+    override suspend fun uninstall(extensionId: String, removeData: Boolean): Boolean {
+        val result = control("uninstall", extensionId, JSONObject().put("remove_data", removeData))
+        refresh()
+        return result.getBoolean("removed")
+    }
+
     override suspend fun exportBackups(extensionIds: Collection<String>, treeUriRaw: String): List<String> {
         val a = request("child_export_backups", JSONObject().put("extension_ids", JSONArray(extensionIds.toList())).put("tree_uri", treeUriRaw)).getJSONArray("exported")
         return buildList { for (i in 0 until a.length()) add(a.getString(i)) }

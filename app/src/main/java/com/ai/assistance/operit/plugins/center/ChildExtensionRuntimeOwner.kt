@@ -16,6 +16,7 @@ internal object ChildRuntimeAuthorityRoles {
 }
 
 internal interface ChildExtensionRuntimeOwner {
+    suspend fun uninstall(extensionId: String, removeData: Boolean): Boolean
     suspend fun start()
     suspend fun stop()
     fun bound(ownerPluginId: String, roles: Set<String>, grantedScopes: Set<String>): InProcessChildExtensionRuntime
