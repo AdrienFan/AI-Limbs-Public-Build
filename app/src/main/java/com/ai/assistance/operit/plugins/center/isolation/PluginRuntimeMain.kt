@@ -137,7 +137,7 @@ object PluginRuntimeMain {
                         requestId = request.getString("request_id")
                         // Record request boundaries, never payloads: a slow request on this serial socket
                         // can delay every later plugin mount and runtime health check.
-                        if (operationName !in setOf("status", "ping", "snapshot_plugin", "child_snapshot")) {
+                        if (operationName == "mount") {
                             Log.i("AILPluginMount", "worker request begin operation=$operationName")
                         }
                         require(requestId.length in 1..64) { "Invalid request ID" }

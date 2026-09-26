@@ -1,6 +1,4 @@
 package com.ai.assistance.operit.plugins.center
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDomain
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsEffect
 
 import android.content.Context
 import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
@@ -8,6 +6,8 @@ import com.ai.assistance.operit.core.tools.catalog.ToolCatalogSourceKind
 import com.ai.assistance.operit.data.model.ToolParameterSchema
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRegistry
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDomain
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsEffect
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
@@ -21,6 +21,35 @@ import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import org.json.JSONArray
 import org.json.JSONObject
+
+/**
+ * The plugin SDK and the policy engine are separate contracts. Translate each policy
+ * dimension explicitly so a new SDK enum cannot fail at mount time through Enum.valueOf().
+ */
+internal fun PluginCapabilityDomain.toAiLimbsPolicyDomain(): AiLimbsDomain = when (this) {
+    PluginCapabilityDomain.CORE_PROTOCOL -> AiLimbsDomain.CORE_PROTOCOL
+    PluginCapabilityDomain.MANAGED_DOCUMENT -> AiLimbsDomain.MANAGED_DOCUMENT
+    PluginCapabilityDomain.LANER_CHAT -> AiLimbsDomain.PLUGIN_CHAT_MODE
+    PluginCapabilityDomain.SYSTEM_ENVIRONMENT -> AiLimbsDomain.SYSTEM_ENVIRONMENT
+    PluginCapabilityDomain.ANDROID_UI -> AiLimbsDomain.ANDROID_UI
+    PluginCapabilityDomain.STORAGE -> AiLimbsDomain.STORAGE
+    PluginCapabilityDomain.HOST -> AiLimbsDomain.HOST
+    PluginCapabilityDomain.PLUGIN -> AiLimbsDomain.PLUGIN
+}
+
+internal fun PluginCapabilityEffect.toAiLimbsPolicyEffect(): AiLimbsEffect = when (this) {
+    PluginCapabilityEffect.READ_ONLY -> AiLimbsEffect.READ_ONLY
+    PluginCapabilityEffect.STATE_CHANGE -> AiLimbsEffect.STATE_CHANGE
+    PluginCapabilityEffect.PERSISTENT_WRITE -> AiLimbsEffect.PERSISTENT_WRITE
+    PluginCapabilityEffect.EXTERNAL_COMMUNICATION -> AiLimbsEffect.EXTERNAL_COMMUNICATION
+    PluginCapabilityEffect.PROCESS_EXECUTION -> AiLimbsEffect.PROCESS_EXECUTION
+    PluginCapabilityEffect.UI_INTERACTION -> AiLimbsEffect.UI_INTERACTION
+    PluginCapabilityEffect.EXTERNAL_CAPABILITY -> AiLimbsEffect.EXTERNAL_CAPABILITY
+}
+
+internal fun PluginCapabilityReceipt.toAiLimbsPolicyReceipt(): AiLimbsRequiredReceipt = when (this) {
+    PluginCapabilityReceipt.WORK_MANUAL -> AiLimbsRequiredReceipt.WORK_MANUAL
+}
 
 /**
  * Kernel-owned capability bridge.
@@ -128,10 +157,10 @@ internal class PluginHostCapabilityRegistry(
                 capabilityId = normalized,
                 invokeAliases = aliases,
                 catalogEntry = catalogEntry,
-                effect = AiLimbsEffect.valueOf(capability.effect.name),
-                domain = AiLimbsDomain.valueOf(capability.domain.name),
+                effect = capability.effect.toAiLimbsPolicyEffect(),
+                domain = capability.domain.toAiLimbsPolicyDomain(),
                 workContextRequiredReceipts = capability.workContextRequiredReceipts
-                    .mapTo(linkedSetOf()) { AiLimbsRequiredReceipt.valueOf(it.name) },
+                    .mapTo(linkedSetOf()) { it.toAiLimbsPolicyReceipt() },
                 executor = AiLimbsPluginCapabilityExecutor { args -> executePluginDirect(normalized, args) }
             )
         } catch (error: Throwable) {
