@@ -397,7 +397,14 @@ internal class PluginWorkerRuntime(
         return JSONObject()
             .put("runtime", childRuntime.businessRuntimeSnapshot())
             .put("presentations", childRuntime.residentPresentationDescriptors())
-            .put("children", JSONArray().apply { children.forEach { put(childSnapshotJson(it)) } })
+            .put("children", JSONArray().apply {
+                children.forEach { child ->
+                    put(childSnapshotJson(child)
+                        .put("versions", JSONArray(childRuntime.versions(child.extensionId)))
+                        .put("retention_limit", childRuntime.retentionLimit(child.extensionId))
+                        .put("rollback_version", childRuntime.immediateRollbackVersion(child.extensionId) ?: JSONObject.NULL))
+                }
+            })
             .put("backups", JSONArray().apply {
                 childRuntime.loggingBackupSnapshots().forEach { put(childBackupJson(it)) }
             })

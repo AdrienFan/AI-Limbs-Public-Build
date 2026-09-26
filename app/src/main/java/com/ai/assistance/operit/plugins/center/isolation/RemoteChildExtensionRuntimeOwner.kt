@@ -28,6 +28,9 @@ internal class RemoteChildExtensionRuntimeOwner(
     private val snapshots = MutableStateFlow<List<ChildExtensionSnapshot>>(emptyList())
     private val backups = MutableStateFlow<List<ChildExtensionBackupSnapshot>>(emptyList())
     private val ui = MutableStateFlow<List<ChildUiContributionSnapshot>>(emptyList())
+    @Volatile private var versionHistory: Map<String, List<String>> = emptyMap()
+    @Volatile private var retentionLimits: Map<String, Int> = emptyMap()
+    @Volatile private var rollbackVersions: Map<String, String?> = emptyMap()
     @Volatile private var canonicalDescriptors: List<CanonicalChildDescriptor> = emptyList()
     private val points = ConcurrentHashMap<String, MutableStateFlow<List<ChildExtensionSnapshot>>>()
     private val uiProviders = ConcurrentHashMap<String, RemoteUi>()
@@ -87,9 +90,9 @@ internal class RemoteChildExtensionRuntimeOwner(
             override suspend fun backup(extensionId: String): ChildExtensionBackupSnapshot { controller(roles); val v = control("backup", extensionId); refresh(); return parseBackup(v) }
             override suspend fun restoreBackup(extensionId: String): ChildExtensionSnapshot { controller(roles); val v = control("restore_backup", extensionId); refresh(); return parseChild(v) }
             override suspend fun deleteBackup(extensionId: String): Boolean { controller(roles); val v = control("delete_backup", extensionId); refresh(); return v.getBoolean("deleted") }
-            override fun versions(extensionId: String): List<String> { controller(roles); return snapshots.value.firstOrNull { it.extensionId == extensionId }?.let { listOf(it.version) }.orEmpty() }
-            override fun retentionLimit(extensionId: String): Int { controller(roles); return 3 }
-            override fun immediateRollbackVersion(extensionId: String): String? { controller(roles); return null }
+            override fun versions(extensionId: String): List<String> { controller(roles); return versionHistory[extensionId].orEmpty() }
+            override fun retentionLimit(extensionId: String): Int { controller(roles); return retentionLimits[extensionId] ?: 3 }
+            override fun immediateRollbackVersion(extensionId: String): String? { controller(roles); return rollbackVersions[extensionId] }
             override suspend fun activateVersion(extensionId: String, version: String): ChildExtensionSnapshot { controller(roles); val v = control("activate_version", extensionId, JSONObject().put("version", version)); refresh(); return parseChild(v) }
             override suspend fun immediateRollback(extensionId: String): ChildExtensionSnapshot { controller(roles); val v = control("immediate_rollback", extensionId); refresh(); return parseChild(v) }
             override suspend fun deleteVersion(extensionId: String, version: String): Boolean { controller(roles); val v = control("delete_version", extensionId, JSONObject().put("version", version)); refresh(); return v.getBoolean("deleted") }
@@ -160,6 +163,16 @@ internal class RemoteChildExtensionRuntimeOwner(
         val childValues = value.optJSONArray("children") ?: JSONArray()
         val backupValues = value.optJSONArray("backups") ?: JSONArray()
         val parsedChildren = buildList { for (i in 0 until childValues.length()) add(parseChild(childValues.getJSONObject(i))) }
+        versionHistory = parsedChildren.associate { child ->
+            val value = childValues.findChild(child.extensionId)
+            child.extensionId to (value?.strings("versions") ?: listOf(child.version))
+        }
+        retentionLimits = parsedChildren.associate { child ->
+            child.extensionId to (childValues.findChild(child.extensionId)?.optInt("retention_limit", 3) ?: 3)
+        }
+        rollbackVersions = parsedChildren.associate { child ->
+            child.extensionId to childValues.findChild(child.extensionId)?.nullable("rollback_version")
+        }
         snapshots.value = parsedChildren
         backups.value = buildList { for (i in 0 until backupValues.length()) add(parseBackup(backupValues.getJSONObject(i))) }
         points.forEach { (point, flow) -> flow.value = parsedChildren.filter { it.target.point == point } }
@@ -276,6 +289,7 @@ internal class RemoteChildExtensionRuntimeOwner(
     private fun clearMirrors() {
         synchronized(capabilityBindings) { capabilityBindings.values.forEach(Binding::close); capabilityBindings.clear(); capabilityFingerprint = "" }
         snapshots.value = emptyList(); backups.value = emptyList(); ui.value = emptyList(); canonicalDescriptors = emptyList()
+        versionHistory = emptyMap(); retentionLimits = emptyMap(); rollbackVersions = emptyMap()
         points.values.forEach { it.value = emptyList() }; uiProviders.clear(); presentations = JSONArray(); runtime = JSONObject()
     }
     private fun controller(roles: Set<String>) {
@@ -283,6 +297,14 @@ internal class RemoteChildExtensionRuntimeOwner(
             "Child runtime administration requires the kernel runtime-controller role"
         }
     }
+}
+
+private fun JSONArray.findChild(extensionId: String): JSONObject? {
+    for (index in 0 until length()) {
+        val value = getJSONObject(index)
+        if (value.optString("extension_id") == extensionId) return value
+    }
+    return null
 }
 
 private fun JSONObject.nullable(key: String): String? = if (!has(key) || isNull(key)) null else getString(key)
