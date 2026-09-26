@@ -101,12 +101,12 @@ class AiLimbsCoreCapabilityRegistryTest {
     }
 
     @Test
-    fun lanerChatNoReplyResolveIsRegistered() {
+    fun pluginChatModeNoReplyResolveIsRegistered() {
         val registration =
             AiLimbsCoreCapabilityRegistry.registrationForInvokeName("ai_limbs.chat.turn.resolve")
         assertTrue(registration != null)
         assertEquals(
-            AiLimbsCoreRoute.LanerChat(AiLimbsLanerChatOperation.TURN_RESOLVE),
+            AiLimbsCoreRoute.PluginChatModeCompatibility("turn.resolve"),
             registration?.route
         )
     }
