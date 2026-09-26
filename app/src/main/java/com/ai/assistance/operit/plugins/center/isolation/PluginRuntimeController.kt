@@ -3,6 +3,7 @@ package com.ai.assistance.operit.plugins.center.isolation
 import android.content.Context
 import android.os.Process
 import android.os.SystemClock
+import android.util.Log
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.core.tools.system.resident.ResidentProcessLiveness
@@ -78,8 +79,18 @@ internal object PluginRuntimeController {
         }
     }
 
-    suspend fun probe(context: Context): JSONObject = lifecycleMutex.withLock {
-        probeLocked(context)
+    suspend fun probe(context: Context): JSONObject {
+        // Separate lifecycle lock contention from worker socket latency in mount failures.
+        val queuedAt = SystemClock.elapsedRealtime()
+        return lifecycleMutex.withLock {
+            val waited = SystemClock.elapsedRealtime() - queuedAt
+            if (waited > 250L) Log.w("AILPluginMount", "runtime probe lock waited_ms=$waited")
+            val result = probeLocked(context)
+            if (!result.optBoolean("consistent", false)) {
+                Log.w("AILPluginMount", "runtime probe phase=${result.optString("phase")} recovery=${result.optString("recovery_reason")}")
+            }
+            result
+        }
     }
 
     private suspend fun probeLocked(context: Context): JSONObject = withContext(Dispatchers.IO) {

@@ -2,6 +2,7 @@ package com.ai.assistance.operit.plugins.center.isolation
 
 import android.os.Process
 import android.os.SystemClock
+import android.util.Log
 import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.core.tools.system.resident.ResidentCoreContextBootstrap
@@ -126,11 +127,19 @@ object PluginRuntimeMain {
                 server.accept().use { socket ->
                     socket.soTimeout = PluginRuntimeWire.TIMEOUT_MS
                     var requestId = ""
+                    var operationName = "unread"
+                    val requestStarted = SystemClock.elapsedRealtime()
                     try {
                         val peer = socket.peerCredentials
                         check(peer.uid == Process.myUid()) { "Plugin runtime client UID mismatch" }
                         val request = PluginRuntimeWire.read(socket)
+                        operationName = request.getString("operation")
                         requestId = request.getString("request_id")
+                        // Record request boundaries, never payloads: a slow request on this serial socket
+                        // can delay every later plugin mount and runtime health check.
+                        if (operationName !in setOf("status", "ping", "snapshot_plugin", "child_snapshot")) {
+                            Log.i("AILPluginMount", "worker request begin operation=$operationName")
+                        }
                         require(requestId.length in 1..64) { "Invalid request ID" }
                         require(request.getInt("protocol") == PluginRuntimeWire.VERSION) {
                             "Unsupported plugin runtime protocol"
@@ -271,6 +280,7 @@ object PluginRuntimeMain {
                                 .put("result", snapshot().put("operation_result", operationResult))
                         )
                     } catch (error: Throwable) {
+                        Log.e("AILPluginMount", "worker request failed operation=$operationName elapsed_ms=${SystemClock.elapsedRealtime() - requestStarted}", error)
                         runCatching {
                             PluginRuntimeWire.write(
                                 socket,
@@ -282,6 +292,11 @@ object PluginRuntimeMain {
                                     .put("error", error.toString().take(2048))
                                     .put("result", snapshot())
                             )
+                        }
+                    } finally {
+                        val elapsed = SystemClock.elapsedRealtime() - requestStarted
+                        if (operationName == "mount" || elapsed > 2_000L) {
+                            Log.i("AILPluginMount", "worker request end operation=$operationName elapsed_ms=$elapsed")
                         }
                     }
                 }

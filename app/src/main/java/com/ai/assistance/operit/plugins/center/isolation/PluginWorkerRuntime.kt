@@ -1,6 +1,8 @@
 package com.ai.assistance.operit.plugins.center.isolation
 
 import android.content.Context
+import android.os.SystemClock
+import android.util.Log
 import com.ai.assistance.operit.plugins.center.AndroidInProcessPluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.center.BusinessPageProviderMetadata
 import com.ai.assistance.operit.plugins.center.PluginServiceEndpoint
@@ -183,6 +185,8 @@ internal class PluginWorkerRuntime(
 
     suspend fun mount(pluginId: String, version: String): JSONObject {
         require(pluginId.isNotBlank() && version.isNotBlank())
+        val started = SystemClock.elapsedRealtime()
+        Log.i("AILPluginMount", "worker mount begin plugin=$pluginId version=$version")
         mounts[pluginId]?.let { current ->
             if (current.version == version) return snapshot(pluginId)
             stopPlugin(pluginId)
@@ -202,7 +206,9 @@ internal class PluginWorkerRuntime(
         }
         // Official android_inprocess trust is attested by the one authoritative Resident Core.
         // Worker deliberately does not re-read a second identity registry view here.
+        Log.i("AILPluginMount", "worker attest begin plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started}")
         coreClient.attestPluginTrust(pluginId, version)
+        Log.i("AILPluginMount", "worker attest end plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started}")
         surfacePolicy.requireManifestAllowed(manifest)
 
         val ownerBinding = capabilityGateway.bindTopLevel(pluginId, version)
@@ -225,6 +231,7 @@ internal class PluginWorkerRuntime(
                 cacheDir = cacheDir,
                 grantedScopes = metadata.grantedScopes
             )
+            Log.i("AILPluginMount", "worker payload begin plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started}")
             hosted = runtimeHost.mount(
                 adapter = adapter,
                 context = PluginRuntimeAdapterContext(
@@ -241,6 +248,7 @@ internal class PluginWorkerRuntime(
                 ),
                 scope = mountScope
             )
+            Log.i("AILPluginMount", "worker payload end plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started}")
             val activeRuntime = checkNotNull(hosted)
             mounts[pluginId] = Mount(version, activeRuntime, ownerBinding)
             return snapshot(pluginId)

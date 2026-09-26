@@ -1,5 +1,8 @@
 package com.ai.assistance.operit.plugins.center.isolation
 
+import android.os.SystemClock
+import android.util.Log
+
 import com.ai.assistance.operit.plugins.center.PluginCapabilityDomain
 import com.ai.assistance.operit.plugins.center.PluginCapabilityEffect
 import com.ai.assistance.operit.plugins.center.PluginCapabilityExecutor
@@ -75,12 +78,16 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
         private var notificationHandle: AutoCloseable? = null
 
         suspend fun mountAndRegister() {
+            val started = SystemClock.elapsedRealtime()
+            Log.i("AILPluginMount", "core begin plugin=$pluginId version=$version")
             val snapshot = ensureMounted(force = true)
+            Log.i("AILPluginMount", "core worker replied plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started}")
             registerCapabilities(snapshot.optJSONArray("capabilities") ?: JSONArray())
             registerServices(snapshot.optJSONArray("services") ?: JSONArray())
             registerExtensions(snapshot.optJSONArray("extensions") ?: JSONArray())
             registerProviders(snapshot.optJSONArray("providers") ?: JSONArray())
             updateNotification(snapshot.optJSONObject("notification"))
+            Log.i("AILPluginMount", "core registered plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started}")
             providerRefreshJob = scope.launch {
                 while (isActive) {
                     delay(1_000L)
@@ -127,16 +134,21 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
 
         private suspend fun ensureMounted(force: Boolean = false): JSONObject = mountMutex.withLock {
             check(!closed) { "Remote plugin runtime is closed: $pluginId" }
+            val started = SystemClock.elapsedRealtime()
+            if (force) Log.i("AILPluginMount", "core probe begin plugin=$pluginId")
             val state = PluginRuntimeController.probe(context.appContext)
+            if (force) Log.i("AILPluginMount", "core probe end plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started} phase=${state.optString("phase")}")
             check(state.optBoolean("consistent", false)) { "Plugin runtime is not attested: $state" }
             val currentSession = state.getString("session_id")
             if (force || sessionId != currentSession) {
+                if (force) Log.i("AILPluginMount", "core request mount plugin=$pluginId")
                 val result = PluginRuntimeWire.request(
                     "mount",
                     currentSession,
                     JSONObject().put("plugin_id", pluginId).put("version", version),
                     PluginRuntimeWire.BUSINESS_TIMEOUT_MS
                 )
+                if (force) Log.i("AILPluginMount", "core reply mount plugin=$pluginId elapsed_ms=${SystemClock.elapsedRealtime() - started}")
                 sessionId = currentSession
                 return@withLock result.getJSONObject("operation_result")
             }
