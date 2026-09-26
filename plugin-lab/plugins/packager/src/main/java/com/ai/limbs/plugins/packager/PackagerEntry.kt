@@ -10,6 +10,7 @@ import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import java.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -129,6 +130,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         return when (eventId) {
             ACTION_ADD_FILES -> addSelectedFiles(payload)
             ACTION_SCAN_FOLDER -> scanFolder(payload)
+            ACTION_SELECT_MANIFEST -> selectManifest(payload)
             ACTION_REMOVE -> removeItem(payload)
             ACTION_CLEAR -> clearQueue()
             ACTION_IMPORT_SYSTEM_KEY -> importKey(PackagerArtifactType.SYSTEM, payload)
@@ -155,15 +157,36 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
     }.getOrElse { failure("加入队列失败", it) }
 
     private fun scanFolder(payload: JSONObject): String = runCatching {
-        val folder = payload.optString("selected_uri").trim()
-        require(folder.isNotBlank()) { "没有选择扫描文件夹" }
-        val candidates = engine.scanFolder(folder)
-        if (candidates.isEmpty()) {
+        // The UI process must enumerate and stage SAF tree contents before the standalone worker
+        // receives this event. Existing direct shared-storage callers still use selected_uri.
+        val sources = if (payload.has("selected_uris")) {
+            val selected = payload.getJSONArray("selected_uris")
+            buildList { for (index in 0 until selected.length()) add(selected.getString(index)) }
+        } else {
+            val folder = payload.optString("selected_uri").trim()
+            require(folder.isNotBlank()) { "没有选择扫描文件夹" }
+            engine.scanFolder(folder).map(PackagerSource::source)
+        }
+        if (sources.isEmpty()) {
             statusLines = listOf("所选文件夹中没有找到 APK。")
             return@runCatching result("没有找到 APK")
         }
-        addSources(candidates.map(PackagerSource::source), "扫描", candidates.size)
+        addSources(sources, "扫描", sources.size)
     }.getOrElse { failure("扫描文件夹失败", it) }
+
+    private fun selectManifest(payload: JSONObject): String = runCatching {
+        val source = payload.optString("selected_uri").trim()
+        require(source.isNotBlank()) { "没有选择 Manifest 模板" }
+        try {
+            engine.validateManifestSource(source)
+            manifestPath = source
+            statusLines = listOf("已选择 Manifest 模板，可继续选择 APK。")
+            result("Manifest 模板已选择")
+        } catch (error: Throwable) {
+            engine.releaseStagedSource(source)
+            throw error
+        }
+    }.getOrElse { failure("选择 Manifest 模板失败", it) }
 
     private fun addSources(sources: List<String>, origin: String, discovered: Int = sources.size): String {
         var added = 0
@@ -190,6 +213,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
                     added += 1
                 }
                 .onFailure { error ->
+                    engine.releaseStagedSource(source)
                     failures += "${source.substringAfterLast('/')}: ${error.message ?: "识别失败"}"
                 }
         }
@@ -204,23 +228,35 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
     private fun removeItem(payload: JSONObject): String {
         if (isPackaging) return result("队列执行中，暂不能移除")
         val id = payload.optString("item_id").trim()
-        val removed = queue.removeAll { it.source == id }
-        statusLines = listOf(if (removed) "已从队列移除 1 项。" else "目标已不在队列中。")
-        return result(if (removed) "已移除" else "项目不存在")
+        val removed = queue.filter { it.source == id }
+        queue.removeAll(removed.toSet())
+        removed.forEach { engine.releaseStagedSource(it.source) }
+        statusLines = listOf(if (removed.isNotEmpty()) "已从队列移除 1 项。" else "目标已不在队列中。")
+        return result(if (removed.isNotEmpty()) "已移除" else "项目不存在")
     }
 
     private fun clearQueue(): String {
         if (isPackaging) return result("队列执行中，暂不能清空")
         val count = queue.size
+        queue.forEach { engine.releaseStagedSource(it.source) }
         queue.clear()
         statusLines = listOf("已清空 $count 个待打包项目。")
         return result("队列已清空")
     }
 
     private fun importKey(type: PackagerArtifactType, payload: JSONObject): String = runCatching {
-        val source = payload.optString("selected_uri").trim()
-        require(source.isNotBlank()) { "没有选择私钥文件" }
-        val profile = engine.importSigningKey(type, source)
+        val profile = if (payload.has("selected_base64")) {
+            // No plaintext private-key file is written to the UI cache.
+            engine.importSigningKeyBytes(type, Base64.getDecoder().decode(payload.getString("selected_base64")))
+        } else {
+            val source = payload.optString("selected_uri").trim()
+            require(source.isNotBlank()) { "没有选择私钥文件" }
+            try {
+                engine.importSigningKey(type, source)
+            } finally {
+                engine.releaseStagedSource(source)
+            }
+        }
         require(profile.optBoolean("valid")) { profile.optString("message").ifBlank { "私钥自检失败" } }
         statusLines = listOf(
             "✅ ${profile.optString("artifact")} 私钥已导入开发签名仓。",
@@ -317,7 +353,13 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
                 multiple = true,
                 mimeTypes = listOf("application/vnd.android.package-archive", "application/octet-stream")
             ))
-            .put(action(ACTION_SCAN_FOLDER, "扫描文件夹", kind = "directory_picker")))
+            .put(action(ACTION_SCAN_FOLDER, "扫描文件夹", kind = "directory_picker"))
+            .put(action(
+                ACTION_SELECT_MANIFEST,
+                "选择 Manifest 模板",
+                kind = "file_picker",
+                mimeTypes = listOf("application/json", "text/plain", "*/*")
+            )))
         .put("queue", JSONObject()
             .put("title", "待打包队列")
             .put("empty_text", "还没有待打包项目。可以多选 APK，或扫描一个指定文件夹。")
@@ -357,18 +399,21 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
                 ACTION_IMPORT_SYSTEM_KEY,
                 "导入 .ailpsys 私钥",
                 kind = "file_picker",
+                fileTransport = "host_inline",
                 mimeTypes = PRIVATE_KEY_MIME_TYPES
             ))
             .put(action(
                 ACTION_IMPORT_PARENT_KEY,
                 "导入 .ailp 私钥",
                 kind = "file_picker",
+                fileTransport = "host_inline",
                 mimeTypes = PRIVATE_KEY_MIME_TYPES
             ))
             .put(action(
                 ACTION_IMPORT_CHILD_KEY,
                 "导入 .ailx 私钥",
                 kind = "file_picker",
+                fileTransport = "host_inline",
                 mimeTypes = PRIVATE_KEY_MIME_TYPES
             ))
             .put(action(ACTION_KEYS, "检查签名仓"))
@@ -415,6 +460,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         kind: String = "invoke",
         multiple: Boolean = false,
         mimeTypes: List<String> = emptyList(),
+        fileTransport: String = if (kind == "file_picker" || kind == "directory_picker") "host_staged" else "opaque_uri",
         enabled: Boolean = !isPackaging
     ) = JSONObject()
         .put("id", id)
@@ -423,6 +469,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         .put("multiple", multiple)
         .put("mime_types", JSONArray(mimeTypes))
         .put("enabled", enabled)
+        .put("file_transport", fileTransport)
         .put("required_field_ids", JSONArray())
 
     private fun publishState() {
@@ -450,6 +497,7 @@ private class PackagerPanel(private val engine: PackagerEngine) : InProcessUiSta
         const val FIELD_OUTPUT = "output_directory"
         const val ACTION_ADD_FILES = "add_files"
         const val ACTION_SCAN_FOLDER = "scan_folder"
+        const val ACTION_SELECT_MANIFEST = "select_manifest"
         const val ACTION_REMOVE = "remove_queue_item"
         const val ACTION_CLEAR = "clear_queue"
         const val ACTION_IMPORT_SYSTEM_KEY = "import_system_private_key"

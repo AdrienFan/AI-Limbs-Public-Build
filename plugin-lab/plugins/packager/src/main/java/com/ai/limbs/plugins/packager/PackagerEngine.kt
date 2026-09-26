@@ -51,6 +51,7 @@ class PackagerEngine(private val host: InProcessPluginHost) {
     private val packageManager = context.packageManager
     private val resolver = context.contentResolver
     private val signingVault = DevelopmentSigningVault(host.dataDir)
+    private val stagedRoot = File(context.cacheDir, "plugin-center-imports/${host.pluginId}").canonicalFile
 
     fun inspectJson(inputSource: String, manifestSource: String? = null): JSONObject {
         val prepared = prepareApk(inputSource)
@@ -172,6 +173,26 @@ class PackagerEngine(private val host: InProcessPluginHost) {
     }
 
     fun clearSigningKeys(): JSONObject = signingVault.clearAll()
+
+    fun importSigningKeyBytes(type: PackagerArtifactType, pem: ByteArray): JSONObject =
+        try {
+            signingVault.importPrivateKey(type, pem)
+        } finally {
+            pem.fill(0)
+        }
+
+    /** Delete only the exact file handed off to this plugin by Plugin Center's picker. */
+    fun releaseStagedSource(source: String) {
+        if (source.startsWith("content://")) return
+        val file = File(source).canonicalFile
+        if (file.parentFile?.parentFile != stagedRoot) return
+        check(!file.exists() || file.delete()) { "Unable to remove staged source: ${file.path}" }
+        file.parentFile?.delete()
+    }
+
+    fun validateManifestSource(source: String) {
+        JSONObject(readTextSource(source))
+    }
 
     private fun inspectPrepared(
         source: String,
@@ -434,7 +455,12 @@ class PackagerEngine(private val host: InProcessPluginHost) {
         val file = File(path.trim()).canonicalFile
         require(file.isFile) { "File does not exist: ${file.path}" }
         val sharedRoot = File("/storage/emulated/0").canonicalFile
-        require(file.path.startsWith(sharedRoot.path + File.separator)) { "Packager only reads files from shared storage" }
+        val shared = file.path.startsWith(sharedRoot.path + File.separator)
+        // Do not grant the worker broad private-file access: only a single regular file below
+        // this plugin's attested picker directory can be used as a staged input.
+        val staged = file.parentFile?.parentFile == stagedRoot &&
+            file.parentFile?.name?.matches(Regex("[0-9a-f]{64}")) == true
+        require(shared || staged) { "Input is outside shared storage and the Packager staging directory" }
         return file
     }
 
@@ -451,7 +477,9 @@ class PackagerEngine(private val host: InProcessPluginHost) {
     private fun resolveOutputDirectory(input: File, inputSource: String, raw: String?): File {
         val directory = when {
             !raw.isNullOrBlank() -> File(raw.trim()).canonicalFile
-            inputSource.trim().startsWith("content://") -> File("/storage/emulated/0/Download/AI-Limbs-Packager")
+            inputSource.trim().startsWith("content://") ||
+                input.canonicalFile.parentFile?.parentFile == stagedRoot ->
+                File("/storage/emulated/0/Download/AI-Limbs-Packager")
             else -> input.parentFile
         }
         require(directory != null) { "Output directory is unavailable" }
