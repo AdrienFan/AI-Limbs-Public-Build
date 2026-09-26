@@ -24,7 +24,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         host.registerHomeTile(InProcessHomeTile("$ART_ID.tile", "画室", "共同编辑的结构化画布", ART_SCREEN))
 
         fun capability(name: String, title: String, effect: InProcessCapabilityEffect,
-                       description: String = title, block: (JSONObject) -> JSONObject) {
+                       description: String = title, block: suspend (JSONObject) -> JSONObject) {
             val fields = parametersFor(name)
             val properties = JSONObject()
             val required = JSONArray()
@@ -45,6 +45,31 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         val read = InProcessCapabilityEffect.READ_ONLY
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
+        capability("view.state", "读取画室视图状态", read,
+            "查看面板、状态栏、网格、像素网格和宿主页面模式的当前状态。") {
+            ArtStudioViewControl.state.value.describe()
+        }
+        capability("view.set", "设置画室视图选项", InProcessCapabilityEffect.UI_INTERACTION,
+            "option 可取 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；设置与阿伟菜单相同的视图状态。") { p ->
+            ArtStudioViewControl.setOption(p.getString("option"), p.getBoolean("enabled"))
+        }
+        capability("view.command", "操作画室视图", InProcessCapabilityEffect.UI_INTERACTION,
+            "在画室画布打开时执行 zoom_in/out/100、fit/fit_width/fit_height、rotate_right/left、reset_rotation、mirror、reset_display 或 refresh。") { p ->
+            ArtStudioViewControl.command(p.getString("command"))
+        }
+        capability("view.presentation", "切换画室页面模式", InProcessCapabilityEffect.UI_INTERACTION,
+            "向宿主请求 normal、fullscreen_portrait 或 fullscreen_landscape；宿主确认后才视为成功。") { p ->
+            val mode = p.getString("mode")
+            require(mode in setOf("normal", "fullscreen_portrait", "fullscreen_landscape"))
+            val response = JSONObject(host.invokeHostCapability("host.ui.presentation@1",
+                JSONObject().put("operation", "set_mode").put("screen_id", ART_SCREEN)
+                    .put("mode", mode).toString()))
+            check(response.optBoolean("ok") && response.optString("mode") == mode) {
+                response.optString("error").ifBlank { "宿主未确认画室显示模式：$response" }
+            }
+            ArtStudioViewControl.setPresentationMode(mode)
+            response
+        }
         capability("toolbox.catalog", "读取画室工具清单", read,
             "列出可用的画室基础工具和已预留的 Krita 工具位置；planned 项只用于识别后续工作，没有执行入口。") {
             ArtToolCatalog.describe()
@@ -352,6 +377,9 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
     }
     val id = p("id")
     return when (name) {
+        "view.set" -> listOf(p("option"), p("enabled", "boolean"))
+        "view.command" -> listOf(p("command"))
+        "view.presentation" -> listOf(p("mode"))
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
             p("background", optional = true), p("name", optional = true))
         "document.import" -> listOf(p("base64"))

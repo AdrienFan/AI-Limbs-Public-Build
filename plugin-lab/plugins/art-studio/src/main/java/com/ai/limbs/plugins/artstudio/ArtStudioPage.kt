@@ -62,6 +62,7 @@ import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -203,6 +204,84 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                                 }
                                 show()
                             }
+                        } else if (title == "视图(V)") {
+                            val anchor = this
+                            PopupMenu(pluginContext, anchor).apply {
+                                fun add(group: Int, id: Int, label: String, enabled: Boolean = true,
+                                        checked: Boolean? = null) {
+                                    menu.add(group, id, id, label).apply {
+                                        isEnabled = enabled && !bridge.busy
+                                        if (checked != null) {
+                                            isCheckable = true
+                                            isChecked = checked
+                                        }
+                                    }
+                                }
+                                val view = ArtStudioViewControl.state.value
+                                val doc = bridge.hasDocument
+                                add(0, 201, "隐藏面板模式(S)    Tab", doc, view.panelsHidden)
+                                add(0, 202, "全屏模式(U)    Ctrl+Shift+F",
+                                    checked = view.presentationMode != "normal")
+                                add(0, 248, "独立画布窗口", false)
+                                add(0, 203, "四方连续显示(W)    Shift+W", false)
+                                menu.addSubMenu(0, 204, 204, "四方连续显示方向").apply {
+                                    add(0, 205, 205, "水平和垂直").isEnabled = false
+                                    add(0, 206, 206, "仅水平").isEnabled = false
+                                    add(0, 207, 207, "仅垂直").isEnabled = false
+                                }.item.isEnabled = false
+                                add(0, 208, "快速预渲染(I)    Shift+L", false)
+                                add(0, 209, "色彩校样    Ctrl+Y", false)
+                                add(0, 210, "色域超出警告色    Ctrl+Shift+Y", false)
+                                menu.addSubMenu(1, 211, 211, "缩放、旋转、镜像(Z)").apply {
+                                    fun action(id: Int, label: String, enabled: Boolean = doc) {
+                                        add(1, id, id, label).isEnabled = enabled && !bridge.busy
+                                    }
+                                    action(212, "放大")
+                                    action(213, "缩小")
+                                    action(214, "100% 缩放")
+                                    action(215, "适合窗口")
+                                    action(216, "适合宽度")
+                                    action(217, "适合高度")
+                                    action(218, "顺时针旋转")
+                                    action(219, "逆时针旋转")
+                                    action(220, "重置旋转")
+                                    action(221, "镜像画布")
+                                    action(222, "围绕光标镜像", false)
+                                    action(223, "围绕画布镜像", false)
+                                    action(224, "重置显示")
+                                }
+                                add(1, 225, "显示为打印大小", false)
+                                add(2, 226, "显示标尺(R)", false)
+                                add(2, 227, "显示标尺游标", false)
+                                add(2, 228, "显示参考线", false)
+                                add(2, 229, "锁定参考线", false)
+                                add(2, 230, "显示状态栏(B)", doc, view.statusBarVisible)
+                                add(3, 231, "显示网格(G)    Ctrl+Shift+'", doc, view.gridVisible)
+                                add(3, 232, "显示像素网格", doc, view.pixelGridVisible)
+                                menu.addSubMenu(4, 233, 233, "吸附(S)").apply {
+                                    listOf("参考线", "网格", "像素", "正交方向", "节点",
+                                        "延长线", "交点", "边界框", "图像边界", "图像中心")
+                                        .forEachIndexed { index, label ->
+                                            add(4, 234 + index, 234 + index, "吸附到$label").isEnabled = false
+                                        }
+                                }.item.isEnabled = false
+                                add(5, 244, "显示辅助尺(H)", false)
+                                add(5, 245, "显示辅助尺预览(A)", false)
+                                add(5, 246, "显示参考图像(H)", false)
+                                add(5, 249, "色板操作菜单", false)
+                                add(6, 247, "刷新画布", doc)
+                                if (android.os.Build.VERSION.SDK_INT >= 28) menu.setGroupDividerEnabled(true)
+                                setOnMenuItemClickListener { selected ->
+                                    bridge.onViewCommand?.invoke(selected.itemId)
+                                    true
+                                }
+                                setOnDismissListener {
+                                    anchor.isSelected = false
+                                    anchor.setBackgroundColor(Color.TRANSPARENT)
+                                    anchor.setTextColor(Color.rgb(218, 218, 218))
+                                }
+                                show()
+                            }
                         }
                     }
                 }
@@ -233,6 +312,7 @@ private class StudioMenuBridge {
     var clipboardCanNew = false
     var onFileCommand: ((Int) -> Unit)? = null
     var onEditCommand: ((Int) -> Unit)? = null
+    var onViewCommand: ((Int) -> Unit)? = null
 }
 
 private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS }
@@ -243,6 +323,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
+    val viewOptions by ArtStudioViewControl.state.collectAsState()
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
     var image by remember { mutableStateOf<Bitmap?>(null) }
     var tool by remember { mutableStateOf("ink") }
@@ -374,6 +455,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 check(response.optBoolean("ok") && response.optString("mode") == mode) {
                     response.optString("error").ifBlank { "宿主未确认页面显示模式：$response" }
                 }
+                ArtStudioViewControl.setPresentationMode(mode)
                 presentationDialog = false
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Page presentation request failed", error)
@@ -756,6 +838,50 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 19 -> requestClose(true)
             }
         }
+        menuBridge.onViewCommand = { command ->
+            if (!busy) when (command) {
+                201 -> ArtStudioViewControl.setOption("panelsHidden", !viewOptions.panelsHidden)
+                202 -> presentationDialog = true
+                230 -> ArtStudioViewControl.setOption("statusBarVisible", !viewOptions.statusBarVisible)
+                231 -> ArtStudioViewControl.setOption("gridVisible", !viewOptions.gridVisible)
+                232 -> ArtStudioViewControl.setOption("pixelGridVisible", !viewOptions.pixelGridVisible)
+                else -> {
+                    val action = mapOf(
+                        212 to "zoom_in", 213 to "zoom_out", 214 to "zoom_100",
+                        215 to "fit", 216 to "fit_width", 217 to "fit_height",
+                        218 to "rotate_right", 219 to "rotate_left",
+                        220 to "reset_rotation", 221 to "mirror",
+                        224 to "reset_display", 247 to "refresh"
+                    )[command]
+                    if (action != null) ArtStudioViewControl.command(action)
+                }
+            }
+        }
+    }
+    SideEffect {
+        ArtStudioViewControl.canvasAttached = current != null && canvasRef[0] != null
+    }
+    DisposableEffect(Unit) {
+        onDispose { ArtStudioViewControl.canvasAttached = false }
+    }
+    LaunchedEffect(Unit) {
+        ArtStudioViewControl.commands.collect { command ->
+            val canvas = canvasRef[0]
+            when (command) {
+                "zoom_in" -> canvas?.zoomIn()
+                "zoom_out" -> canvas?.zoomOut()
+                "zoom_100" -> canvas?.zoomTo100Percent()
+                "fit" -> canvas?.fitViewport()
+                "fit_width" -> canvas?.fitWidth()
+                "fit_height" -> canvas?.fitHeight()
+                "rotate_right" -> canvas?.rotateBy(15f)
+                "rotate_left" -> canvas?.rotateBy(-15f)
+                "reset_rotation" -> canvas?.resetRotation()
+                "mirror" -> canvas?.toggleMirror()
+                "reset_display" -> canvas?.resetDisplay()
+                "refresh" -> refresh()
+            }
+        }
     }
     Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (current == null) {
@@ -769,22 +895,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 val leftDrawerWidth = (maxWidth * 0.25f).coerceIn(84.dp, 96.dp)
                 val drawerWidth = (maxWidth * 0.68f).coerceAtMost(280.dp)
                 // A pinned panel must leave space to draw; both open panels share that space.
-                val leftOccupied = if (leftDrawerOpen) leftDrawerWidth else 0.dp
+                val leftOccupied =
+                    if (leftDrawerOpen && !viewOptions.panelsHidden) leftDrawerWidth else 0.dp
                 val rightDrawerWidth = if (rightDrawerPinned || leftDrawerOpen) {
                     drawerWidth.coerceAtMost(
                         (maxWidth - leftOccupied - railWidth * 2 - 112.dp).coerceAtLeast(0.dp))
                 } else drawerWidth
                 Box(Modifier.fillMaxSize().padding(
-                    start = railWidth + if (leftDrawerOpen && leftDrawerPinned) leftDrawerWidth else 0.dp,
-                    end = railWidth + if (rightDrawerOpen && rightDrawerPinned) rightDrawerWidth else 0.dp
+                    start = if (viewOptions.panelsHidden) 0.dp else
+                        railWidth + if (leftDrawerOpen && leftDrawerPinned) leftDrawerWidth else 0.dp,
+                    end = if (viewOptions.panelsHidden) 0.dp else
+                        railWidth + if (rightDrawerOpen && rightDrawerPinned) rightDrawerWidth else 0.dp
                 ).clipToBounds()) {
                 AndroidView(factory = { ctx -> StudioCanvas(ctx).also { canvasRef[0] = it } },
                     modifier = Modifier.fillMaxSize(), update = { view ->
                     view.documentId = current.getString("id")
                     view.image = image
+                    view.gridVisible = viewOptions.gridVisible
+                    view.pixelGridVisible = viewOptions.pixelGridVisible
                     view.horizontalFitBias = when {
-                        leftDrawerOpen && leftDrawerPinned && !(rightDrawerOpen && rightDrawerPinned) -> -1f
-                        rightDrawerOpen && rightDrawerPinned && !(leftDrawerOpen && leftDrawerPinned) -> 1f
+                        !viewOptions.panelsHidden && leftDrawerOpen && leftDrawerPinned && !(rightDrawerOpen && rightDrawerPinned) -> -1f
+                        !viewOptions.panelsHidden && rightDrawerOpen && rightDrawerPinned && !(leftDrawerOpen && leftDrawerPinned) -> 1f
                         else -> 0f
                     }
                     view.layers = layers
@@ -911,8 +1042,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 // Intercept taps outside an open drawer before they reach the canvas;
                 // the drawer and its handle are drawn above this transparent dismiss area.
-                if ((leftDrawerOpen && !leftDrawerPinned) ||
-                    (rightDrawerOpen && !rightDrawerPinned)) {
+                if (!viewOptions.panelsHidden &&
+                    ((leftDrawerOpen && !leftDrawerPinned) ||
+                    (rightDrawerOpen && !rightDrawerPinned))) {
                     Box(Modifier.fillMaxSize().padding(horizontal = railWidth)
                         .clickable(onClickLabel = "收起未固定侧栏") {
                             if (!leftDrawerPinned) leftDrawerOpen = false
@@ -920,7 +1052,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         })
                 }
                 // Handles remain reachable; pinned drawers may stay open together.
-                if (leftDrawerOpen) {
+                if (leftDrawerOpen && !viewOptions.panelsHidden) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
                         .padding(start = railWidth).width(leftDrawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
@@ -1151,7 +1283,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                 }
                 }
-                if (rightDrawerOpen) {
+                if (rightDrawerOpen && !viewOptions.panelsHidden) {
                     Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
                         .padding(end = railWidth).width(rightDrawerWidth).fillMaxHeight()
                         .clickable { }, tonalElevation = 3.dp) {
@@ -1530,7 +1662,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         }
                     }
                 }
-                Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
+                if (!viewOptions.panelsHidden) Surface(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
                     .width(railWidth).fillMaxHeight()
                     .clickable(onClickLabel = if (leftDrawerOpen && leftDrawerPinned)
                         "取消固定并收起左侧工具栏" else if (leftDrawerOpen)
@@ -1547,7 +1679,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         Text(if (leftDrawerOpen) "‹" else "›", style = MaterialTheme.typography.titleLarge)
                     }
                 }
-                Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
+                if (!viewOptions.panelsHidden) Surface(Modifier.align(androidx.compose.ui.Alignment.CenterEnd)
                     .width(railWidth).fillMaxHeight()
                     .clickable(onClickLabel = if (rightDrawerOpen && rightDrawerPinned)
                         "取消固定并收起右侧面板" else if (rightDrawerOpen)
@@ -1565,6 +1697,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                 }
             }
+            if (viewOptions.statusBarVisible && !viewOptions.panelsHidden)
             Surface(Modifier.fillMaxWidth().height(48.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant, tonalElevation = 1.dp) {
                 Row(Modifier.fillMaxSize().padding(horizontal = 8.dp),
@@ -2196,6 +2329,11 @@ private class StudioCanvas(context: Context) : View(context) {
     var onMove: (Float, Float) -> Unit = { _, _ -> }
     private var zoom = 1f
     private var angle = 0f
+    private var mirrored = false
+    var gridVisible: Boolean = false
+        set(value) { if (field != value) { field = value; invalidate() } }
+    var pixelGridVisible: Boolean = true
+        set(value) { if (field != value) { field = value; invalidate() } }
     private var panX = 0f
     private var panY = 0f
     private var startX = 0f
@@ -2219,12 +2357,59 @@ private class StudioCanvas(context: Context) : View(context) {
     private fun shapePoints(x: Float, y: Float): JSONArray = JSONArray()
         .put(JSONArray().put(shapeStartX).put(shapeStartY).put(1f))
         .put(JSONArray().put(x).put(y).put(1f))
+    private fun fitScale(): Float {
+        val bitmap = image ?: return 1f
+        if (width == 0 || height == 0) return 1f
+        return minOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height) * 0.98f
+    }
+    fun zoomIn() { zoom = (zoom * 1.25f).coerceIn(0.1f, 16f); invalidate() }
+    fun zoomOut() { zoom = (zoom / 1.25f).coerceIn(0.1f, 16f); invalidate() }
+    fun zoomTo100Percent() {
+        zoom = (1f / fitScale()).coerceIn(0.1f, 16f)
+        invalidate()
+    }
+    private fun rotatedBounds(bitmap: Bitmap): Pair<Float, Float> {
+        val radians = Math.toRadians(angle.toDouble())
+        val c = kotlin.math.abs(kotlin.math.cos(radians)).toFloat()
+        val s = kotlin.math.abs(kotlin.math.sin(radians)).toFloat()
+        return Pair(bitmap.width * c + bitmap.height * s,
+            bitmap.width * s + bitmap.height * c)
+    }
+    fun fitViewport() {
+        val bitmap = image ?: return
+        val (w, h) = rotatedBounds(bitmap)
+        zoom = (minOf(width.toFloat() / w, height.toFloat() / h) * 0.98f /
+            fitScale()).coerceIn(0.1f, 16f)
+        panX = 0f; panY = 0f
+        invalidate()
+    }
+    fun fitWidth() {
+        val bitmap = image ?: return
+        zoom = (width.toFloat() / rotatedBounds(bitmap).first / fitScale())
+            .coerceIn(0.1f, 16f)
+        panX = 0f; panY = 0f
+        invalidate()
+    }
+    fun fitHeight() {
+        val bitmap = image ?: return
+        zoom = (height.toFloat() / rotatedBounds(bitmap).second / fitScale())
+            .coerceIn(0.1f, 16f)
+        panX = 0f; panY = 0f
+        invalidate()
+    }
+    fun rotateBy(degrees: Float) { angle += degrees; invalidate() }
+    fun resetRotation() { angle = 0f; invalidate() }
+    fun toggleMirror() { mirrored = !mirrored; invalidate() }
     fun fitToWindow() {
         zoom = 1f
         angle = 0f
         panX = 0f
         panY = 0f
         invalidate()
+    }
+    fun resetDisplay() {
+        mirrored = false
+        fitToWindow()
     }
     private val checkerPaint = Paint().apply {
         val tile = Bitmap.createBitmap(2, 2, Bitmap.Config.ARGB_8888)
@@ -2276,10 +2461,35 @@ private class StudioCanvas(context: Context) : View(context) {
         matrix.postScale(fit * zoom, fit * zoom)
         matrix.postRotate(angle)
         matrix.postTranslate(fittedCenterX + panX, height / 2f + panY)
+        if (mirrored) matrix.postScale(-1f, 1f, fittedCenterX + panX, height / 2f + panY)
         canvas.save(); canvas.concat(matrix)
         canvas.drawRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(), checkerPaint)
         canvas.restore()
         canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        if (gridVisible || (pixelGridVisible && fit * zoom >= 8f)) {
+            canvas.save()
+            canvas.concat(matrix)
+            canvas.clipRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat())
+            val line = Paint().apply {
+                style = Paint.Style.STROKE
+                strokeWidth = 1f / (fit * zoom)
+            }
+            if (gridVisible) {
+                line.color = Color.argb(145, 80, 160, 210)
+                for (x in 0..bitmap.width step 64)
+                    canvas.drawLine(x.toFloat(), 0f, x.toFloat(), bitmap.height.toFloat(), line)
+                for (y in 0..bitmap.height step 64)
+                    canvas.drawLine(0f, y.toFloat(), bitmap.width.toFloat(), y.toFloat(), line)
+            }
+            if (pixelGridVisible && fit * zoom >= 8f) {
+                line.color = Color.argb(90, 70, 70, 70)
+                for (x in 0..bitmap.width)
+                    canvas.drawLine(x.toFloat(), 0f, x.toFloat(), bitmap.height.toFloat(), line)
+                for (y in 0..bitmap.height)
+                    canvas.drawLine(0f, y.toFloat(), bitmap.width.toFloat(), y.toFloat(), line)
+            }
+            canvas.restore()
+        }
         if (tool == "mirror") {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply {

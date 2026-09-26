@@ -107,3 +107,18 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 源码对照入口：https://invent.kde.org/graphics/krita/-/blob/master/libs/ui/KisMainWindow.cpp
 Krita 文件菜单说明：https://docs.krita.org/en/reference_manual/main_menu/file_menu.html
+
+## 视图菜单（Krita 6.0.4 对照）
+
+依据手机上的 Krita 6.0.4 源码 `krita/krita5.xmlgui` 的 View 顺序，以及 `libs/ui/KisViewManager.cpp` 中的操作注册。本菜单仍保留画室顶部横向菜单栏；「隐藏面板模式」只隐藏画布两侧工具栏和底栏，菜单本身保留为退出入口。显示选项只影响画布视图，不写入 .ailart 工程或图层像素。
+
+| 项目 | 画室状态与行为 |
+| --- | --- |
+| 隐藏面板模式、全屏模式、显示状态栏 | 可用。隐藏面板后用同一菜单恢复；全屏调用宿主页面模式，仍可选横屏或竖屏，只有宿主确认后才标记选中；状态栏控制画布底部操作条。 |
+| 缩放、旋转、镜像 | 子菜单可用：放大、缩小、100%、适合窗口／宽度／高度、左右各旋转 15°、重置旋转、镜像画布、重置显示。画布镜像同样用于触摸坐标反算，不翻转保存的像素。 |
+| 显示网格、显示像素网格 | 可用。网格按当前画布每 64 像素绘制；像素网格在单个图像像素达到屏幕 8 像素时显示。均为显示叠层，不参加导出。 |
+| 刷新画布 | 可用，重新读取和绘制当前工程。 |
+| 独立画布窗口、四方连续显示及方向、快速预渲染、色彩校样、色域警告、打印大小 | 灰色。当前没有多窗口、平铺视图、细节层级、ICC 校样或物理 DPI 支持。 |
+| 围绕光标／画布镜像、标尺及游标、参考线及锁定、吸附全部子项、辅助尺及预览、参考图像、色板操作菜单 | 灰色。需要各自的锚点变换、标尺与参考线数据、吸附引擎、辅助对象或色板模块。 |
+
+兰儿可用 `view.state` 读当前状态；`view.set(option, enabled)` 控制 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；`view.command(command)` 逐条执行缩放、旋转、镜像和刷新，画布未打开时明确报错；`view.presentation(mode)` 请求宿主确认 normal、fullscreen_portrait、fullscreen_landscape。灰色项目没有执行能力入口。连续命令使用事件队列，不会把两次放大合并成一次。

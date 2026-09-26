@@ -64,7 +64,9 @@
       "plugin.art.studio.edit.paste_new", "plugin.art.studio.edit.clear",
       "plugin.art.studio.edit.fill_foreground", "plugin.art.studio.edit.fill_background",
       "plugin.art.studio.image.import", "plugin.art.studio.export.png",
-      "plugin.art.studio.export.jpeg"
+      "plugin.art.studio.export.jpeg",
+      "plugin.art.studio.view.state", "plugin.art.studio.view.set",
+      "plugin.art.studio.view.command", "plugin.art.studio.view.presentation"
     ],
     "services": [],
     "providers": ["plugin.art.studio.page"],
