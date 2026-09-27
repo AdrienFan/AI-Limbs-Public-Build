@@ -34,6 +34,7 @@ class AiLimbsDispatcher(
     private val accessContext = AiLimbsAccessContextService(appContext)
     private val uiCapabilities = AiLimbsUiCapabilityService(appContext)
     private val capabilityResolver = AiLimbsCapabilityResolver(appContext, policyEngine)
+    private val capabilityUsageStore = AiLimbsCapabilityUsageStore(appContext)
     private val developerCatalog = AiLimbsDeveloperCatalogService()
     private val storageIndex = AiLimbsStorageIndex(appContext)
     private val subsystemIngressGate = AiLimbsSubsystemIngressGate(policyEngine)
@@ -60,6 +61,7 @@ class AiLimbsDispatcher(
         }
         val result = executeCapabilityRoute(invocation)
         policyEngine.recordSuccessfulExecution(invocation, result)
+        capabilityUsageStore.recordSuccessfulExecution(invocation, result)
         return result.put("execution_policy", decision.inspection.toJson())
     }
 
