@@ -119,6 +119,8 @@ class AiLimbsDispatcher(
                         .ifBlank { args.optString("id") }
                         .ifBlank { args.optString("invoke_id") }
                 )
+            AiLimbsCoreLocalOperation.CAPABILITY_HOT ->
+                capabilityResolver.hot()
             AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ -> developerCatalog.read(args)
             AiLimbsCoreLocalOperation.CORE_STATUS -> coreStatus()
             AiLimbsCoreLocalOperation.DISPATCHER_STATUS -> dispatcherStatus()

@@ -6,6 +6,7 @@ internal enum class AiLimbsCoreLocalOperation {
     ACCESS_CONTEXT_READ,
     CAPABILITY_SEARCH,
     CAPABILITY_DESCRIBE,
+    CAPABILITY_HOT,
     DEVELOPER_CATALOG_READ,
     CORE_STATUS,
     DISPATCHER_STATUS,
@@ -45,5 +46,6 @@ internal data class AiLimbsCoreCapabilityRegistration(
     val capabilityId: String? = null,
     val capabilityAliases: List<String> = emptyList(),
     val provider: AiLimbsCoreProvider = AiLimbsCoreProvider.CORE,
-    val availabilityPolicy: AiLimbsCoreAvailabilityPolicy = AiLimbsCoreAvailabilityPolicy.DEFAULT
+    val availabilityPolicy: AiLimbsCoreAvailabilityPolicy = AiLimbsCoreAvailabilityPolicy.DEFAULT,
+    val role: AiLimbsCapabilityRole = AiLimbsCapabilityRole.CONTROL_PLANE
 )

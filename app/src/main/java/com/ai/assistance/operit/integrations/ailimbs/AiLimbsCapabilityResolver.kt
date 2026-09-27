@@ -8,6 +8,7 @@ import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
 import com.ai.assistance.operit.core.tools.catalog.ToolCatalogSourceKind
 import com.ai.assistance.operit.data.model.ToolParameterSchema
 import java.util.Locale
+import kotlin.math.round
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
@@ -19,7 +20,8 @@ internal data class AiLimbsCapabilityDefinition(
     val provider: String,
     val invokeId: String,
     val aliases: List<String>,
-    val catalogEntry: ToolCatalogEntry
+    val catalogEntry: ToolCatalogEntry,
+    val role: AiLimbsCapabilityRole = AiLimbsCapabilityRole.BUSINESS
 )
 
 internal data class AiLimbsCapabilitySearchMatch(
@@ -169,6 +171,7 @@ class AiLimbsCapabilityResolver(
     private val handler = AIToolHandler.getInstance(appContext)
     private val packageManager = handler.getOrCreatePackageManager()
     private val capabilityUsageStore = AiLimbsCapabilityUsageStore(appContext)
+    private val hotRankingPolicySource = AiLimbsHotRankingPolicySource(appContext)
 
     internal fun currentCapabilityScopes(): List<AiLimbsCapabilityScope> =
         AiLimbsCapabilityRegistry.capabilityScopeSnapshot()
@@ -294,19 +297,53 @@ class AiLimbsCapabilityResolver(
                 .put("next_action", nextAction)
                 .put("next", next)
         activeScopeId?.let { response.put("scope", it) }
+        response.put("hot", hotEntryDescriptor(expanded = false))
 
         if (activeScopeId == null) {
             val cycleState = AiLimbsInteractionCycleRuntime.state(appContext)
             val generation = cycleState.currentGeneration()
             if (cycleState.claimHotCapabilities(generation)) {
-                response.put(
-                    "hot_capabilities",
-                    runCatching { hotCapabilitiesJson(definitions) }
-                        .getOrElse { JSONArray() }
-                )
+                val hotCapabilities =
+                    try {
+                        hotCapabilitiesJson(definitions)
+                    } catch (_: Throwable) {
+                        JSONArray()
+                    }
+                response
+                    .put(
+                        "hot",
+                        hotEntryDescriptor(
+                            expanded = true,
+                            count = hotCapabilities.length()
+                        )
+                    )
+                    .put("hot_capabilities", hotCapabilities)
             }
         }
         return response
+    }
+
+    suspend fun hot(): JSONObject {
+        val definitions = buildDefinitions(forceRefreshPackages = false)
+        val policy = hotRankingPolicySource.current()
+        val hotCapabilities =
+            try {
+                hotCapabilitiesJson(definitions, policy)
+            } catch (_: Throwable) {
+                JSONArray()
+            }
+        return ok()
+            .put("module", MODULE_NAME)
+            .put("protocol_version", CAPABILITY_PROTOCOL_VERSION)
+            .put("count", hotCapabilities.length())
+            .put(
+                "ranking_policy",
+                JSONObject()
+                    .put("source", AiLimbsHotRankingPolicySource.SOURCE_ID)
+                    .put("half_life_days", policy.halfLifeDays)
+            )
+            .put("hot_capabilities", hotCapabilities)
+            .put("next", "Call capability.describe when schema or prerequisites are needed.")
     }
 
     suspend fun describe(identifier: String): JSONObject {
@@ -341,6 +378,7 @@ class AiLimbsCapabilityResolver(
             .put("display_name", definition.displayName)
             .put("provider", definition.provider)
             .put("invoke_id", definition.invokeId)
+            .put("role", definition.role.name)
             .put("description", entry.description)
             .put("aliases", JSONArray(definition.aliases))
             .put("keywords", JSONArray(entry.keywords.distinct()))
@@ -377,6 +415,23 @@ class AiLimbsCapabilityResolver(
             actionType = "CAPABILITY_DESCRIBE",
             exampleParameters = JSONObject().put("capability_id", capabilityIdExample)
         )
+
+    internal fun capabilityHotUsage(): JSONObject =
+        resolverUsage(
+            invokeId = "capability.hot",
+            actionType = "CAPABILITY_HOT",
+            exampleParameters = JSONObject()
+        )
+
+    private fun hotEntryDescriptor(
+        expanded: Boolean,
+        count: Int? = null
+    ): JSONObject =
+        JSONObject()
+            .put("label", "热榜")
+            .put("invoke_id", "capability.hot")
+            .put("expanded", expanded)
+            .apply { count?.let { put("count", it) } }
 
     private fun resolverUsage(
         invokeId: String,
@@ -488,34 +543,54 @@ class AiLimbsCapabilityResolver(
         return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence)
     }
 
-    private fun hotCapabilitiesJson(
-        definitions: List<AiLimbsCapabilityDefinition>
+    private suspend fun hotCapabilitiesJson(
+        definitions: List<AiLimbsCapabilityDefinition>,
+        policy: AiLimbsHotRankingPolicy = hotRankingPolicySource.current()
     ): JSONArray {
+        val eligibleDefinitions =
+            definitions.filter { definition ->
+                definition.role == AiLimbsCapabilityRole.BUSINESS &&
+                    definition.catalogEntry.sourceEnabled
+            }
+        val definitionByInvokeId =
+            eligibleDefinitions.associateBy { it.invokeId }
         val discoverable =
-            definitions.map { definition ->
+            eligibleDefinitions.map { definition ->
                 AiLimbsDiscoverableCapability(
                     capabilityId = definition.capabilityId,
                     displayName = definition.displayName,
-                    invokeId = definition.invokeId
+                    invokeId = definition.invokeId,
+                    role = definition.role
                 )
             }
         val ranked =
             AiLimbsHotCapabilityRanker.rank(
                 usageStats = capabilityUsageStore.snapshots(),
+                usageBuckets = capabilityUsageStore.usageBuckets(),
                 discoverableCapabilities = discoverable,
-                limit = HOT_CAPABILITY_LIMIT
+                halfLifeMs = policy.halfLifeMs,
+                limit = HOT_RANKING_CANDIDATE_LIMIT
             )
-        return JSONArray().apply {
-            ranked.forEach { capability ->
-                put(
-                    JSONObject()
-                        .put("display_name", capability.displayName)
-                        .put("invoke_id", capability.invokeId)
-                        .put("capability_id", capability.capabilityId)
-                        .put("use_count", capability.useCount)
-                )
-            }
+
+        val result = JSONArray()
+        for (capability in ranked) {
+            val definition =
+                definitionByInvokeId[capability.invokeId] ?: continue
+            if (!readAvailability(definition).available) continue
+            result.put(
+                JSONObject()
+                    .put("display_name", capability.displayName)
+                    .put("invoke_id", capability.invokeId)
+                    .put("capability_id", capability.capabilityId)
+                    .put("use_count", capability.useCount)
+                    .put(
+                        "heat_score",
+                        round(capability.heatScore * 1000.0) / 1000.0
+                    )
+            )
+            if (result.length() >= HOT_CAPABILITY_LIMIT) break
         }
+        return result
     }
 
     private fun scopeCard(scope: AiLimbsCapabilityScope): JSONObject =
@@ -556,6 +631,10 @@ class AiLimbsCapabilityResolver(
         val pluginRegistration =
             (managedRegistration as? AiLimbsCapabilityRegistration.Plugin)?.registration
         val semantic = semanticMetadata(invokeId)
+        val role =
+            coreRegistration?.role
+                ?: pluginRegistration?.role
+                ?: AiLimbsCapabilityRolePolicy.forStandalone(invokeId)
         val capabilityId =
             coreRegistration?.capabilityId
                 ?: pluginRegistration?.capabilityId
@@ -579,7 +658,8 @@ class AiLimbsCapabilityResolver(
             catalogEntry =
                 entry.copy(
                     keywords = (entry.keywords + semantic.orEmptyKeywords()).distinct()
-                )
+                ),
+            role = role
         )
     }
 
@@ -779,6 +859,7 @@ class AiLimbsCapabilityResolver(
         const val CAPABILITY_PROTOCOL_VERSION = 3
         const val MAX_SEARCH_RESULTS = 20
         const val HOT_CAPABILITY_LIMIT = 5
+        const val HOT_RANKING_CANDIDATE_LIMIT = 20
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
         const val PROVIDER_BRIDGE = AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER
         const val PROVIDER_SYSTEM_ENVIRONMENT = "system_environment"

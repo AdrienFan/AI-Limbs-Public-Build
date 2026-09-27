@@ -49,6 +49,16 @@ object AiLimbsCoreCapabilityRegistry {
                     )
         ),
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.CAPABILITY_HOT),
+            catalogEntry =
+                entry(
+                    name = "capability.hot",
+                    displayName = "AI Limbs Capability Resolver · 热榜",
+                    description = "Read the current Top 5 hot BUSINESS capabilities using the Host-owned decay policy.",
+                    keywords = listOf("热榜", "常用能力", "hot capabilities", "resolver", "AI Limbs Core")
+                )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ),
             capabilityId = "ai_limbs.developer.catalog.read",
             capabilityAliases = listOf("developer.catalog", "developer.catalog.read"),

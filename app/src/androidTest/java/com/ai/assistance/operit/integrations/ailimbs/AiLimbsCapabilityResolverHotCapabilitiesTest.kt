@@ -6,6 +6,7 @@ import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
 import com.ai.assistance.operit.core.tools.catalog.ToolCatalogSourceKind
 import kotlinx.coroutines.runBlocking
 import org.json.JSONObject
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -60,12 +61,15 @@ class AiLimbsCapabilityResolverHotCapabilitiesTest {
     }
 
     @Test
-    fun scopedSearchDoesNotConsumeFirstGlobalHotCapabilityDelivery() = runBlocking {
+    fun hotEntryStaysCollapsedAfterFirstGlobalAndCanBeExpandedOnDemand() = runBlocking {
         val handle = registerCapability()
         val resolver = resolver()
         val context = context()
+        val policySource = AiLimbsHotRankingPolicySource(context)
 
         try {
+            policySource.setHalfLifeDays(3.0)
+            AiLimbsCapabilityUsageStore(context).recordSuccess(capabilityId)
             AiLimbsInteractionCycleRuntime.reset(context)
 
             val scoped =
@@ -75,17 +79,41 @@ class AiLimbsCapabilityResolverHotCapabilitiesTest {
                     scope = "plugin:$ownerPluginId"
                 )
             assertFalse(scoped.has("hot_capabilities"))
+            assertFalse(scoped.getJSONObject("hot").getBoolean("expanded"))
+            assertEquals(
+                "capability.hot",
+                scoped.getJSONObject("hot").getString("invoke_id")
+            )
 
             val firstGlobal = resolver.search("热度周期回归", 5)
             assertTrue(firstGlobal.has("hot_capabilities"))
+            assertTrue(firstGlobal.getJSONObject("hot").getBoolean("expanded"))
 
             val secondGlobal = resolver.search("热度周期回归", 5)
             assertFalse(secondGlobal.has("hot_capabilities"))
+            assertFalse(secondGlobal.getJSONObject("hot").getBoolean("expanded"))
+
+            val directHot = resolver.hot()
+            assertEquals(
+                3.0,
+                directHot.getJSONObject("ranking_policy")
+                    .getDouble("half_life_days"),
+                0.0
+            )
+            val hotCapabilities = directHot.getJSONArray("hot_capabilities")
+            assertTrue(
+                (0 until hotCapabilities.length())
+                    .map { hotCapabilities.getJSONObject(it).getString("capability_id") }
+                    .contains(capabilityId)
+            )
 
             AiLimbsInteractionCycleRuntime.reset(context)
             val nextGenerationGlobal = resolver.search("热度周期回归", 5)
             assertTrue(nextGenerationGlobal.has("hot_capabilities"))
         } finally {
+            policySource.setHalfLifeDays(
+                AiLimbsHotRankingPolicySource.DEFAULT_HALF_LIFE_DAYS
+            )
             handle.close()
         }
     }

@@ -22,7 +22,8 @@ internal data class AiLimbsPluginCapabilityRegistration(
     val workContextRequiredReceipts: Set<AiLimbsRequiredReceipt>,
     val executor: AiLimbsPluginCapabilityExecutor,
     val ownerDisplayName: String = ownerPluginId,
-    val ownerDescription: String? = null
+    val ownerDescription: String? = null,
+    val role: AiLimbsCapabilityRole = AiLimbsCapabilityRole.BUSINESS
 )
 
 internal sealed interface AiLimbsCapabilityRegistration {
@@ -110,7 +111,11 @@ object AiLimbsCapabilityRegistry {
             workContextRequiredReceipts = workContextRequiredReceipts,
             executor = executor,
             ownerDisplayName = ownerDisplayName.trim().ifBlank { ownerPluginId },
-            ownerDescription = ownerDescription?.trim()?.ifBlank { null }
+            ownerDescription = ownerDescription?.trim()?.ifBlank { null },
+            role = AiLimbsCapabilityRolePolicy.forPlugin(
+                capabilityId = normalizedCapabilityId,
+                effect = effect
+            )
         )
         val owned = OwnedPluginRegistration(UUID.randomUUID().toString(), registration)
         synchronized(lock) {

@@ -218,6 +218,8 @@ jobs:
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsDynamicCapabilityRegistryTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilitySearchScopeContractTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityUsagePolicyTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRolePolicyTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityHotContractTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsHotCapabilityRankerTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsGlobalScopeOrganizerStressTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleControllerTest \
