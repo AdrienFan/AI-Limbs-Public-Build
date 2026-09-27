@@ -39,20 +39,41 @@ class AiLimbsCapabilityResolver(
     internal fun currentCapabilityScopes(): List<AiLimbsCapabilityScope> =
         AiLimbsCapabilityRegistry.capabilityScopeSnapshot()
 
-    suspend fun search(query: String, requestedLimit: Int): JSONObject {
+    suspend fun search(
+        query: String,
+        requestedLimit: Int,
+        scope: String? = null
+    ): JSONObject {
         val normalizedQuery = query.trim()
+        val requestedScope = scope?.trim()?.ifBlank { null }
         if (normalizedQuery.isEmpty()) {
             return error("Missing capability search query")
                 .put("error_code", "CAPABILITY_SEARCH_QUERY_REQUIRED")
-                .put("next_action", capabilitySearchUsage("<capability intent>"))
+                .put("next_action", capabilitySearchUsage("<capability intent>", requestedScope))
         }
         val limit = requestedLimit.coerceIn(1, MAX_SEARCH_RESULTS)
 
-        var definitions = buildDefinitions(forceRefreshPackages = false)
+        var activeScope = requestedScope?.let(::resolveCapabilityScope)
+        if (requestedScope != null && activeScope == null) {
+            return unknownScope(requestedScope)
+        }
+
+        var definitions =
+            filterDefinitionsForScope(
+                buildDefinitions(forceRefreshPackages = false),
+                activeScope
+            )
         var searchResult = searchDefinitions(definitions, normalizedQuery, limit)
         var usedLiveDiscovery = false
         if (searchResult.lowConfidence) {
             definitions = buildDefinitions(forceRefreshPackages = true)
+            if (requestedScope != null) {
+                activeScope = resolveCapabilityScope(requestedScope)
+                if (activeScope == null) {
+                    return unknownScope(requestedScope)
+                }
+            }
+            definitions = filterDefinitionsForScope(definitions, activeScope)
             searchResult = searchDefinitions(definitions, normalizedQuery, limit)
             usedLiveDiscovery = true
         }
@@ -61,29 +82,40 @@ class AiLimbsCapabilityResolver(
         for (definition in searchResult.matches) {
             results.put(compactCard(definition, readAvailability(definition)))
         }
-        return ok()
-            .put("module", MODULE_NAME)
-            .put("protocol_version", CAPABILITY_PROTOCOL_VERSION)
-            .put("query", normalizedQuery)
-            .put("count", results.length())
-            .put("live_discovery", usedLiveDiscovery)
-            .put("results", results)
-            .put(
-                "next_action",
-                if (results.length() == 0) {
-                    capabilitySearchUsage("<refined capability intent>")
-                } else {
-                    capabilityDescribeUsage("<capability_id from results>")
-                }
-            )
-            .put(
-                "next",
-                if (results.length() == 0) {
-                    "No matching capability is currently installed or registered."
-                } else {
-                    "Call capability.describe with a capability_id when parameters or prerequisites are needed."
-                }
-            )
+        val activeScopeId = activeScope?.scopeId
+        val response =
+            ok()
+                .put("module", MODULE_NAME)
+                .put("protocol_version", CAPABILITY_PROTOCOL_VERSION)
+                .put("query", normalizedQuery)
+                .put("count", results.length())
+                .put("live_discovery", usedLiveDiscovery)
+                .put("results", results)
+                .put(
+                    "next_action",
+                    if (results.length() == 0) {
+                        capabilitySearchUsage(
+                            "<refined capability intent>",
+                            activeScopeId
+                        )
+                    } else {
+                        capabilityDescribeUsage("<capability_id from results>")
+                    }
+                )
+                .put(
+                    "next",
+                    if (results.length() == 0) {
+                        if (activeScopeId == null) {
+                            "No matching capability is currently installed or registered."
+                        } else {
+                            "No matching capability is currently registered in scope '$activeScopeId'."
+                        }
+                    } else {
+                        "Call capability.describe with a capability_id when parameters or prerequisites are needed."
+                    }
+                )
+        activeScopeId?.let { response.put("scope", it) }
+        return response
     }
 
     suspend fun describe(identifier: String): JSONObject {
@@ -135,12 +167,18 @@ class AiLimbsCapabilityResolver(
             .put("error_guidance", errorGuidance(definition, availability))
     }
 
-    internal fun capabilitySearchUsage(queryExample: String): JSONObject =
-        resolverUsage(
+    internal fun capabilitySearchUsage(
+        queryExample: String,
+        scope: String? = null
+    ): JSONObject {
+        val parameters = JSONObject().put("query", queryExample)
+        scope?.trim()?.ifBlank { null }?.let { parameters.put("scope", it) }
+        return resolverUsage(
             invokeId = "capability.search",
             actionType = "CAPABILITY_SEARCH",
-            exampleParameters = JSONObject().put("query", queryExample)
+            exampleParameters = parameters
         )
+    }
 
     internal fun capabilityDescribeUsage(capabilityIdExample: String): JSONObject =
         resolverUsage(
@@ -199,6 +237,30 @@ class AiLimbsCapabilityResolver(
             .distinctBy { catalogIdentity(it) }
             .map(::toDefinition)
     }
+
+    private fun resolveCapabilityScope(scopeId: String): AiLimbsCapabilityScope? =
+        currentCapabilityScopes()
+            .firstOrNull { it.scopeId.equals(scopeId, ignoreCase = true) }
+
+    private fun filterDefinitionsForScope(
+        definitions: List<AiLimbsCapabilityDefinition>,
+        scope: AiLimbsCapabilityScope?
+    ): List<AiLimbsCapabilityDefinition> {
+        if (scope == null) return definitions
+        return definitions.filter { definition ->
+            AiLimbsCapabilityRegistry
+                .pluginRegistrationForInvokeName(definition.invokeId)
+                ?.ownerPluginId == scope.ownerPluginId
+        }
+    }
+
+    private fun unknownScope(scopeId: String): JSONObject =
+        error(
+            "Unknown capability scope '$scopeId'. Call capability.search without scope to rediscover."
+        )
+            .put("error_code", "CAPABILITY_SEARCH_SCOPE_UNKNOWN")
+            .put("scope", scopeId)
+            .put("next_action", capabilitySearchUsage("<capability intent>"))
 
     private fun searchDefinitions(
         definitions: List<AiLimbsCapabilityDefinition>,
