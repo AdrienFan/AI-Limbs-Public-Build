@@ -2,6 +2,8 @@ package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRuntimeMetadataPublisher
+
 import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
 import com.ai.assistance.operit.plugins.system.KernelPluginPlatformControlV1
@@ -762,7 +764,9 @@ internal object PluginPlatformKernel {
                     File(appContext.filesDir, "ai_limbs/runtime_owner"), "plugin_kernel"
                 )
             }
+            AiLimbsRuntimeMetadataPublisher.publish(appContext)
             val surfacePolicy = HostSurfacePolicy(appContext)
+
             val adminSecurity = AdminSecurityManager(appContext)
             val usageStore = PluginUsageStore(appContext)
             val inactivityPolicy = PluginInactivityPolicyStore(appContext)
