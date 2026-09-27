@@ -538,7 +538,12 @@ class AiLimbsExecutionPolicyEngine(
                 return AiLimbsAvailabilityResult(
                     available = false,
                     reasonCode = "POLICY_TARGET_NOT_REGISTERED",
-                    reason = "The normalized host target is not registered: " + targetName
+                    reason = "The normalized host target is not registered: " + targetName,
+                    nextAction =
+                        AiLimbsCapabilityDiscoveryProtocol.searchNextAction(
+                            queryExample = targetName,
+                            transportInvocation = ::transportInvocation
+                        )
                 )
             }
         }

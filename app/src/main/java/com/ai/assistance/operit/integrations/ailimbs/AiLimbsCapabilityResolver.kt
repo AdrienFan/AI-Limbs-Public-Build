@@ -399,15 +399,12 @@ class AiLimbsCapabilityResolver(
     internal fun capabilitySearchUsage(
         queryExample: String,
         scope: String? = null
-    ): JSONObject {
-        val parameters = JSONObject().put("query", queryExample)
-        scope?.trim()?.ifBlank { null }?.let { parameters.put("scope", it) }
-        return resolverUsage(
-            invokeId = "capability.search",
-            actionType = "CAPABILITY_SEARCH",
-            exampleParameters = parameters
+    ): JSONObject =
+        AiLimbsCapabilityDiscoveryProtocol.searchNextAction(
+            queryExample = queryExample,
+            scope = scope,
+            transportInvocation = policyEngine::transportInvocation
         )
-    }
 
     internal fun capabilityDescribeUsage(capabilityIdExample: String): JSONObject =
         resolverUsage(
