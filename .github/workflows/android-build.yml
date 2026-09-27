@@ -214,7 +214,21 @@ jobs:
             --tests com.ai.assistance.operit.core.tools.system.PermissionRoutingPolicyTest \
             --tests com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntimeDecisionTest \
             --tests com.ai.assistance.operit.plugins.center.VisualHostPrimitiveReservationTest \
+            --tests com.ai.assistance.operit.core.tools.catalog.ToolCapabilityCatalogSearchTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsDynamicCapabilityRegistryTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilitySearchScopeContractTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityUsagePolicyTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsHotCapabilityRankerTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsGlobalScopeOrganizerStressTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsInteractionCycleControllerTest \
             --stacktrace --no-daemon
+
+      - name: Compile Resolver v3 instrumentation regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :app:compileDebugAndroidTestKotlin --stacktrace --no-daemon
 
       - name: Run Gradle build
         env:

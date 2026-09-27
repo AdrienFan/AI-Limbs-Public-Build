@@ -75,7 +75,14 @@ class AiLimbsCapabilityResolverV2RegressionTest {
         try {
             val search = resolver.search(capabilityId, 8)
             assertEquals(3, search.getInt("protocol_version"))
+            assertEquals(capabilityId, search.getString("query"))
             assertFalse(search.getBoolean("live_discovery"))
+            assertEquals(
+                "capability.describe",
+                search.getJSONObject("next_action")
+                    .getJSONObject("capability")
+                    .getString("name")
+            )
             val results = search.getJSONArray("results")
             val card = (0 until results.length())
                 .map { results.getJSONObject(it) }
@@ -100,11 +107,18 @@ class AiLimbsCapabilityResolverV2RegressionTest {
             handle.close()
         }
 
-        val afterUnmount = resolver.search(capabilityId, 8).getJSONArray("results")
+        val afterUnmountResponse = resolver.search(capabilityId, 8)
+        val afterUnmount = afterUnmountResponse.getJSONArray("results")
         assertFalse(
             (0 until afterUnmount.length())
                 .map { afterUnmount.getJSONObject(it) }
                 .any { it.getString("capability_id") == capabilityId }
+        )
+        assertEquals(
+            "capability.search",
+            afterUnmountResponse.getJSONObject("next_action")
+                .getJSONObject("capability")
+                .getString("name")
         )
     }
 

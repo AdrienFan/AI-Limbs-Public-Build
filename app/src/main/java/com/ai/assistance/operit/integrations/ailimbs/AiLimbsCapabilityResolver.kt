@@ -13,7 +13,7 @@ import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
-private data class AiLimbsCapabilityDefinition(
+internal data class AiLimbsCapabilityDefinition(
     val capabilityId: String,
     val displayName: String,
     val provider: String,
@@ -22,7 +22,7 @@ private data class AiLimbsCapabilityDefinition(
     val catalogEntry: ToolCatalogEntry
 )
 
-private data class AiLimbsCapabilitySearchMatch(
+internal data class AiLimbsCapabilitySearchMatch(
     val definition: AiLimbsCapabilityDefinition,
     val score: Int,
     val matchedTerms: Int,
@@ -38,7 +38,7 @@ private data class AiLimbsCapabilitySearchResult(
     val lowConfidence: Boolean
 )
 
-private sealed interface AiLimbsOrganizedSearchItem {
+internal sealed interface AiLimbsOrganizedSearchItem {
     val sourceIndex: Int
 
     data class Capability(
@@ -50,6 +50,114 @@ private sealed interface AiLimbsOrganizedSearchItem {
         override val sourceIndex: Int,
         val scope: AiLimbsCapabilityScope
     ) : AiLimbsOrganizedSearchItem
+}
+
+internal object AiLimbsGlobalScopeOrganizer {
+    fun organize(
+        query: String,
+        matches: List<AiLimbsCapabilitySearchMatch>,
+        limit: Int,
+        scopes: List<AiLimbsCapabilityScope>,
+        ownerPluginIdByInvokeId: Map<String, String>
+    ): List<AiLimbsOrganizedSearchItem> {
+        if (matches.isEmpty() || limit <= 0) return emptyList()
+
+        val scopesByOwner = scopes.associateBy { it.ownerPluginId }
+        val indexedMatches = matches.withIndex().toList()
+        val groupedByOwner =
+            indexedMatches
+                .mapNotNull { indexed ->
+                    ownerPluginIdByInvokeId[indexed.value.definition.invokeId]
+                        ?.let { owner -> owner to indexed }
+                }
+                .groupBy(
+                    keySelector = { it.first },
+                    valueTransform = { it.second }
+                )
+
+        val foldedOwners =
+            groupedByOwner
+                .mapNotNull { (ownerPluginId, ownedMatches) ->
+                    val scope = scopesByOwner[ownerPluginId] ?: return@mapNotNull null
+                    val groupMatches = ownedMatches.map { it.value }
+                    if (shouldFoldScope(query, scope, groupMatches)) ownerPluginId else null
+                }
+                .toSet()
+
+        val emittedScopes = linkedSetOf<String>()
+        val items = mutableListOf<AiLimbsOrganizedSearchItem>()
+        for (indexed in indexedMatches) {
+            val ownerPluginId =
+                ownerPluginIdByInvokeId[indexed.value.definition.invokeId]
+            if (ownerPluginId != null && ownerPluginId in foldedOwners) {
+                if (emittedScopes.add(ownerPluginId)) {
+                    val scope = scopesByOwner.getValue(ownerPluginId)
+                    items +=
+                        AiLimbsOrganizedSearchItem.Scope(
+                            sourceIndex = indexed.index,
+                            scope = scope
+                        )
+                }
+            } else {
+                items +=
+                    AiLimbsOrganizedSearchItem.Capability(
+                        sourceIndex = indexed.index,
+                        match = indexed.value
+                    )
+            }
+        }
+        return items.sortedBy { it.sourceIndex }.take(limit)
+    }
+
+    private fun shouldFoldScope(
+        query: String,
+        scope: AiLimbsCapabilityScope,
+        matches: List<AiLimbsCapabilitySearchMatch>
+    ): Boolean {
+        if (matches.size < SCOPE_FOLD_MIN_MATCHES) return false
+        if (queryMatchesScopeIdentity(query, scope)) return true
+
+        val top = matches[0]
+        val runnerUp = matches.getOrNull(1) ?: return false
+        val scoreGap = top.score - runnerUp.score
+        val specificByIdentity =
+            top.strongIdentityMatch &&
+                top.coverage >= SPECIFIC_LEAF_IDENTITY_MIN_COVERAGE &&
+                scoreGap >= SPECIFIC_LEAF_IDENTITY_SCORE_GAP
+        val specificByScore =
+            top.score >= SPECIFIC_LEAF_MIN_SCORE &&
+                top.coverage >= SPECIFIC_LEAF_MIN_COVERAGE &&
+                scoreGap >= SPECIFIC_LEAF_SCORE_GAP
+
+        return !(specificByIdentity || specificByScore)
+    }
+
+    private fun queryMatchesScopeIdentity(
+        query: String,
+        scope: AiLimbsCapabilityScope
+    ): Boolean {
+        val needle = normalizeOrganizerText(query)
+        if (needle.isEmpty()) return false
+        return sequenceOf(
+            scope.scopeId,
+            scope.ownerPluginId,
+            scope.displayName
+        ).any { normalizeOrganizerText(it) == needle }
+    }
+
+    private fun normalizeOrganizerText(value: String): String =
+        value
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[^\\p{L}\\p{N}:_./-]+"), " ")
+            .replace(Regex("\\s+"), " ")
+            .trim()
+
+    private const val SCOPE_FOLD_MIN_MATCHES = 3
+    private const val SPECIFIC_LEAF_MIN_SCORE = 220
+    private const val SPECIFIC_LEAF_MIN_COVERAGE = 0.75
+    private const val SPECIFIC_LEAF_SCORE_GAP = 100
+    private const val SPECIFIC_LEAF_IDENTITY_MIN_COVERAGE = 0.5
+    private const val SPECIFIC_LEAF_IDENTITY_SCORE_GAP = 80
 }
 
 /** Read-only discovery surface for all AI Limbs capabilities. */
@@ -107,7 +215,22 @@ class AiLimbsCapabilityResolver(
 
         val organizedItems =
             if (activeScope == null) {
-                organizeGlobalSearch(normalizedQuery, searchResult.matches, limit)
+                val ownerPluginIdByInvokeId =
+                    searchResult.matches
+                        .mapNotNull { match ->
+                            AiLimbsCapabilityRegistry
+                                .pluginRegistrationForInvokeName(match.definition.invokeId)
+                                ?.ownerPluginId
+                                ?.let { owner -> match.definition.invokeId to owner }
+                        }
+                        .toMap()
+                AiLimbsGlobalScopeOrganizer.organize(
+                    query = normalizedQuery,
+                    matches = searchResult.matches,
+                    limit = limit,
+                    scopes = currentCapabilityScopes(),
+                    ownerPluginIdByInvokeId = ownerPluginIdByInvokeId
+                )
             } else {
                 searchResult.matches
                     .take(limit)
@@ -364,106 +487,6 @@ class AiLimbsCapabilityResolver(
         }
         return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence)
     }
-
-    private fun organizeGlobalSearch(
-        query: String,
-        matches: List<AiLimbsCapabilitySearchMatch>,
-        limit: Int
-    ): List<AiLimbsOrganizedSearchItem> {
-        if (matches.isEmpty()) return emptyList()
-
-        val scopesByOwner = currentCapabilityScopes().associateBy { it.ownerPluginId }
-        val indexedMatches = matches.withIndex().toList()
-        val groupedByOwner =
-            indexedMatches
-                .mapNotNull { indexed ->
-                    ownerPluginIdFor(indexed.value)?.let { owner -> owner to indexed }
-                }
-                .groupBy(
-                    keySelector = { it.first },
-                    valueTransform = { it.second }
-                )
-
-        val foldedOwners =
-            groupedByOwner
-                .mapNotNull { (ownerPluginId, ownedMatches) ->
-                    val scope = scopesByOwner[ownerPluginId] ?: return@mapNotNull null
-                    val groupMatches = ownedMatches.map { it.value }
-                    if (shouldFoldScope(query, scope, groupMatches)) ownerPluginId else null
-                }
-                .toSet()
-
-        val emittedScopes = linkedSetOf<String>()
-        val items = mutableListOf<AiLimbsOrganizedSearchItem>()
-        for (indexed in indexedMatches) {
-            val ownerPluginId = ownerPluginIdFor(indexed.value)
-            if (ownerPluginId != null && ownerPluginId in foldedOwners) {
-                if (emittedScopes.add(ownerPluginId)) {
-                    val scope = scopesByOwner.getValue(ownerPluginId)
-                    items +=
-                        AiLimbsOrganizedSearchItem.Scope(
-                            sourceIndex = indexed.index,
-                            scope = scope
-                        )
-                }
-            } else {
-                items +=
-                    AiLimbsOrganizedSearchItem.Capability(
-                        sourceIndex = indexed.index,
-                        match = indexed.value
-                    )
-            }
-        }
-        return items.sortedBy { it.sourceIndex }.take(limit)
-    }
-
-    private fun shouldFoldScope(
-        query: String,
-        scope: AiLimbsCapabilityScope,
-        matches: List<AiLimbsCapabilitySearchMatch>
-    ): Boolean {
-        if (matches.size < SCOPE_FOLD_MIN_MATCHES) return false
-        if (queryMatchesScopeIdentity(query, scope)) return true
-
-        val top = matches[0]
-        val runnerUp = matches.getOrNull(1) ?: return false
-        val scoreGap = top.score - runnerUp.score
-        val specificByIdentity =
-            top.strongIdentityMatch &&
-                top.coverage >= SPECIFIC_LEAF_IDENTITY_MIN_COVERAGE &&
-                scoreGap >= SPECIFIC_LEAF_IDENTITY_SCORE_GAP
-        val specificByScore =
-            top.score >= SPECIFIC_LEAF_MIN_SCORE &&
-                top.coverage >= SPECIFIC_LEAF_MIN_COVERAGE &&
-                scoreGap >= SPECIFIC_LEAF_SCORE_GAP
-
-        return !(specificByIdentity || specificByScore)
-    }
-
-    private fun ownerPluginIdFor(match: AiLimbsCapabilitySearchMatch): String? =
-        AiLimbsCapabilityRegistry
-            .pluginRegistrationForInvokeName(match.definition.invokeId)
-            ?.ownerPluginId
-
-    private fun queryMatchesScopeIdentity(
-        query: String,
-        scope: AiLimbsCapabilityScope
-    ): Boolean {
-        val needle = normalizeOrganizerText(query)
-        if (needle.isEmpty()) return false
-        return sequenceOf(
-            scope.scopeId,
-            scope.ownerPluginId,
-            scope.displayName
-        ).any { normalizeOrganizerText(it) == needle }
-    }
-
-    private fun normalizeOrganizerText(value: String): String =
-        value
-            .lowercase(Locale.ROOT)
-            .replace(Regex("[^\p{L}\p{N}:_./-]+"), " ")
-            .replace(Regex("\s+"), " ")
-            .trim()
 
     private fun hotCapabilitiesJson(
         definitions: List<AiLimbsCapabilityDefinition>
@@ -756,12 +779,6 @@ class AiLimbsCapabilityResolver(
         const val CAPABILITY_PROTOCOL_VERSION = 3
         const val MAX_SEARCH_RESULTS = 20
         const val HOT_CAPABILITY_LIMIT = 5
-        const val SCOPE_FOLD_MIN_MATCHES = 3
-        const val SPECIFIC_LEAF_MIN_SCORE = 220
-        const val SPECIFIC_LEAF_MIN_COVERAGE = 0.75
-        const val SPECIFIC_LEAF_SCORE_GAP = 100
-        const val SPECIFIC_LEAF_IDENTITY_MIN_COVERAGE = 0.5
-        const val SPECIFIC_LEAF_IDENTITY_SCORE_GAP = 80
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
         const val PROVIDER_BRIDGE = AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER
         const val PROVIDER_SYSTEM_ENVIRONMENT = "system_environment"
