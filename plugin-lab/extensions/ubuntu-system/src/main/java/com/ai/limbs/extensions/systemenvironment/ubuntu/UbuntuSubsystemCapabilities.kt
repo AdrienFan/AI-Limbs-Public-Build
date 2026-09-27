@@ -105,6 +105,17 @@ internal object UbuntuSubsystemCapabilities {
             effect = InProcessCapabilityEffect.PROCESS_EXECUTION
         ) { p -> sessionExecute(terminal, p) },
         spec(
+            id = "plugin.ubuntu.project.snapshot",
+            name = "AI Limbs 项目现场快照",
+            description = "读取当前安装版本、正式源码绑定和可选组件的 Git 状态；输出带采集时间与失败标记，供换窗口或继续开发时核对。",
+            keywords = listOf("AI Limbs", "项目", "源码", "现场", "快照", "Git", "交接"),
+            params = listOf(
+                param("component", "string", "可选的 ail-source 注册组件名称；例如 Ubuntu 或 AI Limbs", required = false)
+            ),
+            suggested = """{"component":"Ubuntu"}""",
+            effect = InProcessCapabilityEffect.PROCESS_EXECUTION
+        ) { p -> UbuntuProjectSnapshot.capture(terminal, p) },
+        spec(
             id = "plugin.ubuntu.command",
             invokeAliases = listOf("plugin.system_environment.command"),
             name = "执行 Ubuntu 隐藏命令",
