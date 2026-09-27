@@ -109,7 +109,7 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
             apiVersion = SystemEnvironmentContract.API_VERSION,
             title = "系统环境子系统",
             description = "提供运行时控制、通用能力端点与一个前台 Display Adapter。",
-            allowedHostCapabilities = setOf(HOST_NETWORK_CAPABILITY),
+            allowedHostCapabilities = setOf(HOST_NETWORK_CAPABILITY, HOST_RUNTIME_COMPONENTS_CAPABILITY),
             binder = ChildExtensionBinder(registry::bind)
         )
 
@@ -137,6 +137,7 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         const val SYSTEM_ENVIRONMENT_PAGE_COMPONENT_ID = "system_environment_page"
         const val SYSTEM_ENVIRONMENT_CHILD_SLOT = "after"
         const val HOST_NETWORK_CAPABILITY = "host.network@1"
+        const val HOST_RUNTIME_COMPONENTS_CAPABILITY = "host.runtime.components@1"
         const val PLUGIN_CENTER_UI_ACCESSORY_SERVICE = "system.plugin_center.ui_accessories"
         const val PLUGIN_CENTER_UI_ACCESSORY_API = 1
         const val PAGE_SLOT_ACTIONS_METADATA = "ai_limbs.page_slot_actions.v1"
