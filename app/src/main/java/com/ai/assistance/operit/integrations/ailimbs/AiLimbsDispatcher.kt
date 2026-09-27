@@ -643,6 +643,12 @@ class AiLimbsDispatcher(
                 ),
             chatIdOverride = chatId
         )
+        // The history delegate can persist an external reply without changing its
+        // current display window. Refresh the active chat after that write so the
+        // visible conversation observes the plugin-owned reply.
+        if (core.currentChatId.value == chatId) {
+            core.reloadChatMessagesSmart(chatId)
+        }
     }
 
     private fun nullableLong(value: JSONObject, key: String): Long? =
