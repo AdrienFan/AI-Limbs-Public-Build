@@ -169,4 +169,46 @@ class ToolCapabilityCatalogSearchTest {
         assertEquals("plugin.ubuntu.start", result.matches.first().entry.targetToolName)
     }
 
+    private fun regressionEntry(index: Int) = ToolCatalogEntry(
+        targetToolName = "plugin.test.unknown_catalog.capability_$index",
+        displayName = "画室回归能力 $index",
+        description = "画室图片处理回归能力 $index",
+        parameterHints = emptyList(),
+        sourceKind = ToolCatalogSourceKind.PACKAGE,
+        keywords = listOf("画室", "图片", "基线限额"),
+        sourceName = "plugin:plugin.test.unknown_catalog",
+        searchMetadata = listOf("unknown plugin regression")
+    )
+
+    @Test
+    fun chineseIntent_recallsConcreteCapability() {
+        val create = regressionEntry(1).copy(
+            displayName = "新建画室工程",
+            description = "新建图片工程并创建透明画布",
+            keywords = listOf("新建", "图片", "画布", "透明")
+        )
+        val delete = regressionEntry(2).copy(
+            displayName = "删除画室工程",
+            description = "删除已有图片工程",
+            keywords = listOf("删除", "图片")
+        )
+        val result = ToolCapabilityCatalog.searchDetailed(
+            listOf(delete, create),
+            "新建透明图片",
+            8
+        )
+        assertEquals(create.targetToolName, result.matches.first().entry.targetToolName)
+        assertFalse(result.lowConfidence)
+    }
+
+    @Test
+    fun resultLimit_isClampedToCatalogBounds() {
+        val catalog = (1..25).map(::regressionEntry)
+        val capped = ToolCapabilityCatalog.searchDetailed(catalog, "基线限额", 99)
+        val floored = ToolCapabilityCatalog.searchDetailed(catalog, "基线限额", 0)
+        assertEquals(20, capped.matches.size)
+        assertEquals(1, floored.matches.size)
+    }
+
+
 }
