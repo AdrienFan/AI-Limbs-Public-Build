@@ -1,6 +1,5 @@
 package com.ai.assistance.operit.ui.features.chat.screens
 
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -100,23 +99,24 @@ fun ConfigurationScreen(
                 Spacer(modifier = Modifier.height(16.dp))
                 chatModes.forEach { binding ->
                     key(binding.id) {
-                        Box(
-                            modifier =
-                                Modifier.fillMaxWidth()
-                                    .clickable(enabled = !isSaving) {
+                        AndroidView(
+                            modifier = Modifier.fillMaxWidth(),
+                            factory = { baseContext ->
+                                binding.provider.createSlotView(
+                                    InProcessChatModeSlotIds.CONFIGURATION_CARD,
+                                    baseContext
+                                ) ?: android.widget.Space(baseContext)
+                            },
+                            update = { card ->
+                                // An embedded View consumes its touches. The plugin-owned card
+                                // calls performClick() to request this generic mode selection.
+                                card.setOnClickListener {
+                                    if (!isSaving) {
                                         onUseChatMode(binding.provider.configurationTemplate())
                                     }
-                        ) {
-                            AndroidView(
-                                modifier = Modifier.fillMaxWidth(),
-                                factory = { baseContext ->
-                                    binding.provider.createSlotView(
-                                        InProcessChatModeSlotIds.CONFIGURATION_CARD,
-                                        baseContext
-                                    ) ?: android.widget.Space(baseContext)
                                 }
-                            )
-                        }
+                            }
+                        )
                         Spacer(modifier = Modifier.height(10.dp))
                     }
                 }
