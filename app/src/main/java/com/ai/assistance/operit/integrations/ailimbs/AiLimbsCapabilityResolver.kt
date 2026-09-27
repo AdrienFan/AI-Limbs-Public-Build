@@ -22,10 +22,35 @@ private data class AiLimbsCapabilityDefinition(
     val catalogEntry: ToolCatalogEntry
 )
 
+private data class AiLimbsCapabilitySearchMatch(
+    val definition: AiLimbsCapabilityDefinition,
+    val score: Int,
+    val matchedTerms: Int,
+    val totalTerms: Int,
+    val strongIdentityMatch: Boolean
+) {
+    val coverage: Double
+        get() = if (totalTerms == 0) 0.0 else matchedTerms.toDouble() / totalTerms.toDouble()
+}
+
 private data class AiLimbsCapabilitySearchResult(
-    val matches: List<AiLimbsCapabilityDefinition>,
+    val matches: List<AiLimbsCapabilitySearchMatch>,
     val lowConfidence: Boolean
 )
+
+private sealed interface AiLimbsOrganizedSearchItem {
+    val sourceIndex: Int
+
+    data class Capability(
+        override val sourceIndex: Int,
+        val match: AiLimbsCapabilitySearchMatch
+    ) : AiLimbsOrganizedSearchItem
+
+    data class Scope(
+        override val sourceIndex: Int,
+        val scope: AiLimbsCapabilityScope
+    ) : AiLimbsOrganizedSearchItem
+}
 
 /** Read-only discovery surface for all AI Limbs capabilities. */
 class AiLimbsCapabilityResolver(
@@ -63,7 +88,8 @@ class AiLimbsCapabilityResolver(
                 buildDefinitions(forceRefreshPackages = false),
                 activeScope
             )
-        var searchResult = searchDefinitions(definitions, normalizedQuery, limit)
+        val candidateLimit = if (activeScope == null) MAX_SEARCH_RESULTS else limit
+        var searchResult = searchDefinitions(definitions, normalizedQuery, candidateLimit)
         var usedLiveDiscovery = false
         if (searchResult.lowConfidence) {
             definitions = buildDefinitions(forceRefreshPackages = true)
@@ -74,46 +100,75 @@ class AiLimbsCapabilityResolver(
                 }
             }
             definitions = filterDefinitionsForScope(definitions, activeScope)
-            searchResult = searchDefinitions(definitions, normalizedQuery, limit)
+            searchResult = searchDefinitions(definitions, normalizedQuery, candidateLimit)
             usedLiveDiscovery = true
         }
 
+        val organizedItems =
+            if (activeScope == null) {
+                organizeGlobalSearch(normalizedQuery, searchResult.matches, limit)
+            } else {
+                searchResult.matches
+                    .take(limit)
+                    .mapIndexed { index, match ->
+                        AiLimbsOrganizedSearchItem.Capability(index, match)
+                    }
+            }
+
         val results = JSONArray()
-        for (definition in searchResult.matches) {
-            results.put(compactCard(definition, readAvailability(definition)))
+        val scopeResults = JSONArray()
+        for (item in organizedItems) {
+            when (item) {
+                is AiLimbsOrganizedSearchItem.Capability -> {
+                    val definition = item.match.definition
+                    results.put(compactCard(definition, readAvailability(definition)))
+                }
+                is AiLimbsOrganizedSearchItem.Scope ->
+                    scopeResults.put(scopeCard(item.scope))
+            }
         }
+
         val activeScopeId = activeScope?.scopeId
+        val totalCount = results.length() + scopeResults.length()
+        val nextAction =
+            when {
+                totalCount == 0 ->
+                    capabilitySearchUsage(
+                        "<refined capability intent>",
+                        activeScopeId
+                    )
+                results.length() == 0 && scopeResults.length() > 0 ->
+                    scopeResults.getJSONObject(0).getJSONObject("next_action")
+                else ->
+                    capabilityDescribeUsage("<capability_id from results>")
+            }
+        val next =
+            when {
+                totalCount == 0 && activeScopeId == null ->
+                    "No matching capability is currently installed or registered."
+                totalCount == 0 ->
+                    "No matching capability is currently registered in scope '$activeScopeId'."
+                results.length() == 0 && scopeResults.length() > 0 ->
+                    "Refine the intent inside a returned scope with capability.search and its scope_id."
+                scopeResults.length() > 0 ->
+                    "Use capability.describe for a leaf result, or capability.search with a scope_id to continue inside a returned scope."
+                else ->
+                    "Call capability.describe with a capability_id when parameters or prerequisites are needed."
+            }
+
         val response =
             ok()
                 .put("module", MODULE_NAME)
                 .put("protocol_version", CAPABILITY_PROTOCOL_VERSION)
                 .put("query", normalizedQuery)
-                .put("count", results.length())
+                .put("count", totalCount)
+                .put("capability_count", results.length())
+                .put("scope_count", scopeResults.length())
                 .put("live_discovery", usedLiveDiscovery)
                 .put("results", results)
-                .put(
-                    "next_action",
-                    if (results.length() == 0) {
-                        capabilitySearchUsage(
-                            "<refined capability intent>",
-                            activeScopeId
-                        )
-                    } else {
-                        capabilityDescribeUsage("<capability_id from results>")
-                    }
-                )
-                .put(
-                    "next",
-                    if (results.length() == 0) {
-                        if (activeScopeId == null) {
-                            "No matching capability is currently installed or registered."
-                        } else {
-                            "No matching capability is currently registered in scope '$activeScopeId'."
-                        }
-                    } else {
-                        "Call capability.describe with a capability_id when parameters or prerequisites are needed."
-                    }
-                )
+                .put("scope_results", scopeResults)
+                .put("next_action", nextAction)
+                .put("next", next)
         activeScopeId?.let { response.put("scope", it) }
         return response
     }
@@ -284,10 +339,133 @@ class AiLimbsCapabilityResolver(
         }
         val catalogResult = ToolCapabilityCatalog.searchDetailed(searchable.map { it.second }, query, limit)
         val matches = catalogResult.matches.mapNotNull { match ->
-            definitionsByIdentity[catalogIdentity(match.entry)]
+            definitionsByIdentity[catalogIdentity(match.entry)]?.let { definition ->
+                AiLimbsCapabilitySearchMatch(
+                    definition = definition,
+                    score = match.score,
+                    matchedTerms = match.matchedTerms,
+                    totalTerms = match.totalTerms,
+                    strongIdentityMatch = match.strongIdentityMatch
+                )
+            }
         }
         return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence)
     }
+
+    private fun organizeGlobalSearch(
+        query: String,
+        matches: List<AiLimbsCapabilitySearchMatch>,
+        limit: Int
+    ): List<AiLimbsOrganizedSearchItem> {
+        if (matches.isEmpty()) return emptyList()
+
+        val scopesByOwner = currentCapabilityScopes().associateBy { it.ownerPluginId }
+        val indexedMatches = matches.withIndex().toList()
+        val groupedByOwner =
+            indexedMatches
+                .mapNotNull { indexed ->
+                    ownerPluginIdFor(indexed.value)?.let { owner -> owner to indexed }
+                }
+                .groupBy(
+                    keySelector = { it.first },
+                    valueTransform = { it.second }
+                )
+
+        val foldedOwners =
+            groupedByOwner
+                .mapNotNull { (ownerPluginId, ownedMatches) ->
+                    val scope = scopesByOwner[ownerPluginId] ?: return@mapNotNull null
+                    val groupMatches = ownedMatches.map { it.value }
+                    if (shouldFoldScope(query, scope, groupMatches)) ownerPluginId else null
+                }
+                .toSet()
+
+        val emittedScopes = linkedSetOf<String>()
+        val items = mutableListOf<AiLimbsOrganizedSearchItem>()
+        for (indexed in indexedMatches) {
+            val ownerPluginId = ownerPluginIdFor(indexed.value)
+            if (ownerPluginId != null && ownerPluginId in foldedOwners) {
+                if (emittedScopes.add(ownerPluginId)) {
+                    val scope = scopesByOwner.getValue(ownerPluginId)
+                    items +=
+                        AiLimbsOrganizedSearchItem.Scope(
+                            sourceIndex = indexed.index,
+                            scope = scope
+                        )
+                }
+            } else {
+                items +=
+                    AiLimbsOrganizedSearchItem.Capability(
+                        sourceIndex = indexed.index,
+                        match = indexed.value
+                    )
+            }
+        }
+        return items.sortedBy { it.sourceIndex }.take(limit)
+    }
+
+    private fun shouldFoldScope(
+        query: String,
+        scope: AiLimbsCapabilityScope,
+        matches: List<AiLimbsCapabilitySearchMatch>
+    ): Boolean {
+        if (matches.size < SCOPE_FOLD_MIN_MATCHES) return false
+        if (queryMatchesScopeIdentity(query, scope)) return true
+
+        val top = matches[0]
+        val runnerUp = matches.getOrNull(1) ?: return false
+        val scoreGap = top.score - runnerUp.score
+        val specificByIdentity =
+            top.strongIdentityMatch &&
+                top.coverage >= SPECIFIC_LEAF_IDENTITY_MIN_COVERAGE &&
+                scoreGap >= SPECIFIC_LEAF_IDENTITY_SCORE_GAP
+        val specificByScore =
+            top.score >= SPECIFIC_LEAF_MIN_SCORE &&
+                top.coverage >= SPECIFIC_LEAF_MIN_COVERAGE &&
+                scoreGap >= SPECIFIC_LEAF_SCORE_GAP
+
+        return !(specificByIdentity || specificByScore)
+    }
+
+    private fun ownerPluginIdFor(match: AiLimbsCapabilitySearchMatch): String? =
+        AiLimbsCapabilityRegistry
+            .pluginRegistrationForInvokeName(match.definition.invokeId)
+            ?.ownerPluginId
+
+    private fun queryMatchesScopeIdentity(
+        query: String,
+        scope: AiLimbsCapabilityScope
+    ): Boolean {
+        val needle = normalizeOrganizerText(query)
+        if (needle.isEmpty()) return false
+        return sequenceOf(
+            scope.scopeId,
+            scope.ownerPluginId,
+            scope.displayName
+        ).any { normalizeOrganizerText(it) == needle }
+    }
+
+    private fun normalizeOrganizerText(value: String): String =
+        value
+            .lowercase(Locale.ROOT)
+            .replace(Regex("[^\p{L}\p{N}:_./-]+"), " ")
+            .replace(Regex("\s+"), " ")
+            .trim()
+
+    private fun scopeCard(scope: AiLimbsCapabilityScope): JSONObject =
+        JSONObject()
+            .put("scope_id", scope.scopeId)
+            .put("kind", scope.kind.wireName)
+            .put("display_name", scope.displayName)
+            .put("description", scope.description ?: JSONObject.NULL)
+            .put("capability_count", scope.capabilityCount)
+            .put(
+                "next_action",
+                capabilitySearchUsage(
+                    "<specific capability intent>",
+                    scope.scopeId
+                )
+            )
 
     private fun findDefinition(
         definitions: List<AiLimbsCapabilityDefinition>,
@@ -532,8 +710,14 @@ class AiLimbsCapabilityResolver(
 
     private companion object {
         const val MODULE_NAME = "AI Limbs Capability Resolver"
-        const val CAPABILITY_PROTOCOL_VERSION = 2
+        const val CAPABILITY_PROTOCOL_VERSION = 3
         const val MAX_SEARCH_RESULTS = 20
+        const val SCOPE_FOLD_MIN_MATCHES = 3
+        const val SPECIFIC_LEAF_MIN_SCORE = 220
+        const val SPECIFIC_LEAF_MIN_COVERAGE = 0.75
+        const val SPECIFIC_LEAF_SCORE_GAP = 100
+        const val SPECIFIC_LEAF_IDENTITY_MIN_COVERAGE = 0.5
+        const val SPECIFIC_LEAF_IDENTITY_SCORE_GAP = 80
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
         const val PROVIDER_BRIDGE = AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER
         const val PROVIDER_SYSTEM_ENVIRONMENT = "system_environment"

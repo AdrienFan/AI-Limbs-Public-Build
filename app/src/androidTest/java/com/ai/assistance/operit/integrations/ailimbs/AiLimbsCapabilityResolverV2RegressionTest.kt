@@ -32,7 +32,8 @@ class AiLimbsCapabilityResolverV2RegressionTest {
     private fun registerCapability(
         capabilityId: String,
         displayName: String,
-        keywords: List<String>
+        keywords: List<String>,
+        ownerId: String = ownerPluginId
     ): AutoCloseable {
         val entry = ToolCatalogEntry(
             targetToolName = capabilityId,
@@ -44,12 +45,12 @@ class AiLimbsCapabilityResolverV2RegressionTest {
             parameters = listOf(
                 ToolParameterSchema("text", "string", "regression payload", false)
             ),
-            sourceName = "plugin:$ownerPluginId",
-            sourceLocator = "ai-limbs://plugin/$ownerPluginId/$capabilityId",
-            searchMetadata = listOf(ownerPluginId, "resolver v2 baseline")
+            sourceName = "plugin:$ownerId",
+            sourceLocator = "ai-limbs://plugin/$ownerId/$capabilityId",
+            searchMetadata = listOf(ownerId, "resolver v2 baseline")
         )
         return AiLimbsCapabilityRegistry.registerPluginCapability(
-            ownerPluginId = ownerPluginId,
+            ownerPluginId = ownerId,
             capabilityId = capabilityId,
             invokeAliases = emptyList(),
             catalogEntry = entry,
@@ -73,7 +74,7 @@ class AiLimbsCapabilityResolverV2RegressionTest {
         val resolver = resolver()
         try {
             val search = resolver.search(capabilityId, 8)
-            assertEquals(2, search.getInt("protocol_version"))
+            assertEquals(3, search.getInt("protocol_version"))
             assertFalse(search.getBoolean("live_discovery"))
             val results = search.getJSONArray("results")
             val card = (0 until results.length())
@@ -83,7 +84,7 @@ class AiLimbsCapabilityResolverV2RegressionTest {
 
             val described = resolver.describe(capabilityId)
             assertTrue(described.getBoolean("success"))
-            assertEquals(2, described.getInt("protocol_version"))
+            assertEquals(3, described.getInt("protocol_version"))
             assertEquals(capabilityId, described.getString("capability_id"))
             assertEquals(capabilityId, described.getString("invoke_id"))
             assertEquals(
@@ -111,9 +112,10 @@ class AiLimbsCapabilityResolverV2RegressionTest {
     fun limitAndLowConfidenceLiveDiscovery_preserveV2Contract() = runBlocking {
         val handles = (1..4).map { index ->
             registerCapability(
-                "plugin.test.unknown_resolver_baseline.limit_$index",
-                "基线限额能力 $index",
-                listOf("基线限额", "resolver regression")
+                capabilityId = "plugin.test.unknown_resolver_baseline.limit_$index",
+                displayName = "基线限额能力 $index",
+                keywords = listOf("基线限额", "resolver regression"),
+                ownerId = "plugin.test.unknown_resolver_limit_$index"
             )
         }
         val resolver = resolver()

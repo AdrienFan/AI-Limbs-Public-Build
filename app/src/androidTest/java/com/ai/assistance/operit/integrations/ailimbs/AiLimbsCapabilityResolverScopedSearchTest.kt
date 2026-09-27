@@ -75,7 +75,7 @@ class AiLimbsCapabilityResolverScopedSearchTest {
 
         try {
             val global = resolver.search("scope-isolation-regression-token", 8)
-            assertEquals(2, global.getInt("protocol_version"))
+            assertEquals(3, global.getInt("protocol_version"))
             assertFalse(global.has("scope"))
             val globalIds =
                 (0 until global.getJSONArray("results").length())
@@ -95,8 +95,9 @@ class AiLimbsCapabilityResolverScopedSearchTest {
                     requestedLimit = 8,
                     scope = scopeId
                 )
-            assertEquals(2, scoped.getInt("protocol_version"))
+            assertEquals(3, scoped.getInt("protocol_version"))
             assertEquals(scopeId, scoped.getString("scope"))
+            assertEquals(0, scoped.getJSONArray("scope_results").length())
             val scopedIds =
                 (0 until scoped.getJSONArray("results").length())
                     .map {
