@@ -124,7 +124,18 @@ class PluginRegistrar internal constructor(
         val registration = registry.register(record)
         track(registration)
         try {
-            track(capabilityBinder.register(manifest.pluginId, contract.id, capability))
+            track(
+                capabilityBinder.register(
+                    ownerPluginId = manifest.pluginId,
+                    capabilityId = contract.id,
+                    capability = capability,
+                    ownerMetadata =
+                        PluginCapabilityOwnerMetadata(
+                            displayName = manifest.display.name,
+                            description = manifest.display.description
+                        )
+                )
+            )
         } catch (error: Throwable) {
             registration.close()
             throw error

@@ -136,6 +136,19 @@ internal class PluginHostCapabilityRegistry(
         ownerPluginId: String,
         capabilityId: String,
         capability: PluginCapabilitySpec
+    ): AutoCloseable =
+        register(
+            ownerPluginId = ownerPluginId,
+            capabilityId = capabilityId,
+            capability = capability,
+            ownerMetadata = PluginCapabilityOwnerMetadata(displayName = ownerPluginId)
+        )
+
+    override fun register(
+        ownerPluginId: String,
+        capabilityId: String,
+        capability: PluginCapabilitySpec,
+        ownerMetadata: PluginCapabilityOwnerMetadata
     ): AutoCloseable {
         surfacePolicy?.requireAllowed(PluginSurfaceIds.PUBLISH_CAPABILITY)
         val normalized = capabilityId.trim().lowercase()
@@ -161,7 +174,9 @@ internal class PluginHostCapabilityRegistry(
                 domain = capability.domain.toAiLimbsPolicyDomain(),
                 workContextRequiredReceipts = capability.workContextRequiredReceipts
                     .mapTo(linkedSetOf()) { it.toAiLimbsPolicyReceipt() },
-                executor = AiLimbsPluginCapabilityExecutor { args -> executePluginDirect(normalized, args) }
+                executor = AiLimbsPluginCapabilityExecutor { args -> executePluginDirect(normalized, args) },
+                ownerDisplayName = ownerMetadata.displayName,
+                ownerDescription = ownerMetadata.description
             )
         } catch (error: Throwable) {
             capabilities.remove(normalized, candidate)

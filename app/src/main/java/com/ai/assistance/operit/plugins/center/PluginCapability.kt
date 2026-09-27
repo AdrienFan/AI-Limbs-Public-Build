@@ -57,6 +57,12 @@ data class PluginCapabilitySpec(
     val executor: PluginCapabilityExecutor
 )
 
+/** Host-derived owner identity used only while binding a capability into the kernel. */
+data class PluginCapabilityOwnerMetadata(
+    val displayName: String,
+    val description: String? = null
+)
+
 /**
  * Kernel-side binding boundary. Plugin Runtime can request registration but never receives a
  * Dispatcher or policy entry point.
@@ -67,6 +73,14 @@ interface PluginCapabilityBinder {
         capabilityId: String,
         capability: PluginCapabilitySpec
     ): AutoCloseable
+
+    fun register(
+        ownerPluginId: String,
+        capabilityId: String,
+        capability: PluginCapabilitySpec,
+        ownerMetadata: PluginCapabilityOwnerMetadata
+    ): AutoCloseable =
+        register(ownerPluginId, capabilityId, capability)
 }
 
 /** Narrow runtime gateway shared by the Core registry and isolated plugin worker proxies. */

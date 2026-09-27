@@ -36,6 +36,9 @@ class AiLimbsCapabilityResolver(
     private val handler = AIToolHandler.getInstance(appContext)
     private val packageManager = handler.getOrCreatePackageManager()
 
+    internal fun currentCapabilityScopes(): List<AiLimbsCapabilityScope> =
+        AiLimbsCapabilityRegistry.capabilityScopeSnapshot()
+
     suspend fun search(query: String, requestedLimit: Int): JSONObject {
         val normalizedQuery = query.trim()
         if (normalizedQuery.isEmpty()) {

@@ -20,7 +20,9 @@ internal data class AiLimbsPluginCapabilityRegistration(
     val effect: AiLimbsEffect,
     val domain: AiLimbsDomain,
     val workContextRequiredReceipts: Set<AiLimbsRequiredReceipt>,
-    val executor: AiLimbsPluginCapabilityExecutor
+    val executor: AiLimbsPluginCapabilityExecutor,
+    val ownerDisplayName: String = ownerPluginId,
+    val ownerDescription: String? = null
 )
 
 internal sealed interface AiLimbsCapabilityRegistration {
@@ -53,6 +55,23 @@ internal sealed interface AiLimbsCapabilityRoute {
     ) : AiLimbsCapabilityRoute
 }
 
+internal enum class AiLimbsCapabilityScopeKind(val wireName: String) {
+    PLUGIN("plugin")
+}
+
+internal data class AiLimbsCapabilityScope(
+    val scopeId: String,
+    val kind: AiLimbsCapabilityScopeKind,
+    val ownerPluginId: String,
+    val displayName: String,
+    val description: String?,
+    val capabilityIds: List<String>,
+    val invokeIds: List<String>
+) {
+    val capabilityCount: Int
+        get() = capabilityIds.size
+}
+
 /** Unified stable-kernel registry for Core and mounted plugin capabilities. */
 object AiLimbsCapabilityRegistry {
     private data class OwnedPluginRegistration(
@@ -71,7 +90,9 @@ object AiLimbsCapabilityRegistry {
         effect: AiLimbsEffect,
         domain: AiLimbsDomain,
         workContextRequiredReceipts: Set<AiLimbsRequiredReceipt>,
-        executor: AiLimbsPluginCapabilityExecutor
+        executor: AiLimbsPluginCapabilityExecutor,
+        ownerDisplayName: String = ownerPluginId,
+        ownerDescription: String? = null
     ): AutoCloseable {
         val canonical = normalize(catalogEntry.targetToolName)
         val normalizedCapabilityId = normalize(capabilityId)
@@ -87,7 +108,9 @@ object AiLimbsCapabilityRegistry {
             effect = effect,
             domain = domain,
             workContextRequiredReceipts = workContextRequiredReceipts,
-            executor = executor
+            executor = executor,
+            ownerDisplayName = ownerDisplayName.trim().ifBlank { ownerPluginId },
+            ownerDescription = ownerDescription?.trim()?.ifBlank { null }
         )
         val owned = OwnedPluginRegistration(UUID.randomUUID().toString(), registration)
         synchronized(lock) {
@@ -125,6 +148,43 @@ object AiLimbsCapabilityRegistry {
 
     internal fun pluginRegistrationForInvokeName(name: String): AiLimbsPluginCapabilityRegistration? =
         pluginByInvokeName[normalize(name)]?.registration
+
+    internal fun capabilityScopeSnapshot(): List<AiLimbsCapabilityScope> {
+        val registrations =
+            pluginByInvokeName.values
+                .distinctBy { it.token }
+                .map { it.registration }
+                .sortedBy { it.capabilityId }
+
+        return registrations
+            .groupBy { it.ownerPluginId }
+            .map { (ownerPluginId, owned) ->
+                val displayName =
+                    owned.asSequence()
+                        .map { it.ownerDisplayName.trim() }
+                        .firstOrNull {
+                            it.isNotBlank() && !it.equals(ownerPluginId, ignoreCase = true)
+                        }
+                        ?: owned.asSequence()
+                            .map { it.ownerDisplayName.trim() }
+                            .firstOrNull { it.isNotBlank() }
+                        ?: ownerPluginId
+                val description =
+                    owned.asSequence()
+                        .mapNotNull { it.ownerDescription?.trim()?.ifBlank { null } }
+                        .firstOrNull()
+                AiLimbsCapabilityScope(
+                    scopeId = "plugin:$ownerPluginId",
+                    kind = AiLimbsCapabilityScopeKind.PLUGIN,
+                    ownerPluginId = ownerPluginId,
+                    displayName = displayName,
+                    description = description,
+                    capabilityIds = owned.map { it.capabilityId }.distinct().sorted(),
+                    invokeIds = owned.map { it.catalogEntry.targetToolName }.distinct().sorted()
+                )
+            }
+            .sortedBy { it.scopeId }
+    }
 
     internal fun mergeInto(runtimeCatalog: List<ToolCatalogEntry>): List<ToolCatalogEntry> {
         val coreMerged = AiLimbsCoreCapabilityRegistry.mergeInto(runtimeCatalog)

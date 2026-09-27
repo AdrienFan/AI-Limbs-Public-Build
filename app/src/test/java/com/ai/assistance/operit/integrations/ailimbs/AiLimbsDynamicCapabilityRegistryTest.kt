@@ -71,4 +71,78 @@ class AiLimbsDynamicCapabilityRegistryTest {
                 .any { it.targetToolName == canonical }
         )
     }
+
+    @Test
+    fun capabilityScopesAreDerivedFromCurrentOwnerRegistrations() {
+        val owner = "plugin.test.unknown_scope"
+        val firstId = "plugin.test.unknown_scope.create"
+        val secondId = "plugin.test.unknown_scope.save"
+
+        fun entry(id: String, displayName: String) =
+            ToolCatalogEntry(
+                targetToolName = id,
+                displayName = displayName,
+                description = "Scope regression capability",
+                parameterHints = emptyList(),
+                sourceKind = ToolCatalogSourceKind.PACKAGE,
+                sourceName = "plugin:$owner",
+                sourceLocator = "ai-limbs://plugin/$owner/$id"
+            )
+
+        val first =
+            AiLimbsCapabilityRegistry.registerPluginCapability(
+                ownerPluginId = owner,
+                capabilityId = firstId,
+                invokeAliases = listOf("plugin.test.unknown_scope.new"),
+                catalogEntry = entry(firstId, "Create"),
+                effect = AiLimbsEffect.STATE_CHANGE,
+                domain = AiLimbsDomain.PLUGIN,
+                workContextRequiredReceipts = emptySet(),
+                executor = AiLimbsPluginCapabilityExecutor { JSONObject().put("success", true) },
+                ownerDisplayName = "测试画室",
+                ownerDescription = "用于验证动态 CapabilityScope 的未知插件"
+            )
+        val second =
+            AiLimbsCapabilityRegistry.registerPluginCapability(
+                ownerPluginId = owner,
+                capabilityId = secondId,
+                invokeAliases = emptyList(),
+                catalogEntry = entry(secondId, "Save"),
+                effect = AiLimbsEffect.PERSISTENT_WRITE,
+                domain = AiLimbsDomain.PLUGIN,
+                workContextRequiredReceipts = emptySet(),
+                executor = AiLimbsPluginCapabilityExecutor { JSONObject().put("success", true) },
+                ownerDisplayName = "测试画室",
+                ownerDescription = "用于验证动态 CapabilityScope 的未知插件"
+            )
+
+        try {
+            val scope =
+                AiLimbsCapabilityRegistry.capabilityScopeSnapshot()
+                    .single { it.ownerPluginId == owner }
+            assertEquals("plugin:$owner", scope.scopeId)
+            assertEquals(AiLimbsCapabilityScopeKind.PLUGIN, scope.kind)
+            assertEquals("测试画室", scope.displayName)
+            assertEquals("用于验证动态 CapabilityScope 的未知插件", scope.description)
+            assertEquals(2, scope.capabilityCount)
+            assertEquals(listOf(firstId, secondId), scope.capabilityIds)
+            assertEquals(listOf(firstId, secondId), scope.invokeIds)
+
+            first.close()
+            val afterFirstClose =
+                AiLimbsCapabilityRegistry.capabilityScopeSnapshot()
+                    .single { it.ownerPluginId == owner }
+            assertEquals(1, afterFirstClose.capabilityCount)
+            assertEquals(listOf(secondId), afterFirstClose.capabilityIds)
+        } finally {
+            first.close()
+            second.close()
+        }
+
+        assertFalse(
+            AiLimbsCapabilityRegistry.capabilityScopeSnapshot()
+                .any { it.ownerPluginId == owner }
+        )
+    }
+
 }
