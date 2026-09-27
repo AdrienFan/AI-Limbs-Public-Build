@@ -41,6 +41,7 @@ internal object UbuntuProjectSnapshot {
             .put("installed_runtime", installed)
             .put("source_registry", sources)
             .put("source_check", sourceCheck)
+            .put("needs_review", !sourceCheck.optBoolean("ok"))
             .put("architecture_map_sha256", mapHash)
             .put("source_identity_rule", "Use ail-source dev/where; do not infer from directory names.")
 
@@ -78,7 +79,8 @@ internal object UbuntuProjectSnapshot {
         )
         val output = result.output.ifBlank { result.rawOutputPreview }
         return JSONObject()
-            .put("ok", result.isOk)
+            .put("ok", result.isOk && result.exitCode == 0)
+            .put("executed", result.isOk)
             .put("exit_code", result.exitCode)
             .put("status", result.state.name)
             .put("output", output.take(MAX_OUTPUT_CHARS))
