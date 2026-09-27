@@ -274,6 +274,7 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     private val stateLock = Any()
     private var currentGeneration = 1L
     private var bootstrapDeliveredGeneration: Long? = null
+    private var hotCapabilitiesDeliveredGeneration: Long? = null
     private var residentHandoffFrozen = false
 
     fun beginInvocation(): AiLimbsInteractionCycleLease = synchronized(stateLock) {
@@ -323,10 +324,18 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
     private fun applyContextBoundary(generation: Long) {
         accessGate.resetForContextBoundary()
         bootstrapDeliveredGeneration = null
+        hotCapabilitiesDeliveredGeneration = null
         currentGeneration = generation
     }
 
     fun currentGeneration(): Long = synchronized(stateLock) { currentGeneration }
+
+    fun claimHotCapabilities(generation: Long): Boolean = synchronized(stateLock) {
+        if (generation != currentGeneration) return@synchronized false
+        if (hotCapabilitiesDeliveredGeneration == generation) return@synchronized false
+        hotCapabilitiesDeliveredGeneration = generation
+        true
+    }
 
     fun claimBootstrap(generation: Long): Boolean = synchronized(stateLock) {
         if (accessGate.isReleasedForCurrentCycle()) return@synchronized false
@@ -355,6 +364,10 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
         controller.snapshot()
             .put("current_generation", currentGeneration)
             .put("bootstrap_delivered_generation", bootstrapDeliveredGeneration ?: JSONObject.NULL)
+            .put(
+                "hot_capabilities_delivered_generation",
+                hotCapabilitiesDeliveredGeneration ?: JSONObject.NULL
+            )
             .put("resident_handoff_frozen", residentHandoffFrozen)
             .put("access_gate", accessGate.snapshot())
     }
@@ -377,6 +390,10 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
             .put("controller", controller.exportHandoffState())
             .put("current_generation", currentGeneration)
             .put("bootstrap_delivered_generation", bootstrapDeliveredGeneration ?: JSONObject.NULL)
+            .put(
+                "hot_capabilities_delivered_generation",
+                hotCapabilitiesDeliveredGeneration ?: JSONObject.NULL
+            )
             .put("access_gate", accessGate.freezeAndExportHandoffState())
     }
 
@@ -394,6 +411,9 @@ internal class AiLimbsInteractionCycleRuntimeState(context: Context) {
         currentGeneration = restoredGeneration
         bootstrapDeliveredGeneration = state.optLong("bootstrap_delivered_generation", -1L)
             .takeIf { it > 0L }
+        hotCapabilitiesDeliveredGeneration =
+            state.optLong("hot_capabilities_delivered_generation", -1L)
+                .takeIf { it > 0L }
         residentHandoffFrozen = false
         accessGate.restoreHandoffState(state.getJSONObject("access_gate"))
     }

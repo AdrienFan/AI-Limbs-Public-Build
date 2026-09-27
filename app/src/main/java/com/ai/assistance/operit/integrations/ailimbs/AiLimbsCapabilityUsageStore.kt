@@ -156,6 +156,58 @@ internal class AiLimbsCapabilityUsageStore(context: Context) {
     }
 }
 
+internal data class AiLimbsDiscoverableCapability(
+    val capabilityId: String,
+    val displayName: String,
+    val invokeId: String
+)
+
+internal data class AiLimbsHotCapability(
+    val capabilityId: String,
+    val displayName: String,
+    val invokeId: String,
+    val useCount: Long
+)
+
+internal object AiLimbsHotCapabilityRanker {
+    fun rank(
+        usageStats: List<AiLimbsCapabilityUsageStats>,
+        discoverableCapabilities: List<AiLimbsDiscoverableCapability>,
+        limit: Int
+    ): List<AiLimbsHotCapability> {
+        if (limit <= 0 || usageStats.isEmpty() || discoverableCapabilities.isEmpty()) {
+            return emptyList()
+        }
+
+        val discoverableByInvokeId =
+            discoverableCapabilities
+                .distinctBy { it.invokeId }
+                .associateBy { it.invokeId }
+
+        return usageStats
+            .asSequence()
+            .filter { it.useCount > 0L }
+            .sortedWith(
+                compareByDescending<AiLimbsCapabilityUsageStats> { it.useCount }
+                    .thenByDescending { it.lastUsedAtEpochMs ?: Long.MIN_VALUE }
+                    .thenBy { it.invokeId }
+            )
+            .mapNotNull { stats ->
+                discoverableByInvokeId[stats.invokeId]?.let { capability ->
+                    AiLimbsHotCapability(
+                        capabilityId = capability.capabilityId,
+                        displayName = capability.displayName,
+                        invokeId = capability.invokeId,
+                        useCount = stats.useCount
+                    )
+                }
+            }
+            .distinctBy { it.invokeId }
+            .take(limit)
+            .toList()
+    }
+}
+
 internal object AiLimbsCapabilityUsagePolicy {
     fun trackedInvokeId(
         invocation: AiLimbsNormalizedInvocation,

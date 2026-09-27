@@ -60,6 +60,7 @@ class AiLimbsCapabilityResolver(
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
     private val packageManager = handler.getOrCreatePackageManager()
+    private val capabilityUsageStore = AiLimbsCapabilityUsageStore(appContext)
 
     internal fun currentCapabilityScopes(): List<AiLimbsCapabilityScope> =
         AiLimbsCapabilityRegistry.capabilityScopeSnapshot()
@@ -170,6 +171,18 @@ class AiLimbsCapabilityResolver(
                 .put("next_action", nextAction)
                 .put("next", next)
         activeScopeId?.let { response.put("scope", it) }
+
+        if (activeScopeId == null) {
+            val cycleState = AiLimbsInteractionCycleRuntime.state(appContext)
+            val generation = cycleState.currentGeneration()
+            if (cycleState.claimHotCapabilities(generation)) {
+                response.put(
+                    "hot_capabilities",
+                    runCatching { hotCapabilitiesJson(definitions) }
+                        .getOrElse { JSONArray() }
+                )
+            }
+        }
         return response
     }
 
@@ -452,6 +465,36 @@ class AiLimbsCapabilityResolver(
             .replace(Regex("\s+"), " ")
             .trim()
 
+    private fun hotCapabilitiesJson(
+        definitions: List<AiLimbsCapabilityDefinition>
+    ): JSONArray {
+        val discoverable =
+            definitions.map { definition ->
+                AiLimbsDiscoverableCapability(
+                    capabilityId = definition.capabilityId,
+                    displayName = definition.displayName,
+                    invokeId = definition.invokeId
+                )
+            }
+        val ranked =
+            AiLimbsHotCapabilityRanker.rank(
+                usageStats = capabilityUsageStore.snapshots(),
+                discoverableCapabilities = discoverable,
+                limit = HOT_CAPABILITY_LIMIT
+            )
+        return JSONArray().apply {
+            ranked.forEach { capability ->
+                put(
+                    JSONObject()
+                        .put("display_name", capability.displayName)
+                        .put("invoke_id", capability.invokeId)
+                        .put("capability_id", capability.capabilityId)
+                        .put("use_count", capability.useCount)
+                )
+            }
+        }
+    }
+
     private fun scopeCard(scope: AiLimbsCapabilityScope): JSONObject =
         JSONObject()
             .put("scope_id", scope.scopeId)
@@ -712,6 +755,7 @@ class AiLimbsCapabilityResolver(
         const val MODULE_NAME = "AI Limbs Capability Resolver"
         const val CAPABILITY_PROTOCOL_VERSION = 3
         const val MAX_SEARCH_RESULTS = 20
+        const val HOT_CAPABILITY_LIMIT = 5
         const val SCOPE_FOLD_MIN_MATCHES = 3
         const val SPECIFIC_LEAF_MIN_SCORE = 220
         const val SPECIFIC_LEAF_MIN_COVERAGE = 0.75
