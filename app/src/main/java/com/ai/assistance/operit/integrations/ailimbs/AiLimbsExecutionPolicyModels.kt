@@ -179,6 +179,7 @@ object AiLimbsExecutionPolicyDescriptor {
                     AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ,
                     AiLimbsCoreLocalOperation.CAPABILITY_SEARCH,
                     AiLimbsCoreLocalOperation.CAPABILITY_DESCRIBE,
+                    AiLimbsCoreLocalOperation.CAPABILITY_HOT,
                     AiLimbsCoreLocalOperation.DEVELOPER_CATALOG_READ,
                     AiLimbsCoreLocalOperation.CORE_STATUS,
                     AiLimbsCoreLocalOperation.DISPATCHER_STATUS,
