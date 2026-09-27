@@ -218,7 +218,8 @@ class AiLimbsExecutionPolicyEngine(
                     )
                 }
                 AiLimbsWorkGateState.NON_WORK_ONCE,
-                AiLimbsWorkGateState.WORK_UNLOCKED -> Unit
+                AiLimbsWorkGateState.WORK_UNLOCKED,
+                AiLimbsWorkGateState.CYCLE_RELEASED -> Unit
             }
         }
 
@@ -282,6 +283,7 @@ class AiLimbsExecutionPolicyEngine(
         extensionId: String
     ): AiLimbsSubsystemDiscoveryDecision = receipts.subsystemDiscoveryDecision(extensionId)
 
+    /** An unlocked cycle reports its status; mode selection cannot re-arm a gate or require another manual read. */
     internal suspend fun selectWorkMode(args: JSONObject): JSONObject {
         val rawMode = args.optString("mode").trim().uppercase()
         val mode = AiLimbsWorkMode.entries.firstOrNull { it.name == rawMode }
@@ -293,12 +295,13 @@ class AiLimbsExecutionPolicyEngine(
         val state = receipts.selectWorkMode(mode)
         val result = JSONObject()
             .put("success", true)
-            .put("selected_mode", mode.name)
             .put("work_gate_state", state.name)
 
         return when (state) {
             AiLimbsWorkGateState.NON_WORK_ONCE -> {
                 result
+                    .put("selected_mode", mode.name)
+                    .put("selection_applied", true)
                     .put("one_shot", true)
                     .put("work_gate_unlocked", false)
                     .put("instruction", "Exactly one normal capability may execute; the work-mode gate returns afterward.")
@@ -310,17 +313,23 @@ class AiLimbsExecutionPolicyEngine(
                     result
                         .put("success", false)
                         .put("error_code", "WORK_MODE_ALREADY_SELECTED")
+                        .put("selection_applied", false)
                         .put("error", "WORK is already selected for this Interaction Cycle and cannot be downgraded to NON_WORK.")
                         .put("next_action", missing?.let(::managedDocumentNextAction) ?: JSONObject.NULL)
                 } else {
                     result
+                        .put("selected_mode", mode.name)
+                        .put("selection_applied", true)
                         .put("work_gate_unlocked", false)
                         .put("work_manual_required", true)
                         .put("next_action", missing?.let(::managedDocumentNextAction) ?: JSONObject.NULL)
                 }
             }
-            AiLimbsWorkGateState.WORK_UNLOCKED ->
+            AiLimbsWorkGateState.WORK_UNLOCKED,
+            AiLimbsWorkGateState.CYCLE_RELEASED ->
                 result
+                    .put("selection_applied", false)
+                    .put("message", "本轮门禁已解锁，无需重新选择模式或读取工作手册。")
                     .put("work_gate_unlocked", true)
                     .put("work_manual_required", false)
                     .put("cycle_scope", "interaction_cycle")

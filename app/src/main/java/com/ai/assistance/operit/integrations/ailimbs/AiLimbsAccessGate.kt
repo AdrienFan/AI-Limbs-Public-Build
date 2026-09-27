@@ -19,7 +19,8 @@ internal enum class AiLimbsWorkGateState {
     SELECTION_REQUIRED,
     NON_WORK_ONCE,
     WORK_MANUAL_REQUIRED,
-    WORK_UNLOCKED
+    WORK_UNLOCKED,
+    CYCLE_RELEASED
 }
 
 internal enum class AiLimbsSubsystemDiscoveryDecision {
@@ -233,14 +234,16 @@ class AiLimbsAccessGate(context: Context) {
     internal fun isReleasedForCurrentCycle(): Boolean =
         synchronized(stateLock) { releasedForCurrentCycle }
 
-    internal fun workGateState(): AiLimbsWorkGateState = workModeGate.state()
+    internal fun workGateState(): AiLimbsWorkGateState = synchronized(stateLock) {
+        if (releasedForCurrentCycle) AiLimbsWorkGateState.CYCLE_RELEASED else workModeGate.state()
+    }
 
     internal fun snapshot(): JSONObject {
         val receiptState = synchronized(stateLock) {
             Pair(customPromptReceiptVersion != null, workManualReceiptVersion != null)
         }
         return JSONObject()
-            .put("work_gate_state", workModeGate.state().name)
+            .put("work_gate_state", workGateState().name)
             .put("custom_access_prompt_receipt", receiptState.first)
             .put("work_manual_receipt", receiptState.second)
             .put("released_for_current_cycle", isReleasedForCurrentCycle())
@@ -282,6 +285,8 @@ class AiLimbsAccessGate(context: Context) {
     internal suspend fun selectWorkMode(mode: AiLimbsWorkMode): AiLimbsWorkGateState =
         synchronized(stateLock) {
             check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
+            // A released cycle has no mode choice left to make; do not invalidate its manual receipt.
+            if (releasedForCurrentCycle) return@synchronized AiLimbsWorkGateState.CYCLE_RELEASED
             val before = workModeGate.state()
             if (mode == AiLimbsWorkMode.WORK && before != AiLimbsWorkGateState.WORK_UNLOCKED) {
                 workManualReceiptVersion = null
