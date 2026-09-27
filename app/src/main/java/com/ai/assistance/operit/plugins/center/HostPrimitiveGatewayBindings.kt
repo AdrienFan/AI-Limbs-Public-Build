@@ -247,6 +247,8 @@ internal object HostPrimitiveGatewayBindings {
         "host.plugin.service@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list"), kernel("describe"), kernel("call")),
         "host.extension.routing@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list_points"), kernel("list_bindings"), kernel("bind"), kernel("unbind")),
         "host.plugin.runtime@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list"), kernel("status"), kernel("mount"), kernel("stop")),
+        "host.runtime.components@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("snapshot")),
+
         "host.pipeline.hook@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("list"), pending("register"), pending("unregister")),
         "host.android.usage@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("query", "get_app_usage_time"))),
         "host.content@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("pick"), pending("open"), pending("read"), pending("write"), pending("share")),

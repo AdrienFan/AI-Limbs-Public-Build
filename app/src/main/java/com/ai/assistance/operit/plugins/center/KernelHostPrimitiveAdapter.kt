@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.center
-
 import android.content.Context
+import com.ai.assistance.operit.BuildConfig
+
 import com.ai.assistance.operit.core.tools.system.VisualHostRuntime
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
 import com.ai.assistance.operit.data.model.AITool
@@ -76,7 +77,9 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.plugin.service@1" -> invokePluginService(ownerPluginId, op, parameters)
             "host.extension.routing@1" -> invokeExtensionRouting(op, parameters)
             "host.plugin.runtime@1" -> invokePluginRuntime(op, parameters)
+            "host.runtime.components@1" -> invokeRuntimeComponents(op)
             "host.authorization@1" -> evaluateAuthorization(ownerPluginId, parameters)
+
             "host.privileged.runtime@1" -> com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime.invoke(appContext, ownerPluginId, op, parameters)
             "host.resident.runtime@1" -> com.ai.assistance.operit.core.tools.system.resident.AiLimbsResidentRuntime.invoke(appContext, ownerPluginId, op, parameters)
             "host.ui.layout@1" -> invokeUiLayout(op, parameters)
@@ -405,7 +408,6 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             else -> unsupported("host.plugin.runtime@1", operation)
         }
     }
-
     private fun snapshotJson(snapshot: PluginSnapshot): JSONObject = JSONObject()
         .put("plugin_id", snapshot.pluginId)
         .put("versions", JSONArray(snapshot.versions))
@@ -416,6 +418,67 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         .put("last_error", snapshot.persistentState?.lastError ?: JSONObject.NULL)
         .put("display_name", snapshot.activeManifest?.display?.name ?: JSONObject.NULL)
         .put("contribution_count", snapshot.contributions.size)
+
+    private suspend fun invokeRuntimeComponents(operation: String): JSONObject =
+        when (operation) {
+            "snapshot" -> runtimeComponentsSnapshot()
+            else -> unsupported("host.runtime.components@1", operation)
+        }
+
+    private suspend fun runtimeComponentsSnapshot(): JSONObject {
+        val components = JSONArray()
+        components.put(
+            JSONObject()
+                .put("kind", "base")
+                .put("identity", BuildConfig.APPLICATION_ID)
+                .put("version", BuildConfig.VERSION_NAME)
+                .put("version_code", BuildConfig.VERSION_CODE)
+                .put("enabled", true)
+                .put("state", "ACTIVE")
+        )
+
+        PluginPlatformKernel.manager.snapshots()
+            .sortedBy { it.pluginId }
+            .forEach { snapshot ->
+                val state = snapshot.persistentState
+                components.put(
+                    JSONObject()
+                        .put("kind", "parent_plugin")
+                        .put("identity", snapshot.pluginId)
+                        .put("version", state?.activeVersion ?: JSONObject.NULL)
+                        .put("installed_versions", JSONArray(snapshot.versions.sorted()))
+                        .put("enabled", state?.enabled ?: false)
+                        .put("state", state?.lastState?.name ?: JSONObject.NULL)
+                        .put("mounted_version", snapshot.mountedVersion ?: JSONObject.NULL)
+                        .put("display_name", snapshot.activeManifest?.display?.name ?: JSONObject.NULL)
+                )
+            }
+
+        PluginPlatformKernel.childExtensionRuntime.loggingSnapshots()
+            .sortedBy { it.extensionId }
+            .forEach { snapshot ->
+                components.put(
+                    JSONObject()
+                        .put("kind", "child_extension")
+                        .put("identity", snapshot.extensionId)
+                        .put("version", snapshot.version)
+                        .put("enabled", snapshot.enabled)
+                        .put("state", snapshot.lifecycle.name)
+                        .put("display_name", snapshot.displayName)
+                        .put("parent_plugin_id", snapshot.target.parentPluginId)
+                        .put("extension_point", snapshot.target.point)
+                        .put("api_version", snapshot.target.apiVersion)
+                )
+            }
+
+        return JSONObject()
+            .put("schema_version", 1)
+            .put("authority", "AI_LIMBS_HOST_RUNTIME")
+            .put("updated_at_epoch_ms", System.currentTimeMillis())
+            .put("component_count", components.length())
+            .put("components", components)
+    }
+
 
     private fun stateJson(state: PluginPersistentState): JSONObject = JSONObject()
         .put("plugin_id", state.pluginId)
@@ -752,7 +815,9 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.plugin.runtime@1/status",
             "host.plugin.runtime@1/mount",
             "host.plugin.runtime@1/stop",
+            "host.runtime.components@1/snapshot",
             "host.authorization@1/evaluate",
+
             "host.privileged.runtime@1/status",
             "host.privileged.runtime@1/pair",
             "host.privileged.runtime@1/prepare",

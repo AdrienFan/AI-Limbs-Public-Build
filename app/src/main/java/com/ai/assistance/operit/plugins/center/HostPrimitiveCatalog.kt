@@ -72,7 +72,9 @@ object AiLimbsHostPrimitiveCatalog {
         HostPrimitiveDefinition(50, "host.resident.runtime@1", "AI Limbs Resident Runtime", "管理 AI Limbs Resident 业务 owner、Guardian、Core session CPU/network 资源与 ON/OFF 状态；持续工作效果仍须经实机验证。", "Resident ON 会把 Plugin Kernel、Dispatcher、Bridge、插件与 Ubuntu 业务所有权切到独立 Core；Host 退为 UI_PROXY。Core session 持有 PARTIAL_WAKE_LOCK token 与默认网络 callback，但 status 会把进程存活、Wake token、网络可用性和真实持续工作分别报告，任何 token/PID/oom 值都不构成冻结豁免证据。core_probe/core_status/core_stop 仅供 Plugin Center 生命周期诊断，不向插件暴露 Shell 或 Binder。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, false),
         HostPrimitiveDefinition(48, "host.ui.layout@1", "UI Layout Editing", "开启、结束、查询或恢复 AI Limbs 可编辑页面的用户布局。", "Host 拥有真实页面、编辑会话与布局持久化；插件只能请求标准 surface/mode，不直接操作 View、NavController 或其他插件 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(51, "host.screen.session@1", "Screen Share / Capture Session", "提供持续屏幕视觉会话契约：枚举显示目标、启动、查询、读取会话帧与停止。", "Host 负责 MediaProjection 类系统授权、显示目标、session ownership 与生命周期；单帧截图继续属于 host.screen.capture@1，采样策略、缓存、OCR、视觉推理和历史管理属于插件。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
-        HostPrimitiveDefinition(52, "host.camera.session@1", "Camera Visual Session", "提供持续摄像头视觉会话契约：枚举摄像头、启动、查询、读取会话帧、配置与停止。", "Host 负责 CAMERA 权限、摄像头来源、并发占用与 session lifecycle；单帧拍摄继续属于 host.camera.capture@1，采样策略、缓存、识别和视觉资产管理属于插件。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
+        HostPrimitiveDefinition(52, "host.camera.session@1", "Camera Visual Session", "提供持续摄像头视觉会话契约：枚举摄像头、启动、查询、读取会话帧、配置与停止。", "Host 负责 CAMERA 权限、摄像头来源、并发占用与 session lifecycle；单帧拍摄继续属于 host.camera.capture@1，采样策略、缓存、识别和视觉资产管理属于插件。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
+        HostPrimitiveDefinition(53, "host.runtime.components@1", "Runtime Component Inventory", "读取当前 AI Limbs 基座、父插件与子插件的已安装运行态版本清单。", "Host 只输出动态运行时身份、版本、启用与生命周期事实；不得包含源码路径，也不得认识具体插件 ID。消费者自行决定源码解析与开发策略。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
+
     )
 
     private val byId = all.associateBy { it.id.lowercase() }

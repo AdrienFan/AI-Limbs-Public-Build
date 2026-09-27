@@ -2,7 +2,6 @@ package com.ai.assistance.operit.plugins.center
 
 import android.content.Context
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionAuthorization
-import com.ai.assistance.operit.integrations.ailimbs.AiLimbsRuntimeMetadataPublisher
 
 import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
 import com.ai.assistance.operit.core.tools.system.resident.ResidentBusinessTakeoverFence
@@ -144,10 +143,12 @@ internal object PluginPlatformKernel {
         get() =
             initialized &&
                 notificationHostInstance.hasForegroundResponsibility
-
     internal val manager: PluginManager
         get() = requireInitialized().let { managerInstance }
+    internal val childExtensionRuntime: ChildExtensionRuntimeOwner
+        get() = requireInitialized().let { childExtensionRuntimeInstance }
     internal val runtimeAdapters: PluginRuntimeAdapterRegistry
+
         get() = requireInitialized().let { runtimeAdaptersInstance }
     internal val contributions: PluginContributionRegistry
         get() = requireInitialized().let { contributionsInstance }
@@ -764,7 +765,6 @@ internal object PluginPlatformKernel {
                     File(appContext.filesDir, "ai_limbs/runtime_owner"), "plugin_kernel"
                 )
             }
-            AiLimbsRuntimeMetadataPublisher.publish(appContext)
             val surfacePolicy = HostSurfacePolicy(appContext)
 
             val adminSecurity = AdminSecurityManager(appContext)
