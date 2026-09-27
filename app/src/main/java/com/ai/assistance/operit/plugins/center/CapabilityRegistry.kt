@@ -82,6 +82,7 @@ object CapabilityRegistry {
         hostPrimitive("host.plugin.service@1"),
         hostPrimitive("host.extension.routing@1"),
         hostPrimitive("host.plugin.runtime@1"),
+        hostPrimitive("host.runtime.components@1"),
         hostPrimitive("host.pipeline.hook@1"),
         hostPrimitive("host.android.usage@1"),
         hostPrimitive("host.content@1"),
