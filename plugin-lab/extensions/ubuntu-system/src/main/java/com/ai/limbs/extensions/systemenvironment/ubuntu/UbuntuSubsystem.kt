@@ -11,9 +11,11 @@ internal class UbuntuSubsystem private constructor(
     internal val terminal: TerminalManager,
     internal val runtimeContext: android.content.Context,
     private val hostListenerSync: UbuntuSubsystemHostListenerSync,
+    private val hostComponentSync: UbuntuSubsystemHostComponentSync,
     private val processCapability: UbuntuSubsystemProcessCapability,
 ) {
     suspend fun close() {
+        hostComponentSync.close()
         hostListenerSync.close()
         processCapability.shutdown()
         terminal.prepareForMaintenance()
@@ -33,6 +35,7 @@ internal class UbuntuSubsystem private constructor(
             )
             val terminal = TerminalManager.getInstance(runtimeContext)
             val hostListenerSync = UbuntuSubsystemHostListenerSync(host)
+            val hostComponentSync = UbuntuSubsystemHostComponentSync(host)
             val pageProvider = UbuntuSubsystemPageProvider(
                 host = host,
                 terminal = LocalTerminalUiController(terminal),
@@ -49,6 +52,7 @@ internal class UbuntuSubsystem private constructor(
                 terminal = terminal,
                 runtimeContext = runtimeContext,
                 hostListenerSync = hostListenerSync,
+                hostComponentSync = hostComponentSync,
                 processCapability = processCapability,
             )
         }

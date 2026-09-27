@@ -2,7 +2,7 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.system_environment.ubuntu",
-  "version": "0.1.14",
+  "version": "0.1.15",
   "roles": [
     "system_extension"
   ],
@@ -25,7 +25,8 @@
   },
   "permissions": {
     "host_capabilities": [
-      "host.network@1"
+      "host.network@1",
+      "host.runtime.components@1"
     ]
   }
 }
