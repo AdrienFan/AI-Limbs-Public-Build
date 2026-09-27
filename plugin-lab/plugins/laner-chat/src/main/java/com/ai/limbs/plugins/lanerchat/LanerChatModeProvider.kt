@@ -2,6 +2,7 @@ package com.ai.limbs.plugins.lanerchat
 
 import android.content.Context
 import android.view.View
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -86,11 +87,13 @@ internal class LanerChatModeProvider(
         val pluginContext = host.createPluginContext(context)
         return when (slotId) {
             InProcessChatModeSlotIds.CONFIGURATION_CARD ->
-                composeView(pluginContext) { LanerConfigurationCard() }
+                composeView(pluginContext) { card ->
+                    LanerConfigurationCard { card.performClick() }
+                }
             InProcessChatModeSlotIds.STATUS_OVERLAY ->
-                composeView(pluginContext) { LanerStatusOverlay() }
+                composeView(pluginContext) { _ -> LanerStatusOverlay() }
             InProcessChatModeSlotIds.COMPOSER_ACCESSORY ->
-                composeView(pluginContext) { LanerComposerAccessory() }
+                composeView(pluginContext) { _ -> LanerComposerAccessory() }
             else -> null
         }
     }
@@ -224,20 +227,22 @@ internal class LanerChatModeProvider(
 
     private fun composeView(
         context: Context,
-        content: @Composable () -> Unit
+        content: @Composable (ComposeView) -> Unit
     ): View =
         ComposeView(context).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
-                    content()
+                    content(this@apply)
                 }
             }
         }
 
     @Composable
-    private fun LanerConfigurationCard() {
-        Card(modifier = Modifier.fillMaxWidth()) {
+    private fun LanerConfigurationCard(onSelect: () -> Unit) {
+        // The card owns its touch behavior; performClick notifies the Host's
+        // generic chat-mode selection listener on the root View.
+        Card(modifier = Modifier.fillMaxWidth().clickable(onClick = onSelect)) {
             Column(
                 modifier = Modifier.fillMaxWidth().padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(6.dp)
