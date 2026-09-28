@@ -10,6 +10,9 @@ import com.ai.assistance.operit.core.tools.system.AndroidPermissionLevel
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
+import com.ai.assistance.operit.data.model.ChatMessage
+import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
+import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionSession
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionTransport
@@ -55,6 +58,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         }
         return when (id) {
             "host.network@1" -> invokeNetwork(op)
+            "host.chat@1" -> publishAssistantMessage(parameters)
             "host.screen.capture@1" -> captureScreenFrame(ownerPluginId)
             "host.screen.session@1" ->
 
@@ -92,6 +96,28 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             )
         }
     }
+    private suspend fun publishAssistantMessage(parameters: JSONObject): JSONObject {
+        val chatId = parameters.getString("chat_id").trim().also { require(it.isNotEmpty()) }
+        val content = parameters.getString("content").also { require(it.isNotBlank()) }
+        val timestamp = parameters.getLong("message_timestamp").also { require(it > 0L) }
+        val provider = parameters.getString("provider").trim().also { require(it.isNotEmpty()) }
+        val modelName = parameters.getString("model_name").trim().also { require(it.isNotEmpty()) }
+        val roleName = parameters.getString("role_name").trim().also { require(it.isNotEmpty()) }
+        val completedAt = parameters.getLong("completed_at_ms").also { require(it > 0L) }
+        val core = ChatRuntimeHolder.getInstance(appContext).getCore(ChatRuntimeSlot.MAIN)
+        core.getChatHistoryDelegate().addMessageToChat(
+            ChatMessage(
+                sender = "ai", content = content, timestamp = timestamp,
+                roleName = roleName, provider = provider, modelName = modelName,
+                completedAt = completedAt
+            ),
+            chatIdOverride = chatId
+        )
+        if (core.currentChatId.value == chatId) core.reloadChatMessagesSmart(chatId)
+        return JSONObject().put("success", true).put("chat_id", chatId)
+            .put("message_timestamp", timestamp).put("persisted", true)
+    }
+
     private suspend fun captureScreenFrame(ownerPluginId: String): JSONObject {
         // This is already the Host Primitive execution boundary. Re-entering AiLimbsDispatcher
         // here would incorrectly create a second AI/Policy authorization cycle in Host while
@@ -785,6 +811,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
         val SUPPORTED = setOf(
             "host.network@1/listeners",
+            "host.chat@1/publish_assistant",
             "host.screen.capture@1/capture",
             "host.screen.session@1/list_targets",
 

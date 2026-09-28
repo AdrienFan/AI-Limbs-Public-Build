@@ -216,8 +216,6 @@ class AiLimbsDispatcher(
     ): JSONObject =
         when (operation) {
             "attachment.fetch" -> pluginChatModeAttachmentFetch(args)
-            "turn.reply" -> pluginChatModeTurnReply(args)
-            "reply" -> pluginChatModeReply(args)
             "send" -> pluginChatModeSend(args)
             else ->
                 flattenPluginChatCompatibility(
@@ -412,7 +410,9 @@ class AiLimbsDispatcher(
             "turn.claim",
             "turn.resolve",
             "turn.cancel",
-            "turn.resume" -> copy(raw.optJSONObject("result"))
+            "turn.resume",
+            "turn.reply",
+            "reply" -> copy(raw.optJSONObject("result"))
         }
 
         if (operation == "turn.claim" && out.optBoolean("claimed", false)) {
@@ -479,66 +479,6 @@ class AiLimbsDispatcher(
             .put("payload", readResult.opt("result") ?: JSONObject.NULL)
             .put("read_error", readResult.opt("error") ?: JSONObject.NULL)
             .put("events", readResult.optJSONArray("events") ?: JSONArray())
-    }
-
-    private suspend fun pluginChatModeTurnReply(args: JSONObject): JSONObject {
-        val raw =
-            PluginChatModeRuntime.invokeBusinessCompatibility(
-                "turn.reply",
-                JSONObject(args.toString())
-            )
-        val result = raw.getJSONObject("result")
-        val turn = result.getJSONObject("turn")
-        val covered = result.optJSONArray("covered_requests") ?: JSONArray()
-        val firstRequest = covered.optJSONObject(0)
-        val chatId = firstRequest?.optString("chat_id").orEmpty().trim()
-        val content = turn.optString("reply_content")
-        if (chatId.isNotEmpty() && content.isNotBlank()) {
-            mirrorPluginChatAssistantMessage(
-                chatId = chatId,
-                content = content,
-                timestamp = turn.optLong("chat_message_timestamp", System.currentTimeMillis()),
-                completedAt = nullableLong(turn, "completed_at_ms")
-            )
-        }
-        return JSONObject(raw.toString())
-            .put("turn_id", turn.optString("turn_id"))
-            .put("reply_id", turn.opt("reply_id") ?: JSONObject.NULL)
-            .put("status", turn.optString("status"))
-            .put("covered_request_ids", turn.optJSONArray("request_ids") ?: JSONArray())
-            .put("covered_request_count", result.optInt("covered_request_count", covered.length()))
-            .put("duplicate", result.optBoolean("duplicate", false))
-            .put("delivered_to_chat", chatId.isNotEmpty() && content.isNotBlank())
-            .put("delivery_pending", false)
-            .put("completed_at", isoTime(nullableLong(turn, "completed_at_ms")))
-    }
-
-    private suspend fun pluginChatModeReply(args: JSONObject): JSONObject {
-        val raw =
-            PluginChatModeRuntime.invokeBusinessCompatibility(
-                "reply",
-                JSONObject(args.toString())
-            )
-        val result = raw.getJSONObject("result")
-        val request = result.getJSONObject("request")
-        val chatId = request.optString("chat_id").trim()
-        val content = request.optString("reply_content")
-        if (chatId.isNotEmpty() && content.isNotBlank()) {
-            mirrorPluginChatAssistantMessage(
-                chatId = chatId,
-                content = content,
-                timestamp = request.optLong("chat_message_timestamp", System.currentTimeMillis()),
-                completedAt = nullableLong(request, "answered_at_ms")
-            )
-        }
-        return JSONObject(raw.toString())
-            .put("request_id", request.optString("request_id"))
-            .put("reply_id", request.opt("reply_id") ?: JSONObject.NULL)
-            .put("status", request.optString("status"))
-            .put("duplicate", result.optBoolean("duplicate", false))
-            .put("delivered_to_live_stream", result.optBoolean("delivered_to_live_stream", false))
-            .put("delivered_to_chat", chatId.isNotEmpty() && content.isNotBlank())
-            .put("answered_at", isoTime(nullableLong(request, "answered_at_ms")))
     }
 
     private suspend fun pluginChatModeSend(args: JSONObject): JSONObject {
