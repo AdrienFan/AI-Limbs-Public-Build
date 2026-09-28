@@ -3,7 +3,7 @@ package com.ai.assistance.operit.plugins.center
 object PluginAbi {
     const val FORMAT = "AIL_PLUGIN_V1"
     const val SCHEMA_VERSION = 1
-    const val CURRENT_API = 1
+    const val CURRENT_API = 2
     const val PACKAGE_EXTENSION = ".ailp"
     const val MANIFEST_ENTRY = "plugin.json"
 }

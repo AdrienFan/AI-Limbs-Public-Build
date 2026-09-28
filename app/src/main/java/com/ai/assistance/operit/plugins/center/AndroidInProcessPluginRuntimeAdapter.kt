@@ -12,12 +12,10 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessChildExtensionRuntime
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
+import com.ai.limbs.plugin.runtime.InProcessHostLocalPresentationProviderFactory
 import com.ai.limbs.plugin.runtime.InProcessNativeExecutableIds
 import com.ai.limbs.plugin.runtime.InProcessNativeRuntime
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
-import com.ai.limbs.plugin.runtime.InProcessPluginPresentationEntry
-import com.ai.limbs.plugin.runtime.InProcessPluginPresentationHost
-import com.ai.limbs.plugin.runtime.InProcessPluginPresentationHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessProviderBinding
 import com.ai.limbs.plugin.runtime.InProcessProviderDirectory
@@ -104,68 +102,6 @@ internal class AndroidInProcessPluginRuntimeAdapter(
             runtimeScope.cancel()
             throw error
         }
-        // In Resident mode the UI proxy mounts this entry from a neutral descriptor.
-        // A Host-owned business runtime needs the same presentation entry locally.
-        val presentationRegistrations = mutableListOf<AutoCloseable>()
-        val presentationHandle: InProcessPluginPresentationHandle? = try {
-            val presentationClass = (context.manifest.runtime.configJson?.let(::JSONObject) ?: JSONObject())
-                .optString("presentation_entry_class").trim()
-            if (context.runtimeRole == PluginRuntimeRole.LEGACY_HOST && presentationClass.isNotEmpty()) {
-                val presentationEntry = loader.loadClass(presentationClass)
-                    .getDeclaredConstructor().newInstance() as? InProcessPluginPresentationEntry
-                    ?: throw PluginInstallException(
-                        "PRESENTATION_ENTRY_TYPE_INVALID",
-                        "$presentationClass does not implement InProcessPluginPresentationEntry"
-                    )
-                // Presentation IDs belong to the signed entry, not manifest business provides.
-                fun registerLocalPresentation(
-                    id: String, payload: Any, metadata: Map<String, String>
-                ): AutoCloseable {
-                    require(id.startsWith("${context.manifest.pluginId}.") && id.length > context.manifest.pluginId.length + 1) {
-                        "Presentation provider must belong to ${context.manifest.pluginId}: $id"
-                    }
-                    return contributions.register(
-                        PluginContributionRecord(
-                            CanonicalContributionContracts.provider(context.manifest.pluginId, id, metadata),
-                            payload
-                        )
-                    ).also(presentationRegistrations::add)
-                }
-                val presentationHost = object : InProcessPluginPresentationHost {
-                    override val applicationContext get() = host.applicationContext
-                    override val pluginId get() = host.pluginId
-                    override val version get() = host.version
-                    override val scope get() = host.scope
-                    override val dataDir get() = host.dataDir
-                    override val cacheDir get() = host.cacheDir
-                    override val logger get() = host.logger
-                    override val runtimeEntryFile get() = host.runtimeEntryFile
-                    override val providers get() = host.providers
-                    override fun createPluginContext(baseContext: Context): Context =
-                        host.createPluginContext(baseContext)
-                    override fun registerPresentationProvider(
-                        id: String, payload: Any, metadata: Map<String, String>
-                    ): AutoCloseable = registerLocalPresentation(id, payload, metadata)
-                    override fun registerPageProvider(
-                        id: String, provider: InProcessPageProvider, metadata: Map<String, String>
-                    ): AutoCloseable = registerLocalPresentation(id, provider, metadata)
-                    override suspend fun invokeHostCapability(id: String, parametersJson: String): String =
-                        host.invokeHostCapability(id, parametersJson)
-                    override suspend fun invokePluginCapability(id: String, parametersJson: String): String {
-                        PluginPlatformKernel.manager.activeAuthorization(pluginId)
-                        val parameters = JSONObject(parametersJson.ifBlank { "{}" })
-                        return PluginPlatformKernel.capabilities.invokeOwnedUiDirect(
-                            pluginId, id.trim().lowercase(), parameters
-                        ).toString()
-                    }
-                }
-                presentationEntry.mount(presentationHost)
-            } else null
-        } catch (error: Throwable) {
-            presentationRegistrations.asReversed().forEach { runCatching { it.close() }.exceptionOrNull()?.let(error::addSuppressed) }
-            try { handle.stop() } finally { runtimeScope.cancel() }
-            throw error
-        }
         return object : PluginRuntimeHandle {
             override suspend fun stop() = retire(null, revokeExternalOwner = true)
 
@@ -181,10 +117,7 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 revokeExternalOwner: Boolean
             ) {
                 try {
-                    try { presentationHandle?.stop() } finally {
-                        presentationRegistrations.asReversed().forEach { it.close() }
-                        handle.stop()
-                    }
+                    handle.stop()
                 } finally {
                     try {
                         if (revokeExternalOwner) {
@@ -457,6 +390,31 @@ internal class AndroidInProcessPluginRuntimeAdapter(
                 return
             }
             context.payloadContext.registrar.registerProvider(id, payload, metadata)
+        }
+
+        override fun registerHostLocalPresentationProvider(
+            id: String,
+            factory: InProcessHostLocalPresentationProviderFactory,
+            metadata: Map<String, String>
+        ) {
+            val normalized = id.trim()
+            require(normalized.isNotEmpty()) { "Host-local presentation provider id must not be blank" }
+            require(normalized in context.manifest.provides.providers) {
+                "Host-local presentation provider is not declared by manifest: $normalized"
+            }
+            if (context.runtimeRole == PluginRuntimeRole.BUSINESS) {
+                // Resident BUSINESS must never construct Host UI payloads.
+                // The UI proxy will mount the signed PresentationEntry instead.
+                return
+            }
+            check(context.runtimeRole == PluginRuntimeRole.LEGACY_HOST) {
+                "Host-local presentation provider is unavailable in " + context.runtimeRole
+            }
+            context.payloadContext.registrar.registerProvider(
+                normalized,
+                factory.create(this),
+                metadata
+            )
         }
 
         override fun registerService(
