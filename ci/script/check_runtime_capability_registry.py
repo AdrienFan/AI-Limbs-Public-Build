@@ -289,6 +289,7 @@ def main() -> int:
     allowed_affinity_ids = {
         "host.screen.capture@1",
         "host.chat@1",
+        "host.window.overlay@1",
     }
     if set(enforced_affinity_ids) != allowed_affinity_ids or len(enforced_affinity_ids) != len(allowed_affinity_ids):
         errors.append(
@@ -321,6 +322,21 @@ def main() -> int:
             errors.append("host.chat@1/publish_assistant must be Host-service owned")
         if 'owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("messages", "get_chat_messages"))' not in chat_source:
             errors.append("host.chat@1/messages must remain Core-safe")
+
+    overlay_block = re.search(
+        r'"host\.window\.overlay@1"\s+to\s+primitive\((.*?)\),\s*"host\.capability@1"',
+        host_gateway_text,
+        re.DOTALL,
+    )
+    if overlay_block is None or "enforceAffinity = true" not in overlay_block.group(1):
+        errors.append("host.window.overlay@1 must enforce Host operation ownership")
+    else:
+        for operation in ("create", "update", "remove", "list"):
+            token = f'owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("{operation}"))'
+            if token not in overlay_block.group(1):
+                errors.append(f"host.window.overlay@1/{operation} must execute in Android Host")
+    if '"host.window.overlay@1" -> overlayWindows.invoke(ownerPluginId, op, parameters)' not in kernel_text:
+        errors.append("host.window.overlay@1 is missing the Host window handler")
 
     required_tokens = (
         "val version: Int",
