@@ -13,7 +13,7 @@ import org.json.JSONObject
 internal object ResidentCoreWire {
     const val VERSION = 1
     const val TIMEOUT_MS = 3_000
-    // Resident status now includes bounded runtime diagnostics for Kernel/Bridge/plugin/Ubuntu ownership.
+    // Resident status includes bounded runtime diagnostics for Kernel, Bridge, and plugin ownership.
     // The original 8 KiB ceiling was sized for the pre-migration bootstrap skeleton and can make a
     // healthy Core look unreachable once BUSINESS state is attached. Keep this control plane bounded
     // while leaving ample headroom; it remains far below UI_PROXY (4 MiB) and Dispatcher (8 MiB).

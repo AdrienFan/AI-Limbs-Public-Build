@@ -106,7 +106,6 @@ object ResidentCoreMain {
                 .put("bridge_ingress_prepared", runtimeState.getBoolean("bridge_ingress_prepared"))
                 .put("bridge_plugin_mounted", runtimeState.getBoolean("bridge_plugin_mounted"))
                 .put("plugin_services_prepared", runtimeState.getBoolean("plugin_services_prepared"))
-                .put("ubuntu_control_ready", runtimeState.getBoolean("ubuntu_control_ready"))
                 .put("plugins_migrated", runtimeState.getBoolean("plugin_services_prepared"))
                 .put("continuous_work", false)
                 .put("core_runtime", runtimeState)
