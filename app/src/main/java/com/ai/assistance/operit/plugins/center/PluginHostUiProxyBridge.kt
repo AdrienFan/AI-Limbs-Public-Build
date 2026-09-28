@@ -727,7 +727,8 @@ internal class ResidentProviderDirectory(
                     proxy.update(envelope.proxy.stringOrNull("state_json"))
                     next[id] = SystemPluginProviderBindingV2(owner, id, metadata, proxy)
                 }
-                ProviderProxyProtocol.PAGE_METADATA ->
+                ProviderProxyProtocol.PAGE_METADATA,
+                ProviderProxyProtocol.PRESENTATION_METADATA ->
                     nextPageMetadata[id] = RemoteMetadata(owner, metadata)
                 ProviderProxyProtocol.CAPABILITY_EXECUTOR -> Unit // Not part of Host presentation state.
                 ProviderProxyProtocol.METADATA_ONLY -> Unit // Business discovery metadata stays Core-owned.

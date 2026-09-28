@@ -3,7 +3,10 @@ package com.ai.assistance.operit.plugins.center
 import com.ai.assistance.operit.plugins.center.isolation.ProviderContributionTransportCodec
 import com.ai.assistance.operit.plugins.center.isolation.ProviderProxyProtocol
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessChatModeExtensionProvider
 import com.ai.limbs.plugin.runtime.InProcessMetadataOnlyProvider
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
 import org.json.JSONObject
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -123,6 +126,40 @@ class ProviderContributionTransportTest {
         assertEquals(record.contract, restored.contract)
 
         residentHandles.single().close()
+        handles.single().close()
+    }
+
+    @Test
+    fun chatModePresentationCrossesResidentBoundaryAsMetadataOnly() {
+        val registry = PluginContributionRegistry()
+        val handles = mutableListOf<AutoCloseable>()
+        val registrar = PluginRegistrar(
+            manifest = syntheticManifest(providerId),
+            registry = registry,
+            extensionRouter = Mockito.mock(ExtensionRouter::class.java),
+            capabilityBinder = Mockito.mock(PluginCapabilityBinder::class.java),
+            surfacePolicy = Mockito.mock(HostSurfacePolicy::class.java),
+            track = handles::add
+        )
+        val presentation = object : InProcessChatModeExtensionProvider {
+            override val stateJson: StateFlow<String?> = MutableStateFlow(null)
+            override fun matches(contextJson: String): Boolean = true
+            override fun createSlotView(slotId: String, context: android.content.Context): android.view.View? = null
+            override suspend fun submit(requestJson: String): String = "{}"
+        }
+
+        registrar.registerProvider(
+            providerId,
+            presentation,
+            mapOf("kind" to "chat_mode_extension")
+        )
+        val record = checkNotNull(registry.find(PluginContributionKind.PROVIDER, providerId))
+        val envelope = ProviderContributionTransportCodec.decode(
+            JSONObject(ProviderContributionTransportCodec.encode(record).toString())
+        )
+
+        assertEquals(ProviderProxyProtocol.PRESENTATION_METADATA, envelope.protocol)
+        assertEquals("chat_mode_extension", envelope.contract.metadata["kind"])
         handles.single().close()
     }
 

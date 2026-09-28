@@ -7,6 +7,7 @@ import com.ai.assistance.operit.plugins.center.PluginContributionKind
 import com.ai.assistance.operit.plugins.center.PluginContributionRecord
 import com.ai.assistance.operit.plugins.center.PluginInstallException
 import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
+import com.ai.limbs.plugin.runtime.InProcessChatModeExtensionProvider
 import com.ai.limbs.plugin.runtime.InProcessMetadataOnlyProvider
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
@@ -22,6 +23,7 @@ internal enum class ProviderProxyProtocol(val wireName: String) {
     CAPABILITY_EXECUTOR("capability_executor.v1"),
     UI_STATE("ui_state.v1"),
     PAGE_METADATA("page_metadata.v1"),
+    PRESENTATION_METADATA("presentation_metadata.v1"),
     METADATA_ONLY("metadata_only.v1");
 
     companion object {
@@ -59,6 +61,8 @@ internal object ProviderContributionTransportCodec {
             is InProcessPageProvider,
             BusinessPageProviderMetadata,
             RemotePageProviderMetadata -> proxy(ProviderProxyProtocol.PAGE_METADATA)
+            is InProcessChatModeExtensionProvider,
+            RemotePresentationProviderMetadata -> proxy(ProviderProxyProtocol.PRESENTATION_METADATA)
             else -> throw PluginInstallException(
                 "WORKER_PROVIDER_NOT_PROXYABLE",
                 "Provider " + record.id + " has no structured cross-process proxy protocol: " +

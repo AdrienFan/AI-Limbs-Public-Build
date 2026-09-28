@@ -47,6 +47,7 @@ import org.json.JSONObject
  * Core owns lifecycle, policy and proxy registrations; ail_plugin_runtime owns executable objects.
  */
 internal object RemotePageProviderMetadata
+internal object RemotePresentationProviderMetadata
 
 internal class RemoteAndroidInProcessPluginRuntimeAdapter(
     private val notificationBindingProvider: (String, Set<String>) -> InProcessProviderBinding?
@@ -276,6 +277,7 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
                     ProviderProxyProtocol.UI_STATE ->
                         RemoteUiStateProvider(id, envelope.proxy.optNullableString("state_json"))
                     ProviderProxyProtocol.PAGE_METADATA -> RemotePageProviderMetadata
+                    ProviderProxyProtocol.PRESENTATION_METADATA -> RemotePresentationProviderMetadata
                     ProviderProxyProtocol.METADATA_ONLY -> InProcessMetadataOnlyProvider
 
                 }

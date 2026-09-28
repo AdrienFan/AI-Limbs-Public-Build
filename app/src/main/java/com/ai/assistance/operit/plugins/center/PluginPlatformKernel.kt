@@ -18,6 +18,7 @@ import com.ai.assistance.operit.plugins.center.isolation.ProviderContributionTra
 import com.ai.assistance.operit.plugins.center.isolation.RemoteAndroidInProcessPluginRuntimeAdapter
 import com.ai.assistance.operit.plugins.center.isolation.RemoteChildExtensionRuntimeOwner
 import com.ai.assistance.operit.plugins.center.isolation.RemotePageProviderMetadata
+import com.ai.assistance.operit.plugins.center.isolation.RemotePresentationProviderMetadata
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import kotlinx.coroutines.CancellationException
@@ -350,7 +351,8 @@ internal object PluginPlatformKernel {
                 when (record.payload) {
                     is com.ai.limbs.plugin.runtime.InProcessUiStateProvider,
                     BusinessPageProviderMetadata,
-                    RemotePageProviderMetadata -> put(ProviderContributionTransportCodec.encode(record))
+                    RemotePageProviderMetadata,
+                    RemotePresentationProviderMetadata -> put(ProviderContributionTransportCodec.encode(record))
                     is com.ai.limbs.plugin.runtime.InProcessPageProvider -> Unit // View/Context ABI: never exported.
                     else -> Unit
                 }
