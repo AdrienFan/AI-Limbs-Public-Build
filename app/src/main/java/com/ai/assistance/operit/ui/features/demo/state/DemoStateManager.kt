@@ -26,7 +26,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.ai.assistance.operit.core.tools.system.AccessibilityProviderInstaller
 import com.ai.assistance.operit.core.tools.system.ShizukuAuthorizer
-import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentCapabilityClient
 import com.ai.assistance.operit.R
 
 private const val TAG = "DemoStateManager"
@@ -279,7 +279,7 @@ class DemoStateManager(private val context: Context, private val coroutineScope:
      * page must not start a System Environment runtime, create a session, or execute commands.
      */
     suspend fun refreshNodejsPythonEnvironment() {
-        val available = SystemEnvironmentClient.isAvailable()
+        val available = SystemEnvironmentCapabilityClient.isAvailable()
 
         isPnpmInstalled.value = available
         isPythonInstalled.value = available
@@ -322,7 +322,7 @@ suspend fun refreshPermissionsAndStatus(
 
     // Pluginized terminal support is a passive availability check. Do not auto-start the runtime
     // or execute pnpm/python probes merely because the permission page is being displayed.
-    val isSystemEnvironmentAvailable = SystemEnvironmentClient.isAvailable()
+    val isSystemEnvironmentAvailable = SystemEnvironmentCapabilityClient.isAvailable()
     updateOperitTerminalInstalled(isSystemEnvironmentAvailable)
 
     // 检查存储权限

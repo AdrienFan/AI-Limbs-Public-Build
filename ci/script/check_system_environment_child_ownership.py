@@ -19,6 +19,7 @@ forbidden_tokens = (
     "get_terminal_session_screen",
     "resident_ubuntu_",
     "RESIDENT_UBUNTU_",
+    "SystemEnvironmentClient",
 )
 for path in app.rglob("*.kt"):
     text = path.read_text(encoding="utf-8")
@@ -61,6 +62,30 @@ process_router = (
 ).read_text(encoding="utf-8")
 if '"plugin.system_environment.process"' not in process_router:
     errors.append("Base process router must use generic plugin.system_environment.process alias")
+
+client_path = (
+    root / "app/src/main/java/com/ai/assistance/operit/core/systemenvironment/SystemEnvironmentCapabilityClient.kt"
+)
+if not client_path.exists():
+    errors.append("generic SystemEnvironmentCapabilityClient is missing")
+else:
+    client = client_path.read_text(encoding="utf-8")
+    if "plugin.ubuntu." in client:
+        errors.append("generic SystemEnvironmentCapabilityClient must not reference plugin.ubuntu.*")
+    for capability in (
+        "plugin.system_environment.status",
+        "plugin.system_environment.start",
+        "plugin.system_environment.session.create",
+        "plugin.system_environment.session.execute",
+        "plugin.system_environment.session.input",
+        "plugin.system_environment.session.interrupt",
+        "plugin.system_environment.session.screen",
+        "plugin.system_environment.session.close",
+        "plugin.system_environment.command",
+        "plugin.system_environment.process",
+    ):
+        if capability not in client:
+            errors.append(f"generic SystemEnvironment client missing alias: {capability}")
 
 build = (root / "app/build.gradle.kts").read_text(encoding="utf-8")
 for native in ("libbusybox.so", "liboperit_proot.so", "libbash.so", "libsudo.so"):

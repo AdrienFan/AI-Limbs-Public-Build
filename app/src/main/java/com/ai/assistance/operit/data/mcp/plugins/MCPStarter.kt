@@ -7,7 +7,7 @@ import com.ai.assistance.operit.core.tools.mcp.MCPManager
 import com.ai.assistance.operit.core.tools.mcp.McpRuntimeDescriptor
 import com.ai.assistance.operit.data.mcp.MCPLocalServer
 import com.ai.assistance.operit.data.mcp.MCPRepository
-import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentCapabilityClient
 import com.google.gson.Gson
 import com.google.gson.JsonParser
 import kotlinx.coroutines.CoroutineScope
@@ -77,7 +77,7 @@ class MCPStarter(private val context: Context) {
         }
 
         try {
-            val result = SystemEnvironmentClient.executeSession(sessionId, "command -v pnpm")
+            val result = SystemEnvironmentCapabilityClient.executeSession(sessionId, "command -v pnpm")
             val installed = result.contains("pnpm")
             pnpmInstalled = installed
             return installed
@@ -90,7 +90,7 @@ class MCPStarter(private val context: Context) {
 
     /** Check if terminal service is connected and initialized */
     private suspend fun isTerminalServiceConnected(): Boolean =
-        runCatching { SystemEnvironmentClient.ensureRunning() }
+        runCatching { SystemEnvironmentCapabilityClient.ensureRunning() }
             .onFailure { AppLogger.e(TAG, "System Environment provider is unavailable", it) }
             .getOrDefault(false)
 

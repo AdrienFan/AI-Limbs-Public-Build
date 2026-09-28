@@ -69,7 +69,7 @@ import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspaceConf
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspacePreviewRefreshBus
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.WorkspacePreviewRefreshEvent
 import com.ai.assistance.operit.ui.features.chat.webview.workspace.toWorkspaceCommandOutputEntries
-import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentCapabilityClient
 import com.ai.assistance.operit.util.TtsCleaner
 import com.ai.assistance.operit.util.TtsSegmenter
 import com.ai.assistance.operit.ui.features.chat.util.findMentionTokens
@@ -2620,7 +2620,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 // Resolve by stable session name every time. The provider reuses an active session and
                 // recreates it after a runtime/plugin restart, so Base never inspects provider state.
                 val workspaceName = workspaceDir.name.take(4) // 保留原有短标题行为
-                val sharedSessionId = SystemEnvironmentClient.createSession("Workspace: $workspaceName")
+                val sharedSessionId = SystemEnvironmentCapabilityClient.createSession("Workspace: $workspaceName")
                 workspaceTerminalSessions[workspacePath] = sharedSessionId
                 sessionId = sharedSessionId
 
@@ -2630,7 +2630,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                 )
 
                 val activeSessionId = sharedSessionId
-                SystemEnvironmentClient.executeSession(activeSessionId, "cd \"${workspaceDir.absolutePath}\"")
+                SystemEnvironmentCapabilityClient.executeSession(activeSessionId, "cd \"${workspaceDir.absolutePath}\"")
 
                 _workspaceCommandExecutionState.value =
                     WorkspaceCommandExecutionState(
@@ -2641,7 +2641,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
                         usesDedicatedSession = command.usesDedicatedSession
                     )
 
-                SystemEnvironmentClient.executeSessionFlow(activeSessionId, commandText).collect { event ->
+                SystemEnvironmentCapabilityClient.executeSessionFlow(activeSessionId, commandText).collect { event ->
                     val currentState = _workspaceCommandExecutionState.value
                     if (currentState?.sessionId != activeSessionId) {
                         return@collect
@@ -2699,10 +2699,10 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
                 val workspaceDir = File(workspacePath)
                 val sessionTitle = command.sessionTitle ?: command.label
-                val dedicatedSessionId = SystemEnvironmentClient.createSession(sessionTitle)
+                val dedicatedSessionId = SystemEnvironmentCapabilityClient.createSession(sessionTitle)
 
-                SystemEnvironmentClient.executeSession(dedicatedSessionId, "cd \"${workspaceDir.absolutePath}\"")
-                SystemEnvironmentClient.sendInput(dedicatedSessionId, commandText + "\r")
+                SystemEnvironmentCapabilityClient.executeSession(dedicatedSessionId, "cd \"${workspaceDir.absolutePath}\"")
+                SystemEnvironmentCapabilityClient.sendInput(dedicatedSessionId, commandText + "\r")
                 openAiComputerForTerminalSession()
 
                 AppLogger.d(
@@ -2748,7 +2748,7 @@ class ChatViewModel(private val context: Context) : ViewModel() {
 
         _workspaceCommandExecutionState.value = currentState.copy(isCancelling = true)
         viewModelScope.launch {
-            runCatching { SystemEnvironmentClient.interruptSession(currentState.sessionId) }
+            runCatching { SystemEnvironmentCapabilityClient.interruptSession(currentState.sessionId) }
                 .onFailure { error ->
                     AppLogger.e(TAG, "Failed to interrupt workspace system-environment session", error)
                     _workspaceCommandExecutionState.value =
