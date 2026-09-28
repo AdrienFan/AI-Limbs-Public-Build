@@ -62,6 +62,55 @@ class LanerChatBridgeServiceTest {
         }
     }
 
+
+    @Test
+    fun presenceUsesActiveTurnAndDoesNotTreatStaleHeartbeatAsOnline() {
+        val now = 1_000_000L
+
+        assertEquals(
+            LanerChatPresenceState.ACTIVE,
+            LanerChatContract.presenceState(
+                activeSessionId = "session-presence",
+                lastAgentSeenAtMs = null,
+                nowMs = now,
+                hasActiveTurn = true
+            )
+        )
+        assertEquals(
+            LanerChatPresenceState.ACTIVE,
+            LanerChatContract.presenceState(
+                activeSessionId = "session-presence",
+                lastAgentSeenAtMs = now - LanerChatContract.AGENT_ACTIVE_WINDOW_MS,
+                nowMs = now
+            )
+        )
+        assertEquals(
+            LanerChatPresenceState.RECENT,
+            LanerChatContract.presenceState(
+                activeSessionId = "session-presence",
+                lastAgentSeenAtMs = now - LanerChatContract.AGENT_ACTIVE_WINDOW_MS - 1L,
+                nowMs = now
+            )
+        )
+        assertEquals(
+            LanerChatPresenceState.WAITING,
+            LanerChatContract.presenceState(
+                activeSessionId = "session-presence",
+                lastAgentSeenAtMs = now - LanerChatContract.AGENT_RECENT_WINDOW_MS - 1L,
+                nowMs = now
+            )
+        )
+        assertEquals(
+            LanerChatPresenceState.WAITING,
+            LanerChatContract.presenceState(
+                activeSessionId = null,
+                lastAgentSeenAtMs = now,
+                nowMs = now,
+                hasActiveTurn = true
+            )
+        )
+    }
+
     @Test
     fun canceledTurnPreservesRequestsAndResumeMakesThemEligibleAgain() {
         val root = Files.createTempDirectory("laner-chat-plugin-cancel-test").toFile()

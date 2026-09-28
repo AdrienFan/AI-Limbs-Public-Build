@@ -20,9 +20,16 @@ object LanerChatContract {
     fun presenceState(
         activeSessionId: String?,
         lastAgentSeenAtMs: Long?,
-        nowMs: Long = System.currentTimeMillis()
+        nowMs: Long = System.currentTimeMillis(),
+        hasActiveTurn: Boolean = false
     ): LanerChatPresenceState {
-        if (activeSessionId.isNullOrBlank() || lastAgentSeenAtMs == null) {
+        if (activeSessionId.isNullOrBlank()) {
+            return LanerChatPresenceState.WAITING
+        }
+        if (hasActiveTurn) {
+            return LanerChatPresenceState.ACTIVE
+        }
+        if (lastAgentSeenAtMs == null) {
             return LanerChatPresenceState.WAITING
         }
         val ageMs = (nowMs - lastAgentSeenAtMs).coerceAtLeast(0L)

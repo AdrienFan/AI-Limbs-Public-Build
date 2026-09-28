@@ -558,6 +558,7 @@ internal class LanerChatBridgeService(
         val index = storedState.assistantTurns.indexOfFirst { it.turnId == normalizedTurnId }
         require(index >= 0) { "Laner chat turn not found: $normalizedTurnId" }
         val existing = storedState.assistantTurns[index]
+        touchAgentLocked(existing.sessionId)
         val normalizedReplyId = replyId?.trim()?.takeIf { it.isNotEmpty() } ?: "turn:$normalizedTurnId"
         if (existing.status == LanerChatAssistantTurnStatus.COMPLETED) {
             check(existing.replyId == normalizedReplyId && existing.replyContent == normalizedContent) {
@@ -611,6 +612,7 @@ internal class LanerChatBridgeService(
         val index = storedState.assistantTurns.indexOfFirst { it.turnId == normalizedTurnId }
         require(index >= 0) { "Laner chat turn not found: $normalizedTurnId" }
         val existing = storedState.assistantTurns[index]
+        touchAgentLocked(existing.sessionId)
         if (existing.status == LanerChatAssistantTurnStatus.COMPLETED_NO_REPLY) {
             val requests = existing.requestIds.mapNotNull { id ->
                 storedState.requests.firstOrNull { it.requestId == id }
@@ -815,11 +817,6 @@ internal class LanerChatBridgeService(
         storedState.requests.filter { request ->
             request.isUnresolved() && (sessionId.isNullOrBlank() || request.sessionId == sessionId)
         }
-
-    @Synchronized
-    fun markAgentSeen(sessionId: String? = null) {
-        touchAgentLocked(sessionId)
-    }
 
     private fun touchAgentLocked(sessionId: String?) {
         val targetSessionId =

@@ -269,7 +269,16 @@ internal class LanerChatModeProvider(
             if (mailbox.has("last_agent_seen_at_ms") && !mailbox.isNull("last_agent_seen_at_ms")) {
                 mailbox.optLong("last_agent_seen_at_ms")
             } else null
-        val presence = LanerChatContract.presenceState(activeSessionId, lastSeen)
+        val hasActiveTurn =
+            mailbox.has("active_turn_id") &&
+                !mailbox.isNull("active_turn_id") &&
+                mailbox.optString("active_turn_id").isNotBlank()
+        val presence =
+            LanerChatContract.presenceState(
+                activeSessionId = activeSessionId,
+                lastAgentSeenAtMs = lastSeen,
+                hasActiveTurn = hasActiveTurn
+            )
         val unresolved = queue.optInt("unresolved_count", 0)
         val label =
             when (presence) {

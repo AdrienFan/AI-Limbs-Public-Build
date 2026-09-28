@@ -13,11 +13,11 @@ internal class LanerChatController(
     private val host: InProcessPluginHost
 ) {
     fun status(): JSONObject {
-        service.markAgentSeen()
         val mailbox = service.snapshot()
         val presence = LanerChatContract.presenceState(
             activeSessionId = mailbox.activeSessionId,
-            lastAgentSeenAtMs = mailbox.lastAgentSeenAtMs
+            lastAgentSeenAtMs = mailbox.lastAgentSeenAtMs,
+            hasActiveTurn = mailbox.activeTurnId != null
         )
         return ok()
             .put("module", "AI Limbs Laner Chat Plugin")

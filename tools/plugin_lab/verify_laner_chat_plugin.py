@@ -55,7 +55,58 @@ for kotlin_file in SOURCE_ROOT.glob("*.kt"):
         )
         sys.exit(1)
 
+controller = (SOURCE_ROOT / "LanerChatController.kt").read_text(encoding="utf-8")
+contract = (SOURCE_ROOT / "LanerChatContract.kt").read_text(encoding="utf-8")
+mode_provider = (SOURCE_ROOT / "LanerChatModeProvider.kt").read_text(encoding="utf-8")
 service = (SOURCE_ROOT / "LanerChatBridgeService.kt").read_text(encoding="utf-8")
+
+status_start = controller.find("fun status(): JSONObject {")
+status_end = controller.find("\n    fun sessionOpen(", status_start)
+if status_start < 0 or status_end < 0:
+    print("Laner Chat status() contract is missing.", file=sys.stderr)
+    sys.exit(1)
+status_body = controller[status_start:status_end]
+if "markAgentSeen" in status_body or "touchAgentLocked" in status_body:
+    print("Laner Chat status() must be read-only and must not refresh Agent presence.", file=sys.stderr)
+    sys.exit(1)
+if "hasActiveTurn = mailbox.activeTurnId != null" not in status_body:
+    print("Laner Chat status() must treat an active Assistant Turn as online.", file=sys.stderr)
+    sys.exit(1)
+if "hasActiveTurn" not in contract or "hasActiveTurn = hasActiveTurn" not in mode_provider:
+    print("Laner Chat UI and presence contract must share active-turn presence semantics.", file=sys.stderr)
+    sys.exit(1)
+if "fun markAgentSeen(" in service:
+    print("Laner Chat must not expose a generic markAgentSeen() hook to read paths.", file=sys.stderr)
+    sys.exit(1)
+
+def method_slice(name: str) -> str:
+    start = service.find(f"fun {name}(")
+    if start < 0:
+        return ""
+    end = service.find("\n    @Synchronized", start + 1)
+    return service[start:] if end < 0 else service[start:end]
+
+required_agent_touches = {
+    "completeTurn": "touchAgentLocked(existing.sessionId)",
+    "resolveTurnWithoutReply": "touchAgentLocked(existing.sessionId)",
+}
+for method_name, token in required_agent_touches.items():
+    body = method_slice(method_name)
+    if token not in body:
+        print(
+            f"Laner Chat Agent action {method_name} must refresh presence via {token}.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+for method_name in ("cancelActiveTurn", "resumeScheduler"):
+    if "touchAgentLocked(" in method_slice(method_name):
+        print(
+            f"Laner Chat user-controllable action {method_name} must not synthesize Agent presence.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
 required_core_tokens = [
     "fun openSession(",
     "fun enqueueMailbox(",
