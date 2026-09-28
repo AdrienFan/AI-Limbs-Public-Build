@@ -47,6 +47,73 @@ internal class LanerChatBridgeService(
     val status: StateFlow<LanerChatMailboxStatus> = mailboxStatusFlow.asStateFlow()
     val queueEvents: SharedFlow<LanerChatQueueChangedEvent> = queueEventsFlow.asSharedFlow()
 
+    init {
+        // Existing chat history predates the quick inbox and must not appear as new unread mail.
+        if (!storedState.quickInitialized) {
+            val baseline = assistantMessages().groupBy { it.first }
+                .mapValues { (_, messages) -> messages.maxOf { it.second } }
+            commitState(storedState.copy(quickReadThrough = baseline, quickInitialized = true))
+        }
+    }
+
+    @Synchronized
+    fun quickSnapshot(): JSONObject {
+        val chatId = buildMailboxStatus(storedState).boundChatId.orEmpty()
+        val cursor = storedState.quickReadThrough[chatId] ?: 0L
+        val messages = assistantMessages()
+            .filter { it.first == chatId && it.second > cursor }
+            .distinctBy { it.second }
+            .sortedBy { it.second }
+        return JSONObject()
+            .put("chat_id", chatId)
+            .put("unread_count", messages.size)
+            .put("last_user_timestamp", storedState.requests
+                .filter { it.chatId == chatId }
+                .maxOfOrNull { it.chatMessageTimestamp } ?: 0L)
+            .put("messages", org.json.JSONArray(messages.map { (_, timestamp, content) ->
+                JSONObject().put("timestamp", timestamp).put("content", content)
+            }))
+    }
+
+    @Synchronized
+    fun quickAcknowledge(chatId: String, through: Long) {
+        require(chatId.isNotBlank() && through > 0L)
+        val current = storedState.quickReadThrough[chatId] ?: 0L
+        if (through > current) {
+            commitState(storedState.copy(
+                quickReadThrough = storedState.quickReadThrough + (chatId to through)
+            ))
+        }
+    }
+
+    private fun assistantMessages(): List<Triple<String, Long, String>> {
+        val requestById = storedState.requests.associateBy { it.requestId }
+        val turns = storedState.assistantTurns.mapNotNull { turn ->
+            val chatId = turn.requestIds.firstNotNullOfOrNull { requestById[it]?.chatId }
+            val content = turn.replyContent
+            if (turn.status == LanerChatAssistantTurnStatus.COMPLETED &&
+                chatId != null && content != null && turn.chatMessageTimestamp > 0L
+            ) Triple(chatId, turn.chatMessageTimestamp, content) else null
+        }
+        val proactive = storedState.proactiveMessages.mapNotNull { message ->
+            if (message.status == LanerChatProactiveMessageStatus.DELIVERED)
+                Triple(message.chatId, message.chatMessageTimestamp, message.content)
+            else null
+        }
+        val managedRequestIds = storedState.assistantTurns.flatMap { it.requestIds }.toSet()
+        val legacy = storedState.requests.mapNotNull { request ->
+            val content = request.replyContent
+            if (request.status == LanerChatMessageStatus.ANSWERED &&
+                request.requestId !in managedRequestIds && content != null
+            ) {
+                Triple(request.chatId,
+                    request.chatMessageTimestamp.takeIf { it > 0L } ?: request.answeredAtMs ?: 0L,
+                    content)
+            } else null
+        }
+        return (turns + proactive + legacy).filter { it.second > 0L }
+    }
+
     @Synchronized
     fun openSession(
         requestedSessionId: String?,

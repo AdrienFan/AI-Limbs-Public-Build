@@ -34,6 +34,19 @@ internal class LanerChatController(
             .put("delivers_to_host_chat", true)
     }
 
+    fun quickSnapshot(): JSONObject = ok().put("quick", service.quickSnapshot())
+
+    fun quickCount(): JSONObject =
+        ok().put("unread_count", service.quickSnapshot().getInt("unread_count"))
+
+    fun quickAcknowledge(args: JSONObject): JSONObject {
+        service.quickAcknowledge(
+            requiredString(args, "chat_id"),
+            args.getLong("through")
+        )
+        return ok().put("acknowledged", true)
+    }
+
     fun sessionOpen(args: JSONObject): JSONObject =
         ok().put(
             "result",

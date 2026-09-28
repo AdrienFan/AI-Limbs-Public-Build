@@ -2,14 +2,21 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.chat.laner_bridge",
-  "version": "0.2.6",
-  "api": { "target": 1, "min": 1 },
+  "version": "0.2.7",
+  "api": {
+    "target": 1,
+    "min": 1
+  },
   "display": {
     "name": "Laner Chat",
     "description": "兰儿聊天桥：独立 durable mailbox、Session、Priority、Assistant Turn 与聊天模式 UI。"
   },
-  "roles": ["system_plugin"],
-  "activation": { "mode": "hot" },
+  "roles": [
+    "system_plugin"
+  ],
+  "activation": {
+    "mode": "hot"
+  },
   "runtime": {
     "kind": "android_inprocess",
     "entry": "payload/plugin.apk",
@@ -18,11 +25,23 @@
       "presentation_entry_class": "com.ai.limbs.plugins.lanerchat.LanerChatPresentationEntry"
     }
   },
-  "dependencies": { "plugins": [], "services": [] },
-  "permissions": { "requested_scopes": ["host.chat@1", "host.attention@1"] },
+  "dependencies": {
+    "plugins": [],
+    "services": []
+  },
+  "permissions": {
+    "requested_scopes": [
+      "host.chat@1",
+      "host.attention@1",
+      "host.window.overlay@1"
+    ]
+  },
   "provides": {
     "capabilities": [
       "plugin.chat.laner_bridge.status",
+      "plugin.chat.laner_bridge.quick.ack",
+      "plugin.chat.laner_bridge.quick.count",
+      "plugin.chat.laner_bridge.quick.snapshot",
       "plugin.chat.laner_bridge.session.open",
       "plugin.chat.laner_bridge.session.close",
       "plugin.chat.laner_bridge.ui.bind_chat",
@@ -45,7 +64,8 @@
     "services": [],
     "providers": [
       "plugin.chat.laner_bridge.runtime",
-      "plugin.chat.laner_bridge.chat_mode"
+      "plugin.chat.laner_bridge.chat_mode",
+      "plugin.chat.laner_bridge.quick_overlay"
     ],
     "extensions": []
   }

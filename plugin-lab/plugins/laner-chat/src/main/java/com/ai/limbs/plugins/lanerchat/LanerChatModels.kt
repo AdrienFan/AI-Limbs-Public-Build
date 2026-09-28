@@ -136,7 +136,9 @@ internal data class LanerChatStoredState(
     val requests: List<LanerChatRequest> = emptyList(),
     val proactiveMessages: List<LanerChatProactiveMessage> = emptyList(),
     val assistantTurns: List<LanerChatAssistantTurn> = emptyList(),
-    val schedulerPaused: Boolean = false
+    val schedulerPaused: Boolean = false,
+    val quickReadThrough: Map<String, Long> = emptyMap(),
+    val quickInitialized: Boolean = false
 )
 
 data class LanerChatMailboxStatus(

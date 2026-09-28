@@ -21,6 +21,21 @@ import kotlinx.coroutines.CancellationException
 
 internal const val LANER_CHAT_PLUGIN_ID = "plugin.chat.laner_bridge"
 internal const val LANER_CHAT_PROVIDER_ID = "$LANER_CHAT_PLUGIN_ID.runtime"
+internal const val LANER_CHAT_QUICK_PROVIDER_ID = "$LANER_CHAT_PLUGIN_ID.quick_overlay"
+internal const val LANER_CHAT_OVERLAY_ID = "$LANER_CHAT_PLUGIN_ID.quick"
+
+
+internal fun quickPageSlotAction(): JSONObject = JSONObject()
+    .put("action_id", "laner_quick_chat")
+    .put("target_page_id", "host:native.ai_chat")
+    .put("slot_id", "top_bar_start")
+    .put("provider_id", LANER_CHAT_QUICK_PROVIDER_ID)
+    .put("action_kind", "overlay")
+    .put("overlay_id", LANER_CHAT_OVERLAY_ID)
+    .put("badge_capability_id", "$LANER_CHAT_PLUGIN_ID.quick.count")
+    .put("icon_key", "chat")
+    .put("content_description", "快捷聊天")
+    .put("priority", 110)
 
 class LanerChatEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
@@ -140,6 +155,28 @@ class LanerChatEntry : InProcessPluginEntry {
             "读取影子插件自己的会话、邮箱、优先级和 Assistant Turn 状态，不返回消息正文。",
             read
         ) { controller.status() }
+
+        capability(
+            "quick.snapshot",
+            "读取快捷聊天未读消息",
+            "只返回绑定聊天中尚未确认的兰儿消息。",
+            read
+        ) { controller.quickSnapshot() }
+
+        capability(
+            "quick.count",
+            "读取快捷聊天未读条数",
+            "供通用顶栏角标读取未读数量。",
+            read
+        ) { controller.quickCount() }
+
+        capability(
+            "quick.ack",
+            "确认快捷聊天消息",
+            "同步快捷窗和正式聊天室的已读进度。",
+            write,
+            listOf(parameter("chat_id"), parameter("through"))
+        ) { controller.quickAcknowledge(it) }
 
         capability(
             "session.open",
@@ -345,18 +382,35 @@ class LanerChatEntry : InProcessPluginEntry {
             listOf(parameter("message_id", description = "proactive message ID"))
         ) { controller.proactiveDelivered(it) }
 
+        val modeProvider = LanerChatModeProvider(host) { name, parameters ->
+                val operation = checkNotNull(operations[name]) {
+                    "Unknown Laner Chat operation: $name"
+                }
+                operation(JSONObject(parameters.toString()))
+            }
         host.registerProvider(
             LANER_CHAT_MODE_PROVIDER_ID,
-            LanerChatModeProvider(host) { name, parameters ->
+            modeProvider,
+            mapOf(
+                "kind" to "chat_mode_extension",
+                "api" to "1",
+                "provider_type_id" to LanerChatContract.PROVIDER_TYPE_ID
+            )
+        )
+
+        val quickAction = quickPageSlotAction()
+        host.registerProvider(
+            LANER_CHAT_QUICK_PROVIDER_ID,
+            LanerChatQuickPageProvider(host, modeProvider) { name, parameters ->
                 val operation = checkNotNull(operations[name]) {
                     "Unknown Laner Chat operation: $name"
                 }
                 operation(JSONObject(parameters.toString()))
             },
             mapOf(
-                "kind" to "chat_mode_extension",
-                "api" to "1",
-                "provider_type_id" to LanerChatContract.PROVIDER_TYPE_ID
+                "kind" to "plugin_page",
+                "overlay_enabled" to "true",
+                "ai_limbs.page_slot_actions.v1" to JSONArray().put(quickAction).toString()
             )
         )
 

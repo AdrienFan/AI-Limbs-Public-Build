@@ -116,6 +116,13 @@ internal class LanerChatModeProvider(
                 chatId = chatId,
                 presentations = bound.optJSONArray("message_presentations")
             )
+            val quick = invoke("quick.snapshot").getJSONObject("quick")
+            val messages = quick.getJSONArray("messages")
+            if (messages.length() > 0) {
+                invoke("quick.ack", JSONObject()
+                    .put("chat_id", chatId)
+                    .put("through", messages.getJSONObject(messages.length() - 1).getLong("timestamp")))
+            }
         }
         refreshStatus()
         ensurePolling()
@@ -134,7 +141,12 @@ internal class LanerChatModeProvider(
                 "Laner Chat submit requires text or attachments"
             }
 
-            val selectedPriority = priority.value
+            val selectedPriority =
+                if (request.has("priority")) {
+                    LanerChatPriority.valueOf(request.getString("priority").uppercase())
+                } else {
+                    priority.value
+                }
             val result = invoke(
                 "mailbox.enqueue",
                 JSONObject()
@@ -184,7 +196,7 @@ internal class LanerChatModeProvider(
                         ?.trim()
                         ?.takeIf { it.isNotEmpty() }
                 }
-            priority.value = LanerChatPriority.NORMAL
+            if (!request.has("priority")) priority.value = LanerChatPriority.NORMAL
             refreshStatus()
             JSONObject()
                 .put("success", true)

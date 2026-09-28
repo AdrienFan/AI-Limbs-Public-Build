@@ -30,10 +30,33 @@ class LanerChatPresentationEntry : InProcessPluginPresentationEntry {
                 "provider_type_id" to LanerChatContract.PROVIDER_TYPE_ID
             )
         )
+        val quickRegistration = host.registerPageProvider(
+            LANER_CHAT_QUICK_PROVIDER_ID,
+            LanerChatQuickPageProvider(host, provider) { name, parameters ->
+                org.json.JSONObject(
+                    host.invokePluginCapability(
+                        "$LANER_CHAT_PLUGIN_ID.$name",
+                        parameters.toString()
+                    )
+                )
+            },
+            mapOf("overlay_enabled" to "true", "kind" to "plugin_page",
+                "ai_limbs.page_slot_actions.v1" to org.json.JSONArray().put(quickPageSlotAction()).toString())
+        )
         host.logger.i("LanerChat", "Laner Chat presentation mounted")
         return InProcessPluginPresentationHandle {
             provider.stop()
-            registration.close()
+            try {
+                host.invokeHostCapability(
+                    "host.window.overlay@1",
+                    org.json.JSONObject()
+                        .put("operation", "remove")
+                        .put("overlay_id", LANER_CHAT_OVERLAY_ID).toString()
+                )
+            } finally {
+                quickRegistration.close()
+                registration.close()
+            }
             host.logger.i("LanerChat", "Laner Chat presentation stopped")
         }
     }
