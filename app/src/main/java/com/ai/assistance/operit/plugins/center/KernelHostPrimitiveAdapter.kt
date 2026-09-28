@@ -37,6 +37,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
     private val appContext = context.applicationContext
     private val gatewayBindings = ConcurrentHashMap<String, ExtensionBindingHandle>()
     private val hostScreenCaptureTools by lazy { StandardUITools(appContext) }
+    private val overlayWindows by lazy { HostOverlayWindows(appContext) }
 
     fun isAvailable(primitiveId: String, operation: String): Boolean =
         "${primitiveId.trim().lowercase()}/${operation.trim().lowercase()}" in SUPPORTED
@@ -84,6 +85,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                     parameters
                 )
             "host.ui.surface@1" -> invokeUiSurface(op, parameters)
+            "host.window.overlay@1" -> overlayWindows.invoke(ownerPluginId, op, parameters)
             "host.capability@1" -> invokeCapability(ownerPluginId, parameters)
             "host.plugin.service@1" -> invokePluginService(ownerPluginId, op, parameters)
             "host.extension.routing@1" -> invokeExtensionRouting(op, parameters)
@@ -897,6 +899,10 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.ui.surface@1/register",
             "host.ui.surface@1/open",
             "host.ui.surface@1/remove",
+            "host.window.overlay@1/create",
+            "host.window.overlay@1/update",
+            "host.window.overlay@1/remove",
+            "host.window.overlay@1/list",
             "host.capability@1/invoke",
             "host.plugin.service@1/list",
             "host.plugin.service@1/describe",

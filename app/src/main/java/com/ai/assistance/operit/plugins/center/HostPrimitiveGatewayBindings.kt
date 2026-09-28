@@ -258,7 +258,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.logging@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, logging("sources"), logging("read"), logging("export"), logging("clear"), logging("write")),
         "host.secrets@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("read"), pending("revoke"), pending("rotate")),
         "host.ui.surface@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list")), owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("register")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("open")), owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("remove"))),
-        "host.window.overlay@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("create"), pending("update"), pending("remove"), pending("list")),
+        "host.window.overlay@1" to primitive(HostGatewayExecutionAffinity.HOST_SERVICE, owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("create")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("update")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("remove")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("list")), enforceAffinity = true),
         "host.capability@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, core("search", "capability.search"), core("describe", "capability.describe"), kernel("invoke")),
         "host.plugin.service@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list"), kernel("describe"), kernel("call")),
         "host.extension.routing@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list_points"), kernel("list_bindings"), kernel("bind"), kernel("unbind")),
