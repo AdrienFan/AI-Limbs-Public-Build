@@ -22,7 +22,7 @@ class LanerChatEntry : InProcessPluginEntry {
         }
         val service = LanerChatBridgeService.create(host.dataDir, host.applicationContext)
 
-        val controller = LanerChatController(service)
+        val controller = LanerChatController(service, host)
 
         host.registerProvider(
             LANER_CHAT_PROVIDER_ID,
@@ -198,7 +198,7 @@ class LanerChatEntry : InProcessPluginEntry {
         capability(
             "turn.reply",
             "完成 Laner Chat Assistant Turn",
-            "原子完成一个 Turn 并持久化统一回复。v0.1 影子插件暂不把回复注入主聊天记录。",
+            "完成一个 Turn、持久化统一回复，并通过通用 Host 聊天接口发布。",
             write,
             listOf(
                 parameter("turn_id", description = "turn.claim 返回的 Turn ID"),

@@ -1,10 +1,16 @@
 package com.ai.limbs.plugins.lanerchat
 
+import com.ai.limbs.plugin.runtime.InProcessPluginHost
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+import java.util.TimeZone
 import org.json.JSONArray
 import org.json.JSONObject
 
 internal class LanerChatController(
-    private val service: LanerChatBridgeService
+    private val service: LanerChatBridgeService,
+    private val host: InProcessPluginHost
 ) {
     fun status(): JSONObject {
         service.markAgentSeen()
@@ -25,7 +31,7 @@ internal class LanerChatController(
             .put("supports_priority", true)
             .put("supports_turn_scheduler", true)
             .put("supports_proactive_prepare", true)
-            .put("delivers_to_host_chat", false)
+            .put("delivers_to_host_chat", true)
     }
 
     fun sessionOpen(args: JSONObject): JSONObject =
@@ -123,20 +129,24 @@ internal class LanerChatController(
             )
         )
 
-    fun turnReply(args: JSONObject): JSONObject {
+    suspend fun turnReply(args: JSONObject): JSONObject {
         val result = service.completeTurn(
             turnId = requiredString(args, "turn_id"),
             replyId = optionalString(args, "reply_id"),
             content = requiredString(args, "content")
         )
-        return ok()
-            .put("result", LanerChatJson.turnReply(result))
-            .put("delivered_to_host_chat", false)
-            .put("delivery_pending", true)
-            .put(
-                "note",
-                "Business reply is durable in the Laner Chat plugin; the generic Host compatibility adapter mirrors it into chat history."
-            )
+        val turn = result.turn
+        val chatId = requireNotNull(result.requests.firstOrNull()?.chatId) {
+            "Completed turn has no bound chat"
+        }
+        publishAssistant(chatId, requireNotNull(turn.replyContent),
+            turn.chatMessageTimestamp, requireNotNull(turn.completedAtMs))
+        return ok().put("result", LanerChatJson.turnReply(result))
+            .put("turn_id", turn.turnId).put("reply_id", turn.replyId ?: JSONObject.NULL)
+            .put("status", turn.status.name).put("covered_request_ids", JSONArray(turn.requestIds))
+            .put("covered_request_count", result.requests.size).put("duplicate", result.duplicate)
+            .put("delivered_to_chat", true).put("delivery_pending", false)
+            .put("completed_at", isoTime(requireNotNull(turn.completedAtMs)))
     }
 
     fun turnResolve(args: JSONObject): JSONObject =
@@ -159,17 +169,41 @@ internal class LanerChatController(
             LanerChatJson.turnStatus(service.resumeScheduler(optionalString(args, "session_id")))
         )
 
-    fun legacyReply(args: JSONObject): JSONObject =
-        ok().put(
-            "result",
-            LanerChatJson.reply(
-                service.reply(
-                    requestId = requiredString(args, "request_id"),
-                    replyId = optionalString(args, "reply_id"),
-                    content = requiredString(args, "content")
-                )
-            )
+    suspend fun legacyReply(args: JSONObject): JSONObject {
+        val result = service.reply(
+            requestId = requiredString(args, "request_id"),
+            replyId = optionalString(args, "reply_id"),
+            content = requiredString(args, "content")
         )
+        val request = result.request
+        publishAssistant(request.chatId, requireNotNull(request.replyContent),
+            request.chatMessageTimestamp.takeIf { it > 0L } ?: requireNotNull(request.answeredAtMs),
+            requireNotNull(request.answeredAtMs))
+        return ok().put("result", LanerChatJson.reply(result))
+            .put("request_id", request.requestId).put("reply_id", request.replyId ?: JSONObject.NULL)
+            .put("status", request.status.name).put("duplicate", result.duplicate)
+            .put("delivered_to_live_stream", result.deliveredToLiveStream)
+            .put("delivered_to_chat", true)
+            .put("answered_at", isoTime(requireNotNull(request.answeredAtMs)))
+    }
+
+    private suspend fun publishAssistant(chatId: String, content: String, timestamp: Long, completedAt: Long) {
+        val payload = JSONObject().put("operation", "publish_assistant")
+            .put("chat_id", chatId).put("content", content)
+            .put("message_timestamp", timestamp).put("completed_at_ms", completedAt)
+            .put("provider", LanerChatContract.PROVIDER_TYPE_ID)
+            .put("model_name", LanerChatContract.MODEL_ID)
+            .put("role_name", LanerChatContract.DEFAULT_AGENT_NAME)
+        val published = JSONObject(host.invokeHostCapability("host.chat@1", payload.toString()))
+        check(published.optBoolean("success") && published.optBoolean("persisted")) {
+            "Host chat did not persist the assistant message: $published"
+        }
+    }
+
+    private fun isoTime(timestamp: Long): String =
+        SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US).apply {
+            timeZone = TimeZone.getTimeZone("UTC")
+        }.format(Date(timestamp))
 
     fun enqueue(args: JSONObject): JSONObject {
         val request = service.enqueueMailbox(

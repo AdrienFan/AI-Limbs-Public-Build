@@ -730,11 +730,14 @@ internal class LanerChatBridgeService(
         check(existing.status != LanerChatMessageStatus.RESOLVED_NO_REPLY) {
             "Laner chat request was resolved without reply: $normalizedRequestId"
         }
+        val now = System.currentTimeMillis()
         val answered = existing.copy(
             status = LanerChatMessageStatus.ANSWERED,
-            answeredAtMs = System.currentTimeMillis(),
+            answeredAtMs = now,
             replyId = normalizedReplyId,
-            replyContent = normalizedContent
+            replyContent = normalizedContent,
+            chatMessageTimestamp = existing.chatMessageTimestamp.takeIf { it > 0L }
+                ?: LanerChatTimestampAllocator.next(now)
         )
         val requests = storedState.requests.toMutableList().also { it[index] = answered }
         commitState(storedState.copy(requests = requests))
