@@ -11,6 +11,13 @@ import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.collect
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.CancellationException
 
 internal const val LANER_CHAT_PLUGIN_ID = "plugin.chat.laner_bridge"
 internal const val LANER_CHAT_PROVIDER_ID = "$LANER_CHAT_PLUGIN_ID.runtime"
@@ -24,6 +31,37 @@ class LanerChatEntry : InProcessPluginEntry {
 
         val controller = LanerChatController(service, host)
         val operations = linkedMapOf<String, suspend (JSONObject) -> JSONObject>()
+
+        val attentionJob =
+            host.scope.launch {
+                try {
+                    service.status
+                        .map { service.attentionSummary() }
+                        .distinctUntilChanged()
+                        .collect { summary ->
+                            try {
+                                publishAttention(host, summary)
+                            } catch (cancelled: CancellationException) {
+                                throw cancelled
+                            } catch (error: Exception) {
+                                host.logger.w(
+                                    "LanerChat",
+                                    "Unable to publish Attention sideband",
+                                    error
+                                )
+                            }
+                        }
+                } finally {
+                    withContext(NonCancellable) {
+                        runCatching {
+                            host.invokeHostCapability(
+                                "host.attention@1",
+                                JSONObject().put("operation", "clear").toString()
+                            )
+                        }
+                    }
+                }
+            }
 
         host.registerProvider(
             LANER_CHAT_PROVIDER_ID,
@@ -324,7 +362,79 @@ class LanerChatEntry : InProcessPluginEntry {
 
         host.logger.i("LanerChat", "Laner Chat shadow plugin mounted")
         return InProcessPluginHandle {
+            attentionJob.cancel()
             host.logger.i("LanerChat", "Laner Chat shadow plugin stopped")
         }
     }
+
+    private suspend fun publishAttention(
+        host: InProcessPluginHost,
+        summary: LanerChatAttentionSummary
+    ) {
+        if (summary.isEmpty) {
+            val cleared =
+                JSONObject(
+                    host.invokeHostCapability(
+                        "host.attention@1",
+                        JSONObject().put("operation", "clear").toString()
+                    )
+                )
+            check(cleared.optBoolean("success")) { "Host Attention clear failed: $cleared" }
+            return
+        }
+
+        val groups = JSONArray()
+        addAttentionGroup(groups, "unread", "未读", summary.unread)
+        addAttentionGroup(groups, "pending", "未处理", summary.pending)
+
+        val published =
+            JSONObject(
+                host.invokeHostCapability(
+                    "host.attention@1",
+                    JSONObject()
+                        .put("operation", "publish")
+                        .put("label", "Laner Chat")
+                        .put("groups", groups)
+                        .toString()
+                )
+            )
+        check(published.optBoolean("success")) { "Host Attention publish failed: $published" }
+    }
+
+    private fun addAttentionGroup(
+        groups: JSONArray,
+        id: String,
+        label: String,
+        counts: LanerChatPriorityCounts
+    ) {
+        val items = JSONArray()
+        if (counts.high > 0) {
+            items.put(attentionItem("urgent", "紧急", counts.high, "danger"))
+        }
+        if (counts.normal > 0) {
+            items.put(attentionItem("normal", "普通", counts.normal, "info"))
+        }
+        if (counts.low > 0) {
+            items.put(attentionItem("later", "稍后", counts.low, "success"))
+        }
+        if (items.length() == 0) return
+        groups.put(
+            JSONObject()
+                .put("id", id)
+                .put("label", label)
+                .put("items", items)
+        )
+    }
+
+    private fun attentionItem(
+        id: String,
+        label: String,
+        count: Int,
+        semanticTone: String
+    ): JSONObject =
+        JSONObject()
+            .put("id", id)
+            .put("label", label)
+            .put("count", count)
+            .put("semantic_tone", semanticTone)
 }

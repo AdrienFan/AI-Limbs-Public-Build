@@ -6,8 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.weight
 import androidx.compose.material3.Card
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.MaterialTheme
@@ -28,7 +30,9 @@ import com.ai.limbs.plugin.runtime.InProcessChatModeBehaviorKeys
 import com.ai.limbs.plugin.runtime.InProcessChatModeExtensionProvider
 import com.ai.limbs.plugin.runtime.InProcessChatModeSlotIds
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -49,6 +53,7 @@ internal class LanerChatModeProvider(
 
     private val priority = MutableStateFlow(LanerChatPriority.NORMAL)
     private val activeContext = AtomicReference(JSONObject())
+    private val syncedPresentationKeys = ConcurrentHashMap.newKeySet<String>()
     private val submitMutex = Mutex()
     private var pollingJob: Job? = null
 
@@ -91,8 +96,7 @@ internal class LanerChatModeProvider(
                 composeView(pluginContext) { card ->
                     LanerConfigurationCard { card.performClick() }
                 }
-            InProcessChatModeSlotIds.STATUS_OVERLAY ->
-                composeView(pluginContext) { _ -> LanerStatusOverlay() }
+            InProcessChatModeSlotIds.STATUS_OVERLAY -> null
             InProcessChatModeSlotIds.COMPOSER_ACCESSORY ->
                 composeView(pluginContext) { _ -> LanerComposerAccessory() }
             else -> null
@@ -108,7 +112,11 @@ internal class LanerChatModeProvider(
         }
 
         context.optString("chat_id").trim().takeIf { it.isNotEmpty() }?.let { chatId ->
-            invoke("ui.bind_chat", JSONObject().put("chat_id", chatId))
+            val bound = invoke("ui.bind_chat", JSONObject().put("chat_id", chatId))
+            syncHistoricalPresentations(
+                chatId = chatId,
+                presentations = bound.optJSONArray("message_presentations")
+            )
         }
         refreshStatus()
         ensurePolling()
@@ -138,6 +146,38 @@ internal class LanerChatModeProvider(
                     .put("attachments", JSONArray(attachments.toString()))
             )
             val queued = result.getJSONObject("request")
+            val messageTimestamp = queued.getLong("chat_message_timestamp")
+            val semanticTone = semanticTone(selectedPriority)
+            val hostMessagePublished =
+                try {
+                    val published =
+                        JSONObject(
+                            uiHost.invokeHostCapability(
+                                "host.chat@1",
+                                JSONObject()
+                                    .put("operation", "publish_user")
+                                    .put("chat_id", chatId)
+                                    .put("content", content)
+                                    .put("message_timestamp", messageTimestamp)
+                                    .put(
+                                        "presentation",
+                                        JSONObject().put("semantic_tone", semanticTone)
+                                    )
+                                    .toString()
+                            )
+                        )
+                    (published.optBoolean("success") && published.optBoolean("persisted")).also {
+                        if (it) {
+                            syncedPresentationKeys.add(
+                                presentationKey(chatId, messageTimestamp, semanticTone)
+                            )
+                        }
+                    }
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    false
+                }
             val attachmentNames =
                 (0 until attachments.length()).mapNotNull { index ->
                     attachments.optJSONObject(index)
@@ -150,7 +190,12 @@ internal class LanerChatModeProvider(
             JSONObject()
                 .put("success", true)
                 .put("request_id", queued.getString("request_id"))
-                .put("message_timestamp", queued.getLong("chat_message_timestamp"))
+                .put("message_timestamp", messageTimestamp)
+                .put("host_message_published", hostMessagePublished)
+                .put(
+                    "presentation_json",
+                    JSONObject().put("semantic_tone", semanticTone).toString()
+                )
                 .put(
                     "title",
                     LanerChatContract.localConversationTitle(originalText, attachmentNames)
@@ -177,6 +222,59 @@ internal class LanerChatModeProvider(
     suspend fun stop() {
         stopPolling()
     }
+
+    private suspend fun syncHistoricalPresentations(
+        chatId: String,
+        presentations: JSONArray?
+    ) {
+        if (presentations == null) return
+        for (index in 0 until presentations.length()) {
+            val item = presentations.optJSONObject(index) ?: continue
+            val timestamp = item.optLong("message_timestamp", 0L)
+            if (timestamp <= 0L) continue
+            val priorityValue =
+                runCatching {
+                    LanerChatPriority.valueOf(item.optString("priority").trim().uppercase())
+                }.getOrNull() ?: continue
+            val tone = semanticTone(priorityValue)
+            val key = presentationKey(chatId, timestamp, tone)
+            if (key in syncedPresentationKeys) continue
+            try {
+                val updated =
+                    JSONObject(
+                        uiHost.invokeHostCapability(
+                            "host.chat@1",
+                            JSONObject()
+                                .put("operation", "set_presentation")
+                                .put("chat_id", chatId)
+                                .put("message_timestamp", timestamp)
+                                .put(
+                                    "presentation",
+                                    JSONObject().put("semantic_tone", tone)
+                                )
+                                .toString()
+                        )
+                    )
+                if (updated.optBoolean("success") && updated.optBoolean("persisted")) {
+                    syncedPresentationKeys.add(key)
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Best effort: a later chat-context refresh will retry this timestamp.
+            }
+        }
+    }
+
+    private fun semanticTone(priority: LanerChatPriority): String =
+        when (priority) {
+            LanerChatPriority.HIGH -> "danger"
+            LanerChatPriority.NORMAL -> "info"
+            LanerChatPriority.LOW -> "success"
+        }
+
+    private fun presentationKey(chatId: String, timestamp: Long, tone: String): String =
+        "$chatId:$timestamp:$tone"
 
     private suspend fun refreshStatus() {
         runCatching { invoke("status") }
@@ -257,9 +355,7 @@ internal class LanerChatModeProvider(
     }
 
     @Composable
-    private fun LanerStatusOverlay() {
-        val raw by stateJson.collectAsState()
-        val status = raw?.let(::jsonObject) ?: JSONObject()
+    private fun LanerStatusBadge(status: JSONObject) {
         val mailbox = status.optJSONObject("mailbox") ?: JSONObject()
         val queue = status.optJSONObject("queue") ?: JSONObject()
         val activeSessionId =
@@ -313,9 +409,11 @@ internal class LanerChatModeProvider(
                 horizontalArrangement = Arrangement.spacedBy(6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                PriorityChip("🔴 高", LanerChatPriority.HIGH, selected)
+                PriorityChip("🔴 紧急", LanerChatPriority.HIGH, selected)
                 PriorityChip("🔵 普通", LanerChatPriority.NORMAL, selected)
-                PriorityChip("🟢 低", LanerChatPriority.LOW, selected)
+                PriorityChip("🟢 稍后", LanerChatPriority.LOW, selected)
+                Spacer(modifier = Modifier.weight(1f))
+                LanerStatusBadge(status)
             }
             if (activeTurn || schedulerPaused) {
                 Row(

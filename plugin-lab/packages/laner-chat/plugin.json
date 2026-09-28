@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.chat.laner_bridge",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "api": { "target": 1, "min": 1 },
   "display": {
     "name": "Laner Chat",
@@ -19,7 +19,7 @@
     }
   },
   "dependencies": { "plugins": [], "services": [] },
-  "permissions": { "requested_scopes": ["host.chat@1"] },
+  "permissions": { "requested_scopes": ["host.chat@1", "host.attention@1"] },
   "provides": {
     "capabilities": [
       "plugin.chat.laner_bridge.status",

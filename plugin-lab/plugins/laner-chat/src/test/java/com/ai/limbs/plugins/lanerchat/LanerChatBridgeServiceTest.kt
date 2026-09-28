@@ -63,6 +63,55 @@ class LanerChatBridgeServiceTest {
     }
 
 
+
+    @Test
+    fun attentionSeparatesUnreadFromPendingAndDropsResolvedMessages() {
+        val root = Files.createTempDirectory("laner-chat-attention-test").toFile()
+        try {
+            val service = LanerChatBridgeService.create(root)
+            val session = service.bindUiChat("chat-attention")
+            val urgent =
+                service.enqueueMailbox(
+                    chatId = "chat-attention",
+                    text = "urgent",
+                    priority = LanerChatPriority.HIGH
+                )
+            service.enqueueMailbox(
+                chatId = "chat-attention",
+                text = "later",
+                priority = LanerChatPriority.LOW
+            )
+
+            service.attentionSummary().let { summary ->
+                assertEquals(1, summary.unread.high)
+                assertEquals(1, summary.unread.low)
+                assertEquals(0, summary.pending.total)
+            }
+
+            service.fetchInbox(
+                requestedSessionId = session.sessionId,
+                requestId = urgent.requestId,
+                afterSeq = 0L,
+                requestedLimit = 10
+            )
+            service.attentionSummary().let { summary ->
+                assertEquals(0, summary.unread.high)
+                assertEquals(1, summary.unread.low)
+                assertEquals(1, summary.pending.high)
+            }
+
+            val claimed = service.claimTurn(session.sessionId, requestedLimit = 10)!!
+            service.completeTurn(claimed.turn.turnId, "attention-reply", "handled")
+            service.attentionSummary().let { summary ->
+                assertEquals(0, summary.unread.total)
+                assertEquals(0, summary.pending.total)
+                assertTrue(summary.isEmpty)
+            }
+        } finally {
+            root.deleteRecursively()
+        }
+    }
+
     @Test
     fun presenceUsesActiveTurnAndDoesNotTreatStaleHeartbeatAsOnline() {
         val now = 1_000_000L

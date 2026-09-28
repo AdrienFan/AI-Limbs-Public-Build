@@ -107,6 +107,69 @@ for method_name in ("cancelActiveTurn", "resumeScheduler"):
         )
         sys.exit(1)
 
+mode_provider = (SOURCE_ROOT / "LanerChatModeProvider.kt").read_text(encoding="utf-8")
+required_priority_presentation_tokens = [
+    'uiHost.invokeHostCapability(',
+    '"host.chat@1"',
+    '"operation", "publish_user"',
+    'LanerChatPriority.HIGH -> "danger"',
+    'LanerChatPriority.NORMAL -> "info"',
+    'LanerChatPriority.LOW -> "success"',
+    '.put("host_message_published", hostMessagePublished)',
+    '"presentation_json"',
+    '"presentation"',
+    '"semantic_tone"',
+    '"operation", "set_presentation"',
+    '"message_presentations"',
+    'syncHistoricalPresentations(',
+]
+missing_priority_presentation = [
+    token for token in required_priority_presentation_tokens if token not in mode_provider
+]
+if missing_priority_presentation:
+    print(
+        "Laner Chat priority presentation contract is incomplete: "
+        + ", ".join(missing_priority_presentation),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
+presentation_snapshot_start = service.find("fun presentationSnapshot(")
+presentation_snapshot_end = service.find("\n    /**", presentation_snapshot_start + 1)
+if presentation_snapshot_start < 0 or presentation_snapshot_end < 0:
+    print("Laner Chat presentationSnapshot() contract is missing.", file=sys.stderr)
+    sys.exit(1)
+presentation_snapshot_body = service[presentation_snapshot_start:presentation_snapshot_end]
+if "touchAgentLocked(" in presentation_snapshot_body:
+    print("Laner Chat presentationSnapshot must remain read-only.", file=sys.stderr)
+    sys.exit(1)
+
+entry = (SOURCE_ROOT / "LanerChatEntry.kt").read_text(encoding="utf-8")
+service = (SOURCE_ROOT / "LanerChatBridgeService.kt").read_text(encoding="utf-8")
+required_attention_tokens = [
+    '"host.attention@1"',
+    'service.attentionSummary()',
+    'addAttentionGroup(groups, "unread", "未读", summary.unread)',
+    'addAttentionGroup(groups, "pending", "未处理", summary.pending)',
+    'attentionItem("urgent", "紧急", counts.high, "danger")',
+    'attentionItem("normal", "普通", counts.normal, "info")',
+    'attentionItem("later", "稍后", counts.low, "success")',
+    'if (counts.high > 0)',
+    'if (counts.normal > 0)',
+    'if (counts.low > 0)',
+]
+missing_attention = [token for token in required_attention_tokens if token not in entry]
+if missing_attention:
+    print(
+        "Laner Chat Attention publication contract is incomplete: "
+        + ", ".join(missing_attention),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+if "LanerChatMessageStatus.PENDING" not in service or "LanerChatMessageStatus.DELIVERED" not in service:
+    print("Laner Chat must derive unread/pending Attention from durable message state.", file=sys.stderr)
+    sys.exit(1)
+
 required_core_tokens = [
     "fun openSession(",
     "fun enqueueMailbox(",

@@ -25,6 +25,23 @@ enum class LanerChatPriority {
     LOW
 }
 
+data class LanerChatPriorityCounts(
+    val high: Int = 0,
+    val normal: Int = 0,
+    val low: Int = 0
+) {
+    val total: Int
+        get() = high + normal + low
+}
+
+data class LanerChatAttentionSummary(
+    val unread: LanerChatPriorityCounts,
+    val pending: LanerChatPriorityCounts
+) {
+    val isEmpty: Boolean
+        get() = unread.total == 0 && pending.total == 0
+}
+
 @Serializable
 enum class LanerChatAssistantTurnStatus {
     ACTIVE,

@@ -214,6 +214,20 @@ internal class LanerChatBridgeService(
         return ensureUiSessionLocked(System.currentTimeMillis(), normalizedChatId)
     }
 
+    /** Read-only metadata used to restore Host presentation for existing visible user messages. */
+    @Synchronized
+    fun presentationSnapshot(chatId: String): List<LanerChatRequest> {
+        val normalizedChatId = chatId.trim()
+        require(normalizedChatId.isNotEmpty()) { "chat_id is required" }
+        return storedState.requests
+            .asSequence()
+            .filter { request ->
+                request.chatId == normalizedChatId && request.chatMessageTimestamp > 0L
+            }
+            .sortedBy { it.seq }
+            .toList()
+    }
+
     /**
      * Persist an AI-originated message before chat-history delivery.
      *
@@ -781,6 +795,22 @@ internal class LanerChatBridgeService(
 
     @Synchronized
     fun snapshot(): LanerChatMailboxStatus = buildMailboxStatus(storedState)
+
+    @Synchronized
+    fun attentionSummary(): LanerChatAttentionSummary {
+        fun countsFor(status: LanerChatMessageStatus): LanerChatPriorityCounts {
+            val matching = storedState.requests.filter { it.status == status }
+            return LanerChatPriorityCounts(
+                high = matching.count { it.priority == LanerChatPriority.HIGH },
+                normal = matching.count { it.priority == LanerChatPriority.NORMAL },
+                low = matching.count { it.priority == LanerChatPriority.LOW }
+            )
+        }
+        return LanerChatAttentionSummary(
+            unread = countsFor(LanerChatMessageStatus.PENDING),
+            pending = countsFor(LanerChatMessageStatus.DELIVERED)
+        )
+    }
 
     @Synchronized
     private fun ensureUiSessionLocked(now: Long, chatId: String? = null): LanerChatSession {

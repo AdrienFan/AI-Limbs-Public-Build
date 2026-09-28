@@ -51,11 +51,21 @@ internal class LanerChatController(
             LanerChatJson.session(service.closeSession(optionalString(args, "session_id")))
         )
 
-    fun bindUiChat(args: JSONObject): JSONObject =
-        ok().put(
-            "session",
-            LanerChatJson.session(service.bindUiChat(requiredString(args, "chat_id")))
-        )
+    fun bindUiChat(args: JSONObject): JSONObject {
+        val chatId = requiredString(args, "chat_id")
+        val session = service.bindUiChat(chatId)
+        val presentations =
+            JSONArray(
+                service.presentationSnapshot(chatId).map { request ->
+                    JSONObject()
+                        .put("message_timestamp", request.chatMessageTimestamp)
+                        .put("priority", request.priority.name)
+                }
+            )
+        return ok()
+            .put("session", LanerChatJson.session(session))
+            .put("message_presentations", presentations)
+    }
 
     fun notificationCheck(args: JSONObject): JSONObject =
         ok().put(
