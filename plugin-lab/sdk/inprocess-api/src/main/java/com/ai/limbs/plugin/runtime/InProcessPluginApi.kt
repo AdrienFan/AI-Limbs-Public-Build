@@ -172,6 +172,17 @@ interface InProcessPageProvider {
 }
 
 /**
+ * Deferred Host-local presentation payload.
+ *
+ * Main Entry may declare a UI object needed when business and Android UI share LEGACY_HOST.
+ * BUSINESS/Resident never materializes the factory; Resident UI remains owned by
+ * [InProcessPluginPresentationEntry] in Host UI_PROXY.
+ */
+fun interface InProcessHostLocalPresentationProviderFactory {
+    fun create(host: InProcessPluginUiHost): Any
+}
+
+/**
  * Host-embedded chat mode extension.
  *
  * The Host owns only generic chat composition slots and submit/cancel plumbing.  Concrete mode
@@ -411,6 +422,16 @@ interface InProcessPluginHost : InProcessPluginUiHost {
     fun registerProvider(
         id: String,
         payload: Any,
+        metadata: Map<String, String> = emptyMap()
+    )
+
+    /**
+     * Registers a presentation payload only in LEGACY_HOST.
+     * BUSINESS/Resident leaves the signed PresentationEntry to Host UI_PROXY.
+     */
+    fun registerHostLocalPresentationProvider(
+        id: String,
+        factory: InProcessHostLocalPresentationProviderFactory,
         metadata: Map<String, String> = emptyMap()
     )
 

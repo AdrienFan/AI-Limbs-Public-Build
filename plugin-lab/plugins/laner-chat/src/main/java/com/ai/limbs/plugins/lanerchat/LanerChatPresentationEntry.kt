@@ -13,7 +13,14 @@ class LanerChatPresentationEntry : InProcessPluginPresentationEntry {
         require(host.pluginId == LANER_CHAT_PLUGIN_ID) {
             "Unexpected Laner Chat presentation identity: ${host.pluginId}"
         }
-        val provider = LanerChatModeProvider(host)
+        val provider = LanerChatModeProvider(host) { name, parameters ->
+            org.json.JSONObject(
+                host.invokePluginCapability(
+                    "$LANER_CHAT_PLUGIN_ID.$name",
+                    parameters.toString()
+                )
+            )
+        }
         val registration = host.registerPresentationProvider(
             LANER_CHAT_MODE_PROVIDER_ID,
             provider,

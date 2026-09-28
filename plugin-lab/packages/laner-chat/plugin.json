@@ -2,8 +2,8 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.chat.laner_bridge",
-  "version": "0.2.3",
-  "api": { "target": 1, "min": 1 },
+  "version": "0.2.4",
+  "api": { "target": 2, "min": 2 },
   "display": {
     "name": "Laner Chat",
     "description": "兰儿聊天桥：独立 durable mailbox、Session、Priority、Assistant Turn 与聊天模式 UI。"
@@ -43,7 +43,10 @@
       "plugin.chat.laner_bridge.proactive.delivered"
     ],
     "services": [],
-    "providers": ["plugin.chat.laner_bridge.runtime"],
+    "providers": [
+      "plugin.chat.laner_bridge.runtime",
+      "plugin.chat.laner_bridge.chat_mode"
+    ],
     "extensions": []
   }
 }

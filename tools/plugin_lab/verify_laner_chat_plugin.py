@@ -18,11 +18,38 @@ plugin_id = manifest["plugin_id"]
 declared_list = manifest["provides"]["capabilities"]
 declared = set(declared_list)
 
+api = manifest["api"]
+if api != {"target": 2, "min": 2}:
+    print(f"Laner Chat 0.2.4 requires Plugin ABI 2, got: {api}", file=sys.stderr)
+    sys.exit(1)
+
+declared_providers = set(manifest["provides"]["providers"])
+required_providers = {
+    f"{plugin_id}.runtime",
+    f"{plugin_id}.chat_mode",
+}
+if declared_providers != required_providers:
+    print(
+        "Laner Chat provider declarations must contain exactly runtime + chat_mode: "
+        + repr(sorted(declared_providers)),
+        file=sys.stderr,
+    )
+    sys.exit(1)
+
 if len(declared) != len(declared_list):
     print("Laner Chat manifest has duplicate capability declarations.", file=sys.stderr)
     sys.exit(1)
 
 source = ENTRY.read_text(encoding="utf-8")
+if "registerHostLocalPresentationProvider" not in source:
+    print("Laner Chat Main Entry must declare Host-local chat presentation through Runtime API.", file=sys.stderr)
+    sys.exit(1)
+
+presentation = (SOURCE_ROOT / "LanerChatPresentationEntry.kt").read_text(encoding="utf-8")
+if "registerPresentationProvider" not in presentation:
+    print("Laner Chat Resident PresentationEntry must own the UI_PROXY chat_mode provider.", file=sys.stderr)
+    sys.exit(1)
+
 if "InProcessMetadataOnlyProvider" not in source:
     print("Laner Chat discovery provider must use the metadata-only Resident transport marker.", file=sys.stderr)
     sys.exit(1)

@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessChatModeBehaviorKeys
 import com.ai.limbs.plugin.runtime.InProcessChatModeExtensionProvider
 import com.ai.limbs.plugin.runtime.InProcessChatModeSlotIds
-import com.ai.limbs.plugin.runtime.InProcessPluginPresentationHost
+import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import java.util.concurrent.atomic.AtomicReference
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -41,7 +41,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal class LanerChatModeProvider(
-    private val host: InProcessPluginPresentationHost
+    private val uiHost: InProcessPluginUiHost,
+    private val invokeBusiness: suspend (String, JSONObject) -> JSONObject
 ) : InProcessChatModeExtensionProvider {
     private val mutableState = MutableStateFlow<String?>(null)
     override val stateJson: StateFlow<String?> = mutableState
@@ -84,7 +85,7 @@ internal class LanerChatModeProvider(
             .toString()
 
     override fun createSlotView(slotId: String, context: Context): View? {
-        val pluginContext = host.createPluginContext(context)
+        val pluginContext = uiHost.createPluginContext(context)
         return when (slotId) {
             InProcessChatModeSlotIds.CONFIGURATION_CARD ->
                 composeView(pluginContext) { card ->
@@ -192,7 +193,7 @@ internal class LanerChatModeProvider(
     private fun ensurePolling() {
         if (pollingJob?.isActive == true) return
         pollingJob =
-            host.scope.launch {
+            uiHost.scope.launch {
                 while (isActive && matches(activeContext.get().toString())) {
                     refreshStatus()
                     delay(LanerChatContract.PRESENCE_UI_TICK_MS)
@@ -206,12 +207,7 @@ internal class LanerChatModeProvider(
     }
 
     private suspend fun invoke(name: String, parameters: JSONObject = JSONObject()): JSONObject =
-        JSONObject(
-            host.invokePluginCapability(
-                "$LANER_CHAT_PLUGIN_ID.$name",
-                parameters.toString()
-            )
-        )
+        invokeBusiness(name, JSONObject(parameters.toString()))
 
     private fun sessionParameters(rawContext: String): JSONObject {
         val context = jsonObject(rawContext)

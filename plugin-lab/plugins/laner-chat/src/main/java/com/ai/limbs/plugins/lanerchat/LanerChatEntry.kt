@@ -6,6 +6,7 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessMetadataOnlyProvider
+import com.ai.limbs.plugin.runtime.InProcessHostLocalPresentationProviderFactory
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
@@ -23,6 +24,7 @@ class LanerChatEntry : InProcessPluginEntry {
         val service = LanerChatBridgeService.create(host.dataDir, host.applicationContext)
 
         val controller = LanerChatController(service, host)
+        val operations = linkedMapOf<String, suspend (JSONObject) -> JSONObject>()
 
         host.registerProvider(
             LANER_CHAT_PROVIDER_ID,
@@ -58,6 +60,7 @@ class LanerChatEntry : InProcessPluginEntry {
             parameters: List<InProcessCapabilityParameterSpec> = emptyList(),
             block: suspend (JSONObject) -> JSONObject
         ) {
+            check(operations.put(name, block) == null) { "Duplicate Laner Chat operation: $name" }
             val properties = JSONObject()
             val required = JSONArray()
             parameters.forEach { item ->
@@ -304,6 +307,23 @@ class LanerChatEntry : InProcessPluginEntry {
             write,
             listOf(parameter("message_id", description = "proactive message ID"))
         ) { controller.proactiveDelivered(it) }
+
+        host.registerHostLocalPresentationProvider(
+            LANER_CHAT_MODE_PROVIDER_ID,
+            InProcessHostLocalPresentationProviderFactory { uiHost ->
+                LanerChatModeProvider(uiHost) { name, parameters ->
+                    val operation = checkNotNull(operations[name]) {
+                        "Unknown Laner Chat operation: $name"
+                    }
+                    operation(JSONObject(parameters.toString()))
+                }
+            },
+            mapOf(
+                "kind" to "chat_mode_extension",
+                "api" to "1",
+                "provider_type_id" to LanerChatContract.PROVIDER_TYPE_ID
+            )
+        )
 
         host.logger.i("LanerChat", "Laner Chat shadow plugin mounted")
         return InProcessPluginHandle {
