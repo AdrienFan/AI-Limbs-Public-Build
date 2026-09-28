@@ -4,6 +4,7 @@ package com.ai.assistance.operit.ui.features.chat.components.style.bubble
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.ai.assistance.operit.data.model.ChatMessage
+import com.ai.assistance.operit.ui.features.chat.components.style.common.resolveUserMessagePresentationColors
 import com.ai.assistance.operit.ui.features.chat.components.ChatMessageHeightMemory
 import com.ai.assistance.operit.ui.features.chat.components.style.cursor.SummaryMessageComposable
 import com.ai.assistance.operit.util.stream.Stream
@@ -47,10 +48,16 @@ fun BubbleStyleChatMessage(
 ) {
     when (message.sender) {
         "user" -> {
+            val presentation =
+                resolveUserMessagePresentationColors(
+                    message = message,
+                    fallbackBackground = userMessageColor,
+                    fallbackText = userTextColor,
+                )
             BubbleUserMessageComposable(
                 message = message,
-                backgroundColor = userMessageColor,
-                textColor = userTextColor,
+                backgroundColor = presentation.background,
+                textColor = presentation.text,
                 enableLiquidGlass = userMessageLiquidGlassEnabled,
                 enableWaterGlass = userMessageWaterGlassEnabled,
                 bubbleImageStyle = userBubbleImageStyle,

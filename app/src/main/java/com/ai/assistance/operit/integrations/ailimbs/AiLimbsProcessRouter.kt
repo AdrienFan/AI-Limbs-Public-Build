@@ -6,30 +6,29 @@ import org.json.JSONObject
  * Transport-neutral process router for AI Limbs.
  *
  * Ingress adapters (RDC, TriggerCMD, API, future bridges) must not know which concrete
- * Ubuntu child owns Linux process execution. They pass process semantics here,
+ * system-environment child owns Linux process execution. They pass process semantics here,
  * and this router enters the ordinary Dispatcher/Capability path inside the caller session.
  */
 internal class AiLimbsProcessRouter(
     private val ingressGateway: AiLimbsIngressGateway
 ) {
-    suspend fun executeUbuntu(
+    suspend fun executeSystemEnvironment(
         operation: String,
         args: JSONObject
     ): JSONObject {
         val parameters = JSONObject(args.toString())
             .put("operation", operation.trim().lowercase())
         return ingressGateway.invokePayload(
-            UBUNTU_PROCESS_CAPABILITY,
+            SYSTEM_ENVIRONMENT_PROCESS_CAPABILITY,
             parameters
         )
     }
 
     private companion object {
         /**
-         * Canonical Ubuntu child capability. Transport adapters still depend only on this router,
-         * so Ubuntu implementation details remain outside the transport layer.
+         * Generic system-environment process alias. Concrete child ownership stays outside Base.
          */
-        const val UBUNTU_PROCESS_CAPABILITY =
-            "plugin.ubuntu.process"
+        const val SYSTEM_ENVIRONMENT_PROCESS_CAPABILITY =
+            "plugin.system_environment.process"
     }
 }

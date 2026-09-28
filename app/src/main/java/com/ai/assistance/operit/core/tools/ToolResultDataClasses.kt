@@ -259,73 +259,6 @@ data class ADBResultData(val command: String, val output: String, val exitCode: 
     }
 }
 
-/** 终端命令执行结果数据 */
-@Serializable
-data class TerminalCommandResultData(
-        val command: String,
-        val output: String,
-        val exitCode: Int,
-        val sessionId: String,
-        val timedOut: Boolean = false
-) : ToolResultData() {
-    override fun toString(): String {
-        val sb = StringBuilder()
-        sb.appendLine("Terminal Command Execution Result:")
-        sb.appendLine("Command: $command")
-        sb.appendLine("Session: $sessionId")
-        sb.appendLine("Exit Code: $exitCode")
-        if (timedOut) {
-            sb.appendLine("Timed Out: true")
-        }
-        sb.appendLine("\nOutput:")
-        sb.appendLine(output)
-        return sb.toString()
-    }
-}
-
-/** 终端命令流式事件数据 */
-@Serializable
-data class TerminalStreamEventData(
-        val type: String,
-        val command: String,
-        val sessionId: String,
-        val chunk: String? = null,
-        val chunkIndex: Int? = null,
-        val receivedChars: Int? = null
-) : ToolResultData() {
-    override fun toString(): String {
-        return when (type) {
-            "chunk" -> chunk.orEmpty()
-            "start" -> "Terminal stream started"
-            else -> "Terminal stream event: $type"
-        }
-    }
-}
-
-/** 隐藏终端命令执行结果数据 */
-@Serializable
-data class HiddenTerminalCommandResultData(
-        val command: String,
-        val output: String,
-        val exitCode: Int,
-        val executorKey: String,
-        val timedOut: Boolean = false
-) : ToolResultData() {
-    override fun toString(): String {
-        val sb = StringBuilder()
-        sb.appendLine("Hidden Terminal Command Execution Result:")
-        sb.appendLine("Command: $command")
-        sb.appendLine("Executor Key: $executorKey")
-        sb.appendLine("Exit Code: $exitCode")
-        if (timedOut) {
-            sb.appendLine("Timed Out: true")
-        }
-        sb.appendLine("\nOutput:")
-        sb.appendLine(output)
-        return sb.toString()
-    }
-}
-
 /** 音乐播放结果数据 */
 @Serializable
 data class MusicPlaybackResultData(
@@ -1604,51 +1537,6 @@ data class AutomationFunctionListResult(
             }
         }
 
-        return sb.toString()
-    }
-}
-
-/** 终端会话创建结果数据 */
-@Serializable
-data class TerminalSessionCreationResultData(
-    val sessionId: String,
-    val sessionName: String,
-    val isNewSession: Boolean
-) : ToolResultData() {
-    override fun toString(): String {
-        return if (isNewSession) {
-            "Successfully created new terminal session. Session Name: '$sessionName', Session ID: $sessionId"
-        } else {
-            "Successfully retrieved existing terminal session. Session Name: '$sessionName', Session ID: $sessionId"
-        }
-    }
-}
-
-/** 终端会话关闭结果数据 */
-@Serializable
-data class TerminalSessionCloseResultData(
-    val sessionId: String,
-    val success: Boolean,
-    val message: String
-) : ToolResultData() {
-    override fun toString(): String = message
-}
-
-/** 终端会话当前屏幕内容结果数据（仅当前屏，不含历史滚动缓冲） */
-@Serializable
-data class TerminalSessionScreenResultData(
-    val sessionId: String,
-    val rows: Int,
-    val cols: Int,
-    val content: String
-) : ToolResultData() {
-    override fun toString(): String {
-        val sb = StringBuilder()
-        sb.appendLine("Terminal Session Screen Snapshot:")
-        sb.appendLine("Session: $sessionId")
-        sb.appendLine("Size: ${cols}x${rows}")
-        sb.appendLine()
-        sb.append(content)
         return sb.toString()
     }
 }

@@ -73,7 +73,8 @@ object AiLimbsHostPrimitiveCatalog {
         HostPrimitiveDefinition(48, "host.ui.layout@1", "UI Layout Editing", "开启、结束、查询或恢复 AI Limbs 可编辑页面的用户布局。", "Host 拥有真实页面、编辑会话与布局持久化；插件只能请求标准 surface/mode，不直接操作 View、NavController 或其他插件 UI。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(51, "host.screen.session@1", "Screen Share / Capture Session", "提供持续屏幕视觉会话契约：枚举显示目标、启动、查询、读取会话帧与停止。", "Host 负责 MediaProjection 类系统授权、显示目标、session ownership 与生命周期；单帧截图继续属于 host.screen.capture@1，采样策略、缓存、OCR、视觉推理和历史管理属于插件。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
         HostPrimitiveDefinition(52, "host.camera.session@1", "Camera Visual Session", "提供持续摄像头视觉会话契约：枚举摄像头、启动、查询、读取会话帧、配置与停止。", "Host 负责 CAMERA 权限、摄像头来源、并发占用与 session lifecycle；单帧拍摄继续属于 host.camera.capture@1，采样策略、缓存、识别和视觉资产管理属于插件。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
-        HostPrimitiveDefinition(53, "host.runtime.components@1", "Runtime Component Inventory", "读取当前 AI Limbs 基座、父插件与子插件的已安装运行态版本清单。", "Host 只输出动态运行时身份、版本、启用与生命周期事实；不得包含源码路径，也不得认识具体插件 ID。消费者自行决定源码解析与开发策略。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
+        HostPrimitiveDefinition(53, "host.runtime.components@1", "Runtime Component Inventory", "读取当前 AI Limbs 基座、父插件与子插件的已安装运行态版本清单。", "Host 只输出动态运行时身份、版本、启用与生命周期事实；不得包含源码路径，也不得认识具体插件 ID。消费者自行决定源码解析与开发策略。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true),
+        HostPrimitiveDefinition(54, "host.attention@1", "AI Attention Sideband", "允许插件发布或清除不含正文的稀疏 Attention 计数状态，并由 AI Limbs 在能力调用结果旁路中持续呈现。", "Host 只绑定真实插件身份、校验通用 group/item/count/semantic_tone 协议并承载 sideband；未读、未处理、消息等级等业务语义全部属于插件。", HostPrimitiveMaturity.CONFIRMED, HostPrimitiveExposure.BOUND, true)
 
     )
 

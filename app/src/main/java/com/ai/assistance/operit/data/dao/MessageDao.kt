@@ -162,7 +162,8 @@ interface MessageDao {
             waitDurationMs,
             completedAt,
             displayMode,
-            isFavorite
+            isFavorite,
+            presentationJson
         )
         SELECT
             :targetChatId,
@@ -182,7 +183,8 @@ interface MessageDao {
             waitDurationMs,
             completedAt,
             displayMode,
-            isFavorite
+            isFavorite,
+            presentationJson
         FROM messages
         WHERE chatId = :sourceChatId
             AND (:upToTimestampInclusive IS NULL OR timestamp <= :upToTimestampInclusive)
@@ -234,6 +236,15 @@ interface MessageDao {
         timestamp: Long,
         isFavorite: Boolean,
     )
+
+    @Query(
+        "UPDATE messages SET presentationJson = :presentationJson WHERE chatId = :chatId AND timestamp = :timestamp"
+    )
+    suspend fun updateMessagePresentation(
+        chatId: String,
+        timestamp: Long,
+        presentationJson: String,
+    ): Int
 
     /** 查找包含特定关键词的聊天ID列表（不重复） */
     @Query("SELECT DISTINCT chatId FROM messages WHERE content LIKE '%' || :query || '%' ESCAPE '\\' COLLATE NOCASE")

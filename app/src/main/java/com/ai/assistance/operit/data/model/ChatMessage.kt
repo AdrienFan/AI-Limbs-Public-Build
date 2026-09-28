@@ -25,6 +25,7 @@ data class ChatMessage(
         val completedAt: Long = 0L, // 本轮消息完成时间（时间戳）
         val displayMode: ChatMessageDisplayMode = ChatMessageDisplayMode.NORMAL,
         val isFavorite: Boolean = false,
+        val presentationJson: String = "",
         @Transient
         val isVariantPreview: Boolean = false,
         @Transient
@@ -55,13 +56,8 @@ data class ChatMessage(
         displayMode = readDisplayModeFromParcel(parcel),
         isFavorite = readBooleanFromParcel(parcel),
         completedAt = if (parcel.dataAvail() > 0) parcel.readLong() else 0L,
-    ) {
-        // build74 and older appended one chat-mode-specific String after completedAt.
-        // Consume that legacy Parcelable tail without retaining it in the generic message model.
-        if (parcel.dataAvail() > 0) {
-            parcel.readString()
-        }
-    }
+        presentationJson = readPresentationJsonFromParcel(parcel),
+    )
 
     override fun writeToParcel(parcel: Parcel, flags: Int) {
         parcel.writeString(sender)
@@ -81,6 +77,9 @@ data class ChatMessage(
         parcel.writeString(displayMode.name)
         parcel.writeInt(if (isFavorite) 1 else 0)
         parcel.writeLong(completedAt)
+        parcel.writeString(
+            presentationJson.takeIf { it.isNotBlank() }?.let { PRESENTATION_PARCEL_PREFIX + it }
+        )
         // 不需要序列化contentStream，因为它是暂时性的
     }
 
@@ -103,6 +102,18 @@ data class ChatMessage(
         private fun readBooleanFromParcel(parcel: Parcel): Boolean {
             return parcel.dataAvail() > 0 && parcel.readInt() != 0
         }
+
+        private fun readPresentationJsonFromParcel(parcel: Parcel): String {
+            if (parcel.dataAvail() <= 0) return ""
+            val tail = parcel.readString().orEmpty()
+            // build74 and older appended plugin-specific metadata here.
+            // Only retain values written by the generic Host presentation contract.
+            return tail.takeIf { it.startsWith(PRESENTATION_PARCEL_PREFIX) }
+                ?.removePrefix(PRESENTATION_PARCEL_PREFIX)
+                .orEmpty()
+        }
+
+        private const val PRESENTATION_PARCEL_PREFIX = "chat.presentation.v1:"
 
         override fun createFromParcel(parcel: Parcel): ChatMessage {
             return ChatMessage(parcel)

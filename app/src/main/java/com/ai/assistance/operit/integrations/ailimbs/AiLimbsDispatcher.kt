@@ -10,6 +10,7 @@ import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ChatMessage
 import com.ai.assistance.operit.data.model.ToolInvocation
 import com.ai.assistance.operit.data.model.ToolParameter
+import com.ai.assistance.operit.plugins.center.HostAttentionRegistry
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
 import com.ai.assistance.operit.plugins.center.PluginChatModeRuntime
 import com.ai.assistance.operit.util.stream.StreamCollector
@@ -44,26 +45,35 @@ class AiLimbsDispatcher(
         val invocation =
             runCatching { policyEngine.normalize(tool, args) }
                 .getOrElse { failure ->
-                    return error(failure.message ?: "Unknown AI Limbs capability")
-                        .put("error_code", "UNKNOWN_CAPABILITY")
-                        .put("next_action", capabilityResolver.capabilitySearchUsage(tool))
+                    return withAttention(
+                        error(failure.message ?: "Unknown AI Limbs capability")
+                            .put("error_code", "UNKNOWN_CAPABILITY")
+                            .put("next_action", capabilityResolver.capabilitySearchUsage(tool))
+                    )
                 }
         val preflight = policyEngine.evaluatePreflight(invocation)
         if (!preflight.proceed) {
-            return policyEngine.rejectionJson(invocation, preflight)
+            return withAttention(policyEngine.rejectionJson(invocation, preflight))
         }
         subsystemIngressGate.intercept(invocation)?.let { discovery ->
-            return discovery.put("execution_policy", preflight.inspection.toJson())
+            return withAttention(
+                discovery.put("execution_policy", preflight.inspection.toJson())
+            )
         }
         val decision = policyEngine.commitExecution(invocation, preflight)
         if (!decision.proceed) {
-            return policyEngine.rejectionJson(invocation, decision)
+            return withAttention(policyEngine.rejectionJson(invocation, decision))
         }
         val result = executeCapabilityRoute(invocation)
         policyEngine.recordSuccessfulExecution(invocation, result)
         capabilityUsageStore.recordSuccessfulExecution(invocation, result)
-        return result.put("execution_policy", decision.inspection.toJson())
+        return withAttention(
+            result.put("execution_policy", decision.inspection.toJson())
+        )
     }
+
+    private fun withAttention(result: JSONObject): JSONObject =
+        HostAttentionRegistry.attachTo(result)
 
     private suspend fun executeCapabilityRoute(
         invocation: AiLimbsNormalizedInvocation

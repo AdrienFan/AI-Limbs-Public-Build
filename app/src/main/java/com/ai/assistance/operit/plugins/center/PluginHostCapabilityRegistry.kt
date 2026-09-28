@@ -347,8 +347,7 @@ internal class PluginHostCapabilityRegistry(
     private suspend fun executePluginDirect(capabilityId: String, parameters: JSONObject): JSONObject {
         val capability = capabilities[capabilityId]
             ?: throw PluginInstallException("CAPABILITY_NOT_ACTIVE", "Capability is not active: $capabilityId")
-        val safeParameters = UbuntuHiddenExecutorKeyLimiter.normalize(capabilityId, parameters)
-        val result = capability.spec.executor.execute(safeParameters)
+        val result = capability.spec.executor.execute(JSONObject(parameters.toString()))
         usageStore?.recordUse(capability.ownerPluginId)
         return result
     }

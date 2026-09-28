@@ -3,6 +3,7 @@ package com.ai.assistance.operit.ui.features.chat.components.style.cursor
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.graphics.Color
 import com.ai.assistance.operit.data.model.ChatMessage
+import com.ai.assistance.operit.ui.features.chat.components.style.common.resolveUserMessagePresentationColors
 import com.ai.assistance.operit.ui.features.chat.components.ChatMessageHeightMemory
 import com.ai.assistance.operit.util.stream.Stream
 
@@ -37,12 +38,18 @@ fun CursorStyleChatMessage(
 ) {
     when (message.sender) {
         "user" -> {
+            val presentation =
+                resolveUserMessagePresentationColors(
+                    message = message,
+                    fallbackBackground = userMessageColor,
+                    fallbackText = userTextColor,
+                )
             UserMessageComposable(
                     message = message,
-                    backgroundColor = userMessageColor,
+                    backgroundColor = presentation.background,
                     enableLiquidGlass = userMessageLiquidGlassEnabled,
                     enableWaterGlass = userMessageWaterGlassEnabled,
-                    textColor = userTextColor,
+                    textColor = presentation.text,
                     enableDialogs = enableDialogs,
             )
         }

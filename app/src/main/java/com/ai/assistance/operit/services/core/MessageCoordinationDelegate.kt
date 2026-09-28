@@ -15,6 +15,7 @@ import com.ai.assistance.operit.data.model.CharacterCard
 import com.ai.assistance.operit.data.model.FunctionType
 import com.ai.assistance.operit.data.model.PromptFunctionType
 import com.ai.assistance.operit.data.model.ChatMessage
+import com.ai.assistance.operit.data.model.ChatMessagePresentation
 import com.ai.assistance.operit.data.model.ChatMessageDisplayMode
 import com.ai.assistance.operit.data.model.ChatTurnOptions
 import com.ai.assistance.operit.data.model.InputProcessingState
@@ -422,22 +423,29 @@ class MessageCoordinationDelegate(
             }
             providerPersisted = true
             val timestamp = receipt.optLong("message_timestamp", 0L)
-            val message =
-                if (timestamp > 0L) {
-                    ChatMessage(
-                        sender = "user",
-                        content = finalContent,
-                        timestamp = timestamp,
-                        roleName = context.getString(R.string.message_role_user)
-                    )
-                } else {
-                    ChatMessage(
-                        sender = "user",
-                        content = finalContent,
-                        roleName = context.getString(R.string.message_role_user)
-                    )
-                }
-            chatHistoryDelegate.addMessageToChat(message, pending.chatId)
+            val hostMessagePublished = receipt.optBoolean("host_message_published", false)
+            if (!hostMessagePublished) {
+                val presentationJson =
+                    ChatMessagePresentation.normalize(receipt.optString("presentation_json"))
+                val message =
+                    if (timestamp > 0L) {
+                        ChatMessage(
+                            sender = "user",
+                            content = finalContent,
+                            timestamp = timestamp,
+                            roleName = context.getString(R.string.message_role_user),
+                            presentationJson = presentationJson,
+                        )
+                    } else {
+                        ChatMessage(
+                            sender = "user",
+                            content = finalContent,
+                            roleName = context.getString(R.string.message_role_user),
+                            presentationJson = presentationJson,
+                        )
+                    }
+                chatHistoryDelegate.addMessageToChat(message, pending.chatId)
+            }
             if (isFirstMessage) {
                 val title =
                     receipt.optString("title").trim().takeIf { it.isNotEmpty() }

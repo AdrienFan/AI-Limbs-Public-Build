@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.plugins.center
 import android.content.Context
 import com.ai.assistance.operit.BuildConfig
+import com.ai.assistance.operit.R
 
 import com.ai.assistance.operit.core.tools.system.VisualHostRuntime
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
@@ -11,6 +12,7 @@ import com.ai.assistance.operit.core.tools.system.shell.ShellExecutor
 import com.ai.assistance.operit.core.tools.system.shell.ShellExecutorFactory
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsDispatcher
 import com.ai.assistance.operit.data.model.ChatMessage
+import com.ai.assistance.operit.data.model.ChatMessagePresentation
 import com.ai.assistance.operit.api.chat.ChatRuntimeHolder
 import com.ai.assistance.operit.api.chat.ChatRuntimeSlot
 import com.ai.assistance.operit.integrations.ailimbs.AiLimbsExecutionPolicyEngine
@@ -58,7 +60,12 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         }
         return when (id) {
             "host.network@1" -> invokeNetwork(op)
-            "host.chat@1" -> publishAssistantMessage(parameters)
+            "host.chat@1" -> when (op) {
+                "publish_assistant" -> publishAssistantMessage(parameters)
+                "publish_user" -> publishUserMessage(parameters)
+                "set_presentation" -> setMessagePresentation(parameters)
+                else -> unsupported(id, op)
+            }
             "host.screen.capture@1" -> captureScreenFrame(ownerPluginId)
             "host.screen.session@1" ->
 
@@ -82,6 +89,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.extension.routing@1" -> invokeExtensionRouting(op, parameters)
             "host.plugin.runtime@1" -> invokePluginRuntime(op, parameters)
             "host.runtime.components@1" -> invokeRuntimeComponents(op)
+            "host.attention@1" -> invokeAttention(ownerPluginId, op, parameters)
             "host.authorization@1" -> evaluateAuthorization(ownerPluginId, parameters)
 
             "host.privileged.runtime@1" -> com.ai.assistance.operit.core.tools.system.privilege.PrivilegeRuntime.invoke(appContext, ownerPluginId, op, parameters)
@@ -116,6 +124,52 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         if (core.currentChatId.value == chatId) core.reloadChatMessagesSmart(chatId)
         return JSONObject().put("success", true).put("chat_id", chatId)
             .put("message_timestamp", timestamp).put("persisted", true)
+    }
+
+    private suspend fun publishUserMessage(parameters: JSONObject): JSONObject {
+        val chatId = parameters.getString("chat_id").trim().also { require(it.isNotEmpty()) }
+        val content = parameters.getString("content").also { require(it.isNotBlank()) }
+        val timestamp = parameters.getLong("message_timestamp").also { require(it > 0L) }
+        val roleName =
+            parameters.optString("role_name").trim().takeIf { it.isNotEmpty() }
+                ?: appContext.getString(com.ai.assistance.operit.R.string.message_role_user)
+        val presentationJson = ChatMessagePresentation.normalize(parameters.optJSONObject("presentation"))
+        val core = ChatRuntimeHolder.getInstance(appContext).getCore(ChatRuntimeSlot.MAIN)
+        core.getChatHistoryDelegate().addMessageToChat(
+            ChatMessage(
+                sender = "user",
+                content = content,
+                timestamp = timestamp,
+                roleName = roleName,
+                presentationJson = presentationJson
+            ),
+            chatIdOverride = chatId
+        )
+        if (core.currentChatId.value == chatId) core.reloadChatMessagesSmart(chatId)
+        return JSONObject()
+            .put("success", true)
+            .put("chat_id", chatId)
+            .put("message_timestamp", timestamp)
+            .put("persisted", true)
+    }
+
+    private suspend fun setMessagePresentation(parameters: JSONObject): JSONObject {
+        val chatId = parameters.getString("chat_id").trim().also { require(it.isNotEmpty()) }
+        val timestamp = parameters.getLong("message_timestamp").also { require(it > 0L) }
+        val presentationJson =
+            ChatMessagePresentation.normalize(parameters.optJSONObject("presentation"))
+        val core = ChatRuntimeHolder.getInstance(appContext).getCore(ChatRuntimeSlot.MAIN)
+        val updated =
+            core.getChatHistoryDelegate().setMessagePresentation(
+                chatId = chatId,
+                timestamp = timestamp,
+                presentationJson = presentationJson,
+            )
+        return JSONObject()
+            .put("success", updated)
+            .put("chat_id", chatId)
+            .put("message_timestamp", timestamp)
+            .put("persisted", updated)
     }
 
     private suspend fun captureScreenFrame(ownerPluginId: String): JSONObject {
@@ -444,6 +498,17 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         .put("last_error", snapshot.persistentState?.lastError ?: JSONObject.NULL)
         .put("display_name", snapshot.activeManifest?.display?.name ?: JSONObject.NULL)
         .put("contribution_count", snapshot.contributions.size)
+
+    private fun invokeAttention(
+        ownerPluginId: String,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject =
+        when (operation) {
+            "publish" -> HostAttentionRegistry.publish(ownerPluginId, parameters)
+            "clear" -> HostAttentionRegistry.clear(ownerPluginId)
+            else -> unsupported("host.attention@1", operation)
+        }
 
     private suspend fun invokeRuntimeComponents(operation: String): JSONObject =
         when (operation) {
@@ -812,6 +877,8 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         val SUPPORTED = setOf(
             "host.network@1/listeners",
             "host.chat@1/publish_assistant",
+            "host.chat@1/publish_user",
+            "host.chat@1/set_presentation",
             "host.screen.capture@1/capture",
             "host.screen.session@1/list_targets",
 
@@ -843,6 +910,8 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.plugin.runtime@1/mount",
             "host.plugin.runtime@1/stop",
             "host.runtime.components@1/snapshot",
+            "host.attention@1/publish",
+            "host.attention@1/clear",
             "host.authorization@1/evaluate",
 
             "host.privileged.runtime@1/status",

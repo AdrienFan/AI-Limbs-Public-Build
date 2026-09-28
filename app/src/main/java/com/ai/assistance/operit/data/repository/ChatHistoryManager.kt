@@ -1209,6 +1209,30 @@ class ChatHistoryManager private constructor(private val context: Context) {
         }
     }
 
+    suspend fun setMessagePresentation(
+        chatId: String,
+        timestamp: Long,
+        presentationJson: String,
+    ): Boolean =
+        chatMutex(chatId).withLock {
+            try {
+                val existingMessage =
+                    chatContentDao.getMessageByTimestamp(chatId, timestamp)
+                        ?: return@withLock false
+                if (existingMessage.presentationJson == presentationJson) {
+                    return@withLock true
+                }
+                messageDao.updateMessagePresentation(chatId, timestamp, presentationJson) > 0
+            } catch (e: Exception) {
+                AppLogger.e(
+                    TAG,
+                    "Failed to update presentation for message $timestamp in chat $chatId",
+                    e,
+                )
+                throw e
+            }
+        }
+
     suspend fun addMessageVariant(
         chatId: String,
         messageTimestamp: Long,

@@ -141,15 +141,6 @@ object ToolGetter {
     }
 
     /**
-     * 获取系统环境兼容命令执行器。
-     *
-     * 旧 terminal tool 名仍由该执行器承接，但 Base 不再持有具体终端/Ubuntu 实现。
-     */
-    fun getSystemEnvironmentCommandExecutor(context: Context): StandardSystemEnvironmentCommandExecutor {
-        return StandardSystemEnvironmentCommandExecutor(context)
-    }
-
-    /**
      * 获取音乐播放工具执行器
      * @param context 应用上下文
      * @return 音乐播放工具执行器实现（标准版本）

@@ -130,7 +130,6 @@ object AiLimbsExecutionPolicyDescriptor {
             "read_file_full",
             "read_file_part",
             "list_files",
-            "get_terminal_session_screen",
             "file_info",
             "find_files",
             "grep_code"
@@ -138,13 +137,7 @@ object AiLimbsExecutionPolicyDescriptor {
 
     private val processHostTools =
         setOf(
-            "execute_shell",
-            "create_terminal_session",
-            "execute_in_terminal_session",
-            "execute_in_terminal_session_streaming",
-            "execute_hidden_terminal_command",
-            "close_terminal_session",
-            "input_in_terminal_session"
+            "execute_shell"
         )
 
     private val storageWriteHostTools =
@@ -153,8 +146,6 @@ object AiLimbsExecutionPolicyDescriptor {
             "move_file",
             "make_directory"
         )
-
-    private val systemEnvironmentHostTools = processHostTools - "execute_shell"
 
     val policyVersion: String by lazy {
         val stableDescriptor =
@@ -238,8 +229,7 @@ object AiLimbsExecutionPolicyDescriptor {
     ): AiLimbsPolicySpec {
         val uiTool = isUiTool(targetName)
         val systemEnvironmentTool =
-            targetName in systemEnvironmentHostTools ||
-                parameters.optString("environment").equals("linux", ignoreCase = true)
+            parameters.optString("environment").equals("linux", ignoreCase = true)
         val domain =
             when {
                 uiTool -> AiLimbsDomain.ANDROID_UI
@@ -269,8 +259,7 @@ object AiLimbsExecutionPolicyDescriptor {
             targetName.startsWith("Automatic_ui_subagent:")
 
     internal fun isSystemEnvironmentTool(targetName: String, parameters: JSONObject): Boolean =
-        targetName in systemEnvironmentHostTools ||
-            parameters.optString("environment").equals("linux", ignoreCase = true)
+        parameters.optString("environment").equals("linux", ignoreCase = true)
 
     fun renderChineseExplanation(): String =
         buildString {

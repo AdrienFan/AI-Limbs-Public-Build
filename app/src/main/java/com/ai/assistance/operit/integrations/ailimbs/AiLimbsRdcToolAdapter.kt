@@ -4,6 +4,7 @@ import android.content.Context
 import com.ai.assistance.operit.api.chat.llmprovider.MediaLinkParser
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.util.AppLogger
+import com.ai.assistance.operit.plugins.center.HostAttentionRegistry
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -187,7 +188,7 @@ class AiLimbsRdcToolAdapter(
     }
 
     private suspend fun processTool(operation: String, args: JSONObject): JSONObject =
-        mcpProcessResult(processRouter.executeUbuntu(operation, args))
+        mcpProcessResult(processRouter.executeSystemEnvironment(operation, args))
 
     private suspend fun executeAliasedHostTool(
         rdcToolName: String,
@@ -266,12 +267,23 @@ class AiLimbsRdcToolAdapter(
 
 
     private fun mcpProcessResult(result: JSONObject): JSONObject {
+        HostAttentionRegistry.attachTo(result)
         val success = result.optBoolean("success", false)
-        val text = result.optString("text").ifBlank { result.toString(2) }
+        val rawText = result.optString("text")
+        val attention = result.optJSONObject("attention")
+        val text =
+            if (rawText.isBlank()) {
+                result.toString(2)
+            } else if (attention != null) {
+                rawText + "\n\n" + JSONObject().put("attention", attention).toString(2)
+            } else {
+                rawText
+            }
         val response = JSONObject()
             .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", text)))
             .put("isError", !success)
         if (result.has("execution_policy")) response.put("execution_policy", result.optJSONObject("execution_policy"))
+        if (attention != null) response.put("attention", attention)
         return response
     }
 

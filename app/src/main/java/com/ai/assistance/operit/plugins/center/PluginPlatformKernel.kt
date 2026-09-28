@@ -68,8 +68,6 @@ internal object PluginPlatformKernel {
     @Volatile private var residentBridgeRuntimeReadiness: JSONObject? = null
     @Volatile private var residentPluginServicesPrepared = false
     @Volatile private var residentSubsystemsReady = false
-    @Volatile private var residentUbuntuControlReady = false
-    @Volatile private var residentUbuntuConfigured = false
     private var residentPluginRuntimeReport: org.json.JSONObject? = null
     private var runtimeRole: PluginRuntimeRole = PluginRuntimeRole.LEGACY_HOST
 
@@ -105,8 +103,6 @@ internal object PluginPlatformKernel {
             .put("resident_bridge_readiness", residentBridgeRuntimeReadiness ?: JSONObject.NULL)
             .put("resident_plugin_services_prepared", residentPluginServicesPrepared)
             .put("resident_subsystems_ready", residentSubsystemsReady)
-            .put("resident_ubuntu_configured", residentUbuntuConfigured)
-            .put("resident_ubuntu_control_ready", residentUbuntuControlReady)
             .put("resident_plugin_runtime", residentPluginRuntimeReport ?: org.json.JSONObject.NULL)
             .put("active_capabilities", if (initialized) org.json.JSONArray(capabilityRegistryInstance.activeIds().toList()) else org.json.JSONArray())
             .put("last_error", lifecycleError ?: org.json.JSONObject.NULL)
@@ -1372,16 +1368,7 @@ internal object PluginPlatformKernel {
                 } == true
             }
             // All registered child extension points use the same mount/readiness contract.
-            // Ubuntu fields below remain diagnostics for existing status consumers only.
             residentSubsystemsReady = true
-            val ubuntu = childExtensionRuntimeInstance.loggingSnapshots()
-                .firstOrNull { it.extensionId == RESIDENT_UBUNTU_EXTENSION_ID }
-            residentUbuntuConfigured = ubuntu != null
-            val ubuntuRequired = ubuntu?.enabled == true
-            val ubuntuCapabilitiesReady =
-                capabilityRegistryInstance.activeIds().containsAll(RESIDENT_UBUNTU_REQUIRED_CAPABILITIES)
-            residentUbuntuControlReady = !ubuntuRequired ||
-                (ubuntu.lifecycle == com.ai.limbs.plugin.runtime.ChildExtensionLifecycle.ACTIVE && ubuntuCapabilitiesReady)
             residentPluginRuntimeReport = org.json.JSONObject()
                 .put("active_parent_count", activePlugins.size)
                 .put("active_parent_ids", org.json.JSONArray(activePlugins.map { it.pluginId }))
@@ -1390,9 +1377,6 @@ internal object PluginPlatformKernel {
                 .put("children", childReport)
                 .put("subsystems_ready", residentSubsystemsReady)
                 .put("capability_count", capabilityRegistryInstance.activeIds().size)
-                .put("ubuntu_configured", residentUbuntuConfigured)
-                .put("ubuntu_required", ubuntuRequired)
-                .put("ubuntu_control_ready", residentUbuntuControlReady)
 
             businessRuntimeRestored = true
             residentPluginServicesPrepared = true
@@ -1509,8 +1493,6 @@ internal object PluginPlatformKernel {
             residentBridgePluginMounted = false
             residentPluginServicesPrepared = false
             residentSubsystemsReady = false
-            residentUbuntuControlReady = false
-            residentUbuntuConfigured = false
             residentPluginRuntimeReport = null
             // Registries and references still exist in this VM. Only process death releases
             // runtimeOwnerLease; shutdown alone must never authorize another process to mount.
@@ -1524,9 +1506,4 @@ internal object PluginPlatformKernel {
 
     private const val RESIDENT_BRIDGE_PLUGIN_ID = "plugin.system.bridge"
     private const val RESIDENT_BRIDGE_PROVIDER_POINT = "ai_limbs.bridge.provider"
-    private const val RESIDENT_UBUNTU_EXTENSION_ID = "ai_limbs.system_environment.ubuntu"
-    private val RESIDENT_UBUNTU_REQUIRED_CAPABILITIES = setOf(
-        "plugin.ubuntu.command",
-        "plugin.ubuntu.process"
-    )
 }

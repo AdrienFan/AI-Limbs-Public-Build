@@ -251,6 +251,8 @@ internal object HostPrimitiveGatewayBindings {
             owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("send", "send_message_to_ai")),
             owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("stream", "send_message_to_ai_streaming")),
             owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("publish_assistant")),
+            owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("publish_user")),
+            owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("set_presentation")),
             enforceAffinity = true
         ),
         "host.logging@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, logging("sources"), logging("read"), logging("export"), logging("clear"), logging("write")),
@@ -262,6 +264,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.extension.routing@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list_points"), kernel("list_bindings"), kernel("bind"), kernel("unbind")),
         "host.plugin.runtime@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list"), kernel("status"), kernel("mount"), kernel("stop")),
         "host.runtime.components@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("snapshot")),
+        "host.attention@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("publish"), kernel("clear")),
 
         "host.pipeline.hook@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("list"), pending("register"), pending("unregister")),
         "host.android.usage@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("query", "get_app_usage_time"))),

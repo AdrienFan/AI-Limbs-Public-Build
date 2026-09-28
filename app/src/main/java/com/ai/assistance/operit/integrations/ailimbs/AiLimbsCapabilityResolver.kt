@@ -804,7 +804,6 @@ class AiLimbsCapabilityResolver(
             null -> Unit
         }
         return when {
-            isSystemEnvironmentBackedTool(entry.targetToolName) -> PROVIDER_SYSTEM_ENVIRONMENT
             entry.sourceKind == ToolCatalogSourceKind.PACKAGE -> "toolpkg"
             entry.sourceKind == ToolCatalogSourceKind.MCP -> "mcp"
             entry.sourceKind == ToolCatalogSourceKind.ACTIVATION -> "activation"
@@ -819,7 +818,6 @@ class AiLimbsCapabilityResolver(
             "assets://packages/automatic_ui_base.js#${definition.invokeId.substringAfter(':')}"
         definition.invokeId.startsWith(AUTOMATIC_UI_SUBAGENT_PREFIX) ->
             "assets://packages/automatic_ui_subagent.js#${definition.invokeId.substringAfter(':')}"
-        definition.provider == PROVIDER_SYSTEM_ENVIRONMENT -> "system-environment://legacy-process/${definition.invokeId}"
         else -> definition.catalogEntry.sourceLocator ?: "registry://${definition.invokeId}"
     }
 
@@ -834,9 +832,6 @@ class AiLimbsCapabilityResolver(
 
     private fun definitionSourceName(invokeId: String): String =
         invokeId.substringBefore(':').takeIf { it != invokeId }.orEmpty().ifBlank { "<package_name>" }
-
-    private fun isSystemEnvironmentBackedTool(invokeId: String): Boolean =
-        SYSTEM_ENVIRONMENT_PROCESS_TOOLS.contains(invokeId)
 
     private data class SemanticMetadata(
         val capabilityId: String,
@@ -859,19 +854,8 @@ class AiLimbsCapabilityResolver(
         const val HOT_RANKING_CANDIDATE_LIMIT = 20
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
         const val PROVIDER_BRIDGE = AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER
-        const val PROVIDER_SYSTEM_ENVIRONMENT = "system_environment"
         const val AUTOMATIC_UI_BASE_PREFIX = "Automatic_ui_base:"
         const val AUTOMATIC_UI_SUBAGENT_PREFIX = "Automatic_ui_subagent:"
-
-        val SYSTEM_ENVIRONMENT_PROCESS_TOOLS = setOf(
-            "create_terminal_session",
-            "execute_in_terminal_session",
-            "execute_in_terminal_session_streaming",
-            "execute_hidden_terminal_command",
-            "close_terminal_session",
-            "input_in_terminal_session",
-            "get_terminal_session_screen"
-        )
 
         val SEMANTIC_METADATA = mapOf(
             "Automatic_ui_base:get_page_screenshot_image" to SemanticMetadata(

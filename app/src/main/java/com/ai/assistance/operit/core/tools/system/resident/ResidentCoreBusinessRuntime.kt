@@ -68,7 +68,6 @@ internal class ResidentCoreBusinessRuntime {
     private var bridgeIngressPrepared = false
     private var bridgePluginMounted = false
     private var pluginServicesPrepared = false
-    private var ubuntuControlReady = false
     private var businessAttached = false
     private var pluginRuntimeSupervisor: PluginRuntimeSupervisor? = null
     @Volatile private var stopRequested = false
@@ -297,7 +296,6 @@ internal class ResidentCoreBusinessRuntime {
             check(!stopRequested) { "Business takeover cancelled before ownership publication" }
             synchronized(lock) {
                 pluginServicesPrepared = true
-                ubuntuControlReady = serviceKernel.getBoolean("resident_ubuntu_control_ready")
             }
             // Publish owned only after policy/Dispatcher, Bridge, ordinary plugin services, child
             // capabilities across every registered subsystem have moved into the Core owner.
@@ -332,7 +330,6 @@ internal class ResidentCoreBusinessRuntime {
                 bridgeIngressPrepared = false
                 bridgePluginMounted = false
                 pluginServicesPrepared = false
-                ubuntuControlReady = false
                 businessAttached = false
                 businessPhase = ResidentCoreBusinessPhase.FAILED
                 businessFailureStage = failureStage
@@ -399,7 +396,6 @@ internal class ResidentCoreBusinessRuntime {
                 bridgeIngressPrepared = false
                 bridgePluginMounted = false
                 pluginServicesPrepared = false
-                ubuntuControlReady = false
                 businessAttached = false
                 if (businessPhase != ResidentCoreBusinessPhase.CANCELLED &&
                     businessPhase != ResidentCoreBusinessPhase.FAILED) {
@@ -482,7 +478,6 @@ internal class ResidentCoreBusinessRuntime {
             .put("bridge_ingress_prepared", bridgeIngressPrepared)
             .put("bridge_plugin_mounted", bridgePluginMounted)
             .put("plugin_services_prepared", pluginServicesPrepared)
-            .put("ubuntu_control_ready", ubuntuControlReady)
             .put("plugin_runtime_process", pluginRuntimeSupervisor?.snapshot() ?: JSONObject.NULL)
             .put("plugin_kernel", if (PluginPlatformKernel.isInitialized)
                 PluginPlatformKernel.lifecycleSnapshot() else JSONObject.NULL)

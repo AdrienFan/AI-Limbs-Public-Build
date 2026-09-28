@@ -25,7 +25,7 @@ import com.ai.assistance.operit.data.model.TokenUsageRecordEntity
         TokenUsageRecordEntity::class,
         TokenStatsModelEntity::class,
     ],
-    version = 21,
+    version = 22,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -361,6 +361,17 @@ abstract class AppDatabase : RoomDatabase() {
             }
 
 
+        /** v21 -> v22: generic per-message presentation metadata owned by Host chat runtime. */
+        internal val MIGRATION_21_22 =
+            object : Migration(21, 22) {
+                override fun migrate(db: SupportSQLiteDatabase) {
+                    db.execSQL(
+                        "ALTER TABLE messages ADD COLUMN presentationJson TEXT NOT NULL DEFAULT ''"
+                    )
+                }
+            }
+
+
 
         // 定义从版本2到3的迁移
         private val MIGRATION_2_3 =
@@ -479,7 +490,8 @@ abstract class AppDatabase : RoomDatabase() {
                                 MIGRATION_17_18,
                                 MIGRATION_18_19,
                                 MIGRATION_19_20,
-                                MIGRATION_20_21
+                                MIGRATION_20_21,
+                                MIGRATION_21_22
                             ) // 添加新的迁移
                             .build()
                     INSTANCE = instance

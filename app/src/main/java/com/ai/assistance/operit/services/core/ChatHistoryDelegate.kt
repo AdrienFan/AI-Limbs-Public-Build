@@ -1181,6 +1181,21 @@ class ChatHistoryDelegate(
         }
     }
 
+    suspend fun setMessagePresentation(
+        chatId: String,
+        timestamp: Long,
+        presentationJson: String,
+    ): Boolean {
+        val updated =
+            historyUpdateMutex.withLock {
+                chatHistoryManager.setMessagePresentation(chatId, timestamp, presentationJson)
+            }
+        if (updated && chatId == _currentChatId.value) {
+            reloadCurrentChatDisplayHistory(chatId)
+        }
+        return updated
+    }
+
     suspend fun deleteMessageVariant(timestamp: Long, variantIndex: Int) {
         val chatId = _currentChatId.value ?: throw IllegalStateException("No active chat")
         val shouldReloadCurrentChat =
