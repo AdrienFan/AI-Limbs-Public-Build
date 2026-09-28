@@ -274,8 +274,28 @@ def main() -> int:
     if "hostScreenCaptureTools.captureScreenshot(tool)" not in ui_proxy_bridge_text:
         errors.append("screen.capture Host strategy does not execute the Host MediaProjection handler")
 
-    if host_gateway_text.count("enforceAffinity = true") != 1:
-        errors.append("Test 9.1 must enforce affinity for exactly one pilot primitive")
+    enforced_affinity_ids = []
+    current_primitive_id = None
+    for line in host_gateway_text.splitlines():
+        primitive_match = re.search(r'"([^"]+)"\s+to\s+primitive\(', line)
+        if primitive_match:
+            current_primitive_id = primitive_match.group(1)
+        if "enforceAffinity = true" in line:
+            if current_primitive_id is None:
+                errors.append("Affinity enforcement is not attached to a Host Primitive definition")
+            else:
+                enforced_affinity_ids.append(current_primitive_id)
+
+    allowed_affinity_ids = {
+        "host.screen.capture@1",
+        "host.chat@1",
+    }
+    if set(enforced_affinity_ids) != allowed_affinity_ids or len(enforced_affinity_ids) != len(allowed_affinity_ids):
+        errors.append(
+            "Operation affinity enforcement must stay on the explicit architecture allowlist: "
+            + repr(sorted(enforced_affinity_ids))
+        )
+
     screen_capture_block = re.search(
         r'"host\.screen\.capture@1"\s+to\s+primitive\((.*?)\),\s*"host\.network@1"',
         host_gateway_text,
@@ -285,6 +305,22 @@ def main() -> int:
         errors.append("Test 9.1 pilot affinity enforcement is not scoped to host.screen.capture@1")
     elif "HostGatewayHostExecution.MEDIA_PROJECTION_SCREEN_CAPTURE" not in screen_capture_block.group(1):
         errors.append("Test 9.1 screen.capture pilot does not declare its Host MediaProjection strategy")
+
+    chat_block = re.search(
+        r'"host\.chat@1"\s+to\s+primitive\((.*?)\),\s*"host\.logging@1"',
+        host_gateway_text,
+        re.DOTALL,
+    )
+    if chat_block is None:
+        errors.append("host.chat@1 operation-owned affinity block is missing")
+    else:
+        chat_source = chat_block.group(1)
+        if "enforceAffinity = true" not in chat_source:
+            errors.append("host.chat@1 must enforce operation ownership in Resident mode")
+        if 'owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("publish_assistant"))' not in chat_source:
+            errors.append("host.chat@1/publish_assistant must be Host-service owned")
+        if 'owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("messages", "get_chat_messages"))' not in chat_source:
+            errors.append("host.chat@1/messages must remain Core-safe")
 
     required_tokens = (
         "val version: Int",

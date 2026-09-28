@@ -36,9 +36,30 @@ class HostPrimitiveAffinityRoutingTest {
     }
 
     @Test
-    fun coreSafePrimitiveRemainsLocalToBusinessOwner() {
-        assertFalse(HostPrimitiveGatewayBindings.affinityEnforced("host.chat@1"))
+    fun chatPublishAssistantReturnsToAndroidHostWhileReadsStayBusinessOwned() {
+        assertTrue(HostPrimitiveGatewayBindings.affinityEnforced("host.chat@1"))
+        assertEquals(
+            HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND,
+            HostPrimitiveGatewayBindings.primitiveAffinity("host.chat@1")
+        )
+        assertEquals(
+            HostGatewayExecutionAffinity.CORE_SAFE,
+            HostPrimitiveGatewayBindings.operations("host.chat@1").getValue("messages").affinity
+        )
         assertFalse(HostPrimitiveGatewayBindings.requiresAndroidHost("host.chat@1", "messages"))
+        assertEquals(
+            HostGatewayExecutionAffinity.HOST_SERVICE,
+            HostPrimitiveGatewayBindings
+                .operations("host.chat@1")
+                .getValue("publish_assistant")
+                .affinity
+        )
+        assertTrue(
+            HostPrimitiveGatewayBindings.requiresAndroidHost(
+                "host.chat@1",
+                "publish_assistant"
+            )
+        )
     }
 
     @Test

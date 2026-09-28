@@ -238,7 +238,21 @@ internal object HostPrimitiveGatewayBindings {
         "host.device.state@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("snapshot", "device_info")),
         "host.scheduler@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("schedule_once"), pending("schedule_periodic"), pending("cancel"), pending("list")),
         "host.ai.inference@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("invoke"), pending("stream"), pending("estimate_tokens")),
-        "host.chat@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("create", "create_new_chat"), tool("list", "list_chats"), tool("find", "find_chat"), tool("switch", "switch_chat"), tool("title", "update_chat_title"), tool("delete", "delete_chat"), tool("messages", "get_chat_messages"), tool("messages_range", "get_chat_messages_range"), tool("send", "send_message_to_ai"), tool("stream", "send_message_to_ai_streaming"), kernel("publish_assistant")),
+        "host.chat@1" to primitive(
+            HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND,
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("create", "create_new_chat")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("list", "list_chats")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("find", "find_chat")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("switch", "switch_chat")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("title", "update_chat_title")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("delete", "delete_chat")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("messages", "get_chat_messages")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("messages_range", "get_chat_messages_range")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("send", "send_message_to_ai")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("stream", "send_message_to_ai_streaming")),
+            owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("publish_assistant")),
+            enforceAffinity = true
+        ),
         "host.logging@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, logging("sources"), logging("read"), logging("export"), logging("clear"), logging("write")),
         "host.secrets@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("read"), pending("revoke"), pending("rotate")),
         "host.ui.surface@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("list")), owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("register")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, kernel("open")), owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("remove"))),
@@ -392,7 +406,29 @@ internal class SystemHostPrimitiveExecutor(
                 parameters
             )
             HostGatewayRouteKind.LOGGING -> loggingService.invoke(ownerPluginId, normalizedOperation, parameters)
-            HostGatewayRouteKind.KERNEL -> kernelAdapter.invoke(ownerPluginId, normalizedId, normalizedOperation, JSONObject(parameters.toString()))
+            HostGatewayRouteKind.KERNEL -> {
+                if (
+                    runtimeRole == PluginRuntimeRole.BUSINESS &&
+                    HostPrimitiveGatewayBindings.requiresAndroidHost(
+                        normalizedId,
+                        normalizedOperation
+                    )
+                ) {
+                    invokeResidentHostKernelPrimitive(
+                        ownerPluginId = ownerPluginId,
+                        primitiveId = normalizedId,
+                        operation = normalizedOperation,
+                        parameters = parameters
+                    )
+                } else {
+                    kernelAdapter.invoke(
+                        ownerPluginId,
+                        normalizedId,
+                        normalizedOperation,
+                        JSONObject(parameters.toString())
+                    )
+                }
+            }
             HostGatewayRouteKind.COMPONENT_PROXY -> {
                 if (runtimeRole == PluginRuntimeRole.BUSINESS) {
                     invokeResidentComponentProxy(normalizedOperation, parameters)
@@ -406,6 +442,35 @@ internal class SystemHostPrimitiveExecutor(
             }
             HostGatewayRouteKind.UNBOUND -> error("unreachable")
         }
+    }
+
+    private suspend fun invokeResidentHostKernelPrimitive(
+        ownerPluginId: String,
+        primitiveId: String,
+        operation: String,
+        parameters: JSONObject
+    ): JSONObject {
+        val response =
+            withContext(Dispatchers.IO) {
+                com.ai.assistance.operit.core.tools.system.resident.ResidentHostComponentProxy.request(
+                    com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBroker.KIND_HOST_PRIMITIVE,
+                    JSONObject()
+                        .put("owner_plugin_id", ownerPluginId)
+                        .put("primitive_id", primitiveId)
+                        .put("operation", operation)
+                        .put("parameters", JSONObject(parameters.toString()))
+                )
+            }
+        if (!response.optBoolean("ok", false)) {
+            throw PluginInstallException(
+                "HOST_UI_PROXY_FAILED",
+                response.optString(
+                    "error",
+                    "Host-affinity Kernel operation failed: $primitiveId/$operation"
+                )
+            )
+        }
+        return response.optJSONObject("result") ?: JSONObject()
     }
 
     private fun invokeResidentComponentProxy(operation: String, parameters: JSONObject): JSONObject {

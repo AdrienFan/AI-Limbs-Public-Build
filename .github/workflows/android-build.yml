@@ -63,6 +63,9 @@ jobs:
       - name: Validate presentation runtime ownership
         run: python3 ci/script/check_presentation_runtime_ownership.py
 
+      - name: Validate chat publish Host affinity
+        run: python3 ci/script/check_chat_publish_host_affinity.py
+
       - name: Validate Service Extension Child canonical transport
         run: python3 ci/script/check_service_extension_child_canonical.py
 

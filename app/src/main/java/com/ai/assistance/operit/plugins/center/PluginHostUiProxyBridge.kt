@@ -1003,13 +1003,21 @@ private class ResidentHostComponentExecutor(
             launchActivityResult(requestId, payload, deadlineElapsedMs)
         ResidentComponentProxyBroker.KIND_HOST_PRIMITIVE -> {
             val primitiveId = payload.getString("primitive_id").trim().lowercase()
-            check(CapabilityRegistry.isOwnedBy(primitiveId, CapabilityExecutionOwner.HOST)) {
-                "Primitive is not Host-owned: $primitiveId"
+            val operation = payload.getString("operation").trim().lowercase()
+            val descriptorOwnedByHost =
+                CapabilityRegistry.isOwnedBy(primitiveId, CapabilityExecutionOwner.HOST)
+            val binding = HostPrimitiveGatewayBindings.operations(primitiveId)[operation]
+            val operationOwnedByAndroidHost =
+                HostPrimitiveGatewayBindings.affinityEnforced(primitiveId) &&
+                    HostPrimitiveGatewayBindings.requiresAndroidHost(primitiveId, operation) &&
+                    binding?.kind == HostGatewayRouteKind.KERNEL
+            check(descriptorOwnedByHost || operationOwnedByAndroidHost) {
+                "Primitive operation is not Host-owned: $primitiveId/$operation"
             }
             val result = hostPrimitiveAdapter.invoke(
                 ownerPluginId = payload.getString("owner_plugin_id").trim(),
                 primitiveId = primitiveId,
-                operation = payload.getString("operation").trim().lowercase(),
+                operation = operation,
                 parameters = payload.optJSONObject("parameters") ?: JSONObject()
             )
             JSONObject().put("ok", true).put("result", result)
