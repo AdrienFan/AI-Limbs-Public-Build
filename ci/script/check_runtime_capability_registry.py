@@ -331,8 +331,10 @@ def main() -> int:
     if overlay_block is None or "enforceAffinity = true" not in overlay_block.group(1):
         errors.append("host.window.overlay@1 must enforce Host operation ownership")
     else:
+        if not overlay_block.group(1).lstrip().startswith("HostGatewayExecutionAffinity.HOST_SERVICE,"):
+            errors.append("host.window.overlay@1 must inherit Android Host-service affinity")
         for operation in ("create", "update", "remove", "list"):
-            token = f'owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("{operation}"))'
+            token = f'kernel("{operation}")'
             if token not in overlay_block.group(1):
                 errors.append(f"host.window.overlay@1/{operation} must execute in Android Host")
     if '"host.window.overlay@1" -> overlayWindows.invoke(ownerPluginId, op, parameters)' not in kernel_text:

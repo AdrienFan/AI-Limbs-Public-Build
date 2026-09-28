@@ -82,6 +82,20 @@ class HostPrimitiveAffinityRoutingTest {
     }
 
     @Test
+    fun overlayOperationsInheritHostServiceAffinity() {
+        val id = "host.window.overlay@1"
+        assertEquals(HostGatewayExecutionAffinity.HOST_SERVICE, HostPrimitiveGatewayBindings.primitiveAffinity(id))
+        assertTrue(HostPrimitiveGatewayBindings.affinityEnforced(id))
+        for (operation in listOf("create", "update", "remove", "list")) {
+            assertEquals(
+                HostGatewayExecutionAffinity.HOST_SERVICE,
+                HostPrimitiveGatewayBindings.operations(id).getValue(operation).affinity
+            )
+            assertTrue(HostPrimitiveGatewayBindings.requiresAndroidHost(id, operation))
+        }
+    }
+
+    @Test
     fun mixedPrimitiveWaitsForItsOwnMigrationStage() {
         assertFalse(HostPrimitiveGatewayBindings.affinityEnforced("host.filesystem@1"))
         assertFalse(HostPrimitiveGatewayBindings.requiresAndroidHost("host.filesystem@1", "open"))
