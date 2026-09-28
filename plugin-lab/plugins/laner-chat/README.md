@@ -1,4 +1,4 @@
-# AI Limbs Laner Chat Plugin (v0.2.3)
+# AI Limbs Laner Chat Plugin (v0.2.4)
 
 Laner Chat owns its durable mailbox, sessions, priority, Assistant Turn, and chat-mode presentation. The Host supplies generic chat slots, selection, composer, and history delivery through the chat-mode protocol.
 

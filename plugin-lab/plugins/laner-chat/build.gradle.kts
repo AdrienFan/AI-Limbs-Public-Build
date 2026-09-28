@@ -12,11 +12,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.lanerchat.v023"
+        applicationId = "com.ai.limbs.payload.lanerchat.v024"
         minSdk = 29
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.2.3"
+        versionCode = 6
+        versionName = "0.2.4"
     }
 
     compileOptions {

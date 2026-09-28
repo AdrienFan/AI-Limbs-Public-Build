@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.chat.laner_bridge",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "api": { "target": 1, "min": 1 },
   "display": {
     "name": "Laner Chat",
@@ -43,7 +43,10 @@
       "plugin.chat.laner_bridge.proactive.delivered"
     ],
     "services": [],
-    "providers": ["plugin.chat.laner_bridge.runtime"],
+    "providers": [
+      "plugin.chat.laner_bridge.runtime",
+      "plugin.chat.laner_bridge.chat_mode"
+    ],
     "extensions": []
   }
 }
