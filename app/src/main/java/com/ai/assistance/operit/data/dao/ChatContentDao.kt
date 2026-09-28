@@ -32,6 +32,7 @@ private const val MESSAGE_CONTENT_ROW_QUERY =
         completedAt,
         displayMode,
         isFavorite,
+        presentationJson,
         LENGTH(content) AS contentCharacterCount
     FROM messages
     """
