@@ -417,7 +417,7 @@ internal object UbuntuSubsystemCapabilities {
     private suspend fun hiddenExecute(terminal: TerminalManager, p: JSONObject): JSONObject {
         requireRunning(terminal)
         val command = p.requiredText("command")
-        val executorKey = p.optString("executor_key").trim().ifBlank { "default" }
+        val executorKey = UbuntuHiddenExecutorKeyLimiter.normalize(p.optString("executor_key"))
         val timeoutMs = p.longInRange("timeout_ms", 1_000L, 3_600_000L, 120_000L)
         val result = terminal.executeHiddenCommand(command, executorKey = executorKey, timeoutMs = timeoutMs)
         return JSONObject()

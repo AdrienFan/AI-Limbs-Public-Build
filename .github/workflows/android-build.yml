@@ -46,6 +46,8 @@ jobs:
           persist-credentials: false
       - name: Validate all plugin and child extension versions
         run: python3 tools/plugin_lab/source_provenance.py check --output dist/source-inventory.json
+      - name: Validate Ubuntu child ownership
+        run: python3 tools/plugin_lab/verify_ubuntu_child_ownership.py
       - name: Upload source inventory
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
