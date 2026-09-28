@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from pathlib import Path
 import sys
+import subprocess
 
 root = Path(__file__).resolve().parents[2]
 app = root / "app/src/main/java"
@@ -23,25 +24,28 @@ for path in app.rglob("*.kt"):
     text = path.read_text(encoding="utf-8")
     for token in forbidden_tokens:
         if token in text:
-            errors.append(f"{path.relative_to(root)} contains forbidden Base Ubuntu/terminal token: {token}")
+            errors.append(
+                f"{path.relative_to(root)} contains forbidden Base Ubuntu/terminal token: {token}"
+            )
 
+tracked = set(
+    subprocess.check_output(
+        ["git", "-C", str(root), "ls-files"],
+        text=True,
+    ).splitlines()
+)
 for rel in (
     "app/src/main/java/com/ai/assistance/operit/core/systemenvironment/SystemEnvironmentClient.kt",
     "app/src/main/java/com/ai/assistance/operit/core/tools/defaultTool/standard/StandardSystemEnvironmentCommandExecutor.kt",
     "app/src/main/java/com/ai/assistance/operit/plugins/center/UbuntuHiddenExecutorKeyLimiter.kt",
 ):
-    if (root / rel).exists():
+    if rel in tracked:
         errors.append(f"legacy Base compatibility file still exists: {rel}")
 
-settings_path = root / "settings.gradle.kts"
-if settings_path.exists():
-    settings = settings_path.read_text(encoding="utf-8")
-else:
-    import subprocess
-    settings = subprocess.check_output(
-        ["git", "-C", str(root), "show", "HEAD:settings.gradle.kts"],
-        text=True,
-    )
+settings = subprocess.check_output(
+    ["git", "-C", str(root), "show", ":settings.gradle.kts"],
+    text=True,
+)
 if 'include(":terminal")' in settings:
     errors.append("legacy :terminal module is still included")
 
