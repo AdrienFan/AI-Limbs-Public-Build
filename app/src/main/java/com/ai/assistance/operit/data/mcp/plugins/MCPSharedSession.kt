@@ -2,7 +2,7 @@ package com.ai.assistance.operit.data.mcp.plugins
 
 import android.content.Context
 import com.ai.assistance.operit.util.AppLogger
-import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentCapabilityClient
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -33,7 +33,7 @@ object MCPSharedSession {
         // provider-private session state.
         return mutex.withLock {
             val sessionId = runCatching {
-                SystemEnvironmentClient.createSession(SESSION_NAME)
+                SystemEnvironmentCapabilityClient.createSession(SESSION_NAME)
             }.onFailure { error ->
                 AppLogger.e(TAG, "Failed to resolve shared System Environment session", error)
             }.getOrNull()

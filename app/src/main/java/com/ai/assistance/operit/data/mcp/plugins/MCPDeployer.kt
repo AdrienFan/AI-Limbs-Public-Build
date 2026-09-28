@@ -4,7 +4,7 @@ import android.content.Context
 import com.ai.assistance.operit.R
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.data.mcp.MCPLocalServer
-import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentClient
+import com.ai.assistance.operit.core.systemenvironment.SystemEnvironmentCapabilityClient
 import com.ai.assistance.operit.core.tools.AIToolHandler
 import com.ai.assistance.operit.data.model.AITool
 import com.ai.assistance.operit.data.model.ToolParameter
@@ -67,7 +67,7 @@ class MCPDeployer(private val context: Context) {
             val outputBuilder = StringBuilder()
             var hasEvent = false
 
-            SystemEnvironmentClient.executeSessionFlow(sessionId, command).collect { event ->
+            SystemEnvironmentCapabilityClient.executeSessionFlow(sessionId, command).collect { event ->
                 hasEvent = true
                 if (event.outputChunk.isNotEmpty()) {
                     outputBuilder.append(event.outputChunk)
@@ -115,7 +115,7 @@ class MCPDeployer(private val context: Context) {
 
                         val pluginShortName = pluginId.split("/").last()
                         val sessionId = runCatching {
-                            SystemEnvironmentClient.createSession("deploy-$pluginShortName")
+                            SystemEnvironmentCapabilityClient.createSession("deploy-$pluginShortName")
                         }.getOrNull()
                         if (sessionId == null) {
                             statusCallback(DeploymentStatus.Error(context.getString(R.string.mcp_deployment_cannot_create_terminal)))
@@ -127,7 +127,7 @@ class MCPDeployer(private val context: Context) {
                             statusCallback(DeploymentStatus.InProgress(context.getString(R.string.mcp_deployment_creating_directory, pluginDir)))
 
                             runCatching {
-                                SystemEnvironmentClient.executeSession(sessionId, "mkdir -p $pluginDir")
+                                SystemEnvironmentCapabilityClient.executeSession(sessionId, "mkdir -p $pluginDir")
                             }.getOrElse {
                                 statusCallback(DeploymentStatus.Error(context.getString(R.string.mcp_deployment_create_directory_failed)))
                                 return@withContext false
@@ -138,7 +138,7 @@ class MCPDeployer(private val context: Context) {
                             return@withContext true
                         } finally {
                             kotlinx.coroutines.delay(2000L)
-                            SystemEnvironmentClient.closeSession(sessionId)
+                            SystemEnvironmentCapabilityClient.closeSession(sessionId)
                             AppLogger.d(TAG, "虚拟插件部署完成, 已关闭会話: $sessionId")
                         }
                     }
@@ -277,7 +277,7 @@ class MCPDeployer(private val context: Context) {
             // 为每个插件创建独立的系统环境会话，方便查看部署日志。
             val pluginShortName = pluginId.split("/").last()
             sessionId = runCatching {
-                SystemEnvironmentClient.createSession("deploy-$pluginShortName")
+                SystemEnvironmentCapabilityClient.createSession("deploy-$pluginShortName")
             }.getOrNull()
             if (sessionId == null) {
                 statusCallback(DeploymentStatus.Error(context.getString(R.string.mcp_deployment_cannot_create_terminal)))
@@ -294,7 +294,7 @@ class MCPDeployer(private val context: Context) {
             statusCallback(DeploymentStatus.InProgress(context.getString(R.string.mcp_deployment_creating_directory, pluginDir)))
 
             runCatching {
-                SystemEnvironmentClient.executeSession(sessionId, "mkdir -p $pluginDir")
+                SystemEnvironmentCapabilityClient.executeSession(sessionId, "mkdir -p $pluginDir")
             }.getOrElse {
                 statusCallback(DeploymentStatus.Error(context.getString(R.string.mcp_deployment_create_directory_failed)))
                 return@withContext false
@@ -339,7 +339,7 @@ class MCPDeployer(private val context: Context) {
             statusCallback(DeploymentStatus.InProgress(context.getString(R.string.mcp_deployment_switching_directory)))
 
             runCatching {
-                SystemEnvironmentClient.executeSession(sessionId, "cd $pluginDir")
+                SystemEnvironmentCapabilityClient.executeSession(sessionId, "cd $pluginDir")
             }.getOrElse {
                 statusCallback(DeploymentStatus.Error(context.getString(R.string.mcp_deployment_switch_failed)))
                 return@withContext false
@@ -429,7 +429,7 @@ class MCPDeployer(private val context: Context) {
                     // 延迟关闭会话让用户看到结果
                     val delayTime = if (deploySuccess) 2000L else 3000L
                     kotlinx.coroutines.delay(delayTime)
-                    SystemEnvironmentClient.closeSession(it)
+                    SystemEnvironmentCapabilityClient.closeSession(it)
                     AppLogger.d(TAG, "部署${if (deploySuccess) "完成" else "失败"}，已关闭会话: $it")
                 } catch (e: Exception) {
                     AppLogger.e(TAG, "关闭部署会话时出错: ${e.message}")
