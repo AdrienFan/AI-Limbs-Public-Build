@@ -90,6 +90,16 @@ internal class LanerChatQuickPageProvider(
         )
     }
 
+    private suspend fun closeOverlay() {
+        host.invokeHostCapability(
+            "host.window.overlay@1",
+            JSONObject()
+                .put("operation", "remove")
+                .put("overlay_id", LANER_CHAT_OVERLAY_ID)
+                .toString()
+        )
+    }
+
     private suspend fun moveBy(dx: Int, dy: Int) {
         host.invokeHostCapability(
             "host.window.overlay@1",
@@ -216,13 +226,24 @@ internal class LanerChatQuickPageProvider(
             Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                     Text("兰儿快捷聊天", style = MaterialTheme.typography.titleMedium)
-                    TextButton(onClick = {
-                        scope.launch {
-                            setExpanded(false)
-                            expanded = false
-                            bubbles.clear()
-                        }
-                    }) { Text("收起") }
+                    Row {
+                        TextButton(onClick = {
+                            scope.launch {
+                                setExpanded(false)
+                                expanded = false
+                                bubbles.clear()
+                            }
+                        }) { Text("收起") }
+                        TextButton(onClick = {
+                            scope.launch {
+                                try {
+                                    closeOverlay()
+                                } catch (failure: Exception) {
+                                    error = failure.message ?: "关闭快捷聊天失败"
+                                }
+                            }
+                        }) { Text("关闭") }
+                    }
                 }
                 Column(modifier = Modifier.fillMaxWidth().heightIn(max = 160.dp).verticalScroll(rememberScrollState())) {
                     bubbles.forEach { bubble ->

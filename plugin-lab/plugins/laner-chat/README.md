@@ -8,4 +8,4 @@ The configuration card receives its own Compose click and calls `performClick()`
 
 Version 0.2.7 adds a quick chat overlay surface. The title bar moves the whole window. The circle shows the unread assistant count; opening it acknowledges the visible batch, and a successful reply clears those bubbles. The same `submit` path publishes user messages into the Host chat history. The plugin stores a per-chat read cursor and treats pre-upgrade history as read.
 
-Version 0.2.8 lets the collapsed circle detect a drag while keeping a tap to open. The plugin sends pixel deltas through `host.window.overlay@1/update`; the Host moves the same window used by the expanded title bar. This gesture requires base build93 or newer.
+Version 0.2.8 lets the collapsed circle detect a drag while keeping a tap to open. The plugin sends pixel deltas through `host.window.overlay@1/update`; the Host moves the same window used by the expanded title bar. The expanded panel also has a Close button that removes the overlay, while Collapse keeps its circle. This gesture requires base build93 or newer.
