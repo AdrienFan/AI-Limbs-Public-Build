@@ -375,6 +375,7 @@ fun AppContent(
                         }
                     },
                     actions = {
+                        PluginPageSlotHost(pageContext.pageId, SystemPageSlotIdsV1.TOP_BAR_START)
                         pageSlotRenderer?.Render(
                             SystemPageSlotContextV1(
                                 page = pageContext,
@@ -383,6 +384,7 @@ fun AppContent(
                             )
                         )
                         actions()
+                        PluginPageSlotHost(pageContext.pageId, SystemPageSlotIdsV1.TOP_BAR_END)
                         pageSlotRenderer?.Render(
                             SystemPageSlotContextV1(
                                 page = pageContext,
