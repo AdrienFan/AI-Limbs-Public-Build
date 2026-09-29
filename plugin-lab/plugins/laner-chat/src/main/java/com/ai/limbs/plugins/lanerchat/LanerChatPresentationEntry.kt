@@ -40,7 +40,11 @@ class LanerChatPresentationEntry : InProcessPluginPresentationEntry {
                     )
                 )
             },
-            mapOf("overlay_enabled" to "true", "kind" to "plugin_page")
+            mapOf(
+                "overlay_enabled" to "true",
+                "host_collapsed_drag" to "true",
+                "kind" to "plugin_page"
+            )
         )
         val launcherRegistration = host.registerPageProvider(
             LANER_CHAT_QUICK_LAUNCHER_ID,

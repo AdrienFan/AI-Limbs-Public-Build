@@ -2,7 +2,6 @@ package com.ai.limbs.plugins.lanerchat
 
 import android.content.Context
 import android.view.View
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -30,14 +29,12 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessOverlayPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
-import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -100,18 +97,6 @@ internal class LanerChatQuickPageProvider(
         )
     }
 
-    private suspend fun moveBy(dx: Int, dy: Int) {
-        host.invokeHostCapability(
-            "host.window.overlay@1",
-            JSONObject()
-                .put("operation", "update")
-                .put("overlay_id", LANER_CHAT_OVERLAY_ID)
-                .put("delta_x", dx)
-                .put("delta_y", dy)
-                .toString()
-        )
-    }
-
     private data class Bubble(val timestamp: Long, val content: String)
 
     @Composable
@@ -125,22 +110,6 @@ internal class LanerChatQuickPageProvider(
         var error by remember { mutableStateOf<String?>(null) }
         val bubbles = remember { mutableStateListOf<Bubble>() }
         val scope = rememberCoroutineScope()
-        val dragMoves = remember { PendingDragMoves() }
-
-        // Only the accumulated movement is sent while a Host window update is in flight.
-        // Queuing every pointer event makes the collapsed bubble trail behind the finger.
-        LaunchedEffect(dragMoves) {
-            for (signal in dragMoves.signals) {
-                val (dx, dy) = dragMoves.take()
-                if (dx == 0 && dy == 0) continue
-                try {
-                    moveBy(dx, dy)
-                } catch (failure: Exception) {
-                    error = failure.message ?: "移动快捷聊天失败"
-                }
-            }
-        }
-
         LaunchedEffect(Unit) {
             openSequence.collect { sequence ->
                 if (sequence == 0) return@collect
@@ -201,26 +170,7 @@ internal class LanerChatQuickPageProvider(
         if (!expanded) {
             Button(
                 onClick = ::open,
-                modifier = Modifier.size(56.dp).pointerInput(dragMoves) {
-                    var remainderX = 0f
-                    var remainderY = 0f
-                    detectDragGestures(
-                        onDragStart = {
-                            remainderX = 0f
-                            remainderY = 0f
-                        },
-                        onDrag = { change, amount ->
-                            change.consume()
-                            remainderX += amount.x
-                            remainderY += amount.y
-                            val dx = remainderX.toInt()
-                            val dy = remainderY.toInt()
-                            remainderX -= dx
-                            remainderY -= dy
-                            if (dx != 0 || dy != 0) dragMoves.add(dx, dy)
-                        }
-                    )
-                }
+                modifier = Modifier.size(56.dp)
             ) { Text(if (unread > 0) "$unread" else "聊") }
             return
         }
@@ -303,29 +253,6 @@ internal class LanerChatQuickPageProvider(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("发送") }
             }
-        }
-    }
-}
-
-/** Coalesces pointer deltas without losing the total travel during a slow Host update. */
-private class PendingDragMoves {
-    val signals = Channel<Unit>(Channel.CONFLATED)
-    private val lock = Any()
-    private var x = 0
-    private var y = 0
-
-    fun add(dx: Int, dy: Int) {
-        synchronized(lock) {
-            x += dx
-            y += dy
-        }
-        signals.trySend(Unit)
-    }
-
-    fun take(): Pair<Int, Int> = synchronized(lock) {
-        (x to y).also {
-            x = 0
-            y = 0
         }
     }
 }

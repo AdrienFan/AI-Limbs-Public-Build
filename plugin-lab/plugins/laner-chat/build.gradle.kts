@@ -15,8 +15,8 @@ android {
         applicationId = "com.ai.limbs.payload.lanerchat.v026"
         minSdk = 29
         targetSdk = 34
-        versionCode = 11
-        versionName = "0.2.9"
+        versionCode = 12
+        versionName = "0.2.10"
     }
 
     compileOptions {
