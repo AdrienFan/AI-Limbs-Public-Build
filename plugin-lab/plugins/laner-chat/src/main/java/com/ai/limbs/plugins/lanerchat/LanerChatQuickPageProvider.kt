@@ -125,11 +125,14 @@ internal class LanerChatQuickPageProvider(
         var error by remember { mutableStateOf<String?>(null) }
         val bubbles = remember { mutableStateListOf<Bubble>() }
         val scope = rememberCoroutineScope()
-        val dragMoves = remember { Channel<Pair<Int, Int>>(Channel.UNLIMITED) }
+        val dragMoves = remember { PendingDragMoves() }
 
-        // The plugin decides whether the bubble was tapped or dragged; Host moves its window.
+        // Only the accumulated movement is sent while a Host window update is in flight.
+        // Queuing every pointer event makes the collapsed bubble trail behind the finger.
         LaunchedEffect(dragMoves) {
-            for ((dx, dy) in dragMoves) {
+            for (signal in dragMoves.signals) {
+                val (dx, dy) = dragMoves.take()
+                if (dx == 0 && dy == 0) continue
                 try {
                     moveBy(dx, dy)
                 } catch (failure: Exception) {
@@ -214,7 +217,7 @@ internal class LanerChatQuickPageProvider(
                             val dy = remainderY.toInt()
                             remainderX -= dx
                             remainderY -= dy
-                            if (dx != 0 || dy != 0) dragMoves.trySend(dx to dy)
+                            if (dx != 0 || dy != 0) dragMoves.add(dx, dy)
                         }
                     )
                 }
@@ -300,6 +303,29 @@ internal class LanerChatQuickPageProvider(
                     modifier = Modifier.fillMaxWidth()
                 ) { Text("发送") }
             }
+        }
+    }
+}
+
+/** Coalesces pointer deltas without losing the total travel during a slow Host update. */
+private class PendingDragMoves {
+    val signals = Channel<Unit>(Channel.CONFLATED)
+    private val lock = Any()
+    private var x = 0
+    private var y = 0
+
+    fun add(dx: Int, dy: Int) {
+        synchronized(lock) {
+            x += dx
+            y += dy
+        }
+        signals.trySend(Unit)
+    }
+
+    fun take(): Pair<Int, Int> = synchronized(lock) {
+        (x to y).also {
+            x = 0
+            y = 0
         }
     }
 }
