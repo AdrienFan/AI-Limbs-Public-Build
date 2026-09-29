@@ -52,13 +52,29 @@ internal class LanerChatQuickPageProvider(
     private val invokeBusiness: suspend (String, JSONObject) -> JSONObject
 ) : InProcessOverlayPageProvider {
     private val openSequence = MutableStateFlow(0)
+    private val closeSequence = MutableStateFlow(0)
+    private var launcherWindowOpen = false
 
-    override fun open() {
+    private fun showChat() {
         openSequence.value += 1
     }
 
-    override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
-        ComposeView(host.createPluginContext(context)).apply {
+    override fun open() {
+        // Host calls open() after create, and again when the same launcher action finds this window.
+        if (launcherWindowOpen) {
+            closeSequence.value += 1
+        } else {
+            launcherWindowOpen = true
+            showChat()
+        }
+    }
+
+    override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View {
+        // A new window starts a new launch cycle; the old Compose collectors have been disposed.
+        launcherWindowOpen = false
+        openSequence.value = 0
+        closeSequence.value = 0
+        return ComposeView(host.createPluginContext(context)).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
             setContent {
                 MaterialTheme(colorScheme = darkColorScheme()) {
@@ -66,6 +82,7 @@ internal class LanerChatQuickPageProvider(
                 }
             }
         }
+    }
 
     private suspend fun quickSnapshot(): JSONObject =
         invokeBusiness("quick.snapshot", JSONObject()).getJSONObject("quick")
@@ -98,6 +115,7 @@ internal class LanerChatQuickPageProvider(
                 .put("overlay_id", LANER_CHAT_OVERLAY_ID)
                 .toString()
         )
+        launcherWindowOpen = false
     }
 
     private suspend fun moveBy(dx: Int, dy: Int) {
@@ -134,6 +152,17 @@ internal class LanerChatQuickPageProvider(
                     moveBy(dx, dy)
                 } catch (failure: Exception) {
                     error = failure.message ?: "移动快捷聊天失败"
+                }
+            }
+        }
+
+        LaunchedEffect(Unit) {
+            closeSequence.collect { sequence ->
+                if (sequence == 0) return@collect
+                try {
+                    closeOverlay()
+                } catch (failure: Exception) {
+                    error = failure.message ?: "关闭快捷聊天失败"
                 }
             }
         }
@@ -197,7 +226,7 @@ internal class LanerChatQuickPageProvider(
 
         if (!expanded) {
             Button(
-                onClick = ::open,
+                onClick = ::showChat,
                 modifier = Modifier.size(56.dp).pointerInput(dragMoves) {
                     var remainderX = 0f
                     var remainderY = 0f
