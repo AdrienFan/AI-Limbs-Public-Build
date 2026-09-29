@@ -156,14 +156,6 @@ internal class HostOverlayWindows(private val context: Context) {
         }
 
         val lifecycle = ServiceLifecycleOwner()
-        val root = OverlayRoot(
-            context, id, params, binding.metadata["host_collapsed_drag"] == "true"
-        ).apply {
-            orientation = LinearLayout.VERTICAL
-            setViewTreeLifecycleOwner(lifecycle)
-            setViewTreeViewModelStoreOwner(lifecycle)
-            setViewTreeSavedStateRegistryOwner(lifecycle)
-        }
         val params = WindowManager.LayoutParams(
             dp(56), WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -175,6 +167,14 @@ internal class HostOverlayWindows(private val context: Context) {
             y = preferences.getInt("$id.y", dp(120))
                 .coerceIn(0, (context.resources.displayMetrics.heightPixels - dp(48)).coerceAtLeast(0))
             x = x.coerceIn(0, (context.resources.displayMetrics.widthPixels - dp(56)).coerceAtLeast(0))
+        }
+        val root = OverlayRoot(
+            context, id, params, binding.metadata["host_collapsed_drag"] == "true"
+        ).apply {
+            orientation = LinearLayout.VERTICAL
+            setViewTreeLifecycleOwner(lifecycle)
+            setViewTreeViewModelStoreOwner(lifecycle)
+            setViewTreeSavedStateRegistryOwner(lifecycle)
         }
         val header = TextView(context).apply {
             text = "拖动这里移动"
