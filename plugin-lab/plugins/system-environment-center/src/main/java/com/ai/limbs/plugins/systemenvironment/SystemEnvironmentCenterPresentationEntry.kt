@@ -72,10 +72,21 @@ class SystemEnvironmentCenterPresentationEntry : InProcessPluginPresentationEntr
             SystemEnvironmentCenterPageProvider(host, registry),
             mapOf("kind" to "plugin_page", "screen_id" to SystemEnvironmentContract.SCREEN_ID)
         )
+        val launcher = host.registerPageProvider(
+            LAUNCHER_PROVIDER_ID,
+            SystemEnvironmentLauncherProvider(host),
+            mapOf(
+                "kind" to "host_page_slot",
+                "ai_limbs.host_page_slot.v1" to "true",
+                "target_page_id" to "host:native.ai_chat",
+                "slot_id" to "top_bar_start"
+            )
+        )
         return InProcessPluginPresentationHandle {
             val failures = mutableListOf<Throwable>()
             observer.cancel()
             runCatching { observer.join() }.exceptionOrNull()?.let(failures::add)
+            runCatching { launcher.close() }.exceptionOrNull()?.let(failures::add)
             runCatching { page.close() }.exceptionOrNull()?.let(failures::add)
             mounted.values.toList().asReversed().forEach { owner ->
                 runCatching { owner.handle.close() }.exceptionOrNull()?.let(failures::add)
@@ -111,6 +122,7 @@ class SystemEnvironmentCenterPresentationEntry : InProcessPluginPresentationEntr
 
     private companion object {
         const val PAGE_PROVIDER_ID = "plugin.system_environment_center.page"
+        const val LAUNCHER_PROVIDER_ID = "plugin.system_environment_center.launcher"
         const val PRESENTATION_KIND = "system_environment_presentation"
     }
 }
