@@ -22,20 +22,15 @@ import kotlinx.coroutines.CancellationException
 internal const val LANER_CHAT_PLUGIN_ID = "plugin.chat.laner_bridge"
 internal const val LANER_CHAT_PROVIDER_ID = "$LANER_CHAT_PLUGIN_ID.runtime"
 internal const val LANER_CHAT_QUICK_PROVIDER_ID = "$LANER_CHAT_PLUGIN_ID.quick_overlay"
+internal const val LANER_CHAT_QUICK_LAUNCHER_ID = "$LANER_CHAT_PLUGIN_ID.quick_launcher"
 internal const val LANER_CHAT_OVERLAY_ID = "$LANER_CHAT_PLUGIN_ID.quick"
 
-
-internal fun quickPageSlotAction(): JSONObject = JSONObject()
-    .put("action_id", "laner_quick_chat")
-    .put("target_page_id", "host:native.ai_chat")
-    .put("slot_id", "top_bar_start")
-    .put("provider_id", LANER_CHAT_QUICK_PROVIDER_ID)
-    .put("action_kind", "overlay")
-    .put("overlay_id", LANER_CHAT_OVERLAY_ID)
-    .put("badge_capability_id", "$LANER_CHAT_PLUGIN_ID.quick.count")
-    .put("icon_key", "chat")
-    .put("content_description", "快捷聊天")
-    .put("priority", 110)
+internal fun quickLauncherSlotMetadata(): Map<String, String> = mapOf(
+    "kind" to "host_page_slot",
+    "ai_limbs.host_page_slot.v1" to "true",
+    "target_page_id" to "host:native.ai_chat",
+    "slot_id" to "top_bar_start"
+)
 
 class LanerChatEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
@@ -166,7 +161,7 @@ class LanerChatEntry : InProcessPluginEntry {
         capability(
             "quick.count",
             "读取快捷聊天未读条数",
-            "供通用顶栏角标读取未读数量。",
+            "供 Chat 插件顶栏入口显示未读数量。",
             read
         ) { controller.quickCount() }
 
@@ -398,7 +393,6 @@ class LanerChatEntry : InProcessPluginEntry {
             )
         )
 
-        val quickAction = quickPageSlotAction()
         host.registerProvider(
             LANER_CHAT_QUICK_PROVIDER_ID,
             LanerChatQuickPageProvider(host, modeProvider) { name, parameters ->
@@ -407,11 +401,17 @@ class LanerChatEntry : InProcessPluginEntry {
                 }
                 operation(JSONObject(parameters.toString()))
             },
-            mapOf(
-                "kind" to "plugin_page",
-                "overlay_enabled" to "true",
-                "ai_limbs.page_slot_actions.v1" to JSONArray().put(quickAction).toString()
-            )
+            mapOf("kind" to "plugin_page", "overlay_enabled" to "true")
+        )
+        host.registerProvider(
+            LANER_CHAT_QUICK_LAUNCHER_ID,
+            LanerChatQuickLauncherProvider(host) { name, parameters ->
+                val operation = checkNotNull(operations[name]) {
+                    "Unknown Laner Chat operation: $name"
+                }
+                operation(JSONObject(parameters.toString()))
+            },
+            quickLauncherSlotMetadata()
         )
 
         host.logger.i("LanerChat", "Laner Chat shadow plugin mounted")

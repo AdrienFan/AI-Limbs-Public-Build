@@ -40,8 +40,19 @@ class LanerChatPresentationEntry : InProcessPluginPresentationEntry {
                     )
                 )
             },
-            mapOf("overlay_enabled" to "true", "kind" to "plugin_page",
-                "ai_limbs.page_slot_actions.v1" to org.json.JSONArray().put(quickPageSlotAction()).toString())
+            mapOf("overlay_enabled" to "true", "kind" to "plugin_page")
+        )
+        val launcherRegistration = host.registerPageProvider(
+            LANER_CHAT_QUICK_LAUNCHER_ID,
+            LanerChatQuickLauncherProvider(host) { name, parameters ->
+                org.json.JSONObject(
+                    host.invokePluginCapability(
+                        "$LANER_CHAT_PLUGIN_ID.$name",
+                        parameters.toString()
+                    )
+                )
+            },
+            quickLauncherSlotMetadata()
         )
         host.logger.i("LanerChat", "Laner Chat presentation mounted")
         return InProcessPluginPresentationHandle {
@@ -54,6 +65,7 @@ class LanerChatPresentationEntry : InProcessPluginPresentationEntry {
                         .put("overlay_id", LANER_CHAT_OVERLAY_ID).toString()
                 )
             } finally {
+                launcherRegistration.close()
                 quickRegistration.close()
                 registration.close()
             }

@@ -65,7 +65,8 @@
     "providers": [
       "plugin.chat.laner_bridge.runtime",
       "plugin.chat.laner_bridge.chat_mode",
-      "plugin.chat.laner_bridge.quick_overlay"
+      "plugin.chat.laner_bridge.quick_overlay",
+      "plugin.chat.laner_bridge.quick_launcher"
     ],
     "extensions": []
   }

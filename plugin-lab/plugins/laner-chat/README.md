@@ -10,4 +10,6 @@ Version 0.2.7 adds a quick chat overlay surface. The title bar moves the whole w
 
 Version 0.2.8 lets the collapsed circle detect a drag while keeping a tap to open. The plugin sends pixel deltas through `host.window.overlay@1/update`; the Host moves the same window used by the expanded title bar. The expanded panel also has a Close button that removes the overlay, while Collapse keeps its circle. This gesture requires base build93 or newer.
 
-The Plugin Center slot still invokes the provider's existing overlay action. On a new window the provider opens the panel; invoking that action again asks Laner Chat to remove its own window. The circle uses a separate show action so tapping it never closes the overlay. Plugin Center stays on version 1.3.39.
+Laner Chat now provides the top-bar launcher View, unread badge and on/off behavior to the Host page slot directly. The Host only positions that View; Plugin Center does not render it. The expanded panel's Close button and the launcher both remove Laner Chat's own window through `host.window.overlay@1`. Plugin Center stays on version 1.3.39.
+
+The launcher provider declares `ai_limbs.host_page_slot.v1=true`, `target_page_id=host:native.ai_chat` and `slot_id=top_bar_start`. Its `createView` supplies the complete button; the Host embeds the View in that named slot in Host and Resident modes.
