@@ -9,7 +9,6 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
-import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -37,67 +36,12 @@ internal class HostOverlayWindows(private val context: Context) {
 
     private data class Window(
         val owner: String,
-        val root: DraggableOverlayRoot,
+        val root: LinearLayout,
         val header: TextView,
         val params: WindowManager.LayoutParams,
         val lifecycle: ServiceLifecycleOwner,
         val provider: InProcessOverlayPageProvider
     )
-
-    private inner class DraggableOverlayRoot(
-        context: Context,
-        private val overlayId: String,
-        private val params: WindowManager.LayoutParams
-    ) : LinearLayout(context) {
-        var expanded = false
-        private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
-        private var downX = 0f
-        private var downY = 0f
-        private var startX = 0
-        private var startY = 0
-        private var dragging = false
-
-        // The expanded header disappears when collapsed; intercept only a drag so taps still open chat.
-        override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
-            if (expanded) return super.onInterceptTouchEvent(event)
-            when (event.actionMasked) {
-                MotionEvent.ACTION_DOWN -> {
-                    downX = event.rawX
-                    downY = event.rawY
-                    startX = params.x
-                    startY = params.y
-                    dragging = false
-                }
-                MotionEvent.ACTION_MOVE -> {
-                    if (kotlin.math.abs(event.rawX - downX) > touchSlop ||
-                        kotlin.math.abs(event.rawY - downY) > touchSlop) {
-                        dragging = true
-                        return true
-                    }
-                }
-            }
-            return false
-        }
-
-        override fun onTouchEvent(event: MotionEvent): Boolean {
-            if (expanded) return super.onTouchEvent(event)
-            when (event.actionMasked) {
-                MotionEvent.ACTION_MOVE -> if (dragging) {
-                    params.x = (startX + (event.rawX - downX).toInt())
-                        .coerceIn(0, (context.resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
-                    params.y = (startY + (event.rawY - downY).toInt())
-                        .coerceIn(0, (context.resources.displayMetrics.heightPixels - dp(48)).coerceAtLeast(0))
-                    manager.updateViewLayout(this, params)
-                }
-                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> if (dragging) {
-                    preferences.edit().putInt("$overlayId.x", params.x)
-                        .putInt("$overlayId.y", params.y).apply()
-                    dragging = false
-                }
-            }
-            return true
-        }
-    }
 
     suspend fun invoke(ownerPluginId: String, operation: String, parameters: JSONObject): JSONObject =
         withContext(Dispatchers.Main.immediate) {
@@ -147,6 +91,12 @@ internal class HostOverlayWindows(private val context: Context) {
         }
 
         val lifecycle = ServiceLifecycleOwner()
+        val root = LinearLayout(context).apply {
+            orientation = LinearLayout.VERTICAL
+            setViewTreeLifecycleOwner(lifecycle)
+            setViewTreeViewModelStoreOwner(lifecycle)
+            setViewTreeSavedStateRegistryOwner(lifecycle)
+        }
         val params = WindowManager.LayoutParams(
             dp(56), WindowManager.LayoutParams.WRAP_CONTENT,
             WindowManager.LayoutParams.TYPE_APPLICATION_OVERLAY,
@@ -158,12 +108,6 @@ internal class HostOverlayWindows(private val context: Context) {
             y = preferences.getInt("$id.y", dp(120))
                 .coerceIn(0, (context.resources.displayMetrics.heightPixels - dp(48)).coerceAtLeast(0))
             x = x.coerceIn(0, (context.resources.displayMetrics.widthPixels - dp(56)).coerceAtLeast(0))
-        }
-        val root = DraggableOverlayRoot(context, id, params).apply {
-            orientation = LinearLayout.VERTICAL
-            setViewTreeLifecycleOwner(lifecycle)
-            setViewTreeViewModelStoreOwner(lifecycle)
-            setViewTreeSavedStateRegistryOwner(lifecycle)
         }
         val header = TextView(context).apply {
             text = "拖动这里移动"
@@ -186,15 +130,13 @@ internal class HostOverlayWindows(private val context: Context) {
                         return true
                     }
                     MotionEvent.ACTION_MOVE -> {
-                        params.x = (startX + (event.rawX - rawX).toInt())
-                            .coerceIn(0, (context.resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0))
-                        params.y = (startY + (event.rawY - rawY).toInt())
-                            .coerceIn(0, (context.resources.displayMetrics.heightPixels - dp(48)).coerceAtLeast(0))
-                        manager.updateViewLayout(root, params)
+                        moveWindow(root, params,
+                            startX.toLong() + (event.rawX - rawX).toInt(),
+                            startY.toLong() + (event.rawY - rawY).toInt())
                         return true
                     }
                     MotionEvent.ACTION_UP -> {
-                        preferences.edit().putInt("$id.x", params.x).putInt("$id.y", params.y).apply()
+                        savePosition(id, params)
                         return true
                     }
                 }
@@ -229,16 +171,28 @@ internal class HostOverlayWindows(private val context: Context) {
         val id = spec.getString("overlay_id")
         val window = windows[id] ?: error("Overlay unavailable: $id")
         require(window.owner == ownerPluginId) { "Overlay is owned by another plugin" }
-        val expanded = spec.getBoolean("expanded")
-        window.root.expanded = expanded
-        window.header.visibility = if (expanded) View.VISIBLE else View.GONE
-        window.params.width = if (expanded) dp(360).coerceAtMost(context.resources.displayMetrics.widthPixels - dp(24)) else dp(56)
-        window.params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
-            (if (expanded) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
-        window.params.x = window.params.x.coerceIn(
-            0, (context.resources.displayMetrics.widthPixels - window.params.width).coerceAtLeast(0)
-        )
-        manager.updateViewLayout(window.root, window.params)
+        val hasDelta = spec.has("delta_x") || spec.has("delta_y")
+        require(spec.has("expanded") || hasDelta) { "Overlay update requires expanded or position delta" }
+        require(spec.has("delta_x") == spec.has("delta_y")) { "Overlay position requires both deltas" }
+        if (spec.has("expanded")) {
+            val expanded = spec.getBoolean("expanded")
+            window.header.visibility = if (expanded) View.VISIBLE else View.GONE
+            window.params.width = if (expanded) dp(360).coerceAtMost(context.resources.displayMetrics.widthPixels - dp(24)) else dp(56)
+            window.params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
+                (if (expanded) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
+            window.params.x = window.params.x.coerceIn(
+                0, (context.resources.displayMetrics.widthPixels - window.params.width).coerceAtLeast(0)
+            )
+        }
+        if (hasDelta) {
+            // Plugin-owned drag gestures use the same Host window mover as the expanded header.
+            moveWindow(window.root, window.params,
+                window.params.x.toLong() + spec.getInt("delta_x"),
+                window.params.y.toLong() + spec.getInt("delta_y"))
+            savePosition(id, window.params)
+        } else {
+            manager.updateViewLayout(window.root, window.params)
+        }
         return JSONObject().put("updated", true).put("overlay_id", id)
     }
 
@@ -250,6 +204,18 @@ internal class HostOverlayWindows(private val context: Context) {
         manager.removeView(window.root)
         window.lifecycle.handleLifecycleEvent(Lifecycle.Event.ON_DESTROY)
         return JSONObject().put("removed", true).put("overlay_id", id)
+    }
+
+    private fun moveWindow(root: View, params: WindowManager.LayoutParams, x: Long, y: Long) {
+        params.x = x.coerceIn(0L,
+            (context.resources.displayMetrics.widthPixels - params.width).coerceAtLeast(0).toLong()).toInt()
+        params.y = y.coerceIn(0L,
+            (context.resources.displayMetrics.heightPixels - dp(48)).coerceAtLeast(0).toLong()).toInt()
+        manager.updateViewLayout(root, params)
+    }
+
+    private fun savePosition(id: String, params: WindowManager.LayoutParams) {
+        preferences.edit().putInt("$id.x", params.x).putInt("$id.y", params.y).apply()
     }
 
     private fun dp(value: Int): Int = (value * context.resources.displayMetrics.density).toInt()
