@@ -2,6 +2,7 @@ package com.ai.limbs.plugins.lanerchat
 
 import android.content.Context
 import android.view.View
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -29,12 +30,14 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.InProcessOverlayPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
+import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -87,6 +90,18 @@ internal class LanerChatQuickPageProvider(
         )
     }
 
+    private suspend fun moveBy(dx: Int, dy: Int) {
+        host.invokeHostCapability(
+            "host.window.overlay@1",
+            JSONObject()
+                .put("operation", "update")
+                .put("overlay_id", LANER_CHAT_OVERLAY_ID)
+                .put("delta_x", dx)
+                .put("delta_y", dy)
+                .toString()
+        )
+    }
+
     private data class Bubble(val timestamp: Long, val content: String)
 
     @Composable
@@ -100,6 +115,18 @@ internal class LanerChatQuickPageProvider(
         var error by remember { mutableStateOf<String?>(null) }
         val bubbles = remember { mutableStateListOf<Bubble>() }
         val scope = rememberCoroutineScope()
+        val dragMoves = remember { Channel<Pair<Int, Int>>(Channel.UNLIMITED) }
+
+        // The plugin decides whether the bubble was tapped or dragged; Host moves its window.
+        LaunchedEffect(dragMoves) {
+            for ((dx, dy) in dragMoves) {
+                try {
+                    moveBy(dx, dy)
+                } catch (failure: Exception) {
+                    error = failure.message ?: "移动快捷聊天失败"
+                }
+            }
+        }
 
         LaunchedEffect(Unit) {
             openSequence.collect { sequence ->
@@ -161,7 +188,26 @@ internal class LanerChatQuickPageProvider(
         if (!expanded) {
             Button(
                 onClick = ::open,
-                modifier = Modifier.size(56.dp)
+                modifier = Modifier.size(56.dp).pointerInput(dragMoves) {
+                    var remainderX = 0f
+                    var remainderY = 0f
+                    detectDragGestures(
+                        onDragStart = {
+                            remainderX = 0f
+                            remainderY = 0f
+                        },
+                        onDrag = { change, amount ->
+                            change.consume()
+                            remainderX += amount.x
+                            remainderY += amount.y
+                            val dx = remainderX.toInt()
+                            val dy = remainderY.toInt()
+                            remainderX -= dx
+                            remainderY -= dy
+                            if (dx != 0 || dy != 0) dragMoves.trySend(dx to dy)
+                        }
+                    )
+                }
             ) { Text(if (unread > 0) "$unread" else "聊") }
             return
         }
