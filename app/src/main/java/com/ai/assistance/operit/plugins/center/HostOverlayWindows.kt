@@ -9,6 +9,7 @@ import android.provider.Settings
 import android.view.Gravity
 import android.view.MotionEvent
 import android.view.View
+import android.view.ViewConfiguration
 import android.view.WindowManager
 import android.widget.LinearLayout
 import android.widget.TextView
@@ -36,12 +37,76 @@ internal class HostOverlayWindows(private val context: Context) {
 
     private data class Window(
         val owner: String,
-        val root: LinearLayout,
+        val root: OverlayRoot,
         val header: TextView,
         val params: WindowManager.LayoutParams,
         val lifecycle: ServiceLifecycleOwner,
         val provider: InProcessOverlayPageProvider
     )
+
+    /**
+     * Generic Host drag handle for a plugin's collapsed overlay. The plugin opts in through
+     * provider metadata and owns its button; only the Host can move the Android window locally.
+     */
+    private inner class OverlayRoot(
+        context: Context,
+        private val id: String,
+        private val params: WindowManager.LayoutParams,
+        private val collapsedDragEnabled: Boolean
+    ) : LinearLayout(context) {
+        var collapsed = true
+        private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+        private var startX = 0
+        private var startY = 0
+        private var rawX = 0f
+        private var rawY = 0f
+        private var dragging = false
+
+        override fun requestDisallowInterceptTouchEvent(disallowIntercept: Boolean) {
+            // The collapsed handle must still see MOVE after a Compose button receives DOWN.
+            super.requestDisallowInterceptTouchEvent(
+                disallowIntercept && !(collapsed && collapsedDragEnabled)
+            )
+        }
+
+        override fun onInterceptTouchEvent(event: MotionEvent): Boolean {
+            if (!collapsed || !collapsedDragEnabled) return super.onInterceptTouchEvent(event)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_DOWN -> {
+                    startX = params.x
+                    startY = params.y
+                    rawX = event.rawX
+                    rawY = event.rawY
+                    dragging = false
+                }
+                MotionEvent.ACTION_MOVE -> {
+                    val dx = event.rawX - rawX
+                    val dy = event.rawY - rawY
+                    if (!dragging && dx * dx + dy * dy > touchSlop * touchSlop) {
+                        dragging = true
+                        moveWindow(this, params, startX.toLong() + dx.toInt(), startY.toLong() + dy.toInt())
+                    }
+                    if (dragging) return true
+                }
+            }
+            return false
+        }
+
+        override fun onTouchEvent(event: MotionEvent): Boolean {
+            if (!dragging) return super.onTouchEvent(event)
+            when (event.actionMasked) {
+                MotionEvent.ACTION_MOVE ->
+                    moveWindow(this, params,
+                        startX.toLong() + (event.rawX - rawX).toInt(),
+                        startY.toLong() + (event.rawY - rawY).toInt())
+                MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                    savePosition(id, params)
+                    dragging = false
+                }
+            }
+            return true
+        }
+    }
 
     suspend fun invoke(ownerPluginId: String, operation: String, parameters: JSONObject): JSONObject =
         withContext(Dispatchers.Main.immediate) {
@@ -91,7 +156,9 @@ internal class HostOverlayWindows(private val context: Context) {
         }
 
         val lifecycle = ServiceLifecycleOwner()
-        val root = LinearLayout(context).apply {
+        val root = OverlayRoot(
+            context, id, params, binding.metadata["host_collapsed_drag"] == "true"
+        ).apply {
             orientation = LinearLayout.VERTICAL
             setViewTreeLifecycleOwner(lifecycle)
             setViewTreeViewModelStoreOwner(lifecycle)
@@ -177,6 +244,7 @@ internal class HostOverlayWindows(private val context: Context) {
         if (spec.has("expanded")) {
             val expanded = spec.getBoolean("expanded")
             window.header.visibility = if (expanded) View.VISIBLE else View.GONE
+            window.root.collapsed = !expanded
             window.params.width = if (expanded) dp(360).coerceAtMost(context.resources.displayMetrics.widthPixels - dp(24)) else dp(56)
             window.params.flags = WindowManager.LayoutParams.FLAG_NOT_TOUCH_MODAL or
                 (if (expanded) 0 else WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE)
