@@ -459,6 +459,7 @@ class AiLimbsRdcClient(
         cancelWorkerJob("stop")
         closeRealtimeTransport()
         cancelActiveCalls("RDC stopped")
+        adapter.clearResults()
         activeAuthorization = null
         isRunning = false
         stateFlow.value =
@@ -1563,6 +1564,13 @@ class AiLimbsRdcClient(
                 .put("runtime", "AI Limbs Android RDC Bridge")
                 .put("version", BuildConfig.VERSION_NAME)
                 .put("configuration_owner", "AI Limbs")
+                .put("fileReadLineLimit", 100)
+                .put("maxFileReadLines", 1000)
+                .put("processReadLineLimit", 200)
+                .put("maxProcessReadLines", 1000)
+                .put("result_inline_bytes", RdcResultPager.INLINE_BYTES)
+                .put("result_page_chars", RdcResultPager.PAGE_CHARS)
+                .put("result_page_tool", RdcResultPager.PAGE_TOOL)
                 .put("execution_policy", AiLimbsExecutionPolicyDescriptor.policyVersion)
                 .put("dispatcher", "AiLimbsDispatcher")
                 .put(

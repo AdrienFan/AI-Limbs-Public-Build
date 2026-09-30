@@ -21,6 +21,10 @@ class AiLimbsRdcToolAdapter(
     context: Context,
     private val remoteExecutor: AiLimbsRemoteInvocationExecutor
 ) {
+    private val resultPager = RdcResultPager()
+
+    fun clearResults() = resultPager.clear()
+
     suspend fun execute(toolName: String, args: JSONObject): JSONObject = when (toolName.trim()) {
         "start_process" -> startProcess(args)
         "read_process_output" -> processTool("read", args)
@@ -49,6 +53,10 @@ class AiLimbsRdcToolAdapter(
             val name = request.optString("name").trim()
             if (name.isBlank()) return mcpError("shell=operit requires a tool name")
             val parameters = request.optJSONObject("parameters") ?: JSONObject()
+            if (name == RdcResultPager.PAGE_TOOL) {
+                return resultPager.page(parameters.optString("cursor"), parameters.optInt("offset", -1))
+                    ?: mcpError("Result cursor expired or offset is invalid")
+            }
             // shell=operit is the generic AI Limbs capability ingress. Forward the requested
             // capability unchanged; the Host live registry/resolver owns Core vs Plugin vs HostTool
             // classification. Child Bridge providers must not maintain a static capability list.
@@ -201,17 +209,7 @@ class AiLimbsRdcToolAdapter(
     private fun mcpProcessResult(result: JSONObject): JSONObject {
         val success = result.optBoolean("success", false)
         val text = result.optString("text").ifBlank { result.toString(2) }
-        val display = if (text.length > MAX_PROCESS_TEXT_CHARS) {
-            val header = text.lineSequence().firstOrNull().orEmpty()
-            header + "\n[Bridge display shortened; use read_process_output with an absolute offset and a small length]\n" +
-                text.takeLast(MAX_PROCESS_TEXT_CHARS - header.length - 110)
-        } else text
-        val response = JSONObject()
-            .put(
-                "content",
-                JSONArray().put(JSONObject().put("type", "text").put("text", display))
-            )
-            .put("isError", !success)
+        val response = resultPager.response(text, "text", success)
         if (result.has("execution_policy")) {
             response.put("execution_policy", result.optJSONObject("execution_policy"))
         }
@@ -220,16 +218,9 @@ class AiLimbsRdcToolAdapter(
 
     private fun mcpResult(result: JSONObject): JSONObject {
         val success = result.optBoolean("success", false)
-        return JSONObject()
-            .put(
-                "content",
-                JSONArray().put(
-                    JSONObject()
-                        .put("type", "text")
-                        .put("text", result.toString(2))
-                )
-            )
-            .put("isError", !success)
+        // Events repeat the display body. The formal result and structured_result are preserved once.
+        val compact = JSONObject(result.toString()).apply { remove("events") }
+        return resultPager.response(compact.toString(), "json", success)
     }
 
     private fun mcpError(message: String): JSONObject =
@@ -238,11 +229,10 @@ class AiLimbsRdcToolAdapter(
         const val SYSTEM_ENVIRONMENT_PROCESS = "plugin.system_environment.process"
         const val HOST_TOOL_EXECUTE = "ai_limbs.host_tool.execute"
         const val DEFAULT_RDC_START_WAIT_MS = 10_000L
-        const val DEFAULT_FILE_PAGE_LINES = 20
-        const val MAX_FILE_PAGE_LINES = 20
-        const val DEFAULT_PROCESS_PAGE_LINES = 20
-        const val MAX_PROCESS_PAGE_LINES = 20
-        const val MAX_PROCESS_TEXT_CHARS = 16_000
+        const val DEFAULT_FILE_PAGE_LINES = 100
+        const val MAX_FILE_PAGE_LINES = 1_000
+        const val DEFAULT_PROCESS_PAGE_LINES = 200
+        const val MAX_PROCESS_PAGE_LINES = 1_000
         val LINUX_PREFIXES = listOf("/root", "/home", "/etc", "/usr", "/var", "/tmp")
     }
 }

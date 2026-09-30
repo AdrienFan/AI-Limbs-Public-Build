@@ -3,12 +3,14 @@ plugins { alias(libs.plugins.android.application); alias(libs.plugins.kotlin.and
 android {
     namespace = "com.ai.limbs.extensions.rdc"
     compileSdk = 36
-    defaultConfig { applicationId = "com.ai.limbs.payload.rdc"; minSdk = 26; targetSdk = 34; versionCode = 13; versionName = "1.2.10" }
+    defaultConfig { applicationId = "com.ai.limbs.payload.rdc"; minSdk = 26; targetSdk = 34; versionCode = 14; versionName = "1.2.11" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures { buildConfig = true }
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     compileOnly(project(":plugin-inprocess-api"))
     compileOnly(project(":bridge-contract"))
     implementation(libs.coroutines.android)
