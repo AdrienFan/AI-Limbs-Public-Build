@@ -113,7 +113,9 @@ open class AccessibilityUITools(context: Context) : StandardUITools(context) {
                     UIPageResultData(
                             packageName = focusInfo.packageName ?: "Unknown",
                             activityName = focusInfo.activityName ?: "Unknown",
-                            uiElements = simplifiedLayout
+                            uiElements = simplifiedLayout,
+                            format = format,
+                            detail = detail
                     )
 
             ToolResult(toolName = tool.name, success = true, result = resultData, error = "")

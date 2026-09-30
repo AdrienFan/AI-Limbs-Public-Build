@@ -366,6 +366,8 @@ open class RootUITools(context: Context) : AdminUITools(
     /** Gets page info using uiautomator dump and dumpsys. */
     override suspend fun getPageInfo(tool: AITool): ToolResult {
         return try {
+            val format = tool.parameters.find { it.name == "format" }?.value ?: "xml"
+            val detail = tool.parameters.find { it.name == "detail" }?.value ?: "summary"
             val uiData = getUIDataFromShell(tool)
                 ?: return ToolResult(
                     toolName = tool.name,
@@ -381,7 +383,9 @@ open class RootUITools(context: Context) : AdminUITools(
                 UIPageResultData(
                     packageName = focusInfo.packageName ?: "Unknown",
                     activityName = focusInfo.activityName ?: "Unknown",
-                    uiElements = simplifiedLayout
+                    uiElements = simplifiedLayout,
+                    format = format,
+                    detail = detail
                 )
 
             ToolResult(toolName = tool.name, success = true, result = resultData, error = "")

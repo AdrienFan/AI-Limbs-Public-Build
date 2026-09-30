@@ -30,7 +30,9 @@ data class ToolResult(
         val toolName: String,
         val success: Boolean,
         val result: ToolResultData,
-        val error: String? = null
+        val error: String? = null,
+        /** Actual tool payload, separate from the text prepared for display. */
+        val structuredResult: ToolResultData? = null
 )
 
 /** Represents the validation result for tool parameters */

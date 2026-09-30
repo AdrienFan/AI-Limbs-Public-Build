@@ -305,6 +305,8 @@ class AiLimbsDispatcher(
             .put("success", result.success)
             .put("tool", result.toolName)
             .put("result", parseJsonOrString(gson.toJson(result.result)))
+            .put("structured_result", parseJsonOrString(gson.toJson(result.structuredResult ?: result.result)))
+            .put("result_representation", if (preserveHostToolResultData) "structured" else "display")
             .put("error", result.error ?: JSONObject.NULL)
             .put("events", JSONArray(emitted))
     }

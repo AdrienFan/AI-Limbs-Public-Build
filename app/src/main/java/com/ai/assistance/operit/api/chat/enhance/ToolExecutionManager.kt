@@ -792,7 +792,8 @@ object ToolExecutionManager {
                 toolName = displayToolName,
                 success = lastResult.success,
                 result = lastResult.result,
-                error = lastResult.error
+                error = lastResult.error,
+                structuredResult = lastResult.structuredResult ?: lastResult.result
             )
         }
 
@@ -803,7 +804,9 @@ object ToolExecutionManager {
             toolName = displayToolName,
             success = lastResult.success,
             result = StringResultData(combinedResultString),
-            error = lastResult.error
+            error = lastResult.error,
+            // Display rendering may shorten text. Keep the original final payload for protocol consumers.
+            structuredResult = lastResult.structuredResult ?: lastResult.result
         )
     }
 

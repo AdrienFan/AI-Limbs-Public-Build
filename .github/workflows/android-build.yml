@@ -222,6 +222,7 @@ jobs:
             --tests com.ai.assistance.operit.plugins.center.UnknownPluginUnifiedReceiverTest \
             --tests com.ai.assistance.operit.plugins.center.OfficialPluginIdentityFileStoreTest \
             --tests com.ai.assistance.operit.core.tools.defaultTool.UiAutomationBackendPolicyTest \
+            --tests com.ai.assistance.operit.core.tools.FullContentResultTest \
             --tests com.ai.assistance.operit.core.tools.system.PermissionRoutingPolicyTest \
             --tests com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntimeDecisionTest \
             --tests com.ai.assistance.operit.plugins.center.VisualHostPrimitiveReservationTest \

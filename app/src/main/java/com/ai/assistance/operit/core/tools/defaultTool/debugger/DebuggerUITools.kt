@@ -580,8 +580,7 @@ open class DebuggerUITools(
         }
 
         val format = tool.parameters.find { it.name == "format" }?.value ?: "xml"
-        // detail kept for future use
-        tool.parameters.find { it.name == "detail" }?.value ?: "summary"
+        val detail = tool.parameters.find { it.name == "detail" }?.value ?: "summary"
 
         if (format !in listOf("xml", "json")) {
             return ToolResult(
@@ -615,7 +614,9 @@ open class DebuggerUITools(
                     UIPageResultData(
                             packageName = focusInfo.packageName ?: "Unknown",
                             activityName = focusInfo.activityName ?: "Unknown",
-                            uiElements = simplifiedLayout
+                            uiElements = simplifiedLayout,
+                            format = format,
+                            detail = detail
                     )
 
             ToolResult(toolName = tool.name, success = true, result = resultData, error = "")

@@ -896,9 +896,18 @@ data class SimplifiedUINode(
 data class UIPageResultData(
         val packageName: String,
         val activityName: String,
-        val uiElements: SimplifiedUINode
+        val uiElements: SimplifiedUINode,
+        val format: String = "xml",
+        val detail: String = "summary"
 ) : ToolResultData() {
+    init {
+        require(format in setOf("xml", "json")) { "format must be xml or json" }
+        require(detail in setOf("minimal", "summary", "full")) { "detail must be minimal, summary or full" }
+    }
+
     override fun toString(): String {
+        if (format == "json") return toJson()
+        if (detail == "full") return toFullXml()
         return """
             |Current Application: $packageName
             |Current Activity: $activityName
@@ -907,6 +916,30 @@ data class UIPageResultData(
             |${uiElements.toTreeString()}
             """.trimMargin()
     }
+
+    /** XML transport contains complete node text; the compact tree remains a display preview. */
+    private fun toFullXml(): String = buildString {
+        append("<hierarchy package=\"").append(xmlAttribute(packageName))
+        append("\" activity=\"").append(xmlAttribute(activityName)).append("\">")
+        fun appendNode(node: SimplifiedUINode) {
+            append("<node")
+            listOf("class" to node.className, "text" to node.text,
+                "content-desc" to node.contentDesc, "resource-id" to node.resourceId,
+                "bounds" to node.bounds).forEach { (key, value) ->
+                if (value != null) append(" ").append(key).append("=\"")
+                    .append(xmlAttribute(value)).append("\"")
+            }
+            append(" clickable=\"").append(node.isClickable).append("\">")
+            node.children.forEach { appendNode(it) }
+            append("</node>")
+        }
+        appendNode(uiElements)
+        append("</hierarchy>")
+    }
+
+    private fun xmlAttribute(value: String): String = value
+        .replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
+        .replace("\"", "&quot;").replace("\r", "&#13;").replace("\n", "&#10;").replace("\t", "&#9;")
 }
 
 /** Represents a UI action result data */
