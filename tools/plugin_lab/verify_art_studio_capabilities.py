@@ -51,3 +51,46 @@ print(
     f"{len(runtime_literals)} literal runtime registrations covered; "
     f"{len(declared)} manifest declarations total."
 )
+
+# The native menu and AI entry share this inventory. A missing dispatcher branch
+# would otherwise ship as a clickable menu that throws only on the phone.
+CATALOG = ENTRY.with_name('ArtStudioMenuCatalog.kt')
+STORE = ENTRY.with_name('ArtStore.kt')
+parts = re.findall(r'"""(.*?)"""', CATALOG.read_text(encoding='utf-8'), re.S)
+menus = [json.loads(part) for part in parts]
+expected = ['图层', '选择', '滤镜', '工具', '设置', '窗口', '帮助']
+if [m['title'] for m in menus] != expected:
+    raise SystemExit('Art Studio remaining menu order or coverage is invalid')
+
+
+def leaves(node):
+    if 'children' in node:
+        for child in node['children']:
+            yield from leaves(child)
+    elif 'id' in node:
+        yield node
+
+
+items = [item for menu in menus for item in leaves(menu)]
+identities = [item['id'] for item in items]
+if len(identities) != len(set(identities)):
+    raise SystemExit('Duplicate leaf menu identities')
+store_source = STORE.read_text(encoding='utf-8')
+start = store_source.index('fun executeMenu(')
+end = store_source.index('private fun applyMenuFilter(', start)
+handlers = set(re.findall(r'"([a-zA-Z0-9_.-]+)"', store_source[start:end]))
+implemented = [item for item in items if item['implemented']]
+for item in items:
+    if item['implemented']:
+        if item['id'] not in handlers or 'parameters' not in item or 'documentWrite' not in item:
+            raise SystemExit(f'Menu has no shared execution contract: {item["id"]}')
+    elif not item.get('reason'):
+        raise SystemExit(f'Unavailable menu has no reason: {item["id"]}')
+for item in implemented:
+    if item['id'].startswith('filter.') or item['id'] in {'cut_layer_clipboard', 'merge_layer', 'flatten_image'}:
+        if not item['documentWrite']:
+            raise SystemExit(f'Destructive menu lacks revision protection: {item["id"]}')
+for name in ('menu.catalog', 'menu.execute'):
+    if f'{plugin_id}.{name}' not in declared:
+        raise SystemExit(f'Missing shared menu capability: {name}')
+print(f'Art Studio menus OK: {len(items)} leaf items, {len(implemented)} shared implementations; disabled reasons complete.')

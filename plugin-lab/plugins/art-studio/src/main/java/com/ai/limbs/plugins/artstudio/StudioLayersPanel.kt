@@ -446,34 +446,58 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
             "group" -> siblings.filter {
                 it.optString("parentId") == layer.optString("id") && it.optBoolean("visible", true)
             }.forEach { drawLayer(canvas, it, siblings, docW, docH, depth + 1) }
-            "image" -> {
-                val asset = layer.optString("asset")
-                val image = decoded[asset] ?: store?.assetFile(asset)?.let { file ->
-                    if (!file.isFile) return@let null
-                    val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                    BitmapFactory.decodeFile(file.absolutePath, bounds)
-                    assetBounds[asset] = bounds.outWidth to bounds.outHeight
-                    val sample = (maxOf(bounds.outWidth, bounds.outHeight) / 128).coerceAtLeast(1)
-                    BitmapFactory.decodeFile(file.absolutePath,
-                        BitmapFactory.Options().apply { inSampleSize = sample })
-                        ?.also { decoded[asset] = it }
-                }
-                if (image != null) {
-                    val bounds = requireNotNull(assetBounds[asset])
-                    canvas.drawBitmap(image, Rect(0, 0, image.width, image.height),
-                        RectF(0f, 0f, bounds.first.toFloat(), bounds.second.toFloat()),
-                        Paint(Paint.FILTER_BITMAP_FLAG))
-                }
-            }
             else -> {
-                val strokes = layer.optJSONArray("strokes")
-                if (strokes != null) for (i in 0 until strokes.length()) {
-                    ArtRenderer.drawStroke(canvas, strokes.getJSONObject(i))
+                if(layer.getString("kind")=="image") drawAsset(canvas,layer.getString("asset"),0,0,false)
+                val strokes=layer.getJSONArray("strokes")
+                val order=layer.optJSONArray("contentOrder")
+                if(order==null) {
+                    for(n in 0 until strokes.length()) ArtRenderer.drawStroke(canvas,strokes.getJSONObject(n))
+                } else {
+                    val byId=(0 until strokes.length()).associate { strokes.getJSONObject(it).getString("id") to strokes.getJSONObject(it) }
+                    for(n in 0 until order.length()) {
+                        val event=order.getJSONObject(n)
+                        when(event.getString("kind")) {
+                            "stroke" -> byId[event.getString("id")]?.let { ArtRenderer.drawStroke(canvas,it) }
+                            "paste","erase" -> drawAsset(canvas,event.getString("asset"),event.getInt("x"),event.getInt("y"),event.getString("kind")=="erase")
+                            "clear","fill" -> {
+                                canvas.save()
+                                event.optJSONObject("selection")?.let { canvas.clipPath(ArtSelection.path(it)) }
+                                val p=Paint().apply {
+                                    if(event.getString("kind")=="clear") xfermode=android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
+                                    else color=Color.parseColor(event.getString("color"))
+                                }
+                                val x=event.getInt("x").toFloat();val y=event.getInt("y").toFloat()
+                                canvas.drawRect(x,y,x+event.getInt("width"),y+event.getInt("height"),p)
+                                canvas.restore()
+                            }
+                        }
+                    }
                 }
             }
         }
         canvas.restore()
         canvas.restore()
+    }
+
+    private fun drawAsset(canvas:Canvas,asset:String,x:Int,y:Int,erase:Boolean) {
+        val source=requireNotNull(store)
+        val image=decoded[asset] ?: run {
+            val file=source.assetFile(asset)
+            val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
+            BitmapFactory.decodeFile(file.absolutePath,bounds)
+            require(bounds.outWidth>0 && bounds.outHeight>0) { "工程图片资源缺失" }
+            assetBounds[asset]=bounds.outWidth to bounds.outHeight
+            val sample=(maxOf(bounds.outWidth,bounds.outHeight)/128).coerceAtLeast(1)
+            val result=BitmapFactory.decodeFile(file.absolutePath,BitmapFactory.Options().apply { inSampleSize=sample })
+                ?: error("无法读取工程图片资源")
+            decoded[asset]=result
+            result
+        }
+        val bounds=assetBounds.getValue(asset)
+        val paint=Paint(Paint.FILTER_BITMAP_FLAG)
+        if(erase) paint.xfermode=android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OUT)
+        canvas.drawBitmap(image,Rect(0,0,image.width,image.height),
+            RectF(x.toFloat(),y.toFloat(),(x+bounds.first).toFloat(),(y+bounds.second).toFloat()),paint)
     }
 
     override fun onDetachedFromWindow() {

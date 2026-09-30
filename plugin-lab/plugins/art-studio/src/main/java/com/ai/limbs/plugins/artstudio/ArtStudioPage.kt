@@ -323,6 +323,11 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                                 }
                                 show()
                             }
+                        } else {
+                            showStudioRemainingMenu(pluginContext, this, title.substringBefore('('),
+                                bridge.menuContext, bridge.busy) { command, captured ->
+                                bridge.onRemainingCommand?.invoke(command, captured)
+                            }
                         }
                     }
                 }
@@ -337,6 +342,10 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
 }
 
 private class StudioMenuBridge {
+    var menuContext = JSONObject().put("document", JSONObject.NULL).put("layerClipboard", false)
+        .put("settings", JSONObject().put("selectionVisible",true).put("panelsHidden",false))
+    var onRemainingCommand: ((JSONObject, JSONObject) -> Unit)? = null
+
     var busy = false
     var hasDocument = false
     var canSave = false
@@ -367,6 +376,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
     val viewOptions by ArtStudioViewControl.state.collectAsState()
+    var remainingContext by remember { mutableStateOf(JSONObject()) }
+    var remainingSettings by remember { mutableStateOf(JSONObject()) }
+    var remainingDialog by remember { mutableStateOf<JSONObject?>(null) }
+    var remainingCaptured by remember { mutableStateOf(JSONObject()) }
+    var remainingDefaults by remember { mutableStateOf(JSONObject()) }
+    var remainingResult by remember { mutableStateOf<JSONObject?>(null) }
+    var remainingExportPath by remember { mutableStateOf("") }
+    var remainingGroupExports by remember { mutableStateOf(JSONArray()) }
+    var remainingImportContext by remember { mutableStateOf<JSONObject?>(null) }
+    var remainingImportItem by remember { mutableStateOf<JSONObject?>(null) }
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
     var image by remember { mutableStateOf<Bitmap?>(null) }
     var tool by remember { mutableStateOf("ink") }
@@ -562,6 +581,100 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
 
+    val exportRemainingLayer = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+        val source = remainingExportPath
+        remainingExportPath = ""
+        if (uri != null) scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    context.contentResolver.openOutputStream(uri)?.use { output ->
+                        java.io.File(source).inputStream().use { it.copyTo(output) }
+                    } ?: error("无法写入所选文件")
+                }
+                Toast.makeText(context,"图层图像已保存",Toast.LENGTH_SHORT).show()
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio","Layer export failed",error)
+                Toast.makeText(context,error.message ?: "图层导出失败",Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    val exportRemainingGroups=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocumentTree()) { uri ->
+        val images=remainingGroupExports
+        remainingGroupExports=JSONArray()
+        if(uri!=null) scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    val parent=android.provider.DocumentsContract.buildDocumentUriUsingTree(uri,
+                        android.provider.DocumentsContract.getTreeDocumentId(uri))
+                    for(n in 0 until images.length()) {
+                        val image=images.getJSONObject(n)
+                        val target=android.provider.DocumentsContract.createDocument(context.contentResolver,parent,
+                            "image/png",image.getString("name")) ?: error("无法创建图层组图像文件")
+                        context.contentResolver.openOutputStream(target)?.use { output ->
+                            java.io.File(image.getString("path")).inputStream().use { it.copyTo(output) }
+                        } ?: error("无法写入图层组图像")
+                    }
+                }
+                Toast.makeText(context,"已保存 ${images.length()} 个图层组",Toast.LENGTH_SHORT).show()
+            } catch(error:Exception) {
+                host.logger.e("ArtStudio","Group image export failed",error)
+                remainingResult=JSONObject().put("title","导出未完成").put("text",error.message ?: "图层组导出失败")
+            }
+        }
+    }
+    fun executeRemaining(item: JSONObject, captured: JSONObject, parameters: JSONObject) {
+        if (busy) return
+        val arguments=JSONObject(parameters.toString())
+        if(item.optBoolean("documentWrite")) {
+            val doc=captured.getJSONObject("document")
+            arguments.put("documentId",doc.getString("id")).put("expectedRevision",doc.getInt("revision"))
+        }
+        pendingOperations++; busy=true
+        scope.launch {
+            try {
+                val result=withContext(Dispatchers.IO) { mutex.withLock {
+                    store.executeMenu("AWEI",item.getString("id"),arguments)
+                } }
+                if(result.has("images")) {
+                    remainingGroupExports=result.getJSONArray("images")
+                    exportRemainingGroups.launch(null)
+                } else if(result.has("path")) {
+                    remainingExportPath=result.getString("path")
+                    exportRemainingLayer.launch(result.getString("name"))
+                } else if(result.has("state")) {
+                    if(item.getString("id")=="window.current") {
+                        val doc=result.getJSONObject("state")
+                        remainingResult=JSONObject().put("title","当前画布").put("text",
+                            "${doc.getString("name")}\n${doc.getInt("width")} × ${doc.getInt("height")} 像素")
+                    } else refresh()
+                } else if(item.getString("id").startsWith("help") || item.getString("id") in setOf("buginfo","sysinfo","histogram")) {
+                    if(!result.has("title")) result.put("title",item.getString("title"))
+                    remainingResult=result
+                } else Toast.makeText(context,"已执行：${item.getString("title")}",Toast.LENGTH_SHORT).show()
+            } catch(error:Exception) {
+                host.logger.e("ArtStudio","Menu operation failed",error)
+                remainingResult=JSONObject().put("title","操作未完成").put("text",error.message ?: "菜单操作失败")
+            } finally { pendingOperations--; busy=pendingOperations>0 || awaitingExport }
+        }
+    }
+    val importRemainingLayer=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val captured=remainingImportContext; val item=remainingImportItem
+        remainingImportContext=null; remainingImportItem=null
+        if(uri!=null && captured!=null && item!=null) scope.launch {
+            try {
+                val encoded=withContext(Dispatchers.IO) {
+                    val bytes=context.contentResolver.openInputStream(uri)?.use { it.readNBytes(8*1024*1024+1) }
+                        ?: error("无法读取图像文件")
+                    require(bytes.size<=8*1024*1024) { "图片大小上限为 8 MB" }
+                    android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP)
+                }
+                executeRemaining(item,captured,JSONObject().put("base64",encoded))
+            } catch(error:Exception) {
+                host.logger.e("ArtStudio","Layer import failed",error)
+                remainingResult=JSONObject().put("title","导入未完成").put("text",error.message ?: "无法导入图片")
+            }
+        }
+    }
     val openExternal = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
         val untitled = importingUntitled
         importingUntitled = false
@@ -660,6 +773,33 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     LaunchedEffect(store) {
         refresh()
         while (true) {
+            val menuData=withContext(Dispatchers.IO) { store.menuUiState() }
+            remainingContext=menuData
+            val settings=menuData.getJSONObject("settings")
+            if(settings.toString()!=remainingSettings.toString()) {
+                val previous=remainingSettings
+                remainingSettings=settings
+                if(!previous.has("brushWidth") || previous.getDouble("brushWidth")!=settings.getDouble("brushWidth"))
+                    width=settings.getDouble("brushWidth").toFloat()
+                if(!previous.has("brushOpacity") || previous.getDouble("brushOpacity")!=settings.getDouble("brushOpacity"))
+                    opacity=settings.getDouble("brushOpacity").toFloat()
+                for(key in listOf("panelsHidden","gridVisible","pixelGridVisible"))
+                    if(!previous.has(key) || previous.getBoolean(key)!=settings.getBoolean(key))
+                        ArtStudioViewControl.setOption(key,settings.getBoolean(key))
+            }
+            val request=menuData.optJSONObject("request")
+            if(request!=null && !request.optBoolean("applied")) {
+                activeRightPane=when(request.getString("action")) {
+                    "docker.color" -> RightPane.COLOR
+                    "docker.layers" -> RightPane.LAYERS
+                    "docker.brushes" -> RightPane.BRUSHES
+                    "docker.footprints" -> RightPane.FOOTPRINTS
+                    else -> error("未知画室面板请求")
+                }
+                rightDrawerOpen=true
+                ArtStudioViewControl.setOption("panelsHidden",false)
+                withContext(Dispatchers.IO) { store.ackMenuUiRequest(request.getString("id")) }
+            }
             delay(1200)
             if (!busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
         }
@@ -832,6 +972,39 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val menuClipboardCanNew = clipboardSize.first in 64..4096 && clipboardSize.second in 64..4096
 
     SideEffect {
+        menuBridge.menuContext=JSONObject(remainingContext.toString())
+            .put("document", current ?: JSONObject.NULL)
+            .put("layerClipboard",remainingContext.optBoolean("layerClipboard"))
+            .put("settings",remainingContext.optJSONObject("settings")?.let { JSONObject(it.toString()) }
+                ?.put("panelsHidden",viewOptions.panelsHidden) ?: JSONObject()
+                .put("selectionVisible",true).put("panelsHidden",false).put("brushWidth",6.0).put("brushOpacity",1.0))
+        menuBridge.onRemainingCommand={ item,captured ->
+            if(!busy) {
+                val id=item.getString("id")
+                if(id in setOf("import_layer_from_file","import_layer_as_paint_layer")) {
+                    remainingImportContext=captured; remainingImportItem=item
+                    importRemainingLayer.launch(arrayOf("image/png","image/jpeg"))
+                } else if(id in setOf("toggle_display_selection","view_toggledockers")) {
+                    val settings=captured.getJSONObject("settings")
+                    executeRemaining(item,captured,JSONObject().put("enabled", !settings.getBoolean(
+                        if(id=="toggle_display_selection") "selectionVisible" else "panelsHidden")))
+                } else {
+                    val params=item.optJSONArray("parameters") ?: JSONArray()
+                    val defaults=JSONObject()
+                    val doc=captured.optJSONObject("document")?.getJSONObject("state")
+                    if(id in setOf("selectionscale","edit_selection")) doc?.optJSONObject("selection")?.let { selection ->
+                        listOf("x","y","width","height").forEach { defaults.put(it,selection.getDouble(it)) }
+                    }
+                    if(id=="options_configure") {
+                        val settings=captured.getJSONObject("settings")
+                        defaults.put("brushWidth",settings.getDouble("brushWidth")).put("brushOpacity",settings.getDouble("brushOpacity"))
+                    }
+                    if(params.length()>0 || id in setOf("flatten_image","flatten_layer","merge_layer","cut_layer_clipboard","reset_configurations")) {
+                        remainingDialog=item;remainingCaptured=captured;remainingDefaults=defaults
+                    } else executeRemaining(item,captured,JSONObject())
+                }
+            }
+        }
         menuBridge.busy = menuBusy
         menuBridge.hasDocument = menuHasDocument
         menuBridge.canSave = menuCanSave
@@ -1003,6 +1176,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.layers = layers
                     view.selectedId = selected
                     view.selection = state.optJSONObject("selection")
+                    view.selectionVisible=remainingSettings.optBoolean("selectionVisible",true)
                     view.tool = tool; view.color = color; view.brushWidth = width
                     view.opacity = opacity; view.mirrorDirection = mirrorDirection
                     view.mirrorCount = mirrorCount; view.mirrorRadius = mirrorRadius
@@ -2358,6 +2532,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
             }
         } }, confirmButton = { TextButton(onClick = { openDialog = false }) { Text("关闭") } })
+    remainingDialog?.let { item ->
+        StudioMenuParameters(item,remainingDefaults,onDismiss={remainingDialog=null}) { parameters ->
+            val captured=remainingCaptured
+            remainingDialog=null
+            executeRemaining(item,captured,parameters)
+        }
+    }
+    remainingResult?.let { result -> StudioMenuResult(result) { remainingResult=null } }
     if (renameDialog) AlertDialog(onDismissRequest = { renameDialog = false }, title = { Text("图层名称") },
         text = { OutlinedTextField(layerName, { layerName = it.take(100) }) },
         confirmButton = { TextButton(onClick = {
@@ -2415,6 +2597,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var layers: JSONArray? = null
     var selectedId: String = ""
     var selection: JSONObject? = null
+    var selectionVisible = true
     var tool: String = "ink"
         set(value) {
             if (field != value) {
@@ -2685,7 +2868,7 @@ private class StudioCanvas(context: Context) : View(context) {
             }
             canvas.restore()
         }
-        (selectionPreview ?: selection)?.let { selectedArea ->
+        (selectionPreview ?: selection)?.takeIf { selectionVisible }?.let { selectedArea ->
             canvas.save(); canvas.concat(matrix)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.rgb(52, 150, 255); style = Paint.Style.STROKE

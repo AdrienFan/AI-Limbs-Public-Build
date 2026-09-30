@@ -35,6 +35,9 @@ internal class ArtStore(private val root: File) {
     private val sessionIndex = File(root, "sessions.json")
     private val externalLinks = File(root, "external-links.json")
     private val editClipboard = File(root, "edit-clipboard.json")
+    private val layerClipboard = File(root, "layer-clipboard.json")
+    private val menuSettings = File(root, "menu-settings.json")
+    private val menuUiRequest = File(root, "menu-ui-request.json")
     private val templates = File(root, "templates")
     private val backups = File(root, "backups")
     private val lockFile = File(root, "art-studio.lock")
@@ -74,6 +77,361 @@ internal class ArtStore(private val root: File) {
     }
 
     fun current(): JSONObject = locked { snapshot(loadCurrent()) }
+
+    fun menuContext(): JSONObject = locked {
+        JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
+            .put("layerClipboard", layerClipboard.isFile)
+            .put("settings", readMenuSettings())
+    }
+
+    fun menuUiState(): JSONObject = locked {
+        JSONObject().put("settings", readMenuSettings())
+            .put("layerClipboard",layerClipboard.isFile)
+            .put("request", if (menuUiRequest.isFile) JSONObject(menuUiRequest.readText()) else JSONObject.NULL)
+    }
+
+    fun ackMenuUiRequest(id: String): JSONObject = locked {
+        val request=JSONObject(menuUiRequest.readText())
+        if(request.getString("id")==id) {
+            request.put("applied",true)
+            atomic(menuUiRequest,request.toString())
+        }
+        JSONObject().put("requestId",id).put("applied",request.getString("id")==id)
+    }
+
+    private fun readMenuSettings(): JSONObject =
+        if (menuSettings.isFile) JSONObject(menuSettings.readText()) else JSONObject()
+            .put("brushWidth", 6.0).put("brushOpacity", 1.0).put("selectionVisible", true)
+            .put("panelsHidden", false).put("gridVisible", false).put("pixelGridVisible", true)
+
+    /** The same dispatcher is called by the popup menus and Laner's registered capability. */
+    fun executeMenu(actor: String, action: String, arguments: JSONObject): JSONObject = locked {
+        require(actor in setOf("AWEI", "LANER"))
+        val context = JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
+            .put("layerClipboard", layerClipboard.isFile).put("settings", readMenuSettings())
+        val item = ArtStudioMenuCatalog.find(action) ?: error("未知菜单操作：$action")
+        val availability = ArtStudioMenuCatalog.availability(item, context)
+        require(availability.first) { availability.second }
+        val p = JSONObject(arguments.toString())
+        var fields=item.getJSONArray("parameters")
+        if(action=="filter_apply_reprompt") {
+            context.getJSONObject("document").getJSONObject("state").getJSONObject("lastFilter").let { previous ->
+                fields=ArtStudioMenuCatalog.find(previous.getString("action"))!!.getJSONArray("parameters")
+                for(n in 0 until fields.length()) {
+                    val field=fields.getJSONObject(n);val key=field.getString("name")
+                    if(previous.getJSONObject("parameters").has(key)) field.put("default",previous.getJSONObject("parameters").get(key))
+                }
+            }
+        }
+        val allowed=mutableSetOf("documentId","expectedRevision")
+        for(n in 0 until fields.length()) {
+            val field=fields.getJSONObject(n);val key=field.getString("name");allowed.add(key)
+            if(!p.has(key)) {
+                require(field.has("default")) { "缺少菜单参数：$key" }
+                p.put(key,field.get("default"))
+            }
+            val value=p.get(key)
+            require(when(field.getString("type")) {
+                "string" -> value is String
+                "boolean" -> value is Boolean
+                "integer" -> value is Number && value.toDouble().isFinite() && value.toDouble()==value.toLong().toDouble()
+                "number" -> value is Number && value.toDouble().isFinite()
+                else -> false
+            }) { "菜单参数类型无效：$key" }
+            field.optJSONArray("choices")?.let { choices ->
+                require((0 until choices.length()).any { choices.get(it)==value }) { "菜单参数选项无效：$key" }
+            }
+        }
+        require(p.keys().asSequence().all { it in allowed }) { "菜单包含未知参数" }
+        if (item.optBoolean("documentWrite")) {
+            val doc = context.getJSONObject("document")
+            require(p.getString("documentId") == doc.getString("id") &&
+                p.getInt("expectedRevision") == doc.getInt("revision")) {
+                "工程或修订已经被另一端修改，请刷新后重试"
+            }
+        }
+        val snap = context.optJSONObject("document")
+        val state = snap?.getJSONObject("state")
+        val active = state?.let { ArtMenuOperations.active(it) }
+        fun edit(type: String, params: JSONObject): JSONObject = appendToCurrent(actor, type, params)
+        fun change(remove: List<String>, insert: List<JSONObject>, index: Int, selected: String,
+                   label: String = item.getString("title"), background: String? = null,
+                   filter: JSONObject? = null): JSONObject {
+            val params = ArtMenuOperations.change(requireNotNull(state), remove, insert, index, selected, label)
+            if (background != null) params.put("background", background)
+            if (filter != null) params.put("filter", filter)
+            return edit("MENU_LAYER_CHANGE", params)
+        }
+        fun raster(bitmap: Bitmap, id: String, name: String): JSONObject {
+            val asset = UUID.randomUUID().toString()
+            val bytes = try { ByteArrayOutputStream().use { stream ->
+                require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
+                stream.toByteArray()
+            } } finally { bitmap.recycle() }
+            require(bytes.size <= MAX_ASSET_BYTES) { "图层 PNG 超过 8 MB" }
+            atomicBytes(assetFile(asset), bytes)
+            return ArtMenuOperations.rasterLayer(id, name, asset)
+        }
+        when (action) {
+            "add_new_paint_layer", "add_new_group_layer" -> edit(
+                if (action == "add_new_group_layer") "GROUP_CREATE" else "LAYER_CREATE",
+                JSONObject().put("id", UUID.randomUUID().toString()).put("name", p.getString("name").trim()
+                    .also { require(it.isNotBlank() && it.length <= 100) { "名称需要 1–100 个字符" } })
+                    .put("parentId", active?.let { if (it.getString("kind") == "group") it.getString("id") else it.optString("parentId") } ?: "")
+                    .put("select", true))
+            "duplicatelayer" -> edit("LAYER_COPY", JSONObject().put("id", requireNotNull(active).getString("id"))
+                .put("newId", UUID.randomUUID().toString()).put("select", true))
+            "copy_layer_clipboard", "cut_layer_clipboard" -> {
+                val selected = requireNotNull(active)
+                val tree = ArtMenuOperations.subtree(requireNotNull(state), selected.getString("id"))
+                require(selected.optString("parentId").isBlank()) { "结构化图层剪贴板当前仅支持根图层或根图层组" }
+                if (action == "cut_layer_clipboard") require(tree.none { ArtMenuOperations.isLocked(state, it) }) { "图层或组已锁定" }
+                val clip = JSONObject().put("layers", JSONArray(tree)).put("rootId", selected.getString("id"))
+                    .put("sourceDocument", requireNotNull(snap).getString("id")).put("sourceActor", actor)
+                // Clipboard content is durable before a cut can remove the source tree.
+                atomic(layerClipboard, clip.toString())
+                if (action == "cut_layer_clipboard") {
+                    val ids = tree.map { it.getString("id") }
+                    val remaining = ArtMenuOperations.layers(state).filterNot { it.getString("id") in ids }
+                    change(ids, emptyList(), 0, remaining.lastOrNull()?.getString("id") ?: "")
+                } else JSONObject().put("copied", true).put("layerCount", tree.size)
+            }
+            "paste_layer_from_clipboard" -> {
+                val clip = JSONObject(layerClipboard.readText())
+                val originals = clip.getJSONArray("layers").let { a -> (0 until a.length()).map { a.getJSONObject(it) } }
+                val copies = ArtMenuOperations.cloneTree(originals)
+                val rootIndex = originals.indexOfFirst { it.getString("id") == clip.getString("rootId") }
+                require(rootIndex >= 0)
+                change(emptyList(), copies, ArtMenuOperations.layers(requireNotNull(state)).size, copies[rootIndex].getString("id"))
+            }
+            "create_quick_group" -> {
+                val selected = requireNotNull(active); val all = ArtMenuOperations.layers(requireNotNull(state))
+                val id = UUID.randomUUID().toString()
+                val group = newLayer(id, "group", p.getString("name").trim().also {
+                    require(it.isNotBlank() && it.length<=100) { "名称需要 1–100 个字符" }
+                }, selected.optString("parentId"), "")
+                val child = JSONObject(selected.toString()).put("parentId", id)
+                change(listOf(selected.getString("id")), listOf(group, child), all.indexOf(selected), id)
+            }
+            "quick_ungroup" -> {
+                val group = requireNotNull(active); val all = ArtMenuOperations.layers(requireNotNull(state))
+                val children = all.filter { it.optString("parentId") == group.getString("id") }
+                val remove = listOf(group.getString("id")) + children.map { it.getString("id") }
+                val remainingBefore = all.take(all.indexOf(group)).count { it.getString("id") !in remove }
+                val moved = children.map { JSONObject(it.toString()).put("parentId", group.optString("parentId")) }
+                change(remove, moved, remainingBefore, moved.lastOrNull()?.getString("id") ?: group.optString("parentId"))
+            }
+            "new_from_visible" -> {
+                val view = JSONObject(requireNotNull(snap).toString())
+                view.getJSONObject("state").put("background", "#00000000")
+                val layer = raster(ArtRenderer.render(this, view), UUID.randomUUID().toString(), "可见图层合成")
+                change(emptyList(), listOf(layer), ArtMenuOperations.layers(requireNotNull(state)).size, layer.getString("id"))
+            }
+            "merge_layer" -> {
+                val pair = ArtMenuOperations.mergePair(requireNotNull(state))
+                val trees = pair.flatMap { ArtMenuOperations.subtree(state, it.getString("id")) }
+                val ids = trees.map { it.getString("id") }
+                val layer = raster(ArtRenderer.render(this, ArtMenuOperations.isolated(requireNotNull(snap), ids.toSet())),
+                    pair[0].getString("id"), pair[0].getString("name"))
+                val all = ArtMenuOperations.layers(state)
+                val index = all.take(all.indexOf(pair[0])).count { it.getString("id") !in ids }
+                change(ids, listOf(layer), index, layer.getString("id"))
+            }
+            "flatten_layer", "convert_to_paint_layer" -> {
+                val selected = requireNotNull(active); val tree = ArtMenuOperations.subtree(requireNotNull(state), selected.getString("id"))
+                val ids = tree.map { it.getString("id") }
+                val layer = raster(ArtRenderer.render(this, ArtMenuOperations.isolated(requireNotNull(snap), ids.toSet(), selected.getString("id"))),
+                    selected.getString("id"), selected.getString("name"))
+                    .put("visible", selected.getBoolean("visible")).put("opacity", selected.getDouble("opacity"))
+                    .put("blend", selected.getString("blend"))
+                val all = ArtMenuOperations.layers(state)
+                change(ids, listOf(layer), all.take(all.indexOf(selected)).count { it.getString("id") !in ids }, layer.getString("id"))
+            }
+            "flatten_image" -> {
+                val layer = raster(ArtRenderer.render(this, requireNotNull(snap)), UUID.randomUUID().toString(), "合并画布")
+                change(ArtMenuOperations.layers(requireNotNull(state)).map { it.getString("id") }, listOf(layer), 0,
+                    layer.getString("id"), background = "#00000000")
+            }
+            "import_layer_from_file", "import_layer_as_paint_layer" -> {
+                val bytes = Base64.decode(p.getString("base64"), Base64.DEFAULT)
+                require(bytes.size in 1..MAX_ASSET_BYTES)
+                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+                BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+                require(bounds.outWidth in 1..4096 && bounds.outHeight in 1..4096) { "图片边长上限为 4096 像素" }
+                val bitmap = BitmapFactory.decodeByteArray(bytes,0,bytes.size) ?: error("请使用 PNG 或 JPEG")
+                val layer = raster(bitmap, UUID.randomUUID().toString(), "导入绘画图层")
+                change(emptyList(),listOf(layer),ArtMenuOperations.layers(requireNotNull(state)).size,layer.getString("id"))
+            }
+            "save_node_as_image" -> {
+                val selected = requireNotNull(active)
+                val tree = ArtMenuOperations.subtree(requireNotNull(state), selected.getString("id"))
+                ArtRenderer.export(root, this, ArtMenuOperations.isolated(requireNotNull(snap),
+                    tree.map { it.getString("id") }.toSet(), selected.getString("id")), "png", p.optString("name", "layer"))
+            }
+            "save_groups_as_images" -> {
+                val images=JSONArray()
+                ArtMenuOperations.layers(requireNotNull(state)).filter {
+                    it.getString("kind")=="group" && it.optString("parentId").isBlank()
+                }.forEachIndexed { index,group ->
+                    val ids=ArtMenuOperations.subtree(state,group.getString("id")).map { it.getString("id") }.toSet()
+                    images.put(ArtRenderer.export(root,this,ArtMenuOperations.isolated(requireNotNull(snap),ids,group.getString("id")),
+                        "png","group-${index+1}").put("layerName",group.getString("name")))
+                }
+                JSONObject().put("images",images)
+            }
+            "cut_selection_to_new_layer", "copy_selection_to_new_layer" -> {
+                val selected=requireNotNull(active); val currentState=requireNotNull(state)
+                val area=editingRectangle(currentState)
+                val clip=copyPixelsUnlocked(actor)
+                val layer=ArtMenuOperations.rasterLayer(UUID.randomUUID().toString(),"选区图层",clip.getString("asset"))
+                layer.getJSONArray("contentOrder").getJSONObject(0).put("x",area[0]).put("y",area[1])
+                val all=ArtMenuOperations.layers(currentState)
+                if(action=="cut_selection_to_new_layer") {
+                    val edited=JSONObject(selected.toString())
+                    contentOrder(edited).put(JSONObject().put("kind","clear").put("x",area[0]).put("y",area[1])
+                        .put("width",area[2]).put("height",area[3]).put("selection",JSONObject(currentState.getJSONObject("selection").toString())))
+                    change(listOf(selected.getString("id")),listOf(edited,layer),all.indexOf(selected),layer.getString("id"))
+                } else change(emptyList(),listOf(layer),all.indexOf(selected)+1,layer.getString("id"))
+            }
+            "mirrorNodeX", "mirrorNodeY", "mirrorAllNodesX", "mirrorAllNodesY" -> {
+                val all=ArtMenuOperations.layers(requireNotNull(state))
+                val targets=if(action.startsWith("mirrorAll")) all else listOf(requireNotNull(active))
+                val replacements=targets.associate { selected ->
+                    val id=selected.getString("id")
+                    val input=ArtRenderer.render(this,ArtMenuOperations.isolated(requireNotNull(snap),setOf(id),id))
+                    val output=Bitmap.createBitmap(input.width,input.height,Bitmap.Config.ARGB_8888)
+                    try {
+                        val canvas=Canvas(output)
+                        if(action.endsWith("X")) { canvas.translate(input.width.toFloat(),0f);canvas.scale(-1f,1f) }
+                        else { canvas.translate(0f,input.height.toFloat());canvas.scale(1f,-1f) }
+                        canvas.drawBitmap(input,0f,0f,Paint())
+                    } finally { input.recycle() }
+                    id to raster(output,id,selected.getString("name")).put("opacity",selected.getDouble("opacity"))
+                        .put("blend",selected.getString("blend"))
+                }
+                change(all.map { it.getString("id") },all.map { replacements[it.getString("id")] ?: JSONObject(it.toString()) },
+                    0,state.getString("selectedLayerId"))
+            }
+            "rotateAllLayers", "rotateAllLayersCW90", "rotateAllLayersCCW90", "rotateAllLayers180" -> {
+                val degrees=when(action) { "rotateAllLayersCW90" -> 90.0; "rotateAllLayersCCW90" -> -90.0
+                    "rotateAllLayers180" -> 180.0; else -> p.getDouble("degrees") }
+                require(degrees.isFinite())
+                val currentState=requireNotNull(state); val cx=currentState.getDouble("width")/2;val cy=currentState.getDouble("height")/2
+                val radians=Math.toRadians(degrees)
+                val all=ArtMenuOperations.layers(currentState)
+                val rotated=all.map { old -> JSONObject(old.toString()).apply {
+                    if(old.optString("parentId").isBlank()) {
+                        val dx=old.getDouble("x")-cx;val dy=old.getDouble("y")-cy
+                        put("x",cx+dx*cos(radians)-dy*sin(radians)).put("y",cy+dx*sin(radians)+dy*cos(radians))
+                            .put("rotation",old.getDouble("rotation")+degrees)
+                    }
+                } }
+                change(all.map { it.getString("id") },rotated,0,currentState.getString("selectedLayerId"))
+            }
+            "histogram" -> {
+                val selected = requireNotNull(active)
+                val tree = ArtMenuOperations.subtree(requireNotNull(state), selected.getString("id"))
+                val bitmap = ArtRenderer.render(this, ArtMenuOperations.isolated(requireNotNull(snap), tree.map { it.getString("id") }.toSet(), selected.getString("id")))
+                try { ArtMenuOperations.histogram(bitmap) } finally { bitmap.recycle() }
+            }
+            "rotatelayer", "rotateLayerCW90", "rotateLayerCCW90", "rotateLayer180", "offsetlayer" -> {
+                val selected = requireNotNull(active)
+                val params = JSONObject().put("id", selected.getString("id"))
+                if (action == "offsetlayer") {
+                    params.put("x",selected.getDouble("x")+p.getDouble("dx")).put("y",selected.getDouble("y")+p.getDouble("dy"))
+                } else {
+                    val degrees = when (action) { "rotateLayerCW90" -> 90.0; "rotateLayerCCW90" -> -90.0
+                        "rotateLayer180" -> 180.0; else -> p.getDouble("degrees") }
+                    require(degrees.isFinite())
+                    // Rotate around canvas center in parent coordinates; keep the structured strokes editable.
+                    val cx = requireNotNull(state).getDouble("width")/2; val cy = state.getDouble("height")/2
+                    val radians = Math.toRadians(degrees)
+                    val dx = selected.getDouble("x")-cx; val dy=selected.getDouble("y")-cy
+                    params.put("rotation", selected.getDouble("rotation")+degrees)
+                        .put("x",cx+dx*cos(radians)-dy*sin(radians)).put("y",cy+dx*sin(radians)+dy*cos(radians))
+                }
+                edit("TRANSFORM",params)
+            }
+            "select_all" -> edit("SELECTION_CREATE", JSONObject().put("x",0).put("y",0)
+                .put("width",requireNotNull(state).getInt("width")).put("height",state.getInt("height")))
+            "deselect" -> edit("SELECTION_CLEAR",JSONObject())
+            "reselect" -> edit("SELECTION_CREATE",JSONObject(requireNotNull(state).getJSONObject("previousSelection").toString()))
+            "selectionscale", "edit_selection", "growselection", "shrinkselection" -> {
+                val selection = JSONObject(requireNotNull(state).getJSONObject("selection").toString())
+                if (action in setOf("growselection","shrinkselection")) {
+                    val amount = p.getDouble("pixels") * if (action == "shrinkselection") -1 else 1
+                    require(p.getDouble("pixels") >= 0 && amount.isFinite())
+                    selection.put("x",selection.getDouble("x")-amount).put("y",selection.getDouble("y")-amount)
+                        .put("width",selection.getDouble("width")+amount*2).put("height",selection.getDouble("height")+amount*2)
+                } else {
+                    selection.put("width",p.getDouble("width")).put("height",p.getDouble("height"))
+                    if (action == "edit_selection") selection.put("x",p.getDouble("x")).put("y",p.getDouble("y"))
+                }
+                require(selection.getDouble("width") > 0 && selection.getDouble("height") > 0) { "选区尺寸必须大于零" }
+                edit("SELECTION_CREATE",selection)
+            }
+            "filter_apply_again", "filter_apply_reprompt" -> {
+                val previous = requireNotNull(state).getJSONObject("lastFilter")
+                val parameters=JSONObject(previous.getJSONObject("parameters").toString())
+                if(action=="filter_apply_reprompt") {
+                    ArtStudioMenuCatalog.find(previous.getString("action"))!!.getJSONArray("parameters").let { fields ->
+                        for(n in 0 until fields.length()) {
+                            val key=fields.getJSONObject(n).getString("name")
+                            if(p.has(key)) parameters.put(key,p.get(key))
+                        }
+                    }
+                }
+                applyMenuFilter(actor, previous.getString("action"), parameters, snap,
+                    item.getString("title"), ::raster, ::change)
+            }
+            "filter.invert", "filter.desaturate", "filter.threshold", "filter.posterize", "filter.maximize",
+            "filter.minimize", "filter.resettransparent" ->
+                applyMenuFilter(actor,action,p,requireNotNull(snap),item.getString("title"),::raster,::change)
+            "options_configure", "reset_configurations", "toggle_display_selection", "view_toggledockers" -> {
+                val settings = readMenuSettings()
+                when (action) {
+                    "options_configure" -> {
+                        val brushWidth=p.getDouble("brushWidth"); val brushOpacity=p.getDouble("brushOpacity")
+                        require(brushWidth.isFinite() && brushWidth in 0.1..512.0 && brushOpacity in 0.0..1.0)
+                        settings.put("brushWidth",brushWidth).put("brushOpacity",brushOpacity)
+                    }
+                    "reset_configurations" -> settings.put("brushWidth",6.0).put("brushOpacity",1.0)
+                        .put("selectionVisible",true).put("panelsHidden",false).put("gridVisible",false).put("pixelGridVisible",true)
+                    "toggle_display_selection" -> settings.put("selectionVisible",p.getBoolean("enabled"))
+                    "view_toggledockers" -> settings.put("panelsHidden",p.getBoolean("enabled"))
+                }
+                atomic(menuSettings,settings.toString())
+                settings
+            }
+            "docker.color", "docker.layers", "docker.brushes", "docker.footprints" -> {
+                val request=JSONObject().put("id",UUID.randomUUID().toString()).put("action",action)
+                atomic(menuUiRequest,request.toString())
+                JSONObject().put("accepted",true).put("requestId",request.getString("id"))
+            }
+            "window.current" -> requireNotNull(snap)
+            "help_contents", "help_whats_this", "help_show_tip", "buginfo", "sysinfo", "help_about_app" ->
+                ArtStudioMenuCatalog.help(action,context)
+            else -> error("菜单尚未实现：$action")
+        }
+    }
+
+    private fun applyMenuFilter(actor: String, action: String, p: JSONObject, snapshot: JSONObject?, label: String,
+        raster: (Bitmap,String,String) -> JSONObject,
+        change: (List<String>,List<JSONObject>,Int,String,String,String?,JSONObject?) -> JSONObject): JSONObject {
+        require(actor in setOf("AWEI","LANER"))
+        val snap=requireNotNull(snapshot); val state=snap.getJSONObject("state")
+        require(ArtMenuOperations.pixelsEditable(state)) { "滤镜需要可见、未锁定且未经变换的根像素图层" }
+        val selected=requireNotNull(ArtMenuOperations.active(state)); val id=selected.getString("id")
+        val bitmap=ArtRenderer.render(this,ArtMenuOperations.isolated(snap,setOf(id),id))
+        val layer = try {
+            ArtMenuOperations.filter(bitmap,action,p,state.optJSONObject("selection"))
+            raster(bitmap,id,selected.getString("name"))
+        } catch (error: Throwable) { if (!bitmap.isRecycled) bitmap.recycle(); throw error }
+        layer.put("opacity",selected.getDouble("opacity")).put("blend",selected.getString("blend"))
+        val clean = JSONObject(p.toString()).apply { remove("expectedRevision"); remove("documentId") }
+        return change(listOf(id),listOf(layer),ArtMenuOperations.layers(state).indexOf(selected),id,label,null,
+            JSONObject().put("action",action).put("parameters",clean))
+    }
 
     fun revision(): String = locked {
         if (!pointer.isFile) ""
@@ -397,25 +755,8 @@ internal class ArtStore(private val root: File) {
                 zip.write(doc.toString().toByteArray(Charsets.UTF_8))
                 zip.closeEntry()
                 val used = mutableSetOf<String>()
-                val operations = doc.getJSONArray("operations")
-                val state = replay(doc)
-                val layers = state.getJSONArray("layers")
-                for (i in 0 until layers.length()) {
-                    val layer = layers.getJSONObject(i)
-                    if (layer.optString("kind") == "image") used.add(layer.getString("asset"))
-                    layer.optJSONArray("contentOrder")?.let { order ->
-                        for (n in 0 until order.length()) {
-                            val event = order.getJSONObject(n)
-                            if (event.optString("kind") in setOf("paste", "erase")) used.add(event.getString("asset"))
-                        }
-                    }
-                }
-                for (i in 0 until operations.length()) {
-                    val operation = operations.getJSONObject(i)
-                    if (operation.getString("type") in setOf("IMAGE_IMPORT", "PASTE_IMAGE", "PIXEL_PASTE")) {
-                        used.add(operation.getJSONObject("parameters").getString("asset"))
-                    }
-                }
+                // Include assets in base layers and inactive history, not only the visible state.
+                ArtMenuOperations.assets(doc) { node, key -> used.add(node.getString(key)) }
                 used.forEach { asset ->
                     zip.putNextEntry(ZipEntry("assets/" + asset + ".png"))
                     zip.write(assetFile(asset).readBytes())
@@ -496,36 +837,17 @@ internal class ArtStore(private val root: File) {
         validateId(doc.getString("id"))
         val operations = doc.getJSONArray("operations")
         val assetIds = importedAssets.keys.associateWith { UUID.randomUUID().toString() }
-        val baseLayers = doc.getJSONObject("base").getJSONArray("layers")
-        for (i in 0 until baseLayers.length()) {
-            val layer = baseLayers.getJSONObject(i)
-            if (layer.optString("kind") == "image") {
-                val oldAsset = layer.getString("asset")
-                require(oldAsset in importedAssets) { "工程图片缺失" }
-                layer.put("asset", assetIds.getValue(oldAsset))
-            }
-        }
-        for (i in 0 until baseLayers.length()) {
-            baseLayers.getJSONObject(i).optJSONArray("contentOrder")?.let { order ->
-                for (n in 0 until order.length()) {
-                    val event = order.getJSONObject(n)
-                    if (event.optString("kind") in setOf("paste", "erase")) {
-                        val old = event.getString("asset")
-                        require(old in importedAssets) { "工程剪贴资源缺失" }
-                        event.put("asset", assetIds.getValue(old))
-                    }
-                }
-            }
-        }
         for (i in 0 until operations.length()) {
             val op = operations.getJSONObject(i)
-            if (op.getString("type") in setOf("IMAGE_IMPORT", "PASTE_IMAGE", "PIXEL_PASTE")) {
+            if (op.getString("type") == "IMAGE_IMPORT") {
                 val parameters = op.getJSONObject("parameters")
-                val oldId = parameters.getString("asset")
-                require(oldId in importedAssets) { "工程图片缺失" }
-                parameters.put("id", parameters.optString("id").ifBlank { oldId })
-                parameters.put("asset", assetIds.getValue(oldId))
+                if (!parameters.has("id")) parameters.put("id", parameters.getString("asset"))
             }
+        }
+        ArtMenuOperations.assets(doc) { node, key ->
+            val old = node.getString(key)
+            require(old in importedAssets) { "工程图片资源缺失：$old" }
+            node.put(key, assetIds.getValue(old))
         }
         val id = UUID.randomUUID().toString()
         doc.put("id", id).put("createdBy", actor)
@@ -625,6 +947,7 @@ internal class ArtStore(private val root: File) {
             if (id == null) return ""
             val operation = operationById[id] ?: return ""
             return when (operation.getString("type")) {
+                "MENU_LAYER_CHANGE" -> operation.getJSONObject("parameters").getString("label")
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
                 "GROUP_CREATE" -> "新建图层组"
                 "LAYER_DELETE" -> "删除图层"
@@ -757,6 +1080,7 @@ internal class ArtStore(private val root: File) {
             error("图层不存在：$id；该撤销与后续操作冲突")
         }
         when (type) {
+            "MENU_LAYER_CHANGE" -> ArtMenuOperations.edit(state, p)
             "LAYER_CREATE", "GROUP_CREATE", "IMAGE_IMPORT" -> {
                 val id = p.optString("id").ifBlank { p.optString("asset") }
                 require(id.isNotBlank())
@@ -1055,7 +1379,10 @@ internal class ArtStore(private val root: File) {
                 }
                 state.put("selection", JSONObject(p.toString()))
             }
-            "SELECTION_CLEAR" -> state.put("selection", JSONObject.NULL)
+            "SELECTION_CLEAR" -> {
+                state.optJSONObject("selection")?.let { state.put("previousSelection",JSONObject(it.toString())) }
+                state.put("selection", JSONObject.NULL)
+            }
             "SELECTION_EDIT" -> {
                 val selection = state.optJSONObject("selection") ?: error("请先创建选区")
                 val layer = find(p.getString("layerId")).second
@@ -1263,6 +1590,10 @@ internal class ArtStore(private val root: File) {
     }
 
     fun copyPixels(actor: String, merged: Boolean = false, cut: Boolean = false): JSONObject = locked {
+        copyPixelsUnlocked(actor, merged, cut)
+    }
+
+    private fun copyPixelsUnlocked(actor: String, merged: Boolean = false, cut: Boolean = false): JSONObject {
         require(actor == "AWEI" || actor == "LANER")
         require(!merged || !cut)
         val doc = loadCurrent()
@@ -1334,7 +1665,7 @@ internal class ArtStore(private val root: File) {
             }
             appendToCurrent(actor, "PIXEL_EDIT", params)
         }
-        clipboard.put("cut", cut)
+        return clipboard.put("cut", cut)
     }
 
     fun pastePixels(actor: String, intoActive: Boolean = false,

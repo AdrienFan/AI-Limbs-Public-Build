@@ -45,6 +45,17 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         val read = InProcessCapabilityEffect.READ_ONLY
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
+        capability("menu.catalog", "读取画室完整菜单清单", read,
+            "读取从图层到帮助七栏的菜单树、参数、当前可用状态与灰色原因；手机页面使用同一清单。") {
+            ArtStudioMenuCatalog.describe(store.menuContext())
+        }
+        capability("menu.execute", "执行画室菜单操作", write,
+            "action 使用 menu.catalog 的真实叶子 ID；parameters 使用该项参数。documentWrite=true 时必须传 documentId 与 expectedRevision；未实现项会拒绝。两位协作者共用业务实现、文件锁与撤销历史。UI 面板请求返回 accepted，页面打开时消费。") { p ->
+            val arguments = p.optJSONObject("parameters")?.let { JSONObject(it.toString()) } ?: JSONObject()
+            if (p.has("documentId")) arguments.put("documentId",p.getString("documentId"))
+            if (p.has("expectedRevision")) arguments.put("expectedRevision",p.getInt("expectedRevision"))
+            store.executeMenu("LANER",p.getString("action"),arguments)
+        }
         capability("image.set_background", "设置图像背景色与透明度", write,
             "与图像菜单共用工程操作日志；color 是 #AARRGGBB，00 为全透明。") { p ->
             store.apply("LANER", "IMAGE_BACKGROUND", JSONObject().put("color", p.getString("color")))
@@ -391,6 +402,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
     }
     val id = p("id")
     return when (name) {
+        "menu.execute" -> listOf(p("action"), p("parameters", "object", true),
+            p("documentId", optional = true), p("expectedRevision", "integer", true))
         "image.set_background" -> listOf(p("color"))
         "image.resize_canvas" -> listOf(p("width", "integer"), p("height", "integer"),
             p("offsetX", "integer", true), p("offsetY", "integer", true))
