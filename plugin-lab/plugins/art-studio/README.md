@@ -227,7 +227,7 @@ Krita 文件菜单说明：https://docs.krita.org/en/reference_manual/main_menu/
 
 细节读取使用 plugin.art.studio.canvas.region：x、y、width、height 是画布像素坐标，maxEdge 默认 512、范围 64–1024。返回 regionPreview 的坐标、放大比例、文档与版本以及图片块，越界明确拒绝。手机仍使用同一合成器显示实时画布，通过原有缩放/平移检查细节。
 
-RDC 接收端开发版 1.2.12 将 mcp_content 提升为原生 MCP image 内容，不把编码塞入文本分页。SentinelX 接收端开发版 0.1.8 把图块放在同一次 exec response 的 mcp_content，与原文本分页分开；当前云端 exec 本身按文字包装，调用方必须直接呈现图块。文字 JSON 或图片路径不等于模型已看到图片。SentinelX 内联媒体限制 96 KiB，过大明确给出 media_delivery 错误，细节调用可显式缩小 maxEdge 或区域；不能重新执行绘画操作来取图。
+RDC 接收端开发版 1.2.12 将 mcp_content 提升为原生 MCP image 内容，不把编码塞入文本分页。SentinelX 接收端开发版 0.1.8 把图块放在同一次 exec response 的 mcp_content，与原文本分页分开；当前云端 exec 本身按文字包装，调用方必须直接呈现图块。文字 JSON 或图片路径不等于模型已看到图片。SentinelX 小图片内联上限 96 KiB，整份控制回复限制 120 KiB；较大附件在同次回复中给出二进制媒体句柄，通过官方 sentinel_read_media 传送原图字节。调用方按 delivery 自动呈现，不能重新执行绘画操作来取图。
 
 当前只完成源码与静态审阅，尚未编译、安装或验证两条云端的实际图片呈现。绘制后渲染预览会增加合成开销，性能需要随后续实机验证。
 
