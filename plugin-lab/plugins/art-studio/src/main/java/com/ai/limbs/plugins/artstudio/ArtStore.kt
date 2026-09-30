@@ -51,11 +51,43 @@ internal class ArtStore(private val root: File) {
         require(backups.mkdirs() || backups.isDirectory)
     }
 
-    private inline fun <T> locked(block: () -> T): T = synchronized(processLock) {
-        FileOutputStream(lockFile, true).channel.use { channel ->
+    // The capability wrapper holds one lock through the edit and its rendered receipt.
+    // Nested business methods on this same thread reuse it instead of acquiring an overlapping file lock.
+    private val lockDepth = ThreadLocal.withInitial { 0 }
+    private fun <T> locked(block: () -> T): T = synchronized(processLock) {
+        if (lockDepth.get() > 0) block()
+        else FileOutputStream(lockFile, true).channel.use { channel ->
             val lock: FileLock = channel.lock()
-            try { block() } finally { lock.release() }
+            lockDepth.set(1)
+            try { block() } finally { lockDepth.remove(); lock.release() }
         }
+    }
+
+    fun withCanvasFeedback(block: () -> JSONObject): JSONObject = locked {
+        val result = block()
+        val after = if (pointer.isFile) snapshot(loadCurrent()) else null
+        try {
+            ArtCanvasFeedback.attach(this, result, after)
+        } catch (error: Exception) {
+            // The edit has committed. Report a missing receipt explicitly and preserve its IDs;
+            // throwing an ordinary tool failure here would encourage retrying an already-applied stroke.
+            android.util.Log.e("ArtStudio", "Canvas changed but preview generation failed", error)
+            result.put("thumbnail", JSONObject().put("status", "error").put("operationApplied", true)
+                .put("documentId", after?.getString("id") ?: JSONObject.NULL)
+                .put("revision", after?.getInt("revision") ?: JSONObject.NULL)
+                .put("error", error.message ?: error.javaClass.simpleName))
+        }
+    }
+
+    fun canvasRegion(x: Int, y: Int, width: Int, height: Int, maxEdge: Int,
+        documentId: String? = null, expectedRevision: Int? = null): JSONObject = locked {
+        val current = snapshot(loadCurrent())
+        require(documentId == null || documentId == current.getString("id")) { "工程已经切换，请使用当前画布编号" }
+        require(expectedRevision == null || expectedRevision == current.getInt("revision")) { "画布版本已经改变，请刷新后检查细节" }
+        val image = ArtCanvasFeedback.preview(this, current,
+            x, y, width, height, maxEdge, "region")
+        JSONObject().put("regionPreview", image.getJSONObject("metadata"))
+            .put("mcp_content", JSONArray().put(image.getJSONObject("content")))
     }
 
     fun create(width: Int, height: Int, background: String = "#FFFFFFFF",

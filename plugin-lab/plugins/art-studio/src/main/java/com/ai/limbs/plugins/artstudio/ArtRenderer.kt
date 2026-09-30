@@ -19,13 +19,20 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 internal object ArtRenderer {
-    fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false): Bitmap {
+    fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false, maxEdge: Int? = null): Bitmap {
         val state = snapshot.getJSONObject("state")
         val width = state.getInt("width")
         val height = state.getInt("height")
         require(width in 64..4096 && height in 64..4096)
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+        val factor = if (maxEdge == null) 1.0 else {
+            require(maxEdge in 64..1024)
+            (maxEdge.toDouble() / maxOf(width, height)).coerceAtMost(1.0)
+        }
+        val renderWidth = kotlin.math.round(width * factor).toInt().coerceAtLeast(1)
+        val renderHeight = kotlin.math.round(height * factor).toInt().coerceAtLeast(1)
+        val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
+        canvas.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
         val background = Color.parseColor(state.getString("background"))
         if (opaque) canvas.drawColor(Color.WHITE)
         canvas.drawColor(background)
@@ -56,9 +63,10 @@ internal object ArtRenderer {
                     draw(target, layer.getString("id"), depth + 1)
                     target.restore()
                 } else {
-                    val buffer = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
+                    val buffer = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
                     try {
                         val local = Canvas(buffer)
+                        local.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
                         if (layer.getString("kind") == "image") {
                             BitmapFactory.decodeFile(store.assetFile(layer.getString("asset")).absolutePath)?.let { image ->
                                 local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
@@ -68,7 +76,7 @@ internal object ArtRenderer {
                         val strokes = layer.getJSONArray("strokes")
                         val order = layer.optJSONArray("contentOrder")
                         if (order == null) {
-                            for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s))
+                            for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s), width, height)
                         } else {
                             val byId = (0 until strokes.length()).associate {
                                 val stroke = strokes.getJSONObject(it)
@@ -77,7 +85,7 @@ internal object ArtRenderer {
                             for (n in 0 until order.length()) {
                                 val event = order.getJSONObject(n)
                                 when (event.getString("kind")) {
-                                    "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it) }
+                                    "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it, width, height) }
                                     "clear", "fill" -> {
                                         val editPaint = Paint(Paint.ANTI_ALIAS_FLAG)
                                         if (event.getString("kind") == "clear") {
@@ -109,7 +117,8 @@ internal object ArtRenderer {
                                 }
                             }
                         }
-                        target.drawBitmap(buffer, 0f, 0f, paint)
+                        target.drawBitmap(buffer, null,
+                            android.graphics.RectF(0f, 0f, width.toFloat(), height.toFloat()), paint)
                     } finally { buffer.recycle() }
                 }
                 target.restore()
@@ -122,7 +131,8 @@ internal object ArtRenderer {
         return bitmap
     }
 
-    fun drawStroke(canvas: Canvas, stroke: JSONObject) {
+    fun drawStroke(canvas: Canvas, stroke: JSONObject,
+        logicalWidth: Int = canvas.width, logicalHeight: Int = canvas.height) {
         val points = stroke.getJSONArray("points")
         if (points.length() == 0) return
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -341,8 +351,8 @@ internal object ArtRenderer {
                 else -> android.graphics.LinearGradient(x0, y0, x1, y1,
                     nearColor, farColor, android.graphics.Shader.TileMode.CLAMP)
             }
-            val boundsWidth = stroke.optInt("previewWidth", canvas.width)
-            val boundsHeight = stroke.optInt("previewHeight", canvas.height)
+            val boundsWidth = stroke.optInt("previewWidth", logicalWidth)
+            val boundsHeight = stroke.optInt("previewHeight", logicalHeight)
             canvas.drawRect(0f, 0f, boundsWidth.toFloat(), boundsHeight.toFloat(), paint)
             return
         }

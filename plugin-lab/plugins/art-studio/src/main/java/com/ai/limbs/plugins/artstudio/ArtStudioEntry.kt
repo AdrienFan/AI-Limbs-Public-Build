@@ -23,7 +23,7 @@ class ArtStudioEntry : InProcessPluginEntry {
                     .put("provider_id", ART_PAGE))).toString()))
         host.registerHomeTile(InProcessHomeTile("$ART_ID.tile", "画室", "共同编辑的结构化画布", ART_SCREEN))
 
-        fun capability(name: String, title: String, effect: InProcessCapabilityEffect,
+        fun registerCapability(name: String, title: String, effect: InProcessCapabilityEffect,
                        description: String = title, block: suspend (JSONObject) -> JSONObject) {
             val fields = parametersFor(name)
             val properties = JSONObject()
@@ -42,6 +42,15 @@ class ArtStudioEntry : InProcessPluginEntry {
                 effect = effect, domain = InProcessCapabilityDomain.PLUGIN,
                 executor = InProcessCapabilityExecutor { json -> block(JSONObject(json)).toString() }
             ))
+        }
+        fun capability(name: String, title: String, effect: InProcessCapabilityEffect,
+                       description: String = title, block: (JSONObject) -> JSONObject) {
+            registerCapability(name, title, effect,
+                description + " 成功改变画布时在原结果中自动附带 thumbnail 元数据和 mcp_content 图片块；无需另取缩略图。") { parameters ->
+                if (ArtCanvasFeedback.affectsCanvas(name, parameters))
+                    store.withCanvasFeedback { block(parameters) }
+                else block(parameters)
+            }
         }
         val read = InProcessCapabilityEffect.READ_ONLY
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
@@ -82,7 +91,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             "在画室画布打开时执行 zoom_in/out/100、fit/fit_width/fit_height、rotate_right/left、reset_rotation、mirror、reset_display 或 refresh。") { p ->
             ArtStudioViewControl.command(p.getString("command"))
         }
-        capability("view.presentation", "切换画室页面模式", InProcessCapabilityEffect.UI_INTERACTION,
+        registerCapability("view.presentation", "切换画室页面模式", InProcessCapabilityEffect.UI_INTERACTION,
             "向宿主请求 normal、fullscreen_portrait 或 fullscreen_landscape；宿主确认后才视为成功。") { p ->
             val mode = p.getString("mode")
             require(mode in setOf("normal", "fullscreen_portrait", "fullscreen_landscape"))
@@ -172,6 +181,13 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("document.info", "读取画室工程", read) { store.current() }
         capability("document.list", "列出画室工程", read) { JSONObject().put("documents", store.list()) }
         capability("canvas.inspect", "查看画布结构", read) { store.current() }
+        capability("canvas.region", "查看画布局部放大图", read,
+            "按画布像素坐标读取 x、y、width、height 区域；maxEdge 为输出长边 64–1024，默认 512。返回局部图片、工程与版本号，不修改画布或保存文件。") { p ->
+            store.canvasRegion(p.getInt("x"), p.getInt("y"), p.getInt("width"),
+                p.getInt("height"), p.optInt("maxEdge", 512),
+                if (p.has("documentId")) p.getString("documentId") else null,
+                if (p.has("expectedRevision")) p.getInt("expectedRevision") else null)
+        }
         capability("canvas.measure", "测量画布两点", read,
             "以画布像素坐标返回距离与屏幕坐标系顺时针角度。") { p ->
             val x0 = p.getDouble("x0"); val y0 = p.getDouble("y0")
@@ -394,6 +410,8 @@ class ArtStudioPresentationEntry : InProcessPluginPresentationEntry {
 private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> {
     fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
         val description = when (key) {
+            "maxEdge" -> "局部预览图片的长边，64–1024 像素，默认 512；用于控制细节和传输大小。"
+            "documentId" -> "工程编号；局部图可使用上一张缩略图的编号来拒绝已切换的画布。"
             "directory" -> "应用可写的绝对目录路径；空字符串恢复插件内默认位置，旧工程继续原位保存。"
             "id" -> "图层或工程 ID；先读取 layer.list 或 document.list 确定真实 ID。"
             "parentId" -> "可选的父图层组 ID，空字符串表示根层级。"
@@ -480,6 +498,9 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "history.goto" -> listOf(id, p("expectedRevision", "integer"))
         "history.revert_actor_operations" -> listOf(id)
         "storage.set_directory" -> listOf(p("directory"))
+        "canvas.region" -> listOf(p("x", "integer"), p("y", "integer"), p("width", "integer"),
+            p("height", "integer"), p("maxEdge", "integer", true),
+            p("documentId", optional = true), p("expectedRevision", "integer", true))
         "image.import" -> listOf(p("base64"))
         "export.png", "export.jpeg" -> listOf(p("name", optional = true),
             p("x", "integer", true), p("y", "integer", true),

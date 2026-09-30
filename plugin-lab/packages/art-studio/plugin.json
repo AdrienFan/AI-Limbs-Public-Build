@@ -60,6 +60,7 @@
       "plugin.art.studio.document.info",
       "plugin.art.studio.document.list",
       "plugin.art.studio.canvas.inspect",
+      "plugin.art.studio.canvas.region",
       "plugin.art.studio.canvas.crop",
       "plugin.art.studio.canvas.measure",
       "plugin.art.studio.color.sample",
