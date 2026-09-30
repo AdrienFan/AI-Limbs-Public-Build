@@ -21,6 +21,7 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
@@ -45,6 +46,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.ComposeView
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalViewConfiguration
+import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
@@ -84,7 +87,19 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
         val menuHeight = (42f * density).toInt()
         val content = ComposeView(pluginContext).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-            setContent { MaterialTheme(colorScheme = darkColorScheme()) { Studio(host, bridge) } }
+            setContent {
+                MaterialTheme(colorScheme = darkColorScheme()) {
+                    val platformConfiguration = LocalViewConfiguration.current
+                    val panelConfiguration = remember(platformConfiguration) {
+                        object : ViewConfiguration by platformConfiguration {
+                            override val doubleTapTimeoutMillis = 300L
+                        }
+                    }
+                    CompositionLocalProvider(LocalViewConfiguration provides panelConfiguration) {
+                        Studio(host, bridge)
+                    }
+                }
+            }
         }
         // Reserve a real strip above the canvas so the menu remains clickable while the canvas redraws.
         root.addView(content, FrameLayout.LayoutParams(-1, -1).apply { topMargin = menuHeight })
@@ -488,7 +503,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var rightDrawerOpen by rememberSaveable { mutableStateOf(false) }
     var leftDrawerPinned by rememberSaveable { mutableStateOf(false) }
     var rightDrawerPinned by rememberSaveable { mutableStateOf(false) }
-    var activeRightPane by remember { mutableStateOf(RightPane.COLOR) }
+    var dockPanelState by remember { mutableStateOf(ArtDockPanels.initial()) }
+    val activeRightPane = RightPane.values().firstOrNull {
+        it.name.lowercase(java.util.Locale.ROOT) == dockPanelState.optString("activePane")
+    }
+    var panelCloseDialog by remember { mutableStateOf<RightPane?>(null) }
+    var suppressPanelCloseConfirmation by remember { mutableStateOf(false) }
     val rightPanePrefs = remember(context) {
         context.getSharedPreferences("art_studio_ui", Context.MODE_PRIVATE)
     }
@@ -629,6 +649,24 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
         }
     }
+    fun acceptDockState(next: JSONObject) {
+        if (next.getLong("revision") > dockPanelState.getLong("revision")) dockPanelState = next
+    }
+    fun changeDock(command: String, pane: RightPane? = null, enabled: Boolean? = null,
+        suppressConfirmation: Boolean = false) {
+        scope.launch {
+            try {
+                val next = withContext(Dispatchers.IO) { mutex.withLock {
+                    store.changeDockPanels(command, pane?.name?.lowercase(java.util.Locale.ROOT),
+                        enabled, suppressConfirmation)
+                } }
+                acceptDockState(next)
+            } catch (error: Exception) {
+                remainingResult = JSONObject().put("title", "停靠面板操作未完成")
+                    .put("text", error.message ?: "面板状态保存失败")
+            }
+        }
+    }
     fun executeRemaining(item: JSONObject, captured: JSONObject, parameters: JSONObject) {
         if (busy) return
         val arguments=JSONObject(parameters.toString())
@@ -642,6 +680,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 val result=withContext(Dispatchers.IO) { mutex.withLock {
                     store.executeMenu("AWEI",item.getString("id"),arguments)
                 } }
+                if (result.has("dockPanels")) acceptDockState(result.getJSONObject("dockPanels"))
+                if (item.getString("id") in setOf("options_configure", "reset_configurations"))
+                    acceptDockState(withContext(Dispatchers.IO) { store.dockPanelState() })
                 if ((result.has("images") || result.has("path")) && captured.getJSONObject("storage").getBoolean("custom")) {
                     remainingResult=JSONObject().put("title","已保存到默认目录").put("text",
                         if(result.has("images")) (0 until result.getJSONArray("images").length()).joinToString("\n") {
@@ -820,6 +861,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         while (true) {
             val menuData=withContext(Dispatchers.IO) { store.menuUiState() }
             remainingContext=menuData
+            acceptDockState(menuData.getJSONObject("dockPanels"))
             val settings=menuData.getJSONObject("settings")
             if(settings.toString()!=remainingSettings.toString()) {
                 val previous=remainingSettings
@@ -834,18 +876,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
             val request=menuData.optJSONObject("request")
             if(request!=null && !request.optBoolean("applied")) {
-                activeRightPane=when(request.getString("action")) {
-                    "docker.color" -> RightPane.COLOR
-                    "docker.layers" -> RightPane.LAYERS
-                    "docker.brushes" -> RightPane.BRUSHES
-                    "docker.footprints" -> RightPane.FOOTPRINTS
-                    else -> error("未知画室面板请求")
+                val panel = request.getString("action").removePrefix("docker.")
+                require(panel in ArtDockPanels.ids) { "未知画室面板请求" }
+                if (dockPanelState.getJSONObject("visible").getBoolean(panel)) {
+                    rightDrawerOpen=true
+                    ArtStudioViewControl.setOption("panelsHidden",false)
                 }
-                rightDrawerOpen=true
-                ArtStudioViewControl.setOption("panelsHidden",false)
                 withContext(Dispatchers.IO) { store.ackMenuUiRequest(request.getString("id")) }
             }
-            delay(1200)
+            delay(400)
             if (!busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
         }
     }
@@ -1031,7 +1070,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val menuClipboardCanNew = ArtImagePolicy.dimensionsValid(clipboardSize.first, clipboardSize.second)
 
     SideEffect {
-        menuBridge.menuContext=JSONObject(remainingContext.toString())
+        menuBridge.menuContext=JSONObject(remainingContext.toString()).put("dockPanels", dockPanelState)
             .put("document", current ?: JSONObject.NULL)
             .put("layerClipboard",remainingContext.optBoolean("layerClipboard"))
             .put("settings",remainingContext.optJSONObject("settings")?.let { JSONObject(it.toString()) }
@@ -1043,6 +1082,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 if(id in setOf("import_layer_from_file","import_layer_as_paint_layer")) {
                     remainingImportContext=captured; remainingImportItem=item
                     importRemainingLayer.launch(arrayOf("image/png","image/jpeg"))
+                } else if(id.removePrefix("docker.") in ArtDockPanels.ids) {
+                    val panel = id.removePrefix("docker.")
+                    executeRemaining(item,captured,JSONObject().put("enabled",
+                        !dockPanelState.getJSONObject("visible").getBoolean(panel)))
                 } else if(id in setOf("toggle_display_selection","view_toggledockers")) {
                     val settings=captured.getJSONObject("settings")
                     executeRemaining(item,captured,JSONObject().put("enabled", !settings.getBoolean(
@@ -1063,6 +1106,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     if(id=="options_configure") {
                         val settings=captured.getJSONObject("settings")
                         defaults.put("brushWidth",settings.getDouble("brushWidth")).put("brushOpacity",settings.getDouble("brushOpacity"))
+                            .put("confirmPanelClose",dockPanelState.getBoolean("confirmClose"))
                     }
                     if(params.length()>0 || id in setOf("flatten_image","flatten_layer","merge_layer","cut_layer_clipboard","reset_configurations")) {
                         remainingDialog=item;remainingCaptured=captured;remainingDefaults=defaults
@@ -1615,15 +1659,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             val rightAccordionState = rememberLazyListState()
                             val paneOrder = rightPaneOrderNames.mapNotNull { name ->
                                 RightPane.values().firstOrNull { it.name == name }
-                            }
+                            }.filter { dockPanelState.getJSONObject("visible")
+                                .getBoolean(it.name.lowercase(java.util.Locale.ROOT)) }
                             // Headers before and after the active pane share one scroll list; neither reserves viewport space.
                             val activePaneBodyHeight =
                                 (maxHeight - pinHeaderHeight - paneHeaderHeight).coerceAtLeast(120.dp)
                             val activeHeaderIndex =
                                 paneOrder.indexOf(activeRightPane).coerceAtLeast(0)
 
-                            LaunchedEffect(activeRightPane, rightPaneOrderNames, draggingRightPane) {
-                                if (draggingRightPane == null) {
+                            LaunchedEffect(activeRightPane, paneOrder, draggingRightPane) {
+                                if (draggingRightPane == null && activeRightPane != null && paneOrder.isNotEmpty()) {
                                     rightAccordionState.animateScrollToItem(activeHeaderIndex)
                                 }
                             }
@@ -1632,7 +1677,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 Box(Modifier.fillMaxWidth().height(pinHeaderHeight)) {
                                     Text("视图列表",
                                         style = MaterialTheme.typography.titleSmall,
-                                        modifier = Modifier.align(androidx.compose.ui.Alignment.Center))
+                                        modifier = Modifier.align(androidx.compose.ui.Alignment.Center)
+                                            .combinedClickable(
+                                                onClickLabel = "恢复上次展开状态",
+                                                onDoubleClick = { changeDock("collapse_all") },
+                                                onClick = { changeDock("restore") }))
                                     Box(Modifier.align(androidx.compose.ui.Alignment.CenterStart)
                                         .padding(start = 2.dp).size(36.dp)
                                         .clickable(onClickLabel = if (rightDrawerPinned)
@@ -1656,6 +1705,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
 
                                 LazyColumn(Modifier.fillMaxWidth().weight(1f),
                                     state = rightAccordionState) {
+                                    if (paneOrder.isEmpty()) item {
+                                        Text("所有面板已关闭，可在「设置 → 停靠面板」重新显示。",
+                                            modifier = Modifier.padding(12.dp))
+                                    }
                                     paneOrder.forEach { pane ->
                                         val isActive = activeRightPane == pane
                                         val isDragging = draggingRightPane == pane
@@ -1707,8 +1760,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                                 draggingRightPaneOffset += dragAmount.y
                                                                 val threshold =
                                                                     paneHeaderHeight.toPx()
-                                                                val names =
-                                                                    rightPaneOrderNames.toMutableList()
+                                                                val names = rightPaneOrderNames.filter { name ->
+                                                                    dockPanelState.getJSONObject("visible")
+                                                                        .getBoolean(name.lowercase(java.util.Locale.ROOT))
+                                                                }.toMutableList()
                                                                 var index = names.indexOf(pane.name)
                                                                 var changed = false
                                                                 while (
@@ -1737,33 +1792,42 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                                     changed = true
                                                                 }
                                                                 if (changed) {
-                                                                    rightPaneOrderNames = names
+                                                                    val reordered = names.iterator()
+                                                                    rightPaneOrderNames = rightPaneOrderNames.map { name ->
+                                                                        if (name in names) reordered.next() else name
+                                                                    }
                                                                 }
                                                             }
                                                         )
                                                     }
-                                                    .clickable(
-                                                        onClickLabel = if (isActive)
-                                                            "$label 已展开"
-                                                        else "展开$label"
-                                                    ) {
-                                                        if (draggingRightPane == null) {
-                                                            activeRightPane = pane
-                                                        }
-                                                    }
+                                                    .combinedClickable(
+                                                        onClickLabel = "展开$label",
+                                                        onDoubleClick = {
+                                                            if (draggingRightPane == null) changeDock("collapse", pane)
+                                                        },
+                                                        onClick = {
+                                                            if (draggingRightPane == null && !isActive) changeDock("expand", pane)
+                                                        })
+                                                    .semantics { contentDescription = "$label，单击展开，双击折叠，长按拖动排序" }
                                                     .padding(start = 10.dp),
                                                     contentAlignment =
                                                         androidx.compose.ui.Alignment.CenterStart) {
-                                                    Text(label,
+                                                    Text((if (isActive) "▾ " else "▸ ") + label,
                                                         style =
                                                             MaterialTheme.typography.titleSmall)
                                                 }
                                                 Box(Modifier.size(36.dp)
-                                                    .clickable(onClickLabel =
-                                                        "隐藏$label（待视图菜单完成）") { }
+                                                    .clickable(onClickLabel = "关闭$label") {
+                                                        if (draggingRightPane == null) {
+                                                            if (dockPanelState.getBoolean("confirmClose")) {
+                                                                suppressPanelCloseConfirmation = false
+                                                                panelCloseDialog = pane
+                                                            } else changeDock("set_visible", pane, false)
+                                                        }
+                                                    }
                                                     .semantics {
                                                         contentDescription =
-                                                            "隐藏$label（待视图菜单完成）"
+                                                            "关闭$label"
                                                     },
                                                     contentAlignment =
                                                         androidx.compose.ui.Alignment.Center) {
@@ -2630,6 +2694,35 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
             }
         } }, confirmButton = { TextButton(onClick = { openDialog = false }) { Text("关闭") } })
+    panelCloseDialog?.let { pane ->
+        val label = when (pane) {
+            RightPane.COLOR -> "多功能拾色器"
+            RightPane.LAYERS -> "图层"
+            RightPane.BRUSHES -> "笔刷预设"
+            RightPane.FOOTPRINTS -> "足迹"
+        }
+        AlertDialog(onDismissRequest = { panelCloseDialog = null },
+            title = { Text("是否关闭“$label”面板？") },
+            text = {
+                Column {
+                    Text("关闭后，可通过「设置 → 停靠面板 → $label」重新显示。")
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Checkbox(checked = suppressPanelCloseConfirmation,
+                            onCheckedChange = { suppressPanelCloseConfirmation = it })
+                        Text("以后关闭面板时不再提示")
+                    }
+                }
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    changeDock("set_visible", pane, false, suppressPanelCloseConfirmation)
+                    panelCloseDialog = null
+                }) { Text("关闭面板") }
+            },
+            dismissButton = {
+                TextButton(onClick = { panelCloseDialog = null }) { Text("取消") }
+            })
+    }
     remainingDialog?.let { item ->
         StudioMenuParameters(item,remainingDefaults,onDismiss={remainingDialog=null}) { parameters ->
             val captured=remainingCaptured

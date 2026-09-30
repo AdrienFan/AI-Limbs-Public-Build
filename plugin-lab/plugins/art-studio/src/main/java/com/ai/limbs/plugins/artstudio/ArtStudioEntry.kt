@@ -64,11 +64,20 @@ class ArtStudioEntry : InProcessPluginEntry {
             ArtStudioMenuCatalog.describe(store.menuContext())
         }
         capability("menu.execute", "执行画室菜单操作", write,
-            "action 使用 menu.catalog 的真实叶子 ID；parameters 使用该项参数。documentWrite=true 时必须传 documentId 与 expectedRevision；未实现项会拒绝。两位协作者共用业务实现、文件锁与撤销历史。图片导入超预算返回 needs_confirmation 与 imagePlan；取得用户同意后在 parameters.confirmResize 原样传回 imagePlan.confirmation。UI 面板请求返回 accepted，页面打开时消费。") { p ->
+            "action 使用 menu.catalog 的真实叶子 ID；parameters 使用该项参数。documentWrite=true 时必须传 documentId 与 expectedRevision；未实现项会拒绝。两位协作者共用业务实现、文件锁与撤销历史。图片导入超预算返回 needs_confirmation 与 imagePlan；取得用户同意后在 parameters.confirmResize 原样传回 imagePlan.confirmation。停靠菜单支持 enabled 显隐开关；结果返回 accepted 与已保存的 dockPanels，显示请求在页面打开时消费。") { p ->
             val arguments = p.optJSONObject("parameters")?.let { JSONObject(it.toString()) } ?: JSONObject()
             if (p.has("documentId")) arguments.put("documentId",p.getString("documentId"))
             if (p.has("expectedRevision")) arguments.put("expectedRevision",p.getInt("expectedRevision"))
             store.executeMenu("LANER",p.getString("action"),arguments)
+        }
+        capability("dock.state", "读取画室停靠面板状态", read,
+            "visible 是四个面板的显示状态；activePane 为当前展开面板或 null；allCollapsed/restorePane 为总标题折叠恢复状态；confirmClose 为关闭提示偏好。与手机页面共享并持久保存。") {
+            store.dockPanelState()
+        }
+        capability("dock.command", "操作画室停靠面板", write,
+            "command: set_visible（panel+enabled）、expand/collapse（panel）、collapse_all/restore、set_confirmation（enabled）。panel: color/layers/brushes/footprints。隐藏移除标题与内容；折叠保留标题；显示或展开会请求页面打开右栏。AI 显式隐藏不弹手机确认框。") { p ->
+            store.changeDockPanels(p.getString("command"), p.optString("panel").takeIf { it.isNotBlank() },
+                if (p.has("enabled")) p.getBoolean("enabled") else null)
         }
         capability("image.set_background", "设置图像背景色与透明度", write,
             "与图像菜单共用工程操作日志；color 是 #AARRGGBB，00 为全透明。") { p ->
@@ -448,6 +457,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "image.set_background" -> listOf(p("color"))
         "image.resize_canvas" -> listOf(p("width", "integer"), p("height", "integer"),
             p("offsetX", "integer", true), p("offsetY", "integer", true))
+        "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
         "view.presentation" -> listOf(p("mode"))

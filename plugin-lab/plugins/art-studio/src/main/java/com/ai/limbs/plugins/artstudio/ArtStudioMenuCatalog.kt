@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** Source order follows Krita 6.0.4; one inventory serves UI and capability discovery. */
 internal object ArtStudioMenuCatalog {
-    const val VERSION = "0.2.17"
+    const val VERSION = "0.2.18"
     private val definitions = JSONArray(listOf(
         """{
   "id": "Layer",
@@ -1585,7 +1585,8 @@ internal object ArtStudioMenuCatalog {
           "type": "number",
           "description": "默认画笔不透明度（0–1）",
           "default": 1
-        }
+        },
+        {"name":"confirmPanelClose","type":"boolean","description":"关闭面板前显示确认提示","default":true}
       ],
       "documentWrite": false
     },
@@ -1716,7 +1717,7 @@ internal object ArtStudioMenuCatalog {
           "title": "多功能拾色器",
           "implemented": true,
           "source": "krita/krita5.xmlgui",
-          "parameters": [],
+          "parameters": [{"name":"enabled","type":"boolean","description":"显示此停靠面板","default":true}],
           "documentWrite": false
         },
         {
@@ -1724,7 +1725,7 @@ internal object ArtStudioMenuCatalog {
           "title": "图层",
           "implemented": true,
           "source": "krita/krita5.xmlgui",
-          "parameters": [],
+          "parameters": [{"name":"enabled","type":"boolean","description":"显示此停靠面板","default":true}],
           "documentWrite": false
         },
         {
@@ -1732,7 +1733,7 @@ internal object ArtStudioMenuCatalog {
           "title": "笔刷预设（基础面板）",
           "implemented": true,
           "source": "krita/krita5.xmlgui",
-          "parameters": [],
+          "parameters": [{"name":"enabled","type":"boolean","description":"显示此停靠面板","default":true}],
           "documentWrite": false
         },
         {
@@ -1740,7 +1741,7 @@ internal object ArtStudioMenuCatalog {
           "title": "足迹",
           "implemented": true,
           "source": "krita/krita5.xmlgui",
-          "parameters": [],
+          "parameters": [{"name":"enabled","type":"boolean","description":"显示此停靠面板","default":true}],
           "documentWrite": false
         },
         {
@@ -2112,6 +2113,18 @@ internal object ArtStudioMenuCatalog {
                 if(item.has("id") && !item.has("children")) {
                     val status=availability(item,context)
                     item.put("enabled",status.first).put("unavailableReason",status.second)
+                    context.optJSONObject("dockPanels")?.let { dock ->
+                        val panel = item.getString("id").removePrefix("docker.")
+                        if (panel in ArtDockPanels.ids)
+                            item.put("checkable", true).put("checked", dock.getJSONObject("visible").getBoolean(panel))
+                        if (item.getString("id") == "options_configure") {
+                            val fields = item.getJSONArray("parameters")
+                            for (i in 0 until fields.length()) {
+                                val field = fields.getJSONObject(i)
+                                if (field.getString("name") == "confirmPanelClose") field.put("default", dock.getBoolean("confirmClose"))
+                            }
+                        }
+                    }
                     if(item.getString("id")=="art.storage_directory" && context.has("storage")) {
                         item.getJSONArray("parameters").getJSONObject(0).put("default",
                             context.getJSONObject("storage").getString("configuredDirectory"))
@@ -2133,7 +2146,8 @@ internal object ArtStudioMenuCatalog {
         annotate(menus)
         val doc=context.optJSONObject("document")
         return JSONObject().put("version",VERSION).put("sourceVersion","Krita 6.0.4")
-            .put("menus",menus).put("storage",context.optJSONObject("storage") ?: JSONObject.NULL)
+            .put("menus",menus).put("dockPanels",context.optJSONObject("dockPanels") ?: JSONObject.NULL)
+            .put("storage",context.optJSONObject("storage") ?: JSONObject.NULL)
             .put("documentId",doc?.getString("id") ?: JSONObject.NULL)
             .put("revision",doc?.getInt("revision") ?: JSONObject.NULL)
             .put("mutationProtocol","documentWrite=true 的项目必须携带 documentId 与 expectedRevision；灰色项目没有执行入口")

@@ -120,11 +120,11 @@ internal class ArtStore(private val root: File) {
     fun menuContext(): JSONObject = locked {
         JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
             .put("layerClipboard", layerClipboard.isFile)
-            .put("settings", readMenuSettings()).put("storage", saveDirectories.describe())
+            .put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
     }
 
     fun menuUiState(): JSONObject = locked {
-        JSONObject().put("settings", readMenuSettings()).put("storage", saveDirectories.describe())
+        JSONObject().put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
             .put("layerClipboard",layerClipboard.isFile)
             .put("request", if (menuUiRequest.isFile) JSONObject(menuUiRequest.readText()) else JSONObject.NULL)
     }
@@ -136,6 +136,33 @@ internal class ArtStore(private val root: File) {
             atomic(menuUiRequest,request.toString())
         }
         JSONObject().put("requestId",id).put("applied",request.getString("id")==id)
+    }
+
+    private val dockPanelsFile = File(root, "dock-panels.json")
+
+    private fun readDockPanels(): JSONObject =
+        if (dockPanelsFile.isFile) JSONObject(dockPanelsFile.readText()) else ArtDockPanels.initial()
+
+    fun dockPanelState(): JSONObject = locked { readDockPanels() }
+
+    fun changeDockPanels(command: String, panel: String? = null, enabled: Boolean? = null,
+        suppressCloseConfirmation: Boolean = false): JSONObject = locked {
+        val current = readDockPanels()
+        val next = ArtDockPanels.change(current, command, panel, enabled, suppressCloseConfirmation)
+        atomic(dockPanelsFile, next.toString())
+        val opened = when (command) {
+            "set_visible" -> panel?.takeIf { enabled == true }
+            "expand" -> panel
+            "restore" -> next.optString("activePane").takeIf { current.getBoolean("allCollapsed") && it in ArtDockPanels.ids }
+            else -> null
+        }
+        if (opened != null) {
+            val settings = readMenuSettings().put("panelsHidden", false)
+            atomic(menuSettings, settings.toString())
+            atomic(menuUiRequest, JSONObject().put("id", UUID.randomUUID().toString())
+                .put("action", "docker." + opened).toString())
+        }
+        next
     }
 
     private fun readMenuSettings(): JSONObject =
@@ -161,6 +188,13 @@ internal class ArtStore(private val root: File) {
                     val field=fields.getJSONObject(n);val key=field.getString("name")
                     if(previous.getJSONObject("parameters").has(key)) field.put("default",previous.getJSONObject("parameters").get(key))
                 }
+            }
+        }
+        if (action == "options_configure") {
+            for (n in 0 until fields.length()) {
+                val field = fields.getJSONObject(n)
+                if (field.getString("name") == "confirmPanelClose")
+                    field.put("default", readDockPanels().getBoolean("confirmClose"))
             }
         }
         val allowed=mutableSetOf("documentId","expectedRevision")
@@ -444,9 +478,13 @@ internal class ArtStore(private val root: File) {
                         val brushWidth=p.getDouble("brushWidth"); val brushOpacity=p.getDouble("brushOpacity")
                         require(brushWidth.isFinite() && brushWidth in 0.1..512.0 && brushOpacity in 0.0..1.0)
                         settings.put("brushWidth",brushWidth).put("brushOpacity",brushOpacity)
+                        changeDockPanels("set_confirmation", enabled = p.getBoolean("confirmPanelClose"))
                     }
-                    "reset_configurations" -> settings.put("brushWidth",6.0).put("brushOpacity",1.0)
-                        .put("selectionVisible",true).put("panelsHidden",false).put("gridVisible",false).put("pixelGridVisible",true)
+                    "reset_configurations" -> {
+                        settings.put("brushWidth",6.0).put("brushOpacity",1.0)
+                            .put("selectionVisible",true).put("panelsHidden",false).put("gridVisible",false).put("pixelGridVisible",true)
+                        changeDockPanels("set_confirmation", enabled = true)
+                    }
                     "toggle_display_selection" -> settings.put("selectionVisible",p.getBoolean("enabled"))
                     "view_toggledockers" -> settings.put("panelsHidden",p.getBoolean("enabled"))
                 }
@@ -454,9 +492,10 @@ internal class ArtStore(private val root: File) {
                 settings
             }
             "docker.color", "docker.layers", "docker.brushes", "docker.footprints" -> {
-                val request=JSONObject().put("id",UUID.randomUUID().toString()).put("action",action)
-                atomic(menuUiRequest,request.toString())
-                JSONObject().put("accepted",true).put("requestId",request.getString("id"))
+                val state = changeDockPanels("set_visible", action.removePrefix("docker."), p.getBoolean("enabled"))
+                JSONObject().put("accepted", true).put("dockPanels", state).apply {
+                    if (p.getBoolean("enabled")) put("requestId", JSONObject(menuUiRequest.readText()).getString("id"))
+                }
             }
             "window.current" -> requireNotNull(snap)
             "help_contents", "help_whats_this", "help_show_tip", "buginfo", "sysinfo", "help_about_app" ->

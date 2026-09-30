@@ -44,6 +44,11 @@ internal fun showStudioRemainingMenu(context: Context, anchor: View, title: Stri
                     isEnabled = item.getBoolean("enabled") && !busy
                     contentDescription = item.getString("title") +
                         if (item.getBoolean("enabled")) "" else "，" + item.getString("unavailableReason")
+                    if (item.getString("id").removePrefix("docker.") in ArtDockPanels.ids) {
+                        isCheckable = true
+                        isChecked = captured.getJSONObject("dockPanels").getJSONObject("visible")
+                            .getBoolean(item.getString("id").removePrefix("docker."))
+                    }
                     if (item.getString("id") in setOf("toggle_display_selection", "view_toggledockers")) {
                         isCheckable = true
                         val settings = captured.getJSONObject("settings")
