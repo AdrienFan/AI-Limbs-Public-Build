@@ -24,7 +24,7 @@ if len(declared) != len(declared_list):
 source = ENTRY.read_text(encoding="utf-8")
 literal_names = {
     name
-    for name in re.findall(r'\bcapability\(\s*"([^"]+)"', source)
+    for name in re.findall(r'\b(?:capability|registerCapability)\(\s*"([^"]+)"', source)
     if "$" not in name
 }
 runtime_literals = {f"{plugin_id}.{name}" for name in literal_names}
