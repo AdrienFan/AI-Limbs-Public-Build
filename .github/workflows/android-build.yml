@@ -89,8 +89,8 @@ jobs:
             dist/AI-Limbs-RDC-v1.2.11.ailx.sha256
             dist/AI-Limbs-TriggerCMD-v1.2.5.ailx
             dist/AI-Limbs-TriggerCMD-v1.2.5.ailx.sha256
-            dist/AI-Limbs-SentinelX-v0.1.6.ailx
-            dist/AI-Limbs-SentinelX-v0.1.6.ailx.sha256
+            dist/AI-Limbs-SentinelX-v0.1.7.ailx
+            dist/AI-Limbs-SentinelX-v0.1.7.ailx.sha256
           if-no-files-found: error
           retention-days: 14
   build:
@@ -504,7 +504,7 @@ jobs:
 
   sentinelx:
     if: inputs.target == 'sentinelx'
-    name: Build SentinelX v0.1.6 child extension only
+    name: Build SentinelX v0.1.7 child extension only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -522,6 +522,8 @@ jobs:
           cache: gradle
       - name: Set up Android SDK
         uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+        with:
+          packages: platform-tools
       - name: Install Android SDK
         shell: bash
         run: |
@@ -547,11 +549,11 @@ jobs:
       - name: Upload SentinelX child extension payload
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: sentinelx-extension-v0.1.6-${{ github.run_number }}
+          name: sentinelx-extension-v0.1.7-${{ github.run_number }}
           path: |
-            dist/AI-Limbs-SentinelX-v0.1.6.ailx
-            dist/AI-Limbs-SentinelX-v0.1.6.ailx.sha256
-            dist/AI-Limbs-SentinelX-v0.1.6.ailx.source.json
+            dist/AI-Limbs-SentinelX-v0.1.7.ailx
+            dist/AI-Limbs-SentinelX-v0.1.7.ailx.sha256
+            dist/AI-Limbs-SentinelX-v0.1.7.ailx.source.json
             plugin-lab/extensions/sentinelx/build/outputs/apk/debug/*.apk
             plugin-lab/packages/sentinelx/extension.json
           if-no-files-found: error
