@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Sign only the Resident Bridge fixes with the existing parent/child signer identities."""
+import argparse
 import hashlib
 import json
 import os
@@ -25,9 +26,16 @@ TARGETS = (
 )
 
 def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--package", choices=[target[0] for target in TARGETS],
+                        help="Sign one component; omitted means the entire Bridge suite")
+    selection = parser.parse_args().package
+    targets = TARGETS if selection is None else tuple(target for target in TARGETS if target[0] == selection)
+    source_commit = subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip()
+    source_tree = subprocess.check_output(["git", "rev-parse", "HEAD^{tree}"], cwd=ROOT, text=True).strip()
     dist = ROOT / "dist"
     dist.mkdir(exist_ok=True)
-    for package, module, manifest_name, payload, env_key, signer, fingerprint, label, suffix in TARGETS:
+    for package, module, manifest_name, payload, env_key, signer, fingerprint, label, suffix in targets:
         apks = list((ROOT / "plugin-lab" / module / "build/outputs/apk/debug").glob("*.apk"))
         if len(apks) != 1:
             raise SystemExit(f"Expected exactly one APK for {package}")
@@ -63,6 +71,18 @@ def main():
                 archive.writestr("META-INF/AILIMBS.SIG", sig.read_bytes())
             digest = hashlib.sha256(out.read_bytes()).hexdigest()
             out.with_suffix(out.suffix + ".sha256").write_text(digest + "  " + out.name + "\n")
+            provenance = {
+                "schema_version": 1,
+                "component_id": manifest["extension_id"] if manifest_name == "extension.json" else manifest["plugin_id"],
+                "component_version": manifest["version"],
+                "source_commit": source_commit,
+                "source_tree": source_tree,
+                "source_module": "plugin-lab/" + module,
+                "package_name": out.name,
+                "package_sha256": digest,
+            }
+            out.with_suffix(out.suffix + ".source.json").write_text(
+                json.dumps(provenance, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
             print(out.name + " sha256=" + digest)
 
 if __name__ == "__main__":

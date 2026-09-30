@@ -3,12 +3,14 @@ plugins { alias(libs.plugins.android.application); alias(libs.plugins.kotlin.and
 android {
     namespace = "com.ai.limbs.extensions.sentinelx"
     compileSdk = 36
-    defaultConfig { applicationId = "com.ai.limbs.payload.sentinelx"; minSdk = 26; targetSdk = 34; versionCode = 6; versionName = "0.1.5" }
+    defaultConfig { applicationId = "com.ai.limbs.payload.sentinelx"; minSdk = 26; targetSdk = 34; versionCode = 7; versionName = "0.1.6" }
     compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
     buildFeatures { buildConfig = false }
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 dependencies {
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
     compileOnly(project(":plugin-inprocess-api"))
     compileOnly(project(":bridge-contract"))
     implementation(libs.coroutines.android)

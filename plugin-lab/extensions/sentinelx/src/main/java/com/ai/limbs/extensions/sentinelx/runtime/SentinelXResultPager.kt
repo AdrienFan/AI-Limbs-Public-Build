@@ -32,7 +32,9 @@ internal class SentinelXResultPager {
                 results.remove(results.keys.first())
             }
         }
-        return page(cursor, 0)!!
+        // Another request can evict this cursor as soon as the cache lock is released.
+        // The first page owns its immutable result and must not look it up again.
+        return renderPage(cursor, saved, 0)
     }
 
     fun page(cursor: String, offset: Int): JSONObject? {
@@ -43,6 +45,10 @@ internal class SentinelXResultPager {
         if (offset < 0 || offset > saved.content.length ||
             (offset > 0 && offset < saved.content.length &&
                 Character.isLowSurrogate(saved.content[offset]))) return null
+        return renderPage(cursor, saved, offset)
+    }
+
+    private fun renderPage(cursor: String, saved: SavedResult, offset: Int): JSONObject {
         var end = (offset + PAGE_CHARS).coerceAtMost(saved.content.length)
         if (end < saved.content.length && end > offset &&
             Character.isHighSurrogate(saved.content[end - 1]) &&
