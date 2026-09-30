@@ -627,7 +627,6 @@ class AiLimbsCapabilityResolver(
             (managedRegistration as? AiLimbsCapabilityRegistration.Core)?.registration
         val pluginRegistration =
             (managedRegistration as? AiLimbsCapabilityRegistration.Plugin)?.registration
-        val semantic = semanticMetadata(invokeId)
         val role =
             coreRegistration?.role
                 ?: pluginRegistration?.role
@@ -635,7 +634,6 @@ class AiLimbsCapabilityResolver(
         val capabilityId =
             coreRegistration?.capabilityId
                 ?: pluginRegistration?.capabilityId
-                ?: semantic?.capabilityId
                 ?: generatedId
         val aliases =
             buildList {
@@ -643,19 +641,15 @@ class AiLimbsCapabilityResolver(
                 coreRegistration?.invokeAliases?.let(::addAll)
                 coreRegistration?.capabilityAliases?.let(::addAll)
                 pluginRegistration?.invokeAliases?.let(::addAll)
-                semantic?.aliases?.let(::addAll)
                 add(invokeId)
             }.filter { it != capabilityId }.distinct()
         return AiLimbsCapabilityDefinition(
             capabilityId = capabilityId,
-            displayName = semantic?.displayName ?: entry.displayName,
+            displayName = entry.displayName,
             provider = provider,
             invokeId = invokeId,
             aliases = aliases,
-            catalogEntry =
-                entry.copy(
-                    keywords = (entry.keywords + semantic.orEmptyKeywords()).distinct()
-                ),
+            catalogEntry = entry,
             role = role
         )
     }
@@ -761,7 +755,7 @@ class AiLimbsCapabilityResolver(
         parameter.default?.let { return it }
         return when (parameter.name) {
             "query" -> "查看当前手机屏幕"
-            "capability_id" -> "ui.screen.capture"
+            "capability_id" -> "native.get_page_info"
             "mode" -> "MINUTES_15"
             "key_code" -> "KEYCODE_HOME"
             "x", "y", "start_x", "start_y", "end_x", "end_y", "index" -> 0
@@ -814,8 +808,6 @@ class AiLimbsCapabilityResolver(
     private fun sourceLocator(definition: AiLimbsCapabilityDefinition): String = when {
         AiLimbsCapabilityRegistry.isRegisteredInvokeName(definition.invokeId) ->
             definition.catalogEntry.sourceLocator ?: "registry://${definition.invokeId}"
-        definition.invokeId.startsWith(AUTOMATIC_UI_BASE_PREFIX) ->
-            "assets://packages/automatic_ui_base.js#${definition.invokeId.substringAfter(':')}"
         definition.invokeId.startsWith(AUTOMATIC_UI_SUBAGENT_PREFIX) ->
             "assets://packages/automatic_ui_subagent.js#${definition.invokeId.substringAfter(':')}"
         else -> definition.catalogEntry.sourceLocator ?: "registry://${definition.invokeId}"
@@ -833,16 +825,6 @@ class AiLimbsCapabilityResolver(
     private fun definitionSourceName(invokeId: String): String =
         invokeId.substringBefore(':').takeIf { it != invokeId }.orEmpty().ifBlank { "<package_name>" }
 
-    private data class SemanticMetadata(
-        val capabilityId: String,
-        val displayName: String,
-        val aliases: List<String>,
-        val keywords: List<String>
-    )
-
-    private fun semanticMetadata(invokeId: String): SemanticMetadata? = SEMANTIC_METADATA[invokeId]
-    private fun SemanticMetadata?.orEmptyKeywords(): List<String> = this?.keywords.orEmpty()
-
     private fun ok() = JSONObject().put("success", true)
     private fun error(message: String) = JSONObject().put("success", false).put("error", message)
 
@@ -854,68 +836,6 @@ class AiLimbsCapabilityResolver(
         const val HOT_RANKING_CANDIDATE_LIMIT = 20
         const val PROVIDER_CORE = AiLimbsCoreCapabilityRegistry.CORE_PROVIDER
         const val PROVIDER_BRIDGE = AiLimbsCoreCapabilityRegistry.BRIDGE_PROVIDER
-        const val AUTOMATIC_UI_BASE_PREFIX = "Automatic_ui_base:"
         const val AUTOMATIC_UI_SUBAGENT_PREFIX = "Automatic_ui_subagent:"
-
-        val SEMANTIC_METADATA = mapOf(
-            "Automatic_ui_base:get_page_screenshot_image" to SemanticMetadata(
-                "ui.screen.capture",
-                "获取当前屏幕截图",
-                listOf("screen.capture", "android.screen.capture"),
-                listOf(
-                    "截图",
-                    "屏幕",
-                    "查看屏幕",
-                    "查看当前手机屏幕",
-                    "看一下手机",
-                    "看看手机",
-                    "当前页面",
-                    "视觉",
-                    "screenshot"
-                )
-            ),
-            "Automatic_ui_base:get_page_info" to SemanticMetadata(
-                "ui.page.inspect",
-                "读取当前页面结构",
-                listOf("ui.hierarchy.read", "android.ui.inspect"),
-                listOf("页面结构", "读取页面结构", "当前页面按钮", "按钮", "控件", "accessibility", "page info")
-            ),
-            "Automatic_ui_base:click_element" to SemanticMetadata(
-                "ui.element.click",
-                "点击页面元素",
-                listOf("ui.click"),
-                listOf("点击", "按钮", "元素", "控件")
-            ),
-            "Automatic_ui_base:tap" to SemanticMetadata(
-                "ui.screen.tap",
-                "点击屏幕坐标",
-                listOf("ui.tap"),
-                listOf("点击", "坐标", "触摸", "tap")
-            ),
-            "Automatic_ui_base:swipe" to SemanticMetadata(
-                "ui.screen.swipe",
-                "滑动屏幕",
-                listOf("ui.swipe"),
-                listOf("滑动", "翻页", "滚动", "swipe")
-            ),
-            "Automatic_ui_base:set_input_text" to SemanticMetadata(
-                "ui.text.input",
-                "输入文字",
-                listOf("ui.input"),
-                listOf("输入", "文字", "文本框", "键盘")
-            ),
-            "Automatic_ui_base:press_key" to SemanticMetadata(
-                "ui.key.press",
-                "按下 Android 按键",
-                listOf("android.key.press"),
-                listOf("返回键", "主页键", "按键", "press key")
-            ),
-            "Automatic_ui_base:app_launch" to SemanticMetadata(
-                "android.app.launch",
-                "启动 Android 应用",
-                listOf("ui.app.launch"),
-                listOf("打开应用", "启动应用", "package")
-            )
-        )
     }
 }

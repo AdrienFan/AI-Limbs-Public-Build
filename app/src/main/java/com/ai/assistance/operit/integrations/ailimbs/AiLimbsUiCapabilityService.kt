@@ -28,7 +28,6 @@ data class AiLimbsUiCapabilityStatus(
     val accessibilityProviderInstalled: Boolean,
     val accessibilityProviderVersion: String?,
     val accessibilityServiceEnabled: Boolean,
-    val automaticUiBaseEnabled: Boolean,
     val automaticUiSubagentEnabled: Boolean,
     val uiControllerModelName: String?,
     val uiControllerImageEnabled: Boolean,
@@ -68,9 +67,6 @@ class AiLimbsUiCapabilityService(context: Context) {
             providerVersion != null && runtimeState.accessibilityAvailable
 
         val packageManager = AIToolHandler.getInstance(appContext).getOrCreatePackageManager()
-        val baseEnabled =
-            runCatching { packageManager.isPackageEnabled(AUTOMATIC_UI_BASE) }
-                .getOrDefault(false)
         val subagentEnabled =
             runCatching { packageManager.isPackageEnabled(AUTOMATIC_UI_SUBAGENT) }
                 .getOrDefault(false)
@@ -123,7 +119,6 @@ class AiLimbsUiCapabilityService(context: Context) {
             accessibilityProviderInstalled = providerVersion != null,
             accessibilityProviderVersion = providerVersion,
             accessibilityServiceEnabled = accessibilityEnabled,
-            automaticUiBaseEnabled = baseEnabled,
             automaticUiSubagentEnabled = subagentEnabled,
             uiControllerModelName = uiControllerModelName,
             uiControllerImageEnabled = uiControllerImageEnabled,
@@ -153,7 +148,6 @@ class AiLimbsUiCapabilityService(context: Context) {
     }
 
     private companion object {
-        const val AUTOMATIC_UI_BASE = "Automatic_ui_base"
         const val AUTOMATIC_UI_SUBAGENT = "Automatic_ui_subagent"
     }
 }

@@ -2926,7 +2926,7 @@
     <string name="autoglm_status_success">Konfigurasi satu klik AutoGLM telah selesai:
 - Konfigurasi model pengawal UI AutoGLM telah dicipta atau dikemas kini (autoglm-phone, Zhipu)
 - Fungsi "Pengawal UI" telah ditukar kepada konfigurasi ini
-- Automatic_ui_base telah ditutup, Automatic_ui_subagent telah dibuka
+- Automatic_ui_subagent telah dibuka
 
 Kini anda boleh menggunakan mod AutoGLM di antara muka perbualan.</string>
     <string name="autoglm_status_error">Konfigurasi satu klik gagal: %1$s</string>

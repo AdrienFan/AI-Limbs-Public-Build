@@ -1939,7 +1939,7 @@
     <string name="autoglm_status_success">A configuração do AutoGLM com um clique foi concluída:
 - A configuração do modelo do controlador AutoGLM UI foi criada ou atualizada (autoglm-phone, zhipu)
 - A função "UI Controller" foi alterada para esta configuração
-- Automatic_ui_base desativado, Automatic_ui_subagent ativado
+- Automatic_ui_subagent ativado
 
 Agora é possível usar o modo AutoGLM na interface de diálogo.</string>
     <string name="autoglm_status_error">Falha na configuração com um clique: %1$s</string>

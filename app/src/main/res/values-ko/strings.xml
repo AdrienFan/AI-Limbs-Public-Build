@@ -1986,7 +1986,7 @@
     <string name="process_limit_command">명령</string>
     <string name="toolbox_description">업무 효율을 높여주는 편리하고 실용적인 도구 모음</string>
     <string name="autoglm_status_running">원클릭 구성을 실행 중입니다. 잠시 기다려 주십시오...</string>
-    <string name="autoglm_status_success">AutoGLM 원클릭 구성이 완료되었습니다:\n- AutoGLM UI 컨트롤러 모델 설정(autoglm-phone, Zhipu)을 생성 또는 업데이트했습니다\n- "UI 컨트롤러" 기능을 이 설정으로 전환했습니다\n- Automatic_ui_base를 끄고 Automatic_ui_subagent를 켰습니다\n\n이제 채팅 화면에서 AutoGLM 모드를 사용할 수 있습니다.</string>
+    <string name="autoglm_status_success">AutoGLM 원클릭 구성이 완료되었습니다:\n- AutoGLM UI 컨트롤러 모델 설정(autoglm-phone, Zhipu)을 생성 또는 업데이트했습니다\n- "UI 컨트롤러" 기능을 이 설정으로 전환했습니다\n- Automatic_ui_subagent를 켰습니다\n\n이제 채팅 화면에서 AutoGLM 모드를 사용할 수 있습니다.</string>
     <string name="autoglm_status_error">원클릭 구성 실패: %1$s</string>
     <string name="autoglm_error_empty_api_key">먼저 Zhipu API Key를 입력해주세요.</string>
     <string name="import_or_connect_mcp_service">MCP 서비스 가져오기 또는 연결</string>

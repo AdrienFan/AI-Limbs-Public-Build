@@ -1,5 +1,4 @@
 12306.js
-automatic_ui_base.js
 automatic_ui_subagent.js
 code_runner.js
 crossref.js

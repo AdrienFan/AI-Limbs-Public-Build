@@ -322,7 +322,6 @@ class AiLimbsDispatcher(
                 status.accessibilityProviderVersion ?: JSONObject.NULL
             )
             .put("accessibility_service_enabled", status.accessibilityServiceEnabled)
-            .put("automatic_ui_base_enabled", status.automaticUiBaseEnabled)
             .put("automatic_ui_subagent_enabled", status.automaticUiSubagentEnabled)
             .put("ui_controller_model", status.uiControllerModelName ?: JSONObject.NULL)
             .put("ui_controller_image_enabled", status.uiControllerImageEnabled)

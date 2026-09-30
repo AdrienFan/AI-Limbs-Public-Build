@@ -255,8 +255,7 @@ object AiLimbsExecutionPolicyDescriptor {
     }
 
     internal fun isUiTool(targetName: String): Boolean =
-        targetName.startsWith("Automatic_ui_base:") ||
-            targetName.startsWith("Automatic_ui_subagent:")
+        targetName.startsWith("Automatic_ui_subagent:")
 
     internal fun isSystemEnvironmentTool(targetName: String, parameters: JSONObject): Boolean =
         parameters.optString("environment").equals("linux", ignoreCase = true)

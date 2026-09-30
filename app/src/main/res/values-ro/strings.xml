@@ -2210,7 +2210,7 @@
     <string name="autoglm_status_success">Finalizat AutoGLM Configurare cu un singur clic:
 - A fost creat sau actualizat AutoGLM UI Configurarea modelului controlerului (autoglm-phone, Zhipu)
 - S-a înlocuit „UI Funcția „Controler” este comutată la această configurație
-- Este închis Automatic_ui_base, deschideți Automatic_ui_subagent
+- Automatic_ui_subagent este activat
 
 Acum poate fi utilizat în interfața de dialog AutoGLM A devenit un model.</string>
     <string name="autoglm_status_error">Eșecul configurării cu un singur clic:%1$s</string>

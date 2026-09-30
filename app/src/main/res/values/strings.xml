@@ -2259,7 +2259,7 @@
     <string name="autoglm_status_success">已完成 AutoGLM 一键配置：
 - 已创建或更新 AutoGLM UI 控制器模型配置（autoglm-phone, 智谱）
 - 已将“UI 控制器”功能切换为该配置
-- 已关闭 Automatic_ui_base，打开 Automatic_ui_subagent
+- 已打开 Automatic_ui_subagent
 
 现在可以在对话界面使用 AutoGLM 模式了。</string>
     <string name="autoglm_status_error">一键配置失败：%1$s</string>
