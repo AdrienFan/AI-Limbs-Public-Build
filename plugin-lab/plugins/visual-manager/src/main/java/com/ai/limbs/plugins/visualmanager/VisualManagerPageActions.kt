@@ -4,6 +4,8 @@ import com.ai.limbs.plugin.runtime.InProcessPluginPresentationHost
 import org.json.JSONObject
 
 internal interface VisualManagerPageActions {
+    suspend fun pageInspect(parameters: JSONObject = JSONObject()): JSONObject
+    suspend fun pageText(parameters: JSONObject): JSONObject
     suspend fun dashboard(): JSONObject
     suspend fun screenCapture(parameters: JSONObject = JSONObject()): JSONObject
     suspend fun screenStart(parameters: JSONObject): JSONObject
@@ -21,6 +23,10 @@ internal interface VisualManagerPageActions {
 internal class VisualManagerPresentationClient(
     private val host: InProcessPluginPresentationHost
 ) : VisualManagerPageActions {
+    override suspend fun pageInspect(parameters: JSONObject): JSONObject = invoke("page.inspect", parameters)
+
+    override suspend fun pageText(parameters: JSONObject): JSONObject = invoke("page.text", parameters)
+
     override suspend fun dashboard(): JSONObject =
         invoke("status")
 

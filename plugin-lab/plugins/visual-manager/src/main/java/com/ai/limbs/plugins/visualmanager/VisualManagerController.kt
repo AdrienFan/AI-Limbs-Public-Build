@@ -14,12 +14,28 @@ internal const val VISUAL_TILE_ID = "$VISUAL_PLUGIN_ID.tile"
 internal class VisualManagerController(
     private val host: InProcessPluginUiHost
 ) : VisualManagerPageActions {
+    private val pageReader = VisualPageReader()
     override suspend fun dashboard(): JSONObject = JSONObject()
         .put("screen", safeHost(HOST_SCREEN_SESSION, "status"))
         .put("screen_targets", safeHost(HOST_SCREEN_SESSION, "list_targets"))
         .put("camera", safeHost(HOST_CAMERA_SESSION, "status"))
         .put("camera_sources", safeHost(HOST_CAMERA_SESSION, "list_sources"))
         .put("assets", listAssets())
+        .put("page", pageReader.status())
+
+    override suspend fun pageInspect(parameters: JSONObject): JSONObject {
+        val request = JSONObject().put("format", "json").put("detail", "full")
+        if (parameters.has("display")) request.put("display", parameters.getString("display"))
+        val response = invokeHost(HOST_UI_AUTOMATION, "snapshot", request)
+        check(response.optBoolean("success", false)) {
+            response.opt("error")?.toString() ?: "Page inspection failed"
+        }
+        return pageReader.capture(response.getJSONObject("result"))
+    }
+
+    override suspend fun pageText(parameters: JSONObject): JSONObject = pageReader.read(parameters)
+
+    fun clearPageSnapshots() = pageReader.clear()
 
     suspend fun screenTargets(): JSONObject =
         invokeHost(HOST_SCREEN_SESSION, "list_targets")
@@ -324,6 +340,7 @@ internal class VisualManagerController(
         value.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
 
     private companion object {
+        const val HOST_UI_AUTOMATION = "host.ui.automation@1"
         const val HOST_SCREEN_CAPTURE = "host.screen.capture@1"
         const val HOST_SCREEN_SESSION = "host.screen.session@1"
         const val HOST_CAMERA_SESSION = "host.camera.session@1"

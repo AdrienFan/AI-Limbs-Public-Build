@@ -54,7 +54,7 @@ jobs:
       - name: Compile plugin payload
         run: |
           chmod +x ./gradlew
-          ./gradlew :visual-manager-plugin:assembleDebug --stacktrace --no-daemon
+          ./gradlew :visual-manager-plugin:testDebugUnitTest :visual-manager-plugin:assembleDebug --stacktrace --no-daemon
 
       - name: Sign installable plugin
         env:

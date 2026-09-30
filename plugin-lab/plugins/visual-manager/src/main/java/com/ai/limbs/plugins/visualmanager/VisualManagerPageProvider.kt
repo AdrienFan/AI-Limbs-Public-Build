@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Button
@@ -62,6 +63,7 @@ private fun VisualManagerPage(actions: VisualManagerPageActions) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     var dashboard by remember { mutableStateOf<JSONObject?>(null) }
+    var pageText by remember { mutableStateOf("") }
     var busy by remember { mutableStateOf(false) }
     var lastError by remember { mutableStateOf<String?>(null) }
 
@@ -71,6 +73,22 @@ private fun VisualManagerPage(actions: VisualManagerPageActions) {
             message,
             if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
         ).show()
+    }
+
+    suspend fun readPage(snapshotId: String) {
+        val content = StringBuilder()
+        var offset = 0
+        do {
+            val result = actions.pageText(JSONObject().put("snapshot_id", snapshotId).put("offset", offset))
+            content.append(result.getString("text"))
+            val hasMore = result.getBoolean("has_more")
+            if (hasMore) {
+                val next = result.getInt("next_offset")
+                check(next > offset) { "页面续读未前进" }
+                offset = next
+            }
+        } while (hasMore)
+        pageText = content.toString()
     }
 
     fun refresh() {
@@ -182,6 +200,28 @@ private fun VisualManagerPage(actions: VisualManagerPageActions) {
                             act("全部视觉会话已停止") { actions.stopAll() }
                         }
                     ) { Text("全部停止") }
+                }
+            }
+        }
+
+        Card(modifier = Modifier.fillMaxWidth()) {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("页面全文", style = MaterialTheme.typography.titleMedium)
+                Text("读取当前应用提供的页面文字，也可以查看兰儿最近读取的同一份快照。文字可长按选择和复制。",
+                    style = MaterialTheme.typography.bodySmall)
+                val latest = dashboard?.optJSONObject("page")?.optJSONObject("latest_snapshot")
+                latest?.let { Text("最近页面：" + it.optString("package_name")) }
+                OutlinedButton(enabled = !busy, onClick = {
+                    act("页面文字已读取") {
+                        val snapshot = actions.pageInspect()
+                        readPage(snapshot.getString("snapshot_id"))
+                    }
+                }) { Text("读取当前页面") }
+                OutlinedButton(enabled = !busy && latest != null, onClick = {
+                    act("最近页面全文已读取") { readPage(latest!!.getString("snapshot_id")) }
+                }) { Text("查看最近页面全文") }
+                if (pageText.isNotEmpty()) SelectionContainer {
+                    Text(pageText, style = MaterialTheme.typography.bodySmall)
                 }
             }
         }

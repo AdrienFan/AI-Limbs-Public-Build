@@ -91,7 +91,8 @@ class VisualManagerEntry : InProcessPluginEntry {
                     id = "$VISUAL_PLUGIN_ID.$name",
                     displayName = title,
                     description = description,
-                    keywords = listOf("视觉", "屏幕", "摄像头", "共享"),
+                    keywords = if (name.startsWith("page.")) listOf("页面", "读取当前界面", "页面结构", "全文", "长文字", "控件")
+                        else listOf("视觉", "屏幕", "摄像头", "共享"),
                     parameters = parameters,
                     inputSchema = JSONObject()
                         .put("type", "object")
@@ -118,6 +119,28 @@ class VisualManagerEntry : InProcessPluginEntry {
             read,
             "读取本插件持有的屏幕共享、摄像头会话、可用视觉来源和视觉缓存摘要。"
         ) { controller.dashboard() }
+
+        capability(
+            "page.inspect",
+            "读取当前页面结构",
+            read,
+            "保存当前应用提供的完整页面文字快照；节点预览是摘要，全文通过 page.text 分段读取。",
+            listOf(parameter("display", description = "可选显示目标", required = false))
+        ) { controller.pageInspect(it) }
+
+        capability(
+            "page.text",
+            "读取页面或节点全文",
+            read,
+            "读取 page.inspect 的固定快照全文。按 next_offset 续读直至 has_more=false；快照保留十分钟，最多四份。",
+            listOf(
+                parameter("snapshot_id", description = "page.inspect 返回的 snapshot_id"),
+                parameter("node_id", description = "节点 ID；省略时读取整页文字", required = false),
+                parameter("field", description = "text 或 content_description", required = false, default = "text"),
+                parameter("offset", "integer", "UTF-16 字符偏移，续读使用 next_offset", false, "0"),
+                parameter("length", "integer", "每页字符数 1-4000", false, "3000")
+            )
+        ) { controller.pageText(it) }
 
         capability(
             "screen.list_targets",
@@ -243,6 +266,7 @@ class VisualManagerEntry : InProcessPluginEntry {
         return InProcessPluginHandle {
             runCatching { controller.stopAll() }
                 .onFailure { host.logger.e("VisualManager", "Failed to stop visual sessions", it) }
+            controller.clearPageSnapshots()
             host.logger.i("VisualManager", "Visual Manager stopped")
         }
     }
