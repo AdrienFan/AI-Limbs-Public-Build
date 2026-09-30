@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.14",
+  "version": "0.2.15",
   "api": {
     "target": 1,
     "min": 1
@@ -119,7 +119,9 @@
       "plugin.art.studio.image.resize_canvas",
       "plugin.art.studio.image.crop_to_selection",
       "plugin.art.studio.menu.catalog",
-      "plugin.art.studio.menu.execute"
+      "plugin.art.studio.menu.execute",
+      "plugin.art.studio.storage.settings",
+      "plugin.art.studio.storage.set_directory"
     ],
     "services": [],
     "providers": [

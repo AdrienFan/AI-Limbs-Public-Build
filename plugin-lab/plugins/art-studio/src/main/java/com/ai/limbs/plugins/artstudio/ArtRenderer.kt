@@ -452,14 +452,15 @@ internal object ArtRenderer {
         }
     }
 
-    fun export(dataDir: File, store: ArtStore, snapshot: JSONObject, format: String, name: String,
-               options: JSONObject = JSONObject()): JSONObject {
+    fun export(store: ArtStore, snapshot: JSONObject, format: String, name: String,
+               options: JSONObject = JSONObject(),
+               destinationDirectory: File = store.exportDirectory()): JSONObject {
         require(format == "png" || format == "jpeg")
         val mime = if (format == "png") "image/png" else "image/jpeg"
         val filename = (name.ifBlank { "AI-Limbs-Art-${UUID.randomUUID()}" }
             .replace(Regex("[^A-Za-z0-9_-]"), "_").take(80)) + ".$format"
-        val directory = File(dataDir, "exports")
-        require(directory.mkdirs() || directory.isDirectory)
+        val directory = destinationDirectory
+        require(directory.mkdirs() || directory.isDirectory) { "无法访问图片保存目录：${directory.absolutePath}" }
         val destination = File(directory, filename)
         val temp = File(directory, ".${UUID.randomUUID()}.tmp")
         try {

@@ -1,4 +1,4 @@
-# AI Limbs 画室（开发中，0.2.14）
+# AI Limbs 画室（开发中，0.2.15；尚未编译）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -202,3 +202,19 @@ Krita 文件菜单说明：https://docs.krita.org/en/reference_manual/main_menu/
 - 当前单画布不伪装多窗口；工具菜单脚本灰色。关于页说明画室自身版本与 Krita 参考关系。
 
 本轮只更改画室插件、它的声明与相称的校验脚本；宿主权限仍为既有 `host.ui.presentation@1`，没有修改基座或引入插件特判。
+
+## 默认保存目录（0.2.15 源码待编译）
+
+本轮基于已部署的 0.2.14。保留插件内默认位置；在“设置 → 默认保存目录…”填写有文件访问权限的绝对目录路径，留空可显式恢复插件内默认位置。当前入口是路径输入，不是 Android 文档树 URI 选择器；不接受 content:// 地址。目录先经过真实写入与删除验证，失败时原配置不变。后续目录被删除或权限撤销时，保存明确报错，不改用其他位置。
+
+配置保存在插件的 save-directory.json，两位协作者共用。所选根目录下 documents/ 保存新工程，exports/ 保存 PNG/JPEG 和图层/组导出，backups/ 保存增量备份。已成功保存的工程路径记录在 document-locations.json；改默认目录后仍保存到原位置。0.2.14 的旧工程通过既有 documents/ 档案与摘要识别，格式不变，也不自动搬迁。
+
+草稿、图片资产、修订摘要、剪贴板、模板、会话与足迹保留在插件工作区，不随默认输出目录迁移。重置基础画笔配置不更改作品目录。
+
+选择自定义目录后，手机导出、图层/组导出和另存为可直接使用该目录。普通和高级导出、另存为仍可勾选“本次选择其他保存位置”；没有设置自定义目录时沿用系统保存选择器。普通和高级导出选择器只使用临时缓存文件，成功、失败或取消后均清理，不累积永久私有导出副本。
+
+兰儿用 plugin.art.studio.storage.settings 读取实际目录；用 plugin.art.studio.storage.set_directory(directory) 更改，directory 为空字符串时显式恢复插件内位置。同一设置也可经 menu.catalog / menu.execute 的 art.storage_directory 动作调用。document.save、document.save_as、export.png、export.jpeg 及菜单导出共用相同路径规则。
+
+保持现有 host.ui.presentation@1 权限声明；不修改基座、Runtime 或宿主源语。目录可用性受 Android 文件权限约束，没有权限的路径不会被视为可用。
+
+本轮只保存源码和静态审阅记录，按用户要求不推送云端、不编译、不安装。后续合并其他优化后统一编译与实机验证；重点核对目录权限拒绝、旧工程原位保存、双入口一致、恢复默认及导出选择器取消清理。

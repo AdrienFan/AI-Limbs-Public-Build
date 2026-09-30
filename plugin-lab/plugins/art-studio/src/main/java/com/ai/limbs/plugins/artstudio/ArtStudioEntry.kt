@@ -110,6 +110,14 @@ class ArtStudioEntry : InProcessPluginEntry {
             require(encoded.length <= 90 * 1024 * 1024) { "工程文件超过 64 MB" }
             store.importArchive(Base64.decode(encoded, Base64.DEFAULT), "LANER")
         }
+        capability("storage.settings", "读取画室默认保存目录", read,
+            "读取默认目录、工程/图片/备份目录；尚未设置时保持插件内位置。") {
+            store.saveDirectorySettings()
+        }
+        capability("storage.set_directory", "更改画室默认保存目录", write,
+            "directory 为应用可写的绝对目录路径，空字符串显式恢复插件内默认位置。设置前验证可写；影响新工程、图片与备份，已保存工程仍使用原路径。") { p ->
+            store.setSaveDirectory(p.getString("directory"))
+        }
         capability("document.save", "保存画室工程", write) { store.save() }
         capability("document.recent", "列出最近打开的画室工程", read) {
             JSONObject().put("documents", store.recent())
@@ -119,7 +127,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.openImage(p.getString("base64"), p.optString("name", "未命名图像"), "LANER")
         }
         capability("document.save_as", "另存为并切换画室工程", write,
-            "将当前画布复制成新 ID 的 .ailart 工程，保存到画室私有路径并将新工程设为当前；返回路径。") { p ->
+            "将当前画布复制成新 ID 的 .ailart 工程，保存到默认保存目录并将新工程设为当前；返回路径。") { p ->
             store.saveAs(p.getString("name"), actor = "LANER")
         }
         capability("document.duplicate", "复制当前图像为新工程", write) { p ->
@@ -364,10 +372,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.importImage("LANER", p.getString("base64"))
         }
         capability("export.png", "导出 PNG", write) { p ->
-            ArtRenderer.export(host.dataDir, store, store.current(), "png", p.optString("name", ""), p)
+            ArtRenderer.export(store, store.current(), "png", p.optString("name", ""), p)
         }
         capability("export.jpeg", "导出 JPEG", write) { p ->
-            ArtRenderer.export(host.dataDir, store, store.current(), "jpeg", p.optString("name", ""), p)
+            ArtRenderer.export(store, store.current(), "jpeg", p.optString("name", ""), p)
         }
         host.logger.i("ArtStudio", "Art Studio mounted")
         return InProcessPluginHandle { host.logger.i("ArtStudio", "Art Studio stopped") }
@@ -386,6 +394,7 @@ class ArtStudioPresentationEntry : InProcessPluginPresentationEntry {
 private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> {
     fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
         val description = when (key) {
+            "directory" -> "应用可写的绝对目录路径；空字符串恢复插件内默认位置，旧工程继续原位保存。"
             "id" -> "图层或工程 ID；先读取 layer.list 或 document.list 确定真实 ID。"
             "parentId" -> "可选的父图层组 ID，空字符串表示根层级。"
             "select" -> "可选；true 表示创建或复制后立即选中该图层。"
@@ -470,6 +479,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "transform.rotate" -> listOf(id, p("rotation", "number"))
         "history.goto" -> listOf(id, p("expectedRevision", "integer"))
         "history.revert_actor_operations" -> listOf(id)
+        "storage.set_directory" -> listOf(p("directory"))
         "image.import" -> listOf(p("base64"))
         "export.png", "export.jpeg" -> listOf(p("name", optional = true),
             p("x", "integer", true), p("y", "integer", true),

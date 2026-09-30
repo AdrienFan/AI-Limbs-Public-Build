@@ -40,6 +40,7 @@ internal class ArtStore(private val root: File) {
     private val menuUiRequest = File(root, "menu-ui-request.json")
     private val templates = File(root, "templates")
     private val backups = File(root, "backups")
+    private val saveDirectories = ArtSaveDirectories(root)
     private val lockFile = File(root, "art-studio.lock")
 
     init {
@@ -78,14 +79,20 @@ internal class ArtStore(private val root: File) {
 
     fun current(): JSONObject = locked { snapshot(loadCurrent()) }
 
+    fun saveDirectorySettings(): JSONObject = locked { saveDirectories.describe() }
+
+    fun setSaveDirectory(directory: String): JSONObject = locked { saveDirectories.setDirectory(directory) }
+
+    fun exportDirectory(): File = saveDirectories.outputDirectory("exports")
+
     fun menuContext(): JSONObject = locked {
         JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
             .put("layerClipboard", layerClipboard.isFile)
-            .put("settings", readMenuSettings())
+            .put("settings", readMenuSettings()).put("storage", saveDirectories.describe())
     }
 
     fun menuUiState(): JSONObject = locked {
-        JSONObject().put("settings", readMenuSettings())
+        JSONObject().put("settings", readMenuSettings()).put("storage", saveDirectories.describe())
             .put("layerClipboard",layerClipboard.isFile)
             .put("request", if (menuUiRequest.isFile) JSONObject(menuUiRequest.readText()) else JSONObject.NULL)
     }
@@ -109,6 +116,7 @@ internal class ArtStore(private val root: File) {
         require(actor in setOf("AWEI", "LANER"))
         val context = JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
             .put("layerClipboard", layerClipboard.isFile).put("settings", readMenuSettings())
+            .put("storage", saveDirectories.describe())
         val item = ArtStudioMenuCatalog.find(action) ?: error("未知菜单操作：$action")
         val availability = ArtStudioMenuCatalog.availability(item, context)
         require(availability.first) { availability.second }
@@ -265,7 +273,7 @@ internal class ArtStore(private val root: File) {
             "save_node_as_image" -> {
                 val selected = requireNotNull(active)
                 val tree = ArtMenuOperations.subtree(requireNotNull(state), selected.getString("id"))
-                ArtRenderer.export(root, this, ArtMenuOperations.isolated(requireNotNull(snap),
+                ArtRenderer.export(this, ArtMenuOperations.isolated(requireNotNull(snap),
                     tree.map { it.getString("id") }.toSet(), selected.getString("id")), "png", p.optString("name", "layer"))
             }
             "save_groups_as_images" -> {
@@ -274,7 +282,7 @@ internal class ArtStore(private val root: File) {
                     it.getString("kind")=="group" && it.optString("parentId").isBlank()
                 }.forEachIndexed { index,group ->
                     val ids=ArtMenuOperations.subtree(state,group.getString("id")).map { it.getString("id") }.toSet()
-                    images.put(ArtRenderer.export(root,this,ArtMenuOperations.isolated(requireNotNull(snap),ids,group.getString("id")),
+                    images.put(ArtRenderer.export(this,ArtMenuOperations.isolated(requireNotNull(snap),ids,group.getString("id")),
                         "png","group-${index+1}").put("layerName",group.getString("name")))
                 }
                 JSONObject().put("images",images)
@@ -387,6 +395,7 @@ internal class ArtStore(private val root: File) {
             "filter.invert", "filter.desaturate", "filter.threshold", "filter.posterize", "filter.maximize",
             "filter.minimize", "filter.resettransparent" ->
                 applyMenuFilter(actor,action,p,requireNotNull(snap),item.getString("title"),::raster,::change)
+            "art.storage_directory" -> saveDirectories.setDirectory(p.getString("directory"))
             "options_configure", "reset_configurations", "toggle_display_selection", "view_toggledockers" -> {
                 val settings = readMenuSettings()
                 when (action) {
@@ -650,15 +659,20 @@ internal class ArtStore(private val root: File) {
         val doc = loadCurrent()
         val id = doc.getString("id")
         val saved = archive(id)
+        val hadSavedVersion = saved.isFile
         var number = 1
-        var backup = File(backups, id + "_b" + number.toString().padStart(3, '0') + ".ailart")
+        val backupDirectory = saveDirectories.outputDirectory("backups")
+        var backup = File(backupDirectory, id + "_b" + number.toString().padStart(3, '0') + ".ailart")
         while (backup.exists()) {
             number++
-            backup = File(backups, id + "_b" + number.toString().padStart(3, '0') + ".ailart")
+            backup = File(backupDirectory, id + "_b" + number.toString().padStart(3, '0') + ".ailart")
         }
-        if (saved.isFile) atomicBytes(backup, saved.readBytes())
+        if (hadSavedVersion) {
+            saveDirectories.prepare(backupDirectory)
+            atomicBytes(backup, saved.readBytes())
+        }
         val result = saveDocument(doc)
-        result.put("backupPath", if (saved.isFile) backup.absolutePath else JSONObject.NULL)
+        result.put("backupPath", if (hadSavedVersion) backup.absolutePath else JSONObject.NULL)
     }
 
     fun createTemplate(name: String): JSONObject = locked {
@@ -735,7 +749,9 @@ internal class ArtStore(private val root: File) {
     private fun saveDocument(doc: JSONObject): JSONObject {
         val id = doc.getString("id")
         val destination = archive(id)
+        saveDirectories.prepare(requireNotNull(destination.parentFile))
         writeArchive(doc, destination)
+        saveDirectories.rememberProject(id, destination)
         atomic(File(documents, id + ".sha256"), digest(doc.toString()))
         val links = if (externalLinks.isFile) JSONObject(externalLinks.readText()) else JSONObject()
         links.optJSONObject(id)?.let {
@@ -1938,7 +1954,7 @@ internal class ArtStore(private val root: File) {
     }
 
     private fun draft(id: String): File { validateId(id); return File(drafts, "$id.json") }
-    private fun archive(id: String): File { validateId(id); return File(documents, "$id.ailart") }
+    private fun archive(id: String): File { validateId(id); return saveDirectories.projectFile(id) }
     fun assetFile(id: String): File { validateId(id); return File(assets, "$id.png") }
     private fun validateId(id: String) { require(id.matches(Regex("[a-f0-9-]{36}"))) { "工程标识无效" } }
     private fun requireColor(value: String) { require(value.matches(Regex("#[A-Fa-f0-9]{8}"))) { "颜色必须是 #AARRGGBB" } }

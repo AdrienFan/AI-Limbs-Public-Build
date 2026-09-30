@@ -437,6 +437,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var recentOnly by remember { mutableStateOf(false) }
     var saveAsDialog by remember { mutableStateOf(false) }
     var saveAsName by remember { mutableStateOf("") }
+    var saveAsChooseLocation by remember { mutableStateOf(false) }
     var pendingSaveAsName by remember { mutableStateOf("") }
     var sessionDialog by remember { mutableStateOf(false) }
     var sessionName by remember { mutableStateOf("") }
@@ -457,6 +458,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var exportDialog by remember { mutableStateOf(false) }
     var advancedExportDialog by remember { mutableStateOf(false) }
     var exportFormat by remember { mutableStateOf("png") }
+    var exportChooseLocation by remember { mutableStateOf(false) }
     var cropX by remember { mutableStateOf("0") }
     var cropY by remember { mutableStateOf("0") }
     var cropWidth by remember { mutableStateOf("") }
@@ -635,7 +637,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 val result=withContext(Dispatchers.IO) { mutex.withLock {
                     store.executeMenu("AWEI",item.getString("id"),arguments)
                 } }
-                if(result.has("images")) {
+                if ((result.has("images") || result.has("path")) && captured.getJSONObject("storage").getBoolean("custom")) {
+                    remainingResult=JSONObject().put("title","已保存到默认目录").put("text",
+                        if(result.has("images")) (0 until result.getJSONArray("images").length()).joinToString("\n") {
+                            result.getJSONArray("images").getJSONObject(it).getString("path")
+                        } else result.getString("path"))
+                } else if(result.has("images")) {
                     remainingGroupExports=result.getJSONArray("images")
                     exportRemainingGroups.launch(null)
                 } else if(result.has("path")) {
@@ -735,9 +742,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
     val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
-        if (uri == null) { awaitingExport = false; busy = pendingOperations > 0 }
+        if (uri == null) {
+            if(exportPath.isNotEmpty()) java.io.File(exportPath).delete()
+            exportPath=""
+            awaitingExport = false; busy = pendingOperations > 0
+        }
         else {
             val source = exportPath
+            exportPath=""
             scope.launch {
                 try {
                     withContext(Dispatchers.IO) {
@@ -748,14 +760,22 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Toast.makeText(context, "PNG 图片已保存", Toast.LENGTH_SHORT).show()
                 } catch (error: Exception) {
                     Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
-                } finally { awaitingExport = false; busy = pendingOperations > 0 }
+                } finally {
+                    java.io.File(source).delete()
+                    awaitingExport = false; busy = pendingOperations > 0
+                }
             }
         }
     }
     val exportJpeg = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { uri ->
-        if (uri == null) { awaitingExport = false; busy = pendingOperations > 0 }
+        if (uri == null) {
+            if(exportPath.isNotEmpty()) java.io.File(exportPath).delete()
+            exportPath=""
+            awaitingExport = false; busy = pendingOperations > 0
+        }
         else {
             val source = exportPath
+            exportPath=""
             scope.launch {
                 try {
                     withContext(Dispatchers.IO) {
@@ -766,7 +786,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Toast.makeText(context, "JPEG 图片已保存", Toast.LENGTH_SHORT).show()
                 } catch (error: Exception) {
                     Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
-                } finally { awaitingExport = false; busy = pendingOperations > 0 }
+                } finally {
+                    java.io.File(source).delete()
+                    awaitingExport = false; busy = pendingOperations > 0
+                }
             }
         }
     }
@@ -833,19 +856,33 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     fun edit(type: String, params: JSONObject = JSONObject()) {
         perform { store.apply("AWEI", type, params) }
     }
-    fun publish(format: String, options: JSONObject = JSONObject()) {
+    fun publish(format: String, options: JSONObject = JSONObject(), chooseLocation: Boolean = false) {
         if (awaitingExport || busy) return
         awaitingExport = true
         busy = true
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
-                    mutex.withLock { ArtRenderer.export(host.dataDir, store, store.current(), format, "", options) }
+                    mutex.withLock {
+                        val storage=store.saveDirectorySettings()
+                        val direct=storage.getBoolean("custom") && !chooseLocation
+                        val directory=if(direct) java.io.File(storage.getString("imagesDirectory"))
+                            else java.io.File(host.cacheDir,"art-export-staging")
+                        ArtRenderer.export(store,store.current(),format,"",options,directory)
+                            .put("directSave",direct)
+                    }
                 }
-                exportPath = result.getString("path")
-                if (format == "png") exportPng.launch(result.getString("name"))
-                else exportJpeg.launch(result.getString("name"))
+                if(result.getBoolean("directSave")) {
+                    awaitingExport=false
+                    Toast.makeText(context,"图片已保存：" + result.getString("path"),Toast.LENGTH_LONG).show()
+                } else {
+                    exportPath = result.getString("path")
+                    if (format == "png") exportPng.launch(result.getString("name"))
+                    else exportJpeg.launch(result.getString("name"))
+                }
             } catch (e: Exception) {
+                if (exportPath.isNotEmpty()) java.io.File(exportPath).delete()
+                exportPath = ""
                 awaitingExport = false
                 Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
             } finally { busy = pendingOperations > 0 || awaitingExport }
@@ -995,6 +1032,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     if(id in setOf("selectionscale","edit_selection")) doc?.optJSONObject("selection")?.let { selection ->
                         listOf("x","y","width","height").forEach { defaults.put(it,selection.getDouble(it)) }
                     }
+                    if(id=="art.storage_directory") {
+                        val storage=captured.getJSONObject("storage")
+                        defaults.put("directory",storage.getString("configuredDirectory"))
+                        item.put("notice","当前默认目录：" + storage.getString("directory") +
+                            "\n新工程、图片与备份分别放在 documents、exports、backups；旧工程继续原位保存。仅接受有文件访问权限的目录。")
+                    }
                     if(id=="options_configure") {
                         val settings=captured.getJSONObject("settings")
                         defaults.put("brushWidth",settings.getDouble("brushWidth")).put("brushOpacity",settings.getDouble("brushOpacity"))
@@ -1043,15 +1086,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 2 -> { recentOnly = false; openDialog = true }
                 3 -> { recentOnly = true; openDialog = true }
                 4 -> saveProject()
-                5 -> { saveAsName = state?.optString("name", "未命名工程") ?: "未命名工程"; saveAsDialog = true }
+                5 -> { saveAsName = state?.optString("name", "未命名工程") ?: "未命名工程"; saveAsChooseLocation=false; saveAsDialog = true }
                 6 -> sessionDialog = true
                 7 -> { importingUntitled = true; openExternal.launch(arrayOf("*/*")) }
-                8 -> exportDialog = true
+                8 -> { exportChooseLocation=false; exportDialog = true }
                 9 -> {
                     cropX = "0"; cropY = "0"
                     cropWidth = state?.optInt("width")?.toString() ?: ""
                     cropHeight = state?.optInt("height")?.toString() ?: ""
                     outputWidth = cropWidth; outputHeight = cropHeight
+                    exportChooseLocation=false
                     advancedExportDialog = true
                 }
                 12 -> perform { store.saveIncrementalVersion() }
@@ -2286,18 +2330,29 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         dismissButton = { TextButton(onClick = { backgroundFillDialog = false }) { Text("取消") } })
     if (saveAsDialog) AlertDialog(onDismissRequest = { saveAsDialog = false },
         title = { Text("另存为工程") },
-        text = { OutlinedTextField(saveAsName, { saveAsName = it.take(100) },
-            label = { Text("新工程名称") }, singleLine = true) },
+        text = { Column {
+            OutlinedTextField(saveAsName, { saveAsName = it.take(100) },
+                label = { Text("新工程名称") }, singleLine = true)
+            StudioSaveLocationOptions(remainingContext.optJSONObject("storage"),"projectsDirectory",
+                saveAsChooseLocation) { saveAsChooseLocation=it }
+        } },
         confirmButton = { TextButton(onClick = {
             val name = saveAsName.trim()
             if (name.isNotBlank() && !busy) {
                 saveAsDialog = false
-                pendingSaveAsName = name
-                awaitingExport = true
-                busy = true
-                saveAsFile.launch(name.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".ailart")
+                if(remainingContext.optJSONObject("storage")?.optBoolean("custom")==true && !saveAsChooseLocation) {
+                    perform { store.saveAs(name) }
+                } else {
+                    pendingSaveAsName = name
+                    awaitingExport = true
+                    busy = true
+                    saveAsFile.launch(name.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".ailart")
+                }
             }
-        }, enabled = saveAsName.isNotBlank() && !busy) { Text("选择保存位置") } },
+        }, enabled = saveAsName.isNotBlank() && !busy) {
+            Text(if(remainingContext.optJSONObject("storage")?.optBoolean("custom")==true && !saveAsChooseLocation)
+                "另存到默认目录" else "选择保存位置")
+        } },
         dismissButton = { TextButton(onClick = { saveAsDialog = false }) { Text("取消") } })
     if (exportDialog) AlertDialog(onDismissRequest = { exportDialog = false },
         title = { Text("导出图像") },
@@ -2309,9 +2364,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 FilterChip(selected = exportFormat == "jpeg", onClick = { exportFormat = "jpeg" },
                     label = { Text("JPEG") })
             }
+            StudioSaveLocationOptions(remainingContext.optJSONObject("storage"),"imagesDirectory",
+                exportChooseLocation) { exportChooseLocation=it }
         } },
-        confirmButton = { TextButton(onClick = { exportDialog = false; publish(exportFormat) }) {
-            Text("选择保存位置")
+        confirmButton = { TextButton(onClick = {
+            exportDialog = false; publish(exportFormat,chooseLocation=exportChooseLocation)
+        }) {
+            Text(if(remainingContext.optJSONObject("storage")?.optBoolean("custom")==true && !exportChooseLocation)
+                "保存到默认目录" else "选择保存位置")
         } },
         dismissButton = { TextButton(onClick = { exportDialog = false }) { Text("取消") } })
     if (advancedExportDialog) AlertDialog(onDismissRequest = { advancedExportDialog = false },
@@ -2340,6 +2400,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 FilterChip(selected = exportFormat == "jpeg", onClick = { exportFormat = "jpeg" },
                     label = { Text("JPEG") })
             }
+            StudioSaveLocationOptions(remainingContext.optJSONObject("storage"),"imagesDirectory",
+                exportChooseLocation) { exportChooseLocation=it }
         } },
         confirmButton = { TextButton(onClick = {
             val x = cropX.toIntOrNull(); val y = cropY.toIntOrNull()
@@ -2355,9 +2417,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 advancedExportDialog = false
                 publish(exportFormat, JSONObject().put("x", x).put("y", y)
                     .put("cropWidth", w).put("cropHeight", h)
-                    .put("width", outW).put("height", outH))
+                    .put("width", outW).put("height", outH),chooseLocation=exportChooseLocation)
             }
-        }) { Text("选择保存位置") } },
+        }) {
+            Text(if(remainingContext.optJSONObject("storage")?.optBoolean("custom")==true && !exportChooseLocation)
+                "保存到默认目录" else "选择保存位置")
+        } },
         dismissButton = { TextButton(onClick = { advancedExportDialog = false }) { Text("取消") } })
     if (duplicateDialog) AlertDialog(onDismissRequest = { duplicateDialog = false },
         title = { Text("复制当前图像") },

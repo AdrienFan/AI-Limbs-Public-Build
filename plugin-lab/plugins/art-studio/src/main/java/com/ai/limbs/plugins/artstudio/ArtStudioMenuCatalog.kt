@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** Source order follows Krita 6.0.4; one inventory serves UI and capability discovery. */
 internal object ArtStudioMenuCatalog {
-    const val VERSION = "0.2.14"
+    const val VERSION = "0.2.15"
     private val definitions = JSONArray(listOf(
         """{
   "id": "Layer",
@@ -1553,6 +1553,22 @@ internal object ArtStudioMenuCatalog {
   "title": "设置",
   "children": [
     {
+      "id": "art.storage_directory",
+      "title": "默认保存目录…",
+      "implemented": true,
+      "source": "Art Studio",
+      "parameters": [
+        {
+          "name": "directory",
+          "type": "string",
+          "description": "目录绝对路径，留空恢复插件内默认目录",
+          "default": "",
+          "allowBlank": true
+        }
+      ],
+      "documentWrite": false
+    },
+    {
       "id": "options_configure",
       "title": "配置画室…",
       "implemented": true,
@@ -2052,7 +2068,8 @@ internal object ArtStudioMenuCatalog {
         val id=item.getString("id")
         val snap=context.optJSONObject("document")
         val state=snap?.getJSONObject("state")
-        val independent=id in setOf("help_contents","help_whats_this","help_show_tip","buginfo","sysinfo","help_about_app",
+        if (id=="art.storage_directory" && !context.has("storage")) return false to "正在读取保存目录"
+        val independent=id in setOf("art.storage_directory","help_contents","help_whats_this","help_show_tip","buginfo","sysinfo","help_about_app",
             "options_configure","reset_configurations","view_toggledockers") || id.startsWith("docker.")
         if (state==null) return independent to if (independent) "" else "请先打开画室工程"
         val selected=ArtMenuOperations.active(state)
@@ -2095,6 +2112,10 @@ internal object ArtStudioMenuCatalog {
                 if(item.has("id") && !item.has("children")) {
                     val status=availability(item,context)
                     item.put("enabled",status.first).put("unavailableReason",status.second)
+                    if(item.getString("id")=="art.storage_directory" && context.has("storage")) {
+                        item.getJSONArray("parameters").getJSONObject(0).put("default",
+                            context.getJSONObject("storage").getString("configuredDirectory"))
+                    }
                     if(item.getString("id")=="filter_apply_reprompt") {
                         context.optJSONObject("document")?.getJSONObject("state")?.optJSONObject("lastFilter")?.let { previous ->
                             val fields=find(previous.getString("action"))!!.getJSONArray("parameters")
@@ -2112,7 +2133,8 @@ internal object ArtStudioMenuCatalog {
         annotate(menus)
         val doc=context.optJSONObject("document")
         return JSONObject().put("version",VERSION).put("sourceVersion","Krita 6.0.4")
-            .put("menus",menus).put("documentId",doc?.getString("id") ?: JSONObject.NULL)
+            .put("menus",menus).put("storage",context.optJSONObject("storage") ?: JSONObject.NULL)
+            .put("documentId",doc?.getString("id") ?: JSONObject.NULL)
             .put("revision",doc?.getInt("revision") ?: JSONObject.NULL)
             .put("mutationProtocol","documentWrite=true 的项目必须携带 documentId 与 expectedRevision；灰色项目没有执行入口")
     }

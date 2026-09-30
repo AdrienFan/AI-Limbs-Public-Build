@@ -86,6 +86,7 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
             if (item.getString("id") in setOf("flatten_image","flatten_layer","merge_layer","cut_layer_clipboard","reset_configurations"))
                 Text(if(item.getString("id")=="reset_configurations") "重置画室自己的基础配置，保留工程与历史。"
                     else "此操作会改变图层结构。原图层与像素保留在工程历史中，可通过撤销或足迹恢复。合并画布会移除隐藏图层。")
+            item.optString("notice").takeIf { it.isNotBlank() }?.let { Text(it) }
             if (specs.length()==0) Text("确认执行此菜单操作？")
             for(n in 0 until specs.length()) {
                 val field=specs.getJSONObject(n); val key=field.getString("name")
@@ -113,12 +114,24 @@ internal fun StudioMenuParameters(item: JSONObject, initial: JSONObject,
                     "integer" -> value.toInt()
                     "number" -> value.toDouble().also { require(it.isFinite()) }
                     "boolean" -> value.toBooleanStrict()
-                    else -> value.trim().also { require(it.isNotBlank()) { "请填写 ${field.getString("description")}" } }
+                    else -> value.trim().also { require(field.optBoolean("allowBlank") || it.isNotBlank()) { "请填写 ${field.getString("description")}" } }
                 })
             }
             onExecute(p)
         } catch(e:IllegalArgumentException) { error=e.message ?: "参数格式无效" }
     }) {Text("确定")} }, dismissButton={TextButton(onClick=onDismiss){Text("取消")}})
+}
+
+@Composable
+internal fun StudioSaveLocationOptions(storage: JSONObject?, directoryKey: String,
+    chooseLocation: Boolean, onChoose: (Boolean) -> Unit) {
+    if(storage!=null && storage.getBoolean("custom")) {
+        Text("默认目录：" + storage.getString(directoryKey))
+        Row {
+            Checkbox(checked=chooseLocation,onCheckedChange=onChoose)
+            Text("本次选择其他保存位置")
+        }
+    }
 }
 
 @Composable
