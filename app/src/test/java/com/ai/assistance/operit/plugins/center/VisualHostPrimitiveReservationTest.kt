@@ -59,4 +59,27 @@ class VisualHostPrimitiveReservationTest {
             )
         }
     }
+
+    @Test
+    fun pageSnapshotPrimitiveCanBeRequestedAtInstallation() {
+        val id = "host.ui.automation@1"
+        val primitive = requireNotNull(AiLimbsHostPrimitiveCatalog.find(id))
+        assertEquals(HostPrimitiveExposure.BOUND, primitive.exposure)
+        assertTrue(primitive.requestableScope)
+        AiLimbsHostPrimitiveCatalog.requireInstallableScopes(setOf(id))
+
+        val snapshot = requireNotNull(HostPrimitiveGatewayBindings.operations(id)["snapshot"])
+        assertEquals(HostGatewayRouteKind.HOST_TOOL, snapshot.kind)
+        assertEquals("get_page_info", snapshot.target)
+        assertEquals(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, snapshot.affinity)
+        assertEquals(
+            listOf("click", "key", "long_press", "set_text", "snapshot", "swipe", "tap"),
+            HostPrimitiveGatewayBindings.operationNames(id)
+        )
+    }
+
+    @Test(expected = PluginInstallException::class)
+    fun unboundPrimitiveStillCannotBeRequestedAtInstallation() {
+        AiLimbsHostPrimitiveCatalog.requireInstallableScopes(setOf("host.clipboard@1"))
+    }
 }
