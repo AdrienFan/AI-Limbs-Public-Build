@@ -115,31 +115,51 @@ internal class ResidentUiProxyClient(
             hostFactory = { pluginId, role -> createSystemHost(pluginId, role) }
         )
         systemPluginController.initialize()
-        scope.launch {
-            var rendererRestored = false
-            while (isActive) {
-                try {
-                    refresh(force = revision.get() < 0L)
-                    if (!rendererRestored) {
-                        rendererRestored = systemPluginController.restore().ready
-                    }
-                    runtime.setUiReady(rendererRestored)
-                    componentExecutor.pollAndExecute()
-                    delay(POLL_MS)
-                } catch (error: CancellationException) {
-                    throw error
-                } catch (error: IOException) {
-                    val terminalError = retryTransientTransport(error)
-                    if (terminalError != null) {
-                        failClosedDisconnected(terminalError)
+        scope.launchResidentUiProxyLoops(
+            refreshPresentation = {
+                var rendererRestored = false
+                while (isActive) {
+                    try {
+                        refresh(force = revision.get() < 0L)
+                        if (!rendererRestored) {
+                            rendererRestored = systemPluginController.restore().ready
+                        }
+                        runtime.setUiReady(rendererRestored)
+                        delay(POLL_MS)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: IOException) {
+                        val terminalError = retryTransientTransport(error)
+                        if (terminalError != null) {
+                            failClosedDisconnected(terminalError)
+                            delay(RETRY_MS)
+                        }
+                    } catch (error: Throwable) {
+                        failClosedDisconnected(error)
                         delay(RETRY_MS)
                     }
-                } catch (error: Throwable) {
-                    failClosedDisconnected(error)
-                    delay(RETRY_MS)
+                }
+            },
+            executeHostComponents = {
+                while (isActive) {
+                    try {
+                        componentExecutor.pollAndExecute()
+                        delay(POLL_MS)
+                    } catch (error: CancellationException) {
+                        throw error
+                    } catch (error: Throwable) {
+                        // Presentation owns connection recovery. A snapshot waiting on a lifecycle
+                        // transaction must never prevent the Host from completing that transaction.
+                        com.ai.assistance.operit.util.AppLogger.w(
+                            TAG,
+                            "Resident Host component polling failed",
+                            error
+                        )
+                        delay(RETRY_MS)
+                    }
                 }
             }
-        }
+        )
     }
 
     suspend fun installPluginCenterRendererFromUri(

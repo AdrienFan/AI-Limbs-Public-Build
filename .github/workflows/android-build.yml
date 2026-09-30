@@ -226,6 +226,7 @@ jobs:
             --tests com.ai.assistance.operit.core.tools.system.PermissionRoutingPolicyTest \
             --tests com.ai.assistance.operit.core.tools.system.PermissionPolicyRuntimeDecisionTest \
             --tests com.ai.assistance.operit.plugins.center.VisualHostPrimitiveReservationTest \
+            --tests com.ai.assistance.operit.plugins.center.ResidentUiProxyPollingTest \
             --tests com.ai.assistance.operit.plugins.center.HostPrimitiveAffinityRoutingTest \
             --tests com.ai.assistance.operit.plugins.center.HostAttentionRegistryTest \
             --tests com.ai.assistance.operit.data.model.ChatMessagePresentationTest \
