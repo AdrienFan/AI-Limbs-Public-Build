@@ -74,10 +74,19 @@ internal object ArtCanvasFeedback {
         try {
             val canvas = Canvas(bitmap)
             canvas.drawColor(Color.rgb(32, 32, 32))
-            canvas.drawText("No active canvas", 18f, 70f,
-                Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; textSize = 22f })
+            // Resident app_process may have no default typeface. Text rendering can abort
+            // the whole plugin runtime in native code, so this receipt uses geometry only.
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                color = Color.rgb(190, 190, 190)
+                style = Paint.Style.STROKE
+                strokeWidth = 3f
+            }
+            canvas.drawRect(76f, 26f, 180f, 102f, paint)
+            canvas.drawLine(88f, 38f, 168f, 90f, paint)
+            canvas.drawLine(168f, 38f, 88f, 90f, paint)
             return encode(bitmap, JSONObject().put("kind", "thumbnail").put("empty", true)
                 .put("documentId", JSONObject.NULL).put("revision", JSONObject.NULL)
+                .put("label", "无活动画布")
                 .put("width", bitmap.width).put("height", bitmap.height))
         } finally { bitmap.recycle() }
     }
