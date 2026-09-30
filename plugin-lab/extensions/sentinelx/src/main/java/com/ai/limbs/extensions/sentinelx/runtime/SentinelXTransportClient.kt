@@ -11,6 +11,7 @@ import okhttp3.Response
 import okhttp3.WebSocket
 import okhttp3.WebSocketListener
 import org.json.JSONObject
+import okio.ByteString.Companion.toByteString
 
 internal interface SentinelXTransportListener {
     fun onConnecting()
@@ -33,6 +34,7 @@ internal class SentinelXTransportClient(
 
     @Volatile private var socket: WebSocket? = null
     private val resultPager = SentinelXResultPager()
+    private val mediaStore = SentinelXMediaStore()
     @Volatile var isRunning: Boolean = false
         private set
 
@@ -54,6 +56,7 @@ internal class SentinelXTransportClient(
     }
 
     fun disconnect(reason: String) {
+        mediaStore.clear()
         socket?.close(1000, reason.take(120))
         socket = null
         isRunning = false
@@ -96,6 +99,7 @@ internal class SentinelXTransportClient(
             if (socket !== webSocket) return
             socket = null
             isRunning = false
+            mediaStore.clear()
             listener.onDisconnected("SentinelX 已断开：$code ${reason.take(120)}")
         }
 
@@ -103,6 +107,7 @@ internal class SentinelXTransportClient(
             if (socket !== webSocket) return
             socket = null
             isRunning = false
+            mediaStore.clear()
             val http = response?.code?.let { "HTTP $it" }
             val detail = listOfNotNull(http, t.message).joinToString(" · ").ifBlank { "连接失败" }
             listener.onError("SentinelX $detail", t)
@@ -133,12 +138,24 @@ internal class SentinelXTransportClient(
                 "state" -> SentinelXProtocol.success(id, SentinelXProtocol.state(config))
                 "help" -> SentinelXProtocol.success(id, SentinelXProtocol.help(payload.optString("topic", "index")))
                 "exec" -> handleExec(id, payload)
+                "file_export_init" -> SentinelXProtocol.success(id, mediaStore.initialize(payload))
+                "file_export_chunk" -> {
+                    val chunk = mediaStore.chunk(payload)
+                    // Official protocol ordering: binary frame first, then correlated JSON ack.
+                    if (!webSocket.send(chunk.frame.toByteString()))
+                        throw SentinelXMediaException("binary_emit_error", "WebSocket did not accept the media frame")
+                    SentinelXProtocol.success(id, chunk.metadata)
+                }
+                "file_export_complete" -> SentinelXProtocol.success(id, mediaStore.complete(payload))
                 else -> SentinelXProtocol.failure(
                     id,
                     "unsupported_op",
                     "AI Limbs SentinelX transport 不实现 SentinelX op: $op"
                 )
             }
+        } catch (error: SentinelXMediaException) {
+            SentinelXLogger.e(TAG, "SentinelX media request failed: $op", error)
+            SentinelXProtocol.failure(id, error.code, error.message ?: error.code)
         } catch (error: Exception) {
             SentinelXLogger.e(TAG, "SentinelX request failed: $op", error)
             SentinelXProtocol.failure(
@@ -179,7 +196,9 @@ internal class SentinelXTransportClient(
         val result = executor.execute(bridgeRequest.tool, bridgeRequest.args)
         // The Host events repeat result.value; shipping them as both output and
         // bridge_result multiplies payload size before the Hub's own response cap.
-        val (compact, images) = SentinelXResultMedia.split(result)
+        val extracted = SentinelXResultMedia.split(result)
+        val compact = extracted.payload
+        val images = extracted.images
         val serialized = compact.toString()
         if (!resultPager.canStore(serialized)) {
             return SentinelXProtocol.failure(id, "bridge_result_too_large",
@@ -190,17 +209,41 @@ internal class SentinelXTransportClient(
         } else {
             resultPager.store(serialized)
         }
-        if (images.length() > 0) {
-            // exec remains a structured/text tool at the closed-source Hub. The caller must
-            // present these image blocks directly from this response; no preview-read call is needed.
-            // Keep below the Hub's 128 KiB bound so it cannot silently truncate image bytes.
-            if (images.toString().toByteArray(Charsets.UTF_8).size <= 96 * 1024) {
-                response.put("mcp_content", images)
-            } else {
-                response.put("media_delivery", JSONObject().put("status", "error")
-                    .put("operation_completed", true)
-                    .put("error", "Attached image exceeds SentinelX inline media limit; use a smaller explicit region/maxEdge"))
+        val businessSucceeded = !compact.has("error") && !compact.optBoolean("isError") &&
+            (!compact.has("success") || compact.getBoolean("success"))
+        if (businessSucceeded && (images.length() > 0 || extracted.errors.length() > 0)) {
+            val deliveryErrors = extracted.errors
+            if (images.length() > 0) {
+                // Both channels carry the same immutable images from the original tool result.
+                try {
+                    val attachments = mediaStore.store(images)
+                    val candidate = JSONObject(response.toString())
+                        .put("media_attachments", attachments).put("mcp_content", images)
+                        .put("duration", (System.nanoTime() - startedAt) / 1_000_000_000.0)
+                        .put("returncode", 0).put("request_id", bridgeRequest.requestId)
+                        .put("media_delivery", JSONObject().put("status", "available")
+                            .put("operation_completed", true).put("inline", true)
+                            .put("native_read_tool", "sentinel_read_media").put("errors", deliveryErrors))
+                    // Bound the entire control envelope, including duplicated inline text/metadata.
+                    // Carrier selection happens before publishing; it never retries a failed delivery.
+                    val inline = images.toString().toByteArray(Charsets.UTF_8).size <= 96 * 1024 &&
+                        SentinelXProtocol.success(id, candidate).toString().toByteArray(Charsets.UTF_8).size <= 120 * 1024
+                    for (index in 0 until attachments.length())
+                        attachments.getJSONObject(index).put("delivery", if (inline) "inline" else "binary")
+                    response.put("media_attachments", attachments)
+                    if (inline) response.put("mcp_content", images)
+                } catch (error: Exception) {
+                    SentinelXLogger.e(TAG, "Media attachment delivery failed", error)
+                    deliveryErrors.put(JSONObject()
+                        .put("error_code", if (error is SentinelXMediaException) error.code else "media_delivery_failed")
+                        .put("error", (error.message ?: error.javaClass.simpleName).take(256)))
+                }
             }
+            val published = response.has("media_attachments")
+            val status = if (deliveryErrors.length() == 0) "available" else if (published) "partial" else "error"
+            response.put("media_delivery", JSONObject().put("status", status)
+                .put("operation_completed", true).put("inline", response.has("mcp_content"))
+                .put("native_read_tool", "sentinel_read_media").put("errors", deliveryErrors))
         }
         return SentinelXProtocol.success(
             id,

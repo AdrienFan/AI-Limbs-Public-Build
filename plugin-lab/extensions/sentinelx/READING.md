@@ -10,21 +10,43 @@ v0.1.6 在 v0.1.5 源码上修正首次分页的并发边界；v0.1.7 在同一�
 
 v0.1.6 构建在 setup-android 默认请求已移除的 tools 包时失败，尚未开始编译。v0.1.7 显式指定 packages: platform-tools，随后安装声明的 Android 平台与 build-tools；版本号与载荷 applicationId 同步递增，子插件 ID 与签名身份保持一致。
 
-## 开发版 0.1.8：同一次结果中的图片块
+## 开发版 0.1.8：图片附件与原生媒体通道
 
-通用业务结果可携带 mcp_content=[{type:"image",mimeType:"image/jpeg",data:"Base64"}]，接收端从 JSON 对象中提取图块并移除 events，将文本继续按原协议分页，图片只在首次 response 的 mcp_content 返回一次。续读不会重发图片。需要把 image 块直接呈现给模型，不要打印 Base64，也不要重新执行业务操作来获取图片。
+通用业务结果可携带 mcp_content=[{type:"image",mimeType:"image/jpeg",data:"Base64"}]。接收端提取图片，原业务 JSON 保持文字分页，Base64 不进入文字分页。成功结果的回复增加 media_attachments，内含虚拟路径、MIME、大小、SHA-256、期限与 delivery。
 
-此适配不修改 SentinelX 闭源云端的 exec 包装；客户端必须消费图片块。目前不可宣称 exec 自动成为原生图片工具。媒体不超过 96 KiB，超过时返回明确 media_delivery 错误而保留业务文字结果，避免云端 128 KiB 边界裁坏编码。能力、权限、子插件 ID、签名和文本分页协议不变。尚未推送编译或安装。
+图片合计不超过 96 KiB，且整份控制回复不超过 120 KiB 时，回复同时携带 mcp_content 图片块，delivery=inline。超过这个文字边界的图片指定 delivery=binary，由原生 sentinel_read_media 读取同一份附件字节，避免云端裁坏大段编码。这里不重新生成缩略图，也不重新执行源工具。exec 的闭源云端仍按文字包装；调用方要呈现内联图片块或接收官方媒体结果，不能把文字编码当成已经看见图片。
 
+官方媒体入口要求 file_export_init、file_export_chunk 和 file_export_complete。接收端按公开协议实现三步导出，图片以二进制 WebSocket 帧传输：16 字节 transfer_id、4 字节大端 chunk_index、最多 1 MiB 的图像字节。先发送二进制帧，再发送关联请求的 JSON 确认。完整顺序读完后返回 SHA-256，未完成则 sha256_complete=false。
 
-在支持代码编排的调用端，同一次 sentinel_exec 结果可以直接呈现图片，例如：
+只允许本接收端从已授权工具结果缓存的 /ai-limbs/media/ 虚拟句柄，不读取实际文件系统。PNG/JPEG 的 Base64、文件头和图片尺寸须有效，长边最多 8192、总像素最多 32 Mi；编码总量上限仍为 2 MiB。缓存合计 4 MiB，最多 16 张图，最多 4 个同时导出会话，10 分钟过期。活跃传输固定图片，过期句柄不允许新建传输；会话结束释放固定，断线或接收端停止清理全部图片。忙、过期、无效、越界或发送失败都给出明确错误码。无效图块、编码或附件保存失败另报 media_delivery.errors；部分成功时标记 partial，并保留源工具的业务结果及 operation_completed=true，不能重放已经完成的动作。
+
+在支持代码编排的调用端，一次业务调用可以自动完成图片呈现：
 
 ```javascript
 const result = await tools.mcp__codex_apps__sentinelx_sentinel_exec(request);
-for (const block of result.structuredContent.mcp_content || []) {
+const data = result.structuredContent;
+for (const block of data.mcp_content || []) {
     if (block.type === "image") image(block);
 }
-// 原业务 JSON 仍在 bridge_result/output；按原分页协议续读文字。
+for (const attachment of data.media_attachments || []) {
+    if (attachment.delivery === "binary") {
+        const media = await tools.mcp__codex_apps__sentinelx_sentinel_read_media({
+            host_id: request.host_id,
+            path: attachment.path
+        });
+        for (const block of media.content || []) {
+            if (block.type === "image") image(block);
+        }
+    }
+}
+// 原业务 JSON 位于 bridge_result/output，文字仍按原分页协议续读。
+// 媒体错误只报告传输问题，禁止重新执行 request。
 ```
 
-图片呈现不再发起画室回读请求，也不依赖屏幕共享。没有图块时保留原工具结果，媒体错误按 media_delivery 明确报告。
+协议参考：
+
+- [官方导出处理](https://github.com/pensados/sentinelx-cloud-core/blob/main/src/sentinelx_core/handlers/file_export.py)
+- [官方发送顺序](https://github.com/pensados/sentinelx-cloud-core/blob/main/src/sentinelx_core/client.py)
+- [官方二进制帧](https://github.com/pensados/sentinelx-cloud-protocol/blob/main/python/sentinelx_protocol/binary.py)
+
+基座、Host 原语、权限、子插件 ID、签名和文字分页协议不变。本轮仍未推送编译或安装，原生媒体的云端端到端呈现待统一编译后验证。
