@@ -179,7 +179,7 @@ internal class SentinelXTransportClient(
         val result = executor.execute(bridgeRequest.tool, bridgeRequest.args)
         // The Host events repeat result.value; shipping them as both output and
         // bridge_result multiplies payload size before the Hub's own response cap.
-        val compact = JSONObject(result.toString()).apply { remove("events") }
+        val (compact, images) = SentinelXResultMedia.split(result)
         val serialized = compact.toString()
         if (!resultPager.canStore(serialized)) {
             return SentinelXProtocol.failure(id, "bridge_result_too_large",
@@ -189,6 +189,18 @@ internal class SentinelXTransportClient(
             JSONObject().put("output", serialized).put("bridge_result", compact)
         } else {
             resultPager.store(serialized)
+        }
+        if (images.length() > 0) {
+            // exec remains a structured/text tool at the closed-source Hub. The caller must
+            // present these image blocks directly from this response; no preview-read call is needed.
+            // Keep below the Hub's 128 KiB bound so it cannot silently truncate image bytes.
+            if (images.toString().toByteArray(Charsets.UTF_8).size <= 96 * 1024) {
+                response.put("mcp_content", images)
+            } else {
+                response.put("media_delivery", JSONObject().put("status", "error")
+                    .put("operation_completed", true)
+                    .put("error", "Attached image exceeds SentinelX inline media limit; use a smaller explicit region/maxEdge"))
+            }
         }
         return SentinelXProtocol.success(
             id,

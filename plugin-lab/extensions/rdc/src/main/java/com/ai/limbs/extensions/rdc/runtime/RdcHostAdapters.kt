@@ -217,10 +217,15 @@ class AiLimbsRdcToolAdapter(
     }
 
     private fun mcpResult(result: JSONObject): JSONObject {
-        val success = result.optBoolean("success", false)
-        // Events repeat the display body. The formal result and structured_result are preserved once.
-        val compact = JSONObject(result.toString()).apply { remove("events") }
-        return resultPager.response(compact.toString(), "json", success)
+        // Formal plugin capabilities return business objects, without a success envelope.
+        val success = !result.has("error") && (!result.has("success") || result.getBoolean("success"))
+        val (compact, images) = RdcResultMedia.split(result)
+        val response = resultPager.response(compact.toString(), "json", success)
+        if (success && !response.getBoolean("isError")) {
+            val content = response.getJSONArray("content")
+            for (index in 0 until images.length()) content.put(images.getJSONObject(index))
+        }
+        return response
     }
 
     private fun mcpError(message: String): JSONObject =
