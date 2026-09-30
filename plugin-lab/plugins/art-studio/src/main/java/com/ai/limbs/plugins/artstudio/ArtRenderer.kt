@@ -1,7 +1,6 @@
 package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
@@ -23,13 +22,14 @@ internal object ArtRenderer {
         val state = snapshot.getJSONObject("state")
         val width = state.getInt("width")
         val height = state.getInt("height")
-        require(width in 64..4096 && height in 64..4096)
+        ArtImagePolicy.requireDimensions(width, height)
         val factor = if (maxEdge == null) 1.0 else {
             require(maxEdge in 64..1024)
             (maxEdge.toDouble() / maxOf(width, height)).coerceAtMost(1.0)
         }
         val renderWidth = kotlin.math.round(width * factor).toInt().coerceAtLeast(1)
         val renderHeight = kotlin.math.round(height * factor).toInt().coerceAtLeast(1)
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(store, state, renderWidth, renderHeight), "画布合成")
         val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
@@ -68,9 +68,9 @@ internal object ArtRenderer {
                         val local = Canvas(buffer)
                         local.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
                         if (layer.getString("kind") == "image") {
-                            BitmapFactory.decodeFile(store.assetFile(layer.getString("asset")).absolutePath)?.let { image ->
-                                local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG))
-                                image.recycle()
+                            ArtImagePolicy.decodeAsset(store.assetFile(layer.getString("asset"))).let { image ->
+                                try { local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG)) }
+                                finally { image.recycle() }
                             }
                         }
                         val strokes = layer.getJSONArray("strokes")
@@ -102,9 +102,7 @@ internal object ArtRenderer {
                                         if (clip != null) local.restore()
                                     }
                                     "paste", "erase" -> {
-                                        val inserted = BitmapFactory.decodeFile(
-                                            store.assetFile(event.getString("asset")).absolutePath)
-                                            ?: error("工程粘贴资源已丢失")
+                                        val inserted = ArtImagePolicy.decodeAsset(store.assetFile(event.getString("asset")))
                                         try {
                                             val insertPaint = Paint(Paint.FILTER_BITMAP_FLAG)
                                             if (event.getString("kind") == "erase")
@@ -127,8 +125,13 @@ internal object ArtRenderer {
         // Kotlin local functions cannot refer forward to themselves, so pass the renderer explicitly.
         lateinit var draw: (Canvas, String, Int) -> Unit
         draw = { target, parent, depth -> drawChildren(target, parent, depth, draw) }
-        draw(canvas, "", 0)
-        return bitmap
+        try {
+            draw(canvas, "", 0)
+            return bitmap
+        } catch (error: Throwable) {
+            bitmap.recycle()
+            throw error
+        }
     }
 
     fun drawStroke(canvas: Canvas, stroke: JSONObject,
@@ -474,6 +477,12 @@ internal object ArtRenderer {
         val destination = File(directory, filename)
         val temp = File(directory, ".${UUID.randomUUID()}.tmp")
         try {
+            val state = snapshot.getJSONObject("state")
+            val targetWidth = options.optInt("width", options.optInt("cropWidth", state.getInt("width")))
+            val targetHeight = options.optInt("height", options.optInt("cropHeight", state.getInt("height")))
+            ArtImagePolicy.requireDimensions(targetWidth, targetHeight)
+            ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(store, state, state.getInt("width"),
+                state.getInt("height")) + targetWidth.toLong() * targetHeight * 8, "导出图片")
             val bitmap = render(store, snapshot, opaque = format == "jpeg")
             var output = bitmap
             try {
@@ -487,7 +496,7 @@ internal object ArtRenderer {
                 }
                 val width = options.optInt("width", cropWidth)
                 val height = options.optInt("height", cropHeight)
-                require(width in 64..4096 && height in 64..4096) { "导出尺寸需要在 64–4096 像素之间" }
+                ArtImagePolicy.requireDimensions(width, height)
                 if (x != 0 || y != 0 || cropWidth != bitmap.width || cropHeight != bitmap.height) {
                     output = Bitmap.createBitmap(bitmap, x, y, cropWidth, cropHeight)
                 }

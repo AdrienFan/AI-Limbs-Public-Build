@@ -47,9 +47,14 @@ class ArtStudioEntry : InProcessPluginEntry {
                        description: String = title, block: (JSONObject) -> JSONObject) {
             registerCapability(name, title, effect,
                 description + " 成功改变画布时在原结果中自动附带 thumbnail 元数据和 mcp_content 图片块；无需另取缩略图。") { parameters ->
-                if (ArtCanvasFeedback.affectsCanvas(name, parameters))
-                    store.withCanvasFeedback { block(parameters) }
-                else block(parameters)
+                try {
+                    if (ArtCanvasFeedback.affectsCanvas(name, parameters))
+                        store.withCanvasFeedback { block(parameters) }
+                    else block(parameters)
+                } catch (request: ArtImageResizeRequired) {
+                    // Consent is a no-op result, not a successful edit or an image receipt.
+                    request.response()
+                }
             }
         }
         val read = InProcessCapabilityEffect.READ_ONLY
@@ -59,7 +64,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             ArtStudioMenuCatalog.describe(store.menuContext())
         }
         capability("menu.execute", "执行画室菜单操作", write,
-            "action 使用 menu.catalog 的真实叶子 ID；parameters 使用该项参数。documentWrite=true 时必须传 documentId 与 expectedRevision；未实现项会拒绝。两位协作者共用业务实现、文件锁与撤销历史。UI 面板请求返回 accepted，页面打开时消费。") { p ->
+            "action 使用 menu.catalog 的真实叶子 ID；parameters 使用该项参数。documentWrite=true 时必须传 documentId 与 expectedRevision；未实现项会拒绝。两位协作者共用业务实现、文件锁与撤销历史。图片导入超预算返回 needs_confirmation 与 imagePlan；取得用户同意后在 parameters.confirmResize 原样传回 imagePlan.confirmation。UI 面板请求返回 accepted，页面打开时消费。") { p ->
             val arguments = p.optJSONObject("parameters")?.let { JSONObject(it.toString()) } ?: JSONObject()
             if (p.has("documentId")) arguments.put("documentId",p.getString("documentId"))
             if (p.has("expectedRevision")) arguments.put("expectedRevision",p.getInt("expectedRevision"))
@@ -70,7 +75,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.apply("LANER", "IMAGE_BACKGROUND", JSONObject().put("color", p.getString("color")))
         }
         capability("image.crop_to_selection", "裁切图像到选区边界", write,
-            "按当前选区的边界矩形裁切画布；没有选区或尺寸不足 64 像素时拒绝。") {
+            "按当前选区的边界矩形裁切画布；没有选区或没有有效像素交集时拒绝。") {
             store.cropToSelection("LANER")
         }
         capability("image.resize_canvas", "更改画室画布大小", write,
@@ -132,8 +137,8 @@ class ArtStudioEntry : InProcessPluginEntry {
             JSONObject().put("documents", store.recent())
         }
         capability("document.open_image", "将图片打开为新工程", write,
-            "使用 PNG 或 JPEG 的 base64 数据创建独立工程并切换至它，原工程保持可打开。") { p ->
-            store.openImage(p.getString("base64"), p.optString("name", "未命名图像"), "LANER")
+            "使用 PNG/JPEG 的 base64 创建独立工程。超预算返回 needs_confirmation、operationApplied=false、imagePlan；向用户展示原尺寸/建议尺寸，获得缩小同意后用原 base64 和 imagePlan.confirmation 作为 confirmResize 重试。未确认不创建工程。成功含 imageImport 实际尺寸及 resized。") { p ->
+            store.openImage(p.getString("base64"), p.optString("name", "未命名图像"), "LANER", p.optJSONObject("confirmResize"))
         }
         capability("document.save_as", "另存为并切换画室工程", write,
             "将当前画布复制成新 ID 的 .ailart 工程，保存到默认保存目录并将新工程设为当前；返回路径。") { p ->
@@ -376,7 +381,10 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("edit.paste_into", "粘贴进活动图层", write) {
             store.pastePixels("LANER", intoActive = true)
         }
-        capability("edit.paste_new", "从剪贴板创建新工程", write) { store.pasteAsNew("LANER") }
+        capability("edit.paste_new", "从剪贴板创建新工程", write,
+            "超预算时返回 imagePlan；取得用户同意后传回 confirmResize。") { p ->
+            store.pasteAsNew("LANER", p.optJSONObject("confirmResize"))
+        }
         capability("edit.clear", "清除选区像素", write) { store.editPixels("LANER", "CLEAR") }
         capability("edit.fill_foreground", "用前景色填充选区", write) { p ->
             store.editPixels("LANER", "FILL", p.getString("color"))
@@ -384,8 +392,13 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("edit.fill_background", "用指定背景色填充选区", write) { p ->
             store.editPixels("LANER", "FILL", p.getString("color"))
         }
-        capability("image.import", "导入 PNG 或 JPEG", write) { p ->
-            store.importImage("LANER", p.getString("base64"))
+        capability("image.limits", "读取图片尺寸与内存预算", read,
+            "读取结构尺寸范围与当前保守工作预算；预算随进程内存改变，不是无限制或内存保证。") {
+            ArtImagePolicy.describe()
+        }
+        capability("image.import", "导入 PNG 或 JPEG", write,
+            "导入当前工程。超预算返回 needs_confirmation 和 imagePlan；须先取得用户缩小同意，再携带原 base64 与 imagePlan.confirmation 作为 confirmResize 重试。成功返回 imageImport 与缩略图。") { p ->
+            store.importImage("LANER", p.getString("base64"), p.optJSONObject("confirmResize"))
         }
         capability("export.png", "导出 PNG", write) { p ->
             ArtRenderer.export(store, store.current(), "png", p.optString("name", ""), p)
@@ -422,6 +435,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             "query" -> "图层名称中的文字；按名称筛选且忽略大小写。"
             "visible" -> "true 显示，false 隐藏。"
             "locked" -> "true 锁定，false 解锁。"
+            "confirmResize" -> "仅在用户同意缩小后传回 imagePlan.confirmation 原对象；绑定源图 SHA-256 和明确目标尺寸。"
             "expectedRevision" -> "可选的操作历史条数；用于拒绝在另一端改动后过期的操作。"
             else -> key
         }
@@ -440,7 +454,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
             p("background", optional = true), p("name", optional = true))
         "document.import" -> listOf(p("base64"))
-        "document.open_image" -> listOf(p("base64"), p("name", optional = true))
+        "document.open_image" -> listOf(p("base64"), p("name", optional = true), p("confirmResize", "object", true))
         "document.save_as", "document.duplicate", "template.create",
         "session.save", "session.open", "session.delete" -> listOf(p("name"))
         "template.open" -> listOf(id)
@@ -501,7 +515,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "canvas.region" -> listOf(p("x", "integer"), p("y", "integer"), p("width", "integer"),
             p("height", "integer"), p("maxEdge", "integer", true),
             p("documentId", optional = true), p("expectedRevision", "integer", true))
-        "image.import" -> listOf(p("base64"))
+        "edit.paste_new" -> listOf(p("confirmResize", "object", true))
+        "image.import" -> listOf(p("base64"), p("confirmResize", "object", true))
         "export.png", "export.jpeg" -> listOf(p("name", optional = true),
             p("x", "integer", true), p("y", "integer", true),
             p("cropWidth", "integer", true), p("cropHeight", "integer", true),

@@ -472,6 +472,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var exitAfterClose by remember { mutableStateOf(false) }
     var recentDocs by remember { mutableStateOf(JSONArray()) }
     var importingUntitled by remember { mutableStateOf(false) }
+    var resizeRequest by remember { mutableStateOf<JSONObject?>(null) }
+    var resizeAction by remember { mutableStateOf<((JSONObject?) -> JSONObject)?>(null) }
     var renameDialog by remember { mutableStateOf(false) }
     var layerName by remember { mutableStateOf("") }
     var projectName by remember { mutableStateOf("") }
@@ -557,7 +559,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
 
-    fun perform(action: () -> JSONObject) {
+    fun perform(confirmation: JSONObject? = null, action: (JSONObject?) -> JSONObject) {
         val serial = ++renderSerial
         pendingOperations++
         busy = true
@@ -565,7 +567,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             try {
                 val pair = withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        action()
+                        action(confirmation)
                         val state = store.current()
                         Triple(state, ArtRenderer.render(store, state), store.revision())
                     }
@@ -576,6 +578,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     image = pair.second
                     revision = pair.third
                 } else pair.second.recycle()
+            } catch (request: ArtImageResizeRequired) {
+                resizeRequest = request.plan
+                resizeAction = action
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Edit failed", error)
                 Toast.makeText(context, error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
@@ -658,6 +663,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     if(!result.has("title")) result.put("title",item.getString("title"))
                     remainingResult=result
                 } else Toast.makeText(context,"已执行：${item.getString("title")}",Toast.LENGTH_SHORT).show()
+            } catch(request:ArtImageResizeRequired) {
+                resizeRequest=request.plan
+                resizeAction={ confirmation ->
+                    val confirmed=JSONObject(arguments.toString()).put("confirmResize", requireNotNull(confirmation))
+                    store.executeMenu("AWEI",item.getString("id"),confirmed)
+                }
             } catch(error:Exception) {
                 host.logger.e("ArtStudio","Menu operation failed",error)
                 remainingResult=JSONObject().put("title","操作未完成").put("text",error.message ?: "菜单操作失败")
@@ -690,9 +701,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 null, null, null)?.use { cursor ->
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             } ?: "未命名图像"
-            val bytes = context.contentResolver.openInputStream(uri)?.use { it.readNBytes(64 * 1024 * 1024 + 1) }
-                ?: error("无法读取文件")
-            require(bytes.size <= 64 * 1024 * 1024) { "文件超过 64 MB" }
+            val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
+                val header = input.readNBytes(4)
+                val projectFile = header.size >= 4 && header[0] == 0x50.toByte() && header[1] == 0x4b.toByte()
+                val limit = if (projectFile) 64 * 1024 * 1024 else 8 * 1024 * 1024
+                val body = input.readNBytes(limit + 1 - header.size)
+                require(body.size + header.size <= limit) {
+                    if (projectFile) "工程文件超过 64 MB" else "图片大小上限为 8 MB"
+                }
+                header + body
+            } ?: error("无法读取文件")
             val zip = bytes.size >= 4 && bytes[0] == 0x50.toByte() && bytes[1] == 0x4b.toByte()
             if (zip) {
                 val opened = store.importArchive(bytes)
@@ -711,8 +729,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                     store.current()
                 }
-            } else store.openImage(android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
-                if (untitled) "未命名图像" else name.substringBeforeLast('.').ifBlank { "未命名图像" })
+            } else {
+                require(bytes.size <= 8 * 1024 * 1024) { "图片大小上限为 8 MB" }
+                store.openImage(android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP),
+                    if (untitled) "未命名图像" else name.substringBeforeLast('.').ifBlank { "未命名图像" },
+                    confirmResize = it)
+            }
         }
     }
     val saveAsFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
@@ -1006,7 +1028,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         !menuActive.optBoolean("locked") &&
         menuActive.optDouble("x") == 0.0 && menuActive.optDouble("y") == 0.0 &&
         menuActive.optDouble("scale") == 1.0 && menuActive.optDouble("rotation") == 0.0
-    val menuClipboardCanNew = clipboardSize.first in 64..4096 && clipboardSize.second in 64..4096
+    val menuClipboardCanNew = ArtImagePolicy.dimensionsValid(clipboardSize.first, clipboardSize.second)
 
     SideEffect {
         menuBridge.menuContext=JSONObject(remainingContext.toString())
@@ -1074,7 +1096,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     perform { store.pastePixels("AWEI", atX = point.first, atY = point.second) }
                 }
                 111 -> perform { store.pastePixels("AWEI", intoActive = true) }
-                112 -> perform { store.pasteAsNew("AWEI") }
+                112 -> perform { store.pasteAsNew("AWEI", it) }
                 116 -> perform { store.editPixels("AWEI", "CLEAR") }
                 117 -> perform { store.editPixels("AWEI", "FILL", color) }
                 118 -> backgroundFillDialog = true
@@ -1325,10 +1347,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             .coerceIn(0, state.getInt("width"))
                         val bottom = (rect.getDouble("y") + rect.getDouble("height")).toInt()
                             .coerceIn(0, state.getInt("height"))
-                        if (right - x in 64..4096 && bottom - y in 64..4096)
+                        if (ArtImagePolicy.dimensionsValid(right - x, bottom - y))
                             edit("CROP", JSONObject().put("x", x).put("y", y)
                                 .put("width", right - x).put("height", bottom - y))
-                        else Toast.makeText(context, "裁剪区域至少 64 × 64 像素", Toast.LENGTH_SHORT).show()
+                        else Toast.makeText(context, "裁剪区域须包含至少一个有效像素", Toast.LENGTH_SHORT).show()
                     }
                     view.onMove = { dx, dy ->
                         if (selectedLayer != null) {
@@ -2238,11 +2260,23 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 TextButton(onClick = { presentationDialog = false }) { Text("取消") }
             })
     }
+    resizeRequest?.let { plan ->
+        AlertDialog(onDismissRequest = { resizeRequest = null; resizeAction = null },
+            title = { Text("图片需要缩小") },
+            text = { Text(plan.getString("message")) },
+            confirmButton = { TextButton(enabled = !busy, onClick = {
+                val action = requireNotNull(resizeAction)
+                val confirmation = plan.getJSONObject("confirmation")
+                resizeRequest = null; resizeAction = null
+                perform(confirmation, action)
+            }) { Text("按建议尺寸缩小后打开") } },
+            dismissButton = { TextButton(onClick = { resizeRequest = null; resizeAction = null }) { Text("取消") } })
+    }
     if (newCanvas) {
         val chosenWidth = canvasWidth.toIntOrNull()
         val chosenHeight = canvasHeight.toIntOrNull()
         val dimensionsValid = chosenWidth != null && chosenHeight != null &&
-            chosenWidth in 64..4096 && chosenHeight in 64..4096
+            ArtImagePolicy.dimensionsValid(chosenWidth, chosenHeight)
         val canCreate = dimensionsValid && canvasProjectName.trim().isNotBlank() && !busy
         AlertDialog(onDismissRequest = { newCanvas = false },
             title = { Text("新建图像") },
@@ -2269,11 +2303,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             }
                     }
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedTextField(canvasWidth, { canvasWidth = it.filter(Char::isDigit).take(4) },
+                        OutlinedTextField(canvasWidth, { canvasWidth = it.filter(Char::isDigit).take(5) },
                             modifier = Modifier.weight(1f), singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             label = { Text("宽度 (px)") })
-                        OutlinedTextField(canvasHeight, { canvasHeight = it.filter(Char::isDigit).take(4) },
+                        OutlinedTextField(canvasHeight, { canvasHeight = it.filter(Char::isDigit).take(5) },
                             modifier = Modifier.weight(1f), singleLine = true,
                             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                             label = { Text("高度 (px)") })
@@ -2286,7 +2320,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Text(if (dimensionsValid) "实际图像：" + chosenWidth + " × " + chosenHeight +
                         " 像素 · 约 " + String.format(java.util.Locale.ROOT, "%.1f",
                             chosenWidth!!.toDouble() * chosenHeight!! * 4 / 1048576.0) + " MiB/层"
-                        else "宽度和高度均需在 64–4096 像素之间",
+                        else "宽高须在 1–16384 像素之间；创建时检查内存预算",
                         color = if (dimensionsValid) MaterialTheme.colorScheme.onSurface
                             else MaterialTheme.colorScheme.error,
                         style = MaterialTheme.typography.bodySmall)
@@ -2411,7 +2445,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             val canvasH = state?.optInt("height") ?: 0
             if (x == null || y == null || w == null || h == null || outW == null || outH == null ||
                 x < 0 || y < 0 || w <= 0 || h <= 0 || x.toLong() + w > canvasW ||
-                y.toLong() + h > canvasH || outW !in 64..4096 || outH !in 64..4096) {
+                y.toLong() + h > canvasH || !ArtImagePolicy.dimensionsValid(outW, outH)) {
                 Toast.makeText(context, "裁切范围或输出尺寸无效", Toast.LENGTH_LONG).show()
             } else {
                 advancedExportDialog = false
@@ -2516,28 +2550,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         val heightPx = resizeHeight.toIntOrNull()
         val offsetX = resizeOffsetX.toIntOrNull()
         val offsetY = resizeOffsetY.toIntOrNull()
-        val valid = widthPx != null && widthPx in 64..4096 &&
-            heightPx != null && heightPx in 64..4096 &&
-            offsetX != null && offsetX in -4096..4096 &&
-            offsetY != null && offsetY in -4096..4096
+        val valid = widthPx != null && heightPx != null && ArtImagePolicy.dimensionsValid(widthPx, heightPx) &&
+            offsetX != null && offsetX in -ArtImagePolicy.MAX_EDGE..ArtImagePolicy.MAX_EDGE &&
+            offsetY != null && offsetY in -ArtImagePolicy.MAX_EDGE..ArtImagePolicy.MAX_EDGE
         AlertDialog(onDismissRequest = { canvasResizeDialog = false },
             title = { Text("更改画布大小") },
             text = { Column(Modifier.verticalScroll(rememberScrollState()),
                 verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Text("调整画布边界，不缩放图层。偏移表示旧图像左上角在新画布中的位置；负值会裁掉边缘。")
-                OutlinedTextField(resizeWidth, { resizeWidth = it.filter(Char::isDigit).take(4) },
+                OutlinedTextField(resizeWidth, { resizeWidth = it.filter(Char::isDigit).take(5) },
                     singleLine = true, label = { Text("新宽度 (px)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
-                OutlinedTextField(resizeHeight, { resizeHeight = it.filter(Char::isDigit).take(4) },
+                OutlinedTextField(resizeHeight, { resizeHeight = it.filter(Char::isDigit).take(5) },
                     singleLine = true, label = { Text("新高度 (px)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
                 OutlinedTextField(resizeOffsetX,
-                    { resizeOffsetX = it.filterIndexed { index, c -> c.isDigit() || (index == 0 && c == '-') }.take(5) },
+                    { resizeOffsetX = it.filterIndexed { index, c -> c.isDigit() || (index == 0 && c == '-') }.take(6) },
                     singleLine = true, label = { Text("水平偏移 (px)") })
                 OutlinedTextField(resizeOffsetY,
-                    { resizeOffsetY = it.filterIndexed { index, c -> c.isDigit() || (index == 0 && c == '-') }.take(5) },
+                    { resizeOffsetY = it.filterIndexed { index, c -> c.isDigit() || (index == 0 && c == '-') }.take(6) },
                     singleLine = true, label = { Text("垂直偏移 (px)") })
-                if (!valid) Text("边长须在 64–4096 px，偏移须在 -4096–4096 px",
+                if (!valid) Text("边长须在 1–16384 px，偏移须在 -16384–16384 px；处理时检查内存预算",
                     color = MaterialTheme.colorScheme.error)
             } },
             confirmButton = { TextButton(onClick = {

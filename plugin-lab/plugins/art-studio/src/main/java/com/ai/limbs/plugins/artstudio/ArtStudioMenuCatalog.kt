@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** Source order follows Krita 6.0.4; one inventory serves UI and capability discovery. */
 internal object ArtStudioMenuCatalog {
-    const val VERSION = "0.2.16"
+    const val VERSION = "0.2.17"
     private val definitions = JSONArray(listOf(
         """{
   "id": "Layer",
@@ -232,7 +232,7 @@ internal object ArtStudioMenuCatalog {
             {
               "name": "base64",
               "type": "string",
-              "description": "PNG/JPEG 内容；手机页面使用文件选择器"
+              "description": "PNG/JPEG 内容；手机页面使用文件选择器。超预算返回 imagePlan；用户同意缩小后在 parameters.confirmResize 传回 imagePlan.confirmation"
             }
           ],
           "documentWrite": true
@@ -250,7 +250,7 @@ internal object ArtStudioMenuCatalog {
                 {
                   "name": "base64",
                   "type": "string",
-                  "description": "PNG/JPEG 内容；手机页面使用文件选择器"
+                  "description": "PNG/JPEG 内容；手机页面使用文件选择器。超预算返回 imagePlan；用户同意缩小后在 parameters.confirmResize 传回 imagePlan.confirmation"
                 }
               ],
               "documentWrite": true

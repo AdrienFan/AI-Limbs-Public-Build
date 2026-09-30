@@ -92,7 +92,7 @@ internal class ArtStore(private val root: File) {
 
     fun create(width: Int, height: Int, background: String = "#FFFFFFFF",
                name: String = "未命名工程", actor: String = "AWEI"): JSONObject = locked {
-        require(width in 64..4096 && height in 64..4096) { "画布边长需要在 64–4096 像素之间" }
+        ArtImagePolicy.requireWorkingSize(width, height)
         requireColor(background)
         require(name.trim().isNotBlank()) { "工程名称不能为空" }
         val id = UUID.randomUUID().toString()
@@ -164,6 +164,10 @@ internal class ArtStore(private val root: File) {
             }
         }
         val allowed=mutableSetOf("documentId","expectedRevision")
+        if (action in setOf("import_layer_from_file", "import_layer_as_paint_layer")) {
+            allowed.add("confirmResize")
+            if (p.has("confirmResize")) require(p.get("confirmResize") is JSONObject) { "缩小确认必须是 imagePlan.confirmation 对象" }
+        }
         for(n in 0 until fields.length()) {
             val field=fields.getJSONObject(n);val key=field.getString("name");allowed.add(key)
             if(!p.has(key)) {
@@ -293,14 +297,19 @@ internal class ArtStore(private val root: File) {
                     layer.getString("id"), background = "#00000000")
             }
             "import_layer_from_file", "import_layer_as_paint_layer" -> {
-                val bytes = Base64.decode(p.getString("base64"), Base64.DEFAULT)
-                require(bytes.size in 1..MAX_ASSET_BYTES)
-                val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-                BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
-                require(bounds.outWidth in 1..4096 && bounds.outHeight in 1..4096) { "图片边长上限为 4096 像素" }
-                val bitmap = BitmapFactory.decodeByteArray(bytes,0,bytes.size) ?: error("请使用 PNG 或 JPEG")
+                val bytes = imageBytes(p.getString("base64"))
+                val currentState = requireNotNull(state)
+                val (bitmap, metadata) = ArtImagePolicy.decode(bytes, p.optJSONObject("confirmResize"),
+                    ArtImagePolicy.renderBytes(this, currentState, currentState.getInt("width"), currentState.getInt("height")))
                 val layer = raster(bitmap, UUID.randomUUID().toString(), "导入绘画图层")
-                change(emptyList(),listOf(layer),ArtMenuOperations.layers(requireNotNull(state)).size,layer.getString("id"))
+                try {
+                    change(emptyList(),listOf(layer),ArtMenuOperations.layers(currentState).size,layer.getString("id"))
+                        .put("imageImport", metadata)
+                } catch (error: Throwable) {
+                    // A failed insertion must not leave the newly encoded image orphaned.
+                    ArtMenuOperations.assets(layer) { node, key -> assetFile(node.getString(key)).delete() }
+                    throw error
+                }
             }
             "save_node_as_image" -> {
                 val selected = requireNotNull(active)
@@ -523,8 +532,9 @@ internal class ArtStore(private val root: File) {
             .put("actor", actor).put("type", type).put("parameters", normalized)
             .put("timestamp", System.currentTimeMillis())
         doc.getJSONArray("operations").put(operation)
-        // A failed replay must never overwrite the existing draft or its history.
+        // A failed replay or budget check must never overwrite the draft or its history.
         val result = snapshot(doc)
+        requireRenderBudget(result)
         atomic(draft(doc.getString("id")), doc.toString())
         result.put("lastOperationId", operation.getString("id"))
     }
@@ -541,9 +551,8 @@ internal class ArtStore(private val root: File) {
             selection.getDouble("width")).toInt().coerceIn(0, width)
         val bottom = kotlin.math.ceil(selection.getDouble("y") +
             selection.getDouble("height")).toInt().coerceIn(0, height)
-        require(right - left in 64..4096 && bottom - top in 64..4096) {
-            "选区边界须至少 64 × 64 像素，且与画布相交"
-        }
+        require(right > left && bottom > top) { "选区须与画布相交且包含至少一个像素" }
+        ArtImagePolicy.requireDimensions(right - left, bottom - top)
         appendToCurrent(actor, "CROP", JSONObject().put("width", right - left)
             .put("height", bottom - top).put("x", left).put("y", top))
     }
@@ -844,6 +853,7 @@ internal class ArtStore(private val root: File) {
         }
         val doc = JSONObject(draft(id).readText())
         val result = snapshot(doc)
+        requireRenderBudget(result)
         atomic(pointer, id)
         markRecent(id)
         result
@@ -901,33 +911,35 @@ internal class ArtStore(private val root: File) {
         doc.put("id", id).put("createdBy", actor)
         val result = snapshot(doc)
         importedAssets.forEach { (asset, data) -> atomicBytes(assetFile(assetIds.getValue(asset)), data) }
+        requireRenderBudget(result)
         atomic(draft(id), doc.toString())
         atomic(pointer, id)
         markRecent(id)
         result
     }
 
-    fun openImage(encoded: String, name: String = "未命名图像",
-                  actor: String = "AWEI"): JSONObject = locked {
+    private fun imageBytes(encoded: String): ByteArray {
+        require(encoded.length <= MAX_ASSET_BYTES * 2) { "图片大小上限为 8 MB" }
         val bytes = Base64.decode(encoded, Base64.DEFAULT)
         require(bytes.size in 1..MAX_ASSET_BYTES) { "图片大小上限为 8 MB" }
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        require(bounds.outWidth in 64..4096 && bounds.outHeight in 64..4096) {
-            "图片边长需要在 64–4096 像素之间"
-        }
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            ?: error("图片格式无效，请使用 PNG 或 JPEG")
-        val png = java.io.ByteArrayOutputStream().use { output ->
-            require(bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output))
+        return bytes
+    }
+
+    fun openImage(encoded: String, name: String = "未命名图像",
+                  actor: String = "AWEI", confirmResize: JSONObject? = null): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        // Preflight throws a confirmation request before creating IDs, files or changing the pointer.
+        val (bitmap, metadata) = ArtImagePolicy.decode(imageBytes(encoded), confirmResize)
+        val width = bitmap.width; val height = bitmap.height
+        val png = try { ByteArrayOutputStream().use { output ->
+            require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
             output.toByteArray()
-        }
-        bitmap.recycle()
+        } } finally { bitmap.recycle() }
         require(png.size <= MAX_ASSET_BYTES) { "图片转换后超过 8 MB" }
         val id = UUID.randomUUID().toString()
         val asset = UUID.randomUUID().toString()
         val layer = newLayer(UUID.randomUUID().toString(), "image", "图像图层", "", asset)
-        val base = JSONObject().put("width", bounds.outWidth).put("height", bounds.outHeight)
+        val base = JSONObject().put("width", width).put("height", height)
             .put("name", name.trim().ifBlank { "未命名图像" }.take(100))
             .put("background", "#00000000").put("layers", JSONArray().put(layer))
             .put("selectedLayerId", layer.getString("id")).put("selection", JSONObject.NULL)
@@ -936,49 +948,51 @@ internal class ArtStore(private val root: File) {
         atomicBytes(assetFile(asset), png)
         try {
             val result = snapshot(doc)
+            requireRenderBudget(result)
             atomic(draft(id), doc.toString())
             atomic(pointer, id)
             markRecent(id)
-            result
+            result.put("imageImport", metadata)
         } catch (error: Throwable) {
             assetFile(asset).delete()
             throw error
         }
     }
 
-    fun importImage(actor: String, encoded: String): JSONObject = locked {
+    fun importImage(actor: String, encoded: String, confirmResize: JSONObject? = null): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
-        val bytes = Base64.decode(encoded, Base64.DEFAULT)
-        require(bytes.size in 1..MAX_ASSET_BYTES) { "图片大小上限为 8 MB" }
-        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
-        require(bounds.outWidth in 1..4096 && bounds.outHeight in 1..4096) { "图片边长上限为 4096 像素" }
-        val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
-            ?: error("图片格式无效，请使用 PNG 或 JPEG")
-        require(bitmap.width in 1..4096 && bitmap.height in 1..4096)
+        val state = replay(loadCurrent())
+        val (bitmap, metadata) = ArtImagePolicy.decode(imageBytes(encoded), confirmResize,
+            ArtImagePolicy.renderBytes(this, state, state.getInt("width"), state.getInt("height")))
+        val width = bitmap.width; val height = bitmap.height
         val id = UUID.randomUUID().toString()
-        val png = java.io.ByteArrayOutputStream().use { output ->
-            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, output)
+        val png = try { ByteArrayOutputStream().use { output ->
+            require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
             output.toByteArray()
-        }
-        bitmap.recycle()
+        } } finally { bitmap.recycle() }
         require(png.size <= MAX_ASSET_BYTES) { "图片转换后超过 8 MB" }
         atomicBytes(assetFile(id), png)
-        // apply() takes the same process monitor but acquires a new file lock, so write directly here.
         val doc = loadCurrent()
         val op = JSONObject().put("id", UUID.randomUUID().toString()).put("actor", actor)
             .put("type", "IMAGE_IMPORT").put("timestamp", System.currentTimeMillis())
-            .put("parameters", JSONObject().put("asset", id).put("width", bitmap.width)
-                .put("height", bitmap.height))
+            .put("parameters", JSONObject().put("asset", id).put("width", width).put("height", height))
         doc.getJSONArray("operations").put(op)
         try {
             val result = snapshot(doc)
+            requireRenderBudget(result)
             atomic(draft(doc.getString("id")), doc.toString())
-            result
+            result.put("imageImport", metadata)
         } catch (error: Throwable) {
             assetFile(id).delete()
             throw error
         }
+    }
+
+    private fun requireRenderBudget(snapshot: JSONObject) {
+        val state = snapshot.getJSONObject("state")
+        ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this, state,
+            state.getInt("width"), state.getInt("height")), "画布合成")
     }
 
     private fun snapshot(doc: JSONObject): JSONObject {
@@ -1115,6 +1129,7 @@ internal class ArtStore(private val root: File) {
                 edit(state, op.getString("type"), op.getJSONObject("parameters"))
             }
         }
+        ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
         return state
     }
 
@@ -1512,12 +1527,13 @@ internal class ArtStore(private val root: File) {
                 }
             }
             "CROP", "CANVAS_RESIZE" -> {
-                state.put("width", p.getInt("width").also { require(it in 64..4096) })
-                state.put("height", p.getInt("height").also { require(it in 64..4096) })
+                ArtImagePolicy.requireDimensions(p.getInt("width"), p.getInt("height"))
+                state.put("width", p.getInt("width"))
+                state.put("height", p.getInt("height"))
                 val dx = p.optDouble("x", 0.0); val dy = p.optDouble("y", 0.0)
                 require(dx.isFinite() && dy.isFinite())
-                if (type == "CANVAS_RESIZE") require(dx in -4096.0..4096.0 &&
-                    dy in -4096.0..4096.0) { "画布偏移必须在 -4096–4096 像素之间" }
+                if (type == "CANVAS_RESIZE") require(kotlin.math.abs(dx) <= ArtImagePolicy.MAX_EDGE &&
+                    kotlin.math.abs(dy) <= ArtImagePolicy.MAX_EDGE) { "画布偏移必须在 -16384–16384 像素之间" }
                 for (i in 0 until layers.length()) {
                     val layer = layers.getJSONObject(i)
                     if (layer.optString("parentId").isBlank()) {
@@ -1663,6 +1679,8 @@ internal class ArtStore(private val root: File) {
                 }
             }
         }
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this, view.getJSONObject("state"),
+            state.getInt("width"), state.getInt("height")) + area[2].toLong() * area[3] * 8, "复制选区")
         val bitmap = ArtRenderer.render(this, view)
         val bytes = try {
             val clipped = Bitmap.createBitmap(area[2], area[3], Bitmap.Config.ARGB_8888)
@@ -1740,14 +1758,12 @@ internal class ArtStore(private val root: File) {
             .put("layerId", target).put("x", x).put("y", y))
     }
 
-    fun pasteAsNew(actor: String): JSONObject {
+    fun pasteAsNew(actor: String, confirmResize: JSONObject? = null): JSONObject {
         val clip = clipboardInfo()
         require(clip.has("asset")) { "画室剪贴板为空" }
-        require(clip.getInt("width") in 64..4096 && clip.getInt("height") in 64..4096) {
-            "新画布至少需要 64 × 64 像素"
-        }
+        ArtImagePolicy.requireDimensions(clip.getInt("width"), clip.getInt("height"))
         val bytes = locked { assetFile(clip.getString("asset")).readBytes() }
-        return openImage(Base64.encodeToString(bytes, Base64.NO_WRAP), "粘贴图像", actor)
+        return openImage(Base64.encodeToString(bytes, Base64.NO_WRAP), "粘贴图像", actor, confirmResize)
     }
 
     /**
@@ -1806,6 +1822,8 @@ internal class ArtStore(private val root: File) {
                 }
             }
         }
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this, view.getJSONObject("state"),
+            canvasWidth, canvasHeight) + canvasWidth.toLong() * canvasHeight * 12, "连续区域填充")
         val source = ArtRenderer.render(this, view)
         try {
             val target = source.getPixel(x, y)
@@ -1906,6 +1924,7 @@ internal class ArtStore(private val root: File) {
             .put("type", type).put("parameters", params).put("timestamp", System.currentTimeMillis())
         doc.getJSONArray("operations").put(op)
         val result = snapshot(doc)
+        requireRenderBudget(result)
         atomic(draft(doc.getString("id")), doc.toString())
         return result.put("lastOperationId", op.getString("id"))
     }
