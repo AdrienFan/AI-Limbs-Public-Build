@@ -37,7 +37,6 @@ internal class UbuntuSubsystemProcessCapability(
         private const val MAX_BUFFER_LINES = 4_000
         private const val MAX_BUFFER_CHARS = 2 * 1024 * 1024
         private const val MAX_LINE_CHARS = 64 * 1024
-        private const val MAX_COMPLETION_RECONCILE_CHARS = 512 * 1024
         private const val MAX_READ_LINES = 1_000
         private const val MAX_INTERACT_LINES = 1_000
         private const val INITIAL_OUTPUT_LINES = 200
@@ -106,7 +105,7 @@ internal class UbuntuSubsystemProcessCapability(
         records.values.toList().forEach { record ->
             record.collectorJob?.cancel()
             runCatching { terminal.sendInterruptSignalToSessionNow(record.sessionId) }
-            finish(record, null, "Ubuntu subsystem process service stopped")
+            finish(record, "Ubuntu subsystem process service stopped")
             releaseTerminalResources(record)
         }
         records.clear()
@@ -181,15 +180,17 @@ internal class UbuntuSubsystemProcessCapability(
                 terminal.commandExecutionEvents
                     .filter { event -> event.sessionId == sessionId && event.commandId == commandId }
                     .takeWhile { event ->
-                        if (event.outputChunk.isNotEmpty()) appendOutput(record, event.outputChunk)
-                        if (event.isCompleted) finish(record, null, null)
+                        // Completion carries the full output snapshot, not a new delta.
+                        // Use its canonical snapshot to finalize the buffer, never append it as another delta.
+                        if (!event.isCompleted && event.outputChunk.isNotEmpty()) appendOutput(record, event.outputChunk)
+                        if (event.isCompleted) finish(record, null, event.outputChunk)
                         !event.isCompleted
                     }
                     .collect {}
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Throwable) {
-                finish(record, null, error.message ?: error::class.java.simpleName)
+                finish(record, error.message ?: error::class.java.simpleName)
             } finally {
                 releaseTerminalResources(record)
             }
@@ -198,7 +199,7 @@ internal class UbuntuSubsystemProcessCapability(
             terminal.sendCommandToSession(sessionId, command, commandId)
         } catch (error: Throwable) {
             record.collectorJob?.cancel()
-            finish(record, null, error.message ?: error::class.java.simpleName)
+            finish(record, error.message ?: error::class.java.simpleName)
             releaseTerminalResources(record)
             return failure("Failed to start Ubuntu process: ${error.message}")
         }
@@ -255,7 +256,7 @@ internal class UbuntuSubsystemProcessCapability(
             val localEnd = (end - record.baseLine).coerceAtLeast(localStart)
             val selected = record.lines.subList(localStart, localEnd).toList()
             if (offset == 0) record.readCursor = end
-            ReadSnapshot(start, end, record.nextLine, record.running, selected, record.terminalError)
+            ReadSnapshot(start, end, record.nextLine, record.running, selected, record.terminalError, record.baseLine)
         }
         val waiting = snapshot.running && terminal.isSessionWaitingForInput(record.sessionId)
         val output = snapshot.lines.joinToString("\n")
@@ -266,6 +267,9 @@ internal class UbuntuSubsystemProcessCapability(
             .put("start_line", snapshot.start)
             .put("end_line", snapshot.end)
             .put("total_lines", snapshot.total)
+            .put("has_more", snapshot.end < snapshot.total)
+            .put("next_offset", if (snapshot.end < snapshot.total) snapshot.end else JSONObject.NULL)
+            .put("retained_start_line", snapshot.retainedStart)
             .put("running", snapshot.running)
             .put("waiting_for_input", waiting)
             .put("error", snapshot.error ?: JSONObject.NULL)
@@ -308,7 +312,7 @@ internal class UbuntuSubsystemProcessCapability(
         terminal.sendInterruptSignalToSessionNow(record.sessionId)
         delay(TERMINATE_SETTLE_MS)
         record.collectorJob?.cancel()
-        finish(record, null, "Terminated by capability caller")
+        finish(record, "Terminated by capability caller")
         releaseTerminalResources(record)
         return ok("Process $pid terminated.").put("pid", pid)
     }
@@ -324,13 +328,22 @@ internal class UbuntuSubsystemProcessCapability(
         terminal.appendSharedHiddenOperationOutput(record.sharedOperationId, newLines.joinToString("\n"))
     }
 
-    private fun finish(record: ProcessRecord, finalOutput: String?, error: String?) {
+    private fun finish(record: ProcessRecord, error: String?, completedOutput: String? = null) {
         val sharedOutput = synchronized(record) {
             if (!record.running) return
-            if (!finalOutput.isNullOrBlank()) {
-                val finalLines = splitLines(finalOutput.takeLast(MAX_COMPLETION_RECONCILE_CHARS))
-                finalLines.forEach { line -> if (record.nextLine == 0 || line != record.lines.lastOrNull()) addBufferedLine(record, line) }
-                trimBuffer(record)
+            if (!completedOutput.isNullOrEmpty()) {
+                // Completion is authoritative, including progress-line replacements and cancellation messages.
+                val finalLines = splitLines(completedOutput)
+                val firstLine = (record.nextLine - finalLines.size).coerceAtLeast(0)
+                record.lines.clear()
+                record.bufferedChars = 0
+                record.baseLine = firstLine
+                record.nextLine = firstLine
+                finalLines.forEach { line ->
+                    addBufferedLine(record, line)
+                    trimBuffer(record)
+                }
+                record.readCursor = record.readCursor.coerceIn(record.baseLine, record.nextLine)
             }
             record.running = false
             record.terminalError = error
@@ -384,7 +397,7 @@ internal class UbuntuSubsystemProcessCapability(
             val localEnd = (end - record.baseLine).coerceAtLeast(localStart)
             val selected = record.lines.subList(localStart, localEnd).toList()
             if (advanceCursor) record.readCursor = end
-            ReadSnapshot(start, end, record.nextLine, record.running, selected, record.terminalError)
+            ReadSnapshot(start, end, record.nextLine, record.running, selected, record.terminalError, record.baseLine)
         }
         val waiting = snapshot.running && terminal.isSessionWaitingForInput(record.sessionId)
         return buildString {
@@ -462,7 +475,8 @@ internal class UbuntuSubsystemProcessCapability(
         val total: Int,
         val running: Boolean,
         val lines: List<String>,
-        val error: String?
+        val error: String?,
+        val retainedStart: Int
     )
 
     private fun ok(text: String): JSONObject = JSONObject().put("success", true).put("text", text)

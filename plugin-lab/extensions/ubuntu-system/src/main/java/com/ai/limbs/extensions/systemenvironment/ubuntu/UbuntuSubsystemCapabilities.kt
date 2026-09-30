@@ -384,8 +384,18 @@ internal object UbuntuSubsystemCapabilities {
         val collector = launch(start = CoroutineStart.UNDISPATCHED) {
             terminal.commandExecutionEvents.collect { event ->
                 if (event.sessionId == sessionId && event.commandId == commandId) {
-                    if (event.outputChunk.isNotEmpty()) output.append(event.outputChunk)
-                    if (event.isCompleted && !completed.isCompleted) completed.complete(Unit)
+                    // Completed outputChunk is a full snapshot of the same streamed lines.
+                    if (!event.isCompleted && event.outputChunk.isNotEmpty()) {
+                        if (output.isNotEmpty() && output.last() != '\n') output.append('\n')
+                        output.append(event.outputChunk)
+                    }
+                    if (event.isCompleted && !completed.isCompleted) {
+                        if (event.outputChunk.isNotEmpty()) {
+                            output.setLength(0)
+                            output.append(event.outputChunk)
+                        }
+                        completed.complete(Unit)
+                    }
                 }
             }
         }
