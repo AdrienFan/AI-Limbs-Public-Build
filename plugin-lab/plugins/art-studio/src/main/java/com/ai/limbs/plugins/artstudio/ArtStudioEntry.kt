@@ -106,12 +106,16 @@ class ArtStudioEntry : InProcessPluginEntry {
                 .put("x", -p.optInt("offsetX", 0)).put("y", -p.optInt("offsetY", 0)))
         }
         capability("view.state", "读取画室视图状态", read,
-            "查看面板、状态栏、网格、像素网格和宿主页面模式的当前状态。") {
+            "查看面板、状态栏、网格、像素网格、宿主页面模式及缩放工具方向 zoomToolMode（in/out）和角标 zoomToolBadge（大/小）。") {
             ArtStudioViewControl.state.value.describe()
         }
         capability("view.set", "设置画室视图选项", InProcessCapabilityEffect.UI_INTERACTION,
             "option 可取 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；设置与阿伟菜单相同的视图状态。") { p ->
             ArtStudioViewControl.setOption(p.getString("option"), p.getBoolean("enabled"))
+        }
+        capability("view.zoom_tool", "设置缩放工具方向", InProcessCapabilityEffect.UI_INTERACTION,
+            "mode 为 in（放大）、out（缩小）或 toggle（交替切换）。只设置方向，不立即缩放、不改变选中工具；与手机角标及点击画布共享状态。立即缩放使用 view.command 的 zoom_in/zoom_out。") { p ->
+            ArtStudioViewControl.setZoomToolMode(p.getString("mode"))
         }
         capability("view.command", "操作画室视图", InProcessCapabilityEffect.UI_INTERACTION,
             "在画室画布打开时执行 zoom_in/out/100、fit/fit_width/fit_height、rotate_right/left、reset_rotation、mirror、reset_display 或 refresh。") { p ->
@@ -487,6 +491,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
+        "view.zoom_tool" -> listOf(p("mode"))
         "view.presentation" -> listOf(p("mode"))
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
             p("background", optional = true), p("name", optional = true))

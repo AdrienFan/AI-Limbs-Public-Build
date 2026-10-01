@@ -10,14 +10,19 @@ internal data class StudioViewSettings(
     val statusBarVisible: Boolean = true,
     val gridVisible: Boolean = false,
     val pixelGridVisible: Boolean = true,
-    val presentationMode: String = "normal"
+    val presentationMode: String = "normal",
+    val zoomToolMode: String = "in"
 ) {
+    val zoomToolBadge: String get() = if (zoomToolMode == "in") "大" else "小"
+
     fun describe(): JSONObject = JSONObject()
         .put("panelsHidden", panelsHidden)
         .put("statusBarVisible", statusBarVisible)
         .put("gridVisible", gridVisible)
         .put("pixelGridVisible", pixelGridVisible)
         .put("presentationMode", presentationMode)
+        .put("zoomToolMode", zoomToolMode)
+        .put("zoomToolBadge", zoomToolBadge)
 }
 
 /** The human menu and Laner's capabilities address the same live view state. */
@@ -37,6 +42,18 @@ internal object ArtStudioViewControl {
                 "gridVisible" -> current.copy(gridVisible = enabled)
                 else -> current.copy(pixelGridVisible = enabled)
             }
+        }
+        return state.value.describe()
+    }
+
+    // One atomic direction state drives both the toolbox badge and canvas taps.
+    // Keeping independent UI/AI flags would let the displayed direction disagree.
+    fun setZoomToolMode(mode: String): JSONObject {
+        require(mode in setOf("in", "out", "toggle")) { "缩放工具方向必须是 in、out 或 toggle" }
+        state.update { current ->
+            current.copy(zoomToolMode = if (mode == "toggle") {
+                if (current.zoomToolMode == "in") "out" else "in"
+            } else mode)
         }
         return state.value.describe()
     }

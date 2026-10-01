@@ -88,6 +88,11 @@ internal object ArtToolCatalog {
                 .put("implemented", false).put("status", "planned")
                 .put("source", item.source))
         }
+        val zoomState = ArtStudioViewControl.state.value
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
+            .put("zoomTool", JSONObject().put("mode", zoomState.zoomToolMode)
+                .put("badge", zoomState.zoomToolBadge)
+                .put("modeCapability", "$ART_ID.view.zoom_tool")
+                .put("usage", "选中后再次点击图标切换放大/缩小；点击画布以该点为中心缩放。"))
     }
 }

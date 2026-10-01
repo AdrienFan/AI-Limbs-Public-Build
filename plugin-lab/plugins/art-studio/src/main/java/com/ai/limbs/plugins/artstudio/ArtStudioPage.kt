@@ -35,6 +35,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Fullscreen
 import androidx.compose.material.icons.filled.FullscreenExit
 import androidx.compose.material.icons.filled.PushPin
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -55,6 +56,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1467,7 +1469,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         Box(Modifier.fillMaxSize()) {
                             val availableTools = ArtToolCatalog.implemented
                             val plannedTools = ArtToolCatalog.pending
-                            val selectedToolName = availableTools.firstOrNull { it.first == tool }?.second ?: tool
+                            val selectedToolName = if (tool == "zoom")
+                                "缩放画布 · " + if (viewOptions.zoomToolMode == "in") "放大" else "缩小"
+                            else availableTools.firstOrNull { it.first == tool }?.second ?: tool
 
                             Row(Modifier.fillMaxWidth().height(48.dp).padding(start = 4.dp, end = 2.dp),
                                 verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -1622,18 +1626,25 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                     Row(Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceEvenly) {
                                         pair.forEach { (id, label, glyph) ->
+                                            val toolLabel = if (id == "zoom")
+                                                label + if (viewOptions.zoomToolMode == "in")
+                                                    "：放大；再次点击切换缩小" else "：缩小；再次点击切换放大"
+                                            else label
                                             TooltipBox(
                                                 positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
                                                 tooltip = {
                                                     PlainTooltip {
-                                                        Text(label)
+                                                        Text(toolLabel)
                                                     }
                                                 },
                                                 state = rememberTooltipState(),
                                                 enableUserInput = true
                                             ) {
                                                 Surface(Modifier.size(40.dp)
-                                                    .clickable(onClickLabel = label) {
+                                                    .semantics { contentDescription = toolLabel }
+                                                    .clickable(onClickLabel = toolLabel) {
+                                                        if (id == "zoom" && tool == "zoom")
+                                                            ArtStudioViewControl.setZoomToolMode("toggle")
                                                         tool = id
                                                     },
                                                     shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
@@ -1642,10 +1653,19 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                     else MaterialTheme.colorScheme.surfaceVariant) {
                                                     Box(Modifier.fillMaxSize(),
                                                         contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                        Text(glyph, style = MaterialTheme.typography.titleMedium,
-                                                            modifier = Modifier.semantics {
-                                                                contentDescription = label
-                                                            })
+                                                        if (id == "zoom") {
+                                                            Icon(Icons.Default.Search, contentDescription = null,
+                                                                modifier = Modifier.size(24.dp))
+                                                            Text(viewOptions.zoomToolBadge,
+                                                                fontSize = 10.sp, lineHeight = 12.sp,
+                                                                modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)
+                                                                    .padding(end = 3.dp, bottom = 2.dp))
+                                                        } else {
+                                                            Text(glyph, style = MaterialTheme.typography.titleMedium,
+                                                                modifier = Modifier.semantics {
+                                                                    contentDescription = label
+                                                                })
+                                                        }
                                                     }
                                                 }
                                             }
@@ -2951,6 +2971,27 @@ private class StudioCanvas(context: Context) : View(context) {
         if (width == 0 || height == 0) return 1f
         return minOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height) * 0.98f
     }
+    private fun fittedCenterX(bitmap: Bitmap, fit: Float): Float {
+        val fittedWidth = bitmap.width * fit
+        return when {
+            horizontalFitBias < 0f -> fittedWidth / 2f
+            horizontalFitBias > 0f -> width - fittedWidth / 2f
+            else -> width / 2f
+        }
+    }
+
+    private fun zoomAt(x: Float, y: Float) {
+        val bitmap = requireNotNull(image)
+        val previous = zoom
+        val mode = ArtStudioViewControl.state.value.zoomToolMode
+        zoom = (if (mode == "in") zoom * 1.5f else zoom / 1.5f).coerceIn(0.1f, 16f)
+        val factor = zoom / previous
+        // The click must stay over the same image point, including a dock-biased canvas.
+        val centerX = fittedCenterX(bitmap, fitScale())
+        panX = x - centerX - factor * (x - centerX - panX)
+        panY = y - height / 2f - factor * (y - height / 2f - panY)
+    }
+
     fun zoomIn() { zoom = (zoom * 1.25f).coerceIn(0.1f, 16f); invalidate() }
     fun zoomOut() { zoom = (zoom / 1.25f).coerceIn(0.1f, 16f); invalidate() }
     fun zoomTo100Percent() {
@@ -3040,12 +3081,7 @@ private class StudioCanvas(context: Context) : View(context) {
         val bitmap = image ?: return
         matrix.reset()
         val fit = minOf(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height) * 0.98f
-        val fittedWidth = bitmap.width * fit
-        val fittedCenterX = when {
-            horizontalFitBias < 0f -> fittedWidth / 2f
-            horizontalFitBias > 0f -> width - fittedWidth / 2f
-            else -> width / 2f
-        }
+        val fittedCenterX = fittedCenterX(bitmap, fit)
         matrix.postTranslate(-bitmap.width / 2f, -bitmap.height / 2f)
         matrix.postScale(fit * zoom, fit * zoom)
         matrix.postRotate(angle)
@@ -3378,13 +3414,7 @@ private class StudioCanvas(context: Context) : View(context) {
                         .put("height", kotlin.math.abs(xy[1] - startY)))
                     "move", "transform" -> onMove(xy[0] - startX, xy[1] - startY)
                     "pan" -> Unit
-                    "zoom" -> {
-                        val previous = zoom
-                        zoom = (zoom * 1.5f).coerceAtMost(16f)
-                        val factor = zoom / previous
-                        panX = event.x - width / 2f - factor * (event.x - width / 2f - panX)
-                        panY = event.y - height / 2f - factor * (event.y - height / 2f - panY)
-                    }
+                    "zoom" -> zoomAt(event.x, event.y)
                     "measure" -> measurement = floatArrayOf(startX, startY, xy[0], xy[1])
                     "fill" -> {
                         val sampled = image

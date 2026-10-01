@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.21 源码；修复 0.2.20 编译错误，格式与基础文字待编译验收）
+# AI Limbs 画室（0.2.22 源码；缩放工具双方向迭代，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -310,3 +310,10 @@ image.formats 返回格式、扩展名、MIME、系统声明的 decoderAvailable
 0.2.20 云端编译任务 36802315874 在 compileDebugKotlin 失败：格式说明读取的 ArtStore companion 是 private；图片缩小确认的旧 perform 位置参数调用误绑定到新增 onSuccess 回调。仅将图片限额常量的 companion 可见性调整为插件模块内 internal，进程锁继续 private；确认调用改用 confirmation/action 命名参数。
 
 版本码 24，payload 为 artstudio.v0221。保留 0.2.19 格式拓展与 0.2.20 基础可编辑文字，未改宿主。提交云端重新编译；尚未完成编译或安装验收。
+
+
+## 0.2.22 缩放工具双方向
+
+基于已安装验收的 0.2.21；用户确认常见格式打开及字体有效。缩放工具默认放大，角标“大”；工具选中后再次点图标切为缩小，角标“小”，继续点交替切换。切换到其他工具再回来保留本次会话方向。方向切换本身不缩放；点击画布以点击点为中心，放大 ×1.5、缩小 ÷1.5，限制沿用相对适屏比例 0.1–16。停靠栏使画布偏移时仍使用真实显示中心计算锚点，不修改图像尺寸、像素或撤销历史。双指与菜单缩放保留原行为。
+
+手机、AI 使用同一原子视图方向状态。view.state 返回 zoomToolMode（in/out）、zoomToolBadge（大/小）；view.zoom_tool 的 mode 为 in/out/toggle，只设置方向，不立即缩放或选择工具。AI 立即缩放仍用 view.command zoom_in/zoom_out；toolbox.catalog 提供模式和入口。版本码 25，payload artstudio.v0222。仅画室插件改动，本轮未编译、推送或安装。
