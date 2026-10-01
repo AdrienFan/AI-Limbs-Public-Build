@@ -81,6 +81,7 @@ internal object ArtBezierSelection {
             ArtSelection.validate(s)
             count+=when(s.optString("shape","rect")) {"bezier"->s.getJSONArray("nodes").length();"polygon"->s.getJSONArray("vertices").length();else->4}
         }
+        require(parts.sumOf {it.getJSONObject("selection").let {child->if(child.optString("shape")=="raster")child.getInt("runCount") else 0}}<=ArtRasterSelection.MAX_RUNS) {"复合区域超过32768扫描段，请先替换选区"}
         require(count<=MAX_TOTAL_NODES) {"复合选区累计节点超过8192，请先替换选区"}
         val path=compoundPath(parts)
         if(path.isEmpty)return empty()

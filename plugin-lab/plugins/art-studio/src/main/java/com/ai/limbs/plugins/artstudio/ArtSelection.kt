@@ -9,7 +9,7 @@ internal object ArtSelection {
     fun validate(selection: JSONObject) {
         for(key in listOf("x","y","width","height"))require(selection.getDouble(key).isFinite()) {"选区坐标无效"}
         require(selection.getDouble("width")>=0 && selection.getDouble("height")>=0)
-        if(selection.optString("shape","rect") in setOf("bezier","compound")) {
+        if(selection.optString("shape","rect") in setOf("bezier","compound","raster")) {
             val bounds=ArtBezierSelection.frame(selection)
             require(listOf(bounds.left,bounds.top,bounds.right,bounds.bottom).all {it.isFinite() && kotlin.math.abs(it)<=1_000_000}) {"曲线选区框架超出坐标范围"}
         }
@@ -23,6 +23,7 @@ internal object ArtSelection {
                     val q=points.getJSONArray(i);require(q.length()==2 && q.getDouble(0) in 0.0..1.0 && q.getDouble(1) in 0.0..1.0)
                 }
             }
+            "raster" -> {require(selection.getDouble("width")>0 && selection.getDouble("height")>0);ArtRasterSelection.decode(selection)}
             "bezier" -> {
                 require(selection.getDouble("width")>0 && selection.getDouble("height")>0)
                 val nodes=ArtBezierSelection.nodes(selection)
@@ -38,12 +39,13 @@ internal object ArtSelection {
                 var count=0
                 for(i in 0 until parts.length()) {
                     val part=parts.getJSONObject(i);val child=part.getJSONObject("selection")
-                    require(child.optString("shape","rect") in setOf("rect","ellipse","polygon","bezier")) {"复合选区分量必须为基本轮廓"}
+                    require(child.optString("shape","rect") in setOf("rect","ellipse","polygon","bezier","raster")) {"复合选区分量必须为基本轮廓"}
                     require(part.getString("mode") in if(i==0)setOf("replace") else setOf("add","subtract","intersect"))
                     validate(child)
                     count+=when(child.optString("shape","rect")) {"bezier"->child.getJSONArray("nodes").length();"polygon"->child.getJSONArray("vertices").length();else->4}
                 }
                 require(count<=ArtBezierSelection.MAX_TOTAL_NODES)
+                require((0 until parts.length()).sumOf {parts.getJSONObject(it).getJSONObject("selection").let {child->if(child.optString("shape")=="raster")child.getInt("runCount") else 0}}<=ArtRasterSelection.MAX_RUNS)
             }
             else -> error("选区形状无效")
         }
@@ -120,6 +122,7 @@ internal object ArtSelection {
                 "bezier" -> {
                     set(ArtPathGeometry.preview(ArtBezierSelection.nodes(selection),true));fillType=Path.FillType.EVEN_ODD
                 }
+                "raster" -> set(ArtRasterSelection.path(selection))
                 "compound" -> set(ArtBezierSelection.compoundPath(ArtBezierSelection.parts(selection)))
                 else -> error("未知选区形状")
             }
@@ -132,7 +135,7 @@ internal object ArtSelection {
         val width = selection.getDouble("width")
         val height = selection.getDouble("height")
         if (width <= 0.0 || height <= 0.0) return false
-        if(selection.optString("shape","rect") in setOf("bezier","compound"))return containsPath(path(selection),x,y)
+        if(selection.optString("shape","rect") in setOf("bezier","compound","raster"))return containsPath(path(selection),x,y)
         return when (selection.optString("shape", "rect")) {
             "ellipse" -> {
                 val dx = (2.0 * (x - left) / width) - 1.0
@@ -162,7 +165,7 @@ internal object ArtSelection {
 
     fun intersectsSegment(selection: JSONObject, x0: Double, y0: Double,
                           x1: Double, y1: Double): Boolean {
-        if(selection.optString("shape","rect") in setOf("bezier","compound"))
+        if(selection.optString("shape","rect") in setOf("bezier","compound","raster"))
             return intersectsPath(path(selection),listOf(x0.toFloat() to y0.toFloat(),x1.toFloat() to y1.toFloat()))
         if (contains(selection, x0, y0) || contains(selection, x1, y1)) return true
         val width = selection.getDouble("width")

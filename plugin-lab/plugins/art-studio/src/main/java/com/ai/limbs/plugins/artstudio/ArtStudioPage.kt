@@ -418,6 +418,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var selectionBezierNode by remember {mutableIntStateOf(0)}
     var selectionBezierMode by remember {mutableStateOf("replace")}
     var selectionBezierSmooth by remember {mutableStateOf(false)}
+    var contiguousSettings by remember {mutableStateOf(ArtColorSelection.defaults())}
+    var similarSettings by remember {mutableStateOf(ArtColorSelection.defaults())}
+    var magneticSettings by remember {mutableStateOf(ArtMagneticSelection.defaults())}
+    var magneticImage by remember {mutableStateOf<ArtMagneticSelection.Image?>(null)}
+    var magneticDraft by remember {mutableStateOf(false)}
     var comicPanelSettings by remember {mutableStateOf(ArtComicPanels.defaults())}
     var encloseFillSettings by remember {mutableStateOf(ArtEncloseFill.defaults())}
     var smartPatchSettings by remember { mutableStateOf(ArtSmartPatch.info().getJSONObject("defaults")) }
@@ -974,6 +979,21 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
 
     val current = snapshot
+    LaunchedEffect(tool,current?.optString("id"),revision,selected,
+        magneticSettings.getString("reference"),magneticSettings.getInt("filterRadius"),magneticSettings.getBoolean("limitToSelection")) {
+        magneticImage=null
+        if(tool=="select_magnetic" && current!=null && selected.isNotBlank()) {
+            val request=JSONObject(magneticSettings.toString()).put("documentId",current.getString("id"))
+                .put("expectedRevision",current.getInt("revision")).put("layerId",selected)
+            try {
+                magneticImage=withContext(Dispatchers.IO) {store.magneticReference(request)}
+            } catch(error: kotlinx.coroutines.CancellationException) {throw error}
+            catch(error: Exception) {
+                host.logger.e("ArtStudio","Magnetic reference preparation failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     val clipboardSize = remember(current?.optString("id"), current?.optBoolean("hasClipboard"),
         revision) {
         val clip = store.clipboardInfo()
@@ -1406,6 +1426,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onSelectionBezierNode={selectionBezierNode=it}
                     view.onSelectionBezierCreate={p -> if(!busy)perform {store.bezierSelectionCreate("AWEI",p)}}
                     view.onSelectionBezierEdit={p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}}
+                    view.colorSelectionOptions=if(tool=="select_contiguous")contiguousSettings else similarSettings
+                    view.onColorSelection={p -> if(!busy)perform {store.colorSelection("AWEI",p,tool=="select_contiguous")}}
+                    view.magneticOptions=magneticSettings;view.magneticSource=magneticImage
+                    view.onMagneticDraft={magneticDraft=it}
+                    view.onMagneticComplete={p -> if(!busy)perform {store.magneticCommit("AWEI",p)}}
                     view.comicPanelOptions=comicPanelSettings
                     view.onComicPanel={mode,p -> if(!busy)perform {store.comicEdit("AWEI",mode,p)}}
                     view.encloseFillOptions=encloseFillSettings
@@ -2303,6 +2328,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         {command -> canvasRef[0]?.selectionBezierCommand(command)},
                         {p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}})
                 }
+                if(tool=="select_contiguous")StudioColorSelectionOptions(contiguousSettings,true,busy,{contiguousSettings=it})
+                if(tool=="select_similar")StudioColorSelectionOptions(similarSettings,false,busy,{similarSettings=it})
+                if(tool=="select_magnetic")StudioMagneticSelectionOptions(magneticSettings,busy,magneticDraft,magneticImage!=null,
+                    {magneticSettings=it},{command -> canvasRef[0]?.magneticCommand(command)})
                 if(tool=="comic_panel") {
                     StudioComicPanelOptions(current,selected,busy,comicPanelSettings,{comicPanelSettings=it},
                         {p -> if(!busy)perform {store.apply("AWEI","VECTOR_LAYER_CREATE",p.put("id",java.util.UUID.randomUUID().toString()))}},
@@ -2590,7 +2619,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     FilterChip(selected = viewOptions.zoomToolMode == "out",
                         onClick = { ArtStudioViewControl.setZoomToolMode("out") }, label = { Text("缩小") })
                 }
-                if (tool !in setOf("comic_panel", "select_bezier", "enclose_fill", "colorize_mask", "smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
+                if (tool !in setOf("select_contiguous", "select_similar", "select_magnetic", "comic_panel", "select_bezier", "enclose_fill", "colorize_mask", "smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
                     "vector_freehand", "shape_select", "svg_text", "sampler", "fill", "mirror",
                     "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "calligraphy", "dyna", "zoom")) {
                     Text("此工具暂无独立参数。")
@@ -3071,7 +3100,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3091,10 +3120,10 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     var scene: JSONObject? = null
     var sceneRevision: Int = 0
-        set(value) {if(field!=value){field=value;comicPanelInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var shapeMultiple: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value)comicPanelInteraction.cancel()}
+        set(value) {field=value;if(value){comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3111,6 +3140,16 @@ private class StudioCanvas(context: Context) : View(context) {
     var onSelectionBezierNode: (Int)->Unit = {}
     var onSelectionBezierCreate: (JSONObject)->Unit = {}
     var onSelectionBezierEdit: (JSONObject)->Unit = {}
+    private val colorSelectionInteraction=StudioColorSelectionInteraction()
+    var colorSelectionOptions=ArtColorSelection.defaults()
+    var onColorSelection: (JSONObject)->Unit = {}
+    private val magneticSelectionInteraction=StudioMagneticSelectionInteraction(this)
+    var magneticOptions=ArtMagneticSelection.defaults()
+    var magneticSource: ArtMagneticSelection.Image?=null
+        set(value) {field=value;magneticSelectionInteraction.source(value)}
+    var onMagneticDraft: (Boolean)->Unit = {}
+        set(value) {field=value;magneticSelectionInteraction.onDraft=value}
+    var onMagneticComplete: (JSONObject)->Unit = {}
     private val comicPanelInteraction=StudioComicPanelInteraction()
     var comicPanelOptions=ArtComicPanels.defaults()
     var onComicPanel: (String,JSONObject)->Unit = {_,_->}
@@ -3157,7 +3196,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
-        set(value) {if(field!=value){field=value;comicPanelInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var selection: JSONObject? = null
     var selectionVisible = true
     var tool: String = "ink"
@@ -3167,7 +3206,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
-                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
@@ -3383,11 +3422,11 @@ private class StudioCanvas(context: Context) : View(context) {
         val actual=fitScale()*zoom
         panX=width/2f-fittedCenterX(bitmap,fitScale())+(bitmap.width/2f-bounds.centerX())*actual
         panY=(bitmap.height/2f-bounds.centerY())*actual
-        referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel();invalidate();publishZoom()
+        referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();publishZoom()
     }
 
     fun fitToWindow() {
-        encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel()
+        encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
         zoom = 1f
         angle = 0f
         panX = 0f
@@ -3478,6 +3517,7 @@ private class StudioCanvas(context: Context) : View(context) {
         if(tool=="assistant")assistantInteraction.drawDraft(canvas,matrix)
         if(tool=="select_bezier")scene?.let {selectionBezierInteraction.draw(canvas,it,documentId,sceneRevision,matrix,
             selectionBezierEditing,selectionBezierComponent,selectionBezierNode)}
+        if(tool=="select_magnetic")magneticSelectionInteraction.draw(canvas)
         if(tool=="comic_panel")comicPanelInteraction.draw(canvas)
         encloseFillInteraction.draw(canvas)
         colorizeInteraction.draw(canvas)
@@ -3668,9 +3708,40 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
 
+    fun magneticCommand(action: String) {
+        if(shapeBusy && action!="cancel")return
+        try {magneticSelectionInteraction.command(action)}
+        catch(error: Exception) {
+            android.util.Log.e("ArtStudio","Magnetic selection command failed",error)
+            Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()
+        }
+    }
+    override fun onHoverEvent(event: MotionEvent): Boolean {
+        if(tool!="select_magnetic")return super.onHoverEvent(event)
+        try {return magneticSelectionInteraction.touch(event,documentId,sceneRevision,selectedId,matrix,shapeBusy,magneticOptions,onMagneticComplete)}
+        catch(error: Exception) {
+            magneticSelectionInteraction.cancel()
+            android.util.Log.e("ArtStudio","Magnetic selection hover failed",error)
+            return true
+        }
+    }
+    override fun onDetachedFromWindow() {
+        magneticSelectionInteraction.dispose();colorSelectionInteraction.cancel()
+        super.onDetachedFromWindow()
+    }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="select_magnetic") {
+            when(keyCode) {
+                android.view.KeyEvent.KEYCODE_ESCAPE->{magneticCommand("cancel");return true}
+                android.view.KeyEvent.KEYCODE_ENTER->{magneticCommand("finish");return true}
+                android.view.KeyEvent.KEYCODE_DEL,android.view.KeyEvent.KEYCODE_FORWARD_DEL->{magneticCommand("back");return true}
+            }
+        }
+        if(tool in setOf("select_contiguous","select_similar") && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
+            colorSelectionInteraction.cancel();invalidate();return true
+        }
         if(tool=="comic_panel" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            comicPanelInteraction.cancel();invalidate();return true
+            comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();invalidate();return true
         }
         if(tool=="select_bezier") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {selectionBezierCommand("cancel");return true}
@@ -3678,13 +3749,13 @@ private class StudioCanvas(context: Context) : View(context) {
             if(!selectionBezierEditing && keyCode==android.view.KeyEvent.KEYCODE_DEL) {selectionBezierCommand("back");return true}
         }
         if(tool=="enclose_fill" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
+            encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="colorize_mask" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
+            colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="smart_patch" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
+            smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="assistant") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {assistantInteraction.cancel();invalidate();return true}
@@ -3723,7 +3794,7 @@ private class StudioCanvas(context: Context) : View(context) {
             shapeInteraction.cancel()
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
-            referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel()
+            referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
             assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
@@ -3772,6 +3843,25 @@ private class StudioCanvas(context: Context) : View(context) {
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
         }
+        if(tool in setOf("select_contiguous","select_similar")) {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            val state=scene ?: return true
+            try {return colorSelectionInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,colorSelectionOptions,onColorSelection)}
+            catch(error: Exception) {
+                colorSelectionInteraction.cancel()
+                android.util.Log.e("ArtStudio","Color selection gesture failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {invalidate()}
+        }
+        if(tool=="select_magnetic") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            try {return magneticSelectionInteraction.touch(event,documentId,sceneRevision,selectedId,matrix,shapeBusy,magneticOptions,onMagneticComplete)}
+            catch(error: Exception) {
+                magneticSelectionInteraction.cancel()
+                android.util.Log.e("ArtStudio","Magnetic selection gesture failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {invalidate()}
+        }
         if(tool=="comic_panel") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
@@ -3791,7 +3881,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return encloseFillInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
                     encloseFillOptions,color,onEncloseFill)
             } catch(error:Exception) {
-                encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel()
+                encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Enclose fill gesture failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -3803,7 +3893,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return colorizeInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
                     color,colorizeWidth,colorizeErase,onColorizeCreate,onColorizeStroke)
             } catch(error:Exception) {
-                colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel()
+                colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Colorize key stroke failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -3815,7 +3905,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return smartPatchInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,
                     shapeBusy,smartPatchOptions,onSmartPatch)
             } catch(error:Exception) {
-                smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel()
+                smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Smart patch mask failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -3858,7 +3948,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return referenceInteraction.touch(event,state,documentId,sceneRevision,matrix,
                     referenceMultiple,shapeBusy,onReferenceEdit)
             } catch(error:Exception) {
-                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();selectionBezierInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Reference interaction failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             }

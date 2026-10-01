@@ -745,6 +745,74 @@ internal class ArtStore(private val root: File) {
         if(p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已更新，请重新读取选区"}
         return snap
     }
+    /** Reference layers retain their document transforms; helpers and background are excluded. */
+    private fun selectionReference(snap: JSONObject,p: JSONObject,workingBytes: Long): android.graphics.Bitmap {
+        val view=JSONObject(snap.toString());val state=view.getJSONObject("state");val all=ArtMenuOperations.layers(state)
+        val layerId=p.getString("layerId");val target=all.firstOrNull {it.getString("id")==layerId} ?: error("参考图层不存在")
+        require(p.getString("reference") in setOf("current","visible"))
+        state.put("background","#00000000")
+        if(p.getString("reference")=="current") {
+            require(target.getString("kind")!="group") {"当前层参考需要实际内容图层，请选择绘画、图像、文字或矢量层"}
+            val included=mutableSetOf(layerId);var parent=target.optString("parentId")
+            repeat(all.size+1) {
+                if(parent.isNotBlank()) {
+                    require(included.add(parent)) {"图层组循环引用"}
+                    val group=all.first {it.getString("id")==parent};parent=group.optString("parentId")
+                }
+            }
+            require(parent.isBlank())
+            for(layer in all) {
+                layer.put("visible",layer.getString("id") in included)
+                if(layer.getString("id") in included)layer.put("opacity",1.0).put("blend","normal")
+            }
+        }
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height"))+workingBytes,"选区参考与搜索")
+        return ArtRenderer.render(this,view)
+    }
+    private fun selectionToolRequest(p: JSONObject): JSONObject {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请重新建立选区"}
+        return snap
+    }
+    fun colorSelection(actor: String,p: JSONObject,connected: Boolean): JSONObject = locked {
+        val snap=selectionToolRequest(p);val state=snap.getJSONObject("state");val o=ArtColorSelection.options(p)
+        val request=JSONObject(p.toString());o.keys().forEach {request.put(it,o.get(it))}
+        val bounds=ArtColorSelection.bounds(state,request)
+        val bitmap=selectionReference(snap,request,bounds.width().toLong()*bounds.height()*24)
+        val result=try {ArtColorSelection.solve(state,bitmap,request,connected)} finally {bitmap.recycle()}
+        val selection=ArtBezierSelection.combine(state.optJSONObject("selection"),result.selection,o.getString("mode"))
+        apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+            .put("selection",selection).put("tool",if(connected)"contiguous" else "similar"))
+            .put("selectedPixels",result.pixels).put("sampledColor",result.sampledColor).put("selectionFeedback",true)
+    }
+    fun magneticReference(p: JSONObject): ArtMagneticSelection.Image = locked {
+        val snap=selectionToolRequest(p);val o=ArtMagneticSelection.options(p)
+        val request=JSONObject(p.toString());o.keys().forEach {request.put(it,o.get(it))}
+        val bounds=ArtColorSelection.bounds(snap.getJSONObject("state"),request)
+        val bitmap=selectionReference(snap,request,bounds.width().toLong()*bounds.height()*16+ArtMagneticSelection.MAX_SEARCH_PIXELS*64L)
+        try {ArtMagneticSelection.image(snap,bitmap,request)} finally {bitmap.recycle()}
+    }
+    fun magneticTrace(p: JSONObject): JSONObject = locked {
+        val image=magneticReference(p);val points=ArtMagneticSelection.trace(image,ArtMagneticSelection.anchors(p.getJSONArray("anchors")),p,p.optBoolean("closed",false))
+        JSONObject().put("documentId",image.documentId).put("revision",image.revision).put("points",ArtMagneticSelection.json(points))
+            .put("closed",p.optBoolean("closed",false)).put("algorithm","rgba-sobel-live-wire")
+    }
+    fun magneticCreate(actor: String,p: JSONObject): JSONObject = locked {
+        val image=magneticReference(p)
+        val points=ArtMagneticSelection.trace(image,ArtMagneticSelection.anchors(p.getJSONArray("anchors")),p,true)
+        magneticCommit(actor,JSONObject(p.toString()).put("points",ArtMagneticSelection.json(points)))
+    }
+    fun magneticCommit(actor: String,p: JSONObject): JSONObject = locked {
+        val snap=selectionToolRequest(p);val o=ArtMagneticSelection.options(p)
+        val created=ArtSelection.fromVertices(p.getJSONArray("points"));ArtSelection.validate(created)
+        val path=ArtSelection.path(created);val canonical=android.graphics.Path()
+        check(canonical.op(path,path,android.graphics.Path.Op.UNION))
+        require(!canonical.isEmpty) {"磁性路径没有围出有效面积"}
+        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,o.getString("mode"))
+        apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+            .put("selection",selection).put("tool","magnetic")).put("selectionFeedback",true).put("algorithm","rgba-sobel-live-wire")
+    }
+
     private fun comicRequest(p: JSONObject): JSONObject {
         val snap=current()
         require(p.getString("documentId")==snap.getString("id")) {"工程已切换，请重新读取"}
@@ -951,7 +1019,7 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
-        if (type=="SELECTION_BEZIER" || type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") || type.startsWith("COLORIZE_") ||
+        if (type=="SELECTION_TOOL" || type=="SELECTION_BEZIER" || type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") || type.startsWith("COLORIZE_") ||
             (type=="STROKE_ADD" && params.has("documentId")) || type == "VECTOR_LAYER_CREATE") {
             require(params.getString("documentId") == doc.getString("id")) { "工程已切换，请重新读取工程" }
             require(params.has("expectedRevision")) { "矢量操作必须绑定工程版本" }
@@ -1555,6 +1623,7 @@ internal class ArtStore(private val root: File) {
                     "ENCLOSE_FILL" -> "围合填充";"ENCLOSE_ERASE" -> "围合擦除";else -> "粘贴像素"
                 }
                 "LAYER_COPY" -> "复制图层"
+                "SELECTION_TOOL" -> when(operation.getJSONObject("parameters").getString("tool")) {"contiguous"->"连续区域选区";"similar"->"相似色选区";else->"磁性套索选区"}
                 "SELECTION_BEZIER" -> "贝塞尔曲线选区"
                 "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
                 "DOCUMENT_RENAME" -> "重命名工程"
@@ -1997,7 +2066,7 @@ internal class ArtStore(private val root: File) {
                     layer.put(field, value)
                 }
             }
-            "SELECTION_BEZIER" -> {
+            "SELECTION_TOOL", "SELECTION_BEZIER" -> {
                 val selected=p.getJSONObject("selection");ArtSelection.validate(selected)
                 state.put("selection",JSONObject(selected.toString()))
             }
@@ -2626,7 +2695,7 @@ internal class ArtStore(private val root: File) {
     }
 
     private fun intersects(points: JSONArray, selection: JSONObject, matrix: Matrix): Boolean {
-        if(selection.optString("shape","rect") in setOf("bezier","compound")) {
+        if(selection.optString("shape","rect") in setOf("bezier","compound","raster")) {
             val mapped=(0 until points.length()).map {i->val p=points.getJSONArray(i)
                 val q=floatArrayOf(p.getDouble(0).toFloat(),p.getDouble(1).toFloat());matrix.mapPoints(q);q[0] to q[1]}
             return ArtSelection.intersectsPath(ArtSelection.path(selection),mapped)

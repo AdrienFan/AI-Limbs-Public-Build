@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.36",
+  "version": "0.2.37",
   "api": {
     "target": 1,
     "min": 1
@@ -187,7 +187,13 @@
       "plugin.art.studio.comic.info",
       "plugin.art.studio.comic.frame",
       "plugin.art.studio.comic.cut",
-      "plugin.art.studio.comic.merge"
+      "plugin.art.studio.comic.merge",
+      "plugin.art.studio.selection.color_info",
+      "plugin.art.studio.selection.contiguous",
+      "plugin.art.studio.selection.similar",
+      "plugin.art.studio.selection.magnetic_info",
+      "plugin.art.studio.selection.magnetic_trace",
+      "plugin.art.studio.selection.magnetic_create"
     ],
     "services": [],
     "providers": [

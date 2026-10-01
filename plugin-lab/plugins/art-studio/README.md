@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.36 源码；漫画分格编辑，待编译验收）
+# AI Limbs 画室（0.2.37 源码；连续区域、相似色和磁性套索选区，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -577,3 +577,21 @@ smart_patch 从灰色工具格升级为基础局部纹理修补。单击选中�
 曲线边框、带孔轮廓、凹多边形切分、同轮廓内部间隙合并、非平行边合并及物理单位保持灰色待实现。此前约定的共享选区抗锯齿/羽化继续延后。
 
 本轮仅画室插件源码：0.2.36 / versionCode39 / appId v0236。未执行编译、构建或测试，未提交云端；手机手势、合并边界、变换和归档需后续安装验收。
+
+## 最后三个基础选区工具（0.2.37）
+
+连续区域、相似色和磁性套索从灰色占位改为可用基础工具；单击选择、双击统一浮窗，所有参数和说明均留在浮窗。对照 Krita selectiontools 三个工具及 KisMagneticWorker，官方[连续区域](https://docs.krita.org/en/reference_manual/tools/contiguous_select.html)、[相似色](https://docs.krita.org/en/reference_manual/tools/similar_select.html)、[磁性套索](https://docs.krita.org/en/reference_manual/tools/magnetic_select.html)说明。
+
+颜色区域采用预乘 RGBA 最大通道差，包括透明度。连续区域为固定种子的四邻域搜索；相似色扫描范围中全部相近颜色，保留互不相连区域。连续区域还支持边界色模式和缺口侵蚀／恢复半径0–8；两者支持颜色容差0–100、扩展／收缩-16–16以及替换、添加、减去、相交。修改键在操作开始时固定。缺口处理后种子失效明确拒绝，不换种子。
+
+精确二值选区使用 deflate-rle-v1 压缩扫描段，保留孔洞和离散部分；native Region 合并扫描段边界，显示不产生内部扫描条纹。每个搜索范围最多4194304像素，单个或复合选区最多32768扫描段；复合仍有32分量和8192几何节点预算。移动、缩放、复制、填色、滤镜、笔画命中通过同一 ArtSelection 边界。解压严格检查尺寸、顺序、长度和编码，不读取无界数据。
+
+参考 current 保留本层和父组变换，读取实际内容层并忽略其透明度／混合；visible 合成可见图层，不包含背景、参考图像、尺规和蒙版线索。当前层参考不支持图层组，可改用可见层参考。搜索可限定 bounds，页面可先建立矩形选区再启用“仅在现有选区范围查找”。超范围和内存预算明确拒绝，不缩图识别。
+
+磁性套索使用 RGBA Sobel 对比边缘和八邻域 A* 路径，搜索被限制在锚点连线附近的有界走廊。filterRadius 是1–4像素的边缘采样半径，不冒充 Krita 完整滤波半径模型；searchRadius=2–64，threshold=0–255，strength=1–20，precision=0.25–4像素的轮廓简化误差。128锚点、每段262144搜索像素、最多2048最终顶点及动态内存检查。超预算请增加中间锚点或限制参考范围。
+
+手机磁性工具在后台计算预览，并缓存已经求解的锚点段。点击放置或拖动按屏幕间距追加；首点、Enter或完成按钮闭合，Backspace或按钮撤回，拖动已有锚点修改，拖出参考范围删除。参数及参考从首点捕获；完成前只预览，完成时一次提交；工程、版本、图层、视图变化以及双指、右键、Esc、卸载视图取消任务。完成后重编辑磁性锚点、颜色标签、完整高级滤波及共享抗锯齿／羽化软选区继续灰色待实现。
+
+AI 新入口 selection.color_info、selection.contiguous、selection.similar、selection.magnetic_info、selection.magnetic_trace、selection.magnetic_create。trace 是只读吸附路径预览，create 才写选区。写操作必填 documentId、expectedRevision、layerId；成功自动附带带轮廓的256像素缩图，与共享撤销及保存回放相同。二值扫描段不是软覆盖蒙版，先前约定的抗锯齿和羽化仍延后。
+
+本轮仅修改画室插件，版本0.2.37 / versionCode40 / appId v0237；包括此前0.2.29–0.2.36未编译改动。源代码检查后提交云端，编译结果与手机交互效果仍待验收。

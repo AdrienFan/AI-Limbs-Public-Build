@@ -293,6 +293,18 @@ class ArtStudioEntry : InProcessPluginEntry {
             "documentId/expectedRevision/maskId必填；将当前缓存填色转普通绘画层，删除编辑线索数据；可撤销恢复。不会重新计算，请先update使用最新线索结果。") {p->store.apply("LANER","COLORIZE_CONVERT",p)}
         capability("colorize.preview","检查填色与颜色线索",read,
             "documentId必填，expectedRevision/maskId可选；256边长缩略图包含所选蒙版的编辑线索与半透明输出，仅用于编辑检查，不是导出。") {p->store.colorizePreview(p)}
+        capability("selection.color_info","读取颜色区域选区参数",read,
+            "连续区域为四邻域连通颜色，相似色为范围内全部相近颜色；返回二值表示、搜索预算、参数与高级灰色项目。") {ArtColorSelection.info()}
+        capability("selection.contiguous","创建连续区域选区",write,
+            "documentId/expectedRevision/layerId/x/y必填，x/y文档整数像素。reference=current/visible默认visible，current保留对象图层变换、忽略本层与父组透明度混合；visible合成可见层，不含背景、参考图像、尺规或蒙版线索。tolerance=0–100默认15，预乘RGBA最大通道差；四邻域固定种子颜色搜索。boundaryMode=true改为在boundaryColor之外连通，默认false/黑色。gapClose=0–8默认0用二值侵蚀断开窄通道后恢复，不替换已失效的种子；expand=-16–16默认0。mode=replace/add/subtract/intersect默认replace，精确二值区域保留孔洞与离散分量。limitToSelection默认false，true在现有选区内查找并剪裁；bounds可选{x,y,width,height}文档整数范围。单次范围4194304像素、32768扫描段及动态内存检查，超预算明确拒绝；成功一次历史与轮廓缩图，返回selectedPixels/sampledColor，不写作品像素。") {p->store.colorSelection("LANER",p,true)}
+        capability("selection.similar","创建相似色选区",write,
+            "documentId/expectedRevision/layerId/x/y必填，文档整数取样点。扫描参考范围中所有相近颜色，包含互不连通区域；tolerance=0–100默认15，预乘RGBA差包括透明度。reference=current/visible默认visible；无背景与辅助对象。mode=replace/add/subtract/intersect默认replace，expand=-16–16默认0；limitToSelection/bounds可选，同连续区域范围及预算。生成真实二值区域和孔洞；一次历史、自动选区缩图、selectedPixels与sampledColor。") {p->store.colorSelection("LANER",p,false)}
+        capability("selection.magnetic_info","读取磁性套索参数与范围",read,
+            "真实RGBA对比边缘最短路径，返回搜索、滤波采样、锚点、精度限制和未实现项目。") {ArtMagneticSelection.info()}
+        capability("selection.magnetic_trace","预览磁性吸附轮廓",read,
+            "documentId/expectedRevision/layerId/anchors必填，anchors为1–128文档坐标[x,y]；closed默认false，闭合至少3点。reference=current/visible默认visible；filterRadius=1–4默认1是Sobel采样半径，searchRadius=2–64默认16，threshold=0–255默认24，strength=1–20默认8，precision=0.25–4默认0.75为折线简化误差像素；limitToSelection/bounds可选限制参考范围。八邻域A*沿真实边缘吸附，每段最多262144搜索像素，整参考范围4194304像素；超预算请增加中间锚点。返回最多2048轮廓点，不写选区。") {p->store.magneticTrace(p)}
+        capability("selection.magnetic_create","创建磁性套索选区",write,
+            "参数同magnetic_trace，anchors需3–128且始终闭合；mode=replace/add/subtract/intersect默认replace。吸附、闭合、简化后保存真实折线选区，一次历史并自动轮廓缩图。参考和搜索超预算、工程过期明确拒绝，不使用直线代替失败搜索。") {p->store.magneticCreate("LANER",p)}
         capability("selection.bezier_info","读取贝塞尔曲线选区范围",read,
             "返回选区模式、闭合曲线节点上限、复合上限及未实现项目。曲线选区与图层路径独立，使用文档坐标。") {ArtBezierSelection.info()}
         capability("selection.bezier_create","建立贝塞尔曲线选区",write,
@@ -638,6 +650,15 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "reference.transform" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"),p("matrix","array"))
         "reference.style" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"),p("style","object"))
         "reference.show" -> listOf(p("documentId"),p("expectedRevision","integer"),p("visible","boolean"))
+        "selection.contiguous" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("x","integer"),p("y","integer"),
+            p("mode",optional=true),p("reference",optional=true),p("tolerance","integer",true),p("expand","integer",true),
+            p("gapClose","integer",true),p("boundaryMode","boolean",true),p("boundaryColor",optional=true),p("limitToSelection","boolean",true),p("bounds","object",true))
+        "selection.similar" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("x","integer"),p("y","integer"),
+            p("mode",optional=true),p("reference",optional=true),p("tolerance","integer",true),p("expand","integer",true),p("limitToSelection","boolean",true),p("bounds","object",true))
+        "selection.magnetic_trace", "selection.magnetic_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("anchors","array"),
+            p("mode",optional=true),p("reference",optional=true),p("filterRadius","integer",true),p("searchRadius","integer",true),
+            p("threshold","integer",true),p("strength","number",true),p("precision","number",true),p("limitToSelection","boolean",true),p("bounds","object",true)) +
+            if(name=="selection.magnetic_trace")listOf(p("closed","boolean",true)) else emptyList()
         "comic.frame" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("x","number"),p("y","number"),p("width","number"),p("height","number"),p("style","object",true))
         "comic.cut" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("start","array"),p("end","array"),

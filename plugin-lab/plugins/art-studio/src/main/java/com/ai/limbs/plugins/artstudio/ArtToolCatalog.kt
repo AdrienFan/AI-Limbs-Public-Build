@@ -6,6 +6,9 @@ import org.json.JSONObject
 /** The page and Laner's read-only catalog share one inventory of toolbox slots. */
 internal object ArtToolCatalog {
     val implemented get() = listOf(
+        Triple("select_contiguous","连续区域选区（基础）","◈"),
+        Triple("select_similar","相似色选区（基础）","◎"),
+        Triple("select_magnetic","磁性套索选区（基础）","⊙"),
         Triple("comic_panel","漫画分格编辑（直边）","▤"),
         Triple("select_bezier","贝塞尔曲线选区（基础）","♧"),
         Triple("enclose_fill","围合填充（基础）","⬟"),
@@ -57,12 +60,7 @@ internal object ArtToolCatalog {
     val pending get() = listOf(
         PendingTool("svg_text_advanced", "SVG 文字高级排版", "T",
             "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"),
-        PendingTool("select_contiguous", "连续区域选区", "◈",
-            "plugins/tools/selectiontools/kis_tool_select_contiguous.h"),
-        PendingTool("select_similar", "相似色选区", "◎",
-            "plugins/tools/selectiontools/kis_tool_select_similar.h"),
-        PendingTool("select_magnetic", "磁性套索选区", "⊙",
-            "plugins/tools/selectiontools/KisToolSelectMagnetic.h")
+
     ) + if (!ArtText.available) listOf(PendingTool("svg_text", "基础文字需要 Android 12+", "T",
         "plugins/tools/svgtexttool/SvgTextToolFactory.cpp")) else emptyList()
 
@@ -96,6 +94,7 @@ internal object ArtToolCatalog {
         val zoomState = ArtStudioViewControl.state.value
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
             .put("parameterWindowCapability", "$ART_ID.view.tool_options")
+            .put("colorSelections",ArtColorSelection.info()).put("magneticSelection",ArtMagneticSelection.info())
             .put("comicPanels",ArtComicPanels.info())
             .put("bezierSelection",ArtBezierSelection.info())
             .put("encloseFill",ArtEncloseFill.info())
