@@ -79,5 +79,7 @@ class ArtCapabilityHelpTest {
         assertTrue(ArtCapabilityHelp.description("export.png").contains("不返回原尺寸图片块"))
         assertTrue(ArtCapabilityHelp.parameterDescription("document.create", "background").contains("#AARRGGBB"))
         assertTrue(ArtCapabilityHelp.parameterDescription("stroke.add", "expectedRevision").contains("替换示例0"))
+        assertTrue(ArtCapabilityHelp.parameterDescription("layer.select", "id").contains("layer.list.layers[].id"))
+        assertTrue(ArtCapabilityHelp.parameterDescription("text.update", "id").contains("kind=text"))
     }
 }

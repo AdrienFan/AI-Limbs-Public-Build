@@ -589,7 +589,25 @@ internal object ArtCapabilityHelp {
   "selection.magnetic_trace.layerId":{"description":"参考/目标paint或image层ID，取layer.list；不是矢量对象ID。"},
   "selection.magnetic_create.layerId":{"description":"参考/目标paint或image层ID，取layer.list；不是矢量对象ID。"},
   "patch.apply.layerId":{"description":"当前选中的可见未锁定、未变换根paint/image层ID，取layer.list.selectedLayerId。"},
-  "enclose.apply.layerId":{"description":"当前选中的可见未锁定、未变换根paint/image层ID，取layer.list.selectedLayerId。"}
+  "enclose.apply.layerId":{"description":"当前选中的可见未锁定、未变换根paint/image层ID，取layer.list.selectedLayerId。"},
+  "layer.list.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.search.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.create.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.vector.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.group.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.select.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.rename.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.move.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.move_up.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.move_down.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.delete.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.copy.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.set_visibility.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.set_opacity.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.set_lock.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.set_blend.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "layer.properties.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
+  "text.update.id":{"description":"已有kind=text图层ID，取layer.list.layers[].id；不是工程ID。"}
 }
 """
 }
