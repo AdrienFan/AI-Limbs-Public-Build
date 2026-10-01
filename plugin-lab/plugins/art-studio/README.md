@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.27 源码；矢量书法笔，待编译验收）
+# AI Limbs 画室（0.2.28 源码；参考图像与此前工具迭代，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -414,3 +414,15 @@ path.edit 需要 documentId/expectedRevision/layerId/id/edits；每次1至64动�
 兰儿入口 shape.calligraphy 与页面共用 ArtCalligraphy 和 ArtStore：必传 documentId / expectedRevision / layerId / samples，samples为2–1000个{x,y,time,pressure?}，time为非负递增或相等毫秒；默认pressure=1。可选width、angle、fixation、thinning、smoothing、usePressure、cap、color、opacity见能力说明。笔画的最终几何只提交一次SHAPE_CREATE，保留版本/锁定/预算校验、撤销重做、工程保存和缩略图反馈；不存原始采样、不在回放中重新生成。往返尖角采用轮廓收拢处理；自交仍按普通路径的非零绕组规则填充，不承诺复杂自交区域布尔并集。输入最多1000点、最终最多2048段，超限明确提示分段，不静默截断。
 
 版本0.2.27 / code30 / v0227，承接0.2.26源码。仅做源码和差异审查，尚未编译、云端推送或安装验收。
+
+## 参考图像（0.2.28）
+
+对照 Krita 6.0.4 ToolReferenceImages / KisReferenceImage 与官方 [参考图像工具](https://docs.krita.org/zh_CN/reference_manual/tools/reference_images_tool.html)。reference_images由占位改为可用。参考是工程state.references里的独立视图对象，PNG原图嵌入既有assets，资产遍历自动包含当前、base及撤销历史并在.ailart往返重映射asset。参考不进入layers，不参与ArtRenderer作品合成、图层缩图或PNG/JPEG导出。添加/选择/变换/样式/删除/整体显隐均是REFERENCE_*历史操作，绑定docId/revision，支持两端冲突校验和撤销重做。旧工程缺省无参考，旧功能接口保留。
+
+页面通过系统文件选择器按内容导入已有图片格式，动图只取首帧并显示警告，输入仍为8 MiB；超工作预算沿用明确缩小确认流程。默认参考摆在画布右侧，成功添加后自动将画布和可见参考一起入镜；视图缩放仍遵守0.1–16倍范围。拖图片移动、8柄缩放/圆柄旋转、多选/框选、90°旋转、保持比例、锁定/显隐、删除确认、透明度和饱和度均可用。整体显隐也保存于工程，两端共享。多选样式显示首对象的数值，应用到所有选中对象。参考图几何选择使用瞬态虚拟矩形适配已有选择控件，该适配绝不写为绘画层。
+
+兰儿共享入口 reference.list/preview/region/add/select/transform/style/delete/show。必传documentId；写操作必传expectedRevision，操作对象用ids。矩阵是文档坐标增量仿射、左乘原矩阵。style支持opacity/saturation、visible/locked/keepAspect/name，锁定对象只能单独改locked；keepAspect约束页面手柄，显式API矩阵允许非等比。reference.add输入base64，可选name/matrix/confirmResize；默认位置和页面一致。reference.preview返回包含画布外参考的256边长视图，reference.region按嵌入原图像素读取x/y/width/height，maxEdge64–2048默认512，忽略显示变换和颜色效果便于检查细节。参考写操作与改变参考的撤销重做，在原返回里附加参考视图缩图。
+
+一工程最多16张参考，页面每张解码为至多512边长的预览位图，并计入双帧内存预算，原图保持在资产中，局部细节按需区域解码。显隐只控制视图；外部链接、系统剪贴板和.kref集合导入导出仍灰色，尚未实现参考取色和斜切专用手势。作品导出没有参考图。
+
+版本0.2.28/code31/v0228，基线9d13cc3f（0.2.27）；包含之前未编译的0.2.22–0.2.27工具迭代。用户已授权这批源码推送触发云编译，提交后不监控运行进度。源码校验与云端提交记录见本轮TODO；待安装验收。

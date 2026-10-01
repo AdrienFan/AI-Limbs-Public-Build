@@ -64,8 +64,17 @@ internal class ArtStore(private val root: File) {
     }
 
     fun withCanvasFeedback(block: () -> JSONObject): JSONObject = locked {
+        fun referenceSignature(snapshot:JSONObject?):String {
+            if(snapshot==null) return ""
+            val state=snapshot.getJSONObject("state")
+            if(ArtReferences.items(state).isEmpty()) return ""
+            return JSONObject().put("references",JSONArray(ArtReferences.items(state)))
+                .put("visible",state.optBoolean("referencesVisible",true)).toString()
+        }
+        val before=referenceSignature(if(pointer.isFile) snapshot(loadCurrent()) else null)
         val result = block()
         val after = if (pointer.isFile) snapshot(loadCurrent()) else null
+        if(after!=null && referenceSignature(after)!=before) result.put("referenceFeedback",true)
         try {
             ArtCanvasFeedback.attach(this, result, after)
         } catch (error: Exception) {
@@ -593,6 +602,96 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+
+    fun referenceList(p:JSONObject):JSONObject = locked {
+        val snapshot=snapshot(loadCurrent())
+        require(p.getString("documentId")==snapshot.getString("id")) { "工程已切换" }
+        JSONObject().put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
+            .put("references",JSONArray(ArtReferences.items(snapshot.getJSONObject("state"))))
+            .put("selectedIds",JSONArray(ArtReferences.ids(snapshot.getJSONObject("state"))))
+            .put("coordinateSpace","document").put("storage","embedded").put("exported",false)
+    }
+    fun referenceAdd(actor:String,p:JSONObject):JSONObject = locked {
+        val before=snapshot(loadCurrent())
+        require(p.getString("documentId")==before.getString("id") &&
+            p.getInt("expectedRevision")==before.getInt("revision")) { "工程已切换或更新，请刷新" }
+        val state=before.getJSONObject("state")
+        require(ArtReferences.items(state).size<ArtReferences.MAX) { "一个工程最多16张参考图像" }
+        val (bitmap,metadata)=ArtImagePolicy.decode(imageBytes(p.getString("base64")),p.optJSONObject("confirmResize"),
+            ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height"))+
+                ArtReferences.MAX*ArtReferences.PREVIEW_EDGE.toLong()*ArtReferences.PREVIEW_EDGE*8)
+        val w=bitmap.width;val h=bitmap.height
+        val png=try { ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES) } finally { bitmap.recycle() }
+        val id=UUID.randomUUID().toString();val asset=UUID.randomUUID().toString()
+        val scale=minOf(1.0,state.getInt("height")*0.5/h)
+        val transform=if(p.has("matrix")) p.getJSONArray("matrix")
+            else JSONArray(listOf(scale,0.0,0.0,scale,state.getInt("width")+32.0,0.0))
+        val ref=ArtReferences.normalize(JSONObject().put("id",id).put("asset",asset)
+            .put("width",w).put("height",h).put("matrix",transform).put("name",p.optString("name","参考图像")))
+        atomicBytes(assetFile(asset),png)
+        try {
+            apply(actor,"REFERENCE_ADD",JSONObject().put("documentId",p.getString("documentId"))
+                .put("expectedRevision",p.getInt("expectedRevision")).put("reference",ref))
+                .put("imageImport",metadata).put("referenceId",id)
+        } catch(error:Throwable) { assetFile(asset).delete();throw error }
+    }
+    fun referenceBitmaps(snapshot:JSONObject):Map<String,Bitmap> = locked {
+        val map=mutableMapOf<String,Bitmap>()
+        try {
+            for(r in ArtReferences.items(snapshot.getJSONObject("state"))) {
+                val asset=r.getString("asset")
+                if(asset in map) continue
+                val file=assetFile(asset)
+                val bounds=android.graphics.BitmapFactory.Options().apply { inJustDecodeBounds=true;inScaled=false }
+                android.graphics.BitmapFactory.decodeFile(file.absolutePath,bounds)
+                ArtImagePolicy.requireDimensions(bounds.outWidth,bounds.outHeight)
+                var sample=1
+                while((maxOf(bounds.outWidth,bounds.outHeight)+sample-1)/sample>ArtReferences.PREVIEW_EDGE) sample*=2
+                val bitmap=android.graphics.BitmapFactory.decodeFile(file.absolutePath,
+                    android.graphics.BitmapFactory.Options().apply {
+                        inScaled=false;inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888
+                    }) ?: error("参考图像资源无效")
+                map[asset]=bitmap
+            }
+            map
+        } catch(error:Throwable) { map.values.forEach { it.recycle() };throw error }
+    }
+
+    fun referenceRegion(p:JSONObject):JSONObject = locked {
+        val snapshot=snapshot(loadCurrent())
+        require(p.getString("documentId")==snapshot.getString("id")) { "工程已切换" }
+        if(p.has("expectedRevision")) require(p.getInt("expectedRevision")==snapshot.getInt("revision")) { "工程已更新" }
+        val ref=ArtReferences.items(snapshot.getJSONObject("state")).firstOrNull { it.getString("id")==p.getString("id") }
+            ?: error("参考图像不存在")
+        val x=p.getInt("x");val y=p.getInt("y");val w=p.getInt("width");val h=p.getInt("height")
+        val edge=p.optInt("maxEdge",512)
+        require(x>=0 && y>=0 && w>0 && h>0 && x.toLong()+w<=ref.getInt("width") &&
+            y.toLong()+h<=ref.getInt("height") && edge in 64..2048) { "参考图像局部范围无效" }
+        var sample=1
+        while((maxOf(w,h)+sample-1)/sample>edge) sample*=2
+        ArtImagePolicy.requireBytes(edge.toLong()*edge*16,"参考图像局部预览")
+        val decoder=android.graphics.BitmapRegionDecoder.newInstance(assetFile(ref.getString("asset")).absolutePath,false)
+            ?: error("参考图像区域解码器不可用")
+        val bitmap=try { decoder.decodeRegion(android.graphics.Rect(x,y,x+w,y+h),
+            android.graphics.BitmapFactory.Options().apply { inSampleSize=sample;inPreferredConfig=Bitmap.Config.ARGB_8888 })
+            ?: error("无法解码参考图像区域") } finally { decoder.recycle() }
+        try {
+            val encoded=Base64.encodeToString(ArtImagePolicy.encodePng(bitmap,8*1024*1024),Base64.NO_WRAP)
+            JSONObject().put("regionPreview",JSONObject().put("referenceId",ref.getString("id"))
+                .put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
+                .put("coordinateSpace","source-pixels").put("x",x).put("y",y).put("width",w).put("height",h)
+                .put("imageWidth",bitmap.width).put("imageHeight",bitmap.height).put("rawSource",true))
+                .put("mcp_content",JSONArray().put(JSONObject().put("type","image").put("mimeType","image/png").put("data",encoded)))
+        } finally { bitmap.recycle() }
+    }
+
+    fun referencePreview(p:JSONObject):JSONObject = locked {
+        val snapshot=snapshot(loadCurrent())
+        require(p.getString("documentId")==snapshot.getString("id")) { "工程已切换" }
+        if(p.has("expectedRevision")) require(p.getInt("expectedRevision")==snapshot.getInt("revision")) { "工程已更新" }
+        ArtReferencePreview.overview(this,snapshot)
+    }
+
     fun pathCreate(actor:String,p:JSONObject):JSONObject = apply(actor,"SHAPE_CREATE",JSONObject()
         .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
         .put("layerId",p.getString("layerId")).put("shape",ArtPathGeometry.create(p)))
@@ -627,7 +726,7 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
-        if (type.startsWith("SHAPE_") || type == "VECTOR_LAYER_CREATE") {
+        if (type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type == "VECTOR_LAYER_CREATE") {
             require(params.getString("documentId") == doc.getString("id")) { "工程已切换，请重新读取工程" }
             require(params.has("expectedRevision")) { "矢量操作必须绑定工程版本" }
         }
@@ -1135,7 +1234,8 @@ internal class ArtStore(private val root: File) {
         val state = snapshot.getJSONObject("state")
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
         ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this, state,
-            state.getInt("width"), state.getInt("height")), "画布合成")
+            state.getInt("width"), state.getInt("height"))+
+            ArtReferences.items(state).size*ArtReferences.PREVIEW_EDGE.toLong()*ArtReferences.PREVIEW_EDGE*8, "画布合成与参考预览")
     }
 
     private fun snapshot(doc: JSONObject): JSONObject {
@@ -1154,6 +1254,12 @@ internal class ArtStore(private val root: File) {
             return when (operation.getString("type")) {
                 "MENU_LAYER_CHANGE" -> operation.getJSONObject("parameters").getString("label")
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
+                "REFERENCE_SHOW" -> "参考图像整体显隐"
+                "REFERENCE_ADD" -> "添加参考图像"
+                "REFERENCE_SELECT" -> "选择参考图像"
+                "REFERENCE_TRANSFORM" -> "变换参考图像"
+                "REFERENCE_STYLE" -> "参考图像样式"
+                "REFERENCE_DELETE" -> "删除参考图像"
                 "VECTOR_LAYER_CREATE" -> "添加矢量图层"
                 "SHAPE_CREATE" -> "添加矢量形状"
                 "SHAPE_SELECT" -> "选择形状"
@@ -1283,6 +1389,7 @@ internal class ArtStore(private val root: File) {
         }
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
         ArtShapes.validateDocument(state)
+        ArtReferences.validate(state)
         return state
     }
 
@@ -1296,6 +1403,7 @@ internal class ArtStore(private val root: File) {
             error("图层不存在：$id；该撤销与后续操作冲突")
         }
         when (type) {
+            "REFERENCE_ADD","REFERENCE_SELECT","REFERENCE_TRANSFORM","REFERENCE_STYLE","REFERENCE_DELETE","REFERENCE_SHOW" -> ArtReferences.edit(state,type,p)
             "TEXT_CREATE", "TEXT_UPDATE" -> {
                 val id = p.getString("id")
                 validateId(id); validateId(p.getString("asset"))

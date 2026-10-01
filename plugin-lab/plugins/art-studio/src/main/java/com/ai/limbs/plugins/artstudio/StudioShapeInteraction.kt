@@ -35,6 +35,9 @@ internal class StudioShapeInteraction(private val view: View) {
     private var handle = -1
     private var moved = false
     private var editable = false
+    var preserveAspect = false
+    private var uniformResize = false
+    fun previewMatrix(id:String):Matrix? = if(active && mode!="box" && id in selected) Matrix(delta) else null
     fun cancel() { active=false;rect=null;delta=Matrix();view.invalidate() }
 
     private fun handles(b:RectF):List<PointF> = listOf(
@@ -110,8 +113,10 @@ internal class StudioShapeInteraction(private val view: View) {
                 }
                 var sx=ratio(last.x-pivot.x,h.x-pivot.x)
                 var sy=ratio(last.y-pivot.y,h.y-pivot.y)
-                if((event.metaState and android.view.KeyEvent.META_SHIFT_MASK != 0)&&handle in setOf(0,2,4,6)) {
-                    val uniform=maxOf(kotlin.math.abs(sx),kotlin.math.abs(sy))
+                if(uniformResize || ((event.metaState and android.view.KeyEvent.META_SHIFT_MASK != 0)&&handle in setOf(0,2,4,6))) {
+                    val uniform=if(uniformResize && handle in setOf(1,5)) kotlin.math.abs(sy)
+                        else if(uniformResize && handle in setOf(3,7)) kotlin.math.abs(sx)
+                        else maxOf(kotlin.math.abs(sx),kotlin.math.abs(sy))
                     sx=if(sx<0f) -uniform else uniform;sy=if(sy<0f) -uniform else uniform
                 }
                 delta=Matrix().apply { setScale(sx,sy,pivot.x,pivot.y) }
@@ -132,7 +137,7 @@ internal class StudioShapeInteraction(private val view: View) {
         }
         when(event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                active=true;document=documentId;revision=currentRevision;layerId=currentLayer
+                active=true;uniformResize=preserveAspect;document=documentId;revision=currentRevision;layerId=currentLayer
                 add=multiple||(event.metaState and android.view.KeyEvent.META_SHIFT_MASK != 0);selected=ArtShapes.selected(state,currentLayer)
                 down=PointF(local[0],local[1]);last=PointF(down.x,down.y)
                 downScreen=PointF(event.x,event.y);lastScreen=PointF(event.x,event.y);moved=false;delta=Matrix();handle=-1;hit=null

@@ -408,6 +408,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var remainingImportItem by remember { mutableStateOf<JSONObject?>(null) }
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
     var image by remember { mutableStateOf<Bitmap?>(null) }
+    var referenceBitmaps by remember { mutableStateOf<Map<String,Bitmap>>(emptyMap()) }
+    var referenceMultiple by remember { mutableStateOf(false) }
+    var referenceImportContext by remember { mutableStateOf<JSONObject?>(null) }
     var textDialog by remember { mutableStateOf<JSONObject?>(null) }
     var textFonts by remember { mutableStateOf(JSONArray()) }
     var tool by remember { mutableStateOf("ink") }
@@ -585,15 +588,17 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 val pair = withContext(Dispatchers.IO) {
                     mutex.withLock {
                         val state = store.current()
-                        Triple(state, ArtRenderer.render(store, state), store.revision())
+                        StudioRenderFrame.create(store,state)
                     }
                 }
                 if (serial == renderSerial) {
                     snapshot = pair.first
                     image?.recycle()
                     image = pair.second
+                    referenceBitmaps.values.forEach { it.recycle() }
+                    referenceBitmaps = pair.fourth
                     revision = pair.third
-                } else pair.second.recycle()
+                } else { pair.second.recycle();pair.fourth.values.forEach { it.recycle() } }
             } catch (error: Exception) {
                 if (serial == renderSerial) { snapshot = null; image = null }
             }
@@ -619,16 +624,20 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     mutex.withLock {
                         operationResult = action(confirmation)
                         val state = store.current()
-                        Triple(state, ArtRenderer.render(store, state), store.revision())
+                        StudioRenderFrame.create(store,state)
                     }
                 }
                 if (serial == renderSerial) {
                     snapshot = pair.first
                     image?.recycle()
                     image = pair.second
+                    referenceBitmaps.values.forEach { it.recycle() }
+                    referenceBitmaps = pair.fourth
                     revision = pair.third
-                } else pair.second.recycle()
+                } else { pair.second.recycle();pair.fourth.values.forEach { it.recycle() } }
                 showImageImportNotice(operationResult)
+                if(operationResult.has("referenceId") && serial==renderSerial)
+                    canvasRef[0]?.fitReferences(snapshot?.getJSONObject("state"))
                 onSuccess?.invoke()
             } catch (request: ArtImageResizeRequired) {
                 resizeRequest = request.plan
@@ -765,6 +774,21 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 host.logger.e("ArtStudio","Layer import failed",error)
                 remainingResult=JSONObject().put("title","导入未完成").put("text",error.message ?: "无法导入图片")
             }
+        }
+    }
+    val addReference = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        val captured=referenceImportContext
+        referenceImportContext=null
+        if(uri!=null && captured!=null) perform { confirmation ->
+            val bytes=context.contentResolver.openInputStream(uri)?.use { it.readNBytes(8*1024*1024+1) }
+                ?: error("无法读取参考图像")
+            require(bytes.size<=8*1024*1024) { "参考图像输入上限8 MiB" }
+            val name=context.contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
+                null,null,null)?.use { cursor -> if(cursor.moveToFirst()) cursor.getString(0) else "参考图像" } ?: "参考图像"
+            val params=JSONObject(captured.toString()).put("name",name)
+                .put("base64",android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP))
+            if(confirmation!=null) params.put("confirmResize",confirmation)
+            store.referenceAdd("AWEI",params)
         }
     }
     val openExternal = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1293,6 +1317,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         onDispose {
             ArtStudioViewControl.canvasAttached = false
             ArtStudioViewControl.canvasZoom.value = null
+            referenceBitmaps.values.forEach { it.recycle() }
         }
     }
     LaunchedEffect(Unit) {
@@ -1352,6 +1377,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.scene = state; view.sceneRevision = current.getInt("revision")
                     view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
+                    view.referenceBitmaps = referenceBitmaps
+                    view.referenceMultiple = referenceMultiple
+                    view.onReferenceEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
                     view.calligraphyOptions = JSONObject().put("width",width.toDouble())
                         .put("angle",vectorNibAngle.toDouble()).put("fixation",vectorFixation.toDouble())
                         .put("thinning",vectorThinning.toDouble()).put("smoothing",vectorSmoothing.toDouble())
@@ -1583,6 +1611,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         }, { bezierNode = it }, { bezierNodeType = it },
                                         { bezierClosed = it }, { fillShape = it },
                                         { canvasRef[0]?.bezierCommand(it) }, ::edit)
+                                }
+                                if (tool == "reference_images") {
+                                    StudioReferenceOptions(current,busy,referenceMultiple,{referenceMultiple=it},{
+                                        referenceImportContext=JSONObject().put("documentId",current.getString("id"))
+                                            .put("expectedRevision",current.getInt("revision"))
+                                        addReference.launch(arrayOf("image/*"))
+                                    },{canvasRef[0]?.fitReferences()}, {type,p ->
+                                        if(!busy) perform { store.apply("AWEI",type,p) }
+                                    })
                                 }
                                 if (tool == "vector_calligraphy") {
                                     StudioCalligraphyOptions(current,selected,busy,vectorNibAngle,vectorFixation,
@@ -2991,7 +3028,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel(); shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3017,6 +3054,10 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeCreationContext: JSONObject? = null
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
+    private val referenceInteraction = StudioReferenceInteraction(this)
+    var referenceBitmaps:Map<String,Bitmap> = emptyMap()
+    var referenceMultiple = false
+    var onReferenceEdit:(String,JSONObject)->Unit = {_,_->}
     private val calligraphyInteraction = StudioCalligraphyInteraction(this)
     var calligraphyOptions = JSONObject()
     var onCalligraphy: (JSONObject) -> Unit = {}
@@ -3045,6 +3086,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
+                referenceInteraction.cancel()
                 bezierInteraction.cancel()
                 shapeCreationContext = null
                 points = JSONArray()
@@ -3245,6 +3287,22 @@ private class StudioCanvas(context: Context) : View(context) {
     fun rotateBy(degrees: Float) { angle += degrees; invalidate() }
     fun resetRotation() { angle = 0f; invalidate() }
     fun toggleMirror() { mirrored = !mirrored; invalidate() }
+    fun fitReferences(state:JSONObject?=scene) {
+        val bitmap=image ?: return
+        if(state==null || width<=0 || height<=0) return
+        val bounds=android.graphics.RectF(0f,0f,bitmap.width.toFloat(),bitmap.height.toFloat())
+        val virtual=ArtReferences.selectionState(state)
+        if(state.optBoolean("referencesVisible",true)) ArtShapes.items(ArtShapes.layer(virtual,ArtReferences.LAYER))
+            .forEach { bounds.union(ArtShapes.bounds(it)) }
+        angle=0f;mirrored=false
+        val desired=minOf(width/bounds.width(),height/bounds.height())*0.98f
+        zoom=(desired/fitScale()).coerceIn(0.1f,16f)
+        val actual=fitScale()*zoom
+        panX=width/2f-fittedCenterX(bitmap,fitScale())+(bitmap.width/2f-bounds.centerX())*actual
+        panY=(bitmap.height/2f-bounds.centerY())*actual
+        referenceInteraction.cancel();invalidate();publishZoom()
+    }
+
     fun fitToWindow() {
         zoom = 1f
         angle = 0f
@@ -3330,6 +3388,7 @@ private class StudioCanvas(context: Context) : View(context) {
             }
             canvas.restore()
         }
+        scene?.let { referenceInteraction.draw(canvas,it,referenceBitmaps,matrix,tool=="reference_images") }
         if (tool == "mirror") {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -3507,6 +3566,13 @@ private class StudioCanvas(context: Context) : View(context) {
     }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="reference_images" && keyCode in setOf(android.view.KeyEvent.KEYCODE_DEL,android.view.KeyEvent.KEYCODE_FORWARD_DEL)) {
+            val state=scene
+            if(state!=null && !shapeBusy && ArtReferences.ids(state).isNotEmpty()) onReferenceEdit("REFERENCE_DELETE",
+                JSONObject().put("documentId",documentId).put("expectedRevision",sceneRevision)
+                    .put("ids",JSONArray(ArtReferences.ids(state))))
+            return true
+        }
         if (tool == "vector_bezier" && keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
             bezierCommand("cancel");return true
         }
@@ -3527,6 +3593,7 @@ private class StudioCanvas(context: Context) : View(context) {
             shapeInteraction.cancel()
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
+            referenceInteraction.cancel()
             bezierInteraction.interrupt()
             shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
@@ -3561,6 +3628,18 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(tool=="reference_images") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN) requestFocus()
+            val state=scene ?: return true
+            try {
+                return referenceInteraction.touch(event,state,documentId,sceneRevision,matrix,
+                    referenceMultiple,shapeBusy,onReferenceEdit)
+            } catch(error:Exception) {
+                referenceInteraction.cancel()
+                android.util.Log.e("ArtStudio","Reference interaction failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            }
+        }
         if (tool == "vector_bezier") {
             if (event.actionMasked == MotionEvent.ACTION_DOWN) requestFocus()
             val state=scene

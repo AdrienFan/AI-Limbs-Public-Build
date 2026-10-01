@@ -49,7 +49,11 @@ class ArtStudioEntry : InProcessPluginEntry {
                 description + " 成功改变画布时在原结果中自动附带 thumbnail 元数据和 mcp_content 图片块；无需另取缩略图。") { parameters ->
                 try {
                     if (ArtCanvasFeedback.affectsCanvas(name, parameters))
-                        store.withCanvasFeedback { block(parameters) }
+                        store.withCanvasFeedback {
+                            val result=block(parameters)
+                            if(name.startsWith("reference.")) result.put("referenceFeedback",true)
+                            result
+                        }
                     else block(parameters)
                 } catch (request: ArtImageResizeRequired) {
                     // Consent is a no-op result, not a successful edit or an image receipt.
@@ -310,6 +314,24 @@ class ArtStudioEntry : InProcessPluginEntry {
             "保存独立可编辑形状；documentId/expectedRevision 必填，支持已有父组。支持基础形状、徒手路径、贝塞尔节点编辑和矢量书法轮廓；高级SVG尚未实现。") { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "VECTOR_LAYER_CREATE", p)
         }
+        capability("reference.list","读取参考图像",read,
+            "documentId必填。返回独立于图层的嵌入参考、选择、矩阵和当前revision；文档坐标，作品导出不包含参考。") { p -> store.referenceList(p) }
+        capability("reference.preview","查看参考与画布",read,
+            "documentId必填，可选expectedRevision；返回包含画布外参考的256边长视图图片块。作品导出不受影响。") { p -> store.referencePreview(p) }
+        capability("reference.region","查看参考图像局部细节",read,
+            "documentId/id/x/y/width/height必填；坐标是参考原图像素，maxEdge=64至2048默认512，可选expectedRevision。读取嵌入原图局部，忽略显示矩阵/透明度/饱和度，返回图片块。") { p -> store.referenceRegion(p) }
+        capability("reference.add","添加参考图像",write,
+            "documentId/expectedRevision/base64必填；支持现有图片格式按内容识别，动图首帧。name和matrix=[a,b,c,d,tx,ty]可选，默认摆在画布右侧。工程嵌入原图，最多16张，输入8MiB。超预算先返回缩小确认，取得用户同意后带confirmResize重试。成功含referenceId/imageImport和参考视图缩略图。") { p -> store.referenceAdd("LANER",p) }
+        capability("reference.select","选择参考图像",write,
+            "documentId/expectedRevision/ids必填，空ids清除。与绘画对象选择独立。") { p -> store.apply("LANER","REFERENCE_SELECT",p) }
+        capability("reference.transform","变换参考图像",write,
+            "documentId/expectedRevision/ids/matrix必填；matrix是文档坐标中的增量仿射矩阵，左乘现有矩阵，可移动/缩放/旋转/镜像。锁定或隐藏拒绝；页面保持比例选项不限制显式API矩阵。") { p -> store.apply("LANER","REFERENCE_TRANSFORM",p) }
+        capability("reference.style","设置参考图像样式",write,
+            "documentId/expectedRevision/ids/style必填；style支持opacity/saturation 0至1、visible/locked/keepAspect布尔、name。锁定时只允许单独改locked；keepAspect约束页面缩放。") { p -> store.apply("LANER","REFERENCE_STYLE",p) }
+        capability("reference.delete","删除参考图像",write,
+            "documentId/expectedRevision/ids必填。删除工程对象，可撤销，不删除手机原图。") { p -> store.apply("LANER","REFERENCE_DELETE",p) }
+        capability("reference.show","整体显示或隐藏参考",write,
+            "documentId/expectedRevision/visible必填；工程共享的整体显示状态，不改变单图visible，锁定不影响整体隐藏。") { p -> store.apply("LANER","REFERENCE_SHOW",p) }
         capability("shape.list", "读取矢量形状和选择", read,
             "使用 document.info 的 documentId 和 layerId；返回形状源参数、文档边界、选中编号与图层锁定信息。") { p -> store.shapes(p) }
         capability("shape.hit", "命中矢量形状", read,
@@ -526,6 +548,16 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
     return when (name) {
         "layer.vector" -> listOf(p("documentId"), p("expectedRevision", "integer"),
             p("name", optional = true), p("parentId", optional = true), p("select", "boolean", true))
+        "reference.list" -> listOf(p("documentId"))
+        "reference.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
+        "reference.region" -> listOf(p("documentId"),id,p("x","integer"),p("y","integer"),
+            p("width","integer"),p("height","integer"),p("maxEdge","integer",true),p("expectedRevision","integer",true))
+        "reference.add" -> listOf(p("documentId"),p("expectedRevision","integer"),p("base64"),
+            p("name",optional=true),p("matrix","array",true),p("confirmResize","object",true))
+        "reference.select","reference.delete" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"))
+        "reference.transform" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"),p("matrix","array"))
+        "reference.style" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"),p("style","object"))
+        "reference.show" -> listOf(p("documentId"),p("expectedRevision","integer"),p("visible","boolean"))
         "shape.list" -> listOf(p("documentId"), p("layerId"))
         "shape.hit" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"), p("tolerance", "number", true))
         "shape.box" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"),
