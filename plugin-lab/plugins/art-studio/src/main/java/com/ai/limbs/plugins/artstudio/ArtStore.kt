@@ -71,10 +71,20 @@ internal class ArtStore(private val root: File) {
             return JSONObject().put("references",JSONArray(ArtReferences.items(state)))
                 .put("visible",state.optBoolean("referencesVisible",true)).toString()
         }
-        val before=referenceSignature(if(pointer.isFile) snapshot(loadCurrent()) else null)
+        fun assistantSignature(snapshot: JSONObject?): String {
+            if(snapshot==null)return ""
+            val state=snapshot.getJSONObject("state")
+            if(ArtAssistants.items(state).isEmpty())return ""
+            return JSONObject().put("assistants",JSONArray(ArtAssistants.items(state)))
+                .put("selected",ArtAssistants.selected(state)).put("settings",ArtAssistants.settings(state)).toString()
+        }
+        val beforeSnapshot=if(pointer.isFile) snapshot(loadCurrent()) else null
+        val before=referenceSignature(beforeSnapshot)
+        val assistantBefore=assistantSignature(beforeSnapshot)
         val result = block()
         val after = if (pointer.isFile) snapshot(loadCurrent()) else null
         if(after!=null && referenceSignature(after)!=before) result.put("referenceFeedback",true)
+        if(after!=null && assistantSignature(after)!=assistantBefore) result.put("assistantFeedback",true)
         try {
             ArtCanvasFeedback.attach(this, result, after)
         } catch (error: Exception) {
@@ -723,10 +733,76 @@ internal class ArtStore(private val root: File) {
             .put("shape",shape))
     }
 
+
+    fun assistantList(p: JSONObject): JSONObject = locked {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id")) { "工程已切换" }
+        if(p.has("expectedRevision")) require(p.getInt("expectedRevision")==snap.getInt("revision")) { "工程版本已更新" }
+        val state=snap.getJSONObject("state")
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("assistants",JSONArray(ArtAssistants.items(state)))
+            .put("selectedId",ArtAssistants.selected(state)).put("settings",ArtAssistants.settings(state))
+            .put("types",JSONObject(ArtAssistants.types)).put("pending",JSONArray(ArtAssistants.pending))
+            .put("coordinateSpace","document").put("exported",false)
+            .put("supportedBrushTools",JSONArray(ArtAssistants.brushTools.toList()))
+    }
+
+    fun assistantProject(p: JSONObject): JSONObject = locked {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id") &&
+            p.getInt("expectedRevision")==snap.getInt("revision")) { "工程已切换或更新，请刷新" }
+        val source=ArtAssistants.items(snap.getJSONObject("state")).firstOrNull { it.getString("id")==p.getString("id") }
+            ?: error("尺规不存在")
+        require(source.getBoolean("visible") && source.getBoolean("enabled")) { "尺规隐藏或吸附已禁用" }
+        val raw=p.getJSONArray("points");require(raw.length() in 1..10000)
+        val samples=(0 until raw.length()).map { i ->
+            val q=raw.getJSONArray(i)
+            require(q.length() in 2..3 && q.getDouble(0).isFinite() && q.getDouble(1).isFinite() &&
+                kotlin.math.abs(q.getDouble(0))<=1_000_000 && kotlin.math.abs(q.getDouble(1))<=1_000_000)
+            if(q.length()==3) require(q.getDouble(2) in 0.0..1.0)
+            AssistantPoint(q.getDouble(0),q.getDouble(1))
+        }
+        val projection=ArtAssistants.Projection(source,samples.first())
+        val output=JSONArray()
+        samples.forEachIndexed { i,q -> val next=projection.project(q).json()
+            if(raw.getJSONArray(i).length()==3) next.put(raw.getJSONArray(i).getDouble(2))
+            output.put(next)
+        }
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("assistantId",projection.id).put("coordinateSpace","document").put("points",output)
+    }
+
+    fun assistantStroke(actor: String,p: JSONObject): JSONObject = locked {
+        val projected=assistantProject(p)
+        val state=current().getJSONObject("state")
+        val layer=ArtMenuOperations.layers(state).first { it.getString("id")==p.getString("layerId") }
+        require(layer.getString("kind")=="paint") { "尺规绘画需要绘画图层" }
+        val inverse=android.graphics.Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse))
+        val raw=projected.getJSONArray("points");val output=JSONArray()
+        for(i in 0 until raw.length()) {
+            val q=raw.getJSONArray(i);val v=floatArrayOf(q.getDouble(0).toFloat(),q.getDouble(1).toFloat())
+            inverse.mapPoints(v)
+            output.put(JSONArray().put(v[0]).put(v[1]).put(if(q.length()==3)q.getDouble(2) else 1.0))
+        }
+        val tool=p.optString("tool","ink");require(tool in ArtAssistants.brushTools) { "此画笔尚未实现尺规吸附" }
+        val stroke=JSONObject(p.toString()).put("id",UUID.randomUUID().toString()).put("tool",tool)
+            .put("assistantId",projected.getString("assistantId")).put("points",output)
+            .put("width",p.getDouble("width"))
+        apply(actor,"STROKE_ADD",stroke)
+    }
+
+    fun assistantPreview(p: JSONObject): JSONObject = locked {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id"))
+        if(p.has("expectedRevision")) require(p.getInt("expectedRevision")==snap.getInt("revision"))
+        ArtReferencePreview.overview(this,snap,includeAssistants=true)
+    }
+
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
-        if (type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type == "VECTOR_LAYER_CREATE") {
+        if (type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") ||
+            (type=="STROKE_ADD" && params.has("documentId")) || type == "VECTOR_LAYER_CREATE") {
             require(params.getString("documentId") == doc.getString("id")) { "工程已切换，请重新读取工程" }
             require(params.has("expectedRevision")) { "矢量操作必须绑定工程版本" }
         }
@@ -1254,6 +1330,11 @@ internal class ArtStore(private val root: File) {
             return when (operation.getString("type")) {
                 "MENU_LAYER_CHANGE" -> operation.getJSONObject("parameters").getString("label")
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
+                "ASSISTANT_CREATE" -> "添加辅助尺规"
+                "ASSISTANT_SELECT" -> "选择辅助尺规"
+                "ASSISTANT_UPDATE" -> "编辑辅助尺规"
+                "ASSISTANT_DELETE" -> "删除辅助尺规"
+                "ASSISTANT_SETTINGS" -> "辅助尺规设置"
                 "REFERENCE_SHOW" -> "参考图像整体显隐"
                 "REFERENCE_ADD" -> "添加参考图像"
                 "REFERENCE_SELECT" -> "选择参考图像"
@@ -1390,6 +1471,7 @@ internal class ArtStore(private val root: File) {
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
         ArtShapes.validateDocument(state)
         ArtReferences.validate(state)
+        ArtAssistants.validate(state)
         return state
     }
 
@@ -1403,6 +1485,7 @@ internal class ArtStore(private val root: File) {
             error("图层不存在：$id；该撤销与后续操作冲突")
         }
         when (type) {
+            "ASSISTANT_CREATE","ASSISTANT_SELECT","ASSISTANT_UPDATE","ASSISTANT_DELETE","ASSISTANT_SETTINGS" -> ArtAssistants.edit(state,type,p)
             "REFERENCE_ADD","REFERENCE_SELECT","REFERENCE_TRANSFORM","REFERENCE_STYLE","REFERENCE_DELETE","REFERENCE_SHOW" -> ArtReferences.edit(state,type,p)
             "TEXT_CREATE", "TEXT_UPDATE" -> {
                 val id = p.getString("id")
@@ -1836,6 +1919,11 @@ internal class ArtStore(private val root: File) {
                         layer.put("x", layer.getDouble("x") - dx)
                         layer.put("y", layer.getDouble("y") - dy)
                     }
+                }
+                for(a in ArtAssistants.items(state)) {
+                    a.put("points",JSONArray(ArtAssistants.points(a).map { point ->
+                        AssistantPoint(point.x-dx,point.y-dy).json()
+                    }))
                 }
                 state.put("selection", JSONObject.NULL)
             }

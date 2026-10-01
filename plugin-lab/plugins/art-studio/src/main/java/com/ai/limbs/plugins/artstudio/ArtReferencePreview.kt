@@ -18,12 +18,20 @@ internal data class StudioRenderFrame(val first:JSONObject,val second:Bitmap,val
 
 /** A view receipt includes the artwork and references outside its bounds, unlike exports. */
 internal object ArtReferencePreview {
-    fun overview(store:ArtStore,snapshot:JSONObject):JSONObject {
+    fun overview(store:ArtStore,snapshot:JSONObject,includeAssistants:Boolean=false):JSONObject {
         val state=snapshot.getJSONObject("state")
         val bounds=RectF(0f,0f,state.getInt("width").toFloat(),state.getInt("height").toFloat())
         val synthetic=ArtReferences.selectionState(state)
         val layer=ArtShapes.layer(synthetic,ArtReferences.LAYER)
         if(state.optBoolean("referencesVisible",true)) ArtShapes.items(layer).forEach { bounds.union(ArtShapes.bounds(it)) }
+        if(includeAssistants && ArtAssistants.settings(state).getBoolean("visible")) {
+            for(a in ArtAssistants.items(state).filter { it.getBoolean("visible") }) {
+                for(p in ArtAssistants.points(a)) bounds.union(p.x.toFloat(),p.y.toFloat())
+                if(ArtAssistants.points(a).size==3) {
+                    val r=RectF();ArtAssistants.path(a).computeBounds(r,true);bounds.union(r)
+                }
+            }
+        }
         val edge=ArtCanvasFeedback.THUMBNAIL_EDGE
         val scale=minOf(edge/bounds.width(),edge/bounds.height())
         val w=maxOf(1,kotlin.math.ceil(bounds.width()*scale).toInt()).coerceAtMost(edge)
@@ -36,13 +44,15 @@ internal object ArtReferencePreview {
             try {
                 canvas.drawBitmap(frame.second,matrix,Paint(Paint.FILTER_BITMAP_FLAG))
                 ArtReferences.draw(canvas,state,frame.fourth,matrix)
+                if(includeAssistants) ArtAssistants.draw(canvas,state,matrix)
             } finally { frame.second.recycle();frame.fourth.values.forEach { it.recycle() } }
             val bytes=ArtImagePolicy.encodePng(image,1024*1024)
-            val metadata=JSONObject().put("kind","reference-view").put("width",w).put("height",h)
+            val metadata=JSONObject().put("kind",if(includeAssistants) "assistant-view" else "reference-view").put("width",w).put("height",h)
                 .put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
                 .put("documentBounds",JSONArray().put(bounds.left.toDouble()).put(bounds.top.toDouble())
                     .put(bounds.right.toDouble()).put(bounds.bottom.toDouble()))
                 .put("referenceCount",ArtReferences.items(state).size)
+                .put("assistantCount",if(includeAssistants)ArtAssistants.items(state).size else 0)
             return JSONObject().put("thumbnail",metadata).put("mcp_content",JSONArray().put(
                 JSONObject().put("type","image").put("mimeType","image/png")
                     .put("data",Base64.encodeToString(bytes,Base64.NO_WRAP))))

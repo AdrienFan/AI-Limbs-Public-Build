@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.30 源码；统一工具参数浮窗，待编译验收）
+# AI Limbs 画室（0.2.31 源码；基础绘画辅助尺规，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -452,3 +452,30 @@ path.edit 需要 documentId/expectedRevision/layerId/id/edits；每次1至64动�
 绘画和参数操作仍通过既有绘画能力及参数执行，不改变文档格式、撤销记录或图片反馈桥。本轮为本地源码迭代，未编译、未上传；部署后需验收手机/鼠标双击、拖动、缩小恢复、边画边调和窄屏旋转。
 
 Compose 点击接口依据 [Android 官方 combinedClickable 文档](https://developer.android.com/reference/kotlin/androidx/compose/foundation/combinedClickable.modifier)；手势参数使用 onClick/onDoubleClick，无双击标签参数，自定义无障碍动作单独声明。
+
+## 绘画辅助尺规（0.2.31 源码）
+
+缺口是文档级辅助对象、控制点编辑和画笔采样约束，已有矢量形状无法直接代替尺规：尺规不属于作品图层，移动尺规也不能移动已有笔迹。本轮在插件内部补齐这三个环节，没有更改宿主源语或接收端。
+
+已实现直尺、无限直尺、平行尺、椭圆、同心椭圆和消失点。前两种投影到固定线段或直线；平行尺通过本笔起点构造平行线；消失点通过起点与消失点构造射线所在直线。椭圆用两点主轴及经过第三点的椭圆方程定义，第三点需在主轴两端之间的侧方；同心椭圆按起笔点等比缩放并在本笔固定。控制点为文档坐标，允许消失点放在画布外。
+
+在工具栏选择辅助尺规，双击打开统一参数浮窗，选择类型和创建模式，再依次点击1/2/3个控制点。完成后切到编辑模式；拖圆点修改控制点，拖本体整体移动。参数浮窗还提供数值控制点、显隐、允许吸附、锁定、直尺刻度、消失点预览线数和删除确认。Esc、切换工具、切换创建类型、多点触控会取消未完成的创建或编辑。创建跨点击保留原工程编号、版本和视图矩阵，途中协作编辑或视图变化会明确拒绝旧手势。
+
+在尺规参数或基础画笔参数窗口开启“吸附到辅助尺规”，选择尺规后切回自由画笔即可沿尺绘画。支持自由画笔、铅笔、软笔、喷枪、橡皮擦和栅格书法笔的中心轨迹。起笔范围使用4–64 dp，默认16；“只吸附选中尺规”默认开启，也可以自动按起笔范围与最初方向选择，在一笔内锁定一个目标。超出固定尺规起笔范围时自由绘制；平行尺、消失点及同心椭圆按起点建立本笔约束。颜色、宽度、不透明度、笔尖角度、工程/图层编号与版本、视图和图层矩阵都在起笔时捕获。多点触控、取消事件和冲突不会提交半笔；正常松开只提交一次。
+
+笔迹以投影后图层局部坐标固化到 STROKE_ADD，回放、保存和导出不重新依赖尺规。修改、隐藏或删除尺规不会改变已有笔迹。assistants、selectedAssistantId、assistantSettings 为可选文档字段，旧工程缺失时表示没有尺规；保存、模板、复制、撤销/重做随现有文档操作统一处理。裁剪和带偏移的画布尺寸调整会同时移动尺规。作品 PNG/JPEG 导出仍使用 ArtRenderer，不含辅助线。
+
+兰儿能力：
+- assistant.list：读取尺规、选择、设置、可用/待实现类型和支持画笔
+- assistant.create/select/update/delete/settings：绑定 documentId/expectedRevision 的工程编辑
+- assistant.project：显式指定尺规，输入文档坐标及可选压力，返回投影坐标；不写作品、不使用手机吸附距离阈值
+- assistant.stroke：显式指定尺规及绘画图层，输入文档坐标，投影并转成图层局部坐标，一次写入笔迹
+- assistant.preview：读取辅助线、作品和画布外控制点的256边长视图缩略图
+
+尺规写操作和沿尺绘画在原返回结果中附带 assistant-view 图片反馈，撤销/重做改变尺规时也使用相同视图反馈。此视图同时包含参考图像，是检查用图，不是作品导出。显示辅助线和吸附分别控制；全局隐藏辅助线不关闭吸附，编辑工具仍显示控制点，各尺规隐藏或禁用则不参与吸附。预览绘制只用几何，避免常驻进程中的原生默认字体依赖。
+
+本轮尚未实现三次曲线尺规、透视网格、透视椭圆、双点透视组合、鱼眼、曲线透视、局部作用区域和固定长度单位，参数窗口显示灰色占位。矢量、动态与多重画笔的吸附也尚未接入。两点透视可先用两个消失点配一把垂直平行尺搭建，自动模式选择本筆目标；不冒充完整双点透视助手。
+
+设计参考用户共享储存中 Krita 6.0.4 的 RulerAssistant.cc、InfiniteRulerAssistant.cc、ParallelRulerAssistant.cc、Ellipse.cc、EllipseAssistant.cc、ConcentricEllipseAssistant.cc、VanishingPointAssistant.cc 和 libs/ui/kis_painting_assistants_decoration.cpp，以及 [官方助手工具说明](https://docs.krita.org/en/reference_manual/tools/assistant.html) 和 [绘画辅助尺规说明](https://docs.krita.org/en/user_manual/painting_with_assistants.html)。使用本插件的数据、矩阵、交互与绘画能力实现，没有引入 Qt/Krita 插件内核。
+
+本轮只做本地源码迭代，未编译、未上传或进行运行测试。源码核对包括版本、capability/manifest、控制点验证、坐标投影与固化、冲突/取消路径以及导出排除；编译安装后需验收手机/鼠标创建编辑、变换图层的吸附、保存重开、撤销、导出和六种尺规。

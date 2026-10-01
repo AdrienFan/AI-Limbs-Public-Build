@@ -52,6 +52,7 @@ class ArtStudioEntry : InProcessPluginEntry {
                         store.withCanvasFeedback {
                             val result=block(parameters)
                             if(name.startsWith("reference.")) result.put("referenceFeedback",true)
+                            if(name.startsWith("assistant.")) result.put("assistantFeedback",true)
                             result
                         }
                     else block(parameters)
@@ -146,6 +147,30 @@ class ArtStudioEntry : InProcessPluginEntry {
             ArtStudioViewControl.setPresentationMode(mode)
             response
         }
+
+        capability("assistant.list","读取辅助尺规",read,
+            "documentId 绑定当前工程，可选 expectedRevision；返回尺规、选择、吸附设置、可用类型与未实现部分。所有控制点都是文档坐标，尺规不导出为作品像素。") { p -> store.assistantList(p) }
+        capability("assistant.create","创建辅助尺规",write,
+            "必须传 documentId/expectedRevision；type 从 toolbox.catalog.assistants.types 读取，points 为控制点二维数组，name 可选。ruler/infinite_ruler/parallel_ruler 两点；ellipse/concentric_ellipse 三点（两点主轴、第三点在主轴两端之间侧方并位于椭圆上）；vanishing_point 一点。允许画布外消失点，创建后选中。") { p ->
+            val a=JSONObject().put("id",UUID.randomUUID().toString()).put("type",p.getString("type"))
+                .put("points",p.getJSONArray("points"))
+            if(p.has("name"))a.put("name",p.getString("name"))
+            store.apply("LANER","ASSISTANT_CREATE",JSONObject(p.toString()).put("assistant",a))
+        }
+        capability("assistant.select","选择辅助尺规",write,
+            "documentId/expectedRevision/id；空 id 清除选择，选择不受编辑锁限制。") { p -> store.apply("LANER","ASSISTANT_SELECT",p) }
+        capability("assistant.update","编辑辅助尺规",write,
+            "documentId/expectedRevision/id/changes；changes 可含 points/name/visible/enabled/locked/subdivisions(0..100)/rays(4..64)。锁定后只能单独修改 locked；points 仍为原类型控制点。隐藏尺规不参与吸附。") { p -> store.apply("LANER","ASSISTANT_UPDATE",p) }
+        capability("assistant.delete","删除辅助尺规",write,
+            "documentId/expectedRevision/id；可撤销，不修改已经完成的笔迹，锁定尺规须先解锁。") { p -> store.apply("LANER","ASSISTANT_DELETE",p) }
+        capability("assistant.settings","设置尺规显示与画笔吸附",write,
+            "documentId/expectedRevision/settings；settings 可含 visible(显示辅助线)、snapping、onlySelected、thresholdDp(4..64)。手机起笔按屏幕 dp 范围及方向挑选并锁定一个尺规；全局隐藏辅助线不关闭吸附，各尺规 visible=false 或 enabled=false 才不参与吸附。") { p -> store.apply("LANER","ASSISTANT_SETTINGS",p) }
+        capability("assistant.project","计算沿尺规坐标",read,
+            "documentId/expectedRevision/id/points；points 为 1..10000 个文档坐标，可带第三项压力。显式约束到指定尺规，不使用手机距离阈值；起笔点决定平行线、消失点射线与同心椭圆，返回投影后的文档坐标，不写作品。") { p -> store.assistantProject(p) }
+        capability("assistant.stroke","沿尺规绘画",write,
+            "documentId/expectedRevision/id(尺规)/layerId/points/width；points 为文档坐标，可带压力。tool 可选 ink/pencil/soft/spray/eraser/calligraphy，color/opacity/nibAngle 可选。width 为图层局部像素；投影后转换到当前绘画图层局部坐标，只写一条 STROKE_ADD；笔迹固化，以后编辑或删除尺规不会改变已有作品。") { p -> store.assistantStroke("LANER",p) }
+        capability("assistant.preview","检查尺规与画布",read,
+            "documentId，可选 expectedRevision；返回256边长的尺规视图缩略图，包含可见辅助线和画布外控制点，不是作品导出。") { p -> store.assistantPreview(p) }
         capability("toolbox.catalog", "读取画室工具清单", read,
             "列出可用的画室基础工具和已预留的 Krita 工具位置；每格都有双击参数浮窗入口；planned 项只能查看说明，没有绘画执行入口。") {
             ArtToolCatalog.describe()
@@ -594,6 +619,14 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
+        "assistant.list", "assistant.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
+        "assistant.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("type"),p("points","array"),p("name",optional=true))
+        "assistant.select", "assistant.delete" -> listOf(p("documentId"),p("expectedRevision","integer"),id)
+        "assistant.update" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("changes","object"))
+        "assistant.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("settings","object"))
+        "assistant.project" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("points","array"))
+        "assistant.stroke" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("layerId"),p("points","array"),p("width","number"),
+            p("tool",optional=true),p("color",optional=true),p("opacity","number",true),p("nibAngle","number",true))
         "view.tool_options" -> listOf(p("action"), p("toolId", optional = true),
             p("xDp", "number", true), p("yDp", "number", true))
         "view.zoom_tool" -> listOf(p("mode"))

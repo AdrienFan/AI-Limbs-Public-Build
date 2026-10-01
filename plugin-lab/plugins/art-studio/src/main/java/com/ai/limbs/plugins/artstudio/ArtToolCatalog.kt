@@ -6,6 +6,7 @@ import org.json.JSONObject
 /** The page and Laner's read-only catalog share one inventory of toolbox slots. */
 internal object ArtToolCatalog {
     val implemented get() = listOf(
+        Triple("assistant","绘画辅助尺规（基础）","⌖"),
         Triple("reference_images","参考图像","▧"),
         Triple("vector_calligraphy", "矢量书法笔", "✒"),
         Triple("vector_bezier", "可编辑贝塞尔路径", "⌁"),
@@ -51,8 +52,6 @@ internal object ArtToolCatalog {
     val pending get() = listOf(
         PendingTool("svg_text_advanced", "SVG 文字高级排版", "T",
             "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"),
-        PendingTool("assistant", "绘画辅助尺规", "⌖",
-            "plugins/assistants/Assistants/assistant_tool.cc"),
         PendingTool("smart_patch", "智能修补", "✚",
             "plugins/tools/tool_smart_patch/kis_tool_smart_patch.h"),
         PendingTool("colorize_mask", "上色蒙版编辑", "▦",
@@ -102,6 +101,10 @@ internal object ArtToolCatalog {
         val zoomState = ArtStudioViewControl.state.value
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
             .put("parameterWindowCapability", "$ART_ID.view.tool_options")
+            .put("assistants",JSONObject().put("types",JSONObject(ArtAssistants.types))
+                .put("pending",JSONArray(ArtAssistants.pending)).put("maxObjects",ArtAssistants.MAX)
+                .put("coordinateSpace","document").put("exported",false)
+                .put("supportedBrushTools",JSONArray(ArtAssistants.brushTools.toList())))
             .put("calligraphy",JSONObject().put("capability","$ART_ID.shape.calligraphy")
                 .put("coordinateSpace","layer-local").put("timeUnit","milliseconds")
                 .put("maxSamples",ArtCalligraphy.MAX_SAMPLES)

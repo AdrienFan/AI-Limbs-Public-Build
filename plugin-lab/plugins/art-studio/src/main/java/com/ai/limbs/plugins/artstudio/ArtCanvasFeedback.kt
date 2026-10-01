@@ -17,6 +17,7 @@ internal object ArtCanvasFeedback {
     fun affectsCanvas(name: String, parameters: JSONObject): Boolean = when {
         name == "menu.execute" ->
             ArtStudioMenuCatalog.find(parameters.getString("action"))?.optBoolean("documentWrite") == true
+        name.startsWith("assistant.") -> name !in setOf("assistant.list","assistant.project","assistant.preview")
         name.startsWith("reference.") -> name !in setOf("reference.list","reference.preview","reference.region")
         name in setOf("text.create", "text.update") -> true
         name.startsWith("path.") -> name != "path.nodes"
@@ -32,8 +33,9 @@ internal object ArtCanvasFeedback {
     }
 
     fun attach(store: ArtStore, result: JSONObject, snapshot: JSONObject?): JSONObject {
-        if (result.optBoolean("referenceFeedback")) {
-            val receipt=ArtReferencePreview.overview(store,requireNotNull(snapshot))
+        if (result.optBoolean("referenceFeedback") || result.optBoolean("assistantFeedback")) {
+            val receipt=ArtReferencePreview.overview(store,requireNotNull(snapshot),
+                includeAssistants=result.optBoolean("assistantFeedback"))
             return result.put("thumbnail",receipt.getJSONObject("thumbnail"))
                 .put("mcp_content",receipt.getJSONArray("mcp_content"))
         }

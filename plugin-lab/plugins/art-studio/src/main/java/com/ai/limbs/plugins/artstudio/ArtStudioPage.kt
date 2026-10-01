@@ -411,6 +411,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var image by remember { mutableStateOf<Bitmap?>(null) }
     var referenceBitmaps by remember { mutableStateOf<Map<String,Bitmap>>(emptyMap()) }
     var referenceMultiple by remember { mutableStateOf(false) }
+    var assistantAdding by remember { mutableStateOf(true) }
+    var assistantType by remember { mutableStateOf("ruler") }
     var referenceImportContext by remember { mutableStateOf<JSONObject?>(null) }
     var textDialog by remember { mutableStateOf<JSONObject?>(null) }
     var textFonts by remember { mutableStateOf(JSONArray()) }
@@ -1380,6 +1382,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.scene = state; view.sceneRevision = current.getInt("revision")
                     view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
+                    view.assistantAdding = assistantAdding
+                    view.assistantType = assistantType
+                    view.onAssistantCreated = { assistantAdding=false }
+                    view.onAssistantEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
+                    view.onAssistedStroke = { p -> if(!busy) perform { store.apply("AWEI","STROKE_ADD",p) } }
                     view.referenceBitmaps = referenceBitmaps
                     view.referenceMultiple = referenceMultiple
                     view.onReferenceEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
@@ -2242,6 +2249,22 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             if (pending != null) {
                 Text("该工具尚未实现，当前仅提供说明入口，不能用于绘画。")
             } else {
+                if(tool=="assistant") {
+                    StudioAssistantOptions(current,busy,assistantAdding,assistantType,
+                        {assistantAdding=it},{assistantType=it},
+                        {type,p -> if(!busy)perform { store.apply("AWEI",type,p) }},
+                        {assistantAdding=false;ArtStudioToolOptionsControl.select("ink")})
+                }
+                if(tool in ArtAssistants.brushTools) {
+                    val assistantSettings=ArtAssistants.settings(current.getJSONObject("state"))
+                    FilterChip(selected=assistantSettings.getBoolean("snapping"),enabled=!busy,
+                        onClick={
+                            val p=JSONObject().put("documentId",current.getString("id")).put("expectedRevision",current.getInt("revision"))
+                                .put("settings",JSONObject().put("snapping",!assistantSettings.getBoolean("snapping")))
+                            perform { store.apply("AWEI","ASSISTANT_SETTINGS",p) }
+                        },label={Text("吸附到辅助尺规")})
+                    TextButton(onClick={ArtStudioToolOptionsControl.show("assistant")},enabled=!busy) { Text("设置辅助尺规") }
+                }
                 if (tool == "vector_bezier") {
                     StudioBezierOptions(current, selected, busy, bezierEditing, bezierNode,
                         bezierNodeType, bezierClosed, fillShape, { mode ->
@@ -2501,7 +2524,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     FilterChip(selected = viewOptions.zoomToolMode == "out",
                         onClick = { ArtStudioViewControl.setZoomToolMode("out") }, label = { Text("缩小") })
                 }
-                if (tool !in setOf("vector_bezier", "reference_images", "vector_calligraphy",
+                if (tool !in setOf("assistant", "vector_bezier", "reference_images", "vector_calligraphy",
                     "vector_freehand", "shape_select", "svg_text", "sampler", "fill", "mirror",
                     "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "calligraphy", "dyna", "zoom")) {
                     Text("此工具暂无独立参数。")
@@ -2982,7 +3005,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel(); shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3008,6 +3031,15 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeCreationContext: JSONObject? = null
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
+    private val assistantInteraction = StudioAssistantInteraction().apply { density=context.resources.displayMetrics.density }
+    private val assistedBrushInteraction = StudioAssistedBrushInteraction().apply { density=context.resources.displayMetrics.density }
+    var assistantAdding: Boolean = true
+        set(value) { if(field!=value){field=value;assistantInteraction.cancel();invalidate()} }
+    var assistantType: String = "ruler"
+        set(value) { if(field!=value){field=value;assistantInteraction.cancel();invalidate()} }
+    var onAssistantCreated: ()->Unit = {}
+    var onAssistantEdit: (String,JSONObject)->Unit = {_,_->}
+    var onAssistedStroke: (JSONObject)->Unit = {}
     private val referenceInteraction = StudioReferenceInteraction(this)
     var referenceBitmaps:Map<String,Bitmap> = emptyMap()
     var referenceMultiple = false
@@ -3041,6 +3073,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
                 referenceInteraction.cancel()
+                assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
                 points = JSONArray()
@@ -3122,6 +3155,7 @@ private class StudioCanvas(context: Context) : View(context) {
     private var lastY = 0f
     private var pinch = 0f
     private var pinchAngle = 0f
+    private var assistedStrokeRouting = false
     private var multitouch = false
     private var points = JSONArray()
     private var pathVertices = JSONArray()
@@ -3343,6 +3377,10 @@ private class StudioCanvas(context: Context) : View(context) {
             canvas.restore()
         }
         scene?.let { referenceInteraction.draw(canvas,it,referenceBitmaps,matrix,tool=="reference_images") }
+        scene?.let { ArtAssistants.draw(canvas,it,matrix,tool=="assistant",assistantInteraction.preview,
+            resources.displayMetrics.density) }
+        if(tool=="assistant")assistantInteraction.drawDraft(canvas,matrix)
+        assistedBrushInteraction.draw(canvas)
         if (tool == "mirror") {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -3520,6 +3558,16 @@ private class StudioCanvas(context: Context) : View(context) {
     }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="assistant") {
+            if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {assistantInteraction.cancel();invalidate();return true}
+            if(keyCode in setOf(android.view.KeyEvent.KEYCODE_DEL,android.view.KeyEvent.KEYCODE_FORWARD_DEL)) {
+                val state=scene
+                if(state!=null && !shapeBusy && ArtAssistants.selected(state).isNotEmpty())
+                    onAssistantEdit("ASSISTANT_DELETE",JSONObject().put("documentId",documentId)
+                        .put("expectedRevision",sceneRevision).put("id",ArtAssistants.selected(state)))
+                return true
+            }
+        }
         if(tool=="reference_images" && keyCode in setOf(android.view.KeyEvent.KEYCODE_DEL,android.view.KeyEvent.KEYCODE_FORWARD_DEL)) {
             val state=scene
             if(state!=null && !shapeBusy && ArtReferences.ids(state).isNotEmpty()) onReferenceEdit("REFERENCE_DELETE",
@@ -3548,6 +3596,7 @@ private class StudioCanvas(context: Context) : View(context) {
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
             referenceInteraction.cancel()
+            assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
@@ -3582,6 +3631,37 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(tool=="assistant") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN) requestFocus()
+            val state=scene ?: return true
+            try {
+                return assistantInteraction.touch(event,state,documentId,sceneRevision,matrix,
+                    assistantAdding,assistantType,shapeBusy,onAssistantEdit,onAssistantCreated)
+            } catch(error:Exception) {
+                assistantInteraction.cancel()
+                android.util.Log.e("ArtStudio","Assistant edit failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {invalidate()}
+        }
+        val assistantState=scene
+        if(event.actionMasked==MotionEvent.ACTION_DOWN) assistedStrokeRouting =
+            tool in ArtAssistants.brushTools && assistantState!=null && ArtAssistants.settings(assistantState).getBoolean("snapping")
+        if(assistedStrokeRouting && assistantState!=null) {
+            try {
+                val options=JSONObject().put("tool",tool).put("color",color)
+                    .put("width",brushWidth.toDouble()).put("opacity",opacity.toDouble())
+                if(tool=="calligraphy")options.put("nibAngle",nibAngle.toDouble())
+                return assistedBrushInteraction.touch(event,assistantState,documentId,sceneRevision,selectedId,
+                    matrix,shapeBusy,options,onAssistedStroke)
+            } catch(error:Exception) {
+                assistedBrushInteraction.cancel()
+                android.util.Log.e("ArtStudio","Assisted stroke failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {
+                if(event.actionMasked in setOf(MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL))assistedStrokeRouting=false
+                invalidate()
+            }
+        }
         if(tool=="reference_images") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN) requestFocus()
             val state=scene ?: return true
