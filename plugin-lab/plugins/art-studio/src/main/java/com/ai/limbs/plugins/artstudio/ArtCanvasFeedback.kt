@@ -115,7 +115,7 @@ internal object ArtCanvasFeedback {
         } finally { bitmap.recycle() }
     }
 
-    private fun encode(bitmap: Bitmap, metadata: JSONObject): JSONObject {
+    fun encode(bitmap: Bitmap, metadata: JSONObject): JSONObject {
         val bytes = ByteArrayOutputStream().use { stream ->
             check(bitmap.compress(Bitmap.CompressFormat.JPEG, 80, stream)) { "无法编码画布预览" }
             stream.toByteArray()

@@ -63,6 +63,11 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+    /** Read the active document and render a view under one lock; no history or pointer mutation. */
+    fun withViewSnapshot(block: (JSONObject?) -> JSONObject): JSONObject = locked {
+        block(if (pointer.isFile) snapshot(loadCurrent()) else null)
+    }
+
     fun withCanvasFeedback(block: () -> JSONObject): JSONObject = locked {
         fun referenceSignature(snapshot:JSONObject?):String {
             if(snapshot==null) return ""

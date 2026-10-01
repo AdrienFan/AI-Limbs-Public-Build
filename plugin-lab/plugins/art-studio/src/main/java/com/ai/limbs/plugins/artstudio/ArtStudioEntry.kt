@@ -15,6 +15,11 @@ class ArtStudioEntry : InProcessPluginEntry {
         require(host.pluginId == ART_ID)
         val store = ArtStore(host.dataDir)
         val viewChannel = ArtStudioViewChannel()
+        val assistantView = ArtStudioAssistantView()
+
+        fun viewTarget(p: JSONObject): String = p.optString("target", "assistant").also {
+            require(it in setOf("assistant", "phone")) { "target 必须是 assistant 或 phone" }
+        }
         host.registerProvider(ART_VIEW_CONTROL, viewChannel,
             mapOf("kind" to "ui_state"))
         host.registerProvider(ART_PAGE, ArtStudioPage(host),
@@ -119,15 +124,18 @@ class ArtStudioEntry : InProcessPluginEntry {
                 .put("x", -p.optInt("offsetX", 0)).put("y", -p.optInt("offsetY", 0)))
         }
         capability("view.state", "读取画室视图状态", read,
-            "查看面板、状态栏、网格、像素网格、页面模式、缩放方向和角标；canvasZoom 包含实际像素比例 percent、范围 minPercent/maxPercent 及 documentId。未挂载、页面不可见或连接过期时没有 canvasZoom；canvasAttached/pageVisible 来自实际手机页面。") {
-            viewChannel.describe()
+            "target 默认为 assistant：读取兰儿的独立后台预览，canvasAttached 表示当前工程已打开；pageVisible 不冒充手机可见性。canvasZoom 包含比例、范围及 documentId。target=phone 显式读取手机页面、面板与工具窗状态，保持真实挂载、可见性与心跳校验。") { p ->
+            when (viewTarget(p)) {
+                "assistant" -> store.withViewSnapshot { assistantView.describe(it) }
+                else -> viewChannel.describe().put("target", "phone")
+            }
         }
         registerCapability("view.set", "设置画室视图选项", InProcessCapabilityEffect.UI_INTERACTION,
             "option 可取 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；设置与阿伟菜单相同的视图状态。") { p ->
             viewChannel.execute("set", p)
         }
         registerCapability("view.tool_options", "操作工具参数浮窗", InProcessCapabilityEffect.UI_INTERACTION,
-            "action 为 show/minimize/restore/close/move。show 必须传 toolbox.catalog 的 toolId，可用工具同时被选中，planned 项只显示说明。move 必须传非负有限 xDp/yDp，以画室内容左上角为原点，布局后限制在可见区域内。窗口为插件内非模态浮窗，可继续绘画；状态读取 view.state 的 toolOptionsWindow。操作不改变作品，accepted 表示实际页面已执行并回执，最终布局坐标随后读取。") { p ->
+            "action 为 show/minimize/restore/close/move。show 必须传 toolbox.catalog 的 toolId，可用工具同时被选中，planned 项只显示说明。move 必须传非负有限 xDp/yDp，以画室内容左上角为原点，布局后限制在可见区域内。窗口为插件内非模态浮窗，可继续绘画；状态读取 view.state(target=phone) 的 toolOptionsWindow。操作不改变作品，accepted 表示实际页面已执行并回执，最终布局坐标随后读取。") { p ->
             viewChannel.execute("tool_options", p)
         }
         registerCapability("view.zoom_tool", "设置缩放工具方向", InProcessCapabilityEffect.UI_INTERACTION,
@@ -135,12 +143,18 @@ class ArtStudioEntry : InProcessPluginEntry {
             viewChannel.execute("zoom_tool", p)
         }
         registerCapability("view.zoom", "设置画布显示比例", InProcessCapabilityEffect.UI_INTERACTION,
-            "documentId 使用 view.state 的 canvasZoom.documentId；percent 为显示百分比，100 表示一个图像像素对应一个屏幕像素，必须在当前 minPercent/maxPercent 内。以可视区域中心缩放；返回 accepted 表示实际页面已执行并回执，实际值读取 view.state。只改变显示，不改变图片像素或历史。") { p ->
-            viewChannel.execute("zoom", p)
+            "target 默认为 assistant：缩放兰儿的独立后台预览并返回实际渲染图片，无需打开手机页面。documentId 和范围必须来自同一 target 的 view.state；100 表示源像素与预览像素1:1。target=phone 显式控制手机页面并等待执行回执。只改变显示，不改变作品像素或历史。") { p ->
+            when (viewTarget(p)) {
+                "assistant" -> store.withViewSnapshot { assistantView.execute(store, it, "zoom", p) }
+                else -> viewChannel.execute("zoom", p)
+            }
         }
         registerCapability("view.command", "操作画室视图", InProcessCapabilityEffect.UI_INTERACTION,
-            "在画室画布打开时执行 zoom_in/out/100、fit/fit_width/fit_height、rotate_right/left、reset_rotation、mirror、reset_display 或 refresh。") { p ->
-            viewChannel.execute("command", p)
+            "target 默认为 assistant：在当前工程上执行 zoom_in/out/100、fit/fit_width/fit_height、rotate_right/left、reset_rotation、mirror、reset_display 或 refresh，并返回实际后台预览图片；不依赖手机页面。target=phone 显式控制手机视图，未挂载或不可见时明确拒绝，不切换手机页面。") { p ->
+            when (viewTarget(p)) {
+                "assistant" -> store.withViewSnapshot { assistantView.execute(store, it, "command", p) }
+                else -> viewChannel.execute("command", p)
+            }
         }
         registerCapability("view.presentation", "切换画室页面模式", InProcessCapabilityEffect.UI_INTERACTION,
             "向宿主请求 normal、fullscreen_portrait 或 fullscreen_landscape；宿主确认后才视为成功。") { p ->
@@ -614,7 +628,8 @@ class ArtStudioPresentationEntry : InProcessPluginPresentationEntry {
 private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> {
     fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
         val description = when (key) {
-            "percent" -> "实际显示百分比；范围见 view.state.canvasZoom，100 表示 1:1。仅缩放显示。"
+            "target" -> "显式视图目标：assistant（默认，兰儿的后台预览）或 phone（手机实际页面）；不按页面是否可见自动切换。"
+            "percent" -> "实际显示百分比；范围见同一 target 的 view.state.canvasZoom，100 表示 1:1。仅缩放显示。"
             "content" -> "需要保存的完整文字，最多4096字符；换行符换行。基础排版边界见text.fonts。"
             "fontId" -> "text.fonts返回的当前设备字体标识；创建时默认中英文字体，更新时保留原字体。"
             "fontSize" -> "字号，6–512画布像素。"
@@ -700,7 +715,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("offsetX", "integer", true), p("offsetY", "integer", true))
         "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
-        "view.command" -> listOf(p("command"))
+        "view.state" -> listOf(p("target", optional = true))
+        "view.command" -> listOf(p("command"), p("target", optional = true))
         "colorize.list" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("maskId",optional=true),p("includeKeys","boolean",true))
         "colorize.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("maskId",optional=true))
         "colorize.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("sourceLayerId"),p("name",optional=true))
@@ -737,7 +753,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "view.tool_options" -> listOf(p("action"), p("toolId", optional = true),
             p("xDp", "number", true), p("yDp", "number", true))
         "view.zoom_tool" -> listOf(p("mode"))
-        "view.zoom" -> listOf(p("documentId"), p("percent", "number"))
+        "view.zoom" -> listOf(p("documentId"), p("percent", "number"), p("target", optional = true))
         "view.presentation" -> listOf(p("mode"))
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
             p("background", optional = true), p("name", optional = true))

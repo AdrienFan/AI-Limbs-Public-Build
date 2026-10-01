@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.39 源码；手机与 AI 视图连接修复，待编译验收）
+# AI Limbs 画室（0.2.40 源码；兰儿独立视图修复，待云端编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -613,3 +613,15 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 每次页面挂载拥有独立 session；400毫秒心跳、5秒连接和命令期限。命令绑定当前页面与工程，执行前申请一次性 claim；关闭页面、更换页面、切换工程、过期或重复请求不会操作后来打开的画布。accepted 仅在页面执行后返回；浮窗最终布局坐标仍在布局后读取。页面尚未打开时，view.set/zoom_tool 等偏好保留到页面确认应用，兼容既有用法。视图控制不改作品历史、像素或保存文件。
 
 版本0.2.39 / versionCode42 / appId v0239。新增10个 JVM 回归用例覆盖跨端状态、执行回执、关闭/替换页面、切换工程、心跳与请求过期、重复事件和错误传播；既有云端工作流先运行测试，再编译安装包。源码检查与编译、安装验收分别记录，不把源码完成当成实机验证成功。
+
+## 兰儿独立预览与手机视图目标（0.2.40）
+
+0.2.39 把 view.command / view.zoom 接到手机页面 Provider，仍把“AI 已打开工程”误当成“手机页面应当已挂载”，造成兰儿从自己的入口打开作品后仍无法适配、缩放。0.2.40 使 view.state / view.command / view.zoom 的默认目标为 assistant；它们直接读取同一 ArtStore 当前工程，在插件业务进程渲染真实的 1024×768 后台视口，不启动应用、不切换手机页面。
+
+- view.state 的 canvasAttached 表示 assistant 工程已打开；pageVisible=false 如实表示没有手机页面。viewSurface=offscreen_bitmap 明确视图身份；canvasZoom 返回同一目标的比例与 documentId。未打开工程时没有 canvasZoom。
+- view.command 支持原有缩放、旋转、镜像、适配、重置和刷新；成功时返回 viewPreview 元数据与 mcp_content 图片块。使用原始分辨率合成而非放大缩略图，沿用工作预算，超预算明确拒绝。
+- view.zoom 仍要求当前 documentId 与范围；100% 是一个文档像素对应一个预览像素。换工程或尺寸变化重置预览；只改视图，不写作品像素、历史、修订号或导出文件。预览变换是插件当前运行态，不作为工程保存内容。
+- 显式 target=phone 使用0.2.39的真实页面 Provider、心跳和执行回执；关闭或不可见时仍明确拒绝。目标只由参数确定，不按手机是否可见自动切换。
+- view.set / view.zoom_tool / view.tool_options / view.presentation 继续表示手机菜单、方向、参数窗和显示模式；读取其手机状态使用 view.state(target=phone)。toolbox.catalog 中工具窗状态也属于手机页面。绘画与对象编辑继续使用原有结构化能力。
+
+版本0.2.40 / versionCode43 / appId v0240。保留全部既有能力名与必填参数，给上述三项能力添加可选 target；手机控制仍通过显式 target=phone 提供。新增7项 JVM 回归用例，与既有10项连接用例一并由云端工作流执行。安装后需要验收：仅从兰儿入口打开工程、fit与缩放返回图片、旋转镜像真实改变预览、作品修订号不变，以及手机目标的可见性拒绝。源码完成不代表实机通过。
