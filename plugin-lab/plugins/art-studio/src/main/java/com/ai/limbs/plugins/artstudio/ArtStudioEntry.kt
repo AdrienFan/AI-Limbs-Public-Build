@@ -292,6 +292,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             "documentId/expectedRevision/maskId必填；将当前缓存填色转普通绘画层，删除编辑线索数据；可撤销恢复。不会重新计算，请先update使用最新线索结果。") {p->store.apply("LANER","COLORIZE_CONVERT",p)}
         capability("colorize.preview","检查填色与颜色线索",read,
             "documentId必填，expectedRevision/maskId可选；256边长缩略图包含所选蒙版的编辑线索与半透明输出，仅用于编辑检查，不是导出。") {p->store.colorizePreview(p)}
+        capability("enclose.info","读取围合填充范围与默认参数",read,
+            "返回四种围合方式、七种颜色条件、限制和高级灰色项目。基础 RGBA8 围合及区域筛选，非完整 Krita 内核。") {ArtEncloseFill.info()}
+        capability("enclose.apply","围合填充当前图层",write,
+            "documentId/expectedRevision/layerId/shape/points必填。shape=rect/ellipse需两个对角点，lasso需3–2048点并自动闭合，brush需1–2048点和width=1–256默认32，均为文档像素坐标。目标必须当前选中的未锁定可见未变换根绘画/图像层。color=#AARRGGBB，非擦除必填。mode=all/transparent/color/color_or_transparent/not_color/not_transparent/not_color_or_transparent，默认all；regionColor默认白；tolerance=0–100默认15；includeContour默认false，排除触及围合边界的连通区域；invert默认false。reference=current/visible默认visible，visible合成图层透明度及混合但不含文档背景、参考、尺规、蒙版线索；current读取原始图层像素。opacity=0–1默认1，erase默认false，expand=-16–16默认0，feather=0–8默认0，gapClose=0–8默认0只用于非all的二值条件，以形态学开运算断开窄通道再恢复边缘。现有选区剪裁最终输出，围合不会更改选区。最大4194304围合矩形像素和动态内存预检，无缩图处理。完成固化PNG并记录一次历史，自动缩图；没有可写像素返回changed=false，不增加历史。") {p->store.encloseFill("LANER",p)}
         capability("patch.info","读取智能修补范围",read,
             "返回基础局部 PatchMatch 的参数默认值、区域及计算预算、目标图层要求和未实现功能。") { ArtSmartPatch.info() }
         capability("patch.apply","智能修补当前图层",write,
@@ -657,6 +661,12 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("color"),p("action"),p("transparent","boolean",true))
         "colorize.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),p("settings","object"))
         "colorize.clear","colorize.update","colorize.convert" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"))
+        "enclose.info" -> emptyList()
+        "enclose.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("shape"),
+            p("points","array"),p("color",optional=true),p("mode",optional=true),p("regionColor",optional=true),
+            p("tolerance","integer",true),p("includeContour","boolean",true),p("invert","boolean",true),
+            p("reference",optional=true),p("width","integer",true),p("opacity","number",true),
+            p("erase","boolean",true),p("expand","integer",true),p("feather","integer",true),p("gapClose","integer",true))
         "patch.info" -> emptyList()
         "patch.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("points","array"),p("width","number"),p("patchRadius","integer",true),

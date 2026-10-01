@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.33",
+  "version": "0.2.34",
   "api": {
     "target": 1,
     "min": 1
@@ -176,7 +176,9 @@
       "plugin.art.studio.colorize.clear",
       "plugin.art.studio.colorize.update",
       "plugin.art.studio.colorize.convert",
-      "plugin.art.studio.colorize.preview"
+      "plugin.art.studio.colorize.preview",
+      "plugin.art.studio.enclose.info",
+      "plugin.art.studio.enclose.apply"
     ],
     "services": [],
     "providers": [

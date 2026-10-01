@@ -26,7 +26,7 @@ internal object ArtCanvasFeedback {
         name.startsWith("stroke.") || name.startsWith("transform.") || name.startsWith("selection.") -> true
         name.startsWith("layer.") -> name !in setOf("layer.list", "layer.search")
         name.startsWith("history.") -> name !in setOf("history.list", "history.timeline")
-        name.startsWith("image.") || name == "fill.contiguous" || name == "patch.apply" || name == "canvas.crop" -> true
+        name.startsWith("image.") || name == "fill.contiguous" || name == "patch.apply" || name == "enclose.apply" || name == "canvas.crop" -> true
         name.startsWith("edit.") -> name !in setOf("edit.clipboard_info", "edit.copy", "edit.copy_merged")
         else -> name in setOf("document.create", "document.open", "document.import",
             "document.open_image", "document.save_as", "document.duplicate", "document.close",

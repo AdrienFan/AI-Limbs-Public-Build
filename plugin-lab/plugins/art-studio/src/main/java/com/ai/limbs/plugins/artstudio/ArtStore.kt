@@ -1477,7 +1477,9 @@ internal class ArtStore(private val root: File) {
                     "清除像素" else "填充像素"
                 "PIXEL_PASTE" -> if (operation.getJSONObject("parameters")
                     .optString("action") == "FILL_CONTIGUOUS") "填充相连区域" else if (operation.getJSONObject("parameters")
-                    .optString("action") == "FILL_CONTIGUOUS_ERASE") "擦除相连区域" else "粘贴像素"
+                    .optString("action") == "FILL_CONTIGUOUS_ERASE") "擦除相连区域" else when(operation.getJSONObject("parameters").optString("action")) {
+                    "ENCLOSE_FILL" -> "围合填充";"ENCLOSE_ERASE" -> "围合擦除";else -> "粘贴像素"
+                }
                 "LAYER_COPY" -> "复制图层"
                 "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
                 "DOCUMENT_RENAME" -> "重命名工程"
@@ -1656,7 +1658,12 @@ internal class ArtStore(private val root: File) {
                 val order = contentOrder(layer)
                 if (type == "PIXEL_PASTE") {
                     validateId(p.getString("asset"))
-                    val kind = if (p.optString("action") == "FILL_CONTIGUOUS_ERASE") "erase" else "paste"
+                    if(p.optString("action") in setOf("ENCLOSE_FILL","ENCLOSE_ERASE")) {
+                        val x=p.getInt("x");val y=p.getInt("y");val w=p.getInt("width");val h=p.getInt("height")
+                        require(x>=0 && y>=0 && w>0 && h>0 && x.toLong()+w<=state.getInt("width") &&
+                            y.toLong()+h<=state.getInt("height") && w.toLong()*h<=ArtEncloseFill.MAX_PIXELS)
+                    }
+                    val kind = if (p.optString("action") in setOf("FILL_CONTIGUOUS_ERASE","ENCLOSE_ERASE")) "erase" else "paste"
                     order.put(JSONObject().put("kind", kind).put("asset", p.getString("asset"))
                         .put("x", p.getInt("x")).put("y", p.getInt("y")))
                 } else {
@@ -2257,6 +2264,47 @@ internal class ArtStore(private val root: File) {
         ArtImagePolicy.requireDimensions(clip.getInt("width"), clip.getInt("height"))
         val bytes = locked { assetFile(clip.getString("asset")).readBytes() }
         return openImage(Base64.encodeToString(bytes, Base64.NO_WRAP), "粘贴图像", actor, confirmResize)
+    }
+
+    /** Reference rendering and the pixel receipt share the document lock with revision checks. */
+    fun encloseFill(actor: String,p: JSONObject): JSONObject = locked {
+        require(actor in setOf("AWEI","LANER"))
+        val doc=loadCurrent()
+        require(p.getString("documentId")==doc.getString("id")) {"工程已切换，请重新围合"}
+        require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) {"工程已更新，请重新围合"}
+        val state=replay(doc);val layer=editableLayer(state);ArtEncloseFill.target(layer)
+        require(p.getString("layerId")==layer.getString("id")) {"目标图层已改变，请重新围合"}
+        val settings=ArtEncloseFill.options(p)
+        val color=if(settings.getBoolean("erase")) Color.WHITE else Color.parseColor(p.getString("color").also {requireColor(it)})
+        require(settings.getBoolean("erase") || Color.alpha(color)>0) {"填充色不能完全透明，请使用擦除模式"}
+        val points=ArtEncloseFill.points(p.getJSONArray("points"))
+        val area=ArtEncloseFill.area(state,settings,points)
+        val view=if(settings.getString("reference")=="current")
+            ArtMenuOperations.isolated(snapshot(doc),setOf(layer.getString("id")),layer.getString("id")) else snapshot(doc)
+        val viewState=view.getJSONObject("state");viewState.put("background","#00000000")
+        if(settings.getString("reference")=="current")ArtMenuOperations.layers(viewState)
+            .first {it.getString("id")==layer.getString("id")}.put("opacity",1.0).put("blend","normal")
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,viewState,state.getInt("width"),state.getInt("height"))+
+            area.rect.width().toLong()*area.rect.height()*96,"围合填充")
+        val source=ArtRenderer.render(this,view)
+        val result=try {ArtEncloseFill.solve(state,source,settings,area,color)} finally {source.recycle()}
+        val receipt=JSONObject().put("filledPixels",result.pixels).put("selectedRegions",result.regions)
+            .put("algorithm","enclosed-rgba-regions").put("reference",settings.getString("reference"))
+        if(result.pixels==0) {
+            result.bitmap.recycle()
+            return@locked snapshot(doc).put("encloseResult",receipt.put("changed",false).put("message","没有符合条件的可写入区域"))
+        }
+        val bytes=try {ArtImagePolicy.encodePng(result.bitmap,MAX_ASSET_BYTES)} finally {result.bitmap.recycle()}
+        val asset=UUID.randomUUID().toString()
+        try {
+            atomicBytes(assetFile(asset),bytes)
+            appendToCurrent(actor,"PIXEL_PASTE",JSONObject().put("asset",asset).put("layerId",layer.getString("id"))
+                .put("action",if(settings.getBoolean("erase"))"ENCLOSE_ERASE" else "ENCLOSE_FILL")
+                .put("x",area.rect.left).put("y",area.rect.top).put("width",area.rect.width()).put("height",area.rect.height())
+                .put("settings",settings).put("points",JSONArray().apply {points.forEach {put(JSONArray().put(it.first).put(it.second))}})
+                .put("filledPixels",result.pixels).put("algorithm","enclosed-rgba-regions"))
+                .put("encloseResult",receipt.put("changed",true))
+        } catch(error: Throwable) {assetFile(asset).delete();throw error}
     }
 
     /** Compute pixels under the same document lock; only a complete result enters history. */
