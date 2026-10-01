@@ -1360,25 +1360,71 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 canvas.zoomToPercent(request.percent)
         }
     }
-    LaunchedEffect(Unit) {
-        ArtStudioViewControl.commands.collect { command ->
-            val canvas = canvasRef[0]
-            when (command) {
-                "zoom_in" -> canvas?.zoomIn()
-                "zoom_out" -> canvas?.zoomOut()
-                "zoom_100" -> canvas?.zoomTo100Percent()
-                "fit" -> canvas?.fitViewport()
-                "fit_width" -> canvas?.fitWidth()
-                "fit_height" -> canvas?.fitHeight()
-                "rotate_right" -> canvas?.rotateBy(15f)
-                "rotate_left" -> canvas?.rotateBy(-15f)
-                "reset_rotation" -> canvas?.resetRotation()
-                "mirror" -> canvas?.toggleMirror()
-                "reset_display" -> canvas?.resetDisplay()
-                "refresh" -> refresh()
-            }
+    fun runViewCommand(command: String) {
+        val canvas = requireNotNull(canvasRef[0]) { "画布尚未完成挂载" }
+        when (command) {
+            "zoom_in" -> canvas.zoomIn()
+            "zoom_out" -> canvas.zoomOut()
+            "zoom_100" -> canvas.zoomTo100Percent()
+            "fit" -> canvas.fitViewport()
+            "fit_width" -> canvas.fitWidth()
+            "fit_height" -> canvas.fitHeight()
+            "rotate_right" -> canvas.rotateBy(15f)
+            "rotate_left" -> canvas.rotateBy(-15f)
+            "reset_rotation" -> canvas.resetRotation()
+            "mirror" -> canvas.toggleMirror()
+            "reset_display" -> canvas.resetDisplay()
+            "refresh" -> refresh()
+            else -> error("未知视图命令：$command")
         }
     }
+    LaunchedEffect(Unit) {
+        ArtStudioViewControl.commands.collect { command -> runViewCommand(command) }
+    }
+    val pageView = LocalView.current
+    StudioViewConnection(host,
+        physicalState = {
+            val canvas = canvasRef[0]
+            val visible = pageView.isAttachedToWindow && pageView.isShown &&
+                pageView.windowVisibility == View.VISIBLE
+            val attached = visible && canvas != null && canvas.isAttachedToWindow &&
+                canvas.image != null && canvas.documentId.isNotBlank()
+            ArtStudioViewControl.canvasAttached = attached
+            ArtStudioViewControl.describe().apply {
+                put("pageVisible", visible).put("canvasAttached", attached)
+                if (attached) put("canvasZoom", ArtStudioViewControl.canvasZoom.value?.describe())
+                else remove("canvasZoom")
+                getJSONObject("toolOptionsWindow").put("visible",
+                    attached && ArtStudioToolOptionsControl.state.value.open)
+            }
+        },
+        execute = { operation, parameters ->
+            check(!busy) { "画室正在处理绘画操作，请稍后再操作视图" }
+            when (operation) {
+                "command" -> {
+                    runViewCommand(parameters.getString("command"))
+                    JSONObject().put("accepted", true).put("command", parameters.getString("command"))
+                }
+                "zoom" -> {
+                    val canvas = requireNotNull(canvasRef[0])
+                    val zoomState = requireNotNull(ArtStudioViewControl.canvasZoom.value)
+                    require(canvas.documentId == parameters.getString("documentId")) { "画布已切换" }
+                    val percent = parameters.getDouble("percent")
+                    require(percent.isFinite() && percent in zoomState.minPercent..zoomState.maxPercent)
+                    canvas.zoomToPercent(percent)
+                    JSONObject().put("accepted", true).put("documentId", canvas.documentId)
+                        .put("requestedPercent", percent)
+                }
+                "set" -> ArtStudioViewControl.setOption(parameters.getString("option"), parameters.getBoolean("enabled"))
+                "zoom_tool" -> ArtStudioViewControl.setZoomToolMode(parameters.getString("mode"))
+                "tool_options" -> ArtStudioToolOptionsControl.command(parameters)
+                "presentation" -> {
+                    ArtStudioViewControl.setPresentationMode(parameters.getString("mode"))
+                    ArtStudioViewControl.describe().put("accepted", true)
+                }
+                else -> error("未知页面视图操作：$operation")
+            }
+        })
     LaunchedEffect(toolWindow.open, toolWindow.toolId) {
         // A tool window must not leave a full-canvas drawer dismiss shield behind it.
         if (toolWindow.open) {

@@ -46,6 +46,8 @@ internal data class StudioZoomRequest(val documentId: String, val percent: Doubl
 
 /** The human menu and Laner's capabilities address the same live view state. */
 internal object ArtStudioViewControl {
+    val commandNames = setOf("zoom_in", "zoom_out", "zoom_100", "fit", "fit_width", "fit_height",
+        "rotate_right", "rotate_left", "reset_rotation", "mirror", "reset_display", "refresh")
     val state = MutableStateFlow(StudioViewSettings())
     val commands = MutableSharedFlow<String>(extraBufferCapacity = 64)
     val canvasZoom = MutableStateFlow<StudioCanvasZoom?>(null)
@@ -104,11 +106,7 @@ internal object ArtStudioViewControl {
     }
 
     fun command(name: String): JSONObject {
-        require(name in setOf(
-            "zoom_in", "zoom_out", "zoom_100", "fit", "fit_width", "fit_height",
-            "rotate_right", "rotate_left", "reset_rotation", "mirror", "reset_display",
-            "refresh"
-        )) { "尚未实现的视图命令：$name" }
+        require(name in commandNames) { "尚未实现的视图命令：$name" }
         check(canvasAttached) { "请先打开画室画布，再操作视图" }
         check(commands.subscriptionCount.value > 0 && commands.tryEmit(name)) {
             "画室视图暂时无法接收操作"

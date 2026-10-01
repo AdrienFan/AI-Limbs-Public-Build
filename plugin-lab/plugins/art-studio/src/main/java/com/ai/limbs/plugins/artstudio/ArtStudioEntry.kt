@@ -14,6 +14,9 @@ class ArtStudioEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
         require(host.pluginId == ART_ID)
         val store = ArtStore(host.dataDir)
+        val viewChannel = ArtStudioViewChannel()
+        host.registerProvider(ART_VIEW_CONTROL, viewChannel,
+            mapOf("kind" to "ui_state"))
         host.registerProvider(ART_PAGE, ArtStudioPage(host),
             mapOf("kind" to "plugin_page", "screen_id" to ART_SCREEN))
         host.registerScreen(InProcessScreen(ART_SCREEN, "画室", "阿伟和兰儿共同编辑的画布",
@@ -116,28 +119,28 @@ class ArtStudioEntry : InProcessPluginEntry {
                 .put("x", -p.optInt("offsetX", 0)).put("y", -p.optInt("offsetY", 0)))
         }
         capability("view.state", "读取画室视图状态", read,
-            "查看面板、状态栏、网格、像素网格、页面模式、缩放方向和角标；canvasZoom 包含实际像素比例 percent、范围 minPercent/maxPercent 及 documentId。未挂载画布时没有 canvasZoom。") {
-            ArtStudioViewControl.describe()
+            "查看面板、状态栏、网格、像素网格、页面模式、缩放方向和角标；canvasZoom 包含实际像素比例 percent、范围 minPercent/maxPercent 及 documentId。未挂载、页面不可见或连接过期时没有 canvasZoom；canvasAttached/pageVisible 来自实际手机页面。") {
+            viewChannel.describe()
         }
-        capability("view.set", "设置画室视图选项", InProcessCapabilityEffect.UI_INTERACTION,
+        registerCapability("view.set", "设置画室视图选项", InProcessCapabilityEffect.UI_INTERACTION,
             "option 可取 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；设置与阿伟菜单相同的视图状态。") { p ->
-            ArtStudioViewControl.setOption(p.getString("option"), p.getBoolean("enabled"))
+            viewChannel.execute("set", p)
         }
-        capability("view.tool_options", "操作工具参数浮窗", InProcessCapabilityEffect.UI_INTERACTION,
-            "action 为 show/minimize/restore/close/move。show 必须传 toolbox.catalog 的 toolId，可用工具同时被选中，planned 项只显示说明。move 必须传非负有限 xDp/yDp，以画室内容左上角为原点，布局后限制在可见区域内。窗口为插件内非模态浮窗，可继续绘画；状态读取 view.state 的 toolOptionsWindow。操作不改变作品，accepted 表示共享状态已更新，最终布局坐标随后读取。") { p ->
-            ArtStudioToolOptionsControl.command(p)
+        registerCapability("view.tool_options", "操作工具参数浮窗", InProcessCapabilityEffect.UI_INTERACTION,
+            "action 为 show/minimize/restore/close/move。show 必须传 toolbox.catalog 的 toolId，可用工具同时被选中，planned 项只显示说明。move 必须传非负有限 xDp/yDp，以画室内容左上角为原点，布局后限制在可见区域内。窗口为插件内非模态浮窗，可继续绘画；状态读取 view.state 的 toolOptionsWindow。操作不改变作品，accepted 表示实际页面已执行并回执，最终布局坐标随后读取。") { p ->
+            viewChannel.execute("tool_options", p)
         }
-        capability("view.zoom_tool", "设置缩放工具方向", InProcessCapabilityEffect.UI_INTERACTION,
+        registerCapability("view.zoom_tool", "设置缩放工具方向", InProcessCapabilityEffect.UI_INTERACTION,
             "mode 为 in（放大）、out（缩小）或 toggle（交替切换）。只设置方向，不立即缩放、不改变选中工具；与手机角标及点击画布共享状态。立即缩放使用 view.command 的 zoom_in/zoom_out。") { p ->
-            ArtStudioViewControl.setZoomToolMode(p.getString("mode"))
+            viewChannel.execute("zoom_tool", p)
         }
-        capability("view.zoom", "设置画布显示比例", InProcessCapabilityEffect.UI_INTERACTION,
-            "documentId 使用 view.state 的 canvasZoom.documentId；percent 为显示百分比，100 表示一个图像像素对应一个屏幕像素，必须在当前 minPercent/maxPercent 内。以可视区域中心缩放；返回 accepted 表示已排队，实际值读取 view.state。只改变显示，不改变图片像素或历史。") { p ->
-            ArtStudioViewControl.requestZoom(p.getString("documentId"), p.getDouble("percent"))
+        registerCapability("view.zoom", "设置画布显示比例", InProcessCapabilityEffect.UI_INTERACTION,
+            "documentId 使用 view.state 的 canvasZoom.documentId；percent 为显示百分比，100 表示一个图像像素对应一个屏幕像素，必须在当前 minPercent/maxPercent 内。以可视区域中心缩放；返回 accepted 表示实际页面已执行并回执，实际值读取 view.state。只改变显示，不改变图片像素或历史。") { p ->
+            viewChannel.execute("zoom", p)
         }
-        capability("view.command", "操作画室视图", InProcessCapabilityEffect.UI_INTERACTION,
+        registerCapability("view.command", "操作画室视图", InProcessCapabilityEffect.UI_INTERACTION,
             "在画室画布打开时执行 zoom_in/out/100、fit/fit_width/fit_height、rotate_right/left、reset_rotation、mirror、reset_display 或 refresh。") { p ->
-            ArtStudioViewControl.command(p.getString("command"))
+            viewChannel.execute("command", p)
         }
         registerCapability("view.presentation", "切换画室页面模式", InProcessCapabilityEffect.UI_INTERACTION,
             "向宿主请求 normal、fullscreen_portrait 或 fullscreen_landscape；宿主确认后才视为成功。") { p ->
@@ -149,7 +152,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             check(response.optBoolean("ok") && response.optString("mode") == mode) {
                 response.optString("error").ifBlank { "宿主未确认画室显示模式：$response" }
             }
-            ArtStudioViewControl.setPresentationMode(mode)
+            viewChannel.execute("presentation", p)
             response
         }
 
@@ -178,7 +181,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             "documentId，可选 expectedRevision；返回256边长的尺规视图缩略图，包含可见辅助线和画布外控制点，不是作品导出。") { p -> store.assistantPreview(p) }
         capability("toolbox.catalog", "读取画室工具清单", read,
             "列出可用的画室基础工具和已预留的 Krita 工具位置；每格都有双击参数浮窗入口；planned 项只能查看说明，没有绘画执行入口。") {
-            ArtToolCatalog.describe()
+            ArtToolCatalog.describe(viewChannel.describe())
         }
         capability("document.create", "新建画室工程", write) { p ->
             store.create(p.getInt("width"), p.getInt("height"),
@@ -595,7 +598,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             ArtRenderer.export(store, store.current(), "jpeg", p.optString("name", ""), p)
         }
         host.logger.i("ArtStudio", "Art Studio mounted")
-        return InProcessPluginHandle { host.logger.i("ArtStudio", "Art Studio stopped") }
+        return InProcessPluginHandle { viewChannel.close(); host.logger.i("ArtStudio", "Art Studio stopped") }
     }
 }
 

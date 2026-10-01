@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.38 源码；修正选区输入与漫画分格编译错误，待编译验收）
+# AI Limbs 画室（0.2.39 源码；手机与 AI 视图连接修复，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -603,3 +603,13 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 修正为 MotionEvent.metaState 与 KeyEvent.META_SHIFT_MASK/META_ALT_MASK/META_CTRL_MASK 的位运算，覆盖左右修饰键，保留 Shift 添加、Alt 相减、Shift+Alt 相交和 Ctrl 替换；中文紧接变量时使用大括号插值。未更改工具能力、参数协议、宿主依赖或基座。
 
 版本0.2.38 / versionCode41 / appId v0238。提交前执行源码一致性和正式能力校验，提交后执行来源校验，随后重新推送既有云端工作流；编译和实机结果仍待验收。
+
+## 手机与 AI 视图连接（0.2.39）
+
+0.2.38 实机绘画成功，但 Resident 业务端的 view.state 缺少 canvasZoom，view.command fit 在手机已经打开画布时仍报“请先打开画室画布”。原因是进程内 ArtStudioViewControl/工具浮窗 Flow 不会跨 Runtime 分享。
+
+新增插件自有 plugin.art.studio.view.control Provider，使用现有 InProcessUiStateProvider.stateJson/perform 双向协议。手机页面上报真实 View 挂载、页面可见性、工程、缩放和工具浮窗；业务端将 view.* 请求投递到页面，页面在主线程执行并回传成功或明确错误。所有已公开的 view.* 名称、参数与 toolbox.catalog 保留。未增加 Host 原语、权限或基座特判。
+
+每次页面挂载拥有独立 session；400毫秒心跳、5秒连接和命令期限。命令绑定当前页面与工程，执行前申请一次性 claim；关闭页面、更换页面、切换工程、过期或重复请求不会操作后来打开的画布。accepted 仅在页面执行后返回；浮窗最终布局坐标仍在布局后读取。页面尚未打开时，view.set/zoom_tool 等偏好保留到页面确认应用，兼容既有用法。视图控制不改作品历史、像素或保存文件。
+
+版本0.2.39 / versionCode42 / appId v0239。新增10个 JVM 回归用例覆盖跨端状态、执行回执、关闭/替换页面、切换工程、心跳与请求过期、重复事件和错误传播；既有云端工作流先运行测试，再编译安装包。源码检查与编译、安装验收分别记录，不把源码完成当成实机验证成功。

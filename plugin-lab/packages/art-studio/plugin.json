@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.38",
+  "version": "0.2.39",
   "api": {
     "target": 1,
     "min": 1
@@ -197,7 +197,8 @@
     ],
     "services": [],
     "providers": [
-      "plugin.art.studio.page"
+      "plugin.art.studio.page",
+      "plugin.art.studio.view.control"
     ],
     "extensions": [
       {

@@ -10,11 +10,11 @@ android {
     namespace = "com.ai.limbs.plugins.artstudio"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.artstudio.v0238"
+        applicationId = "com.ai.limbs.payload.artstudio.v0239"
         minSdk = 29
         targetSdk = 34
-        versionCode = 41
-        versionName = "0.2.38"
+        versionCode = 42
+        versionName = "0.2.39"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -33,4 +33,7 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.activity.compose)
     implementation(libs.coroutines.android)
+    testImplementation(project(":plugin-inprocess-api"))
+    testImplementation(libs.junit)
+    testImplementation(libs.json.jvm)
 }

@@ -77,7 +77,7 @@ internal object ArtToolCatalog {
         else -> "双击工具打开参数浮窗；浮窗关闭后仍保留当前工具和参数。"
     }
 
-    fun describe(): JSONObject {
+    fun describe(viewState: JSONObject = ArtStudioViewControl.describe()): JSONObject {
         val tools = JSONArray()
         implemented.forEach { (id, label, _) ->
             tools.put(JSONObject().put("id", id).put("label", label)
@@ -91,7 +91,7 @@ internal object ArtToolCatalog {
                 .put("parameterWindow", JSONObject().put("gesture", "double-click").put("available", true)
                     .put("drawingEnabled", false)))
         }
-        val zoomState = ArtStudioViewControl.state.value
+        val zoomMode = viewState.getString("zoomToolMode")
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
             .put("parameterWindowCapability", "$ART_ID.view.tool_options")
             .put("colorSelections",ArtColorSelection.info()).put("magneticSelection",ArtMagneticSelection.info())
@@ -109,8 +109,8 @@ internal object ArtToolCatalog {
                 .put("maxSamples",ArtCalligraphy.MAX_SAMPLES)
                 .put("editable","普通封闭轮廓，可用形状选择和贝塞尔节点工具修改")
                 .put("pending",JSONArray(listOf("followSelectedPath","tabletAngle","massAndDrag","presets"))))
-            .put("zoomTool", JSONObject().put("mode", zoomState.zoomToolMode)
-                .put("badge", zoomState.zoomToolBadge)
+            .put("zoomTool", JSONObject().put("mode", zoomMode)
+                .put("badge", if (zoomMode == "in") "大" else "小")
                 .put("modeCapability", "$ART_ID.view.zoom_tool")
                 .put("usage", "选中后再次点击图标切换放大/缩小；点击画布以该点为中心缩放。"))
     }

@@ -44,6 +44,10 @@ jobs:
           set -euo pipefail
           sdkmanager --install "platform-tools" "platforms;android-34" "platforms;android-36" "build-tools;35.0.0"
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
+      - name: Test view connection lifecycle
+        run: |
+          chmod +x ./gradlew
+          ./gradlew :art-studio-plugin:testDebugUnitTest --stacktrace --no-daemon
       - name: Compile plugin payload
         run: |
           chmod +x ./gradlew
