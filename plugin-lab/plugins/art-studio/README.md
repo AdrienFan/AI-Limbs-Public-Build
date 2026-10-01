@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.40 源码；兰儿独立视图修复，待云端编译验收）
+# AI Limbs 画室（0.2.41 源码；能力示例与简短参数说明）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -625,3 +625,23 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 - view.set / view.zoom_tool / view.tool_options / view.presentation 继续表示手机菜单、方向、参数窗和显示模式；读取其手机状态使用 view.state(target=phone)。toolbox.catalog 中工具窗状态也属于手机页面。绘画与对象编辑继续使用原有结构化能力。
 
 版本0.2.40 / versionCode43 / appId v0240。保留全部既有能力名与必填参数，给上述三项能力添加可选 target；手机控制仍通过显式 target=phone 提供。新增7项 JVM 回归用例，与既有10项连接用例一并由云端工作流执行。安装后需要验收：仅从兰儿入口打开工程、fit与缩放返回图片、旋转镜像真实改变预览、作品修订号不变，以及手机目标的可见性拒绝。源码完成不代表实机通过。
+
+## 按需能力说明与示例（0.2.41）
+
+158项能力均通过已有 Runtime API 发布 `suggestedParamsJson`，`capability.describe` 将它作为 `minimal_example` 返回。只读取当前工具的说明和示例，无需先加载整份工具目录。基座、搜索与业务执行器保持既有实现。
+
+`ArtCapabilityHelp` 是插件能力说明的唯一来源：能力摘要说明效果及前置条件，参数说明包含格式、坐标空间、范围和条件依赖，确定的枚举也写入 `inputSchema`。示例只放在 `suggestedParamsJson`，不在摘要与 schema 再重复同一份 JSON。原来只有参数名的描述已补齐，重复的 `expectedRevision` 参数记录已去重，既有必填与可选含义不变。
+
+示例中的 `DOCUMENT_ID` 用 `document.info.id` 替换；`PAINT_LAYER_ID` / `VECTOR_LAYER_ID` / `TEXT_LAYER_ID` 从 `layer.list` 按 kind 选择。其他对象ID的读取入口写在对应参数说明。`expectedRevision:0` 是模板数字，每次调用前替换为当前 `document.info.revision`，不能一直沿用0。`BASE64_*` 是文件字节编码占位，不能当真实输入，也不能传文件路径。
+
+例如，在未锁定绘画层上画一笔：
+
+```json
+{"layerId":"PAINT_LAYER_ID","points":[[10,10],[100,80]],"tool":"ink","color":"#FF245364","width":6,"expectedRevision":0}
+```
+
+颜色统一为 `#AARRGGBB`。`stroke.add` 的点是图层局部像素；尺规笔迹、像素选区及分格使用文档像素；路径节点编辑使用对象局部像素。形状、渐变、曲线需要的点数和嵌套对象结构由该参数说明给出。显示操作优先使用默认 `target=assistant`，明确操作手机页面才选择 phone 或手机专用能力。
+
+示例包含真实有效的数字、动作名和格式，同时如实说明动态对象、剪贴板、选区、图层锁定等前置条件。PNG/JPEG导出保存原尺寸文件并返回路径；它不会返回原尺寸图片块，实际预览使用 `view.command` 或 `canvas.region`。此轮不改变导出或传输机制。
+
+版本0.2.41 / versionCode44 / appId v0241。增加云端 JVM 用例检查全部示例与注册参数的必填字段、类型、枚举、颜色和坐标说明；静态清单检查保证示例与manifest能力集合完全一致。只允许云端编译，安装后仍需通过实际 `capability.describe` 验收新说明。

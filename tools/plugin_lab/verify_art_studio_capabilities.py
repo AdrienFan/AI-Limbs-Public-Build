@@ -94,3 +94,39 @@ for name in ('menu.catalog', 'menu.execute'):
     if f'{plugin_id}.{name}' not in declared:
         raise SystemExit(f'Missing shared menu capability: {name}')
 print(f'Art Studio menus OK: {len(items)} leaf items, {len(implemented)} shared implementations; disabled reasons complete.')
+
+# Keep examples in the existing plugin CI gate: a capability without usable help
+# must not silently receive Resolver's zero/empty automatic example again.
+HELP = ENTRY.with_name('ArtCapabilityHelp.kt')
+help_source = HELP.read_text(encoding='utf-8')
+help_blocks = {
+    name: json.loads(body)
+    for name, body in re.findall(
+        r'private const val (EXAMPLES|FIELDS|SCOPED) = """\s*(\{.*?\})\s*"""',
+        help_source,
+        re.S,
+    )
+}
+if set(help_blocks) != {'EXAMPLES', 'FIELDS', 'SCOPED'}:
+    raise SystemExit('Art Studio help metadata blocks are missing or invalid')
+expected_help = {identity.removeprefix(f'{plugin_id}.') for identity in declared}
+examples = help_blocks['EXAMPLES']
+if set(examples) != expected_help:
+    raise SystemExit(f'Art Studio example coverage mismatch: missing={sorted(expected_help-set(examples))}, extra={sorted(set(examples)-expected_help)}')
+for name, help_item in examples.items():
+    if not isinstance(help_item['args'], dict) or not help_item['summary'].strip() or not isinstance(help_item['note'], str):
+        raise SystemExit(f'Invalid capability help: {name}')
+    for key in ('color', 'background', 'baseColor', 'boundaryColor', 'gradientEndColor', 'regionColor'):
+        if key in help_item['args'] and not re.fullmatch(r'#[A-Fa-f0-9]{8}', help_item['args'][key]):
+            raise SystemExit(f'Invalid example color: {name}.{key}')
+parameter_names = set(re.findall(r'\bp\("([^"]+)"', source[source.index('internal fun parametersFor'):]))
+if parameter_names - set(help_blocks['FIELDS']):
+    raise SystemExit(f'Missing parameter help: {sorted(parameter_names-set(help_blocks["FIELDS"]))}')
+for key, rule in help_blocks['FIELDS'].items():
+    if not rule['description'].strip() or rule['description'] == key:
+        raise SystemExit(f'Parameter help is only a name: {key}')
+if 'suggestedParamsJson = ArtCapabilityHelp.example(name).toString()' not in source:
+    raise SystemExit('Art Studio examples are not published through Runtime API')
+if 'ArtCapabilityHelp.property(name, field)' not in source:
+    raise SystemExit('Art Studio parameter enums are not published in inputSchema')
+print(f'Art Studio compact help OK: {len(examples)} examples; {len(parameter_names)} documented parameter names; Runtime API wiring present.')
