@@ -2305,7 +2305,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             enabled = !busy && current.optBoolean("canRedo")
                         ) { Text("↪️") }
                     }
-                    Row(Modifier.weight(1f).padding(start = 6.dp),
+                    Row(Modifier.weight(1f, fill = false).padding(start = 6.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
                         val liveZoom = canvasZoom?.takeIf { it.documentId == current.getString("id") }
                         val zoomEnabled = image != null && liveZoom != null
@@ -2318,7 +2318,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             },
                             enabled = zoomEnabled,
                             valueRange = 0f..1f,
-                            modifier = Modifier.weight(1f).semantics {
+                            modifier = Modifier.weight(1f, fill = false).widthIn(max = 120.dp).semantics {
                                 contentDescription = "画布缩放比例"
                             },
                             thumb = {
