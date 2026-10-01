@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.19 源码；基于已部署 0.2.18，格式拓展待编译验收）
+# AI Limbs 画室（0.2.20 源码；基于 0.2.19 格式拓展，格式与基础文字待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -81,7 +81,8 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 | 待实现工具 | 工具 ID | Krita 6.0.4 源码入口 | 所需基础能力 |
 | --- | --- | --- | --- |
-| 形状选择、SVG 文字 | shape_select、svg_text | plugins/tools/defaulttool/defaulttool/DefaultToolFactory.cpp；plugins/tools/svgtexttool/SvgTextToolFactory.cpp | 矢量对象与文字模型 |
+| 形状选择 | shape_select | plugins/tools/defaulttool/defaulttool/DefaultToolFactory.cpp | 矢量对象 |
+| SVG 文字高级排版 | svg_text_advanced | plugins/tools/svgtexttool/SvgTextToolFactory.cpp | 完整 SVG 排版、富文本与源码编辑；基础可编辑文字已单独实现 |
 | 矢量徒手路径、可编辑贝塞尔路径、矢量书法笔 | vector_freehand、vector_bezier、vector_calligraphy | plugins/tools/basictools/kis_tool_pencil.h、kis_tool_path.h；plugins/tools/karbonplugins/tools/CalligraphyTool/KarbonCalligraphyToolFactory.cpp | 可编辑路径与控制点 |
 | 参考图像 | reference_images | plugins/tools/defaulttool/referenceimagestool/ToolReferenceImages.h | 参考图像资源 |
 | 绘画辅助尺规 | assistant | plugins/assistants/Assistants/assistant_tool.cc | 辅助对象与笔画约束 |
@@ -91,7 +92,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 清单单一来源为 ArtToolCatalog.kt。兰儿读取 toolbox.catalog 可得到各项 id、label、implemented 与 status；待实现项还返回 Krita 相对源码路径，且没有执行能力。现有工具的 status=basic 只表示本画室已有可用入口，不表示已达到 Krita 完整行为。每次真正完成工具时，应在清单中把它从 pending 移至 implemented，并同时接通画布、工程记录与兰儿入口；保留的灰色位置不能冒充实现。
 
-这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、可编辑贝塞尔控制点/自由路径、书法笔矢量轮廓及速度调角、矢量形状、文字、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
+这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、可编辑贝塞尔控制点/自由路径、书法笔矢量轮廓及速度调角、矢量形状、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
 
 ## 右侧手风琴布局
 
@@ -284,3 +285,21 @@ image.formats 返回格式、扩展名、MIME、系统声明的 decoderAvailable
 压缩照片转为工程内无损 PNG 可能明显变大，故原文件输入上限 8 MiB 与单工程资源上限 64 MiB 分离。PNG 编码在越过限额时停止缓冲；归档读取同样检查单资源、当前内存及导入聚合资源预算，防止仅放大单资源限额后无界累积。尺寸边界仍为 1–16384；超预算仍需明确缩小确认。较大的新资源需用此版本或更新版本读取；旧工程可继续打开。
 
 验证用例应覆盖各格式的静态样本、GIF/动态 WebP 首帧、错误后缀、损坏内容、透明背景、照片方向、尺寸预算取消/确认、图层导入及工程保存再打开。当前仅完成源码检查，尚未编译和执行真机解码验收。
+
+## 0.2.20 基础可编辑文字
+
+在 0.2.19 格式拓展源码上继续迭代，版本码为 23，payload 为 artstudio.v0220。包含前一轮全部格式导入优化，本轮只提交源码，尚未推送、编译或安装。
+
+工具箱的 svg_text 位启用为「文字（基础可编辑）」；高级 SVG 排版仍单独灰色留位。Android 10/11 显示明确的 Android 12+ 要求。选择文字工具后，点击画布添加；选择已有文字图层后点击文字区域或「编辑选中文字」再次编辑。输入多行文字，选择系统中英文字体、字号、颜色、行距、左/中/右对齐、换行框宽度及位置。框宽按字形宽度自动换行；移动、缩放、旋转使用已有图层工具，删除使用图层删除。
+
+文字保存为 kind=text 的独立图层，text 包含原文与样式，asset 是透明 PNG 渲染缓存。编辑只重新生成缓存，保留图层锁、显隐、组关系、混合、不透明度、缩放与旋转；不把源文字烧录后丢掉。复制图层、另存为、工程归档保留文字与历史中的全部缓存；撤销重做能恢复旧文字。打开工程和正常画布/图层缩略图、导出只读取缓存，因此重新打开不要求当前字体仍然存在。原字体不可用时，必须明确选择当前字体才能编辑，不隐式替换。旧工程仍可读取，含 TEXT_CREATE/TEXT_UPDATE 的新工程需要新版画室读取。
+
+手机与 AI 共用 ArtStore.writeText 和现有跨进程锁；提交必须携带捕获的 documentId 与 expectedRevision，拒绝跨工程或过期编辑。新增能力 text.fonts、text.create、text.update；读取 document.info 获取工程 id/revision 和 state.layers 中的文字对象，text.update 必传完整 content，未传样式保持原值。成功写操作自动附带原有 thumbnail 与 MCP image，局部检查仍用 canvas.region。
+
+后台默认字体未初始化曾导致 drawText 原生崩溃。本轮读取系统 fonts.xml 中的 CJK 字体、集合索引与变体轴，使用公开的 Font.Builder 显式构建，再以 Font 度量与 Canvas.drawGlyphs 渲染，避免默认 Typeface；没有增加基座代码、隐藏 API 或字体初始化补丁。Unicode 字符到字形的 cmap 格式 4/12 按 OpenType 规范读取；缺字明确拒绝。PNG 缓存以当前内存预算和 32B/px 的排版、压缩缓冲预算预检，且受工程资源大小限制，失败不写入操作历史。
+
+这一版覆盖基础横排中文、预组合拉丁字母、日文、预组合韩文；不提供 OpenType 复杂塑形、字偶距/连字、组合附加符号、双向文字、Emoji 序列、富文本、竖排、路径文字或 SVG 源码编辑。显示和导出使用栅格缓存，放大有栅格边缘；源文字保留，字号变化可重新生成缓存。本版不是 Krita SVG 文字引擎的完整实现。
+
+静态声明/菜单校验通过：78 个字面运行时注册、94 个能力声明，216 个菜单叶子和 65 个菜单共享实现。没有运行 Gradle、构建或实机文字操作；安装后仍需检查中文混排、字体选择、多行换行、编辑、撤销重做、保存再打开、旋转缩放、锁定图层拒绝与两端并发冲突，并确认插件进程不重启。
+
+参考：[Android Font](https://developer.android.com/reference/android/graphics/fonts/Font)、[Canvas.drawGlyphs](https://developer.android.com/reference/android/graphics/Canvas#drawGlyphs(int[],%20int,%20float[],%20int,%20int,%20android.graphics.fonts.Font,%20android.graphics.Paint))、[Android 字体配置](https://android.googlesource.com/platform/frameworks/base/+/master/data/fonts/fonts.xml)、[OpenType cmap](https://learn.microsoft.com/en-us/typography/opentype/spec/cmap)。

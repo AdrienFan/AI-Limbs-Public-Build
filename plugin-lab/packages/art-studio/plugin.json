@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.19",
+  "version": "0.2.20",
   "api": {
     "target": 1,
     "min": 1
@@ -126,7 +126,10 @@
       "plugin.art.studio.storage.set_directory",
       "plugin.art.studio.dock.state",
       "plugin.art.studio.dock.command",
-      "plugin.art.studio.image.formats"
+      "plugin.art.studio.image.formats",
+      "plugin.art.studio.text.fonts",
+      "plugin.art.studio.text.create",
+      "plugin.art.studio.text.update"
     ],
     "services": [],
     "providers": [

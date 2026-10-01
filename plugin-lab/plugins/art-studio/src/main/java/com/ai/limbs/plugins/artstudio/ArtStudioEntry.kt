@@ -79,6 +79,18 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.changeDockPanels(p.getString("command"), p.optString("panel").takeIf { it.isNotBlank() },
                 if (p.has("enabled")) p.getBoolean("enabled") else null)
         }
+        capability("text.fonts", "读取基础文字可用字体", read,
+            "返回当前设备的中英文字体标识、默认字体与基础排版边界；字体标识用于 text.create/update。") {
+            ArtText.fonts()
+        }
+        capability("text.create", "添加基础可编辑文字", write,
+            "创建独立文字图层，保存原文和样式及透明渲染缓存；content 支持多行，boxWidth 控制自动换行，fontSize 单位为画布像素，align 为 left/center/right。documentId 与 expectedRevision 必须来自最新 document.info。字体缺字和复杂排版会明确拒绝。移动、缩放、旋转沿用 transform.*，删除使用 layer.delete；" + ArtText.NOTICE) { p ->
+            store.writeText("LANER", p, false)
+        }
+        capability("text.update", "修改可编辑文字", write,
+            "id 是 kind=text 的图层；必须传完整 content，未传样式字段使用该文字现有值。documentId 与 expectedRevision 防止覆盖另一端编辑；保留当前移动、缩放和旋转。共享撤销历史，成功自动附图；" + ArtText.NOTICE) { p ->
+            store.writeText("LANER", p, true)
+        }
         capability("image.set_background", "设置图像背景色与透明度", write,
             "与图像菜单共用工程操作日志；color 是 #AARRGGBB，00 为全透明。") { p ->
             store.apply("LANER", "IMAGE_BACKGROUND", JSONObject().put("color", p.getString("color")))
@@ -436,6 +448,12 @@ class ArtStudioPresentationEntry : InProcessPluginPresentationEntry {
 private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> {
     fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
         val description = when (key) {
+            "content" -> "需要保存的完整文字，最多4096字符；换行符换行。基础排版边界见text.fonts。"
+            "fontId" -> "text.fonts返回的当前设备字体标识；创建时默认中英文字体，更新时保留原字体。"
+            "fontSize" -> "字号，6–512画布像素。"
+            "boxWidth" -> "自动换行框宽度，1–16384画布像素。"
+            "lineSpacing" -> "行距倍数，1.0–3.0。"
+            "align" -> "水平对齐：left、center、right。"
             "maxEdge" -> "局部预览图片的长边，64–1024 像素，默认 512；用于控制细节和传输大小。"
             "documentId" -> "工程编号；局部图可使用上一张缩略图的编号来拒绝已切换的画布。"
             "directory" -> "应用可写的绝对目录路径；空字符串恢复插件内默认位置，旧工程继续原位保存。"
@@ -456,6 +474,11 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
     }
     val id = p("id")
     return when (name) {
+        "text.create", "text.update" -> listOf(p("documentId"), p("expectedRevision", "integer"),
+            p("content"), p("fontId", optional = true), p("fontSize", "number", true),
+            p("boxWidth", "integer", true), p("lineSpacing", "number", true), p("align", optional = true),
+            p("color", optional = true), p("x", "number", true), p("y", "number", true)) +
+            if (name == "text.update") listOf(id) else emptyList()
         "menu.execute" -> listOf(p("action"), p("parameters", "object", true),
             p("documentId", optional = true), p("expectedRevision", "integer", true))
         "image.set_background" -> listOf(p("color"))

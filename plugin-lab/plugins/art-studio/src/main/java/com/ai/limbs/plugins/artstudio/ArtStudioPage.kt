@@ -403,6 +403,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var remainingImportItem by remember { mutableStateOf<JSONObject?>(null) }
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
     var image by remember { mutableStateOf<Bitmap?>(null) }
+    var textDialog by remember { mutableStateOf<JSONObject?>(null) }
+    var textFonts by remember { mutableStateOf(JSONArray()) }
     var tool by remember { mutableStateOf("ink") }
     var color by remember { mutableStateOf("#FF161616") }
     var colorHexInput by remember { mutableStateOf(color) }
@@ -586,7 +588,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 Toast.LENGTH_LONG).show()
         }
     }
-    fun perform(confirmation: JSONObject? = null, action: (JSONObject?) -> JSONObject) {
+    fun perform(confirmation: JSONObject? = null, onSuccess: (() -> Unit)? = null,
+        action: (JSONObject?) -> JSONObject) {
         val serial = ++renderSerial
         pendingOperations++
         busy = true
@@ -607,6 +610,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     revision = pair.third
                 } else pair.second.recycle()
                 showImageImportNotice(operationResult)
+                onSuccess?.invoke()
             } catch (request: ArtImageResizeRequired) {
                 resizeRequest = request.plan
                 resizeAction = action
@@ -926,6 +930,31 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         .firstOrNull { it.getString("id") == selected }
     fun edit(type: String, params: JSONObject = JSONObject()) {
         perform { store.apply("AWEI", type, params) }
+    }
+    fun openTextEditor(layer: JSONObject? = null, atX: Double = 0.0, atY: Double = 0.0) {
+        if (busy || current == null) return
+        val capturedDocument = current.getString("id")
+        val capturedRevision = current.getInt("revision")
+        val capturedLayer = layer?.let { JSONObject(it.toString()) }
+        scope.launch {
+            try {
+                val catalog = withContext(Dispatchers.IO) { ArtText.fonts() }
+                require(catalog.getBoolean("available")) { "当前设备没有可用的基础文字渲染接口或中英文字体" }
+                val fields = capturedLayer?.getJSONObject("text")?.let { JSONObject(it.toString()) }
+                    ?: JSONObject().put("content", "").put("fontId", catalog.getString("defaultFontId"))
+                        .put("fontSize", 48.0).put("boxWidth", minOf(640, state!!.getInt("width")))
+                        .put("lineSpacing", 1.2).put("align", "left").put("color", color)
+                fields.put("documentId", capturedDocument).put("expectedRevision", capturedRevision)
+                    .put("x", capturedLayer?.getDouble("x") ?: atX)
+                    .put("y", capturedLayer?.getDouble("y") ?: atY)
+                capturedLayer?.let { fields.put("id", it.getString("id")) }
+                textFonts = catalog.getJSONArray("fonts")
+                textDialog = fields
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Text editor font catalog failed", error)
+                Toast.makeText(context, error.message ?: "无法打开文字编辑器", Toast.LENGTH_LONG).show()
+            }
+        }
     }
     fun publish(format: String, options: JSONObject = JSONObject(), chooseLocation: Boolean = false) {
         if (awaitingExport || busy) return
@@ -1377,6 +1406,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             edit("STROKE_ADD", stroke)
                         }
                     }
+                    view.onText = { x, y, hit ->
+                        openTextEditor(if (hit) selectedLayer else null, x, y)
+                    }
                     view.onCursor = { x, y -> canvasCursor = x to y }
                     view.onSampleColor = { pixel ->
                         val sampled = if (sampleBlend == 100) pixel else
@@ -1471,6 +1503,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (tool == "svg_text") {
+                                    Text("点击画布添加文字；点击选中文字编辑。", style = MaterialTheme.typography.labelSmall)
+                                    TextButton(onClick = { openTextEditor(selectedLayer) },
+                                        enabled = !busy && selectedLayer?.optString("kind") == "text") {
+                                        Text("编辑选中文字")
+                                    }
+                                    TextButton(onClick = { openTextEditor() }, enabled = !busy && current != null) {
+                                        Text("新建文字")
+                                    }
+                                }
                                 if (tool == "sampler") {
                                     TextButton(onClick = { samplerOptionsDialog = true },
                                         modifier = Modifier.fillMaxWidth().semantics {
@@ -2424,6 +2466,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }, enabled = canCreate) { Text("创建") } },
             dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
     }
+    textDialog?.let { captured ->
+        StudioTextEditor(captured, textFonts, busy,
+            onDismiss = { textDialog = null },
+            onSubmit = { fields ->
+                perform(onSuccess = { textDialog = null }) {
+                    store.writeText("AWEI", fields, fields.has("id"))
+                }
+            })
+    }
+
     if (backgroundFillDialog) AlertDialog(
         onDismissRequest = { backgroundFillDialog = false },
         title = { Text("填充背景色") },
@@ -2856,6 +2908,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 invalidate()
             }
         }
+    var onText: (Double, Double, Boolean) -> Unit = { _, _, _ -> }
     var onStroke: (JSONArray) -> Unit = {}
     var onSelection: (JSONObject) -> Unit = {}
     var onCrop: (JSONObject) -> Unit = {}
@@ -3194,6 +3247,20 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if (tool == "svg_text") {
+            if (event.actionMasked == MotionEvent.ACTION_UP && image != null &&
+                xy[0] >= 0 && xy[1] >= 0 && xy[0] <= image!!.width && xy[1] <= image!!.height) {
+                val all = layers
+                val active = all?.let { (0 until it.length()).map { n -> it.getJSONObject(n) }
+                    .firstOrNull { it.getString("id") == selectedId } }
+                val source = active?.optJSONObject("text")
+                val hit = active != null && active.optString("kind") == "text" && active.getBoolean("visible") &&
+                    source != null && local[0] >= 0 && local[1] >= 0 &&
+                    local[0] <= source.getInt("cacheWidth") && local[1] <= source.getInt("cacheHeight")
+                onText(xy[0].toDouble(), xy[1].toDouble(), hit)
+            }
+            return true
+        }
         if (tool == "mirror" && mirrorOriginPlacement) {
             if (event.actionMasked == MotionEvent.ACTION_UP)
                 onMirrorOrigin(local[0].toDouble(), local[1].toDouble())

@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /** The page and Laner's read-only catalog share one inventory of toolbox slots. */
 internal object ArtToolCatalog {
-    val implemented = listOf(
+    val implemented get() = listOf(
         Triple("ink", "自由画笔", "✎"),
         Triple("pencil", "铅笔", "✏"),
         Triple("soft", "软笔", "◌"),
@@ -33,19 +33,20 @@ internal object ArtToolCatalog {
         Triple("pan", "平移画布", "✋"),
         Triple("zoom", "缩放画布", "⌕"),
         Triple("measure", "测量距离", "⌁")
-    )
+    ) + if (ArtText.available) listOf(Triple("svg_text", "文字（基础可编辑）", "T")) else emptyList()
 
     data class PendingTool(
         val id: String, val label: String, val glyph: String, val source: String
     )
 
-    // Each entry names a distinct Krita factory. A disabled slot must not route
+    // Pending entries name Krita factories; advanced text is the remaining portion
+    // of the factory whose basic editable subset is now implemented. A disabled slot must not route
     // touches to a superficially similar raster tool: that would silently change
     // artwork when the user expected an unimplemented vector or selection tool.
-    val pending = listOf(
+    val pending get() = listOf(
         PendingTool("shape_select", "形状选择", "↖",
             "plugins/tools/defaulttool/defaulttool/DefaultToolFactory.cpp"),
-        PendingTool("svg_text", "SVG 文字", "T",
+        PendingTool("svg_text_advanced", "SVG 文字高级排版", "T",
             "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"),
         PendingTool("vector_freehand", "矢量徒手路径", "〽",
             "plugins/tools/basictools/kis_tool_pencil.h"),
@@ -73,7 +74,8 @@ internal object ArtToolCatalog {
             "plugins/tools/selectiontools/kis_tool_select_similar.h"),
         PendingTool("select_magnetic", "磁性套索选区", "⊙",
             "plugins/tools/selectiontools/KisToolSelectMagnetic.h")
-    )
+    ) + if (!ArtText.available) listOf(PendingTool("svg_text", "基础文字需要 Android 12+", "T",
+        "plugins/tools/svgtexttool/SvgTextToolFactory.cpp")) else emptyList()
 
     fun describe(): JSONObject {
         val tools = JSONArray()
@@ -86,6 +88,6 @@ internal object ArtToolCatalog {
                 .put("implemented", false).put("status", "planned")
                 .put("source", item.source))
         }
-        return JSONObject().put("tools", tools)
+        return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
     }
 }

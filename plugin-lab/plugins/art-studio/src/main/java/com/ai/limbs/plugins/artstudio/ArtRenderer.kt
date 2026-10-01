@@ -67,7 +67,7 @@ internal object ArtRenderer {
                     try {
                         val local = Canvas(buffer)
                         local.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
-                        if (layer.getString("kind") == "image") {
+                        if (layer.getString("kind") in setOf("image", "text")) {
                             ArtImagePolicy.decodeAsset(store.assetFile(layer.getString("asset"))).let { image ->
                                 try { local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG)) }
                                 finally { image.recycle() }

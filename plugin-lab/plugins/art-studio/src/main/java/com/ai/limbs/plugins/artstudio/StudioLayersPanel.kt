@@ -346,6 +346,7 @@ private fun StudioLayerProperties(
                 Text("类型：" + when (layer.optString("kind")) {
                     "group" -> "图层组"
                     "image" -> "图片图层"
+                    "text" -> "可编辑文字图层"
                     else -> "绘画图层"
                 })
                 OutlinedTextField(value = name, onValueChange = { name = it.take(100) },
@@ -447,7 +448,7 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                 it.optString("parentId") == layer.optString("id") && it.optBoolean("visible", true)
             }.forEach { drawLayer(canvas, it, siblings, docW, docH, depth + 1) }
             else -> {
-                if(layer.getString("kind")=="image") drawAsset(canvas,layer.getString("asset"),0,0,false)
+                if(layer.getString("kind") in setOf("image", "text")) drawAsset(canvas,layer.getString("asset"),0,0,false)
                 val strokes=layer.getJSONArray("strokes")
                 val order=layer.optJSONArray("contentOrder")
                 if(order==null) {

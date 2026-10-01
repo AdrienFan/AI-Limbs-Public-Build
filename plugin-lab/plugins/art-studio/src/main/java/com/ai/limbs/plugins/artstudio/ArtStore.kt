@@ -1022,6 +1022,39 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+    /** Text creation and updates share the same locked source/cache transaction on both clients. */
+    fun writeText(actor: String, p: JSONObject, update: Boolean): JSONObject = locked {
+        require(actor == "AWEI" || actor == "LANER")
+        val doc = loadCurrent()
+        require(p.getString("documentId") == doc.getString("id") &&
+            p.getInt("expectedRevision") == doc.getJSONArray("operations").length()) {
+            "工程已切换或被另一端修改，请刷新后重新编辑文字"
+        }
+        val state = replay(doc)
+        val layers = state.getJSONArray("layers")
+        val id = if (update) p.getString("id") else UUID.randomUUID().toString()
+        val previous = if (update) (0 until layers.length()).map { layers.getJSONObject(it) }
+            .firstOrNull { it.getString("id") == id } ?: error("文字图层不存在") else null
+        if (previous != null) require(previous.getString("kind") == "text" &&
+            !lockedByParent(previous, layers)) { "请选择未锁定的文字图层" }
+        val source = previous?.optJSONObject("text")?.let { JSONObject(it.toString()) } ?: JSONObject()
+        p.keys().forEach { source.put(it, p.get(it)) }
+        val text = ArtText.normalize(source)
+        val x = if (p.has("x")) p.getDouble("x") else previous?.getDouble("x") ?: 0.0
+        val y = if (p.has("y")) p.getDouble("y") else previous?.getDouble("y") ?: 0.0
+        require(x.isFinite() && y.isFinite()) { "文字位置无效" }
+        val bitmap = ArtText.render(text, ArtImagePolicy.renderBytes(this, state,
+            state.getInt("width"), state.getInt("height")))
+        val asset = UUID.randomUUID().toString()
+        val bytes = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
+        atomicBytes(assetFile(asset), bytes)
+        try {
+            val result = appendToCurrent(actor, if (update) "TEXT_UPDATE" else "TEXT_CREATE",
+                JSONObject().put("id", id).put("asset", asset).put("text", text).put("x", x).put("y", y))
+            result.put("textLayerId", id).put("textNotice", ArtText.NOTICE)
+        } catch (error: Throwable) { assetFile(asset).delete(); throw error }
+    }
+
     private fun requireRenderBudget(snapshot: JSONObject) {
         val state = snapshot.getJSONObject("state")
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
@@ -1045,6 +1078,8 @@ internal class ArtStore(private val root: File) {
             return when (operation.getString("type")) {
                 "MENU_LAYER_CHANGE" -> operation.getJSONObject("parameters").getString("label")
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
+                "TEXT_CREATE" -> "添加文字"
+                "TEXT_UPDATE" -> "编辑文字"
                 "GROUP_CREATE" -> "新建图层组"
                 "LAYER_DELETE" -> "删除图层"
                 "STROKE_ADD" -> when (operation.getJSONObject("parameters").optString("tool")) {
@@ -1177,6 +1212,24 @@ internal class ArtStore(private val root: File) {
             error("图层不存在：$id；该撤销与后续操作冲突")
         }
         when (type) {
+            "TEXT_CREATE", "TEXT_UPDATE" -> {
+                val id = p.getString("id")
+                validateId(id); validateId(p.getString("asset"))
+                val text = p.getJSONObject("text")
+                ArtText.normalize(text)
+                require(text.getInt("cacheWidth") > 0 && text.getInt("cacheHeight") > 0)
+                val layer = if (type == "TEXT_CREATE") {
+                    require((0 until layers.length()).none { layers.getJSONObject(it).getString("id") == id })
+                    newLayer(id, "text", "文字 · " + text.getString("content").lineSequence().first().take(24), "", "")
+                        .also { layers.put(it) }
+                } else find(id).second.also {
+                    require(it.getString("kind") == "text" && !lockedByParent(it, layers)) { "文字图层已锁定或类型不符" }
+                }
+                for (key in listOf("x", "y")) require(p.getDouble(key).isFinite())
+                layer.put("asset", p.getString("asset")).put("text", JSONObject(text.toString()))
+                    .put("x", p.getDouble("x")).put("y", p.getDouble("y"))
+                state.put("selectedLayerId", id)
+            }
             "MENU_LAYER_CHANGE" -> ArtMenuOperations.edit(state, p)
             "LAYER_CREATE", "GROUP_CREATE", "IMAGE_IMPORT" -> {
                 val id = p.optString("id").ifBlank { p.optString("asset") }

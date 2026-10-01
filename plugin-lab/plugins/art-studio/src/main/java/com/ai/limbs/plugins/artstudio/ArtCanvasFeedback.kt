@@ -17,6 +17,7 @@ internal object ArtCanvasFeedback {
     fun affectsCanvas(name: String, parameters: JSONObject): Boolean = when {
         name == "menu.execute" ->
             ArtStudioMenuCatalog.find(parameters.getString("action"))?.optBoolean("documentWrite") == true
+        name in setOf("text.create", "text.update") -> true
         name.startsWith("stroke.") || name.startsWith("transform.") || name.startsWith("selection.") -> true
         name.startsWith("layer.") -> name !in setOf("layer.list", "layer.search")
         name.startsWith("history.") -> name !in setOf("history.list", "history.timeline")
