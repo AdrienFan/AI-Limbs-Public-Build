@@ -303,6 +303,8 @@ internal class ArtStore(private val root: File) {
             return ArtMenuOperations.rasterLayer(id, name, asset)
         }
         when (action) {
+            "add_new_colorize_mask" -> edit("COLORIZE_CREATE",
+                JSONObject().put("id",UUID.randomUUID().toString()).put("sourceLayerId",requireNotNull(active).getString("id")))
             "add_new_shape_layer" -> edit("VECTOR_LAYER_CREATE",
                 JSONObject().put("id", UUID.randomUUID().toString()).put("name", p.getString("name"))
                     .put("parentId", active?.let { if (it.getString("kind") == "group") it.getString("id") else it.optString("parentId") } ?: "")
@@ -734,6 +736,82 @@ internal class ArtStore(private val root: File) {
     }
 
 
+
+    fun colorizeList(p: JSONObject): JSONObject = locked {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id")) {"工程已切换"}
+        if(p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision")) {"工程版本已更新"}
+        val state=snap.getJSONObject("state")
+        if(p.has("maskId"))ArtColorize.layer(state,p.getString("maskId"))
+        val masks=ArtMenuOperations.layers(state).filter {it.getString("kind")=="colorize" && (!p.has("maskId") || it.getString("id")==p.getString("maskId"))}.map {
+            val copy=JSONObject(it.toString()).put("dirty",ArtColorize.dirty(state,it)).put("canUpdate",ArtColorize.canUpdate(state,it))
+                .put("sourceAvailable",ArtMenuOperations.layers(state).any {source-> source.getString("id")==it.getJSONObject("colorize").getString("sourceLayerId")})
+            if(!p.optBoolean("includeKeys",false)) {
+                val data=copy.getJSONObject("colorize")
+                data.remove("keys")
+                data.put("keySummaries",JSONArray(ArtColorize.items(it).map {key ->
+                    JSONObject().put("id",key.getString("id")).put("color",key.getString("color"))
+                        .put("erase",key.getBoolean("erase")).put("width",key.getDouble("width"))
+                        .put("pointCount",key.getJSONArray("points").length())
+                }))
+            }
+            copy
+        }
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("selectedLayerId",state.optString("selectedLayerId")).put("masks",JSONArray(masks))
+            .put("scope",ArtColorize.defaults())
+    }
+    fun colorizeCreate(actor: String,p: JSONObject): JSONObject =
+        apply(actor,"COLORIZE_CREATE",JSONObject(p.toString()).put("id",UUID.randomUUID().toString()))
+    fun colorizeStroke(actor: String,p: JSONObject): JSONObject = locked {
+        val snap=current();val input=JSONObject(p.toString())
+        snap.getJSONObject("state").optJSONObject("selection")?.let {input.put("selection",JSONObject(it.toString()))}
+        apply(actor,"COLORIZE_STROKE",JSONObject(p.toString()).put("stroke",ArtColorize.stroke(input,UUID.randomUUID().toString())))
+    }
+    fun colorizeUpdate(actor: String,p: JSONObject): JSONObject = locked {
+        require(actor in setOf("AWEI","LANER"))
+        val snap=current();require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {
+            "工程或版本已改变，请重新更新蒙版"
+        }
+        val state=snap.getJSONObject("state");val mask=ArtColorize.layer(state,p.getString("maskId"))
+        require(!mask.getBoolean("locked") && mask.getBoolean("visible")) {"蒙版已锁定或隐藏"}
+        ArtColorize.root(mask)
+        val source=ArtColorize.source(state,mask.getJSONObject("colorize").getString("sourceLayerId"))
+        val view=ArtMenuOperations.isolated(snap,setOf(source.getString("id")),source.getString("id"))
+        // The full render and a conservative solver reservation coexist; do not estimate them independently.
+        val bitmap=ArtRenderer.render(this,view)
+        val result=try {
+            val area=ArtColorizeSolver.region(state,bitmap,mask)
+            ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,view.getJSONObject("state"),
+                state.getInt("width"),state.getInt("height"))+area.width().toLong()*area.height()*64,"上色蒙版更新")
+            ArtColorizeSolver.solve(state,bitmap,mask,area)
+        } finally {bitmap.recycle()}
+        val outputWidth=result.bitmap.width;val outputHeight=result.bitmap.height
+        val png=try {ArtImagePolicy.encodePng(result.bitmap,MAX_ASSET_BYTES)} finally {result.bitmap.recycle()}
+        val asset=UUID.randomUUID().toString()
+        try {
+            atomicBytes(assetFile(asset),png)
+            val params=JSONObject(p.toString()).put("generation",mask.getJSONObject("colorize").getInt("generation"))
+                .put("sourceSignature",ArtColorize.signature(state,source))
+                .put("output",JSONObject().put("asset",asset).put("x",result.x).put("y",result.y)
+                    .put("width",outputWidth).put("height",outputHeight))
+            apply(actor,"COLORIZE_OUTPUT",params).put("colorizeResult",JSONObject().put("filledPixels",result.filled)
+                .put("seedPixels",result.seeds).put("algorithm","seeded-geodesic-fill"))
+        } catch(error:Throwable) {assetFile(asset).delete();throw error}
+    }
+    fun colorizePreview(p: JSONObject): JSONObject = locked {
+        val snap=current();require(p.getString("documentId")==snap.getString("id"))
+        if(p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision"))
+        val state=snap.getJSONObject("state")
+        if(p.has("maskId")) {
+            ArtColorize.layer(state,p.getString("maskId"));state.put("selectedLayerId",p.getString("maskId"))
+        }
+        val preview=ArtCanvasFeedback.preview(this,snap,0,0,state.getInt("width"),state.getInt("height"),
+            256,"thumbnail",colorizeKeys=true)
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("thumbnail",preview.getJSONObject("metadata")).put("mcp_content",JSONArray().put(preview.getJSONObject("content")))
+    }
+
     fun assistantList(p: JSONObject): JSONObject = locked {
         val snap=current()
         require(p.getString("documentId")==snap.getString("id")) { "工程已切换" }
@@ -801,7 +879,7 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
-        if (type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") ||
+        if (type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") || type.startsWith("COLORIZE_") ||
             (type=="STROKE_ADD" && params.has("documentId")) || type == "VECTOR_LAYER_CREATE") {
             require(params.getString("documentId") == doc.getString("id")) { "工程已切换，请重新读取工程" }
             require(params.has("expectedRevision")) { "矢量操作必须绑定工程版本" }
@@ -1387,6 +1465,13 @@ internal class ArtStore(private val root: File) {
                 "LAYER_BLEND" -> "调整图层混合模式"
                 "LAYER_PROPERTIES" -> "修改图层属性"
                 "LAYER_MOVE", "LAYER_MOVE_STEP" -> "调整图层顺序"
+                "COLORIZE_CREATE" -> "新建上色蒙版"
+                "COLORIZE_STROKE" -> "颜色线索"
+                "COLORIZE_REMOVE_STROKE","COLORIZE_CLEAR" -> "清理颜色线索"
+                "COLORIZE_PALETTE" -> "颜色线索调色板"
+                "COLORIZE_SETTINGS" -> "上色蒙版参数"
+                "COLORIZE_OUTPUT" -> "更新填色结果"
+                "COLORIZE_CONVERT" -> "蒙版转为绘画图层"
                 "PIXEL_REPAIR" -> "智能修补"
                 "PIXEL_EDIT" -> if (operation.getJSONObject("parameters").optString("mode") == "CLEAR")
                     "清除像素" else "填充像素"
@@ -1473,6 +1558,7 @@ internal class ArtStore(private val root: File) {
         ArtShapes.validateDocument(state)
         ArtReferences.validate(state)
         ArtAssistants.validate(state)
+        ArtColorize.validate(state)
         return state
     }
 
@@ -1488,6 +1574,8 @@ internal class ArtStore(private val root: File) {
         when (type) {
             "ASSISTANT_CREATE","ASSISTANT_SELECT","ASSISTANT_UPDATE","ASSISTANT_DELETE","ASSISTANT_SETTINGS" -> ArtAssistants.edit(state,type,p)
             "REFERENCE_ADD","REFERENCE_SELECT","REFERENCE_TRANSFORM","REFERENCE_STYLE","REFERENCE_DELETE","REFERENCE_SHOW" -> ArtReferences.edit(state,type,p)
+            "COLORIZE_CREATE","COLORIZE_STROKE","COLORIZE_REMOVE_STROKE","COLORIZE_CLEAR",
+            "COLORIZE_PALETTE","COLORIZE_SETTINGS","COLORIZE_OUTPUT","COLORIZE_CONVERT" -> ArtColorize.edit(state,type,p)
             "TEXT_CREATE", "TEXT_UPDATE" -> {
                 val id = p.getString("id")
                 validateId(id); validateId(p.getString("asset"))
@@ -1668,6 +1756,10 @@ internal class ArtStore(private val root: File) {
                     copy.put("id", mapping.getValue(source.getString("id")))
                     copy.put("parentId", mapping[source.optString("parentId")] ?: source.optString("parentId"))
                     copy.put("name", source.getString("name") + " 副本")
+                    copy.optJSONObject("colorize")?.let {data ->
+                        val sourceId=data.getString("sourceLayerId")
+                        if(mapping.containsKey(sourceId))data.put("sourceLayerId",mapping.getValue(sourceId))
+                    }
                     copy.optJSONArray("shapes")?.let { shapes ->
                         for (i in 0 until shapes.length()) shapes.getJSONObject(i).put("id",
                             UUID.nameUUIDFromBytes((copy.getString("id") + ":shape:" + i).toByteArray()).toString())

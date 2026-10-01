@@ -10,7 +10,7 @@ internal data class StudioRenderFrame(val first:JSONObject,val second:Bitmap,val
     companion object {
         fun create(store:ArtStore,snapshot:JSONObject):StudioRenderFrame {
             val refs=store.referenceBitmaps(snapshot)
-            try { return StudioRenderFrame(snapshot,ArtRenderer.render(store,snapshot),store.revision(),refs) }
+            try { return StudioRenderFrame(snapshot,ArtRenderer.render(store,snapshot,colorizeKeys=true),store.revision(),refs) }
             catch(error:Throwable) { refs.values.forEach { it.recycle() };throw error }
         }
     }

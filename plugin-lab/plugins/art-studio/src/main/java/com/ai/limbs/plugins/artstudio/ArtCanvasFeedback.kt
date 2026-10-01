@@ -17,6 +17,7 @@ internal object ArtCanvasFeedback {
     fun affectsCanvas(name: String, parameters: JSONObject): Boolean = when {
         name == "menu.execute" ->
             ArtStudioMenuCatalog.find(parameters.getString("action"))?.optBoolean("documentWrite") == true
+        name.startsWith("colorize.") -> name !in setOf("colorize.list","colorize.preview")
         name.startsWith("assistant.") -> name !in setOf("assistant.list","assistant.project","assistant.preview")
         name.startsWith("reference.") -> name !in setOf("reference.list","reference.preview","reference.region")
         name in setOf("text.create", "text.update") -> true
@@ -39,15 +40,18 @@ internal object ArtCanvasFeedback {
             return result.put("thumbnail",receipt.getJSONObject("thumbnail"))
                 .put("mcp_content",receipt.getJSONArray("mcp_content"))
         }
-        val image = if (snapshot == null) emptyCanvas() else preview(store, snapshot,
-            0, 0, snapshot.getJSONObject("state").getInt("width"),
-            snapshot.getJSONObject("state").getInt("height"), THUMBNAIL_EDGE, "thumbnail")
+        val feedbackSnapshot=if(snapshot!=null && result.has("colorizeMaskId"))JSONObject(snapshot.toString()).apply {
+            getJSONObject("state").put("selectedLayerId",result.getString("colorizeMaskId"))
+        } else snapshot
+        val image = if (feedbackSnapshot == null) emptyCanvas() else preview(store, feedbackSnapshot,
+            0, 0, feedbackSnapshot.getJSONObject("state").getInt("width"),
+            feedbackSnapshot.getJSONObject("state").getInt("height"), THUMBNAIL_EDGE, "thumbnail",colorizeKeys=result.optBoolean("colorizeFeedback"))
         return result.put("thumbnail", image.getJSONObject("metadata"))
             .put("mcp_content", JSONArray().put(image.getJSONObject("content")))
     }
 
     fun preview(store: ArtStore, snapshot: JSONObject, x: Int, y: Int,
-        width: Int, height: Int, maxEdge: Int, kind: String): JSONObject {
+        width: Int, height: Int, maxEdge: Int, kind: String, colorizeKeys: Boolean = false): JSONObject {
         val state = snapshot.getJSONObject("state")
         require(x >= 0 && y >= 0 && width > 0 && height > 0 &&
             x.toLong() + width <= state.getInt("width") &&
@@ -58,7 +62,7 @@ internal object ArtCanvasFeedback {
         val outputHeight = (height * scale).roundToInt().coerceAtLeast(1)
         // Use the same compositor as the phone and exports; include visible groups and blend modes.
         val rendered = ArtRenderer.render(store, snapshot,
-            maxEdge = if (kind == "thumbnail") THUMBNAIL_EDGE else null)
+            maxEdge = if (kind == "thumbnail") THUMBNAIL_EDGE else null,colorizeKeys=colorizeKeys)
         try {
             val output = Bitmap.createBitmap(outputWidth, outputHeight, Bitmap.Config.ARGB_8888)
             try {
@@ -69,7 +73,7 @@ internal object ArtCanvasFeedback {
                 canvas.drawBitmap(rendered, null,
                     android.graphics.RectF(0f, 0f, state.getInt("width").toFloat(), state.getInt("height").toFloat()),
                     Paint(Paint.FILTER_BITMAP_FLAG))
-                val metadata = JSONObject().put("kind", kind).put("empty", false)
+                val metadata = JSONObject().put("kind", kind).put("empty", false).put("colorizeKeys",colorizeKeys)
                     .put("documentId", snapshot.getString("id")).put("revision", snapshot.getInt("revision"))
                     .put("sourceWidth", state.getInt("width")).put("sourceHeight", state.getInt("height"))
                     .put("region", JSONObject().put("x", x).put("y", y).put("width", width).put("height", height))

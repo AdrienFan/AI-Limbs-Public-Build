@@ -411,6 +411,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var image by remember { mutableStateOf<Bitmap?>(null) }
     var referenceBitmaps by remember { mutableStateOf<Map<String,Bitmap>>(emptyMap()) }
     var referenceMultiple by remember { mutableStateOf(false) }
+    var colorizeWidth by remember { mutableFloatStateOf(16f) }
+    var colorizeErase by remember { mutableStateOf(false) }
     var smartPatchSettings by remember { mutableStateOf(ArtSmartPatch.info().getJSONObject("defaults")) }
     var assistantAdding by remember { mutableStateOf(true) }
     var assistantType by remember { mutableStateOf("ruler") }
@@ -1383,6 +1385,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.scene = state; view.sceneRevision = current.getInt("revision")
                     view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
+                    view.colorizeWidth=colorizeWidth;view.colorizeErase=colorizeErase
+                    view.onColorizeCreate={p -> if(!busy)perform {store.colorizeCreate("AWEI",p)}}
+                    view.onColorizeStroke={p -> if(!busy)perform {store.colorizeStroke("AWEI",p)}}
                     view.smartPatchOptions = smartPatchSettings
                     view.onSmartPatch = { p -> if(!busy)perform { store.smartPatch("AWEI",p) } }
                     view.assistantAdding = assistantAdding
@@ -2252,6 +2257,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             if (pending != null) {
                 Text("该工具尚未实现，当前仅提供说明入口，不能用于绘画。")
             } else {
+                if(tool=="colorize_mask") {
+                    StudioColorizeOptions(current,selected,busy,colorizeWidth,colorizeErase,color,
+                        {colorizeWidth=it},{colorizeErase=it},{color=it},
+                        {p -> if(!busy)perform {store.colorizeCreate("AWEI",p)}},
+                        {p -> if(!busy)perform {store.colorizeUpdate("AWEI",p)}},
+                        {type,p -> if(!busy)perform {store.apply("AWEI",type,p)}})
+                }
                 if(tool=="smart_patch") {
                     StudioSmartPatchOptions(smartPatchSettings,busy,{smartPatchSettings=it})
                 }
@@ -2530,7 +2542,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     FilterChip(selected = viewOptions.zoomToolMode == "out",
                         onClick = { ArtStudioViewControl.setZoomToolMode("out") }, label = { Text("缩小") })
                 }
-                if (tool !in setOf("smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
+                if (tool !in setOf("colorize_mask", "smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
                     "vector_freehand", "shape_select", "svg_text", "sampler", "fill", "mirror",
                     "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "calligraphy", "dyna", "zoom")) {
                     Text("此工具暂无独立参数。")
@@ -3011,7 +3023,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3037,6 +3049,11 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeCreationContext: JSONObject? = null
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
+    private val colorizeInteraction=StudioColorizeInteraction()
+    var colorizeWidth=16f
+    var colorizeErase=false
+    var onColorizeCreate: (JSONObject)->Unit = {}
+    var onColorizeStroke: (JSONObject)->Unit = {}
     private val smartPatchInteraction=StudioSmartPatchInteraction()
     var smartPatchOptions=ArtSmartPatch.info().getJSONObject("defaults")
     var onSmartPatch: (JSONObject)->Unit = {}
@@ -3081,7 +3098,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
-                referenceInteraction.cancel();smartPatchInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel()
                 assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
@@ -3297,7 +3314,7 @@ private class StudioCanvas(context: Context) : View(context) {
         val actual=fitScale()*zoom
         panX=width/2f-fittedCenterX(bitmap,fitScale())+(bitmap.width/2f-bounds.centerX())*actual
         panY=(bitmap.height/2f-bounds.centerY())*actual
-        referenceInteraction.cancel();smartPatchInteraction.cancel();invalidate();publishZoom()
+        referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();invalidate();publishZoom()
     }
 
     fun fitToWindow() {
@@ -3389,6 +3406,7 @@ private class StudioCanvas(context: Context) : View(context) {
         scene?.let { ArtAssistants.draw(canvas,it,matrix,tool=="assistant",assistantInteraction.preview,
             resources.displayMetrics.density) }
         if(tool=="assistant")assistantInteraction.drawDraft(canvas,matrix)
+        colorizeInteraction.draw(canvas)
         smartPatchInteraction.draw(canvas)
         assistedBrushInteraction.draw(canvas)
         if (tool == "mirror") {
@@ -3568,8 +3586,11 @@ private class StudioCanvas(context: Context) : View(context) {
     }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="colorize_mask" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
+            colorizeInteraction.cancel();invalidate();return true
+        }
         if(tool=="smart_patch" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            smartPatchInteraction.cancel();invalidate();return true
+            smartPatchInteraction.cancel();colorizeInteraction.cancel();invalidate();return true
         }
         if(tool=="assistant") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {assistantInteraction.cancel();invalidate();return true}
@@ -3608,7 +3629,7 @@ private class StudioCanvas(context: Context) : View(context) {
             shapeInteraction.cancel()
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
-            referenceInteraction.cancel();smartPatchInteraction.cancel()
+            referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel()
             assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
@@ -3644,6 +3665,18 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(tool=="colorize_mask") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            val state=scene ?: return true
+            try {
+                return colorizeInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
+                    color,colorizeWidth,colorizeErase,onColorizeCreate,onColorizeStroke)
+            } catch(error:Exception) {
+                colorizeInteraction.cancel()
+                android.util.Log.e("ArtStudio","Colorize key stroke failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {invalidate()}
+        }
         if(tool=="smart_patch") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
@@ -3651,7 +3684,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return smartPatchInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,
                     shapeBusy,smartPatchOptions,onSmartPatch)
             } catch(error:Exception) {
-                smartPatchInteraction.cancel()
+                smartPatchInteraction.cancel();colorizeInteraction.cancel()
                 android.util.Log.e("ArtStudio","Smart patch mask failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -3694,7 +3727,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return referenceInteraction.touch(event,state,documentId,sceneRevision,matrix,
                     referenceMultiple,shapeBusy,onReferenceEdit)
             } catch(error:Exception) {
-                referenceInteraction.cancel();smartPatchInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel()
                 android.util.Log.e("ArtStudio","Reference interaction failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             }

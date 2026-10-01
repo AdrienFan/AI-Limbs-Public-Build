@@ -53,6 +53,10 @@ class ArtStudioEntry : InProcessPluginEntry {
                             val result=block(parameters)
                             if(name.startsWith("reference.")) result.put("referenceFeedback",true)
                             if(name.startsWith("assistant.")) result.put("assistantFeedback",true)
+                            if(name.startsWith("colorize.")) {
+                                result.put("colorizeFeedback",true)
+                                if(parameters.has("maskId"))result.put("colorizeMaskId",parameters.getString("maskId"))
+                            }
                             result
                         }
                     else block(parameters)
@@ -268,6 +272,26 @@ class ArtStudioEntry : InProcessPluginEntry {
             JSONObject().put("distancePx", kotlin.math.hypot(x1 - x0, y1 - y0))
                 .put("degrees", Math.toDegrees(kotlin.math.atan2(y1 - y0, x1 - x0)))
         }
+        capability("colorize.list","读取上色蒙版与颜色线索",read,
+            "documentId必填，expectedRevision、maskId可选；includeKeys=true返回完整线索坐标，默认只返回线索摘要。返回蒙版源、脏状态、调色板、参数和基础能力范围。") {p->store.colorizeList(p)}
+        capability("colorize.create","从线稿创建上色蒙版",write,
+            "documentId/expectedRevision/sourceLayerId必填，name可选。基础版支持未变换的可见根绘画或图像线稿；独立colorize图层放在源上方，以保留暗线的透明填色覆盖明亮区域，原线稿和属性不改写。新蒙版自动选中。") {p->store.colorizeCreate("LANER",p)}
+        capability("colorize.stroke","编辑蒙版颜色线索",write,
+            "documentId/expectedRevision/maskId/points/width必填，points为1–4096个蒙版局部坐标二维点；当前只支持未变换根蒙版，故与文档坐标相同。width=0.1–256，erase可选false；非擦除时color必须#AARRGGBB非透明。遵循当前选区并保存选区剪裁，颜色线索不写原线稿，需update生成新结果。") {p->store.colorizeStroke("LANER",p)}
+        capability("colorize.remove_stroke","删除一笔颜色线索",write,
+            "documentId/expectedRevision/maskId/strokeId必填，删除指定线索后需update。") {p->store.apply("LANER","COLORIZE_REMOVE_STROKE",p)}
+        capability("colorize.palette","管理线索调色板",write,
+            "documentId/expectedRevision/maskId/color/action必填。action=transparent时transparent布尔必填，指定该色区域不产生填色；action=remove删除该颜色全部线索。需update。透明标记不擦除源线稿。") {p->store.apply("LANER","COLORIZE_PALETTE",p)}
+        capability("colorize.settings","设置上色蒙版",write,
+            "documentId/expectedRevision/maskId/settings必填。settings仅threshold整数1–254默认180、gapClose闭合半径0–8默认0、limitBounds默认false、editKeys/showOutput默认true，后三项布尔。求解参数改变后需update；显示控制不重新计算。") {p->store.apply("LANER","COLORIZE_SETTINGS",p)}
+        capability("colorize.clear","清空蒙版颜色线索",write,
+            "documentId/expectedRevision/maskId必填。清空线索与调色板；已生成结果保留至下一次update，可撤销。") {p->store.apply("LANER","COLORIZE_CLEAR",p)}
+        capability("colorize.update","重新计算蒙版填色",write,
+            "documentId/expectedRevision/maskId必填。暗线屏障、缺口闭合及多色种子测地传播；选区限制计算区域，封闭无种子区域透明。最多4194304区域像素并检查动态内存预算；不缩图求解。完成后固化一次输出资源与历史，重放不重算；保留旧结果直到成功。") {p->store.colorizeUpdate("LANER",p)}
+        capability("colorize.convert","蒙版转换为绘画图层",write,
+            "documentId/expectedRevision/maskId必填；将当前缓存填色转普通绘画层，删除编辑线索数据；可撤销恢复。不会重新计算，请先update使用最新线索结果。") {p->store.apply("LANER","COLORIZE_CONVERT",p)}
+        capability("colorize.preview","检查填色与颜色线索",read,
+            "documentId必填，expectedRevision/maskId可选；256边长缩略图包含所选蒙版的编辑线索与半透明输出，仅用于编辑检查，不是导出。") {p->store.colorizePreview(p)}
         capability("patch.info","读取智能修补范围",read,
             "返回基础局部 PatchMatch 的参数默认值、区域及计算预算、目标图层要求和未实现功能。") { ArtSmartPatch.info() }
         capability("patch.apply","智能修补当前图层",write,
@@ -623,6 +647,16 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
+        "colorize.list" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("maskId",optional=true),p("includeKeys","boolean",true))
+        "colorize.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("maskId",optional=true))
+        "colorize.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("sourceLayerId"),p("name",optional=true))
+        "colorize.stroke" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),
+            p("points","array"),p("width","number"),p("color",optional=true),p("erase","boolean",true))
+        "colorize.remove_stroke" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),p("strokeId"))
+        "colorize.palette" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),
+            p("color"),p("action"),p("transparent","boolean",true))
+        "colorize.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),p("settings","object"))
+        "colorize.clear","colorize.update","colorize.convert" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"))
         "patch.info" -> emptyList()
         "patch.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("points","array"),p("width","number"),p("patchRadius","integer",true),

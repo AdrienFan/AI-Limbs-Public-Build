@@ -18,7 +18,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 internal object ArtRenderer {
-    fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false, maxEdge: Int? = null): Bitmap {
+    fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false, maxEdge: Int? = null, colorizeKeys: Boolean = false): Bitmap {
         val state = snapshot.getJSONObject("state")
         val width = state.getInt("width")
         val height = state.getInt("height")
@@ -71,6 +71,25 @@ internal object ArtRenderer {
                             ArtImagePolicy.decodeAsset(store.assetFile(layer.getString("asset"))).let { image ->
                                 try { local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG)) }
                                 finally { image.recycle() }
+                            }
+                        }
+
+                        if(layer.getString("kind")=="colorize") {
+                            val data=layer.getJSONObject("colorize");val settings=data.getJSONObject("settings")
+                            val edit=colorizeKeys && state.optString("selectedLayerId")==layer.getString("id") && settings.getBoolean("editKeys")
+                            if(settings.getBoolean("showOutput") && layer.getString("asset").isNotBlank()) {
+                                val output=ArtImagePolicy.decodeAsset(store.assetFile(layer.getString("asset")))
+                                try {
+                                    val outputPaint=Paint(Paint.FILTER_BITMAP_FLAG).apply {if(edit)alpha=100}
+                                    local.drawBitmap(output,data.getInt("outputX").toFloat(),data.getInt("outputY").toFloat(),outputPaint)
+                                } finally {output.recycle()}
+                            }
+                            if(edit) {
+                                local.saveLayer(0f,0f,width.toFloat(),height.toFloat(),null)
+                                try {
+                                    local.clipRect(0f,0f,width.toFloat(),height.toFloat())
+                                    ArtColorize.items(layer).forEach {ArtColorize.drawKey(local,it)}
+                                } finally {local.restore()}
                             }
                         }
                         if (layer.getString("kind") == "vector") ArtShapes.draw(local, layer)

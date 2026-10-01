@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** Source order follows Krita 6.0.4; one inventory serves UI and capability discovery. */
 internal object ArtStudioMenuCatalog {
-    const val VERSION = "0.2.32"
+    const val VERSION = "0.2.33"
     private val definitions = JSONArray(listOf(
         """{
   "id": "Layer",
@@ -129,9 +129,10 @@ internal object ArtStudioMenuCatalog {
         {
           "id": "add_new_colorize_mask",
           "title": "上色蒙版",
-          "implemented": false,
+          "implemented": true,
           "source": "krita/krita5.xmlgui",
-          "reason": "尚缺像素选区/蒙版模型与对应算法"
+          "parameters": [],
+          "documentWrite": true
         },
         {
           "id": "add_new_transform_mask",
@@ -2096,6 +2097,8 @@ internal object ArtStudioMenuCatalog {
             "cut_selection_to_new_layer" -> result(state.optJSONObject("selection")!=null && ArtMenuOperations.pixelsEditable(state),"请选择可编辑根像素图层并创建选区")
             "copy_selection_to_new_layer" -> result(state.optJSONObject("selection")!=null && hasLayer && root && selected!!.getString("kind") in setOf("paint","image") && selected.getBoolean("visible"),"请选择可见根像素图层并创建选区")
             "save_groups_as_images" -> result(ArtMenuOperations.layers(state).any { it.getString("kind")=="group" && it.optString("parentId").isBlank() },"尚无根图层组")
+            "add_new_colorize_mask" -> result(hasLayer && selected!!.getString("kind") in setOf("paint","image") &&
+                selected.getBoolean("visible") && ArtColorize.rooted(selected),"请选择可见、未变换的根绘画或图像线稿")
             "duplicatelayer" -> result(hasLayer,"请先选择图层")
             "add_new_paint_layer","add_new_group_layer" -> result(!hasLayer || unlocked,"当前父图层已锁定")
             "deselect","selectionscale","edit_selection" -> result(state.optJSONObject("selection")!=null,"请先创建选区")

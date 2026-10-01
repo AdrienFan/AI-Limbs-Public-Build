@@ -352,6 +352,7 @@ private fun StudioLayerProperties(
                     "image" -> "图片图层"
                     "text" -> "可编辑文字图层"
                     "vector" -> "可编辑矢量图层"
+                    "colorize" -> "可编辑上色蒙版"
                     else -> "绘画图层"
                 })
                 OutlinedTextField(value = name, onValueChange = { name = it.take(100) },
@@ -454,6 +455,11 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
             }.forEach { drawLayer(canvas, it, siblings, docW, docH, depth + 1) }
             else -> {
                 if(layer.getString("kind") in setOf("image", "text")) drawAsset(canvas,layer.getString("asset"),0,0,false)
+                if(layer.getString("kind")=="colorize") {
+                    val data=layer.getJSONObject("colorize")
+                    if(data.getJSONObject("settings").getBoolean("showOutput") && layer.getString("asset").isNotBlank())
+                        drawAsset(canvas,layer.getString("asset"),data.getInt("outputX"),data.getInt("outputY"),false)
+                }
                 if(layer.getString("kind")=="vector") ArtShapes.draw(canvas,layer)
                 val strokes=layer.getJSONArray("strokes")
                 val order=layer.optJSONArray("contentOrder")

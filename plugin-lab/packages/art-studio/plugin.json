@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.32",
+  "version": "0.2.33",
   "api": {
     "target": 1,
     "min": 1
@@ -166,7 +166,17 @@
       "plugin.art.studio.assistant.stroke",
       "plugin.art.studio.assistant.preview",
       "plugin.art.studio.patch.info",
-      "plugin.art.studio.patch.apply"
+      "plugin.art.studio.patch.apply",
+      "plugin.art.studio.colorize.list",
+      "plugin.art.studio.colorize.create",
+      "plugin.art.studio.colorize.stroke",
+      "plugin.art.studio.colorize.remove_stroke",
+      "plugin.art.studio.colorize.palette",
+      "plugin.art.studio.colorize.settings",
+      "plugin.art.studio.colorize.clear",
+      "plugin.art.studio.colorize.update",
+      "plugin.art.studio.colorize.convert",
+      "plugin.art.studio.colorize.preview"
     ],
     "services": [],
     "providers": [

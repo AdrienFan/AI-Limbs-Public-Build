@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.32 源码；基础智能修补，待编译验收）
+# AI Limbs 画室（0.2.33 源码；基础上色蒙版，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -85,7 +85,6 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 | 待实现工具 | 工具 ID | Krita 6.0.4 源码入口 | 所需基础能力 |
 | --- | --- | --- | --- |
 | SVG 文字高级排版 | svg_text_advanced | plugins/tools/svgtexttool/SvgTextToolFactory.cpp | 完整 SVG 排版、富文本与源码编辑；基础可编辑文字已单独实现 |
-| 上色蒙版编辑 | colorize_mask | plugins/tools/tool_lazybrush/kis_tool_lazy_brush.h | 上色蒙版 |
 | 围合填充、漫画分格编辑 | enclose_fill、comic_panel | plugins/tools/tool_enclose_and_fill/KisToolEncloseAndFillFactory.h；plugins/tools/tool_knife/KisToolKnife.h | 封闭区域计算与分格对象 |
 | 贝塞尔曲线选区、连续区域选区、相似色选区、磁性套索选区 | select_bezier、select_contiguous、select_similar、select_magnetic | plugins/tools/selectiontools/kis_tool_select_path.h、kis_tool_select_contiguous.h、kis_tool_select_similar.h、KisToolSelectMagnetic.h | 像素选区蒙版及相关路径算法 |
 
@@ -493,3 +492,30 @@ smart_patch 从灰色工具格升级为基础局部纹理修补。单击选中�
 
 版本0.2.32 / versionCode35 / com.ai.limbs.payload.artstudio.v0232，131项能力。
 验证仅源码审阅、JSON/接口一致性和差异检查；尚未编译、测试、上传云端或手机验证。纹理复杂、结构独特或大面积遮挡时效果仍需实际检查，可撤销调整后重试。
+
+## 0.2.33 基础上色蒙版编辑
+
+参考本地 Krita 6.0.4 的 tool_lazybrush、kis_colorize_mask、kis_colorize_stroke_strategy 与 KisWatershedWorker，并核对[官方上色蒙版说明](https://docs.krita.org/en/reference_manual/tools/colorize_mask.html)。原来灰色的 colorize_mask 已成为基础工具；图层菜单「添加 → 上色蒙版」同样接通。它保存独立 colorize 图层，关联源线稿 ID，单独记录颜色线索、调色板、参数和显式更新得到的 PNG；原线稿、源不透明度及混合模式不改写。
+
+界面：选择未变换的可见根绘画/图像线稿，首次在画布点击建立蒙版，后续用前景色画颜色线索；也可在参数窗或图层菜单创建。双击工具使用统一可拖动浮窗。支持线索笔径、擦除、重新选择调色板颜色、透明标记/取消、移除颜色全部线索、暗线阈值、缺口闭合半径、限制到线稿/线索边界、编辑线索/显示结果、更新、清空线索和转绘画层。清空、删除颜色、转换有捕获工程版本的确认框。Esc、换工具、视图变化、多指及 ACTION_CANCEL 取消未提交笔画；文档/版本/层和视图在起笔时捕获。创建蒙版的首次点击不同时写一笔线索。
+
+基础算法独立实现为暗线屏障加多颜色种子的测地距离传播，采用索引最小堆、确定性距离/颜色/坐标排序；通过滑动极值的形态学闭合补小缺口。与 Krita 的完整高度图分水岭和清理算法不等价。强线处的线索不作为填色种子；未有种子的封闭区域保持透明。阈值1–254默认180，缺口闭合半径0–8默认0；limitBounds默认false；区域上限4194304像素且遵循当前选区及动态内存预算，不降采样计算。颜色线索的选区剪裁随线索保存，擦除按绘制顺序清除所有颜色标签，后画颜色优先。最多256笔、每笔4096点、每蒙版32768点和32种颜色，笔径0.1–256。透明标记只使对应填色输出透明，不擦除原线稿。
+
+结果层默认放在源上方，对亮色/透明区域输出颜色，并以原暗线强度保留轮廓，因此可处理白底暗线稿及透明底暗线稿。编辑视图中所选蒙版的输出半透明、线索可见；普通导出与图层缩图不包含线索，导出服从 showOutput。关掉编辑线索可检查完整填色。种子传播不识别语义，开放边界会漏色；需要修补线稿、适当闭合或添加透明标记。实心阴影边缘检测、精细出界线索清理、组/变换线稿、多尺度大画幅和动画/HDR保持灰色说明。
+
+新建、笔画、删除线索、调色板、参数、清空、更新和转换均走 COLORIZE_* 操作，绑定 documentId/expectedRevision。更新成功才提交一次固化输出；失败不替换旧结果，写入失败清理新资产。保存/导入/复制/历史沿用通用 JSON 和嵌套 asset 扫描，复制组内关联源时重映射 sourceLayerId。删掉关联源后仍可显示现有缓存，状态明确提示源缺失，更新拒绝；可把缓存转绘画层。普通绘画与像素编辑工具不将蒙版冒充绘画层；转换后才使用普通工具。整体裁剪/移动保留现有像素和本地线索坐标，变换或分组后的重新求解属于当前不可用范围。
+
+兰儿入口共有10项：
+- colorize.list：documentId必填，expectedRevision/maskId/includeKeys可选，默认返回笔画摘要，按需 includeKeys=true 读取坐标
+- colorize.create：documentId/expectedRevision/sourceLayerId必填，name可选
+- colorize.stroke：documentId/expectedRevision/maskId/points/width必填；color在非擦除时必填，erase默认false，局部坐标当前与文档坐标一致
+- colorize.remove_stroke：绑定工程与蒙版，指定strokeId
+- colorize.palette：color/action必填，transparent操作额外传布尔transparent；remove移除该颜色全部线索
+- colorize.settings：settings为指定参数的部分更新
+- colorize.clear、colorize.update、colorize.convert：绑定工程、版本和maskId；convert明确固化当前缓存结果
+- colorize.preview：256边长编辑检查图，maskId可选，不改变真实图层选择
+
+成功修改时自动附带256缩略图，包含目标蒙版开启的编辑线索及半透明输出；colorize.preview可主动检查，canvas.region查看作品局部细节。编辑图与实际作品导出有明确区别。颜色线索与参数改变后不自动重算；dirty比较生成版本及源线稿签名，需显式更新。显示参数不使结果脏。
+
+版本0.2.33 / versionCode36 / com.ai.limbs.payload.artstudio.v0233，141项能力。所有能力在画室插件内，未改基座、桥或宿主源语。
+完成源码结构/字符串/括号、编码、菜单及清单JSON、接口/版本一致性与差异检查；未执行编译、构建、测试、云端推送或手机效果验证。
