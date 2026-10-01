@@ -53,6 +53,7 @@ class ArtStudioEntry : InProcessPluginEntry {
                             val result=block(parameters)
                             if(name.startsWith("reference.")) result.put("referenceFeedback",true)
                             if(name.startsWith("assistant.")) result.put("assistantFeedback",true)
+                            if(name.startsWith("selection."))result.put("selectionFeedback",true)
                             if(name.startsWith("colorize.")) {
                                 result.put("colorizeFeedback",true)
                                 if(parameters.has("maskId"))result.put("colorizeMaskId",parameters.getString("maskId"))
@@ -253,11 +254,11 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("document.list", "列出画室工程", read) { JSONObject().put("documents", store.list()) }
         capability("canvas.inspect", "查看画布结构", read) { store.current() }
         capability("canvas.region", "查看画布局部放大图", read,
-            "按画布像素坐标读取 x、y、width、height 区域；maxEdge 为输出长边 64–1024，默认 512。返回局部图片、工程与版本号，不修改画布或保存文件。") { p ->
+            "按画布像素坐标读取 x、y、width、height 区域；maxEdge 为输出长边 64–1024，默认 512。selectionOutline=true 可显示当前选区轮廓，默认false保持作品预览。返回局部图片、工程与版本号，不修改画布或保存文件。") { p ->
             store.canvasRegion(p.getInt("x"), p.getInt("y"), p.getInt("width"),
                 p.getInt("height"), p.optInt("maxEdge", 512),
                 if (p.has("documentId")) p.getString("documentId") else null,
-                if (p.has("expectedRevision")) p.getInt("expectedRevision") else null)
+                if (p.has("expectedRevision")) p.getInt("expectedRevision") else null,p.optBoolean("selectionOutline",false))
         }
         capability("canvas.measure", "测量画布两点", read,
             "以画布像素坐标返回距离与屏幕坐标系顺时针角度。") { p ->
@@ -292,6 +293,16 @@ class ArtStudioEntry : InProcessPluginEntry {
             "documentId/expectedRevision/maskId必填；将当前缓存填色转普通绘画层，删除编辑线索数据；可撤销恢复。不会重新计算，请先update使用最新线索结果。") {p->store.apply("LANER","COLORIZE_CONVERT",p)}
         capability("colorize.preview","检查填色与颜色线索",read,
             "documentId必填，expectedRevision/maskId可选；256边长缩略图包含所选蒙版的编辑线索与半透明输出，仅用于编辑检查，不是导出。") {p->store.colorizePreview(p)}
+        capability("selection.bezier_info","读取贝塞尔曲线选区范围",read,
+            "返回选区模式、闭合曲线节点上限、复合上限及未实现项目。曲线选区与图层路径独立，使用文档坐标。") {ArtBezierSelection.info()}
+        capability("selection.bezier_create","建立贝塞尔曲线选区",write,
+            "documentId/expectedRevision/nodes必填。nodes为2–2048节点，x/y为文档像素，in/out可选二维控制柄，type=corner/smooth/symmetric默认corner；路径始终闭合，面积为零明确拒绝。mode=replace/add/subtract/intersect默认replace。保留真实三次曲线；复合选区最多32分量、8192累计节点。没有现有选区时add创建，subtract/intersect产生空选区以阻止像素写入。独立于图层且不写作品像素，工程绑定与共享撤销；自动缩图含选区轮廓。") {p->store.bezierSelectionCreate("LANER",p)}
+        capability("selection.bezier_nodes","读取曲线选区节点",read,
+            "documentId必填，expectedRevision和componentIndex可选；componentIndex零基默认0，复合选区可从document.info.state.selection.parts读取分量类型。指定分量必须bezier。返回当前文档坐标的节点与控制柄、模式、版本和分量数，已应用选区移动缩放。") {p->store.bezierSelectionNodes(p)}
+        capability("selection.bezier_edit","编辑曲线选区节点",write,
+            "documentId/expectedRevision/edits必填，componentIndex零基默认0。edits为1–64顺序动作：move_node(node,x,y)、move_handle(node,side=in/out,x,y)、node_type(node,type=corner/smooth/symmetric)、insert_node(segment,t默认0.5)、delete_node(node)、segment_type(segment,type=line/curve)。坐标为文档像素；始终闭合且至少2节点。复合重算布尔边界并保留每个分量；无面积运算结果保存为空选区。一次历史与自动轮廓缩图。") {p->store.bezierSelectionEdit("LANER",p)}
+        capability("selection.preview","检查当前选区轮廓",read,
+            "documentId必填，expectedRevision可选；返回256长边图片，含选区浅蓝覆盖和轮廓以及当前选区数据。仅编辑检查，作品导出不含选区。局部细节用canvas.region并传selectionOutline=true。") {p->store.selectionPreview(p)}
         capability("enclose.info","读取围合填充范围与默认参数",read,
             "返回四种围合方式、七种颜色条件、限制和高级灰色项目。基础 RGBA8 围合及区域筛选，非完整 Krita 内核。") {ArtEncloseFill.info()}
         capability("enclose.apply","围合填充当前图层",write,
@@ -661,6 +672,11 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             p("color"),p("action"),p("transparent","boolean",true))
         "colorize.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),p("settings","object"))
         "colorize.clear","colorize.update","colorize.convert" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"))
+        "selection.bezier_info" -> emptyList()
+        "selection.bezier_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("nodes","array"),p("mode",optional=true))
+        "selection.bezier_nodes" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("componentIndex","integer",true))
+        "selection.bezier_edit" -> listOf(p("documentId"),p("expectedRevision","integer"),p("edits","array"),p("componentIndex","integer",true))
+        "selection.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
         "enclose.info" -> emptyList()
         "enclose.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("shape"),
             p("points","array"),p("color",optional=true),p("mode",optional=true),p("regionColor",optional=true),
@@ -746,7 +762,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "history.revert_actor_operations" -> listOf(id)
         "storage.set_directory" -> listOf(p("directory"))
         "canvas.region" -> listOf(p("x", "integer"), p("y", "integer"), p("width", "integer"),
-            p("height", "integer"), p("maxEdge", "integer", true),
+            p("height", "integer"), p("maxEdge", "integer", true),p("selectionOutline","boolean",true),
             p("documentId", optional = true), p("expectedRevision", "integer", true))
         "edit.paste_new" -> listOf(p("confirmResize", "object", true))
         "image.import" -> listOf(p("base64"), p("confirmResize", "object", true))

@@ -413,6 +413,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var referenceMultiple by remember { mutableStateOf(false) }
     var colorizeWidth by remember { mutableFloatStateOf(16f) }
     var colorizeErase by remember { mutableStateOf(false) }
+    var selectionBezierEditing by remember {mutableStateOf(false)}
+    var selectionBezierComponent by remember {mutableIntStateOf(0)}
+    var selectionBezierNode by remember {mutableIntStateOf(0)}
+    var selectionBezierMode by remember {mutableStateOf("replace")}
+    var selectionBezierSmooth by remember {mutableStateOf(false)}
     var encloseFillSettings by remember {mutableStateOf(ArtEncloseFill.defaults())}
     var smartPatchSettings by remember { mutableStateOf(ArtSmartPatch.info().getJSONObject("defaults")) }
     var assistantAdding by remember { mutableStateOf(true) }
@@ -1392,6 +1397,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.colorizeWidth=colorizeWidth;view.colorizeErase=colorizeErase
                     view.onColorizeCreate={p -> if(!busy)perform {store.colorizeCreate("AWEI",p)}}
                     view.onColorizeStroke={p -> if(!busy)perform {store.colorizeStroke("AWEI",p)}}
+                    view.selectionBezierEditing=selectionBezierEditing
+                    view.selectionBezierComponent=selectionBezierComponent;view.selectionBezierNode=selectionBezierNode
+                    view.selectionBezierMode=selectionBezierMode;view.selectionBezierSmooth=selectionBezierSmooth
+                    view.onSelectionBezierNode={selectionBezierNode=it}
+                    view.onSelectionBezierCreate={p -> if(!busy)perform {store.bezierSelectionCreate("AWEI",p)}}
+                    view.onSelectionBezierEdit={p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}}
                     view.encloseFillOptions=encloseFillSettings
                     view.onEncloseFill={p -> if(!busy)perform {store.encloseFill("AWEI",p)}}
                     view.smartPatchOptions = smartPatchSettings
@@ -2270,6 +2281,23 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         {p -> if(!busy)perform {store.colorizeUpdate("AWEI",p)}},
                         {type,p -> if(!busy)perform {store.apply("AWEI",type,p)}})
                 }
+                if(tool=="select_bezier") {
+                    StudioBezierSelectionOptions(current,busy,selectionBezierEditing,selectionBezierComponent,selectionBezierNode,
+                        selectionBezierMode,selectionBezierSmooth,{value ->
+                            if(canvasRef[0]?.selectionBezierHasDraft==true)Toast.makeText(context,"请先完成或取消当前选区",Toast.LENGTH_SHORT).show()
+                            else {
+                                if(value) {
+                                    val area=current.getJSONObject("state").optJSONObject("selection")
+                                    val parts=area?.let {ArtBezierSelection.parts(it)} ?: emptyList()
+                                    val curves=parts.indices.filter {parts[it].getJSONObject("selection").optString("shape","rect")=="bezier"}
+                                    if(selectionBezierComponent !in curves && curves.isNotEmpty())selectionBezierComponent=curves.first()
+                                }
+                                selectionBezierEditing=value
+                            }
+                        },{selectionBezierComponent=it},{selectionBezierNode=it},{selectionBezierMode=it},{selectionBezierSmooth=it},
+                        {command -> canvasRef[0]?.selectionBezierCommand(command)},
+                        {p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}})
+                }
                 if(tool=="enclose_fill") {
                     StudioEncloseFillOptions(encloseFillSettings,busy,color,{colorText=color;colorDialog=true},{encloseFillSettings=it})
                 }
@@ -2551,7 +2579,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     FilterChip(selected = viewOptions.zoomToolMode == "out",
                         onClick = { ArtStudioViewControl.setZoomToolMode("out") }, label = { Text("缩小") })
                 }
-                if (tool !in setOf("enclose_fill", "colorize_mask", "smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
+                if (tool !in setOf("select_bezier", "enclose_fill", "colorize_mask", "smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
                     "vector_freehand", "shape_select", "svg_text", "sampler", "fill", "mirror",
                     "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "calligraphy", "dyna", "zoom")) {
                     Text("此工具暂无独立参数。")
@@ -3032,7 +3060,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3058,6 +3086,18 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeCreationContext: JSONObject? = null
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
+    private val selectionBezierInteraction=StudioBezierSelectionInteraction(this)
+    val selectionBezierHasDraft get()=selectionBezierInteraction.hasDraft
+    var selectionBezierEditing=false
+        set(value) {if(field!=value){field=value;selectionBezierInteraction.cancel();invalidate()}}
+    var selectionBezierComponent=0
+        set(value) {if(field!=value){field=value;selectionBezierInteraction.cancel();invalidate()}}
+    var selectionBezierNode=0
+    var selectionBezierMode="replace"
+    var selectionBezierSmooth=false
+    var onSelectionBezierNode: (Int)->Unit = {}
+    var onSelectionBezierCreate: (JSONObject)->Unit = {}
+    var onSelectionBezierEdit: (JSONObject)->Unit = {}
     private val encloseFillInteraction=StudioEncloseFillInteraction()
     var encloseFillOptions=ArtEncloseFill.defaults()
     var onEncloseFill: (JSONObject)->Unit = {}
@@ -3110,7 +3150,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
-                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel()
                 assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
@@ -3326,11 +3366,11 @@ private class StudioCanvas(context: Context) : View(context) {
         val actual=fitScale()*zoom
         panX=width/2f-fittedCenterX(bitmap,fitScale())+(bitmap.width/2f-bounds.centerX())*actual
         panY=(bitmap.height/2f-bounds.centerY())*actual
-        referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();invalidate();publishZoom()
+        referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel();invalidate();publishZoom()
     }
 
     fun fitToWindow() {
-        encloseFillInteraction.cancel()
+        encloseFillInteraction.cancel();selectionBezierInteraction.cancel()
         zoom = 1f
         angle = 0f
         panX = 0f
@@ -3419,6 +3459,8 @@ private class StudioCanvas(context: Context) : View(context) {
         scene?.let { ArtAssistants.draw(canvas,it,matrix,tool=="assistant",assistantInteraction.preview,
             resources.displayMetrics.density) }
         if(tool=="assistant")assistantInteraction.drawDraft(canvas,matrix)
+        if(tool=="select_bezier")scene?.let {selectionBezierInteraction.draw(canvas,it,documentId,sceneRevision,matrix,
+            selectionBezierEditing,selectionBezierComponent,selectionBezierNode)}
         encloseFillInteraction.draw(canvas)
         colorizeInteraction.draw(canvas)
         smartPatchInteraction.draw(canvas)
@@ -3599,15 +3641,29 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
 
+    fun selectionBezierCommand(command: String) {
+        if(shapeBusy)return
+        try {selectionBezierInteraction.command(command,documentId,sceneRevision,onSelectionBezierCreate)}
+        catch(error:Exception) {
+            android.util.Log.e("ArtStudio","Bezier selection command failed",error)
+            Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()
+        }
+    }
+
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="select_bezier") {
+            if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {selectionBezierCommand("cancel");return true}
+            if(!selectionBezierEditing && keyCode==android.view.KeyEvent.KEYCODE_ENTER) {selectionBezierCommand("finish");return true}
+            if(!selectionBezierEditing && keyCode==android.view.KeyEvent.KEYCODE_DEL) {selectionBezierCommand("back");return true}
+        }
         if(tool=="enclose_fill" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            encloseFillInteraction.cancel();invalidate();return true
+            encloseFillInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="colorize_mask" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            colorizeInteraction.cancel();encloseFillInteraction.cancel();invalidate();return true
+            colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="smart_patch" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();invalidate();return true
+            smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="assistant") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {assistantInteraction.cancel();invalidate();return true}
@@ -3646,7 +3702,7 @@ private class StudioCanvas(context: Context) : View(context) {
             shapeInteraction.cancel()
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
-            referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel()
+            referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel()
             assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
@@ -3682,6 +3738,19 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(tool=="select_bezier") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            val state=scene ?: return true
+            try {
+                return selectionBezierInteraction.touch(event,state,documentId,sceneRevision,matrix,shapeBusy,
+                    selectionBezierEditing,selectionBezierComponent,selectionBezierNode,selectionBezierMode,selectionBezierSmooth,
+                    onSelectionBezierNode,onSelectionBezierCreate,onSelectionBezierEdit)
+            } catch(error:Exception) {
+                selectionBezierInteraction.cancel()
+                android.util.Log.e("ArtStudio","Bezier selection gesture failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {invalidate()}
+        }
         if(tool=="enclose_fill") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
@@ -3689,7 +3758,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return encloseFillInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
                     encloseFillOptions,color,onEncloseFill)
             } catch(error:Exception) {
-                encloseFillInteraction.cancel()
+                encloseFillInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Enclose fill gesture failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -3701,7 +3770,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return colorizeInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
                     color,colorizeWidth,colorizeErase,onColorizeCreate,onColorizeStroke)
             } catch(error:Exception) {
-                colorizeInteraction.cancel();encloseFillInteraction.cancel()
+                colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Colorize key stroke failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -3713,7 +3782,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return smartPatchInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,
                     shapeBusy,smartPatchOptions,onSmartPatch)
             } catch(error:Exception) {
-                smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel()
+                smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Smart patch mask failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -3756,7 +3825,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return referenceInteraction.touch(event,state,documentId,sceneRevision,matrix,
                     referenceMultiple,shapeBusy,onReferenceEdit)
             } catch(error:Exception) {
-                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Reference interaction failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             }

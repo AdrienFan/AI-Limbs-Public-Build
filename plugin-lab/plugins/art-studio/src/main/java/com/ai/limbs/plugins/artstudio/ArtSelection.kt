@@ -6,6 +6,69 @@ import org.json.JSONObject
 
 /** Shared geometry for the visible selection and its raster editing operations. */
 internal object ArtSelection {
+    fun validate(selection: JSONObject) {
+        for(key in listOf("x","y","width","height"))require(selection.getDouble(key).isFinite()) {"选区坐标无效"}
+        require(selection.getDouble("width")>=0 && selection.getDouble("height")>=0)
+        if(selection.optString("shape","rect") in setOf("bezier","compound")) {
+            val bounds=ArtBezierSelection.frame(selection)
+            require(listOf(bounds.left,bounds.top,bounds.right,bounds.bottom).all {it.isFinite() && kotlin.math.abs(it)<=1_000_000}) {"曲线选区框架超出坐标范围"}
+        }
+        when(selection.optString("shape","rect")) {
+            "rect" -> Unit
+            "ellipse" -> require(selection.getDouble("width")>0 && selection.getDouble("height")>0)
+            "polygon" -> {
+                require(selection.getDouble("width")>0 && selection.getDouble("height")>0)
+                val points=selection.getJSONArray("vertices");require(points.length() in 3..2048)
+                for(i in 0 until points.length()) {
+                    val q=points.getJSONArray(i);require(q.length()==2 && q.getDouble(0) in 0.0..1.0 && q.getDouble(1) in 0.0..1.0)
+                }
+            }
+            "bezier" -> {
+                require(selection.getDouble("width")>0 && selection.getDouble("height")>0)
+                val nodes=ArtBezierSelection.nodes(selection)
+                require(nodes.size in 2..ArtBezierSelection.MAX_NODES)
+                ArtPathGeometry.parse(ArtPathGeometry.json(nodes))
+            }
+            "compound" -> {
+                require(selection.getDouble("width")>0 && selection.getDouble("height")>0)
+                val basis=selection.getJSONObject("basis")
+                for(key in listOf("x","y","width","height"))require(basis.getDouble(key).isFinite())
+                require(basis.getDouble("width")>0 && basis.getDouble("height")>0)
+                val parts=selection.getJSONArray("parts");require(parts.length() in 1..ArtBezierSelection.MAX_PARTS)
+                var count=0
+                for(i in 0 until parts.length()) {
+                    val part=parts.getJSONObject(i);val child=part.getJSONObject("selection")
+                    require(child.optString("shape","rect") in setOf("rect","ellipse","polygon","bezier")) {"复合选区分量必须为基本轮廓"}
+                    require(part.getString("mode") in if(i==0)setOf("replace") else setOf("add","subtract","intersect"))
+                    validate(child)
+                    count+=when(child.optString("shape","rect")) {"bezier"->child.getJSONArray("nodes").length();"polygon"->child.getJSONArray("vertices").length();else->4}
+                }
+                require(count<=ArtBezierSelection.MAX_TOTAL_NODES)
+            }
+            else -> error("选区形状无效")
+        }
+    }
+
+    /** Subpixel geometry hit only; pixel editing uses the original Path through clipping/Region. */
+    fun containsPath(path: Path,x: Double,y: Double): Boolean {
+        val scaled=Path(path).apply {transform(android.graphics.Matrix().apply {setScale(16f,16f)})}
+        val px=(x*16).toInt();val py=(y*16).toInt()
+        val region=android.graphics.Region().apply {
+            setPath(scaled,android.graphics.Region(px-2,py-2,px+3,py+3))
+        }
+        return region.contains(px,py)
+    }
+    fun intersectsPath(path: Path,points: List<Pair<Float,Float>>): Boolean {
+        if(points.isEmpty())return false
+        if(points.size==1)return containsPath(path,points[0].first.toDouble(),points[0].second.toDouble())
+        val line=Path().apply {points.forEachIndexed {i,q->if(i==0)moveTo(q.first,q.second) else lineTo(q.first,q.second)}}
+        val coverage=Path()
+        android.graphics.Paint().apply {style=android.graphics.Paint.Style.STROKE;strokeWidth=0.125f
+            strokeCap=android.graphics.Paint.Cap.ROUND;strokeJoin=android.graphics.Paint.Join.ROUND}.getFillPath(line,coverage)
+        val result=Path();check(result.op(path,coverage,Path.Op.INTERSECT)) {"曲线选区命中计算失败"}
+        return !result.isEmpty
+    }
+
     /** Store normalized vertices so moving and scaling a selection also moves its geometry. */
     fun fromVertices(points: JSONArray): JSONObject {
         require(points.length() in 3..2048) { "多边形选区需要 3–2048 个顶点" }
@@ -54,6 +117,10 @@ internal object ArtSelection {
                     }
                     close()
                 }
+                "bezier" -> {
+                    set(ArtPathGeometry.preview(ArtBezierSelection.nodes(selection),true));fillType=Path.FillType.EVEN_ODD
+                }
+                "compound" -> set(ArtBezierSelection.compoundPath(ArtBezierSelection.parts(selection)))
                 else -> error("未知选区形状")
             }
         }
@@ -65,6 +132,7 @@ internal object ArtSelection {
         val width = selection.getDouble("width")
         val height = selection.getDouble("height")
         if (width <= 0.0 || height <= 0.0) return false
+        if(selection.optString("shape","rect") in setOf("bezier","compound"))return containsPath(path(selection),x,y)
         return when (selection.optString("shape", "rect")) {
             "ellipse" -> {
                 val dx = (2.0 * (x - left) / width) - 1.0
@@ -94,6 +162,8 @@ internal object ArtSelection {
 
     fun intersectsSegment(selection: JSONObject, x0: Double, y0: Double,
                           x1: Double, y1: Double): Boolean {
+        if(selection.optString("shape","rect") in setOf("bezier","compound"))
+            return intersectsPath(path(selection),listOf(x0.toFloat() to y0.toFloat(),x1.toFloat() to y1.toFloat()))
         if (contains(selection, x0, y0) || contains(selection, x1, y1)) return true
         val width = selection.getDouble("width")
         val height = selection.getDouble("height")

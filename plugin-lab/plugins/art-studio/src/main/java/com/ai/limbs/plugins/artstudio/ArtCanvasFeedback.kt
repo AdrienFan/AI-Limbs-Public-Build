@@ -23,7 +23,8 @@ internal object ArtCanvasFeedback {
         name in setOf("text.create", "text.update") -> true
         name.startsWith("path.") -> name != "path.nodes"
         name.startsWith("shape.") -> name !in setOf("shape.list", "shape.hit", "shape.box")
-        name.startsWith("stroke.") || name.startsWith("transform.") || name.startsWith("selection.") -> true
+        name.startsWith("selection.") -> name !in setOf("selection.bezier_info","selection.bezier_nodes","selection.preview")
+        name.startsWith("stroke.") || name.startsWith("transform.") -> true
         name.startsWith("layer.") -> name !in setOf("layer.list", "layer.search")
         name.startsWith("history.") -> name !in setOf("history.list", "history.timeline")
         name.startsWith("image.") || name == "fill.contiguous" || name == "patch.apply" || name == "enclose.apply" || name == "canvas.crop" -> true
@@ -45,13 +46,13 @@ internal object ArtCanvasFeedback {
         } else snapshot
         val image = if (feedbackSnapshot == null) emptyCanvas() else preview(store, feedbackSnapshot,
             0, 0, feedbackSnapshot.getJSONObject("state").getInt("width"),
-            feedbackSnapshot.getJSONObject("state").getInt("height"), THUMBNAIL_EDGE, "thumbnail",colorizeKeys=result.optBoolean("colorizeFeedback"))
+            feedbackSnapshot.getJSONObject("state").getInt("height"), THUMBNAIL_EDGE, "thumbnail",colorizeKeys=result.optBoolean("colorizeFeedback"),selectionOutline=result.optBoolean("selectionFeedback"))
         return result.put("thumbnail", image.getJSONObject("metadata"))
             .put("mcp_content", JSONArray().put(image.getJSONObject("content")))
     }
 
     fun preview(store: ArtStore, snapshot: JSONObject, x: Int, y: Int,
-        width: Int, height: Int, maxEdge: Int, kind: String, colorizeKeys: Boolean = false): JSONObject {
+        width: Int, height: Int, maxEdge: Int, kind: String, colorizeKeys: Boolean = false, selectionOutline: Boolean = false): JSONObject {
         val state = snapshot.getJSONObject("state")
         require(x >= 0 && y >= 0 && width > 0 && height > 0 &&
             x.toLong() + width <= state.getInt("width") &&
@@ -73,7 +74,14 @@ internal object ArtCanvasFeedback {
                 canvas.drawBitmap(rendered, null,
                     android.graphics.RectF(0f, 0f, state.getInt("width").toFloat(), state.getInt("height").toFloat()),
                     Paint(Paint.FILTER_BITMAP_FLAG))
+                if(selectionOutline)state.optJSONObject("selection")?.let {selection ->
+                    val outline=ArtSelection.path(selection)
+                    canvas.drawPath(outline,Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.argb(35,50,170,255);style=Paint.Style.FILL})
+                    canvas.drawPath(outline,Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.rgb(40,150,255);style=Paint.Style.STROKE
+                        strokeWidth=(1.5/scale).toFloat();pathEffect=android.graphics.DashPathEffect(floatArrayOf((5/scale).toFloat(),(3/scale).toFloat()),0f)})
+                }
                 val metadata = JSONObject().put("kind", kind).put("empty", false).put("colorizeKeys",colorizeKeys)
+                    .put("selectionOutline",selectionOutline).put("selectionShape",state.optJSONObject("selection")?.optString("shape","rect") ?: JSONObject.NULL)
                     .put("documentId", snapshot.getString("id")).put("revision", snapshot.getInt("revision"))
                     .put("sourceWidth", state.getInt("width")).put("sourceHeight", state.getInt("height"))
                     .put("region", JSONObject().put("x", x).put("y", y).put("width", width).put("height", height))

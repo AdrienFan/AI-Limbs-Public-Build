@@ -81,10 +81,12 @@ internal class ArtStore(private val root: File) {
         val beforeSnapshot=if(pointer.isFile) snapshot(loadCurrent()) else null
         val before=referenceSignature(beforeSnapshot)
         val assistantBefore=assistantSignature(beforeSnapshot)
+        val selectionBefore=beforeSnapshot?.getJSONObject("state")?.optJSONObject("selection")?.toString()
         val result = block()
         val after = if (pointer.isFile) snapshot(loadCurrent()) else null
         if(after!=null && referenceSignature(after)!=before) result.put("referenceFeedback",true)
         if(after!=null && assistantSignature(after)!=assistantBefore) result.put("assistantFeedback",true)
+        if(after?.getJSONObject("state")?.optJSONObject("selection")?.toString()!=selectionBefore)result.put("selectionFeedback",true)
         try {
             ArtCanvasFeedback.attach(this, result, after)
         } catch (error: Exception) {
@@ -99,12 +101,12 @@ internal class ArtStore(private val root: File) {
     }
 
     fun canvasRegion(x: Int, y: Int, width: Int, height: Int, maxEdge: Int,
-        documentId: String? = null, expectedRevision: Int? = null): JSONObject = locked {
+        documentId: String? = null, expectedRevision: Int? = null, selectionOutline: Boolean = false): JSONObject = locked {
         val current = snapshot(loadCurrent())
         require(documentId == null || documentId == current.getString("id")) { "工程已经切换，请使用当前画布编号" }
         require(expectedRevision == null || expectedRevision == current.getInt("revision")) { "画布版本已经改变，请刷新后检查细节" }
         val image = ArtCanvasFeedback.preview(this, current,
-            x, y, width, height, maxEdge, "region")
+            x, y, width, height, maxEdge, "region",selectionOutline=selectionOutline)
         JSONObject().put("regionPreview", image.getJSONObject("metadata"))
             .put("mcp_content", JSONArray().put(image.getJSONObject("content")))
     }
@@ -737,6 +739,45 @@ internal class ArtStore(private val root: File) {
 
 
 
+    private fun selectionRequest(p: JSONObject): JSONObject {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id")) {"工程已切换，请重新读取选区"}
+        if(p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已更新，请重新读取选区"}
+        return snap
+    }
+    fun bezierSelectionCreate(actor: String,p: JSONObject): JSONObject = locked {
+        val snap=selectionRequest(p);require(p.has("expectedRevision"))
+        val created=ArtBezierSelection.fromNodes(p.getJSONArray("nodes"))
+        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,p.optString("mode","replace"))
+        apply(actor,"SELECTION_BEZIER",JSONObject().put("documentId",snap.getString("id"))
+            .put("expectedRevision",snap.getInt("revision")).put("selection",selection))
+    }
+    fun bezierSelectionEdit(actor: String,p: JSONObject): JSONObject = locked {
+        val snap=selectionRequest(p);require(p.has("expectedRevision"))
+        val current=snap.getJSONObject("state").optJSONObject("selection") ?: error("当前没有选区")
+        val selection=ArtBezierSelection.edited(current,p.optInt("componentIndex",0),p.getJSONArray("edits"))
+        apply(actor,"SELECTION_BEZIER",JSONObject().put("documentId",snap.getString("id"))
+            .put("expectedRevision",snap.getInt("revision")).put("selection",selection))
+    }
+    fun selectionPreview(p: JSONObject): JSONObject = locked {
+        val snap=selectionRequest(p);val state=snap.getJSONObject("state")
+        val image=ArtCanvasFeedback.preview(this,snap,0,0,state.getInt("width"),state.getInt("height"),256,"thumbnail",selectionOutline=true)
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("selection",state.optJSONObject("selection") ?: JSONObject.NULL)
+            .put("thumbnail",image.getJSONObject("metadata")).put("mcp_content",JSONArray().put(image.getJSONObject("content")))
+    }
+
+    fun bezierSelectionNodes(p: JSONObject): JSONObject = locked {
+        val snap=selectionRequest(p)
+        val selection=snap.getJSONObject("state").optJSONObject("selection") ?: error("当前没有选区")
+        val parts=ArtBezierSelection.parts(selection);val index=p.optInt("componentIndex",0)
+        val component=ArtBezierSelection.component(selection,index)
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("coordinateSpace","document").put("componentIndex",index).put("componentCount",parts.size)
+            .put("mode",parts[index].getString("mode")).put("closed",true)
+            .put("nodes",ArtPathGeometry.json(ArtBezierSelection.nodes(component)))
+    }
+
     fun colorizeList(p: JSONObject): JSONObject = locked {
         val snap=current()
         require(p.getString("documentId")==snap.getString("id")) {"工程已切换"}
@@ -879,7 +920,7 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
-        if (type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") || type.startsWith("COLORIZE_") ||
+        if (type=="SELECTION_BEZIER" || type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") || type.startsWith("COLORIZE_") ||
             (type=="STROKE_ADD" && params.has("documentId")) || type == "VECTOR_LAYER_CREATE") {
             require(params.getString("documentId") == doc.getString("id")) { "工程已切换，请重新读取工程" }
             require(params.has("expectedRevision")) { "矢量操作必须绑定工程版本" }
@@ -1481,6 +1522,7 @@ internal class ArtStore(private val root: File) {
                     "ENCLOSE_FILL" -> "围合填充";"ENCLOSE_ERASE" -> "围合擦除";else -> "粘贴像素"
                 }
                 "LAYER_COPY" -> "复制图层"
+                "SELECTION_BEZIER" -> "贝塞尔曲线选区"
                 "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
                 "DOCUMENT_RENAME" -> "重命名工程"
                 else -> "画室操作"
@@ -1561,6 +1603,8 @@ internal class ArtStore(private val root: File) {
         ArtReferences.validate(state)
         ArtAssistants.validate(state)
         ArtColorize.validate(state)
+        state.optJSONObject("selection")?.let {ArtSelection.validate(it)}
+        state.optJSONObject("previousSelection")?.let {ArtSelection.validate(it)}
         return state
     }
 
@@ -1919,22 +1963,12 @@ internal class ArtStore(private val root: File) {
                     layer.put(field, value)
                 }
             }
+            "SELECTION_BEZIER" -> {
+                val selected=p.getJSONObject("selection");ArtSelection.validate(selected)
+                state.put("selection",JSONObject(selected.toString()))
+            }
             "SELECTION_CREATE" -> {
-                for (field in listOf("x", "y", "width", "height")) require(p.getDouble(field).isFinite())
-                val shape = p.optString("shape", "rect")
-                require(shape in setOf("rect", "ellipse", "polygon")) { "选区形状无效" }
-                require(p.getDouble("width") >= 0 && p.getDouble("height") >= 0)
-                if (shape != "rect") require(p.getDouble("width") > 0 && p.getDouble("height") > 0)
-                if (shape == "polygon") {
-                    val vertices = p.getJSONArray("vertices")
-                    require(vertices.length() in 3..2048) { "多边形选区需要 3–2048 个顶点" }
-                    for (index in 0 until vertices.length()) {
-                        val vertex = vertices.getJSONArray(index)
-                        require(vertex.length() == 2 &&
-                            vertex.getDouble(0) in 0.0..1.0 &&
-                            vertex.getDouble(1) in 0.0..1.0) { "选区顶点范围无效" }
-                    }
-                }
+                ArtSelection.validate(p)
                 state.put("selection", JSONObject(p.toString()))
             }
             "SELECTION_CLEAR" -> {
@@ -2558,6 +2592,11 @@ internal class ArtStore(private val root: File) {
     }
 
     private fun intersects(points: JSONArray, selection: JSONObject, matrix: Matrix): Boolean {
+        if(selection.optString("shape","rect") in setOf("bezier","compound")) {
+            val mapped=(0 until points.length()).map {i->val p=points.getJSONArray(i)
+                val q=floatArrayOf(p.getDouble(0).toFloat(),p.getDouble(1).toFloat());matrix.mapPoints(q);q[0] to q[1]}
+            return ArtSelection.intersectsPath(ArtSelection.path(selection),mapped)
+        }
         var previous: FloatArray? = null
         for (i in 0 until points.length()) {
             val point = points.getJSONArray(i)

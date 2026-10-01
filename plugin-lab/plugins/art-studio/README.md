@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.34 源码；基础围合填充，待编译验收）
+# AI Limbs 画室（0.2.35 源码；贝塞尔曲线选区，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -539,3 +539,25 @@ smart_patch 从灰色工具格升级为基础局部纹理修补。单击选中�
 兰儿入口为 plugin.art.studio.enclose.info 和 plugin.art.studio.enclose.apply。apply 必须绑定 documentId、expectedRevision、layerId、shape 和文档像素坐标 points；矩形/椭圆恰好两个点、套索至少三个点、画笔至少一个点。非擦除时还必须 color=#AARRGGBB。其他字段与 info.defaults 相同。成功修改后在原结果中附带 thumbnail 与 mcp_content；进一步看细节仍用 canvas.region。
 
 贝塞尔围合、按外围轮廓颜色判定、图案填充、颜色标签参考组、最暗像素停止扩展、变换及组内图层写入、HDR 和动画保持灰色。基础版参数、算法和结果需编译及手机实测验收；本次仅完成源码静态检查与本地提交，没有执行编译、构建或测试，也没有上传云端。
+
+## 贝塞尔曲线选区（0.2.35 源码，待编译验收）
+
+对照 Krita 6.0.4 的 plugins/tools/selectiontools/kis_tool_select_path.cc、既有贝塞尔节点实现与官方 Path Selection Tool 文档。新 select_bezier 工具实现真实闭合三次曲线选区，既不绘制作品笔画，也不把保存的曲线折线化。业务和 UI 均位于画室插件。
+
+单击选中工具，点击放置节点，按住拖动拉出切线；点回起点、双击末节点、Enter 或参数窗中的完成按钮提交。双击工具打开统一可拖动参数窗。支持退回上一节点、取消、右键退回、Backspace 退回、Esc 取消。未完成路径只存在于编辑器；工程变化明确拒绝，取消、双指、工具切换、显示适配或切换编辑模式会结束临时手势，未完成路径需先完成或取消后才能切换新建／编辑。
+
+参数窗可以选择替换、添加、减去和相交；快捷键 Shift 添加、Alt 减去、Ctrl 替换、Shift+Alt 相交，以第一节点按下时为准。未拖动的节点可在完成时自动平滑，默认关闭。选区必须有面积，至少两个节点；只有两个节点时需有弯曲控制柄。每条最多2048节点，节点和控制柄的文档坐标有限且绝对值不超过1000000。
+
+新建贝塞尔选区保存为 shape=bezier 的规范化节点及框架。添加、减去和相交保存有界 shape=compound 的有序布尔分量，保留基本曲线及各步骤模式，绘制、像素剪裁和编辑时使用真实 Path 布尔运算。最多32分量、累计8192节点，不允许嵌套复合分量。移动、缩放通过选区框架映射各分量，节点和控制柄仍可按当前文档坐标编辑。
+
+空选区保留为零面积矩形，不转换为取消选区。没有已有选区时，添加建立新选区，减去或相交得到空选区。运算消除所有面积也得到空选区；现有像素编辑范围检查或选区剪裁阻止写入，避免清掉选区后误编辑整张画布。
+
+编辑模式支持选择复合里的贝塞尔分量、拖动节点及控制柄，节点类型尖角／平滑／对称，下一段插入节点、删除节点、下一段变直线或曲线。插入沿用 de Casteljau 细分；始终闭合且至少两个节点。每次节点拖动或参数命令只记一次工程操作，绑定工程 ID 与版本，支持撤销、重做、归档和重新打开。
+
+复制、清除、填充、围合填充、上色蒙版、智能修补和图像过滤通过已有 ArtSelection.path 剪裁链路使用曲线。笔画选区编辑的中心线命中采用路径交集和0.125 px检测带，单点命中采用1/16 px网格；这是几何命中精度，不是统一像素选区的抗锯齿或羽化。选区仍不作为作品图层导出。
+
+兰儿入口为 selection.bezier_info、selection.bezier_create、selection.bezier_nodes、selection.bezier_edit 和 selection.preview，完整前缀 plugin.art.studio。创建和编辑必填 documentId 与 expectedRevision。create 接收文档坐标 nodes 及 mode；edit 接收零基 componentIndex 和1–64顺序动作：move_node、move_handle、node_type、insert_node、delete_node、segment_type。nodes 返回已应用移动缩放的文档坐标。复合分量类型可由 document.info.state.selection.parts 读取。
+
+成功的选区操作自动附带256长边的编辑检查缩图，显示浅蓝覆盖和虚线轮廓；撤销、重做等操作改变选区时也附带轮廓。selection.preview 可只读检查。canvas.region 新增可选 selectionOutline=true 用于局部边界细节，默认false保留原作品预览行为。轮廓反馈不写资源、不改作品、不进入导出。
+
+抗锯齿／羽化统一像素选区蒙版、角度吸附、任意旋转选区及独立选区蒙版图层保持灰色。当前选择模型是几何剪裁，各像素操作的边缘策略尚未统一，不能把显示抗锯齿冒充为完整软选区能力。本次仅做源码静态检查和本地提交，未运行编译、构建或测试，未上传云端；手机上的节点拖动、布尔边界、撤销及保存效果仍待验收。
