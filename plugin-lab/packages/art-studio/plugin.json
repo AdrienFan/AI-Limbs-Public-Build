@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.22",
+  "version": "0.2.23",
   "api": {
     "target": 1,
     "min": 1
@@ -117,6 +117,7 @@
       "plugin.art.studio.view.set",
       "plugin.art.studio.view.command",
       "plugin.art.studio.view.zoom_tool",
+      "plugin.art.studio.view.zoom",
       "plugin.art.studio.view.presentation",
       "plugin.art.studio.image.set_background",
       "plugin.art.studio.image.resize_canvas",

@@ -4,6 +4,7 @@ import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.update
 import org.json.JSONObject
+import kotlin.math.ln
 
 internal data class StudioViewSettings(
     val panelsHidden: Boolean = false,
@@ -25,11 +26,49 @@ internal data class StudioViewSettings(
         .put("zoomToolBadge", zoomToolBadge)
 }
 
+internal data class StudioCanvasZoom(
+    val documentId: String,
+    val relativeScale: Float,
+    val fitScale: Float
+) {
+    val percent: Double get() = relativeScale.toDouble() * fitScale * 100.0
+    val minPercent: Double get() = 0.1 * fitScale * 100.0
+    val maxPercent: Double get() = 16.0 * fitScale * 100.0
+    val sliderPosition: Float get() =
+        (ln(relativeScale / 0.1f) / ln(160f)).coerceIn(0f, 1f)
+
+    fun describe(): JSONObject = JSONObject().put("documentId", documentId)
+        .put("percent", percent).put("minPercent", minPercent).put("maxPercent", maxPercent)
+        .put("relativeScale", relativeScale.toDouble())
+}
+
+internal data class StudioZoomRequest(val documentId: String, val percent: Double)
+
 /** The human menu and Laner's capabilities address the same live view state. */
 internal object ArtStudioViewControl {
     val state = MutableStateFlow(StudioViewSettings())
     val commands = MutableSharedFlow<String>(extraBufferCapacity = 64)
+    val canvasZoom = MutableStateFlow<StudioCanvasZoom?>(null)
+    val zoomRequests = MutableSharedFlow<StudioZoomRequest>(extraBufferCapacity = 64)
     @Volatile var canvasAttached: Boolean = false
+
+    fun describe(): JSONObject = state.value.describe()
+        .put("canvasZoom", if (canvasAttached) canvasZoom.value?.describe() else null)
+
+    fun requestZoom(documentId: String, percent: Double): JSONObject {
+        check(canvasAttached) { "请先打开画室画布，再操作视图" }
+        val current = requireNotNull(canvasZoom.value) { "画布尚未完成布局" }
+        require(current.documentId == documentId) { "画布已切换，请重新读取 view.state" }
+        require(percent.isFinite() && percent in current.minPercent..current.maxPercent) {
+            "当前缩放范围为 ${current.minPercent}–${current.maxPercent}%，请读取 view.state"
+        }
+        check(zoomRequests.subscriptionCount.value > 0 &&
+            zoomRequests.tryEmit(StudioZoomRequest(documentId, percent))) {
+            "画室视图暂时无法接收操作"
+        }
+        return JSONObject().put("accepted", true).put("documentId", documentId)
+            .put("requestedPercent", percent)
+    }
 
     fun setOption(name: String, enabled: Boolean): JSONObject {
         require(name in setOf("panelsHidden", "statusBarVisible", "gridVisible", "pixelGridVisible")) {

@@ -8,6 +8,7 @@ import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
 import android.view.MotionEvent
+import android.view.InputDevice
 import android.view.View
 import android.view.Gravity
 import android.widget.FrameLayout
@@ -78,6 +79,7 @@ import org.json.JSONObject
 import java.util.UUID
 import kotlin.math.atan2
 import kotlin.math.hypot
+import kotlin.math.pow
 import kotlin.math.roundToInt
 
 internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider {
@@ -393,6 +395,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
     val viewOptions by ArtStudioViewControl.state.collectAsState()
+    val canvasZoom by ArtStudioViewControl.canvasZoom.collectAsState()
     var remainingContext by remember { mutableStateOf(JSONObject()) }
     var remainingSettings by remember { mutableStateOf(JSONObject()) }
     var remainingDialog by remember { mutableStateOf<JSONObject?>(null) }
@@ -1268,7 +1271,18 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         ArtStudioViewControl.canvasAttached = current != null && canvasRef[0] != null
     }
     DisposableEffect(Unit) {
-        onDispose { ArtStudioViewControl.canvasAttached = false }
+        onDispose {
+            ArtStudioViewControl.canvasAttached = false
+            ArtStudioViewControl.canvasZoom.value = null
+        }
+    }
+    LaunchedEffect(Unit) {
+        ArtStudioViewControl.zoomRequests.collect { request ->
+            val canvas = canvasRef[0]
+            // Queued view operations must never zoom a subsequently opened document.
+            if (canvas != null && canvas.documentId == request.documentId && canvas.image != null)
+                canvas.zoomToPercent(request.percent)
+        }
     }
     LaunchedEffect(Unit) {
         ArtStudioViewControl.commands.collect { command ->
@@ -2175,11 +2189,54 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             enabled = !busy && current.optBoolean("canRedo")
                         ) { Text("↪️") }
                     }
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        TextButton(onClick = { canvasRef[0]?.fitToWindow() }, enabled = image != null) {
+                    Row(Modifier.weight(1f).padding(start = 6.dp),
+                        verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        val liveZoom = canvasZoom?.takeIf { it.documentId == current.getString("id") }
+                        val zoomEnabled = image != null && liveZoom != null
+                        val activeTrack = MaterialTheme.colorScheme.primary
+                        val inactiveTrack = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.35f)
+                        val thumbColor = if (zoomEnabled) activeTrack else inactiveTrack
+                        Slider(value = liveZoom?.sliderPosition ?: 0f,
+                            onValueChange = { position ->
+                                canvasRef[0]?.zoomToSlider(position)
+                            },
+                            enabled = zoomEnabled,
+                            valueRange = 0f..1f,
+                            modifier = Modifier.weight(1f).semantics {
+                                contentDescription = "画布缩放比例"
+                            },
+                            thumb = {
+                                Box(Modifier.size(18.dp).background(thumbColor,
+                                    androidx.compose.foundation.shape.CircleShape))
+                            },
+                            track = { sliderState ->
+                                androidx.compose.foundation.Canvas(Modifier.fillMaxWidth().height(3.dp)) {
+                                    val start = if (layoutDirection == androidx.compose.ui.unit.LayoutDirection.Rtl)
+                                        size.width else 0f
+                                    val end = size.width - start
+                                    val y = size.height / 2f
+                                    drawLine(inactiveTrack,
+                                        androidx.compose.ui.geometry.Offset(start, y),
+                                        androidx.compose.ui.geometry.Offset(end, y),
+                                        strokeWidth = size.height,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                    drawLine(if (zoomEnabled) activeTrack else inactiveTrack,
+                                        androidx.compose.ui.geometry.Offset(start, y),
+                                        androidx.compose.ui.geometry.Offset(start + (end - start) * sliderState.value, y),
+                                        strokeWidth = size.height,
+                                        cap = androidx.compose.ui.graphics.StrokeCap.Round)
+                                }
+                            })
+                        Text(if (liveZoom != null)
+                            String.format(java.util.Locale.ROOT, "%.1f%%", liveZoom.percent) else "—",
+                            modifier = Modifier.width(52.dp),
+                            fontSize = 11.sp, maxLines = 1, textAlign = TextAlign.Center)
+                        TextButton(onClick = { canvasRef[0]?.fitToWindow() }, enabled = image != null,
+                            modifier = Modifier.width(48.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
                             Text("居中")
                         }
-                        TextButton(onClick = { presentationDialog = true }) {
+                        TextButton(onClick = { presentationDialog = true },
+                            modifier = Modifier.width(48.dp), contentPadding = PaddingValues(horizontal = 4.dp)) {
                             Text("全屏")
                         }
                     }
@@ -2858,7 +2915,11 @@ private class StudioCanvas(context: Context) : View(context) {
             fitToWindow()
         }
     }
-    var image: Bitmap? = null; set(value) { field = value; invalidate() }
+    var image: Bitmap? = null; set(value) {
+        field = value
+        publishZoom()
+        invalidate()
+    }
     var horizontalFitBias: Float = 0f
         set(value) {
             val normalized = value.coerceIn(-1f, 1f)
@@ -2937,6 +2998,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var onCursor: (Int, Int) -> Unit = { _, _ -> }
     var onMove: (Float, Float) -> Unit = { _, _ -> }
     private var zoom = 1f
+        set(value) { field = value; publishZoom() }
     private var angle = 0f
     private var mirrored = false
     var gridVisible: Boolean = false
@@ -2980,23 +3042,65 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
 
-    private fun zoomAt(x: Float, y: Float) {
-        val bitmap = requireNotNull(image)
+    private fun publishZoom() {
+        if (image == null || width <= 0 || height <= 0 || documentId.isBlank()) {
+            ArtStudioViewControl.canvasZoom.value = null
+            return
+        }
+        ArtStudioViewControl.canvasZoom.value = StudioCanvasZoom(documentId, zoom, fitScale())
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        publishZoom()
+    }
+
+    private fun setZoomAt(target: Float, x: Float, y: Float) {
+        val bitmap = image ?: return
+        if (width <= 0 || height <= 0) return
+        require(target.isFinite() && target > 0f)
         val previous = zoom
-        val mode = ArtStudioViewControl.state.value.zoomToolMode
-        zoom = (if (mode == "in") zoom * 1.5f else zoom / 1.5f).coerceIn(0.1f, 16f)
+        zoom = target.coerceIn(0.1f, 16f)
         val factor = zoom / previous
-        // The click must stay over the same image point, including a dock-biased canvas.
+        // Click, wheel and percentage inputs share anchor math for dock-biased canvases.
         val centerX = fittedCenterX(bitmap, fitScale())
         panX = x - centerX - factor * (x - centerX - panX)
         panY = y - height / 2f - factor * (y - height / 2f - panY)
+        invalidate()
     }
 
-    fun zoomIn() { zoom = (zoom * 1.25f).coerceIn(0.1f, 16f); invalidate() }
-    fun zoomOut() { zoom = (zoom / 1.25f).coerceIn(0.1f, 16f); invalidate() }
-    fun zoomTo100Percent() {
-        zoom = (1f / fitScale()).coerceIn(0.1f, 16f)
-        invalidate()
+    private fun zoomAt(x: Float, y: Float) {
+        val mode = ArtStudioViewControl.state.value.zoomToolMode
+        setZoomAt(if (mode == "in") zoom * 1.5f else zoom / 1.5f, x, y)
+    }
+
+    fun zoomIn() { setZoomAt(zoom * 1.25f, width / 2f, height / 2f) }
+    fun zoomOut() { setZoomAt(zoom / 1.25f, width / 2f, height / 2f) }
+    fun zoomTo100Percent() { zoomToPercent(100.0) }
+
+    fun zoomToPercent(percent: Double) {
+        require(percent.isFinite() && percent > 0.0)
+        setZoomAt((percent / 100.0 / fitScale()).toFloat(), width / 2f, height / 2f)
+    }
+
+    fun zoomToSlider(position: Float) {
+        require(position.isFinite())
+        setZoomAt(0.1f * 160f.pow(position.coerceIn(0f, 1f)), width / 2f, height / 2f)
+    }
+
+    override fun onGenericMotionEvent(event: MotionEvent): Boolean {
+        if (event.actionMasked == MotionEvent.ACTION_SCROLL &&
+            event.isFromSource(InputDevice.SOURCE_CLASS_POINTER) &&
+            image != null && width > 0 && height > 0 &&
+            event.x >= 0f && event.x < width && event.y >= 0f && event.y < height) {
+            val scroll = event.getAxisValue(MotionEvent.AXIS_VSCROLL)
+            if (scroll.isFinite() && scroll != 0f) {
+                // Positive VSCROLL is wheel-forward. Keep fractional/high-resolution deltas.
+                setZoomAt(zoom * 1.25f.pow(scroll.coerceIn(-32f, 32f)), event.x, event.y)
+                return true
+            }
+        }
+        return super.onGenericMotionEvent(event)
     }
     private fun rotatedBounds(bitmap: Bitmap): Pair<Float, Float> {
         val radians = Math.toRadians(angle.toDouble())

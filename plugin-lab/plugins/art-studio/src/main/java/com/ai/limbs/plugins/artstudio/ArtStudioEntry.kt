@@ -106,8 +106,8 @@ class ArtStudioEntry : InProcessPluginEntry {
                 .put("x", -p.optInt("offsetX", 0)).put("y", -p.optInt("offsetY", 0)))
         }
         capability("view.state", "读取画室视图状态", read,
-            "查看面板、状态栏、网格、像素网格、宿主页面模式及缩放工具方向 zoomToolMode（in/out）和角标 zoomToolBadge（大/小）。") {
-            ArtStudioViewControl.state.value.describe()
+            "查看面板、状态栏、网格、像素网格、页面模式、缩放方向和角标；canvasZoom 包含实际像素比例 percent、范围 minPercent/maxPercent 及 documentId。未挂载画布时没有 canvasZoom。") {
+            ArtStudioViewControl.describe()
         }
         capability("view.set", "设置画室视图选项", InProcessCapabilityEffect.UI_INTERACTION,
             "option 可取 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；设置与阿伟菜单相同的视图状态。") { p ->
@@ -116,6 +116,10 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("view.zoom_tool", "设置缩放工具方向", InProcessCapabilityEffect.UI_INTERACTION,
             "mode 为 in（放大）、out（缩小）或 toggle（交替切换）。只设置方向，不立即缩放、不改变选中工具；与手机角标及点击画布共享状态。立即缩放使用 view.command 的 zoom_in/zoom_out。") { p ->
             ArtStudioViewControl.setZoomToolMode(p.getString("mode"))
+        }
+        capability("view.zoom", "设置画布显示比例", InProcessCapabilityEffect.UI_INTERACTION,
+            "documentId 使用 view.state 的 canvasZoom.documentId；percent 为显示百分比，100 表示一个图像像素对应一个屏幕像素，必须在当前 minPercent/maxPercent 内。以可视区域中心缩放；返回 accepted 表示已排队，实际值读取 view.state。只改变显示，不改变图片像素或历史。") { p ->
+            ArtStudioViewControl.requestZoom(p.getString("documentId"), p.getDouble("percent"))
         }
         capability("view.command", "操作画室视图", InProcessCapabilityEffect.UI_INTERACTION,
             "在画室画布打开时执行 zoom_in/out/100、fit/fit_width/fit_height、rotate_right/left、reset_rotation、mirror、reset_display 或 refresh。") { p ->
@@ -452,6 +456,7 @@ class ArtStudioPresentationEntry : InProcessPluginPresentationEntry {
 private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> {
     fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
         val description = when (key) {
+            "percent" -> "实际显示百分比；范围见 view.state.canvasZoom，100 表示 1:1。仅缩放显示。"
             "content" -> "需要保存的完整文字，最多4096字符；换行符换行。基础排版边界见text.fonts。"
             "fontId" -> "text.fonts返回的当前设备字体标识；创建时默认中英文字体，更新时保留原字体。"
             "fontSize" -> "字号，6–512画布像素。"
@@ -492,6 +497,7 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
         "view.zoom_tool" -> listOf(p("mode"))
+        "view.zoom" -> listOf(p("documentId"), p("percent", "number"))
         "view.presentation" -> listOf(p("mode"))
         "document.create" -> listOf(p("width", "integer"), p("height", "integer"),
             p("background", optional = true), p("name", optional = true))

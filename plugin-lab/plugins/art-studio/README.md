@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.22 源码；缩放工具双方向迭代，待编译验收）
+# AI Limbs 画室（0.2.23 源码；滚轮和底栏缩放迭代，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -317,3 +317,14 @@ image.formats 返回格式、扩展名、MIME、系统声明的 decoderAvailable
 基于已安装验收的 0.2.21；用户确认常见格式打开及字体有效。缩放工具默认放大，角标“大”；工具选中后再次点图标切为缩小，角标“小”，继续点交替切换。切换到其他工具再回来保留本次会话方向。方向切换本身不缩放；点击画布以点击点为中心，放大 ×1.5、缩小 ÷1.5，限制沿用相对适屏比例 0.1–16。停靠栏使画布偏移时仍使用真实显示中心计算锚点，不修改图像尺寸、像素或撤销历史。双指与菜单缩放保留原行为。
 
 手机、AI 使用同一原子视图方向状态。view.state 返回 zoomToolMode（in/out）、zoomToolBadge（大/小）；view.zoom_tool 的 mode 为 in/out/toggle，只设置方向，不立即缩放或选择工具。AI 立即缩放仍用 view.command zoom_in/zoom_out；toolbox.catalog 提供模式和入口。版本码 25，payload artstudio.v0222。仅画室插件改动，本轮未编译、推送或安装。
+
+
+## 0.2.23 滚轮与底栏缩放
+
+基于 0.2.22 源码继续迭代，包含“大/小”双方向工具。画布接收 Android ACTION_SCROLL/AXIS_VSCROLL：鼠标向前滚放大，向后滚缩小，每单位滚动 1.25 倍，支持小数滚动量，以事件在画布内的悬停坐标锚定，不需要选中缩放工具。仅消费画布内有效的垂直滚动；其他滚动事件交给正常分派，不抢工具栏/面板滚动。
+
+底栏“居中”左侧新增细轨道和圆形滑块，支持点击与连续拖动，旁边显示实际显示比例百分比，100% 为图像像素 1:1 屏幕像素。轨道用对数刻度映射既有相对适屏范围 0.1–16；滑动条以可视区域中心锚定。所有缩放写入都会发布实际比例，图片/页面尺寸改变也重新发布，因此工具、滚轮、双指、菜单、居中/适屏和 AI 请求同步到滑块与百分比。
+
+新增 view.zoom(documentId, percent) 设置显示比例，与滑动条共享画布处理；先读取 view.state.canvasZoom 获取 documentId 与 minPercent/maxPercent。返回 accepted 表示请求已排队，实际应用值读取状态；过期工程请求不操作新工程。视图缩放不修改图像尺寸、像素或工程历史。无宿主变更。版本码 26，payload artstudio.v0223；本轮未推送、编译、测试或安装。
+
+接口依据：[Android MotionEvent](https://developer.android.com/reference/android/view/MotionEvent)、[Compose Slider](https://developer.android.com/develop/ui/compose/components/slider)。
