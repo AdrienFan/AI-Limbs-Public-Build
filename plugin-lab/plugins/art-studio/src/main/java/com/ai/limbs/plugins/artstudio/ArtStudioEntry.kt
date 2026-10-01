@@ -117,6 +117,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             "option 可取 panelsHidden、statusBarVisible、gridVisible、pixelGridVisible；设置与阿伟菜单相同的视图状态。") { p ->
             ArtStudioViewControl.setOption(p.getString("option"), p.getBoolean("enabled"))
         }
+        capability("view.tool_options", "操作工具参数浮窗", InProcessCapabilityEffect.UI_INTERACTION,
+            "action 为 show/minimize/restore/close/move。show 必须传 toolbox.catalog 的 toolId，可用工具同时被选中，planned 项只显示说明。move 必须传非负有限 xDp/yDp，以画室内容左上角为原点，布局后限制在可见区域内。窗口为插件内非模态浮窗，可继续绘画；状态读取 view.state 的 toolOptionsWindow。操作不改变作品，accepted 表示共享状态已更新，最终布局坐标随后读取。") { p ->
+            ArtStudioToolOptionsControl.command(p)
+        }
         capability("view.zoom_tool", "设置缩放工具方向", InProcessCapabilityEffect.UI_INTERACTION,
             "mode 为 in（放大）、out（缩小）或 toggle（交替切换）。只设置方向，不立即缩放、不改变选中工具；与手机角标及点击画布共享状态。立即缩放使用 view.command 的 zoom_in/zoom_out。") { p ->
             ArtStudioViewControl.setZoomToolMode(p.getString("mode"))
@@ -143,7 +147,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             response
         }
         capability("toolbox.catalog", "读取画室工具清单", read,
-            "列出可用的画室基础工具和已预留的 Krita 工具位置；planned 项只用于识别后续工作，没有执行入口。") {
+            "列出可用的画室基础工具和已预留的 Krita 工具位置；每格都有双击参数浮窗入口；planned 项只能查看说明，没有绘画执行入口。") {
             ArtToolCatalog.describe()
         }
         capability("document.create", "新建画室工程", write) { p ->
@@ -590,6 +594,8 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
+        "view.tool_options" -> listOf(p("action"), p("toolId", optional = true),
+            p("xDp", "number", true), p("yDp", "number", true))
         "view.zoom_tool" -> listOf(p("mode"))
         "view.zoom" -> listOf(p("documentId"), p("percent", "number"))
         "view.presentation" -> listOf(p("mode"))

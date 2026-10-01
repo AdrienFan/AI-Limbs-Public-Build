@@ -72,19 +72,36 @@ internal object ArtToolCatalog {
     ) + if (!ArtText.available) listOf(PendingTool("svg_text", "基础文字需要 Android 12+", "T",
         "plugins/tools/svgtexttool/SvgTextToolFactory.cpp")) else emptyList()
 
+
+    fun usage(id: String): String = when (id) {
+        "ink", "pencil", "soft", "spray", "eraser", "line", "polyline" ->
+            "在画布上绘制；颜色、笔粗和不透明度使用右侧画笔面板的设置。"
+        "select", "select_ellipse", "select_polygon", "select_freehand" ->
+            "在画布上绘制选区；后续编辑作用于当前选区。"
+        "crop" -> "拖动框出裁剪区域，松开后裁剪画布。"
+        "move" -> "拖动移动当前图层；存在选区时移动选区内容。"
+        "pan" -> "拖动画布调整显示位置，不改变作品。"
+        "measure" -> "拖动测量画布中的距离。"
+        else -> "双击工具打开参数浮窗；浮窗关闭后仍保留当前工具和参数。"
+    }
+
     fun describe(): JSONObject {
         val tools = JSONArray()
         implemented.forEach { (id, label, _) ->
             tools.put(JSONObject().put("id", id).put("label", label)
-                .put("implemented", true).put("status", "basic"))
+                .put("implemented", true).put("status", "basic")
+                .put("parameterWindow", JSONObject().put("gesture", "double-click").put("available", true)))
         }
         pending.forEach { item ->
             tools.put(JSONObject().put("id", item.id).put("label", item.label)
                 .put("implemented", false).put("status", "planned")
-                .put("source", item.source))
+                .put("source", item.source)
+                .put("parameterWindow", JSONObject().put("gesture", "double-click").put("available", true)
+                    .put("drawingEnabled", false)))
         }
         val zoomState = ArtStudioViewControl.state.value
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
+            .put("parameterWindowCapability", "$ART_ID.view.tool_options")
             .put("calligraphy",JSONObject().put("capability","$ART_ID.shape.calligraphy")
                 .put("coordinateSpace","layer-local").put("timeUnit","milliseconds")
                 .put("maxSamples",ArtCalligraphy.MAX_SAMPLES)

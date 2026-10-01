@@ -51,8 +51,9 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalViewConfiguration
 import androidx.compose.ui.platform.ViewConfiguration
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.customActions
 import androidx.compose.ui.semantics.contentDescription
-import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.IntOffset
@@ -413,7 +414,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var referenceImportContext by remember { mutableStateOf<JSONObject?>(null) }
     var textDialog by remember { mutableStateOf<JSONObject?>(null) }
     var textFonts by remember { mutableStateOf(JSONArray()) }
-    var tool by remember { mutableStateOf("ink") }
+    val toolWindow by ArtStudioToolOptionsControl.state.collectAsState()
+    val tool = toolWindow.activeTool
     var shapeMultiple by remember { mutableStateOf(false) }
     var vectorNibAngle by remember { mutableFloatStateOf(45f) }
     var vectorFixation by remember { mutableFloatStateOf(1f) }
@@ -435,11 +437,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var sampleRadius by remember { mutableIntStateOf(0) }
     var sampleBlend by remember { mutableIntStateOf(100) }
     var sampleMerged by remember { mutableStateOf(true) }
-    var samplerOptionsDialog by remember { mutableStateOf(false) }
     var fillTolerance by remember { mutableIntStateOf(0) }
     var fillReferenceAll by remember { mutableStateOf(false) }
     var fillErase by remember { mutableStateOf(false) }
-    var fillOptionsDialog by remember { mutableStateOf(false) }
     var mirrorDirection by remember { mutableStateOf("vertical") }
     var mirrorCount by remember { mutableIntStateOf(6) }
     var mirrorRadius by remember { mutableFloatStateOf(80f) }
@@ -450,12 +450,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var mirrorCenters by remember { mutableStateOf(JSONArray()) }
     var mirrorIntervalX by remember { mutableIntStateOf(1024) }
     var mirrorIntervalY by remember { mutableIntStateOf(1024) }
-    var mirrorOptionsDialog by remember { mutableStateOf(false) }
     var dynaMass by remember { mutableFloatStateOf(0.5f) }
     var dynaDrag by remember { mutableFloatStateOf(0.15f) }
-    var dynaOptionsDialog by remember { mutableStateOf(false) }
     var nibAngle by remember { mutableFloatStateOf(45f) }
-    var nibOptionsDialog by remember { mutableStateOf(false) }
     var fillShape by remember { mutableStateOf(false) }
     var bezierContinuous by remember { mutableStateOf(false) }
     var gradientMode by remember { mutableStateOf("linear") }
@@ -463,7 +460,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var gradientToColor by remember { mutableStateOf(false) }
     var gradientEndInput by remember { mutableStateOf("#FFFFFFFF") }
     var gradientEndColor by remember { mutableStateOf("#FFFFFFFF") }
-    var gradientOptionsDialog by remember { mutableStateOf(false) }
     var newCanvas by remember { mutableStateOf(false) }
     var presentationDialog by remember { mutableStateOf(false) }
     var presentationError by remember { mutableStateOf<String?>(null) }
@@ -518,7 +514,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var projectName by remember { mutableStateOf("") }
     var colorDialog by remember { mutableStateOf(false) }
     var colorText by remember { mutableStateOf(color) }
-    var transformDialog by remember { mutableStateOf(false) }
     var transformX by remember { mutableStateOf("0") }
     var transformY by remember { mutableStateOf("0") }
     var transformScale by remember { mutableStateOf("1") }
@@ -1347,6 +1342,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
         }
     }
+    LaunchedEffect(toolWindow.open, toolWindow.toolId) {
+        // A tool window must not leave a full-canvas drawer dismiss shield behind it.
+        if (toolWindow.open) {
+            if (!leftDrawerPinned) leftDrawerOpen = false
+            if (!rightDrawerPinned) rightDrawerOpen = false
+        }
+    }
+    BoxWithConstraints(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
         if (current == null) {
             Text("尚未创建画布。", Modifier.padding(top = 72.dp, start = 12.dp))
@@ -1602,153 +1605,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                if (tool == "vector_bezier") {
-                                    StudioBezierOptions(current, selected, busy, bezierEditing, bezierNode,
-                                        bezierNodeType, bezierClosed, fillShape, { mode ->
-                                            if (mode != bezierEditing && canvasRef[0]?.bezierHasDraft == true)
-                                                Toast.makeText(context,"请先完成或取消当前路径",Toast.LENGTH_SHORT).show()
-                                            else bezierEditing = mode
-                                        }, { bezierNode = it }, { bezierNodeType = it },
-                                        { bezierClosed = it }, { fillShape = it },
-                                        { canvasRef[0]?.bezierCommand(it) }, ::edit)
-                                }
-                                if (tool == "reference_images") {
-                                    StudioReferenceOptions(current,busy,referenceMultiple,{referenceMultiple=it},{
-                                        referenceImportContext=JSONObject().put("documentId",current.getString("id"))
-                                            .put("expectedRevision",current.getInt("revision"))
-                                        addReference.launch(arrayOf("image/*"))
-                                    },{canvasRef[0]?.fitReferences()}, {type,p ->
-                                        if(!busy) perform { store.apply("AWEI",type,p) }
-                                    })
-                                }
-                                if (tool == "vector_calligraphy") {
-                                    StudioCalligraphyOptions(current,selected,busy,vectorNibAngle,vectorFixation,
-                                        vectorThinning,vectorSmoothing,vectorPressure,vectorCap,
-                                        {vectorNibAngle=it},{vectorFixation=it},{vectorThinning=it},
-                                        {vectorSmoothing=it},{vectorPressure=it},{vectorCap=it},::edit)
-                                }
-                                if (tool == "vector_freehand") {
-                                    StudioFreehandOptions(current, selected, busy, freehandMode, freehandPrecision,
-                                        freehandClosed, fillShape, { freehandMode = it }, { freehandPrecision = it },
-                                        { freehandClosed = it }, { fillShape = it }, ::edit)
-                                }
-                                if (tool == "shape_select") {
-                                    StudioShapeOptions(current, selected, busy, color, width,
-                                        shapeMultiple, { shapeMultiple = it }, ::edit,
-                                        { bezierEditing = true; bezierNode = 0; tool = "vector_bezier" })
-                                }
-                                if (tool == "svg_text") {
-                                    Text("点击画布添加文字；点击选中文字编辑。", style = MaterialTheme.typography.labelSmall)
-                                    TextButton(onClick = { openTextEditor(selectedLayer) },
-                                        enabled = !busy && selectedLayer?.optString("kind") == "text") {
-                                        Text("编辑选中文字")
-                                    }
-                                    TextButton(onClick = { openTextEditor() }, enabled = !busy && current != null) {
-                                        Text("新建文字")
-                                    }
-                                }
-                                if (tool == "sampler") {
-                                    TextButton(onClick = { samplerOptionsDialog = true },
-                                        modifier = Modifier.fillMaxWidth().semantics {
-                                            contentDescription = "取色器选项"
-                                        }) {
-                                        Text("取色选项", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "fill") {
-                                    TextButton(onClick = { fillOptionsDialog = true },
-                                        modifier = Modifier.fillMaxWidth()
-                                            .semantics { contentDescription = "连续区域填充选项" }) {
-                                        Text("填充选项", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "mirror") {
-                                    TextButton(onClick = { mirrorOptionsDialog = true },
-                                        modifier = Modifier.fillMaxWidth()
-                                            .semantics { contentDescription = "多重画笔选项" }) {
-                                        Text("多重画笔选项", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "mirror") {
-                                    TextButton(onClick = {
-                                        mirrorOriginPlacement = !mirrorOriginPlacement
-                                        if (mirrorOriginPlacement) mirrorPlacement = false
-                                    }, modifier = Modifier.fillMaxWidth().semantics {
-                                        contentDescription = if (mirrorOriginPlacement)
-                                            "取消移动对称中心" else "点画布移动对称中心"
-                                    }) {
-                                        Text(if (mirrorOriginPlacement) "取消移动中心" else "移动中心",
-                                            style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "mirror" && mirrorDirection == "copytranslate") {
-                                    TextButton(onClick = {
-                                        mirrorPlacement = !mirrorPlacement
-                                        if (mirrorPlacement) mirrorOriginPlacement = false
-                                    },
-                                        modifier = Modifier.fillMaxWidth().semantics {
-                                            contentDescription = if (mirrorPlacement)
-                                                "完成子画笔布置" else "点击画布添加子画笔"
-                                        }) {
-                                        Text(if (mirrorPlacement) "完成布置" else "添加子画笔",
-                                            style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool in setOf("rectangle", "ellipse", "polygon")) {
-                                    TextButton(onClick = { fillShape = !fillShape },
-                                        modifier = Modifier.fillMaxWidth().semantics {
-                                            contentDescription = if (fillShape) "取消形状填充" else "填充形状"
-                                        }) {
-                                        Text(if (fillShape) "填充：前景色" else "填充：无",
-                                            style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "bezier") {
-                                    TextButton(onClick = { bezierContinuous = !bezierContinuous },
-                                        modifier = Modifier.fillMaxWidth().semantics {
-                                            contentDescription = if (bezierContinuous)
-                                                "关闭连续曲线模式" else "开启连续曲线模式"
-                                        }) {
-                                        Text(if (bezierContinuous) "连续曲线：双击结束" else "单段曲线：四点完成",
-                                            style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "gradient") {
-                                    TextButton(onClick = { gradientOptionsDialog = true },
-                                        modifier = Modifier.fillMaxWidth().semantics {
-                                            contentDescription = "渐变选项"
-                                        }) {
-                                        Text("渐变选项", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "transform" && selectedLayer != null) {
-                                    TextButton(onClick = {
-                                        transformX = selectedLayer.getDouble("x").toString()
-                                        transformY = selectedLayer.getDouble("y").toString()
-                                        transformScale = selectedLayer.getDouble("scale").toString()
-                                        transformAngle = selectedLayer.getDouble("rotation").toString()
-                                        transformDialog = true
-                                    }, modifier = Modifier.fillMaxWidth().semantics {
-                                        contentDescription = "设置图层位置缩放旋转"
-                                    }) {
-                                        Text("变换参数", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "calligraphy") {
-                                    TextButton(onClick = { nibOptionsDialog = true },
-                                        modifier = Modifier.fillMaxWidth().semantics {
-                                            contentDescription = "书法笔尖角度"
-                                        }) {
-                                        Text("笔尖角度", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
-                                if (tool == "dyna") {
-                                    TextButton(onClick = { dynaOptionsDialog = true },
-                                        modifier = Modifier.fillMaxWidth()
-                                            .semantics { contentDescription = "动态画笔选项" }) {
-                                        Text("动态选项", style = MaterialTheme.typography.labelSmall)
-                                    }
-                                }
                                 Text("可使用", modifier = Modifier.padding(start = 5.dp),
                                     style = MaterialTheme.typography.labelSmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant)
@@ -1764,19 +1620,28 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                 positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
                                                 tooltip = {
                                                     PlainTooltip {
-                                                        Text(toolLabel)
+                                                        Text(toolLabel + "；双击打开参数")
                                                     }
                                                 },
                                                 state = rememberTooltipState(),
                                                 enableUserInput = true
                                             ) {
                                                 Surface(Modifier.size(40.dp)
-                                                    .semantics { contentDescription = toolLabel }
-                                                    .clickable(onClickLabel = toolLabel) {
-                                                        if (id == "zoom" && tool == "zoom")
-                                                            ArtStudioViewControl.setZoomToolMode("toggle")
-                                                        tool = id
-                                                    },
+                                                    .semantics {
+                                                        contentDescription = toolLabel + "；双击打开参数"
+                                                        customActions = listOf(CustomAccessibilityAction("打开工具参数") {
+                                                            ArtStudioToolOptionsControl.show(id); true
+                                                        })
+                                                    }
+                                                    .combinedClickable(
+                                                        onClickLabel = toolLabel,
+                                                        onClick = {
+                                                            if (id == "zoom" && tool == "zoom")
+                                                                ArtStudioViewControl.setZoomToolMode("toggle")
+                                                            ArtStudioToolOptionsControl.select(id)
+                                                        },
+                                                        onDoubleClick = { ArtStudioToolOptionsControl.show(id) }
+                                                    ),
                                                     shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
                                                     color = if (tool == id)
                                                         MaterialTheme.colorScheme.primaryContainer
@@ -1816,16 +1681,22 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                     TooltipDefaults.rememberPlainTooltipPositionProvider(),
                                                 tooltip = {
                                                     PlainTooltip {
-                                                        Text("${item.label} · 尚未实现")
+                                                        Text("${item.label} · 尚未实现；双击查看说明")
                                                     }
                                                 },
                                                 state = rememberTooltipState(),
                                                 enableUserInput = true
                                             ) {
                                                 Surface(Modifier.size(40.dp).semantics {
-                                                    disabled()
-                                                    contentDescription = "${item.label}，尚未实现"
-                                                },
+                                                    contentDescription = "${item.label}，尚未实现，双击查看说明"
+                                                    customActions = listOf(CustomAccessibilityAction("查看工具说明") {
+                                                        ArtStudioToolOptionsControl.show(item.id); true
+                                                    })
+                                                }.combinedClickable(
+                                                    onClickLabel = "工具尚未实现",
+                                                    onClick = { },
+                                                    onDoubleClick = { ArtStudioToolOptionsControl.show(item.id) }
+                                                ),
                                                     shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
                                                     color = MaterialTheme.colorScheme.surfaceVariant
                                                         .copy(alpha = 0.45f)) {
@@ -2360,12 +2231,98 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
         }
     }
-    if (mirrorOptionsDialog) {
-        AlertDialog(onDismissRequest = { mirrorOptionsDialog = false },
-            title = { Text("多重画笔选项") },
-            text = {
-                Column(Modifier.verticalScroll(rememberScrollState()),
-                    verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    if (toolWindow.open && current != null) {
+        val tool = toolWindow.toolId
+        val toolTitle = ArtToolCatalog.implemented.firstOrNull { it.first == tool }?.second
+            ?: ArtToolCatalog.pending.first { it.id == tool }.label
+        StudioToolOptionsWindow(toolWindow, toolTitle,
+            ArtStudioToolOptionsControl::move, ArtStudioToolOptionsControl::minimize,
+            ArtStudioToolOptionsControl::restore, ArtStudioToolOptionsControl::close) {
+            val pending = ArtToolCatalog.pending.firstOrNull { it.id == tool }
+            if (pending != null) {
+                Text("该工具尚未实现，当前仅提供说明入口，不能用于绘画。")
+            } else {
+                if (tool == "vector_bezier") {
+                    StudioBezierOptions(current, selected, busy, bezierEditing, bezierNode,
+                        bezierNodeType, bezierClosed, fillShape, { mode ->
+                            if (mode != bezierEditing && canvasRef[0]?.bezierHasDraft == true)
+                                Toast.makeText(context,"请先完成或取消当前路径",Toast.LENGTH_SHORT).show()
+                            else bezierEditing = mode
+                        }, { bezierNode = it }, { bezierNodeType = it },
+                        { bezierClosed = it }, { fillShape = it },
+                        { canvasRef[0]?.bezierCommand(it) }, ::edit)
+                }
+                if (tool == "reference_images") {
+                    StudioReferenceOptions(current,busy,referenceMultiple,{referenceMultiple=it},{
+                        referenceImportContext=JSONObject().put("documentId",current.getString("id"))
+                            .put("expectedRevision",current.getInt("revision"))
+                        addReference.launch(arrayOf("image/*"))
+                    },{canvasRef[0]?.fitReferences()}, {type,p ->
+                        if(!busy) perform { store.apply("AWEI",type,p) }
+                    })
+                }
+                if (tool == "vector_calligraphy") {
+                    StudioCalligraphyOptions(current,selected,busy,vectorNibAngle,vectorFixation,
+                        vectorThinning,vectorSmoothing,vectorPressure,vectorCap,
+                        {vectorNibAngle=it},{vectorFixation=it},{vectorThinning=it},
+                        {vectorSmoothing=it},{vectorPressure=it},{vectorCap=it},::edit)
+                }
+                if (tool == "vector_freehand") {
+                    StudioFreehandOptions(current, selected, busy, freehandMode, freehandPrecision,
+                        freehandClosed, fillShape, { freehandMode = it }, { freehandPrecision = it },
+                        { freehandClosed = it }, { fillShape = it }, ::edit)
+                }
+                if (tool == "shape_select") {
+                    StudioShapeOptions(current, selected, busy, color, width,
+                        shapeMultiple, { shapeMultiple = it }, ::edit,
+                        { bezierEditing = true; bezierNode = 0; ArtStudioToolOptionsControl.select("vector_bezier") })
+                }
+                if (tool == "svg_text") {
+                    Text("点击画布添加文字；点击选中文字编辑。", style = MaterialTheme.typography.labelSmall)
+                    TextButton(onClick = { openTextEditor(selectedLayer) },
+                        enabled = !busy && selectedLayer?.optString("kind") == "text") {
+                        Text("编辑选中文字")
+                    }
+                    TextButton(onClick = { openTextEditor() }, enabled = !busy && current != null) {
+                        Text("新建文字")
+                    }
+                }
+                if (tool == "sampler") {
+                    FilterChip(selected = sampleMerged, onClick = { sampleMerged = true },
+                        label = { Text("合成画布") })
+                    FilterChip(selected = !sampleMerged, onClick = { sampleMerged = false },
+                        label = { Text("当前图层") })
+                    if (!sampleMerged) Text("当前仅支持可见根绘画层或图像层。",
+                        style = MaterialTheme.typography.bodySmall)
+                    Text("取色半径：$sampleRadius px")
+                    Slider(value = sampleRadius.toFloat(),
+                        onValueChange = { sampleRadius = it.roundToInt().coerceIn(0, 32) },
+                        valueRange = 0f..32f, steps = 31)
+                    Text("混合当前颜色：$sampleBlend%（100% 为纯取样）")
+                    Slider(value = sampleBlend.toFloat(),
+                        onValueChange = { sampleBlend = it.roundToInt().coerceIn(0, 100) },
+                        valueRange = 0f..100f)
+                    Text("半径内的像素按透明度混合；0 px 精确取单个像素。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                if (tool == "fill") {
+                    Text("颜色容差：$fillTolerance%")
+                    Slider(value = fillTolerance.toFloat(),
+                        onValueChange = { fillTolerance = it.toInt().coerceIn(0, 100) },
+                        valueRange = 0f..100f, steps = 99)
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("参考所有可见图层", modifier = Modifier.weight(1f))
+                        Switch(checked = fillReferenceAll,
+                            onCheckedChange = { fillReferenceAll = it })
+                    }
+                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                        Text("擦除连续区域", modifier = Modifier.weight(1f))
+                        Switch(checked = fillErase, onCheckedChange = { fillErase = it })
+                    }
+                    Text("填色或擦除只修改当前图层；容差按每个 RGBA 通道比较。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                if (tool == "mirror") {
                     FilterChip(selected = mirrorDirection == "vertical",
                         onClick = { mirrorDirection = "vertical"; mirrorPlacement = false },
                         label = { Text("左右镜像") })
@@ -2404,7 +2361,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             onValueChange = { mirrorRadius = it }, valueRange = 0f..512f)
                     }
                     if (mirrorDirection == "copytranslate") {
-                        Text("已添加 ${mirrorCenters.length()} 支子画笔；关闭选项后从左栏进入布置模式，点击画布放置。")
+                        Text("已添加 ${mirrorCenters.length()} 支子画笔；使用下方布置按钮后，点击窗口外的画布放置。")
                         TextButton(onClick = { mirrorCenters = JSONArray() }) {
                             Text("清空子画笔")
                         }
@@ -2424,123 +2381,135 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Text("对称中心随当前图层移动或变换。",
                         style = MaterialTheme.typography.bodySmall)
                 }
-            }, confirmButton = {
-                TextButton(onClick = { mirrorOptionsDialog = false }) { Text("完成") }
-            })
-    }
-    if (samplerOptionsDialog) {
-        AlertDialog(onDismissRequest = { samplerOptionsDialog = false },
-            title = { Text("取色器选项") },
-            text = { Column(Modifier.heightIn(max = 360.dp)
-                .verticalScroll(rememberScrollState())) {
-                FilterChip(selected = sampleMerged, onClick = { sampleMerged = true },
-                    label = { Text("合成画布") })
-                FilterChip(selected = !sampleMerged, onClick = { sampleMerged = false },
-                    label = { Text("当前图层") })
-                if (!sampleMerged) Text("当前仅支持可见根绘画层或图像层。",
-                    style = MaterialTheme.typography.bodySmall)
-                Text("取色半径：$sampleRadius px")
-                Slider(value = sampleRadius.toFloat(),
-                    onValueChange = { sampleRadius = it.roundToInt().coerceIn(0, 32) },
-                    valueRange = 0f..32f, steps = 31)
-                Text("混合当前颜色：$sampleBlend%（100% 为纯取样）")
-                Slider(value = sampleBlend.toFloat(),
-                    onValueChange = { sampleBlend = it.roundToInt().coerceIn(0, 100) },
-                    valueRange = 0f..100f)
-                Text("半径内的像素按透明度混合；0 px 精确取单个像素。",
-                    style = MaterialTheme.typography.bodySmall)
-            } }, confirmButton = {
-                TextButton(onClick = { samplerOptionsDialog = false }) { Text("完成") }
-            })
-    }
-    if (gradientOptionsDialog) {
-        AlertDialog(onDismissRequest = { gradientOptionsDialog = false },
-            title = { Text("渐变选项") },
-            text = { Column(Modifier.heightIn(max = 400.dp).verticalScroll(rememberScrollState()),
-                verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = gradientMode == "linear",
-                    onClick = { gradientMode = "linear" }, label = { Text("线性") })
-                FilterChip(selected = gradientMode == "radial",
-                    onClick = { gradientMode = "radial" }, label = { Text("径向") })
-                FilterChip(selected = gradientMode == "angular",
-                    onClick = { gradientMode = "angular" }, label = { Text("角度") })
-                FilterChip(selected = !gradientToColor,
-                    onClick = { gradientToColor = false }, label = { Text("前景色 → 透明") })
-                FilterChip(selected = gradientToColor,
-                    onClick = { gradientToColor = true }, label = { Text("前景色 → 终点色") })
-                if (gradientToColor) {
-                    OutlinedTextField(gradientEndInput, { gradientEndInput = it.take(9) },
-                        label = { Text("终点颜色 #AARRGGBB") }, singleLine = true)
+                if (tool == "mirror") {
                     TextButton(onClick = {
-                        if (gradientEndInput.matches(Regex("#[0-9A-Fa-f]{8}")))
-                            gradientEndColor = gradientEndInput.uppercase(java.util.Locale.ROOT)
-                        else Toast.makeText(context, "请输入 #AARRGGBB 格式颜色",
-                            Toast.LENGTH_SHORT).show()
-                    }) { Text("应用终点色") }
-                    Text("当前终点色：$gradientEndColor", style = MaterialTheme.typography.bodySmall)
+                        mirrorOriginPlacement = !mirrorOriginPlacement
+                        if (mirrorOriginPlacement) mirrorPlacement = false
+                    }, modifier = Modifier.fillMaxWidth().semantics {
+                        contentDescription = if (mirrorOriginPlacement)
+                            "取消移动对称中心" else "点画布移动对称中心"
+                    }) {
+                        Text(if (mirrorOriginPlacement) "取消移动中心" else "移动中心",
+                            style = MaterialTheme.typography.labelSmall)
+                    }
                 }
-                FilterChip(selected = gradientReverse,
-                    onClick = { gradientReverse = !gradientReverse },
-                    label = { Text("反向颜色") })
-                Text("线性／径向用终点定范围，角度用终点定方向；反向会互换颜色。",
-                    style = MaterialTheme.typography.bodySmall)
-            } }, confirmButton = {
-                TextButton(onClick = { gradientOptionsDialog = false }) { Text("完成") }
-            })
-    }
-    if (nibOptionsDialog) {
-        AlertDialog(onDismissRequest = { nibOptionsDialog = false },
-            title = { Text("书法笔尖") },
-            text = { Column {
-                Text("固定角度：${nibAngle.roundToInt()}°")
-                Slider(value = nibAngle, onValueChange = { nibAngle = it },
-                    valueRange = 0f..180f)
-                Text("笔尖宽度使用当前笔粗；触笔压力控制实际宽度。",
-                    style = MaterialTheme.typography.bodySmall)
-            } }, confirmButton = {
-                TextButton(onClick = { nibOptionsDialog = false }) { Text("完成") }
-            })
-    }
-    if (dynaOptionsDialog) {
-        AlertDialog(onDismissRequest = { dynaOptionsDialog = false },
-            title = { Text("动态画笔选项") },
-            text = { Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("惯性：${(dynaMass * 100).toInt()}%")
-                Slider(value = dynaMass, onValueChange = { dynaMass = it },
-                    valueRange = 0f..1f)
-                Text("阻力：${(dynaDrag * 100).toInt()}%")
-                Slider(value = dynaDrag, onValueChange = { dynaDrag = it },
-                    valueRange = 0f..1f)
-                Text("按 Krita 动态工具的质量与阻力公式平滑轨迹；同一笔画保留绘制时参数。",
-                    style = MaterialTheme.typography.bodySmall)
-            } }, confirmButton = {
-                TextButton(onClick = { dynaOptionsDialog = false }) { Text("完成") }
-            })
-    }
-    if (fillOptionsDialog) {
-        AlertDialog(onDismissRequest = { fillOptionsDialog = false },
-            title = { Text("连续区域填充选项") },
-            text = {
-                Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                    Text("颜色容差：$fillTolerance%")
-                    Slider(value = fillTolerance.toFloat(),
-                        onValueChange = { fillTolerance = it.toInt().coerceIn(0, 100) },
-                        valueRange = 0f..100f, steps = 99)
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("参考所有可见图层", modifier = Modifier.weight(1f))
-                        Switch(checked = fillReferenceAll,
-                            onCheckedChange = { fillReferenceAll = it })
+                if (tool == "mirror" && mirrorDirection == "copytranslate") {
+                    TextButton(onClick = {
+                        mirrorPlacement = !mirrorPlacement
+                        if (mirrorPlacement) mirrorOriginPlacement = false
+                    },
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            contentDescription = if (mirrorPlacement)
+                                "完成子画笔布置" else "点击画布添加子画笔"
+                        }) {
+                        Text(if (mirrorPlacement) "完成布置" else "添加子画笔",
+                            style = MaterialTheme.typography.labelSmall)
                     }
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("擦除连续区域", modifier = Modifier.weight(1f))
-                        Switch(checked = fillErase, onCheckedChange = { fillErase = it })
+                }
+                if (tool in setOf("rectangle", "ellipse", "polygon")) {
+                    TextButton(onClick = { fillShape = !fillShape },
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            contentDescription = if (fillShape) "取消形状填充" else "填充形状"
+                        }) {
+                        Text(if (fillShape) "填充：前景色" else "填充：无",
+                            style = MaterialTheme.typography.labelSmall)
                     }
-                    Text("填色或擦除只修改当前图层；容差按每个 RGBA 通道比较。",
+                }
+                if (tool == "bezier") {
+                    TextButton(onClick = { bezierContinuous = !bezierContinuous },
+                        modifier = Modifier.fillMaxWidth().semantics {
+                            contentDescription = if (bezierContinuous)
+                                "关闭连续曲线模式" else "开启连续曲线模式"
+                        }) {
+                        Text(if (bezierContinuous) "连续曲线：双击结束" else "单段曲线：四点完成",
+                            style = MaterialTheme.typography.labelSmall)
+                    }
+                }
+                if (tool == "gradient") {
+                    FilterChip(selected = gradientMode == "linear",
+                        onClick = { gradientMode = "linear" }, label = { Text("线性") })
+                    FilterChip(selected = gradientMode == "radial",
+                        onClick = { gradientMode = "radial" }, label = { Text("径向") })
+                    FilterChip(selected = gradientMode == "angular",
+                        onClick = { gradientMode = "angular" }, label = { Text("角度") })
+                    FilterChip(selected = !gradientToColor,
+                        onClick = { gradientToColor = false }, label = { Text("前景色 → 透明") })
+                    FilterChip(selected = gradientToColor,
+                        onClick = { gradientToColor = true }, label = { Text("前景色 → 终点色") })
+                    if (gradientToColor) {
+                        OutlinedTextField(gradientEndInput, { gradientEndInput = it.take(9) },
+                            label = { Text("终点颜色 #AARRGGBB") }, singleLine = true)
+                        TextButton(onClick = {
+                            if (gradientEndInput.matches(Regex("#[0-9A-Fa-f]{8}")))
+                                gradientEndColor = gradientEndInput.uppercase(java.util.Locale.ROOT)
+                            else Toast.makeText(context, "请输入 #AARRGGBB 格式颜色",
+                                Toast.LENGTH_SHORT).show()
+                        }) { Text("应用终点色") }
+                        Text("当前终点色：$gradientEndColor", style = MaterialTheme.typography.bodySmall)
+                    }
+                    FilterChip(selected = gradientReverse,
+                        onClick = { gradientReverse = !gradientReverse },
+                        label = { Text("反向颜色") })
+                    Text("线性／径向用终点定范围，角度用终点定方向；反向会互换颜色。",
                         style = MaterialTheme.typography.bodySmall)
                 }
-            }, confirmButton = {
-                TextButton(onClick = { fillOptionsDialog = false }) { Text("完成") }
-            })
+                if (tool == "transform") {
+                    if (selectedLayer == null) {
+                        Text("请先选择要变换的图层。")
+                    } else {
+                        LaunchedEffect(current.getString("id"), selected, current.getInt("revision")) {
+                            transformX = selectedLayer.getDouble("x").toString()
+                            transformY = selectedLayer.getDouble("y").toString()
+                            transformScale = selectedLayer.getDouble("scale").toString()
+                            transformAngle = selectedLayer.getDouble("rotation").toString()
+                        }
+                        OutlinedTextField(transformX, { transformX = it }, label = { Text("X 位置") })
+                        OutlinedTextField(transformY, { transformY = it }, label = { Text("Y 位置") })
+                        OutlinedTextField(transformScale, { transformScale = it }, label = { Text("缩放（0.01–100）") })
+                        OutlinedTextField(transformAngle, { transformAngle = it }, label = { Text("旋转角度") })
+                        TextButton(enabled = !busy, onClick = {
+                            val x = transformX.toDoubleOrNull(); val y = transformY.toDoubleOrNull()
+                            val scale = transformScale.toDoubleOrNull(); val angle = transformAngle.toDoubleOrNull()
+                            if (x != null && y != null && scale != null && angle != null &&
+                                x.isFinite() && y.isFinite() && scale in 0.01..100.0 && angle.isFinite()) {
+                                edit("TRANSFORM", JSONObject().put("id", selected).put("x", x).put("y", y)
+                                    .put("scale", scale).put("rotation", angle))
+                            } else Toast.makeText(context, "请输入有效的位置、缩放和角度", Toast.LENGTH_SHORT).show()
+                        }) { Text("应用变换") }
+                    }
+                }
+                if (tool == "calligraphy") {
+                    Text("固定角度：${nibAngle.roundToInt()}°")
+                    Slider(value = nibAngle, onValueChange = { nibAngle = it },
+                        valueRange = 0f..180f)
+                    Text("笔尖宽度使用当前笔粗；触笔压力控制实际宽度。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                if (tool == "dyna") {
+                    Text("惯性：${(dynaMass * 100).toInt()}%")
+                    Slider(value = dynaMass, onValueChange = { dynaMass = it },
+                        valueRange = 0f..1f)
+                    Text("阻力：${(dynaDrag * 100).toInt()}%")
+                    Slider(value = dynaDrag, onValueChange = { dynaDrag = it },
+                        valueRange = 0f..1f)
+                    Text("按 Krita 动态工具的质量与阻力公式平滑轨迹；同一笔画保留绘制时参数。",
+                        style = MaterialTheme.typography.bodySmall)
+                }
+                if (tool == "zoom") {
+                    FilterChip(selected = viewOptions.zoomToolMode == "in",
+                        onClick = { ArtStudioViewControl.setZoomToolMode("in") }, label = { Text("放大") })
+                    FilterChip(selected = viewOptions.zoomToolMode == "out",
+                        onClick = { ArtStudioViewControl.setZoomToolMode("out") }, label = { Text("缩小") })
+                }
+                if (tool !in setOf("vector_bezier", "reference_images", "vector_calligraphy",
+                    "vector_freehand", "shape_select", "svg_text", "sampler", "fill", "mirror",
+                    "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "calligraphy", "dyna", "zoom")) {
+                    Text("此工具暂无独立参数。")
+                    Text(ArtToolCatalog.usage(tool), style = MaterialTheme.typography.bodySmall)
+                }
+            }
+        }
+    }
     }
     if (presentationDialog) {
         AlertDialog(onDismissRequest = { presentationDialog = false },
@@ -3005,22 +2974,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             if (colorText.matches(Regex("#[A-F0-9]{8}"))) { color = colorText; colorDialog = false }
             else Toast.makeText(context, "颜色需为 #AARRGGBB", Toast.LENGTH_SHORT).show()
         }) { Text("确定") } }, dismissButton = { TextButton(onClick = { colorDialog = false }) { Text("取消") } })
-    if (transformDialog) AlertDialog(onDismissRequest = { transformDialog = false }, title = { Text("图层变换") },
-        text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState())) {
-            OutlinedTextField(transformX, { transformX = it }, label = { Text("X 位置") })
-            OutlinedTextField(transformY, { transformY = it }, label = { Text("Y 位置") })
-            OutlinedTextField(transformScale, { transformScale = it }, label = { Text("缩放（0.01–100）") })
-            OutlinedTextField(transformAngle, { transformAngle = it }, label = { Text("旋转角度") })
-        } }, confirmButton = { TextButton(onClick = {
-            val x = transformX.toDoubleOrNull(); val y = transformY.toDoubleOrNull()
-            val scale = transformScale.toDoubleOrNull(); val angle = transformAngle.toDoubleOrNull()
-            if (x != null && y != null && scale != null && angle != null &&
-                x.isFinite() && y.isFinite() && scale in 0.01..100.0 && angle.isFinite()) {
-                transformDialog = false
-                edit("TRANSFORM", JSONObject().put("id", selected).put("x", x).put("y", y)
-                    .put("scale", scale).put("rotation", angle))
-            } else Toast.makeText(context, "请输入有效的位置、缩放和角度", Toast.LENGTH_SHORT).show()
-        }) { Text("应用") } }, dismissButton = { TextButton(onClick = { transformDialog = false }) { Text("取消") } })
+
 }
 
 private class StudioCanvas(context: Context) : View(context) {

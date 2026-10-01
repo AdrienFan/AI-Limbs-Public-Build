@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.29",
+  "version": "0.2.30",
   "api": {
     "target": 1,
     "min": 1
@@ -154,7 +154,8 @@
       "plugin.art.studio.image.formats",
       "plugin.art.studio.text.fonts",
       "plugin.art.studio.text.create",
-      "plugin.art.studio.text.update"
+      "plugin.art.studio.text.update",
+      "plugin.art.studio.view.tool_options"
     ],
     "services": [],
     "providers": [

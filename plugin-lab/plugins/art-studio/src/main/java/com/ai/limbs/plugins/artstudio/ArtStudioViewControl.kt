@@ -53,6 +53,7 @@ internal object ArtStudioViewControl {
     @Volatile var canvasAttached: Boolean = false
 
     fun describe(): JSONObject = state.value.describe()
+        .put("toolOptionsWindow", ArtStudioToolOptionsControl.state.value.describe())
         .put("canvasZoom", if (canvasAttached) canvasZoom.value?.describe() else null)
 
     fun requestZoom(documentId: String, percent: Double): JSONObject {
