@@ -579,15 +579,23 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
 
+    fun showImageImportNotice(result: JSONObject) {
+        result.optJSONObject("imageImport")?.getJSONArray("warnings")?.let { warnings ->
+            if (warnings.length() > 0) Toast.makeText(context,
+                (0 until warnings.length()).joinToString("\n") { warnings.getString(it) },
+                Toast.LENGTH_LONG).show()
+        }
+    }
     fun perform(confirmation: JSONObject? = null, action: (JSONObject?) -> JSONObject) {
         val serial = ++renderSerial
         pendingOperations++
         busy = true
         scope.launch {
             try {
+                lateinit var operationResult: JSONObject
                 val pair = withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        action(confirmation)
+                        operationResult = action(confirmation)
                         val state = store.current()
                         Triple(state, ArtRenderer.render(store, state), store.revision())
                     }
@@ -598,6 +606,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     image = pair.second
                     revision = pair.third
                 } else pair.second.recycle()
+                showImageImportNotice(operationResult)
             } catch (request: ArtImageResizeRequired) {
                 resizeRequest = request.plan
                 resizeAction = action
@@ -704,6 +713,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     if(!result.has("title")) result.put("title",item.getString("title"))
                     remainingResult=result
                 } else Toast.makeText(context,"已执行：${item.getString("title")}",Toast.LENGTH_SHORT).show()
+                showImageImportNotice(result)
             } catch(request:ArtImageResizeRequired) {
                 resizeRequest=request.plan
                 resizeAction={ confirmation ->
@@ -1081,7 +1091,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 val id=item.getString("id")
                 if(id in setOf("import_layer_from_file","import_layer_as_paint_layer")) {
                     remainingImportContext=captured; remainingImportItem=item
-                    importRemainingLayer.launch(arrayOf("image/png","image/jpeg"))
+                    importRemainingLayer.launch(ArtImageFormats.pickerMimeTypes)
                 } else if(id.removePrefix("docker.") in ArtDockPanels.ids) {
                     val panel = id.removePrefix("docker.")
                     executeRemaining(item,captured,JSONObject().put("enabled",

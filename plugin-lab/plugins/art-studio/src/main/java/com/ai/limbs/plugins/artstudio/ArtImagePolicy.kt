@@ -2,6 +2,13 @@ package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
+import android.graphics.ColorSpace
+import android.graphics.ImageDecoder
+import org.json.JSONArray
+import java.nio.ByteBuffer
+import java.io.ByteArrayOutputStream
+import java.io.OutputStream
+import java.io.IOException
 import org.json.JSONObject
 import java.io.File
 import java.security.MessageDigest
@@ -19,8 +26,9 @@ internal object ArtImagePolicy {
     const val MAX_EDGE = 16384
     private const val MIB = 1024L * 1024
     private const val MAX_WORK_BYTES = 384 * MIB
-    // Sampled decode may be up to four times target pixels, plus a scaled bitmap and workspace.
-    private const val IMPORT_BYTES_PER_PIXEL = 24L
+    // Conservative working estimate includes software decoding, 8-bit normalization and PNG buffers.
+    // Allow for an F16 software decode, ARGB copy, codec workspace and growing/copying PNG buffers.
+    private const val IMPORT_BYTES_PER_PIXEL = 32L
 
     fun dimensionsValid(width: Int, height: Int): Boolean =
         width in 1..MAX_EDGE && height in 1..MAX_EDGE
@@ -54,15 +62,6 @@ internal object ArtImagePolicy {
 
     private fun ceilMiB(bytes: Long): Long = (bytes + MIB - 1) / MIB
 
-    private fun bounds(bytes: ByteArray): BitmapFactory.Options {
-        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true; inScaled = false }
-        BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-        require(options.outWidth > 0 && options.outHeight > 0 &&
-            options.outMimeType in setOf("image/png", "image/jpeg")) { "图片格式无效，请使用 PNG 或 JPEG" }
-        require(options.outWidth.toLong() * options.outHeight <= Long.MAX_VALUE / 32) { "图片声明的像素数量无效" }
-        return options
-    }
-
     private fun hash(bytes: ByteArray): String = MessageDigest.getInstance("SHA-256").digest(bytes)
         .joinToString("") { "%02x".format(it.toInt() and 255) }
 
@@ -86,9 +85,8 @@ internal object ArtImagePolicy {
             .put("message", "$reason：原图 $width × $height 像素。是否按比例缩小为 $targetWidth × $targetHeight 像素后打开？缩小会减少细节，原文件保持不变。")
     }
 
-    private fun target(bytes: ByteArray, bounds: BitmapFactory.Options,
+    private fun target(bytes: ByteArray, width: Int, height: Int,
                        confirmation: JSONObject?, extraBytes: Long): Pair<Int, Int> {
-        val width = bounds.outWidth; val height = bounds.outHeight
         val budget = budgetBytes()
         if (confirmation != null) {
             require(confirmation.getString("sourceSha256") == hash(bytes)) { "缩小确认对应另一张图片，请重新选择。" }
@@ -110,29 +108,68 @@ internal object ArtImagePolicy {
 
     fun decode(bytes: ByteArray, confirmation: JSONObject? = null,
                extraBytes: Long = 0): Pair<Bitmap, JSONObject> {
-        val bounds = bounds(bytes)
-        val (width, height) = target(bytes, bounds, confirmation, extraBytes)
-        var sample = 1
-        while (sample <= (1 shl 28) && sample * 2L <= maxOf(bounds.outWidth, bounds.outHeight) &&
-            (bounds.outWidth.toLong() / (sample * 2L)).coerceAtLeast(1) >= width &&
-            (bounds.outHeight.toLong() / (sample * 2L)).coerceAtLeast(1) >= height) sample *= 2
-        val options = BitmapFactory.Options().apply {
-            inSampleSize = sample; inScaled = false; inPreferredConfig = Bitmap.Config.ARGB_8888
+        val metadata = JSONObject()
+        val decoded = try {
+            // Decode from bytes, never the file suffix or picker MIME. The header callback runs
+            // before pixel allocation, so a resize request cannot create a partial document.
+            ImageDecoder.decodeBitmap(ImageDecoder.createSource(ByteBuffer.wrap(bytes))) { decoder, info, _ ->
+                val originalWidth = info.size.width; val originalHeight = info.size.height
+                require(originalWidth > 0 && originalHeight > 0 &&
+                    ArtImageFormats.accepts(info.mimeType)) {
+                    "图片格式不受支持，当前可读取 PNG、JPEG/JPG、WebP、BMP、GIF、HEIC/HEIF、AVIF"
+                }
+                require(originalWidth.toLong() * originalHeight <= Long.MAX_VALUE / 32) { "图片声明的像素数量无效" }
+                val (width, height) = target(bytes, originalWidth, originalHeight, confirmation, extraBytes)
+                // Recheck the current budget immediately before allocation and encoding normalization.
+                if (width.toLong() * height * IMPORT_BYTES_PER_PIXEL + extraBytes > budgetBytes())
+                    throw ArtImageResizeRequired(resizePlan(bytes, originalWidth, originalHeight, budgetBytes(), extraBytes))
+                decoder.allocator = ImageDecoder.ALLOCATOR_SOFTWARE
+                decoder.setTargetSize(width, height)
+                decoder.setTargetColorSpace(ColorSpace.get(ColorSpace.Named.SRGB))
+                metadata.put("originalWidth", originalWidth).put("originalHeight", originalHeight)
+                    .put("mime", info.mimeType).put("animated", info.isAnimated)
+                    .put("headerColorSpace", info.colorSpace?.name ?: JSONObject.NULL)
+                    .put("frameIndex", 0).put("animationPreserved", false)
+                    .put("colorSpace", "sRGB").put("bitDepth", 8)
+                    .put("resized", width != originalWidth || height != originalHeight)
+                metadata.put("warnings", JSONArray().apply {
+                    if (info.isAnimated) put("此动图仅导入首帧，当前工程不保留动画；原文件保持不变。")
+                })
+            }
+        } catch (error: ImageDecoder.DecodeException) {
+            throw IllegalArgumentException("图片无法解码：文件可能损坏，或当前运行环境缺少该图片编码的系统解码器。", error)
         }
-        // Recheck immediately before allocating. A changed budget requires fresh explicit consent.
-        val sampledPixels = ((bounds.outWidth.toLong() + sample - 1) / sample) *
-            ((bounds.outHeight.toLong() + sample - 1) / sample)
-        val estimate = sampledPixels * 4 + width.toLong() * height * 8 + extraBytes
-        if (estimate > budgetBytes())
-            throw ArtImageResizeRequired(resizePlan(bytes, bounds.outWidth, bounds.outHeight, budgetBytes(), extraBytes))
-        val decoded = BitmapFactory.decodeByteArray(bytes, 0, bytes.size, options)
-            ?: error("图片解码失败，请使用有效的 PNG 或 JPEG")
-        val bitmap = if (decoded.width == width && decoded.height == height) decoded else {
-            try { Bitmap.createScaledBitmap(decoded, width, height, true) } finally { decoded.recycle() }
+        val bitmap = if (decoded.config == Bitmap.Config.ARGB_8888) decoded else {
+            try {
+                decoded.copy(Bitmap.Config.ARGB_8888, false) ?: error("图片转换为 8 位工程失败")
+            } finally { decoded.recycle() }
         }
-        return bitmap to JSONObject().put("originalWidth", bounds.outWidth).put("originalHeight", bounds.outHeight)
-            .put("width", bitmap.width).put("height", bitmap.height).put("mime", bounds.outMimeType)
-            .put("resized", bitmap.width != bounds.outWidth || bitmap.height != bounds.outHeight)
+        bitmap.density = Bitmap.DENSITY_NONE
+        return bitmap to metadata.put("width", bitmap.width).put("height", bitmap.height)
+    }
+
+    /** Compressed photos may grow greatly when normalized to the lossless project asset format. */
+    fun encodePng(bitmap: Bitmap, limit: Int): ByteArray {
+        require(limit > 0) { "PNG 缓冲上限无效" }
+        class BoundedOutput : OutputStream() {
+            val buffer = ByteArrayOutputStream()
+            var exceeded = false
+            fun checkSize(addition: Int) {
+                if (buffer.size().toLong() + addition > limit) {
+                    exceeded = true
+                    throw IOException("工程图片资源超过保存上限")
+                }
+            }
+            override fun write(value: Int) { checkSize(1); buffer.write(value) }
+            override fun write(bytes: ByteArray, offset: Int, length: Int) {
+                checkSize(length); buffer.write(bytes, offset, length)
+            }
+        }
+        val output = BoundedOutput()
+        val encoded = bitmap.compress(Bitmap.CompressFormat.PNG, 100, output)
+        require(!output.exceeded) { "转换后的工程图片超过 " + limit / (1024 * 1024) + " MiB；请使用较小尺寸" }
+        require(encoded) { "工程图片 PNG 编码失败" }
+        return output.buffer.toByteArray()
     }
 
     fun assetPixels(file: File): Long {

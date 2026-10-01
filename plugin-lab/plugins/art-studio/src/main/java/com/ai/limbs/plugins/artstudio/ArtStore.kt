@@ -242,11 +242,7 @@ internal class ArtStore(private val root: File) {
         }
         fun raster(bitmap: Bitmap, id: String, name: String): JSONObject {
             val asset = UUID.randomUUID().toString()
-            val bytes = try { ByteArrayOutputStream().use { stream ->
-                require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, stream))
-                stream.toByteArray()
-            } } finally { bitmap.recycle() }
-            require(bytes.size <= MAX_ASSET_BYTES) { "图层 PNG 超过 8 MB" }
+            val bytes = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
             atomicBytes(assetFile(asset), bytes)
             return ArtMenuOperations.rasterLayer(id, name, asset)
         }
@@ -883,6 +879,8 @@ internal class ArtStore(private val root: File) {
                     val name = asset.name.removePrefix("assets/").removeSuffix(".png")
                     require(asset.name == "assets/$name.png")
                     validateId(name)
+                    require(asset.size in 0..MAX_ASSET_BYTES.toLong()) { "工程图片资源大小无效" }
+                    ArtImagePolicy.requireBytes(asset.size * 2, "读取工程图片资源")
                     val content = zip.getInputStream(asset).use { it.readNBytes(MAX_ASSET_BYTES + 1) }
                     require(content.size <= MAX_ASSET_BYTES)
                     atomicBytes(assetFile(name), content)
@@ -902,6 +900,8 @@ internal class ArtStore(private val root: File) {
         require(bytes.size in 1..64 * 1024 * 1024) { "工程文件超过 64 MB" }
         var project: JSONObject? = null
         val importedAssets = mutableMapOf<String, ByteArray>()
+        var importedAssetBytes = 0L
+        val archiveAssetBudget = minOf(128L * 1024 * 1024, ArtImagePolicy.budgetBytes() / 3)
         ZipInputStream(ByteArrayInputStream(bytes)).use { zip ->
             var count = 0
             while (true) {
@@ -920,8 +920,11 @@ internal class ArtStore(private val root: File) {
                         require(path == "assets/$asset.png") { "工程资源路径无效" }
                         validateId(asset)
                         require(asset !in importedAssets) { "工程资源重复" }
-                        val data = zip.readNBytes(MAX_ASSET_BYTES + 1)
-                        require(data.size <= MAX_ASSET_BYTES) { "工程图片过大" }
+                        val available = minOf(MAX_ASSET_BYTES.toLong(), archiveAssetBudget - importedAssetBytes)
+                            .coerceAtLeast(0).toInt()
+                        val data = zip.readNBytes(available + 1)
+                        require(data.size <= available) { "工程图片资源超过当前读取预算" }
+                        importedAssetBytes += data.size
                         importedAssets[asset] = data
                     }
                     else -> error("工程中含有未知条目")
@@ -958,9 +961,9 @@ internal class ArtStore(private val root: File) {
     }
 
     private fun imageBytes(encoded: String): ByteArray {
-        require(encoded.length <= MAX_ASSET_BYTES * 2) { "图片大小上限为 8 MB" }
+        require(encoded.length <= MAX_IMAGE_INPUT_BYTES * 2) { "图片大小上限为 8 MB" }
         val bytes = Base64.decode(encoded, Base64.DEFAULT)
-        require(bytes.size in 1..MAX_ASSET_BYTES) { "图片大小上限为 8 MB" }
+        require(bytes.size in 1..MAX_IMAGE_INPUT_BYTES) { "图片大小上限为 8 MB" }
         return bytes
     }
 
@@ -970,11 +973,7 @@ internal class ArtStore(private val root: File) {
         // Preflight throws a confirmation request before creating IDs, files or changing the pointer.
         val (bitmap, metadata) = ArtImagePolicy.decode(imageBytes(encoded), confirmResize)
         val width = bitmap.width; val height = bitmap.height
-        val png = try { ByteArrayOutputStream().use { output ->
-            require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-            output.toByteArray()
-        } } finally { bitmap.recycle() }
-        require(png.size <= MAX_ASSET_BYTES) { "图片转换后超过 8 MB" }
+        val png = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
         val id = UUID.randomUUID().toString()
         val asset = UUID.randomUUID().toString()
         val layer = newLayer(UUID.randomUUID().toString(), "image", "图像图层", "", asset)
@@ -1005,11 +1004,7 @@ internal class ArtStore(private val root: File) {
             ArtImagePolicy.renderBytes(this, state, state.getInt("width"), state.getInt("height")))
         val width = bitmap.width; val height = bitmap.height
         val id = UUID.randomUUID().toString()
-        val png = try { ByteArrayOutputStream().use { output ->
-            require(bitmap.compress(Bitmap.CompressFormat.PNG, 100, output))
-            output.toByteArray()
-        } } finally { bitmap.recycle() }
-        require(png.size <= MAX_ASSET_BYTES) { "图片转换后超过 8 MB" }
+        val png = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
         atomicBytes(assetFile(id), png)
         val doc = loadCurrent()
         val op = JSONObject().put("id", UUID.randomUUID().toString()).put("actor", actor)
@@ -2060,6 +2055,7 @@ internal class ArtStore(private val root: File) {
 
     private companion object {
         val processLock = Any()
-        const val MAX_ASSET_BYTES = 8 * 1024 * 1024
+        const val MAX_IMAGE_INPUT_BYTES = 8 * 1024 * 1024
+        const val MAX_ASSET_BYTES = 64 * 1024 * 1024
     }
 }

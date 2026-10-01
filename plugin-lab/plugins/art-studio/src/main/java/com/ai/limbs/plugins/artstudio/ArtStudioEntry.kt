@@ -146,7 +146,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             JSONObject().put("documents", store.recent())
         }
         capability("document.open_image", "将图片打开为新工程", write,
-            "使用 PNG/JPEG 的 base64 创建独立工程。超预算返回 needs_confirmation、operationApplied=false、imagePlan；向用户展示原尺寸/建议尺寸，获得缩小同意后用原 base64 和 imagePlan.confirmation 作为 confirmResize 重试。未确认不创建工程。成功含 imageImport 实际尺寸及 resized。") { p ->
+            "使用 PNG、JPEG/JPG、WebP、BMP、GIF、HEIC/HEIF、AVIF 的 base64 创建独立工程；编码由内容识别，HEIC/AVIF 依赖系统解码器。动图只导入首帧，须向用户说明返回的 imageImport.warnings。超预算返回 needs_confirmation、operationApplied=false、imagePlan；向用户展示原尺寸/建议尺寸，获得缩小同意后用原 base64 和 imagePlan.confirmation 作为 confirmResize 重试。未确认不创建工程。成功含 imageImport 实际尺寸及 resized。") { p ->
             store.openImage(p.getString("base64"), p.optString("name", "未命名图像"), "LANER", p.optJSONObject("confirmResize"))
         }
         capability("document.save_as", "另存为并切换画室工程", write,
@@ -401,12 +401,16 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("edit.fill_background", "用指定背景色填充选区", write) { p ->
             store.editPixels("LANER", "FILL", p.getString("color"))
         }
+        capability("image.formats", "读取画室图片格式支持", read,
+            "列出 PNG、JPEG/JPG、WebP、BMP、GIF、HEIC/HEIF、AVIF 的扩展名、MIME 与当前运行环境的解码器可用性；按内容识别，GIF/动态 WebP 当前只导入首帧。导出仍为 PNG/JPEG。") {
+            ArtImageFormats.describe()
+        }
         capability("image.limits", "读取图片尺寸与内存预算", read,
             "读取结构尺寸范围与当前保守工作预算；预算随进程内存改变，不是无限制或内存保证。") {
             ArtImagePolicy.describe()
         }
-        capability("image.import", "导入 PNG 或 JPEG", write,
-            "导入当前工程。超预算返回 needs_confirmation 和 imagePlan；须先取得用户缩小同意，再携带原 base64 与 imagePlan.confirmation 作为 confirmResize 重试。成功返回 imageImport 与缩略图。") { p ->
+        capability("image.import", "导入常用格式图片", write,
+            "支持 PNG、JPEG/JPG、WebP、BMP、GIF、HEIC/HEIF、AVIF，按图片内容识别。动图只导入首帧，须说明 imageImport.warnings。导入当前工程。超预算返回 needs_confirmation 和 imagePlan；须先取得用户缩小同意，再携带原 base64 与 imagePlan.confirmation 作为 confirmResize 重试。成功返回 imageImport 与缩略图。") { p ->
             store.importImage("LANER", p.getString("base64"), p.optJSONObject("confirmResize"))
         }
         capability("export.png", "导出 PNG", write) { p ->
