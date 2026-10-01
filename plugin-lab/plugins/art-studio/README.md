@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.26 源码；可编辑贝塞尔路径，待编译验收）
+# AI Limbs 画室（0.2.27 源码；矢量书法笔，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -404,3 +404,13 @@ path.edit 需要 documentId/expectedRevision/layerId/id/edits；每次1至64动�
 当前是单路径、单节点/柄编辑，未实现多节点框选、多个子路径、跨路径端点合并/拆分、拖动曲线段塑形、自动平滑/角度吸附、SVG及布尔操作，不能称为Krita完整节点编辑器。
 
 源码与差异审查完成，未执行构建测试。编译安装后验收点击直线/拖柄曲线、开放/闭合/完成撤回取消、双击与键盘、双指保留草稿、单击不跳移、三节点类型、零长度柄、精确插点/删除/线曲转换、旧徒手闭合曲线环、对象和嵌套组变换、并发冲突、锁定隐藏、复制/撤销/保存重开、两端坐标和缩略图；同时确认旧栅格bezier、绘画、图片、字体和缩放工具。
+
+## 矢量书法笔（0.2.27 源码）
+
+对照 Krita 6.0.4 的 KarbonCalligraphyTool / KarbonCalligraphicShape 和官方 [Calligraphy Tool](https://docs.krita.org/en/reference_manual/tools/calligraphy.html)。此实现使用本插件的普通封闭路径，保存最终轮廓，不引入 Qt 参数形状。绘制后可由形状选择变换、改色、删除，或由贝塞尔节点工具编辑两侧轮廓与圆头控制柄；修改的是轮廓而非书法中心线，原笔尖参数仅为来源元数据。
+
+手机工具 vector_calligraphy 支持新建矢量层、宽度（共用笔刷大小）、笔尖角度、固定度、笔压、速度变细/变粗、时间平滑、平头/圆头。鼠标和手指按恒定压力1处理；数位笔读取实际压力。角度从图层局部+X顺时针；固定度1保留斜头，0随轨迹法线转动。速度用局部像素/秒，达到1000 px/s后变细系数封顶；负thinning反向变粗，实际宽度限制0.1–512。椭圆笔尖厚度是宽度5%（至少0.1 px），避免沿笔尖平行移动生成不可见轮廓。平滑是时间常数最多120 ms的一阶滤波，未冒充Krita质量/阻力模型；沿选中路径、数位笔角度、质量/阻力、预设为灰色待实现。
+
+兰儿入口 shape.calligraphy 与页面共用 ArtCalligraphy 和 ArtStore：必传 documentId / expectedRevision / layerId / samples，samples为2–1000个{x,y,time,pressure?}，time为非负递增或相等毫秒；默认pressure=1。可选width、angle、fixation、thinning、smoothing、usePressure、cap、color、opacity见能力说明。笔画的最终几何只提交一次SHAPE_CREATE，保留版本/锁定/预算校验、撤销重做、工程保存和缩略图反馈；不存原始采样、不在回放中重新生成。往返尖角采用轮廓收拢处理；自交仍按普通路径的非零绕组规则填充，不承诺复杂自交区域布尔并集。输入最多1000点、最终最多2048段，超限明确提示分段，不静默截断。
+
+版本0.2.27 / code30 / v0227，承接0.2.26源码。仅做源码和差异审查，尚未编译、云端推送或安装验收。

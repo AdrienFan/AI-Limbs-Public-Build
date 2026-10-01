@@ -612,6 +612,10 @@ internal class ArtStore(private val root: File) {
             .put("visible",ArtShapes.visible(state,layer)&&shape.getBoolean("visible")&&shape.getDouble("opacity")>0.0)
     }
 
+    fun calligraphy(actor:String,p:JSONObject):JSONObject = apply(actor,"SHAPE_CREATE",JSONObject()
+        .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
+        .put("layerId",p.getString("layerId")).put("shape",ArtCalligraphy.create(p)))
+
     fun freehand(actor:String, params:JSONObject):JSONObject {
         // Fit on the caller's worker thread; revision checks and the atomic write remain in apply.
         val shape=ArtFreehand.create(params)

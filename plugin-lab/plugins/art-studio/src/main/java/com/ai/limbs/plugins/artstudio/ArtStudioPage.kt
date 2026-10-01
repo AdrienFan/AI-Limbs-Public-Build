@@ -412,6 +412,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var textFonts by remember { mutableStateOf(JSONArray()) }
     var tool by remember { mutableStateOf("ink") }
     var shapeMultiple by remember { mutableStateOf(false) }
+    var vectorNibAngle by remember { mutableFloatStateOf(45f) }
+    var vectorFixation by remember { mutableFloatStateOf(1f) }
+    var vectorThinning by remember { mutableFloatStateOf(0f) }
+    var vectorSmoothing by remember { mutableFloatStateOf(0f) }
+    var vectorPressure by remember { mutableStateOf(true) }
+    var vectorCap by remember { mutableStateOf("round") }
     var freehandMode by remember { mutableStateOf("curve") }
     var freehandPrecision by remember { mutableFloatStateOf(2f) }
     var freehandClosed by remember { mutableStateOf(false) }
@@ -1346,6 +1352,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.scene = state; view.sceneRevision = current.getInt("revision")
                     view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
+                    view.calligraphyOptions = JSONObject().put("width",width.toDouble())
+                        .put("angle",vectorNibAngle.toDouble()).put("fixation",vectorFixation.toDouble())
+                        .put("thinning",vectorThinning.toDouble()).put("smoothing",vectorSmoothing.toDouble())
+                        .put("usePressure",vectorPressure).put("cap",vectorCap).put("color",color)
+                        .put("opacity",opacity.toDouble())
+                    view.onCalligraphy = { p -> if (!busy) perform { store.calligraphy("AWEI",p) } }
                     view.freehandMode = freehandMode; view.freehandPrecision = freehandPrecision
                     view.freehandClosed = freehandClosed
                     view.onFreehand = { p -> if (!busy) perform { store.freehand("AWEI", p) } }
@@ -1571,6 +1583,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         }, { bezierNode = it }, { bezierNodeType = it },
                                         { bezierClosed = it }, { fillShape = it },
                                         { canvasRef[0]?.bezierCommand(it) }, ::edit)
+                                }
+                                if (tool == "vector_calligraphy") {
+                                    StudioCalligraphyOptions(current,selected,busy,vectorNibAngle,vectorFixation,
+                                        vectorThinning,vectorSmoothing,vectorPressure,vectorCap,
+                                        {vectorNibAngle=it},{vectorFixation=it},{vectorThinning=it},
+                                        {vectorSmoothing=it},{vectorPressure=it},{vectorCap=it},::edit)
                                 }
                                 if (tool == "vector_freehand") {
                                     StudioFreehandOptions(current, selected, busy, freehandMode, freehandPrecision,
@@ -2973,7 +2991,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -2999,6 +3017,9 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeCreationContext: JSONObject? = null
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
+    private val calligraphyInteraction = StudioCalligraphyInteraction(this)
+    var calligraphyOptions = JSONObject()
+    var onCalligraphy: (JSONObject) -> Unit = {}
     private val freehandInteraction = StudioFreehandInteraction(this)
     private val bezierInteraction = StudioBezierInteraction(this)
     val bezierHasDraft get() = bezierInteraction.hasDraft
@@ -3023,6 +3044,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 field = value
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
+                calligraphyInteraction.cancel()
                 bezierInteraction.cancel()
                 shapeCreationContext = null
                 points = JSONArray()
@@ -3430,6 +3452,14 @@ private class StudioCanvas(context: Context) : View(context) {
                 bezierInteraction.draw(canvas,state,documentId,sceneRevision,selectedId,toScreen,bezierEditing,bezierNode,bezierClosed)
             }
         }
+        if (tool == "vector_calligraphy") {
+            val state=scene
+            val active=state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id")==selectedId } }
+            if(state!=null && active?.getString("kind")=="vector") {
+                val toScreen=Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state,active)) }
+                calligraphyInteraction.draw(canvas,toScreen,documentId,sceneRevision,selectedId)
+            }
+        }
         if (tool == "vector_freehand") {
             val state = scene
             val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
@@ -3496,6 +3526,7 @@ private class StudioCanvas(context: Context) : View(context) {
             multitouch = true
             shapeInteraction.cancel()
             freehandInteraction.cancel()
+            calligraphyInteraction.cancel()
             bezierInteraction.interrupt()
             shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
@@ -3543,6 +3574,20 @@ private class StudioCanvas(context: Context) : View(context) {
             } catch(error:Exception) {
                 bezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Bezier interaction failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            }
+        }
+        if (tool == "vector_calligraphy") {
+            val state=scene
+            if(state==null) { calligraphyInteraction.cancel();return true }
+            try {
+                val active=ArtShapes.layer(state,selectedId)
+                val toScreen=Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state,active)) }
+                return calligraphyInteraction.touch(event,toScreen,state,documentId,sceneRevision,selectedId,
+                    shapeBusy,calligraphyOptions,onCalligraphy)
+            } catch(error: Exception) {
+                calligraphyInteraction.cancel()
+                android.util.Log.e("ArtStudio","Vector calligraphy failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             }
         }

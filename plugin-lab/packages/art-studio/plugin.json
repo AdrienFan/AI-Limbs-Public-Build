@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.26",
+  "version": "0.2.27",
   "api": {
     "target": 1,
     "min": 1
@@ -75,6 +75,7 @@
       "plugin.art.studio.path.create",
       "plugin.art.studio.path.nodes",
       "plugin.art.studio.path.edit",
+      "plugin.art.studio.shape.calligraphy",
       "plugin.art.studio.shape.freehand",
       "plugin.art.studio.shape.create",
       "plugin.art.studio.shape.select",
