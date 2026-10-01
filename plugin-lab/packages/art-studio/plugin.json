@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.35",
+  "version": "0.2.36",
   "api": {
     "target": 1,
     "min": 1
@@ -183,7 +183,11 @@
       "plugin.art.studio.selection.bezier_create",
       "plugin.art.studio.selection.bezier_nodes",
       "plugin.art.studio.selection.bezier_edit",
-      "plugin.art.studio.selection.preview"
+      "plugin.art.studio.selection.preview",
+      "plugin.art.studio.comic.info",
+      "plugin.art.studio.comic.frame",
+      "plugin.art.studio.comic.cut",
+      "plugin.art.studio.comic.merge"
     ],
     "services": [],
     "providers": [

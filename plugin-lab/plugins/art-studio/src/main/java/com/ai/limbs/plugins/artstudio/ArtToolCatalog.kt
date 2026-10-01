@@ -6,6 +6,7 @@ import org.json.JSONObject
 /** The page and Laner's read-only catalog share one inventory of toolbox slots. */
 internal object ArtToolCatalog {
     val implemented get() = listOf(
+        Triple("comic_panel","漫画分格编辑（直边）","▤"),
         Triple("select_bezier","贝塞尔曲线选区（基础）","♧"),
         Triple("enclose_fill","围合填充（基础）","⬟"),
         Triple("colorize_mask","上色蒙版编辑（基础）","▦"),
@@ -56,8 +57,6 @@ internal object ArtToolCatalog {
     val pending get() = listOf(
         PendingTool("svg_text_advanced", "SVG 文字高级排版", "T",
             "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"),
-        PendingTool("comic_panel", "漫画分格编辑", "▤",
-            "plugins/tools/tool_knife/KisToolKnife.h"),
         PendingTool("select_contiguous", "连续区域选区", "◈",
             "plugins/tools/selectiontools/kis_tool_select_contiguous.h"),
         PendingTool("select_similar", "相似色选区", "◎",
@@ -97,6 +96,7 @@ internal object ArtToolCatalog {
         val zoomState = ArtStudioViewControl.state.value
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
             .put("parameterWindowCapability", "$ART_ID.view.tool_options")
+            .put("comicPanels",ArtComicPanels.info())
             .put("bezierSelection",ArtBezierSelection.info())
             .put("encloseFill",ArtEncloseFill.info())
             .put("colorize",ArtColorize.defaults())

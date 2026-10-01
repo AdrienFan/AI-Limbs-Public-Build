@@ -410,6 +410,14 @@ class ArtStudioEntry : InProcessPluginEntry {
             "x/y 为文档坐标，tolerance 为文档像素，默认0。在指定可见矢量层按实际填充/描边从上向下查找；返回hitId或null，不改变选择。") { p -> store.shapes(p, true) }
         capability("shape.box", "查询框内矢量对象", read,
             "x/y/width/height为文档坐标矩形；contained=true要求完全包含，false选择相交对象。返回boxedIds，可交给shape.select；使用手机同一几何规则，不创建像素选区。") { p -> store.shapes(p, box = true) }
+        capability("comic.info","读取漫画分格范围与默认参数",read,
+            "直边矢量分格与合并，文档像素坐标；返回宽度预设、角度规则与灰色项目。对象清单使用shape.list。") {ArtComicPanels.info()}
+        capability("comic.frame","创建漫画分格框",write,
+            "documentId/expectedRevision/layerId/x/y/width/height必填。坐标尺寸为文档像素；可见未锁定矢量层，支持层及父组变换。style可选fill/stroke/strokeWidth/opacity；默认透明填充、黑色2像素边框，样式粗细为对象局部。先用layer.vector创建矢量层。一次撤销与自动缩图。") {p->store.comicFrame("LANER",p)}
+        capability("comic.cut","切分漫画矢量分格",write,
+            "documentId/expectedRevision/layerId/start/end必填；start/end=[x,y]为文档像素，切线须从框外完整穿过框。ids可选限定对象，不传处理该层手势范围内的可见对象。支持矩形、凸多边形、闭合L直线路径，最多256顶点；曲线、凹轮廓和锁定交叉对象明确拒绝。thick/thin/special为0–512文档像素，默认12/6/8；automatic默认true，horizontal/vertical/diagonal使用thick/thin/special默认映射，angle=0–45默认15度。automatic=false用preset，默认thick。保留真实多边形、样式与对象仿射矩阵；一次原子记录，过宽拒绝，无交叉changed=false不增加历史；成功自动缩图、removedIds/createdIds/gutterWidth。") {p->store.comicEdit("LANER","cut",p)}
+        capability("comic.merge","合并相邻漫画分格",write,
+            "documentId/expectedRevision/layerId/start/end必填，文档像素；ids可选限定对象。起终点须在不同格内部，手势恰好穿过两条平行相对直边，间隙0–512像素且大于0。每次合并一条间隙，仅填满直边重叠区，最多256顶点；带孔、曲线、非平行边不可用，碰到第三格拒绝。保留较靠下对象的样式及矩阵；一次撤销、过期锁定检查、自动缩图与removedIds/createdIds。") {p->store.comicEdit("LANER","merge",p)}
         capability("path.create", "创建可编辑贝塞尔路径", write,
             "nodes为逻辑节点数组，每项x/y和可选in/out=[x,y]、type=corner/smooth/symmetric；创建坐标为图层局部。closed/style可选。documentId/expectedRevision/layerId必填；开放路径至少2节点。") { p -> store.pathCreate("LANER",p) }
         capability("path.nodes", "读取路径节点与控制柄", read,
@@ -630,6 +638,13 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "reference.transform" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"),p("matrix","array"))
         "reference.style" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"),p("style","object"))
         "reference.show" -> listOf(p("documentId"),p("expectedRevision","integer"),p("visible","boolean"))
+        "comic.frame" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
+            p("x","number"),p("y","number"),p("width","number"),p("height","number"),p("style","object",true))
+        "comic.cut" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("start","array"),p("end","array"),
+            p("ids","array",true),p("automatic","boolean",true),p("preset",optional=true),
+            p("thick","number",true),p("thin","number",true),p("special","number",true),
+            p("horizontal",optional=true),p("vertical",optional=true),p("diagonal",optional=true),p("angle","number",true))
+        "comic.merge" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("start","array"),p("end","array"),p("ids","array",true))
         "shape.list" -> listOf(p("documentId"), p("layerId"))
         "shape.hit" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"), p("tolerance", "number", true))
         "shape.box" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"),

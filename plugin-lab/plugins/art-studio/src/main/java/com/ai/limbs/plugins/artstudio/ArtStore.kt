@@ -745,6 +745,37 @@ internal class ArtStore(private val root: File) {
         if(p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已更新，请重新读取选区"}
         return snap
     }
+    private fun comicRequest(p: JSONObject): JSONObject {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id")) {"工程已切换，请重新读取"}
+        require(p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已更新，请刷新分格"}
+        return snap
+    }
+    fun comicFrame(actor: String,p: JSONObject): JSONObject = locked {
+        val snap=comicRequest(p)
+        val shape=ArtComicPanels.frame(snap.getJSONObject("state"),p)
+        apply(actor,"SHAPE_CREATE",JSONObject().put("documentId",snap.getString("id"))
+            .put("expectedRevision",snap.getInt("revision")).put("layerId",p.getString("layerId")).put("shape",shape))
+    }
+    fun comicEdit(actor: String,mode: String,p: JSONObject): JSONObject = locked {
+        require(mode in setOf("cut","merge"))
+        val snap=comicRequest(p)
+        val result=if(mode=="cut")ArtComicPanels.cut(snap.getJSONObject("state"),p)
+            else ArtComicPanels.merge(snap.getJSONObject("state"),p)
+        if(result==null)return@locked snap.put("comicPanelFeedback",true).put("changed",false)
+            .put("message","分格线没有完整穿过可切分的边框，请从框外拖到框外")
+        result.put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+        apply(actor,if(mode=="cut")"SHAPE_COMIC_CUT" else "SHAPE_COMIC_MERGE",result)
+            .put("comicPanelFeedback",true).put("changed",true)
+            .put("removedIds",result.getJSONArray("removedIds"))
+            .put("createdIds",JSONArray().apply {
+                val groups=result.getJSONArray("groups")
+                for(i in 0 until groups.length()) {
+                    val shapes=groups.getJSONObject(i).getJSONArray("shapes")
+                    for(j in 0 until shapes.length())put(shapes.getJSONObject(j).getString("id"))
+                }
+            }).also {if(result.has("gutterWidth"))it.put("gutterWidth",result.getDouble("gutterWidth"))}
+    }
     fun bezierSelectionCreate(actor: String,p: JSONObject): JSONObject = locked {
         val snap=selectionRequest(p);require(p.has("expectedRevision"))
         val created=ArtBezierSelection.fromNodes(p.getJSONArray("nodes"))
@@ -1461,6 +1492,8 @@ internal class ArtStore(private val root: File) {
                 "REFERENCE_STYLE" -> "参考图像样式"
                 "REFERENCE_DELETE" -> "删除参考图像"
                 "VECTOR_LAYER_CREATE" -> "添加矢量图层"
+                "SHAPE_COMIC_CUT" -> "漫画分格切分"
+                "SHAPE_COMIC_MERGE" -> "漫画分格合并"
                 "SHAPE_CREATE" -> "添加矢量形状"
                 "SHAPE_SELECT" -> "选择形状"
                 "SHAPE_TRANSFORM" -> "变换形状"
@@ -1640,6 +1673,7 @@ internal class ArtStore(private val root: File) {
                     .put("x", p.getDouble("x")).put("y", p.getDouble("y"))
                 state.put("selectedLayerId", id)
             }
+            "SHAPE_COMIC_CUT", "SHAPE_COMIC_MERGE" -> ArtComicPanels.apply(state,p)
             "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT" ->
                 ArtShapes.edit(state, type, p)
             "VECTOR_LAYER_CREATE" -> {
