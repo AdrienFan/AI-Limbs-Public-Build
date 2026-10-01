@@ -6,6 +6,7 @@ import org.json.JSONObject
 /** The page and Laner's read-only catalog share one inventory of toolbox slots. */
 internal object ArtToolCatalog {
     val implemented get() = listOf(
+        Triple("smart_patch","智能修补（局部纹理）","✚"),
         Triple("assistant","绘画辅助尺规（基础）","⌖"),
         Triple("reference_images","参考图像","▧"),
         Triple("vector_calligraphy", "矢量书法笔", "✒"),
@@ -52,8 +53,6 @@ internal object ArtToolCatalog {
     val pending get() = listOf(
         PendingTool("svg_text_advanced", "SVG 文字高级排版", "T",
             "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"),
-        PendingTool("smart_patch", "智能修补", "✚",
-            "plugins/tools/tool_smart_patch/kis_tool_smart_patch.h"),
         PendingTool("colorize_mask", "上色蒙版编辑", "▦",
             "plugins/tools/tool_lazybrush/kis_tool_lazy_brush.h"),
         PendingTool("enclose_fill", "围合填充", "⬟",
@@ -101,6 +100,7 @@ internal object ArtToolCatalog {
         val zoomState = ArtStudioViewControl.state.value
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
             .put("parameterWindowCapability", "$ART_ID.view.tool_options")
+            .put("smartPatch",ArtSmartPatch.info())
             .put("assistants",JSONObject().put("types",JSONObject(ArtAssistants.types))
                 .put("pending",JSONArray(ArtAssistants.pending)).put("maxObjects",ArtAssistants.MAX)
                 .put("coordinateSpace","document").put("exported",false)

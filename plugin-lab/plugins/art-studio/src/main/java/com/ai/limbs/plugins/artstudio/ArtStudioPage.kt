@@ -411,6 +411,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var image by remember { mutableStateOf<Bitmap?>(null) }
     var referenceBitmaps by remember { mutableStateOf<Map<String,Bitmap>>(emptyMap()) }
     var referenceMultiple by remember { mutableStateOf(false) }
+    var smartPatchSettings by remember { mutableStateOf(ArtSmartPatch.info().getJSONObject("defaults")) }
     var assistantAdding by remember { mutableStateOf(true) }
     var assistantType by remember { mutableStateOf("ruler") }
     var referenceImportContext by remember { mutableStateOf<JSONObject?>(null) }
@@ -1382,6 +1383,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.scene = state; view.sceneRevision = current.getInt("revision")
                     view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
+                    view.smartPatchOptions = smartPatchSettings
+                    view.onSmartPatch = { p -> if(!busy)perform { store.smartPatch("AWEI",p) } }
                     view.assistantAdding = assistantAdding
                     view.assistantType = assistantType
                     view.onAssistantCreated = { assistantAdding=false }
@@ -2249,6 +2252,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             if (pending != null) {
                 Text("该工具尚未实现，当前仅提供说明入口，不能用于绘画。")
             } else {
+                if(tool=="smart_patch") {
+                    StudioSmartPatchOptions(smartPatchSettings,busy,{smartPatchSettings=it})
+                }
                 if(tool=="assistant") {
                     StudioAssistantOptions(current,busy,assistantAdding,assistantType,
                         {assistantAdding=it},{assistantType=it},
@@ -2524,7 +2530,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     FilterChip(selected = viewOptions.zoomToolMode == "out",
                         onClick = { ArtStudioViewControl.setZoomToolMode("out") }, label = { Text("缩小") })
                 }
-                if (tool !in setOf("assistant", "vector_bezier", "reference_images", "vector_calligraphy",
+                if (tool !in setOf("smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
                     "vector_freehand", "shape_select", "svg_text", "sampler", "fill", "mirror",
                     "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "calligraphy", "dyna", "zoom")) {
                     Text("此工具暂无独立参数。")
@@ -3005,7 +3011,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3031,6 +3037,9 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeCreationContext: JSONObject? = null
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
+    private val smartPatchInteraction=StudioSmartPatchInteraction()
+    var smartPatchOptions=ArtSmartPatch.info().getJSONObject("defaults")
+    var onSmartPatch: (JSONObject)->Unit = {}
     private val assistantInteraction = StudioAssistantInteraction().apply { density=context.resources.displayMetrics.density }
     private val assistedBrushInteraction = StudioAssistedBrushInteraction().apply { density=context.resources.displayMetrics.density }
     var assistantAdding: Boolean = true
@@ -3072,7 +3081,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
-                referenceInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel()
                 assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
@@ -3288,7 +3297,7 @@ private class StudioCanvas(context: Context) : View(context) {
         val actual=fitScale()*zoom
         panX=width/2f-fittedCenterX(bitmap,fitScale())+(bitmap.width/2f-bounds.centerX())*actual
         panY=(bitmap.height/2f-bounds.centerY())*actual
-        referenceInteraction.cancel();invalidate();publishZoom()
+        referenceInteraction.cancel();smartPatchInteraction.cancel();invalidate();publishZoom()
     }
 
     fun fitToWindow() {
@@ -3380,6 +3389,7 @@ private class StudioCanvas(context: Context) : View(context) {
         scene?.let { ArtAssistants.draw(canvas,it,matrix,tool=="assistant",assistantInteraction.preview,
             resources.displayMetrics.density) }
         if(tool=="assistant")assistantInteraction.drawDraft(canvas,matrix)
+        smartPatchInteraction.draw(canvas)
         assistedBrushInteraction.draw(canvas)
         if (tool == "mirror") {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
@@ -3558,6 +3568,9 @@ private class StudioCanvas(context: Context) : View(context) {
     }
 
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="smart_patch" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
+            smartPatchInteraction.cancel();invalidate();return true
+        }
         if(tool=="assistant") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {assistantInteraction.cancel();invalidate();return true}
             if(keyCode in setOf(android.view.KeyEvent.KEYCODE_DEL,android.view.KeyEvent.KEYCODE_FORWARD_DEL)) {
@@ -3595,7 +3608,7 @@ private class StudioCanvas(context: Context) : View(context) {
             shapeInteraction.cancel()
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
-            referenceInteraction.cancel()
+            referenceInteraction.cancel();smartPatchInteraction.cancel()
             assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
@@ -3631,6 +3644,18 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(tool=="smart_patch") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            val state=scene ?: return true
+            try {
+                return smartPatchInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,
+                    shapeBusy,smartPatchOptions,onSmartPatch)
+            } catch(error:Exception) {
+                smartPatchInteraction.cancel()
+                android.util.Log.e("ArtStudio","Smart patch mask failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {invalidate()}
+        }
         if(tool=="assistant") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN) requestFocus()
             val state=scene ?: return true
@@ -3669,7 +3694,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return referenceInteraction.touch(event,state,documentId,sceneRevision,matrix,
                     referenceMultiple,shapeBusy,onReferenceEdit)
             } catch(error:Exception) {
-                referenceInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel()
                 android.util.Log.e("ArtStudio","Reference interaction failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             }

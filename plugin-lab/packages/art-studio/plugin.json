@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.31",
+  "version": "0.2.32",
   "api": {
     "target": 1,
     "min": 1
@@ -164,7 +164,9 @@
       "plugin.art.studio.assistant.settings",
       "plugin.art.studio.assistant.project",
       "plugin.art.studio.assistant.stroke",
-      "plugin.art.studio.assistant.preview"
+      "plugin.art.studio.assistant.preview",
+      "plugin.art.studio.patch.info",
+      "plugin.art.studio.patch.apply"
     ],
     "services": [],
     "providers": [

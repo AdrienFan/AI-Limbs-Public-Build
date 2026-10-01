@@ -1387,6 +1387,7 @@ internal class ArtStore(private val root: File) {
                 "LAYER_BLEND" -> "调整图层混合模式"
                 "LAYER_PROPERTIES" -> "修改图层属性"
                 "LAYER_MOVE", "LAYER_MOVE_STEP" -> "调整图层顺序"
+                "PIXEL_REPAIR" -> "智能修补"
                 "PIXEL_EDIT" -> if (operation.getJSONObject("parameters").optString("mode") == "CLEAR")
                     "清除像素" else "填充像素"
                 "PIXEL_PASTE" -> if (operation.getJSONObject("parameters")
@@ -1539,6 +1540,22 @@ internal class ArtStore(private val root: File) {
                 layer.put("x", p.getInt("x")).put("y", p.getInt("y"))
                 layers.put(layer)
                 state.put("selectedLayerId", id)
+            }
+            "PIXEL_REPAIR" -> {
+                val layer=find(p.getString("layerId")).second
+                require(layer.getString("kind") in setOf("paint","image") && !lockedByParent(layer,layers))
+                require(layer.optString("parentId").isBlank() &&
+                    layer.getDouble("x")==0.0 && layer.getDouble("y")==0.0 &&
+                    layer.getDouble("scale")==1.0 && layer.getDouble("rotation")==0.0)
+                val x=p.getInt("x");val y=p.getInt("y");val w=p.getInt("width");val h=p.getInt("height")
+                require(x>=0 && y>=0 && w>0 && h>0 && x.toLong()+w<=state.getInt("width") &&
+                    y.toLong()+h<=state.getInt("height") && w.toLong()*h<=ArtSmartPatch.MAX_REGION_PIXELS)
+                val order=contentOrder(layer)
+                for(key in listOf("erase","patch")) {
+                    val asset=p.getJSONObject(key).getString("asset");validateId(asset)
+                    order.put(JSONObject().put("kind",if(key=="erase")"erase" else "paste")
+                        .put("asset",asset).put("x",x).put("y",y))
+                }
             }
             "PIXEL_EDIT", "PIXEL_PASTE" -> {
                 val layer = find(p.getString("layerId")).second
@@ -2148,6 +2165,43 @@ internal class ArtStore(private val root: File) {
         ArtImagePolicy.requireDimensions(clip.getInt("width"), clip.getInt("height"))
         val bytes = locked { assetFile(clip.getString("asset")).readBytes() }
         return openImage(Base64.encodeToString(bytes, Base64.NO_WRAP), "粘贴图像", actor, confirmResize)
+    }
+
+    /** Compute pixels under the same document lock; only a complete result enters history. */
+    fun smartPatch(actor: String,p: JSONObject): JSONObject = locked {
+        require(actor in setOf("AWEI","LANER"))
+        val doc=loadCurrent()
+        require(p.getString("documentId")==doc.getString("id")) { "工程已切换，请重新涂抹修补区域" }
+        require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) { "工程版本已更新，请重新涂抹修补区域" }
+        val state=replay(doc);val layer=editableLayer(state)
+        require(p.getString("layerId")==layer.getString("id")) { "当前图层已改变，请重新选择修补目标" }
+        val mask=ArtSmartPatch.mask(state,p)
+        val view=ArtMenuOperations.isolated(snapshot(doc),setOf(layer.getString("id")),layer.getString("id"))
+        val viewState=view.getJSONObject("state");viewState.put("background","#00000000")
+        ArtMenuOperations.layers(viewState).first { it.getString("id")==layer.getString("id") }
+            .put("visible",true).put("opacity",1.0).put("blend","normal")
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,viewState,state.getInt("width"),state.getInt("height"))+
+            mask.width.toLong()*mask.height*64,"智能修补")
+        val source=ArtRenderer.render(this,view)
+        val result=try { ArtSmartPatch.repair(source,mask) } finally { source.recycle() }
+        val patchBytes: ByteArray;val eraseBytes: ByteArray
+        try {
+            patchBytes=ArtImagePolicy.encodePng(result.patch,MAX_ASSET_BYTES)
+            eraseBytes=ArtImagePolicy.encodePng(result.erase,MAX_ASSET_BYTES)
+        } finally { result.patch.recycle();result.erase.recycle() }
+        val patchId=UUID.randomUUID().toString();val eraseId=UUID.randomUUID().toString()
+        // Both references use the standard nested asset key, so archive, cleanup and import see them.
+        try {
+            atomicBytes(assetFile(patchId),patchBytes);atomicBytes(assetFile(eraseId),eraseBytes)
+            val params=JSONObject().put("layerId",layer.getString("id")).put("x",mask.left).put("y",mask.top)
+                .put("width",mask.width).put("height",mask.height)
+                .put("patch",JSONObject().put("asset",patchId)).put("erase",JSONObject().put("asset",eraseId))
+                .put("algorithm","local-patchmatch").put("maskPixels",result.pixels)
+                .put("comparisons",result.work).put("settings",JSONObject(p.toString())
+                    .apply { remove("points");remove("documentId");remove("expectedRevision");remove("layerId") })
+            appendToCurrent(actor,"PIXEL_REPAIR",params).put("repair",JSONObject()
+                .put("maskPixels",result.pixels).put("comparisons",result.work).put("algorithm","local-patchmatch"))
+        } catch(error:Throwable) {assetFile(patchId).delete();assetFile(eraseId).delete();throw error}
     }
 
     /**

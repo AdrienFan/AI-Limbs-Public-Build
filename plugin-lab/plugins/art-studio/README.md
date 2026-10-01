@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.31 源码；基础绘画辅助尺规，待编译验收）
+# AI Limbs 画室（0.2.32 源码；基础智能修补，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -85,10 +85,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 | 待实现工具 | 工具 ID | Krita 6.0.4 源码入口 | 所需基础能力 |
 | --- | --- | --- | --- |
 | SVG 文字高级排版 | svg_text_advanced | plugins/tools/svgtexttool/SvgTextToolFactory.cpp | 完整 SVG 排版、富文本与源码编辑；基础可编辑文字已单独实现 |
-| 矢量书法笔 | vector_calligraphy | plugins/tools/karbonplugins/tools/CalligraphyTool/KarbonCalligraphyToolFactory.cpp | 可编辑路径与控制点 |
-| 参考图像 | reference_images | plugins/tools/defaulttool/referenceimagestool/ToolReferenceImages.h | 参考图像资源 |
-| 绘画辅助尺规 | assistant | plugins/assistants/Assistants/assistant_tool.cc | 辅助对象与笔画约束 |
-| 智能修补、上色蒙版编辑 | smart_patch、colorize_mask | plugins/tools/tool_smart_patch/kis_tool_smart_patch.h；plugins/tools/tool_lazybrush/kis_tool_lazy_brush.h | 区域修补与上色蒙版 |
+| 上色蒙版编辑 | colorize_mask | plugins/tools/tool_lazybrush/kis_tool_lazy_brush.h | 上色蒙版 |
 | 围合填充、漫画分格编辑 | enclose_fill、comic_panel | plugins/tools/tool_enclose_and_fill/KisToolEncloseAndFillFactory.h；plugins/tools/tool_knife/KisToolKnife.h | 封闭区域计算与分格对象 |
 | 贝塞尔曲线选区、连续区域选区、相似色选区、磁性套索选区 | select_bezier、select_contiguous、select_similar、select_magnetic | plugins/tools/selectiontools/kis_tool_select_path.h、kis_tool_select_contiguous.h、kis_tool_select_similar.h、KisToolSelectMagnetic.h | 像素选区蒙版及相关路径算法 |
 
@@ -479,3 +476,20 @@ Compose 点击接口依据 [Android 官方 combinedClickable 文档](https://dev
 设计参考用户共享储存中 Krita 6.0.4 的 RulerAssistant.cc、InfiniteRulerAssistant.cc、ParallelRulerAssistant.cc、Ellipse.cc、EllipseAssistant.cc、ConcentricEllipseAssistant.cc、VanishingPointAssistant.cc 和 libs/ui/kis_painting_assistants_decoration.cpp，以及 [官方助手工具说明](https://docs.krita.org/en/reference_manual/tools/assistant.html) 和 [绘画辅助尺规说明](https://docs.krita.org/en/user_manual/painting_with_assistants.html)。使用本插件的数据、矩阵、交互与绘画能力实现，没有引入 Qt/Krita 插件内核。
 
 本轮只做本地源码迭代，未编译、未上传或进行运行测试。源码核对包括版本、capability/manifest、控制点验证、坐标投影与固化、冲突/取消路径以及导出排除；编译安装后需验收手机/鼠标创建编辑、变换图层的吸附、保存重开、撤销、导出和六种尺规。
+
+## 0.2.32 基础智能修补
+
+smart_patch 从灰色工具格升级为基础局部纹理修补。单击选中，拖动涂抹粉色蒙版，松手后在后台计算；双击打开统一可拖动参数浮窗，调整笔径、补丁半径、搜索半径、精度和边缘融合。Esc、换工具或多指操作取消尚未提交的涂抹；计算期间使用已有 busy 控制，参数和工程绑定均在起笔时捕获。
+
+参考本地 Krita 6.0.4 的工具及 kis_inpaint.cpp，并核对[官方工具说明](https://docs.krita.org/en/reference_manual/tools/smart_patch.html)。本插件编写独立 Kotlin 局部 PatchMatch：有效未涂抹源补丁、确定性随机搜索、交替扫描传播、补丁投票及预乘 alpha 边缘混合，不依赖 Qt、模型或宿主新增能力。与 Krita 完整多尺度求解器并不等价；大面积多尺度、跨图层、变换/分组图层及 HDR 继续灰色说明。
+
+目标为当前未锁定的可见根绘画/图像层，位置0、缩放1、旋转0。选区仅限制修补写入，取样允许位于选区外；参考图像、辅助尺规与其他图层不进入取样。只改蒙版覆盖的像素。完整结果以 PIXEL_REPAIR 一次提交，存储嵌套 asset 字段的擦除和补丁 PNG，复用既有 erase/paste 合成、历史、图层复制与归档资源扫描，不在重放时运行算法。透明源像素以“擦除旧像素再写最终像素”的顺序保留透明度；最终图层不透明度和混合模式保持原值。
+
+兰儿入口：
+- plugin.art.studio.patch.info：参数默认值、范围、预算及未实现项
+- plugin.art.studio.patch.apply：documentId、expectedRevision、layerId、points、width 必填。points 为1–4096个文档坐标二维点，圆头路径形成蒙版；width 1–256、patchRadius 1–8 默认4、accuracy 1–100 默认40、searchRadius 16–256 默认64、feather 0–8 默认2。返回 repair 统计和自动256缩略图；细节继续使用 canvas.region
+
+单笔蒙版最多32768像素；包含搜索余量的局部矩形最多1048576像素；颜色样本比较最多8000万。空间和比较预算超限、没有有效纹理、文档/版本/目标层变化时直接拒绝，不缩图计算、不改变作品。计算和PNG编码全部完成后才写历史；写入失败清理新资源。内存遵循 ArtImagePolicy 的动态预算。
+
+版本0.2.32 / versionCode35 / com.ai.limbs.payload.artstudio.v0232，131项能力。
+验证仅源码审阅、JSON/接口一致性和差异检查；尚未编译、测试、上传云端或手机验证。纹理复杂、结构独特或大面积遮挡时效果仍需实际检查，可撤销调整后重试。

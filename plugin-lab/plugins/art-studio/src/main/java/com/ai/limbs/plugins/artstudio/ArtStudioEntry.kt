@@ -268,6 +268,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             JSONObject().put("distancePx", kotlin.math.hypot(x1 - x0, y1 - y0))
                 .put("degrees", Math.toDegrees(kotlin.math.atan2(y1 - y0, x1 - x0)))
         }
+        capability("patch.info","读取智能修补范围",read,
+            "返回基础局部 PatchMatch 的参数默认值、区域及计算预算、目标图层要求和未实现功能。") { ArtSmartPatch.info() }
+        capability("patch.apply","智能修补当前图层",write,
+            "documentId/expectedRevision/layerId/points/width 必填；points 为1–4096个文档坐标二维数组，形成圆头涂抹蒙版，遵循选区。width=1–256；patchRadius=1–8 默认4；accuracy=1–100 默认40；searchRadius=16–256 默认64；feather=0–8 默认2。仅当前未锁定可见且未变换的根绘画/图像图层，从其附近未涂抹纹理做局部 PatchMatch；单次最多32768蒙版像素。成功保存一次历史并返回缩图。结果是固化像素，不在回放时重算；无可用纹理或超预算明确拒绝。") { p -> store.smartPatch("LANER",p) }
         capability("fill.contiguous", "填充当前图层连通区域", write,
             "连通填色，遵循当前选区；tolerance 为每个 RGBA 通道允许的最大差值百分比（0–100），referenceAllLayers 决定从所有可见层取参考色；erase=true 时擦除匹配区域的当前图层像素。目标仍是当前可编辑根图层。") { p ->
             store.fillContiguous("LANER", p.getInt("x"), p.getInt("y"), p.getString("color"),
@@ -619,6 +623,10 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.command" -> listOf(p("command"))
+        "patch.info" -> emptyList()
+        "patch.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
+            p("points","array"),p("width","number"),p("patchRadius","integer",true),
+            p("accuracy","integer",true),p("searchRadius","integer",true),p("feather","integer",true))
         "assistant.list", "assistant.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
         "assistant.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("type"),p("points","array"),p("name",optional=true))
         "assistant.select", "assistant.delete" -> listOf(p("documentId"),p("expectedRevision","integer"),id)
