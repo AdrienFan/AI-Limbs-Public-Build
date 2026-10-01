@@ -96,8 +96,8 @@ internal fun StudioLayersPanel(
         appendChildren("", 0)
     }.filter { filterText.isBlank() || it.layer.optString("name").contains(filterText, ignoreCase = true) }
 
-    fun addLayer(group: Boolean) {
-        val base = if (group) "图层组" else "绘画图层"
+    fun addLayer(group: Boolean, vector: Boolean = false) {
+        val base = if (group) "图层组" else if (vector) "矢量图层" else "绘画图层"
         var name = base
         var number = 1
         while (allLayers.any { it.optString("name") == name }) {
@@ -105,7 +105,7 @@ internal fun StudioLayersPanel(
         }
         val parent = if (!group && active?.optString("kind") == "group") selectedId
             else active?.optString("parentId").orEmpty()
-        onEdit(if (group) "GROUP_CREATE" else "LAYER_CREATE",
+        onEdit(if (group) "GROUP_CREATE" else if (vector) "VECTOR_LAYER_CREATE" else "LAYER_CREATE",
             JSONObject().put("id", UUID.randomUUID().toString())
                 .put("name", name).put("parentId", parent).put("select", true))
     }
@@ -248,6 +248,10 @@ internal fun StudioLayersPanel(
                             addMenu = false
                             addLayer(group = false)
                         })
+                        DropdownMenuItem(text = { Text("新建矢量图层") }, onClick = {
+                            addMenu = false
+                            addLayer(group = false, vector = true)
+                        })
                         DropdownMenuItem(text = { Text("新建图层组") }, onClick = {
                             addMenu = false
                             addLayer(group = true)
@@ -347,6 +351,7 @@ private fun StudioLayerProperties(
                     "group" -> "图层组"
                     "image" -> "图片图层"
                     "text" -> "可编辑文字图层"
+                    "vector" -> "可编辑矢量图层"
                     else -> "绘画图层"
                 })
                 OutlinedTextField(value = name, onValueChange = { name = it.take(100) },
@@ -449,6 +454,7 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
             }.forEach { drawLayer(canvas, it, siblings, docW, docH, depth + 1) }
             else -> {
                 if(layer.getString("kind") in setOf("image", "text")) drawAsset(canvas,layer.getString("asset"),0,0,false)
+                if(layer.getString("kind")=="vector") ArtShapes.draw(canvas,layer)
                 val strokes=layer.getJSONArray("strokes")
                 val order=layer.optJSONArray("contentOrder")
                 if(order==null) {

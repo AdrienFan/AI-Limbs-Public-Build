@@ -306,6 +306,37 @@ class ArtStudioEntry : InProcessPluginEntry {
             "创建可绘画图层；可选 parentId 指定已有图层组，可选 select=true 立即设为活动图层。") { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "LAYER_CREATE", p)
         }
+        capability("layer.vector", "创建基础矢量图层", write,
+            "保存独立可编辑形状；documentId/expectedRevision 必填，支持已有父组。高级SVG和路径编辑暂未实现。") { p ->
+            p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "VECTOR_LAYER_CREATE", p)
+        }
+        capability("shape.list", "读取矢量形状和选择", read,
+            "使用 document.info 的 documentId 和 layerId；返回形状源参数、文档边界、选中编号与图层锁定信息。") { p -> store.shapes(p) }
+        capability("shape.hit", "命中矢量形状", read,
+            "x/y 为文档坐标，tolerance 为文档像素，默认0。在指定可见矢量层按实际填充/描边从上向下查找；返回hitId或null，不改变选择。") { p -> store.shapes(p, true) }
+        capability("shape.box", "查询框内矢量对象", read,
+            "x/y/width/height为文档坐标矩形；contained=true要求完全包含，false选择相交对象。返回boxedIds，可交给shape.select；使用手机同一几何规则，不创建像素选区。") { p -> store.shapes(p, box = true) }
+        capability("shape.create", "创建可编辑基础形状", write,
+            "shape 为对象：kind=line/rectangle/ellipse/polygon，points为局部坐标点；前三类2点、多边形3至2048点。fill/stroke为#AARRGGBB，strokeWidth为0.1至512，opacity为0至1；可选matrix=[a,b,c,d,tx,ty]。ID自动生成。documentId/expectedRevision/layerId必填。") { p ->
+            val shape = JSONObject(p.getJSONObject("shape").toString()).put("id", UUID.randomUUID().toString())
+            p.put("shape", shape); store.apply("LANER", "SHAPE_CREATE", p)
+        }
+        capability("shape.select", "选择矢量对象", write,
+            "ids为当前矢量层的对象编号列表，空数组取消；只改变对象选择，不创建像素选区。工程编号和版本必填。") { p ->
+            store.apply("LANER", "SHAPE_SELECT", p)
+        }
+        capability("shape.transform", "变换选定形状", write,
+            "ids为对象编号，matrix=[a,b,c,d,tx,ty]为矢量层局部坐标的增量仿射变换，支持移动/缩放/旋转；一次操作整体提交，锁定拒绝。工程编号和版本必填。") { p ->
+            store.apply("LANER", "SHAPE_TRANSFORM", p)
+        }
+        capability("shape.style", "设置基础形状样式", write,
+            "style只支持fill/stroke/strokeWidth/opacity，未传字段保持现值。ids/documentId/expectedRevision/layerId必填。") { p ->
+            store.apply("LANER", "SHAPE_STYLE", p)
+        }
+        capability("shape.delete", "删除矢量对象", write,
+            "ids/documentId/expectedRevision/layerId必填；锁定对象拒绝，共享撤销与图片反馈。") { p ->
+            store.apply("LANER", "SHAPE_DELETE", p)
+        }
         capability("layer.group", "创建画室图层组", write,
             "创建图层组；可选 parentId 指定父组，可选 select=true 立即设为活动组。") { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "GROUP_CREATE", p)
@@ -476,13 +507,23 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
             "visible" -> "true 显示，false 隐藏。"
             "locked" -> "true 锁定，false 解锁。"
             "confirmResize" -> "仅在用户同意缩小后传回 imagePlan.confirmation 原对象；绑定源图 SHA-256 和明确目标尺寸。"
-            "expectedRevision" -> "可选的操作历史条数；用于拒绝在另一端改动后过期的操作。"
+            "expectedRevision" -> "操作历史条数；矢量写操作必填，用于拒绝在另一端改动后过期的操作。"
             else -> key
         }
         return InProcessCapabilityParameterSpec(key, type, description, !optional)
     }
     val id = p("id")
     return when (name) {
+        "layer.vector" -> listOf(p("documentId"), p("expectedRevision", "integer"),
+            p("name", optional = true), p("parentId", optional = true), p("select", "boolean", true))
+        "shape.list" -> listOf(p("documentId"), p("layerId"))
+        "shape.hit" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"), p("tolerance", "number", true))
+        "shape.box" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"),
+            p("width", "number"), p("height", "number"), p("contained", "boolean", true))
+        "shape.create" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("shape", "object"))
+        "shape.select", "shape.delete" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"))
+        "shape.transform" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("matrix", "array"))
+        "shape.style" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("style", "object"))
         "text.create", "text.update" -> listOf(p("documentId"), p("expectedRevision", "integer"),
             p("content"), p("fontId", optional = true), p("fontSize", "number", true),
             p("boxWidth", "integer", true), p("lineSpacing", "number", true), p("align", optional = true),

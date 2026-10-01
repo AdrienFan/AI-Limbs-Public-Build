@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.23 源码；滚轮和底栏缩放迭代，待编译验收）
+# AI Limbs 画室（0.2.24 源码；基础矢量形状与选择，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -66,6 +66,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 | 斜头书法笔（栅格） | 固定角度的宽笔尖沿触笔轨迹生成有笔压变化的带状笔画；保存为绘画层笔画 | stroke.add，tool=calligraphy，可选 nibAngle（0–180°） |
 | 直线、矩形、椭圆 | 拖动生成线框；矩形、椭圆可用前景色填充；以两端点记录到当前绘画层 | stroke.add，tool=line/rectangle/ellipse，闭合形状可选 fillShape |
 | 多边形、折线 | 逐点点击，至少 3 / 2 个顶点后双击最后一个点结束；多边形闭合后可用前景色填充 | stroke.add，tool=polygon/polyline，多边形可选 fillShape |
+| 基础矢量形状与形状选择 | 在矢量层使用直线、矩形、椭圆和多边形工具；选择工具支持点选、方向框选、多选、移动、缩放与旋转 | layer.vector、shape.create/list/hit/box/select/transform/style/delete |
 | 三次贝塞尔曲线 | 默认依次点起点、两处控制点与终点，第四点保存；打开连续曲线模式后每三个点接一段，完成的端点上双击保存，未完成段只预览 | stroke.add，tool=bezier，points 为 1+3n 点（4–1024 点） |
 | 颜色取样 | 点击合成画布更新当前笔色；半径可设为 0–32 px，圆形范围内的像素按透明度混合；可在合成画布与可见根绘画／图像层之间切换，还可选取样色与当前色的混合比例 | color.sample（画布像素坐标，可选 radius、blend、sampleMerged；blend<100 需 baseColor，sampleMerged=false 需 layerId） |
 | 连续区域填充／擦除 | 左侧「填充选项」可设容差（0–100）、参考当前图层／所有可见图层及擦除模式；遵循当前选区，使用 PNG 像素掩码可撤销地修改当前可编辑根图层 | fill.contiguous（x/y/color，可选 tolerance、referenceAllLayers、erase、expectedRevision） |
@@ -81,7 +82,6 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 | 待实现工具 | 工具 ID | Krita 6.0.4 源码入口 | 所需基础能力 |
 | --- | --- | --- | --- |
-| 形状选择 | shape_select | plugins/tools/defaulttool/defaulttool/DefaultToolFactory.cpp | 矢量对象 |
 | SVG 文字高级排版 | svg_text_advanced | plugins/tools/svgtexttool/SvgTextToolFactory.cpp | 完整 SVG 排版、富文本与源码编辑；基础可编辑文字已单独实现 |
 | 矢量徒手路径、可编辑贝塞尔路径、矢量书法笔 | vector_freehand、vector_bezier、vector_calligraphy | plugins/tools/basictools/kis_tool_pencil.h、kis_tool_path.h；plugins/tools/karbonplugins/tools/CalligraphyTool/KarbonCalligraphyToolFactory.cpp | 可编辑路径与控制点 |
 | 参考图像 | reference_images | plugins/tools/defaulttool/referenceimagestool/ToolReferenceImages.h | 参考图像资源 |
@@ -92,7 +92,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 清单单一来源为 ArtToolCatalog.kt。兰儿读取 toolbox.catalog 可得到各项 id、label、implemented 与 status；待实现项还返回 Krita 相对源码路径，且没有执行能力。现有工具的 status=basic 只表示本画室已有可用入口，不表示已达到 Krita 完整行为。每次真正完成工具时，应在清单中把它从 pending 移至 implemented，并同时接通画布、工程记录与兰儿入口；保留的灰色位置不能冒充实现。
 
-这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、可编辑贝塞尔控制点/自由路径、书法笔矢量轮廓及速度调角、矢量形状、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
+这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、可编辑贝塞尔控制点/自由路径、书法笔矢量轮廓及速度调角、高级矢量路径、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
 
 ## 右侧手风琴布局
 
@@ -328,3 +328,25 @@ image.formats 返回格式、扩展名、MIME、系统声明的 decoderAvailable
 新增 view.zoom(documentId, percent) 设置显示比例，与滑动条共享画布处理；先读取 view.state.canvasZoom 获取 documentId 与 minPercent/maxPercent。返回 accepted 表示请求已排队，实际应用值读取状态；过期工程请求不操作新工程。视图缩放不修改图像尺寸、像素或工程历史。无宿主变更。版本码 26，payload artstudio.v0223；本轮未推送、编译、测试或安装。
 
 接口依据：[Android MotionEvent](https://developer.android.com/reference/android/view/MotionEvent)、[Compose Slider](https://developer.android.com/develop/ui/compose/components/slider)。
+
+## 0.2.24 基础矢量形状与选择
+
+基于 0.2.23 源码迭代，保留缩放工具状态、鼠标悬停点滚轮缩放和底栏滑条。新增功能全部位于画室插件，宿主权限和接口依赖未增加。versionCode 27，applicationId com.ai.limbs.payload.artstudio.v0224。本轮只提交源码，未编译、测试、安装或推送云端。
+
+### 阿伟的操作入口
+
+在「图层 → 新建 → 矢量图层（基础形状）…」、图层面板添加菜单或形状选择选项中新建矢量层。直线、矩形、椭圆及多边形工具在该层保存独立对象；多边形逐点添加后双击末点结束。已有绘画层继续保存原有笔画，不自动转换。
+
+选择「形状选择（基础矢量）」后，点选描边或填充区域最上方对象，点击选择框外空白取消；拖动空白框选，从左到右要求完整包含，从右到左选择相交对象。Shift 或左栏「多选」用于追加框选和点选切换；当前只在活动矢量层内选择。拖动选择框内部移动，八个方块缩放，顶部圆点旋转；Shift 拖角保持比例，Ctrl 旋转按 45° 吸附。左栏还提供全选、取消、数值位移/缩放/旋转、前景色填充、取消填充、描边和删除。拖动期间预览选择框，释放时一次提交形状变换。锁定对象仍可选中，但修改会拒绝。
+
+### 兰儿的共享入口
+
+先读取 document.info 的工程 id/revision 和图层列表，再调用 layer.vector 或 shape.*。shape.list 返回对象源参数、文档坐标边界、选中编号和锁定/可见信息；shape.hit 在文档坐标查询实际几何命中，shape.box 查询矩形完全包含或相交对象，查询不改变选择。shape.select 传同层 ids，空数组取消。shape.create 支持 kind=line/rectangle/ellipse/polygon 和图层局部 points；颜色采用 #AARRGGBB。shape.transform 的 matrix=[a,b,c,d,tx,ty] 是相对现有对象的图层局部增量变换：x'=a*x+c*y+tx，y'=b*x+d*y+ty。shape.style 支持 fill/stroke/strokeWidth/opacity；shape.delete 删除指定编号。
+
+所有矢量写操作必须携带 documentId/expectedRevision，手机手势从按下起绑定工程、版本和图层；另一端改动后拒绝过期提交。对象模型、渲染、命中和修改共用 ArtShapes/ArtStore，操作进入现有足迹与撤销重做，保存后可重新打开；图层复制为新对象编号。影响画布的成功写操作沿用自动缩略图，shape.list/hit/box 只读查询不额外附图。单层最多 512 个对象、32768 个顶点，多边形单对象最多 2048 顶点；结构性边界不替代原有渲染工作预算。
+
+### 当前边界与待验收
+
+这是基础矢量对象阶段，未实现 SVG 导入、可编辑贝塞尔控制点、自由路径、渐变网格、布尔运算、斜切手柄或叠放对象循环选择。相关高级工具继续灰色。现有文字仍是独立文字层，不能用形状选择编辑。含新矢量操作的工程需要新版本读取，旧版本不能编辑这些新操作。
+
+已做源码与差异审查。后续编译安装后验收：四类对象的创建、透明填充与细描边命中、双方向框选、多选、控制柄与数值变换、锁定及隐藏父组、旋转/缩放视图与嵌套组、手机与兰儿并发冲突、复制删除、撤销重做、保存重开、图层与工具缩略图反馈，并确认旧图片、文字和绘画层行为。

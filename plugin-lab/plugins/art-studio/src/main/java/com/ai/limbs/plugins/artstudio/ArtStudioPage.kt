@@ -411,6 +411,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var textDialog by remember { mutableStateOf<JSONObject?>(null) }
     var textFonts by remember { mutableStateOf(JSONArray()) }
     var tool by remember { mutableStateOf("ink") }
+    var shapeMultiple by remember { mutableStateOf(false) }
     var color by remember { mutableStateOf("#FF161616") }
     var colorHexInput by remember { mutableStateOf(color) }
     var width by remember { mutableFloatStateOf(6f) }
@@ -934,6 +935,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val selectedLayer = (0 until (layers?.length() ?: 0)).map { layers!!.getJSONObject(it) }
         .firstOrNull { it.getString("id") == selected }
     fun edit(type: String, params: JSONObject = JSONObject()) {
+        if (type.startsWith("SHAPE_") || type == "VECTOR_LAYER_CREATE") {
+            if (busy || current == null) return
+            if (!params.has("documentId")) params.put("documentId", current.getString("id"))
+            if (!params.has("expectedRevision")) params.put("expectedRevision", current.getInt("revision"))
+        }
         perform { store.apply("AWEI", type, params) }
     }
     fun openTextEditor(layer: JSONObject? = null, atX: Double = 0.0, atY: Double = 0.0) {
@@ -1330,6 +1336,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 AndroidView(factory = { ctx -> StudioCanvas(ctx).also { canvasRef[0] = it } },
                     modifier = Modifier.fillMaxSize(), update = { view ->
                     view.documentId = current.getString("id")
+                    view.scene = state; view.sceneRevision = current.getInt("revision")
+                    view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
+                    view.onShapeEdit = ::edit
                     view.image = image
                     view.gridVisible = viewOptions.gridVisible
                     view.pixelGridVisible = viewOptions.pixelGridVisible
@@ -1393,7 +1402,25 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         }
                     }
                     view.onStroke = { points ->
-                        if (selectedLayer?.getString("kind") != "paint")
+                        if (view.shapeCreationContext != null || selectedLayer?.getString("kind") == "vector") {
+                            if (tool !in ArtShapes.kinds)
+                                Toast.makeText(context, "此矢量层目前支持直线、矩形、椭圆和多边形", Toast.LENGTH_SHORT).show()
+                            else {
+                                val vertices = JSONArray()
+                                for (n in 0 until points.length()) {
+                                    val p = points.getJSONArray(n)
+                                    vertices.put(JSONArray().put(p.getDouble(0)).put(p.getDouble(1)))
+                                }
+                                val shape = JSONObject().put("id", UUID.randomUUID().toString())
+                                    .put("kind", tool).put("points", vertices)
+                                    .put("stroke", color).put("strokeWidth", width.toDouble())
+                                    .put("opacity", opacity.toDouble())
+                                    .put("fill", if (fillShape && tool != "line") color else "#00000000")
+                                val captured = view.shapeCreationContext
+                                if (captured != null) edit("SHAPE_CREATE", JSONObject(captured.toString()).put("shape", shape))
+                                else Toast.makeText(context, "请重新开始绘制形状", Toast.LENGTH_SHORT).show()
+                            }
+                        } else if (selectedLayer?.getString("kind") != "paint")
                             Toast.makeText(context, "请选择绘画图层", Toast.LENGTH_SHORT).show()
                         else {
                             val stroke = JSONObject().put("id", UUID.randomUUID().toString())
@@ -1521,6 +1548,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (tool == "shape_select") {
+                                    StudioShapeOptions(current, selected, busy, color, width,
+                                        shapeMultiple, { shapeMultiple = it }, ::edit)
+                                }
                                 if (tool == "svg_text") {
                                     Text("点击画布添加文字；点击选中文字编辑。", style = MaterialTheme.typography.labelSmall)
                                     TextButton(onClick = { openTextEditor(selectedLayer) },
@@ -2912,6 +2943,8 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
+            shapeInteraction.cancel(); shapeCreationContext = null
+            points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
     }
@@ -2928,6 +2961,14 @@ private class StudioCanvas(context: Context) : View(context) {
                 invalidate()
             }
         }
+    var scene: JSONObject? = null
+    var sceneRevision: Int = 0
+    var shapeMultiple: Boolean = false
+    var shapeBusy: Boolean = false
+    var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
+    var shapeCreationContext: JSONObject? = null
+        private set
+    private val shapeInteraction = StudioShapeInteraction(this)
     var layers: JSONArray? = null
     var selectedId: String = ""
     var selection: JSONObject? = null
@@ -2936,6 +2977,8 @@ private class StudioCanvas(context: Context) : View(context) {
         set(value) {
             if (field != value) {
                 field = value
+                shapeInteraction.cancel()
+                shapeCreationContext = null
                 points = JSONArray()
                 pathVertices = JSONArray()
                 cropPreview = null
@@ -3322,6 +3365,17 @@ private class StudioCanvas(context: Context) : View(context) {
                     setShadowLayer(3f, 0f, 0f, Color.BLACK)
                 })
         }
+        if (tool == "shape_select") {
+            val state = scene
+            val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
+            if (state != null && active?.getString("kind") == "vector" && ArtShapes.visible(state, active)) {
+                val ids = ArtShapes.selected(state, selectedId)
+                val editable = !ArtMenuOperations.isLocked(state, active) &&
+                    ArtShapes.items(active).filter { it.getString("id") in ids }.none { it.getBoolean("locked") }
+                val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
+                shapeInteraction.draw(canvas, active, ids, toScreen, editable)
+            }
+        }
         if (points.length() > 0 && tool !in listOf("pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val preview = JSONObject().put("points", points).put("tool", tool)
@@ -3355,6 +3409,8 @@ private class StudioCanvas(context: Context) : View(context) {
         if (image == null) return true
         if (event.pointerCount >= 2) {
             multitouch = true
+            shapeInteraction.cancel()
+            shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
             val dy = event.getY(1) - event.getY(0)
             val distance = hypot(dx, dy)
@@ -3387,6 +3443,25 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if (tool == "shape_select") {
+            val state = scene
+            val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
+            if (state == null || active?.getString("kind") != "vector") {
+                if (event.actionMasked == MotionEvent.ACTION_DOWN)
+                    Toast.makeText(context, "请先新建或选择矢量图层，再选择形状", Toast.LENGTH_SHORT).show()
+                return true
+            }
+            try {
+                val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
+                return shapeInteraction.touch(event, local, toScreen, state, documentId,
+                    sceneRevision, selectedId, shapeMultiple, shapeBusy, onShapeEdit)
+            } catch (error: Exception) {
+                shapeInteraction.cancel()
+                android.util.Log.e("ArtStudio", "Shape interaction failed", error)
+                Toast.makeText(context, error.message, Toast.LENGTH_SHORT).show()
+                return true
+            }
+        }
         if (tool == "svg_text") {
             if (event.actionMasked == MotionEvent.ACTION_UP && image != null &&
                 xy[0] >= 0 && xy[1] >= 0 && xy[0] <= image!!.width && xy[1] <= image!!.height) {
@@ -3420,6 +3495,16 @@ private class StudioCanvas(context: Context) : View(context) {
                 points = JSONArray()
                 if (tool == "mirror") mirrorSeed = kotlin.random.Random.nextInt(Int.MAX_VALUE)
                 shapeStartX = local[0]; shapeStartY = local[1]
+                val vectorLayer = scene?.let { ArtMenuOperations.layers(it).firstOrNull { l ->
+                    l.getString("id") == selectedId && l.getString("kind") == "vector"
+                } }
+                if (vectorLayer != null && tool in ArtShapes.kinds) {
+                    if (tool != "polygon" || pathVertices.length() == 0) {
+                        // Capture at the first point, not release; another collaborator may edit meanwhile.
+                        shapeCreationContext = JSONObject().put("documentId", documentId)
+                            .put("expectedRevision", sceneRevision).put("layerId", selectedId)
+                    }
+                } else shapeCreationContext = null
                 cropPreview = null
                 selectionPreview = null
                 if (tool == "select_freehand") {
@@ -3606,6 +3691,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 selectionPreview = null
             }
             MotionEvent.ACTION_CANCEL -> {
+                shapeCreationContext = null
                 multitouch = false
                 points = JSONArray()
                 pathVertices = JSONArray()

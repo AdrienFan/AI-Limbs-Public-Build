@@ -111,6 +111,43 @@ internal class ArtStore(private val root: File) {
 
     fun current(): JSONObject = locked { snapshot(loadCurrent()) }
 
+    fun shapes(p: JSONObject, hit: Boolean = false, box: Boolean = false): JSONObject = locked {
+        val snapshot = snapshot(loadCurrent())
+        require(p.getString("documentId") == snapshot.getString("id")) { "工程已切换" }
+        val state = snapshot.getJSONObject("state")
+        val layerId = p.getString("layerId")
+        val layer = ArtShapes.layer(state, layerId)
+        val result = ArtShapes.describe(state, layerId)
+            .put("documentId", snapshot.getString("id")).put("revision", snapshot.getInt("revision"))
+        if (box) {
+            require(ArtShapes.visible(state, layer)) { "矢量层或父组不可见" }
+            val x=p.getDouble("x");val y=p.getDouble("y")
+            val w=p.getDouble("width");val h=p.getDouble("height")
+            require(listOf(x,y,w,h,x+w,y+h).all { it.isFinite() && kotlin.math.abs(it)<=1000000.0 } && w>0 && h>0)
+            val inverse=Matrix();check(ArtShapes.layerMatrix(state,layer).invert(inverse))
+            val clip=android.graphics.Path().apply {
+                addRect(x.toFloat(),y.toFloat(),(x+w).toFloat(),(y+h).toFloat(),android.graphics.Path.Direction.CW)
+                transform(inverse)
+            }
+            result.put("boxedIds",JSONArray(ArtShapes.box(layer,clip,p.optBoolean("contained",true))))
+        }
+        if (hit) {
+            require(ArtShapes.visible(state, layer)) { "矢量层或父组不可见" }
+            val point = floatArrayOf(p.getDouble("x").toFloat(), p.getDouble("y").toFloat())
+            require(point.all { it.isFinite() && kotlin.math.abs(it) <= 1000000f })
+            val inverse = Matrix()
+            check(ArtShapes.layerMatrix(state, layer).invert(inverse))
+            inverse.mapPoints(point)
+            val tolerance = p.optDouble("tolerance", 0.0).toFloat()
+            require(tolerance.isFinite() && tolerance in 0f..1024f)
+            val vector = floatArrayOf(tolerance, 0f); inverse.mapVectors(vector)
+            val localTolerance = kotlin.math.hypot(vector[0], vector[1])
+            require(localTolerance.isFinite() && localTolerance in 0f..1000000f) { "当前图层比例下命中容差过大" }
+            result.put("hitId", ArtShapes.hit(layer, point[0], point[1], localTolerance) ?: JSONObject.NULL)
+        }
+        result
+    }
+
     fun saveDirectorySettings(): JSONObject = locked { saveDirectories.describe() }
 
     fun setSaveDirectory(directory: String): JSONObject = locked { saveDirectories.setDirectory(directory) }
@@ -247,6 +284,10 @@ internal class ArtStore(private val root: File) {
             return ArtMenuOperations.rasterLayer(id, name, asset)
         }
         when (action) {
+            "add_new_shape_layer" -> edit("VECTOR_LAYER_CREATE",
+                JSONObject().put("id", UUID.randomUUID().toString()).put("name", p.getString("name"))
+                    .put("parentId", active?.let { if (it.getString("kind") == "group") it.getString("id") else it.optString("parentId") } ?: "")
+                    .put("select", true))
             "add_new_paint_layer", "add_new_group_layer" -> edit(
                 if (action == "add_new_group_layer") "GROUP_CREATE" else "LAYER_CREATE",
                 JSONObject().put("id", UUID.randomUUID().toString()).put("name", p.getString("name").trim()
@@ -555,6 +596,10 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
+        if (type.startsWith("SHAPE_") || type == "VECTOR_LAYER_CREATE") {
+            require(params.getString("documentId") == doc.getString("id")) { "工程已切换，请重新读取工程" }
+            require(params.has("expectedRevision")) { "矢量操作必须绑定工程版本" }
+        }
         if (params.has("expectedRevision")) {
             require(params.getInt("expectedRevision") == doc.getJSONArray("operations").length()) { "工程已被另一端修改，请刷新后重试" }
         }
@@ -1078,6 +1123,12 @@ internal class ArtStore(private val root: File) {
             return when (operation.getString("type")) {
                 "MENU_LAYER_CHANGE" -> operation.getJSONObject("parameters").getString("label")
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
+                "VECTOR_LAYER_CREATE" -> "添加矢量图层"
+                "SHAPE_CREATE" -> "添加矢量形状"
+                "SHAPE_SELECT" -> "选择形状"
+                "SHAPE_TRANSFORM" -> "变换形状"
+                "SHAPE_DELETE" -> "删除形状"
+                "SHAPE_STYLE" -> "形状样式"
                 "TEXT_CREATE" -> "添加文字"
                 "TEXT_UPDATE" -> "编辑文字"
                 "GROUP_CREATE" -> "新建图层组"
@@ -1199,6 +1250,7 @@ internal class ArtStore(private val root: File) {
             }
         }
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
+        ArtShapes.validateDocument(state)
         return state
     }
 
@@ -1229,6 +1281,19 @@ internal class ArtStore(private val root: File) {
                 layer.put("asset", p.getString("asset")).put("text", JSONObject(text.toString()))
                     .put("x", p.getDouble("x")).put("y", p.getDouble("y"))
                 state.put("selectedLayerId", id)
+            }
+            "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE" ->
+                ArtShapes.edit(state, type, p)
+            "VECTOR_LAYER_CREATE" -> {
+                val id = p.getString("id"); validateId(id)
+                require((0 until layers.length()).none { layers.getJSONObject(it).getString("id") == id })
+                val parent = p.optString("parentId")
+                if (parent.isNotBlank()) require(find(parent).second.getString("kind") == "group")
+                val name = p.optString("name", "矢量图层").trim()
+                require(name.isNotBlank() && name.length <= 100)
+                layers.put(newLayer(id, "vector", name, parent, "").put("shapes", JSONArray()))
+                if (p.optBoolean("select", true)) state.put("selectedLayerId", id)
+                state.put("shapeSelection", JSONObject.NULL)
             }
             "MENU_LAYER_CHANGE" -> ArtMenuOperations.edit(state, p)
             "LAYER_CREATE", "GROUP_CREATE", "IMAGE_IMPORT" -> {
@@ -1363,6 +1428,10 @@ internal class ArtStore(private val root: File) {
                     copy.put("id", mapping.getValue(source.getString("id")))
                     copy.put("parentId", mapping[source.optString("parentId")] ?: source.optString("parentId"))
                     copy.put("name", source.getString("name") + " 副本")
+                    copy.optJSONArray("shapes")?.let { shapes ->
+                        for (i in 0 until shapes.length()) shapes.getJSONObject(i).put("id",
+                            UUID.nameUUIDFromBytes((copy.getString("id") + ":shape:" + i).toByteArray()).toString())
+                    }
                     val strokes = copy.getJSONArray("strokes")
                     for (i in 0 until strokes.length()) {
                         val stroke = strokes.getJSONObject(i)

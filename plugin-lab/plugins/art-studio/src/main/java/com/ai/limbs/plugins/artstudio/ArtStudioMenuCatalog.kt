@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** Source order follows Krita 6.0.4; one inventory serves UI and capability discovery. */
 internal object ArtStudioMenuCatalog {
-    const val VERSION = "0.2.23"
+    const val VERSION = "0.2.24"
     private val definitions = JSONArray(listOf(
         """{
   "id": "Layer",
@@ -82,10 +82,11 @@ internal object ArtStudioMenuCatalog {
         },
         {
           "id": "add_new_shape_layer",
-          "title": "矢量图层",
-          "implemented": false,
+          "title": "矢量图层（基础形状）…",
+          "implemented": true,
           "source": "krita/krita5.xmlgui",
-          "reason": "尚缺可编辑矢量对象、路径或 SVG 引擎"
+          "parameters": [{"name":"name","type":"string","description":"名称","default":"矢量图层"}],
+          "documentWrite": true
         },
         {
           "id": "add_new_adjustment_layer",

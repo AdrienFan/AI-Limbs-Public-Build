@@ -18,6 +18,7 @@ internal object ArtCanvasFeedback {
         name == "menu.execute" ->
             ArtStudioMenuCatalog.find(parameters.getString("action"))?.optBoolean("documentWrite") == true
         name in setOf("text.create", "text.update") -> true
+        name.startsWith("shape.") -> name !in setOf("shape.list", "shape.hit", "shape.box")
         name.startsWith("stroke.") || name.startsWith("transform.") || name.startsWith("selection.") -> true
         name.startsWith("layer.") -> name !in setOf("layer.list", "layer.search")
         name.startsWith("history.") -> name !in setOf("history.list", "history.timeline")

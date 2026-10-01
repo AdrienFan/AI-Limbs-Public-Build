@@ -68,6 +68,9 @@ internal object ArtMenuOperations {
                 put("id", ids.getValue(original.getString("id")))
                 put("parentId", if (original.optString("parentId") in ids)
                     ids.getValue(original.getString("parentId")) else "")
+                optJSONArray("shapes")?.let { shapes ->
+                    for (n in 0 until shapes.length()) shapes.getJSONObject(n).put("id", UUID.randomUUID().toString())
+                }
                 val strokes = getJSONArray("strokes")
                 val strokeIds = mutableMapOf<String, String>()
                 for (n in 0 until strokes.length()) {

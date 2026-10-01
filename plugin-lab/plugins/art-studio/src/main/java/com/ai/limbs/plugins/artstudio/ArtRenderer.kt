@@ -73,6 +73,7 @@ internal object ArtRenderer {
                                 finally { image.recycle() }
                             }
                         }
+                        if (layer.getString("kind") == "vector") ArtShapes.draw(local, layer)
                         val strokes = layer.getJSONArray("strokes")
                         val order = layer.optJSONArray("contentOrder")
                         if (order == null) {
