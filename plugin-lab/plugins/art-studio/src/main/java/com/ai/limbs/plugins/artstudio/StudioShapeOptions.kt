@@ -15,7 +15,7 @@ import java.util.UUID
 @Composable
 internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Boolean,
     color:String,width:Float,multiple:Boolean,onMultiple:(Boolean)->Unit,
-    onEdit:(String,JSONObject)->Unit) {
+    onEdit:(String,JSONObject)->Unit,onPathEdit:()->Unit) {
     val state=snapshot.getJSONObject("state")
     val layer=ArtMenuOperations.layers(state).firstOrNull { it.getString("id")==selectedLayer }
     var captured by remember { mutableStateOf<JSONObject?>(null) }
@@ -48,6 +48,8 @@ internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Bo
     TextButton(onClick={onEdit("SHAPE_SELECT",parameters(ArtShapes.items(layer)
         .filter { it.getBoolean("visible") }.map { it.getString("id") }))},enabled=!busy&&visible) { Text("全选形状") }
     TextButton(onClick={onEdit("SHAPE_SELECT",parameters(emptyList()))},enabled=!busy&&visible) { Text("取消选择") }
+    val singlePath=ids.size==1&&ArtShapes.items(layer).any { it.getString("id")==ids[0]&&it.getString("kind")=="path" }
+    TextButton(onClick=onPathEdit,enabled=!busy&&visible&&singlePath) { Text("编辑路径节点") }
     TextButton(onClick={
         val p=parameters()
         val bounds=ArtShapes.bounds(layer,ids)!!

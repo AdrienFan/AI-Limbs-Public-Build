@@ -415,6 +415,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var freehandMode by remember { mutableStateOf("curve") }
     var freehandPrecision by remember { mutableFloatStateOf(2f) }
     var freehandClosed by remember { mutableStateOf(false) }
+    var bezierEditing by remember { mutableStateOf(false) }
+    var bezierNode by remember { mutableIntStateOf(0) }
+    var bezierNodeType by remember { mutableStateOf("symmetric") }
+    var bezierClosed by remember { mutableStateOf(false) }
     var color by remember { mutableStateOf("#FF161616") }
     var colorHexInput by remember { mutableStateOf(color) }
     var width by remember { mutableFloatStateOf(6f) }
@@ -1345,6 +1349,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.freehandMode = freehandMode; view.freehandPrecision = freehandPrecision
                     view.freehandClosed = freehandClosed
                     view.onFreehand = { p -> if (!busy) perform { store.freehand("AWEI", p) } }
+                    view.bezierEditing = bezierEditing; view.bezierNode = bezierNode
+                    view.bezierNodeType = bezierNodeType; view.bezierClosed = bezierClosed
+                    view.onBezierNode = { bezierNode = it }
+                    view.onBezierCreate = { p -> if (!busy) perform { store.pathCreate("AWEI", p) } }
                     view.image = image
                     view.gridVisible = viewOptions.gridVisible
                     view.pixelGridVisible = viewOptions.pixelGridVisible
@@ -1554,6 +1562,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (tool == "vector_bezier") {
+                                    StudioBezierOptions(current, selected, busy, bezierEditing, bezierNode,
+                                        bezierNodeType, bezierClosed, fillShape, { mode ->
+                                            if (mode != bezierEditing && canvasRef[0]?.bezierHasDraft == true)
+                                                Toast.makeText(context,"请先完成或取消当前路径",Toast.LENGTH_SHORT).show()
+                                            else bezierEditing = mode
+                                        }, { bezierNode = it }, { bezierNodeType = it },
+                                        { bezierClosed = it }, { fillShape = it },
+                                        { canvasRef[0]?.bezierCommand(it) }, ::edit)
+                                }
                                 if (tool == "vector_freehand") {
                                     StudioFreehandOptions(current, selected, busy, freehandMode, freehandPrecision,
                                         freehandClosed, fillShape, { freehandMode = it }, { freehandPrecision = it },
@@ -1561,7 +1579,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 }
                                 if (tool == "shape_select") {
                                     StudioShapeOptions(current, selected, busy, color, width,
-                                        shapeMultiple, { shapeMultiple = it }, ::edit)
+                                        shapeMultiple, { shapeMultiple = it }, ::edit,
+                                        { bezierEditing = true; bezierNode = 0; tool = "vector_bezier" })
                                 }
                                 if (tool == "svg_text") {
                                     Text("点击画布添加文字；点击选中文字编辑。", style = MaterialTheme.typography.labelSmall)
@@ -2950,11 +2969,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
 }
 
 private class StudioCanvas(context: Context) : View(context) {
-    init { contentDescription = "画室画布，可使用所选工具绘画" }
+    init { contentDescription = "画室画布，可使用所选工具绘画";isFocusableInTouchMode = true }
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -2981,6 +3000,15 @@ private class StudioCanvas(context: Context) : View(context) {
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
     private val freehandInteraction = StudioFreehandInteraction(this)
+    private val bezierInteraction = StudioBezierInteraction(this)
+    val bezierHasDraft get() = bezierInteraction.hasDraft
+    var bezierEditing: Boolean = false
+        set(value) { if(field != value) { field = value; bezierInteraction.cancel(); invalidate() } }
+    var bezierNode: Int = 0
+    var bezierNodeType: String = "symmetric"
+    var bezierClosed: Boolean = false
+    var onBezierNode: (Int) -> Unit = {}
+    var onBezierCreate: (JSONObject) -> Unit = {}
     var freehandMode: String = "curve"
     var freehandPrecision: Float = 2f
     var freehandClosed: Boolean = false
@@ -2995,6 +3023,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 field = value
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
+                bezierInteraction.cancel()
                 shapeCreationContext = null
                 points = JSONArray()
                 pathVertices = JSONArray()
@@ -3393,6 +3422,14 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.draw(canvas, active, ids, toScreen, editable)
             }
         }
+        if (tool == "vector_bezier") {
+            val state = scene
+            val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
+            if (state != null && active?.getString("kind") == "vector") {
+                val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
+                bezierInteraction.draw(canvas,state,documentId,sceneRevision,selectedId,toScreen,bezierEditing,bezierNode,bezierClosed)
+            }
+        }
         if (tool == "vector_freehand") {
             val state = scene
             val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
@@ -3430,12 +3467,36 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
 
+    fun bezierCommand(command: String) {
+        if (shapeBusy) return
+        try { bezierInteraction.command(command,documentId,sceneRevision,selectedId,bezierClosed,onBezierCreate) }
+        catch (error: Exception) {
+            android.util.Log.e("ArtStudio","Bezier command failed",error)
+            Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if (tool == "vector_bezier" && keyCode == android.view.KeyEvent.KEYCODE_ESCAPE) {
+            bezierCommand("cancel");return true
+        }
+        if (tool == "vector_bezier" && !bezierEditing) {
+            when(keyCode) {
+                android.view.KeyEvent.KEYCODE_ENTER -> { bezierCommand("finish");return true }
+                android.view.KeyEvent.KEYCODE_ESCAPE -> { bezierCommand("cancel");return true }
+                android.view.KeyEvent.KEYCODE_DEL, android.view.KeyEvent.KEYCODE_FORWARD_DEL -> { bezierCommand("back");return true }
+            }
+        }
+        return super.onKeyDown(keyCode,event)
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (image == null) return true
         if (event.pointerCount >= 2) {
             multitouch = true
             shapeInteraction.cancel()
             freehandInteraction.cancel()
+            bezierInteraction.interrupt()
             shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
             val dy = event.getY(1) - event.getY(0)
@@ -3469,6 +3530,22 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if (tool == "vector_bezier") {
+            if (event.actionMasked == MotionEvent.ACTION_DOWN) requestFocus()
+            val state=scene
+            if (state==null) { bezierInteraction.cancel();return true }
+            try {
+                val active=ArtShapes.layer(state,selectedId)
+                val toScreen=Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state,active)) }
+                return bezierInteraction.touch(event,state,documentId,sceneRevision,selectedId,toScreen,
+                    bezierEditing,bezierNode,bezierNodeType,bezierClosed,shapeBusy,color,brushWidth,opacity,fillShape,
+                    onBezierNode,{ onShapeEdit("SHAPE_SELECT",it) },onBezierCreate,{ onShapeEdit("SHAPE_PATH_EDIT",it) })
+            } catch(error:Exception) {
+                bezierInteraction.cancel()
+                android.util.Log.e("ArtStudio","Bezier interaction failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            }
+        }
         if (tool == "vector_freehand") {
             val state = scene
             if (state == null) { freehandInteraction.cancel(); return true }

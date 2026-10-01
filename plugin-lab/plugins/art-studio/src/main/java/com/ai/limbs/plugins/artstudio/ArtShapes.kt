@@ -71,6 +71,7 @@ internal object ArtShapes {
                 }
                 require(consumed == points.length()) { "路径命令与几何点数量不匹配" }
                 shape.put("closed", shape.optBoolean("closed", false))
+                ArtPathGeometry.validateModes(shape)
             }
             "polygon" -> require(points.length() in 3..2048)
             else -> require(points.length() == 2)
@@ -290,6 +291,14 @@ internal object ArtShapes {
                 layer.getJSONArray("shapes").put(shape);choose(listOf(shape.getString("id")))
             }
             "SHAPE_SELECT" -> choose(ids(p.getJSONArray("ids")))
+            "SHAPE_PATH_EDIT" -> {
+                val id=p.getString("id");val shape=all.firstOrNull { it.getString("id")==id }
+                    ?: error("路径对象不存在")
+                require(!shape.getBoolean("locked")) { "路径对象已锁定" }
+                val result=ArtPathGeometry.edited(shape,p.getJSONArray("edits"))
+                result.keys().forEach { key -> shape.put(key,result.get(key)) }
+                choose(listOf(id))
+            }
             "SHAPE_TRANSFORM" -> {
                 val ids=ids(p.getJSONArray("ids"))
                 transformIds(layer,ids,matrix(p.getJSONArray("matrix")));choose(ids)

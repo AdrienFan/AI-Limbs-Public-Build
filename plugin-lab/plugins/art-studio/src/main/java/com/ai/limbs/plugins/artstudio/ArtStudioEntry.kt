@@ -316,6 +316,12 @@ class ArtStudioEntry : InProcessPluginEntry {
             "x/y 为文档坐标，tolerance 为文档像素，默认0。在指定可见矢量层按实际填充/描边从上向下查找；返回hitId或null，不改变选择。") { p -> store.shapes(p, true) }
         capability("shape.box", "查询框内矢量对象", read,
             "x/y/width/height为文档坐标矩形；contained=true要求完全包含，false选择相交对象。返回boxedIds，可交给shape.select；使用手机同一几何规则，不创建像素选区。") { p -> store.shapes(p, box = true) }
+        capability("path.create", "创建可编辑贝塞尔路径", write,
+            "nodes为逻辑节点数组，每项x/y和可选in/out=[x,y]、type=corner/smooth/symmetric；创建坐标为图层局部。closed/style可选。documentId/expectedRevision/layerId必填；开放路径至少2节点。") { p -> store.pathCreate("LANER",p) }
+        capability("path.nodes", "读取路径节点与控制柄", read,
+            "documentId/layerId/id必填；返回对象局部nodes、closed、revision和objectToDocument矩阵。节点编号是零基数组索引，编辑前刷新。") { p -> store.pathNodes(p) }
+        capability("path.edit", "编辑贝塞尔路径节点", write,
+            "documentId/expectedRevision/layerId/id/edits必填；edits为1至64个顺序动作。move_node(node,x,y)、move_handle(node,side=in/out,x,y)、node_type(node,type=corner/smooth/symmetric)、insert_node(segment,t默认0.5)、delete_node(node)、segment_type(segment,type=line/curve)、closed(value)。坐标为对象局部，节点/段零基。一次原子提交，锁定和过期拒绝。") { p -> store.apply("LANER","SHAPE_PATH_EDIT",p) }
         capability("shape.freehand", "绘制矢量徒手路径", write,
             "points为2至2048个图层局部采样点；mode=raw/curve/straight，precision=0.25至32（默认2），closed可选；style支持fill/stroke/strokeWidth/opacity。保存拟合后的可编辑路径，不重算回放；documentId/expectedRevision/layerId必填。") { p -> store.freehand("LANER", p) }
         capability("shape.create", "创建可编辑矢量形状", write,
@@ -522,6 +528,10 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "shape.hit" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"), p("tolerance", "number", true))
         "shape.box" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"),
             p("width", "number"), p("height", "number"), p("contained", "boolean", true))
+        "path.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
+            p("nodes","array"),p("closed","boolean",true),p("style","object",true))
+        "path.nodes" -> listOf(p("documentId"),p("layerId"),id)
+        "path.edit" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),id,p("edits","array"))
         "shape.freehand" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"),
             p("points", "array"), p("mode", optional = true), p("precision", "number", true),
             p("closed", "boolean", true), p("style", "object", true))

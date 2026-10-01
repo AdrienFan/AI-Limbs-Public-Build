@@ -593,6 +593,25 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+    fun pathCreate(actor:String,p:JSONObject):JSONObject = apply(actor,"SHAPE_CREATE",JSONObject()
+        .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
+        .put("layerId",p.getString("layerId")).put("shape",ArtPathGeometry.create(p)))
+
+    fun pathNodes(p:JSONObject):JSONObject = locked {
+        val snapshot=snapshot(loadCurrent());require(p.getString("documentId")==snapshot.getString("id")) { "工程已切换" }
+        val state=snapshot.getJSONObject("state");val layer=ArtShapes.layer(state,p.getString("layerId"))
+        val shape=ArtShapes.items(layer).firstOrNull { it.getString("id")==p.getString("id") }
+            ?: error("路径对象不存在")
+        val nodes=ArtPathGeometry.nodes(shape)
+        val transform=ArtShapes.layerMatrix(state,layer).apply { preConcat(ArtShapes.matrix(shape.getJSONArray("matrix"))) }
+        JSONObject().put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
+            .put("layerId",layer.getString("id")).put("id",shape.getString("id"))
+            .put("nodes",ArtPathGeometry.json(nodes)).put("closed",shape.getBoolean("closed"))
+            .put("objectToDocument",ArtShapes.encode(transform)).put("coordinateSpace","object-local")
+            .put("locked",ArtMenuOperations.isLocked(state,layer)||shape.getBoolean("locked"))
+            .put("visible",ArtShapes.visible(state,layer)&&shape.getBoolean("visible")&&shape.getDouble("opacity")>0.0)
+    }
+
     fun freehand(actor:String, params:JSONObject):JSONObject {
         // Fit on the caller's worker thread; revision checks and the atomic write remain in apply.
         val shape=ArtFreehand.create(params)
@@ -1135,6 +1154,7 @@ internal class ArtStore(private val root: File) {
                 "SHAPE_CREATE" -> "添加矢量形状"
                 "SHAPE_SELECT" -> "选择形状"
                 "SHAPE_TRANSFORM" -> "变换形状"
+                "SHAPE_PATH_EDIT" -> "编辑路径节点"
                 "SHAPE_DELETE" -> "删除形状"
                 "SHAPE_STYLE" -> "形状样式"
                 "TEXT_CREATE" -> "添加文字"
@@ -1290,7 +1310,7 @@ internal class ArtStore(private val root: File) {
                     .put("x", p.getDouble("x")).put("y", p.getDouble("y"))
                 state.put("selectedLayerId", id)
             }
-            "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE" ->
+            "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT" ->
                 ArtShapes.edit(state, type, p)
             "VECTOR_LAYER_CREATE" -> {
                 val id = p.getString("id"); validateId(id)
