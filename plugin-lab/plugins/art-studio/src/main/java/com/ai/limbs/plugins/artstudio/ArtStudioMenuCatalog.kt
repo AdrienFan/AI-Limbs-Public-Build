@@ -6,7 +6,7 @@ import org.json.JSONObject
 
 /** Source order follows Krita 6.0.4; one inventory serves UI and capability discovery. */
 internal object ArtStudioMenuCatalog {
-    const val VERSION = "0.2.24"
+    const val VERSION = "0.2.25"
     private val definitions = JSONArray(listOf(
         """{
   "id": "Layer",

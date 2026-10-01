@@ -6,6 +6,7 @@ import org.json.JSONObject
 /** The page and Laner's read-only catalog share one inventory of toolbox slots. */
 internal object ArtToolCatalog {
     val implemented get() = listOf(
+        Triple("vector_freehand", "矢量徒手路径", "〽"),
         Triple("shape_select", "形状选择（基础矢量）", "↖"),
         Triple("ink", "自由画笔", "✎"),
         Triple("pencil", "铅笔", "✏"),
@@ -47,8 +48,6 @@ internal object ArtToolCatalog {
     val pending get() = listOf(
         PendingTool("svg_text_advanced", "SVG 文字高级排版", "T",
             "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"),
-        PendingTool("vector_freehand", "矢量徒手路径", "〽",
-            "plugins/tools/basictools/kis_tool_pencil.h"),
         PendingTool("vector_bezier", "可编辑贝塞尔路径", "⌁",
             "plugins/tools/basictools/kis_tool_path.h"),
         PendingTool("vector_calligraphy", "矢量书法笔", "✒",

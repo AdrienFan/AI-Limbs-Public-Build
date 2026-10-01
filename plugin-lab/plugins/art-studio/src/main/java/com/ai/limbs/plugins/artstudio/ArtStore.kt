@@ -593,6 +593,14 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+    fun freehand(actor:String, params:JSONObject):JSONObject {
+        // Fit on the caller's worker thread; revision checks and the atomic write remain in apply.
+        val shape=ArtFreehand.create(params)
+        return apply(actor,"SHAPE_CREATE",JSONObject().put("documentId",params.getString("documentId"))
+            .put("expectedRevision",params.getInt("expectedRevision")).put("layerId",params.getString("layerId"))
+            .put("shape",shape))
+    }
+
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()

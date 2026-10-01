@@ -35,6 +35,7 @@ internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Bo
     val visible=ArtShapes.visible(state,layer)
     val canEdit=ids.isNotEmpty()&&visible&&!ArtMenuOperations.isLocked(state,layer)&&
         ArtShapes.items(layer).filter { it.getString("id") in ids }.none { it.getBoolean("locked") }
+    val canFill = ArtShapes.items(layer).any { it.getString("id") in ids && ArtShapes.canFill(it) }
     fun parameters(selected:List<String> = ids):JSONObject = JSONObject()
         .put("documentId",snapshot.getString("id")).put("expectedRevision",snapshot.getInt("revision"))
         .put("layerId",selectedLayer).put("ids",JSONArray(selected))
@@ -53,8 +54,8 @@ internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Bo
         p.put("pivotX",bounds.centerX().toDouble()).put("pivotY",bounds.centerY().toDouble())
         captured=p;dx="0";dy="0";sx="1";sy="1";angle="0"
     },enabled=!busy&&canEdit) { Text("数值变换…") }
-    TextButton(onClick={style(JSONObject().put("fill",color))},enabled=!busy&&canEdit) { Text("填充前景色") }
-    TextButton(onClick={style(JSONObject().put("fill","#00000000"))},enabled=!busy&&canEdit) { Text("取消填充") }
+    TextButton(onClick={style(JSONObject().put("fill",color))},enabled=!busy&&canEdit&&canFill) { Text("填充前景色") }
+    TextButton(onClick={style(JSONObject().put("fill","#00000000"))},enabled=!busy&&canEdit&&canFill) { Text("取消填充") }
     TextButton(onClick={style(JSONObject().put("stroke",color).put("strokeWidth",width.toDouble()))},
         enabled=!busy&&canEdit) { Text("应用描边") }
     TextButton(onClick={onEdit("SHAPE_DELETE",parameters())},enabled=!busy&&canEdit) { Text("删除形状") }

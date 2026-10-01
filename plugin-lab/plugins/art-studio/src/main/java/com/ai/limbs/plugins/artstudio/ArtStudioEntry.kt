@@ -316,8 +316,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             "x/y 为文档坐标，tolerance 为文档像素，默认0。在指定可见矢量层按实际填充/描边从上向下查找；返回hitId或null，不改变选择。") { p -> store.shapes(p, true) }
         capability("shape.box", "查询框内矢量对象", read,
             "x/y/width/height为文档坐标矩形；contained=true要求完全包含，false选择相交对象。返回boxedIds，可交给shape.select；使用手机同一几何规则，不创建像素选区。") { p -> store.shapes(p, box = true) }
-        capability("shape.create", "创建可编辑基础形状", write,
-            "shape 为对象：kind=line/rectangle/ellipse/polygon，points为局部坐标点；前三类2点、多边形3至2048点。fill/stroke为#AARRGGBB，strokeWidth为0.1至512，opacity为0至1；可选matrix=[a,b,c,d,tx,ty]。ID自动生成。documentId/expectedRevision/layerId必填。") { p ->
+        capability("shape.freehand", "绘制矢量徒手路径", write,
+            "points为2至2048个图层局部采样点；mode=raw/curve/straight，precision=0.25至32（默认2），closed可选；style支持fill/stroke/strokeWidth/opacity。保存拟合后的可编辑路径，不重算回放；documentId/expectedRevision/layerId必填。") { p -> store.freehand("LANER", p) }
+        capability("shape.create", "创建可编辑矢量形状", write,
+            "shape 为对象：kind=line/rectangle/ellipse/polygon/path，points为局部坐标点；基础前三类2点、多边形3至2048点。path需commands=[L或C...]，起点占1点，L再占1点，C占控制点1/2和终点3点，closed可选，最多2048段/6145点。fill/stroke为#AARRGGBB，strokeWidth为0.1至512，opacity为0至1；可选matrix=[a,b,c,d,tx,ty]。ID自动生成。documentId/expectedRevision/layerId必填。") { p ->
             val shape = JSONObject(p.getJSONObject("shape").toString()).put("id", UUID.randomUUID().toString())
             p.put("shape", shape); store.apply("LANER", "SHAPE_CREATE", p)
         }
@@ -520,6 +522,9 @@ private fun parametersFor(name: String): List<InProcessCapabilityParameterSpec> 
         "shape.hit" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"), p("tolerance", "number", true))
         "shape.box" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"),
             p("width", "number"), p("height", "number"), p("contained", "boolean", true))
+        "shape.freehand" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"),
+            p("points", "array"), p("mode", optional = true), p("precision", "number", true),
+            p("closed", "boolean", true), p("style", "object", true))
         "shape.create" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("shape", "object"))
         "shape.select", "shape.delete" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"))
         "shape.transform" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("matrix", "array"))

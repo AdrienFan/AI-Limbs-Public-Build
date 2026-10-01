@@ -12,7 +12,7 @@ import org.json.JSONObject
 
 /** Geometry remains editable source; no pixels are used as object identity. */
 internal object ArtShapes {
-    val kinds = setOf("line", "rectangle", "ellipse", "polygon")
+    val kinds = setOf("line", "rectangle", "ellipse", "polygon", "path")
     private val identity = listOf(1.0, 0.0, 0.0, 1.0, 0.0, 0.0)
     fun ids(array: JSONArray): List<String> = (0 until array.length()).map { array.getString(it) }
     fun items(layer: JSONObject): List<JSONObject> {
@@ -58,7 +58,23 @@ internal object ArtShapes {
         require(shape.getString("id").matches(Regex("[a-f0-9-]{36}"))) { "形状编号无效" }
         val kind = shape.getString("kind"); require(kind in kinds) { "尚未实现此矢量形状" }
         val points = shape.getJSONArray("points")
-        require(if (kind == "polygon") points.length() in 3..2048 else points.length() == 2)
+        when (kind) {
+            "path" -> {
+                require(points.length() in 2..ArtFreehand.MAX_GEOMETRY_POINTS)
+                val commands = shape.getJSONArray("commands")
+                require(commands.length() in 1..ArtFreehand.MAX_SEGMENTS)
+                var consumed = 1
+                for (n in 0 until commands.length()) consumed += when (commands.getString(n)) {
+                    "L" -> 1
+                    "C" -> 3
+                    else -> error("路径仅支持直线L和三次贝塞尔C")
+                }
+                require(consumed == points.length()) { "路径命令与几何点数量不匹配" }
+                shape.put("closed", shape.optBoolean("closed", false))
+            }
+            "polygon" -> require(points.length() in 3..2048)
+            else -> require(points.length() == 2)
+        }
         for (n in 0 until points.length()) {
             val p = points.getJSONArray(n)
             require(p.length() == 2 && (0..1).all {
@@ -79,7 +95,7 @@ internal object ArtShapes {
         matrix(shape.getJSONArray("matrix"))
         val rawBounds = RectF(); path(shape).computeBounds(rawBounds,true)
         require(rawBounds.width() > 0f || rawBounds.height() > 0f) { "请画出非零大小的形状" }
-        if (kind != "line") require(rawBounds.width() > 0f && rawBounds.height() > 0f)
+        if (kind in setOf("rectangle", "ellipse", "polygon")) require(rawBounds.width() > 0f && rawBounds.height() > 0f)
         val transformed=bounds(shape)
         require(listOf(transformed.left,transformed.top,transformed.right,transformed.bottom)
             .all { it.isFinite() && kotlin.math.abs(it)<=1000000f }) { "形状变换超出可编辑坐标范围" }
@@ -120,10 +136,29 @@ internal object ArtShapes {
                     for(n in 1 until a.length()) { val p=a.getJSONArray(n);lineTo(p.getDouble(0).toFloat(),p.getDouble(1).toFloat()) }
                     close()
                 }
+                "path" -> {
+                    moveTo(x,y)
+                    val commands=shape.getJSONArray("commands")
+                    var index=1
+                    fun next():FloatArray {
+                        val p=a.getJSONArray(index++)
+                        return floatArrayOf(p.getDouble(0).toFloat(),p.getDouble(1).toFloat())
+                    }
+                    for(n in 0 until commands.length()) when(commands.getString(n)) {
+                        "L" -> { val p=next();lineTo(p[0],p[1]) }
+                        "C" -> { val c1=next();val c2=next();val p=next()
+                            cubicTo(c1[0],c1[1],c2[0],c2[1],p[0],p[1]) }
+                        else -> error("不支持的路径命令")
+                    }
+                    if(shape.getBoolean("closed")) close()
+                }
                 else -> error("不支持的形状")
             }
         }
     }
+    fun canFill(shape:JSONObject):Boolean = shape.getString("kind") != "line" &&
+        (shape.getString("kind") != "path" || shape.getBoolean("closed"))
+
     fun draw(canvas: Canvas, layer: JSONObject) {
         for(shape in items(layer)) {
             if(!shape.getBoolean("visible") || shape.getDouble("opacity")==0.0) continue
@@ -137,7 +172,7 @@ internal object ArtShapes {
                 val c=Color.parseColor(shape.getString(key))
                 paint.color=c;paint.alpha=(Color.alpha(c)*shape.getDouble("opacity")).toInt()
             }
-            if(shape.getString("kind")!="line") {
+            if(canFill(shape)) {
                 setColor("fill");paint.style=Paint.Style.FILL;canvas.drawPath(path,paint)
             }
             setColor("stroke");paint.style=Paint.Style.STROKE;canvas.drawPath(path,paint)
@@ -146,7 +181,7 @@ internal object ArtShapes {
     }
     private fun coverage(shape:JSONObject):Path {
         val source=path(shape);val area=Path()
-        if(shape.getString("kind")!="line" && Color.alpha(Color.parseColor(shape.getString("fill")))>0)
+        if(canFill(shape) && Color.alpha(Color.parseColor(shape.getString("fill")))>0)
             area.addPath(source)
         if(Color.alpha(Color.parseColor(shape.getString("stroke")))>0) {
             val outline=Path()

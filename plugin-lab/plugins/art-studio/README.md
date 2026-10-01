@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.24 源码；基础矢量形状与选择，待编译验收）
+# AI Limbs 画室（0.2.25 源码；矢量徒手路径，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -66,6 +66,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 | 斜头书法笔（栅格） | 固定角度的宽笔尖沿触笔轨迹生成有笔压变化的带状笔画；保存为绘画层笔画 | stroke.add，tool=calligraphy，可选 nibAngle（0–180°） |
 | 直线、矩形、椭圆 | 拖动生成线框；矩形、椭圆可用前景色填充；以两端点记录到当前绘画层 | stroke.add，tool=line/rectangle/ellipse，闭合形状可选 fillShape |
 | 多边形、折线 | 逐点点击，至少 3 / 2 个顶点后双击最后一个点结束；多边形闭合后可用前景色填充 | stroke.add，tool=polygon/polyline，多边形可选 fillShape |
+| 矢量徒手路径 | 在矢量层按住拖动，抬手生成原始折线、拟合曲线或直线化路径；可闭合填色，之后用形状选择修改整体 | shape.freehand；shape.create 支持 path 几何 |
 | 基础矢量形状与形状选择 | 在矢量层使用直线、矩形、椭圆和多边形工具；选择工具支持点选、方向框选、多选、移动、缩放与旋转 | layer.vector、shape.create/list/hit/box/select/transform/style/delete |
 | 三次贝塞尔曲线 | 默认依次点起点、两处控制点与终点，第四点保存；打开连续曲线模式后每三个点接一段，完成的端点上双击保存，未完成段只预览 | stroke.add，tool=bezier，points 为 1+3n 点（4–1024 点） |
 | 颜色取样 | 点击合成画布更新当前笔色；半径可设为 0–32 px，圆形范围内的像素按透明度混合；可在合成画布与可见根绘画／图像层之间切换，还可选取样色与当前色的混合比例 | color.sample（画布像素坐标，可选 radius、blend、sampleMerged；blend<100 需 baseColor，sampleMerged=false 需 layerId） |
@@ -83,7 +84,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 | 待实现工具 | 工具 ID | Krita 6.0.4 源码入口 | 所需基础能力 |
 | --- | --- | --- | --- |
 | SVG 文字高级排版 | svg_text_advanced | plugins/tools/svgtexttool/SvgTextToolFactory.cpp | 完整 SVG 排版、富文本与源码编辑；基础可编辑文字已单独实现 |
-| 矢量徒手路径、可编辑贝塞尔路径、矢量书法笔 | vector_freehand、vector_bezier、vector_calligraphy | plugins/tools/basictools/kis_tool_pencil.h、kis_tool_path.h；plugins/tools/karbonplugins/tools/CalligraphyTool/KarbonCalligraphyToolFactory.cpp | 可编辑路径与控制点 |
+| 可编辑贝塞尔路径、矢量书法笔 | vector_bezier、vector_calligraphy | plugins/tools/basictools/kis_tool_path.h；plugins/tools/karbonplugins/tools/CalligraphyTool/KarbonCalligraphyToolFactory.cpp | 可编辑路径与控制点 |
 | 参考图像 | reference_images | plugins/tools/defaulttool/referenceimagestool/ToolReferenceImages.h | 参考图像资源 |
 | 绘画辅助尺规 | assistant | plugins/assistants/Assistants/assistant_tool.cc | 辅助对象与笔画约束 |
 | 智能修补、上色蒙版编辑 | smart_patch、colorize_mask | plugins/tools/tool_smart_patch/kis_tool_smart_patch.h；plugins/tools/tool_lazybrush/kis_tool_lazy_brush.h | 区域修补与上色蒙版 |
@@ -92,7 +93,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 清单单一来源为 ArtToolCatalog.kt。兰儿读取 toolbox.catalog 可得到各项 id、label、implemented 与 status；待实现项还返回 Krita 相对源码路径，且没有执行能力。现有工具的 status=basic 只表示本画室已有可用入口，不表示已达到 Krita 完整行为。每次真正完成工具时，应在清单中把它从 pending 移至 implemented，并同时接通画布、工程记录与兰儿入口；保留的灰色位置不能冒充实现。
 
-这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、可编辑贝塞尔控制点/自由路径、书法笔矢量轮廓及速度调角、高级矢量路径、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
+这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、可编辑贝塞尔控制点/路径节点、书法笔矢量轮廓及速度调角、高级矢量路径、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
 
 ## 右侧手风琴布局
 
@@ -350,3 +351,27 @@ image.formats 返回格式、扩展名、MIME、系统声明的 decoderAvailable
 这是基础矢量对象阶段，未实现 SVG 导入、可编辑贝塞尔控制点、自由路径、渐变网格、布尔运算、斜切手柄或叠放对象循环选择。相关高级工具继续灰色。现有文字仍是独立文字层，不能用形状选择编辑。含新矢量操作的工程需要新版本读取，旧版本不能编辑这些新操作。
 
 已做源码与差异审查。后续编译安装后验收：四类对象的创建、透明填充与细描边命中、双方向框选、多选、控制柄与数值变换、锁定及隐藏父组、旋转/缩放视图与嵌套组、手机与兰儿并发冲突、复制删除、撤销重做、保存重开、图层与工具缩略图反馈，并确认旧图片、文字和绘画层行为。
+
+## 0.2.25 矢量徒手路径
+
+基于 0b7bd269 的 0.2.24 迭代，保留基础矢量对象和形状选择，以及此前的字体、格式、缩放改动。versionCode 28，applicationId com.ai.limbs.payload.artstudio.v0225。只改画室插件，不新增宿主依赖。本轮未编译、测试、推送或安装。
+
+### 手机操作
+
+新建或选择矢量层，点击左栏「矢量徒手路径」。工具选项可新建矢量层，并选择「原始轨迹」「拟合曲线」「直线化」；原始模式保留采样折线，曲线模式生成分段三次贝塞尔路径，直线化按距离误差简化折线。精度为 0.25–32 个图层局部像素，默认 2；值越小越贴近采样，原始模式不使用该值。直线化参数不是 Krita 的角度合并阈值。
+
+按住拖动显示原始轨迹预览，抬手后在后台拟合并一次保存；最终曲线与预览可能不同。勾选「闭合路径」或抬手时按 Shift 闭合；「闭合填色」使用前景色。开放路径只描边，闭合路径才能填充。绘制使用当前前景色、描边宽度和不透明度，不模拟矢量笔压宽度或笔刷纹理。
+
+画完切到「形状选择」即可点选、框选、多选，移动、缩放、旋转、调整样式或删除。节点/控制柄编辑、已有路径端点接续和矢量书法笔仍未实现。绘画层行为保留；该工具明确要求矢量层，不将它自动变成栅格笔画。
+
+### 兰儿入口与保存格式
+
+shape.freehand 参数：documentId、expectedRevision、layerId、points 必填；points 是 2–2048 个图层局部 [x,y] 采样点。mode 为 raw/curve/straight，precision 默认为 2，closed 默认为 false；style 支持 fill/stroke（#AARRGGBB）、strokeWidth（0.1–512）、opacity（0–1）。重复相邻点不产生额外几何，闭合输入至少三个不同位置。拟合精度约束采样点误差，不承诺连续轨迹的全局距离或自动保留每个微小角点；数值过大可能抹掉很小的轮廓，应降低精度。
+
+shape.create 也接受 kind=path：points 第一个是起点，commands 逐段给出 L/C；L 消耗一个终点，C 依次消耗两个控制点和一个终点，closed 指定闭合。每条路径最多 2048 段、6145 几何点；单层仍限制 512 对象、32768 几何点。shape.list 返回完整几何及 freehand 的模式/精度/采样数量元数据，可沿用 shape.hit/box/select/transform/style/delete。
+
+ArtFreehand 在写操作前生成几何，Store 只把最终路径、工程版本和图层写入 SHAPE_CREATE 日志，避免重复保存采样数组或回放重拟合。渲染、图层缩图、命中和框选使用同一 ArtShapes 路径；保存、撤销/重做及复制沿用 0.2.24 链路，成功 AI 写操作附原有缩略图。手机采样包含历史触摸点，按下捕获工程/图层/工具参数，释放绑定版本提交；绘制中另端修改或滚轮改变坐标系会中止，双指手势取消轨迹。超出采样上限明确报错，不静默删点。拟合采用迭代分段和受正则约束的最小二乘控制点求解，绘制与预览不依赖默认字体。
+
+### 待编译后验收
+
+源码与差异审查已完成，未执行构建或测试。后续检查三种模式、小精度/大精度、重复点/点击零轨迹、闭合轮廓与开放水平线、细描边命中和填充区域框选、旋转视图及父组、锁定隐藏、双指取消/滚轮中止、手机与 AI 并发、采样上限、复制/变换/撤销/保存重开和缩略图，同时确认旧栅格画笔、基础形状与文字。新路径工程需 0.2.25 或之后版本读取，旧版本不支持 path。

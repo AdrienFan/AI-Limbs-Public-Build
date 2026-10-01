@@ -412,6 +412,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var textFonts by remember { mutableStateOf(JSONArray()) }
     var tool by remember { mutableStateOf("ink") }
     var shapeMultiple by remember { mutableStateOf(false) }
+    var freehandMode by remember { mutableStateOf("curve") }
+    var freehandPrecision by remember { mutableFloatStateOf(2f) }
+    var freehandClosed by remember { mutableStateOf(false) }
     var color by remember { mutableStateOf("#FF161616") }
     var colorHexInput by remember { mutableStateOf(color) }
     var width by remember { mutableFloatStateOf(6f) }
@@ -1339,6 +1342,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.scene = state; view.sceneRevision = current.getInt("revision")
                     view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
+                    view.freehandMode = freehandMode; view.freehandPrecision = freehandPrecision
+                    view.freehandClosed = freehandClosed
+                    view.onFreehand = { p -> if (!busy) perform { store.freehand("AWEI", p) } }
                     view.image = image
                     view.gridVisible = viewOptions.gridVisible
                     view.pixelGridVisible = viewOptions.pixelGridVisible
@@ -1548,6 +1554,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                if (tool == "vector_freehand") {
+                                    StudioFreehandOptions(current, selected, busy, freehandMode, freehandPrecision,
+                                        freehandClosed, fillShape, { freehandMode = it }, { freehandPrecision = it },
+                                        { freehandClosed = it }, { fillShape = it }, ::edit)
+                                }
                                 if (tool == "shape_select") {
                                     StudioShapeOptions(current, selected, busy, color, width,
                                         shapeMultiple, { shapeMultiple = it }, ::edit)
@@ -2943,7 +2954,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -2969,6 +2980,11 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeCreationContext: JSONObject? = null
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
+    private val freehandInteraction = StudioFreehandInteraction(this)
+    var freehandMode: String = "curve"
+    var freehandPrecision: Float = 2f
+    var freehandClosed: Boolean = false
+    var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
     var selection: JSONObject? = null
@@ -2978,6 +2994,7 @@ private class StudioCanvas(context: Context) : View(context) {
             if (field != value) {
                 field = value
                 shapeInteraction.cancel()
+                freehandInteraction.cancel()
                 shapeCreationContext = null
                 points = JSONArray()
                 pathVertices = JSONArray()
@@ -3376,6 +3393,14 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.draw(canvas, active, ids, toScreen, editable)
             }
         }
+        if (tool == "vector_freehand") {
+            val state = scene
+            val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
+            if (state != null && active?.getString("kind") == "vector") {
+                val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
+                freehandInteraction.draw(canvas, toScreen, documentId, sceneRevision, selectedId)
+            }
+        }
         if (points.length() > 0 && tool !in listOf("pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val preview = JSONObject().put("points", points).put("tool", tool)
@@ -3410,6 +3435,7 @@ private class StudioCanvas(context: Context) : View(context) {
         if (event.pointerCount >= 2) {
             multitouch = true
             shapeInteraction.cancel()
+            freehandInteraction.cancel()
             shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
             val dy = event.getY(1) - event.getY(0)
@@ -3443,6 +3469,21 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if (tool == "vector_freehand") {
+            val state = scene
+            if (state == null) { freehandInteraction.cancel(); return true }
+            try {
+                val active = ArtShapes.layer(state, selectedId)
+                val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
+                return freehandInteraction.touch(event, toScreen, state, documentId, sceneRevision, selectedId,
+                    shapeBusy, freehandMode, freehandPrecision, freehandClosed, fillShape, color, brushWidth, opacity, onFreehand)
+            } catch (error: Exception) {
+                freehandInteraction.cancel()
+                android.util.Log.e("ArtStudio", "Freehand path failed", error)
+                Toast.makeText(context, error.message, Toast.LENGTH_SHORT).show()
+                return true
+            }
+        }
         if (tool == "shape_select") {
             val state = scene
             val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
