@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Matrix
 import android.graphics.Paint
 import android.graphics.Path
+import android.view.KeyEvent
 import android.view.MotionEvent
 import android.view.View
 import android.widget.Toast
@@ -103,8 +104,12 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
             val o=ArtMagneticSelection.options(options)
             require(image.reference==o.getString("reference") && image.filterRadius==o.getInt("filterRadius"))
             require(m.invert(inverse));matrix=Matrix(m);frozenImage=image
-            val mode=when {event.isShiftPressed && event.isAltPressed->"intersect";event.isCtrlPressed->"replace"
-                event.isShiftPressed->"add";event.isAltPressed->"subtract";else->o.getString("mode")}
+            // MotionEvent exposes modifier bits via metaState, not KeyEvent convenience properties.
+            val shift=event.metaState and KeyEvent.META_SHIFT_MASK!=0
+            val alt=event.metaState and KeyEvent.META_ALT_MASK!=0
+            val ctrl=event.metaState and KeyEvent.META_CTRL_MASK!=0
+            val mode=when {shift && alt->"intersect";ctrl->"replace"
+                shift->"add";alt->"subtract";else->o.getString("mode")}
             capture=o.put("documentId",documentId).put("expectedRevision",revision).put("layerId",layerId).put("mode",mode)
             commit=onCommit;onDraft(true)
         }

@@ -58,7 +58,8 @@ internal fun StudioComicPanelOptions(snapshot: JSONObject,layerId: String,busy: 
         }
         if(settings.getBoolean("automatic")) {
             for((key,label) in listOf("horizontal" to "横向","vertical" to "竖向","diagonal" to "斜向")) {
-                Text("$label使用")
+                // Braces keep the following Chinese text out of the Kotlin identifier.
+                Text("${label}使用")
                 Row(Modifier.horizontalScroll(rememberScrollState())) {
                     ArtComicPanels.presets.forEach {(id,name)->FilterChip(selected=settings.getString(key)==id,
                         enabled=!busy,onClick={set(key,id)},label={Text(name)})}

@@ -1,4 +1,4 @@
-# AI Limbs 画室（0.2.37 源码；连续区域、相似色和磁性套索选区，待编译验收）
+# AI Limbs 画室（0.2.38 源码；修正选区输入与漫画分格编译错误，待编译验收）
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
@@ -595,3 +595,11 @@ smart_patch 从灰色工具格升级为基础局部纹理修补。单击选中�
 AI 新入口 selection.color_info、selection.contiguous、selection.similar、selection.magnetic_info、selection.magnetic_trace、selection.magnetic_create。trace 是只读吸附路径预览，create 才写选区。写操作必填 documentId、expectedRevision、layerId；成功自动附带带轮廓的256像素缩图，与共享撤销及保存回放相同。二值扫描段不是软覆盖蒙版，先前约定的抗锯齿和羽化仍延后。
 
 本轮仅修改画室插件，版本0.2.37 / versionCode40 / appId v0237；包括此前0.2.29–0.2.36未编译改动。源代码检查后提交云端，编译结果与手机交互效果仍待验收。
+
+## 0.2.37 云端编译错误修正（0.2.38）
+
+云端 Run 36853168556 在 Kotlin 编译阶段失败：颜色选区和磁性套索把 KeyEvent 的 isShiftPressed/isAltPressed/isCtrlPressed 属性用在 MotionEvent 上；漫画分格的 "$label使用" 将中文连同 label 解析为变量名。
+
+修正为 MotionEvent.metaState 与 KeyEvent.META_SHIFT_MASK/META_ALT_MASK/META_CTRL_MASK 的位运算，覆盖左右修饰键，保留 Shift 添加、Alt 相减、Shift+Alt 相交和 Ctrl 替换；中文紧接变量时使用大括号插值。未更改工具能力、参数协议、宿主依赖或基座。
+
+版本0.2.38 / versionCode41 / appId v0238。提交前执行源码一致性和正式能力校验，提交后执行来源校验，随后重新推送既有云端工作流；编译和实机结果仍待验收。
