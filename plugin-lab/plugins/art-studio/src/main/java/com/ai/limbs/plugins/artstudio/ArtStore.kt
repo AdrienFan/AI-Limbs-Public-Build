@@ -2106,8 +2106,8 @@ internal class ArtStore(private val root: File) {
         } finally { temp.delete() }
     }
 
-    private companion object {
-        val processLock = Any()
+    internal companion object {
+        private val processLock = Any()
         const val MAX_IMAGE_INPUT_BYTES = 8 * 1024 * 1024
         const val MAX_ASSET_BYTES = 64 * 1024 * 1024
     }

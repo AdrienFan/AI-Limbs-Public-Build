@@ -18,10 +18,13 @@ status: source-ready
 - [x] 实现工具箱点击添加及选中文字重新编辑
 - [x] 更新能力声明、版本与文档，静态审查
 
-本轮未授权编译、推送、安装或实机验收。
+后续用户已授权提交云端编译；0.2.20 编译失败，安装与实机验收仍待进行。
 
 [DONE] 0.2.20 源码与静态检查完成。versionCode 23，applicationId .v0220，保留0.2.19格式优化。78字面能力/94声明，216菜单叶子/65共享实现，git diff --check通过。源码完成勾选不包含编译与实机验收。
 
 待安装验收：中文/英文混排、缺字明确提示、字体选择、多行及对齐、选中后编辑、锁定拒绝、两端过期编辑拒绝、撤销重做、保存重新打开、复制图层、移动/旋转/缩放和自动图片回执；对照插件进程确认文字操作不触发重启。
 
 字体来源审查：AOSP Font.cpp 的枚举调用 minikin SystemFonts::getFontSet，字体集合来自已注册的 mCollections，不能假设后台进程已初始化。实现直接读取 /system/etc/fonts.xml 的 CJK 家族，用 Font.Builder 加载声明的文件、ttcIndex、weight/slant/axes；不调用 SystemFonts.getAvailableFonts、Typeface 或隐藏初始化接口。字体配置或声明文件不可用时明确报错。
+
+
+0.2.21 编译修复：依据任务 36802315874 的 Kotlin 错误日志，将 ArtStore 图片限额 companion 改为 internal、保留 processLock 私有；缩小确认 perform 调用改为命名参数，避免新增 onSuccess 参数误绑定。版本码 24，applicationId .v0221；继续提交云端编译，不监控构建进度。

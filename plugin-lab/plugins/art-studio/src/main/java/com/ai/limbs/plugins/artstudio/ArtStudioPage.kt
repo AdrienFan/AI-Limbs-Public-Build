@@ -2384,7 +2384,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 val action = requireNotNull(resizeAction)
                 val confirmation = plan.getJSONObject("confirmation")
                 resizeRequest = null; resizeAction = null
-                perform(confirmation, action)
+                perform(confirmation = confirmation, action = action)
             }) { Text("按建议尺寸缩小后打开") } },
             dismissButton = { TextButton(onClick = { resizeRequest = null; resizeAction = null }) { Text("取消") } })
     }
