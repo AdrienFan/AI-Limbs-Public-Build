@@ -18,8 +18,8 @@ internal object ArtMagneticSelection {
         val filterRadius: Int,val rect: Rect,val edges: FloatArray)
     fun defaults()=JSONObject().put("mode","replace").put("reference","visible").put("filterRadius",1)
         .put("searchRadius",16).put("threshold",24).put("strength",8.0).put("anchorGap",40)
-        .put("precision",0.75).put("limitToSelection",false)
-    val pending=listOf("共享抗锯齿与羽化软选区","完成后的磁性锚点重编辑","颜色标签参考","Krita全部高级滤波模型")
+        .put("precision",0.75).put("limitToSelection",false).put("antialias",1).put("feather",0).put("expand",0)
+    val pending=listOf("完成后的磁性锚点重编辑","颜色标签参考","Krita全部高级滤波模型")
     fun options(p: JSONObject): JSONObject {
         val o=defaults();o.keys().forEach {if(p.has(it))o.put(it,p.get(it))}
         require(o.getString("mode") in ArtBezierSelection.modes && o.getString("reference") in setOf("current","visible"))
@@ -27,9 +27,10 @@ internal object ArtMagneticSelection {
         require(o.getDouble("strength").isFinite() && o.getDouble("strength") in 1.0..20.0)
         require(o.getDouble("precision").isFinite() && o.getDouble("precision") in 0.25..4.0)
         require(o.getInt("anchorGap") in 8..128);o.getBoolean("limitToSelection")
+        ArtSoftSelection.options(o)
         return o
     }
-    fun info()=JSONObject().put("defaults",defaults()).put("pending",JSONArray(pending))
+    fun info()=JSONObject().put("softSelection",ArtSoftSelection.info()).put("modes",JSONObject(ArtSoftSelection.modes)).put("defaults",defaults()).put("pending",JSONArray(pending))
         .put("maxAnchors",MAX_ANCHORS).put("maxSearchPixels",MAX_SEARCH_PIXELS).put("maxPathPoints",MAX_PATH_POINTS)
         .put("maxReferencePixels",ArtRasterSelection.MAX_PIXELS).put("algorithm","RGBA Sobel contrast + eight-neighbor A* live wire")
     fun image(snapshot: JSONObject,bitmap: Bitmap,p: JSONObject): Image {

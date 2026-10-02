@@ -172,13 +172,13 @@ internal object ArtCapabilityHelp {
   "colorize.clear":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"maskId":"MASK_ID"},"note":"","summary":"清空线索与调色板；已有输出保留到下一次update。"},
   "colorize.update":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"maskId":"MASK_ID"},"note":"先创建蒙版并写颜色线索；选区限制求解范围，最多4194304像素；成功固化填色，不改变源线稿。","summary":"重新计算蒙版填色"},
   "colorize.convert":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"maskId":"MASK_ID"},"note":"先用update生成最新填色，再转换为绘画层。","summary":"把缓存填色转为普通绘画层，移除编辑线索；可撤销，不重新求解。"},
-  "selection.bezier_create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"nodes":[{"x":10,"y":10},{"x":100,"y":10},{"x":100,"y":100},{"x":10,"y":100}],"mode":"replace"},"note":"","summary":"保存真实闭合三次曲线选区；复合选区最多32分量/8192节点，不写作品像素。"},
-  "selection.bezier_nodes":{"args":{"documentId":"DOCUMENT_ID"},"note":"当前选区须含bezier分量；复合选区可指定componentIndex。","summary":"读取当前bezier选区分量的文档坐标节点、控制柄和revision。"},
-  "selection.bezier_edit":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"edits":[{"action":"move_node","node":0,"x":20,"y":20}]},"note":"先读selection.bezier_nodes；当前分量须为bezier。","summary":"原子编辑当前bezier选区分量，重算布尔边界；无面积保存为空选区。"},
+  "selection.bezier_create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"nodes":[{"x":10,"y":10},{"x":100,"y":10},{"x":100,"y":100},{"x":10,"y":100}],"mode":"xor","antialias":0.8,"feather":4,"expand":2},"note":" antialias:0–1默认1；feather:0–32默认0；expand:-64–64默认0，负数收缩。先扩缩，再羽化，再用replace/add/subtract/intersect/xor组合。羽化时忽略抗锯齿；无选区时add/xor创建，subtract/intersect为空。","summary":"保存可编辑三次曲线节点及最终8位软蒙版；绘画、擦除、填色、复制和滤镜共享覆盖率。"},
+  "selection.bezier_nodes":{"args":{"documentId":"DOCUMENT_ID"},"note":"当前选区须含bezier分量；复合选区可指定componentIndex。 软选区也保留节点；返回该分量创建时的options。混合分量请指定曲线的componentIndex。","summary":"读取当前bezier选区分量的文档坐标节点、控制柄和revision。"},
+  "selection.bezier_edit":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"edits":[{"action":"move_node","node":0,"x":20,"y":20}]},"note":"先读selection.bezier_nodes；当前分量须为bezier。","summary":"编辑曲线节点，以该分量原软选区参数重建覆盖率和组合结果；移动与缩放保留节点。"},
   "selection.contiguous":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","x":30,"y":30,"reference":"labels","colorLabels":[1,2],"mode":"xor","tolerance":20,"opacitySpread":50,"antialias":0.75,"feather":0,"expand":2,"stopAtDarkest":true},"summary":"创建与取样点四邻域连通的颜色软选区；成功附选区缩图。","note":"ID/revision取document.info/layer.list；先用layer.properties设colorLabel，再选labels参考，未匹配会报错。默认visible/replace/覆盖硬度100/AA1/羽化0；用feather:4可羽化，羽化时跳过AA。"},
   "selection.similar":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","x":30,"y":30,"reference":"labels","colorLabels":[1,2],"mode":"xor","tolerance":20,"opacitySpread":50,"antialias":0.75,"feather":0,"expand":2,"stopAtDarkest":true},"summary":"创建搜索范围内全部相似颜色的软选区，含分离区域；成功附选区缩图。","note":"ID/revision取document.info/layer.list；先用layer.properties设colorLabel，再选labels参考，未匹配会报错。默认visible/replace/覆盖硬度100/AA1/羽化0；用feather:4可羽化，羽化时跳过AA。"},
-  "selection.magnetic_trace":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","anchors":[[10,10],[100,10]],"reference":"visible"},"note":"取样范围中须有可搜索图像边缘。 每段最多262144搜索像素、参考范围最多4194304像素；超预算增加中间锚点。","summary":"用真实RGBA对比边缘搜索吸附折线，返回最多2048轮廓点；不写选区。"},
-  "selection.magnetic_create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","anchors":[[10,10],[100,10],[100,100]],"mode":"replace"},"note":"取样范围中须有可搜索图像边缘。 每段最多262144搜索像素、参考范围最多4194304像素；超预算增加中间锚点。","summary":"沿真实边缘搜索闭合轮廓并保存选区，成功附轮廓缩略图。"},
+  "selection.magnetic_trace":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","anchors":[[10,10],[100,10]],"reference":"visible"},"note":"取样范围中须有可搜索图像边缘。 每段最多262144搜索像素、参考范围最多4194304像素；超预算增加中间锚点。 此能力只返回吸附轮廓；软选区参数仅magnetic_create生效。","summary":"用真实RGBA对比边缘搜索吸附折线，返回最多2048轮廓点；不写选区。"},
+  "selection.magnetic_create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","anchors":[[10,10],[100,10],[100,100]],"mode":"xor","antialias":0.8,"feather":4,"expand":2},"note":"取样范围中须有可搜索图像边缘。 每段最多262144搜索像素、参考范围最多4194304像素；超预算增加中间锚点。 antialias:0–1默认1；feather:0–32默认0；expand:-64–64默认0，负数收缩。先扩缩，再羽化，再用replace/add/subtract/intersect/xor组合。羽化时忽略抗锯齿；无选区时add/xor创建，subtract/intersect为空。","summary":"沿真实边缘搜索闭合轮廓并保存选区，成功附轮廓缩略图。"},
   "comic.frame":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","x":10,"y":10,"width":200,"height":200},"note":"目标为可见未锁定矢量层。","summary":"在矢量层创建直边分格，坐标为文档像素；支持父组变换。"},
   "comic.cut":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","start":[0,110],"end":[220,110],"preset":"thin","automatic":false},"note":"须有直边凸分格；示例切线完整穿过上述comic.frame矩形。","summary":"切分直边凸分格并保存真实多边形，最多256顶点；曲线/凹轮廓不支持，无交叉不加历史。"},
   "comic.merge":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","start":[110,60],"end":[110,160]},"note":"须有两格，其间为0<间隙<=512的平行相对直边；起终点分别在两格内。","summary":"每次合并一条平行直边间隙，最多256顶点；曲线/带孔/非平行边或第三格干扰拒绝。"},
@@ -840,7 +840,15 @@ internal object ArtCapabilityHelp {
   "selection.similar.stopAtDarkest":{"description":"默认false，仅expand>0起效：8邻域扩展需下一像素更不透明或等透明，且更暗或等亮（上一像素全透明时不比较亮度）。不向局部暗峰后的亮区或透明度下降区传播；保留原覆盖率，最大范围仍受expand限制。不改变初始颜色搜索。"},
   "selection.similar.bounds":{"description":"可选查找范围{x,y,width,height}文档像素整数，尺寸>0；裁到画布后最多4194304像素。颜色搜索、扩展、羽化和AA都限制在此范围内。"},
   "selection.similar.limitToSelection":{"description":"默认false；true需现有选区，搜索仅用非零覆盖范围，最终覆盖率与原选区逐点取较小值。没有bounds时使用原选区外框作为查找范围。"},
-  "layer.properties.colorLabel":{"description":"可选颜色标签整数0–8：0无，1蓝，2绿，3黄，4橙，5红，6紫，7灰，8棕。独立于像素颜色；可用于selection.contiguous/similar的reference=labels。"}
+  "layer.properties.colorLabel":{"description":"可选颜色标签整数0–8：0无，1蓝，2绿，3黄，4橙，5红，6紫，7灰，8棕。独立于像素颜色；可用于selection.contiguous/similar的reference=labels。"},
+  "selection.bezier_create.antialias":{"description":"抗锯齿强度0–1，默认1；0关闭。feather>0时忽略此项。"},
+  "selection.bezier_create.feather":{"description":"羽化半径整数0–32文档像素，默认0；扩缩之后羽化，再组合覆盖率。"},
+  "selection.bezier_create.expand":{"description":"扩展/收缩整数−64至64文档像素，默认0；正数扩展，负数收缩。"},
+  "selection.bezier_create.mode":{"description":"replace/add/subtract/intersect/xor，默认replace；xor覆盖率=abs(a-b)。"},
+  "selection.magnetic_create.antialias":{"description":"抗锯齿强度0–1，默认1；0关闭。feather>0时忽略此项。"},
+  "selection.magnetic_create.feather":{"description":"羽化半径整数0–32文档像素，默认0；扩缩之后羽化，再组合覆盖率。"},
+  "selection.magnetic_create.expand":{"description":"扩展/收缩整数−64至64文档像素，默认0；正数扩展，负数收缩。"},
+  "selection.magnetic_create.mode":{"description":"replace/add/subtract/intersect/xor，默认replace；xor覆盖率=abs(a-b)。"}
 }
 """
 }

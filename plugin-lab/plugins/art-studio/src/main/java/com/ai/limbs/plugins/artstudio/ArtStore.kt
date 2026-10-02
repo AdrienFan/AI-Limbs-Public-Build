@@ -892,7 +892,9 @@ internal class ArtStore(private val root: File) {
         val path=ArtSelection.path(created);val canonical=android.graphics.Path()
         check(canonical.op(path,path,android.graphics.Path.Op.UNION))
         require(!canonical.isEmpty) {"磁性路径没有围出有效面积"}
-        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,o.getString("mode"),snap.getJSONObject("state").getInt("width"),snap.getJSONObject("state").getInt("height"))
+        val state=snap.getJSONObject("state");val w=state.getInt("width");val h=state.getInt("height")
+        val mask=ArtSoftSelection.process(created,o,w,h)
+        val selection=ArtCurveSoftSelection.append(state.optJSONObject("selection"),mask,o.getString("mode"),w,h)
         apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
             .put("selection",selection).put("tool","magnetic")).put("selectionFeedback",true).put("algorithm","rgba-sobel-live-wire")
     }
@@ -931,14 +933,17 @@ internal class ArtStore(private val root: File) {
     fun bezierSelectionCreate(actor: String,p: JSONObject): JSONObject = locked {
         val snap=selectionRequest(p);require(p.has("expectedRevision"))
         val created=ArtBezierSelection.fromNodes(p.getJSONArray("nodes"))
-        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,p.optString("mode","replace"),snap.getJSONObject("state").getInt("width"),snap.getJSONObject("state").getInt("height"))
+        val state=snap.getJSONObject("state")
+        val selection=ArtCurveSoftSelection.create(state.optJSONObject("selection"),created,p,state.getInt("width"),state.getInt("height"))
         apply(actor,"SELECTION_BEZIER",JSONObject().put("documentId",snap.getString("id"))
             .put("expectedRevision",snap.getInt("revision")).put("selection",selection))
     }
     fun bezierSelectionEdit(actor: String,p: JSONObject): JSONObject = locked {
         val snap=selectionRequest(p);require(p.has("expectedRevision"))
         val current=snap.getJSONObject("state").optJSONObject("selection") ?: error("当前没有选区")
-        val selection=ArtBezierSelection.edited(current,p.optInt("componentIndex",0),p.getJSONArray("edits"))
+        val state=snap.getJSONObject("state")
+        val selection=if(current.has("curveParts"))ArtCurveSoftSelection.edit(current,p.optInt("componentIndex",0),p.getJSONArray("edits"),state.getInt("width"),state.getInt("height"))
+            else ArtBezierSelection.edited(current,p.optInt("componentIndex",0),p.getJSONArray("edits"))
         apply(actor,"SELECTION_BEZIER",JSONObject().put("documentId",snap.getString("id"))
             .put("expectedRevision",snap.getInt("revision")).put("selection",selection))
     }
@@ -957,7 +962,7 @@ internal class ArtStore(private val root: File) {
         val component=ArtBezierSelection.component(selection,index)
         JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
             .put("coordinateSpace","document").put("componentIndex",index).put("componentCount",parts.size)
-            .put("mode",parts[index].getString("mode")).put("closed",true)
+            .put("mode",parts[index].getString("mode")).put("options",parts[index].optJSONObject("options") ?: ArtSoftSelection.defaults().put("antialias",0)).put("closed",true)
             .put("nodes",ArtPathGeometry.json(ArtBezierSelection.nodes(component)))
     }
 

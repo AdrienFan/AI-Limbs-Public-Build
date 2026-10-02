@@ -84,6 +84,7 @@ internal fun StudioMagneticSelectionOptions(settings: JSONObject,busy: Boolean,h
     }
     Text("已放置的锚点可拖动，拖出参考范围可删除。Esc／右键／双指取消；完成时只记录一次选区。")
     SelectionToolModes(settings,enabled,::set)
+    StudioSoftSelectionControls(settings,enabled,::set)
     if(hasDraft)Text("这条路径使用开始时的参考和参数；完成或取消后再修改参数。",color=Color.Gray)
     for((key,label,range) in listOf(Triple("filterRadius","边缘采样半径",1f..4f),
         Triple("searchRadius","搜索半径",2f..64f),Triple("threshold","边缘阈值",0f..255f),Triple("anchorGap","拖动锚点间距（屏幕像素）",8f..128f))) {

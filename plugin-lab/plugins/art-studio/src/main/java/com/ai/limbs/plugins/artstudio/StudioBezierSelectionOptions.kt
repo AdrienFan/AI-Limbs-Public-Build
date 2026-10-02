@@ -12,7 +12,7 @@ import org.json.JSONObject
 
 @Composable
 internal fun StudioBezierSelectionOptions(snapshot: JSONObject,busy: Boolean,editing: Boolean,
-    component: Int,node: Int,mode: String,autoSmooth: Boolean,onEditing: (Boolean)->Unit,
+    component: Int,node: Int,mode: String,autoSmooth: Boolean,settings:JSONObject,draft:Boolean,onSettings:(JSONObject)->Unit,onEditing: (Boolean)->Unit,
     onComponent: (Int)->Unit,onNode: (Int)->Unit,onMode: (String)->Unit,onSmooth: (Boolean)->Unit,
     onCommand: (String)->Unit,onEdit: (JSONObject)->Unit) {
     val selection=snapshot.getJSONObject("state").optJSONObject("selection")
@@ -31,11 +31,13 @@ internal fun StudioBezierSelectionOptions(snapshot: JSONObject,busy: Boolean,edi
         },label={Text("编辑现有选区")})
     }
     if(!editing) {
+        StudioSoftSelectionControls(settings,!busy&&!draft) {key,value->onSettings(JSONObject(settings.toString()).put(key,value))}
+        if(draft)Text("当前路径使用首节点时的软选区参数；请完成或取消后再调整。")
         Row(Modifier.horizontalScroll(rememberScrollState())) {
-            ArtBezierSelection.modes.forEach {(id,label)->FilterChip(selected=mode==id,enabled=!busy,
+            ArtBezierSelection.modes.forEach {(id,label)->FilterChip(selected=mode==id,enabled=!busy&&!draft,
                 onClick={onMode(id)},label={Text(label)})}
         }
-        FilterChip(selected=autoSmooth,enabled=!busy,onClick={onSmooth(!autoSmooth)},label={Text("自动平滑未拖动的节点")})
+        FilterChip(selected=autoSmooth,enabled=!busy&&!draft,onClick={onSmooth(!autoSmooth)},label={Text("自动平滑未拖动的节点")})
         Row {
             TextButton(enabled=!busy,onClick={onCommand("back")}) {Text("退回上一节点")}
             TextButton(enabled=!busy,onClick={onCommand("finish")}) {Text("完成选区")}
@@ -75,6 +77,6 @@ internal fun StudioBezierSelectionOptions(snapshot: JSONObject,busy: Boolean,edi
             TextButton(enabled=!busy,onClick={edit(JSONObject().put("action","segment_type").put("segment",index).put("type","curve"))}) {Text("下一段变曲线")}
         }
     }
-    Text("移动和缩放保留曲线。复合最多32个分量、累计8192节点；超过时请替换选区。选区不随作品导出。")
+    Text("移动和缩放保留曲线；节点编辑沿用该分量创建时的软选区参数，重新生成蒙版。复合最多32个分量、累计8192节点；超过时请替换选区。选区不随作品导出。")
     ArtBezierSelection.pending.forEach {Text("$it（待实现）",color=Color.Gray)}
 }

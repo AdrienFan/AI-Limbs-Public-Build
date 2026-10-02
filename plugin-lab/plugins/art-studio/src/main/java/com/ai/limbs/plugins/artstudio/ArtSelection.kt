@@ -14,6 +14,7 @@ internal object ArtSelection {
             val bounds=ArtBezierSelection.frame(selection)
             require(listOf(bounds.left,bounds.top,bounds.right,bounds.bottom).all {it.isFinite() && kotlin.math.abs(it)<=1_000_000}) {"曲线选区框架超出坐标范围"}
         }
+        if(selection.has("curveParts"))ArtCurveSoftSelection.validate(selection)
         when(selection.optString("shape","rect")) {
             "rect" -> Unit
             "ellipse" -> require(selection.getDouble("width")>0 && selection.getDouble("height")>0)

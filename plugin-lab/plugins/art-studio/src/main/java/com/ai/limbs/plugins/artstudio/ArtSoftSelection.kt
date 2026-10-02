@@ -102,7 +102,7 @@ internal object ArtSoftSelection {
         ArtSelection.validate(s);val o=options(p)
         if(s.getDouble("width")==0.0||s.getDouble("height")==0.0)return ArtBezierSelection.empty()
         val r=region(s,w,h,abs(o.getInt("expand"))+o.getInt("feather"));if(r.isEmpty)return ArtBezierSelection.empty()
-        budget(r);val aa=o.getDouble("antialias");var mask=raster(s,r,aa>0)
+        budget(r);val aa=if(o.getInt("feather")>0)0.0 else o.getDouble("antialias");var mask=raster(s,r,aa>0)
         if(!s.has("coverage")&&aa>0&&aa<1) {val hard=raster(s,r,false);for(i in mask.indices)mask[i]=((hard[i].toInt() and 255)*(1-aa)+(mask[i].toInt() and 255)*aa).roundToInt().toByte()}
         val expand=o.getInt("expand");if(expand!=0)mask=ArtColorSelection.morph(mask,r.width(),r.height(),abs(expand),expand>0)
         val feather=o.getInt("feather");if(feather>0)mask=blur(mask,r.width(),r.height(),feather)
@@ -144,7 +144,7 @@ internal object ArtSoftSelection {
         try {block();apply(canvas,s,toLocal)} finally {canvas.restoreToCount(saved)}
     }
     fun bindStroke(stroke:JSONObject,selection:JSONObject?,toLayer:Matrix):JSONObject {
-        if(selection!=null)stroke.put("selection",JSONObject(selection.toString())).put("selectionToLayer",ArtShapes.encode(toLayer))
+        if(selection!=null)stroke.put("selection",JSONObject(selection.toString()).apply {remove("curveParts");remove("curveBasis")}).put("selectionToLayer",ArtShapes.encode(toLayer))
         return stroke
     }
     fun maskBitmap(bitmap:Bitmap,s:JSONObject,x:Int=0,y:Int=0) {apply(Canvas(bitmap),s,Matrix().apply {setTranslate(-x.toFloat(),-y.toFloat())})}
@@ -157,5 +157,5 @@ internal object ArtSoftSelection {
     }
     fun info()=JSONObject().put("defaults",defaults()).put("modes",JSONObject(modes))
         .put("pipeline","rasterize geometry -> square max/min expand/shrink -> three-pass Gaussian approximation feather -> coverage combine. AA strength 0..1; expand -64..64 px; feather 0..32 px. Pixel coverage is 0..255; add=min(255,a+b), subtract=max(0,a-b), intersect=min(a,b), xor=abs(a-b).")
-        .put("scope","Rectangle/ellipse/polygon/lasso creation in document pixels; mask clipped to canvas, <=4194304 pixels/32768 nonzero runs. No selection is empty for combination: add/xor create, subtract/intersect yield an explicit empty selection. New history stores final mask. Older geometry selections remain readable.")
+        .put("scope","Rectangle/ellipse/polygon/lasso/magnetic/Bezier creation in document pixels; mask clipped to canvas, <=4194304 pixels/32768 nonzero runs. No selection is empty for combination: add/xor create, subtract/intersect yield an explicit empty selection. New history stores final mask. Older geometry selections remain readable.")
 }

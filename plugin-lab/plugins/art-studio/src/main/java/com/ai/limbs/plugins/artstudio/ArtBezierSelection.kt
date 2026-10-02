@@ -15,6 +15,7 @@ internal object ArtBezierSelection {
     val pending=listOf("角度吸附","任意旋转选区","独立选区蒙版图层")
     fun info()=JSONObject().put("modes",JSONObject(modes)).put("maxNodes",MAX_NODES)
         .put("maxParts",MAX_PARTS).put("maxTotalNodes",MAX_TOTAL_NODES)
+        .put("defaults",ArtSoftSelection.defaults()).put("softSelection",ArtSoftSelection.info())
         .put("coordinateSpace","document").put("closed",true).put("pending",JSONArray(pending))
         .put("scope","真实闭合三次曲线，复合选区保留各操作的曲线节点；选区移动和缩放不折线化。仅改变选区，不写作品像素。")
     fun empty()=JSONObject().put("shape","rect").put("x",0).put("y",0).put("width",0).put("height",0)
@@ -46,6 +47,7 @@ internal object ArtBezierSelection {
     }
     /** All children are simple contours. Scaling a compound frame is pushed to their bounding frames. */
     fun parts(s: JSONObject): MutableList<JSONObject> {
+        if(s.has("curveParts"))return ArtCurveSoftSelection.parts(s)
         if(s.optString("shape","rect")!="compound")
             return mutableListOf(JSONObject().put("mode","replace").put("selection",copy(s)))
         val basis=frame(s.getJSONObject("basis"));val current=frame(s)

@@ -546,6 +546,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         return InProcessCapabilityParameterSpec(key, type, ArtCapabilityHelp.parameterDescription(name, key), !optional)
     }
     val id = p("id")
+    fun softSelectionFields()=listOf(p("antialias","number",true),p("feather","integer",true),p("expand","integer",true))
     fun colorSelectionFields()=listOf(p("opacitySpread","integer",true),p("antialias","number",true),p("feather","integer",true),p("stopAtDarkest","boolean",true),p("colorLabels","array",true))
     fun basicSelectionFields()=listOf(p("documentId",optional=true),p("expectedRevision","integer",true),p("mode",optional=true),p("antialias","number",true),p("feather","integer",true),p("expand","integer",true))
     fun figureFields()=listOf(p("fixedWidth","number",true),p("fixedHeight","number",true),p("fixedRatio","number",true),
@@ -598,7 +599,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.magnetic_trace", "selection.magnetic_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("anchors","array"),
             p("mode",optional=true),p("reference",optional=true),p("filterRadius","integer",true),p("searchRadius","integer",true),
             p("threshold","integer",true),p("strength","number",true),p("precision","number",true),p("limitToSelection","boolean",true),p("bounds","object",true)) +
-            if(name=="selection.magnetic_trace")listOf(p("closed","boolean",true)) else emptyList()
+            if(name=="selection.magnetic_trace")listOf(p("closed","boolean",true)) else softSelectionFields()
         "comic.frame" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("x","number"),p("y","number"),p("width","number"),p("height","number"),p("style","object",true))
         "comic.cut" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("start","array"),p("end","array"),
@@ -662,7 +663,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.basic_info", "selection.bezier_info" -> emptyList()
         "selection.adjust" -> listOf(p("documentId"),p("expectedRevision","integer"),p("expand","integer",true),p("feather","integer",true))
         "selection.coverage" -> listOf(p("documentId"),p("expectedRevision","integer"),p("x","number"),p("y","number"))
-        "selection.bezier_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("nodes","array"),p("mode",optional=true))
+        "selection.bezier_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("nodes","array"),p("mode",optional=true))+softSelectionFields()
         "selection.bezier_nodes" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("componentIndex","integer",true))
         "selection.bezier_edit" -> listOf(p("documentId"),p("expectedRevision","integer"),p("edits","array"),p("componentIndex","integer",true))
         "selection.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))

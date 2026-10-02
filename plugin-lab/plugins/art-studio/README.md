@@ -860,3 +860,24 @@ stopAtDarkest仅作用于正expand：先得到正常扩展的覆盖率，再以�
 AI入口与精简示例：selection.color_info返回默认值、公式、标签目录及设置方法；layer.properties({id:LAYER_ID,colorLabel:1,expectedRevision:REV})设置标签；selection.contiguous({documentId:ID,expectedRevision:REV,layerId:LAYER_ID,x:30,y:30,reference:"labels",colorLabels:[1,2],tolerance:20,opacitySpread:50,antialias:0.75,feather:0,expand:2,stopAtDarkest:true,mode:"xor"})创建选区；相似色改用selection.similar。每次写后更新revision；selection.coverage可只读核对0..255软边。手机两个参数面板均提供全部选项，连续工具另保留边界色和缺口处理。
 
 参考Krita 6.0.4的kis_tool_select_contiguous/similar、KisColorSelectionPolicies.h、kis_fill_painter.cc、KisGrowUntilDarkestPixelSelectionFilter与KisMergeLabeledLayersCommand的规则，独立实现；Krita色彩空间差值、圆盘形态、跨度插值抗锯齿、双扫描自适应增长与本插件的RGBA差值、方形形态、1px边界平滑、队列传播不逐像素等同。版本0.2.53 / versionCode56 / applicationId com.ai.limbs.payload.artstudio.v0253。仅静态检查与仓库提交，未编译、未运行测试、未推云端；实机取样、标签组参考、软边与撤销重放待统一部署验证。
+
+
+## 0.2.54 磁性套索与贝塞尔软选区
+
+参照用户提供的 Krita 6.0.4 `KisToolSelectMagnetic.cc` 和 `kis_tool_select_path.cc` 的轮廓→扩缩→羽化→组合顺序，以本插件共享8位蒙版实现；不复用其源码。羽化采用现有三次盒式高斯近似、扩缩采用方形最大/最小滤波，不声明逐像素等同 Krita。
+
+两个工具参数区均提供抗锯齿0–1、羽化0–32 px、扩展/收缩−64至64 px，以及替换、添加、减去、相交、异或。参数在首个节点/锚点固定；羽化>0时不重复抗锯齿。磁性搜索仍沿真实RGBA边缘，软处理在闭合后执行，不改变吸附搜索成本。
+
+助手入口 `selection.magnetic_create` 与 `selection.bezier_create` 共用 `antialias/feather/expand/mode`。示例（先用实际工程ID、revision、图层ID替换）：
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","anchors":[[10,10],[100,10],[100,100]],"mode":"xor","antialias":0.8,"feather":4,"expand":2}
+```
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"nodes":[{"x":10,"y":10},{"x":100,"y":10},{"x":100,"y":100},{"x":10,"y":100}],"mode":"replace","antialias":1,"feather":6,"expand":-2}
+```
+
+`selection.magnetic_trace` 仅预览吸附轮廓；它不执行软边处理。`selection.bezier_nodes` 返回节点与该分量的 `options`，`selection.bezier_edit` 沿用这些参数重新生成最终蒙版。软曲线组合保留最多32个源分量、8192节点，移动和缩放映射源节点；编辑按当前文档像素半径重新生成。磁性追加也保留当前曲线分量。像素消费者和操作重放读取保存的最终覆盖率，不在历史重放时重新搜索边缘或羽化。其它工具重新生成/处理整体选区会将其固化为统一蒙版。
+
+软选区范围、历史中持有的栅格素材各限制4194304像素/32768扫描段；源分量JSON另限6 MiB，超限明确提示替换选区。空组合结果仍保留可编辑源节点，但阻止像素写入。新包0.2.54，versionCode57，applicationId `com.ai.limbs.payload.artstudio.v0254`。

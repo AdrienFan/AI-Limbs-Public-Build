@@ -419,6 +419,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var selectionBezierNode by remember {mutableIntStateOf(0)}
     var selectionBezierMode by remember {mutableStateOf("replace")}
     var selectionBezierSmooth by remember {mutableStateOf(false)}
+    var selectionBezierDraft by remember {mutableStateOf(false)}
+    var selectionBezierSettings by remember {mutableStateOf(ArtSoftSelection.defaults())}
     var basicSelectionSettings by remember {mutableStateOf(ArtSoftSelection.defaults())}
     var basicSelectionDraft by remember {mutableStateOf(false)}
     var contiguousSettings by remember {mutableStateOf(ArtColorSelection.defaults())}
@@ -1494,6 +1496,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.selectionBezierEditing=selectionBezierEditing
                     view.selectionBezierComponent=selectionBezierComponent;view.selectionBezierNode=selectionBezierNode
                     view.selectionBezierMode=selectionBezierMode;view.selectionBezierSmooth=selectionBezierSmooth
+                    view.selectionBezierSettings=selectionBezierSettings
+                    view.onSelectionBezierDraft={selectionBezierDraft=it}
                     view.onSelectionBezierNode={selectionBezierNode=it}
                     view.onSelectionBezierCreate={p -> if(!busy)perform {store.bezierSelectionCreate("AWEI",p)}}
                     view.onSelectionBezierEdit={p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}}
@@ -2425,7 +2429,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 if(tool=="select_bezier") {
                     StudioBezierSelectionOptions(current,busy,selectionBezierEditing,selectionBezierComponent,selectionBezierNode,
-                        selectionBezierMode,selectionBezierSmooth,{value ->
+                        selectionBezierMode,selectionBezierSmooth,selectionBezierSettings,selectionBezierDraft,{selectionBezierSettings=it},{value ->
                             if(canvasRef[0]?.selectionBezierHasDraft==true)Toast.makeText(context,"请先完成或取消当前选区",Toast.LENGTH_SHORT).show()
                             else {
                                 if(value) {
@@ -3253,6 +3257,8 @@ private class StudioCanvas(context: Context) : View(context) {
         private set
     private val shapeInteraction = StudioShapeInteraction(this)
     private val selectionBezierInteraction=StudioBezierSelectionInteraction(this)
+    var onSelectionBezierDraft:(Boolean)->Unit={}
+        set(value) {field=value;selectionBezierInteraction.onDraft=value}
     val selectionBezierHasDraft get()=selectionBezierInteraction.hasDraft
     var selectionBezierEditing=false
         set(value) {if(field!=value){field=value;selectionBezierInteraction.cancel();invalidate()}}
@@ -3261,6 +3267,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var selectionBezierNode=0
     var selectionBezierMode="replace"
     var selectionBezierSmooth=false
+    var selectionBezierSettings=ArtSoftSelection.defaults()
     var onSelectionBezierNode: (Int)->Unit = {}
     var onSelectionBezierCreate: (JSONObject)->Unit = {}
     var onSelectionBezierEdit: (JSONObject)->Unit = {}
@@ -4058,7 +4065,7 @@ private class StudioCanvas(context: Context) : View(context) {
             val state=scene ?: return true
             try {
                 return selectionBezierInteraction.touch(event,state,documentId,sceneRevision,matrix,shapeBusy,
-                    selectionBezierEditing,selectionBezierComponent,selectionBezierNode,selectionBezierMode,selectionBezierSmooth,
+                    selectionBezierEditing,selectionBezierComponent,selectionBezierNode,selectionBezierMode,selectionBezierSmooth,selectionBezierSettings,
                     onSelectionBezierNode,onSelectionBezierCreate,onSelectionBezierEdit)
             } catch(error:Exception) {
                 selectionBezierInteraction.cancel()

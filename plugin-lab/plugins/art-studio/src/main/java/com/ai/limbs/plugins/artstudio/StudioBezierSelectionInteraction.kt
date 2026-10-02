@@ -26,8 +26,9 @@ internal class StudioBezierSelectionInteraction(private val view: View) {
     private var grab=ArtPathGeometry.Vec(0.0,0.0)
     private var pointer=ArtPathGeometry.Vec(0.0,0.0)
     private val density get()=view.resources.displayMetrics.density
+    var onDraft:(Boolean)->Unit={}
     val hasDraft get()=capture!=null
-    fun cancel() {capture=null;draft.clear();pressed=false;finish=false;editing=null;edited.clear();view.invalidate()}
+    fun cancel() {val existed=hasDraft;capture=null;draft.clear();pressed=false;finish=false;editing=null;edited.clear();if(existed)onDraft(false);view.invalidate()}
     private fun check(p: JSONObject,doc: String,revision: Int) {
         require(p.getString("documentId")==doc && p.getInt("expectedRevision")==revision) {"工程或选区已更新，请重新操作"}
     }
@@ -68,7 +69,7 @@ internal class StudioBezierSelectionInteraction(private val view: View) {
         cancel();onCreate(result)
     }
     fun touch(e: MotionEvent,state: JSONObject,doc: String,revision: Int,m: Matrix,busy: Boolean,
-        editMode: Boolean,component: Int,node: Int,mode: String,autoSmooth: Boolean,
+        editMode: Boolean,component: Int,node: Int,mode: String,autoSmooth: Boolean,options:JSONObject,
         onNode: (Int)->Unit,onCreate: (JSONObject)->Unit,onEdit: (JSONObject)->Unit): Boolean {
         if(busy || e.actionMasked==MotionEvent.ACTION_CANCEL) {cancel();return true}
         if(editMode)return editTouch(e,state,doc,revision,m,component,node,onNode,onEdit)
@@ -85,8 +86,9 @@ internal class StudioBezierSelectionInteraction(private val view: View) {
                     val alt=e.metaState and KeyEvent.META_ALT_MASK!=0
                     val ctrl=e.metaState and KeyEvent.META_CTRL_MASK!=0
                     val chosen=when {shift&&alt->"intersect";ctrl->"replace";shift->"add";alt->"subtract";else->mode}
-                    capture=JSONObject().put("documentId",doc).put("expectedRevision",revision)
+                    capture=ArtSoftSelection.options(options).put("documentId",doc).put("expectedRevision",revision)
                         .put("mode",chosen).put("autoSmooth",autoSmooth)
+                    onDraft(true)
                 }
                 draft.add(ArtPathGeometry.Node(local(e,m)))
             }
