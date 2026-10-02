@@ -9,7 +9,12 @@ import org.json.JSONObject
 internal object ArtCapabilityHelp {
     private val examples by lazy { JSONObject(EXAMPLES) }
     private val fields by lazy { JSONObject(FIELDS) }
-    private val scoped by lazy { JSONObject(SCOPED) }
+    private val scoped by lazy {
+        JSONObject(SCOPED_1).apply {
+            val extra = JSONObject(SCOPED_2)
+            extra.keys().forEach { key -> put(key, extra.getJSONObject(key)) }
+        }
+    }
 
     fun names(): Set<String> = examples.keys().asSequence().toSet()
 
@@ -416,7 +421,7 @@ internal object ArtCapabilityHelp {
   "figureFill":{"description":"完整填充对象，默认{mode:none}。mode:none/solid/pattern；solid可传color:#AARRGGBB（缺省本次color）。pattern={kind:checker/stripes/dots/image,tileSize:4–128整数(内置图案),foreground:#AARRGGBB,background:#AARRGGBB,scale:0.1–16,angle:-360–360,offset:[dx,dy]}；默认checker/16/本次color/透明/1/0/[0,0]，offset是图层局部像素且绝对值<=1000000。image必须asset（1–512px RGBA图片，原色平铺，tileSize/前背景色不染色）；取brush.resources(kind=texture)或导入返回asset。矢量仅none/solid。未知字段或不属于当前模式的color/pattern/asset拒绝。"}
 }
 """
-    private const val SCOPED = """
+    private const val SCOPED_1 = """
 {
   "document.list.width":{"description":"尺寸整数1–16384像素；还须通过image.limits当前内存预算。"},
   "document.list.height":{"description":"尺寸整数1–16384像素；还须通过image.limits当前内存预算。"},
@@ -612,7 +617,11 @@ internal object ArtCapabilityHelp {
   "shape.freehand.layerId":{"description":"目标kind=vector层ID，取layer.list；不存在时先用layer.vector创建。"},
   "shape.freehand.ids":{"description":"当前矢量层的形状ID数组，取shape.list.shapes[].id；shape.select允许空数组清除选择。"},
   "shape.calligraphy.layerId":{"description":"目标kind=vector层ID，取layer.list；不存在时先用layer.vector创建。"},
-  "shape.calligraphy.ids":{"description":"当前矢量层的形状ID数组，取shape.list.shapes[].id；shape.select允许空数组清除选择。"},
+  "shape.calligraphy.ids":{"description":"当前矢量层的形状ID数组，取shape.list.shapes[].id；shape.select允许空数组清除选择。"}
+}
+"""
+    private const val SCOPED_2 = """
+{
   "path.create.layerId":{"description":"目标kind=vector层ID，取layer.list；不存在时先用layer.vector创建。"},
   "path.create.ids":{"description":"当前矢量层的形状ID数组，取shape.list.shapes[].id；shape.select允许空数组清除选择。"},
   "path.nodes.layerId":{"description":"目标kind=vector层ID，取layer.list；不存在时先用layer.vector创建。"},

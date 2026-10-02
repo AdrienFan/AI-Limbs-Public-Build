@@ -99,16 +99,31 @@ print(f'Art Studio menus OK: {len(items)} leaf items, {len(implemented)} shared 
 # must not silently receive Resolver's zero/empty automatic example again.
 HELP = ENTRY.with_name('ArtCapabilityHelp.kt')
 help_source = HELP.read_text(encoding='utf-8')
-help_blocks = {
+help_parts = {
     name: json.loads(body)
     for name, body in re.findall(
-        r'private const val (EXAMPLES|FIELDS|SCOPED) = """\s*(\{.*?\})\s*"""',
+        r'private const val (EXAMPLES|FIELDS|SCOPED(?:_\d+)?) = """\s*(\{.*?\})\s*"""',
         help_source,
         re.S,
     )
 }
-if set(help_blocks) != {'EXAMPLES', 'FIELDS', 'SCOPED'}:
+if 'EXAMPLES' not in help_parts or 'FIELDS' not in help_parts:
     raise SystemExit('Art Studio help metadata blocks are missing or invalid')
+if 'SCOPED' in help_parts:
+    scoped = help_parts['SCOPED']
+    if any(name.startswith('SCOPED_') for name in help_parts):
+        raise SystemExit('Art Studio scoped help mixes legacy and segmented metadata')
+else:
+    names = sorted((name for name in help_parts if name.startswith('SCOPED_')), key=lambda name: int(name.split('_')[1]))
+    if not names:
+        raise SystemExit('Art Studio scoped help metadata is missing')
+    scoped = {}
+    for name in names:
+        overlap = set(scoped) & set(help_parts[name])
+        if overlap:
+            raise SystemExit(f'Duplicate scoped help keys: {sorted(overlap)}')
+        scoped.update(help_parts[name])
+help_blocks = {'EXAMPLES': help_parts['EXAMPLES'], 'FIELDS': help_parts['FIELDS'], 'SCOPED': scoped}
 expected_help = {identity.removeprefix(f'{plugin_id}.') for identity in declared}
 examples = help_blocks['EXAMPLES']
 if set(examples) != expected_help:
