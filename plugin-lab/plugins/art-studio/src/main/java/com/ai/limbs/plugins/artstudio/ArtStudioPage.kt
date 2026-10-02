@@ -1714,9 +1714,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             Column(Modifier.fillMaxSize().padding(top = 48.dp)
                                 .verticalScroll(rememberScrollState()),
                                 verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Text("可使用", modifier = Modifier.padding(start = 5.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 availableTools.chunked(2).forEach { pair ->
                                     Row(Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -1776,11 +1773,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         }
                                     }
                                 }
-                                HorizontalDivider(Modifier.padding(top = 8.dp, bottom = 4.dp))
-                                Text("待实现（${plannedTools.size}）",
-                                    modifier = Modifier.padding(start = 5.dp, bottom = 4.dp),
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant)
                                 plannedTools.chunked(2).forEach { pair ->
                                     Row(Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceEvenly) {
@@ -2450,6 +2442,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                     TextButton(onClick = { openTextEditor() }, enabled = !busy && current != null) {
                         Text("新建文字")
+                    }
+                    // Planned text features share the text parameter window; they cannot execute yet.
+                    Text("高级排版", style = MaterialTheme.typography.labelLarge)
+                    ArtToolCatalog.textAdvancedOptions.forEach { option ->
+                        TextButton(onClick = { }, enabled = false) {
+                            Text("$option（待实现）", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
                 if (tool == "sampler") {

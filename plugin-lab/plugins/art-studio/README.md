@@ -2,6 +2,12 @@
 
 画室是独立的 android_inprocess 插件。页面与兰儿能力共用 ArtStore 工程目录、文件锁和当前工程指针；本次文件菜单迭代没有改动基座，也没有改变 .ailart 的格式号。UI 创建或导入的新工程记录 createdBy=AWEI，兰儿通过能力创建、导入、模板创建、另存为或复制的新工程记录 createdBy=LANER；画布编辑历史仍以 AWEI / LANER 标注。
 
+## 未发布：文字工具入口整理
+
+基于 0.2.41 继续迭代。折叠工具侧栏移除独立的高级文字占位和“可使用”“待实现”分类标签，同时去掉原分类分隔线。现有文字工具保持原位置与编辑行为；双击打开参数浮窗后，基础编辑入口下方统一列出 SVG 排版、富文本、SVG 源码编辑，均明确标示为尚未实现且不可点击。toolbox.catalog 将这些项目放在文字工具的 advancedOptions 内，不再作为独立工具返回。Android 10/11 的基础文字平台要求仍保留。
+
+本次仅修改画室插件的工具清单、参数浮窗与相关文档，没有修改文字渲染、工程格式、绘画执行器或宿主。暂不推送、不编译、不安装；后续功能一起迭代后再发布版本并做实机验收。
+
 ## 文件菜单
 
 菜单行为参照手机里解压的 Krita 6.0.4 源码 libs/ui/KisMainWindow.cpp：slotFileOpen、slotFileOpenRecent、slotFileSave、slotFileSaveAs、slotExportFile、slotExportAdvance、slotFileCloseAll、slotFileQuit，以及官方 5.3 文件菜单说明。菜单结构采用 Krita 的顺序，内部实现基于本画室的文档格式与 Android 文件选择器。
@@ -78,17 +84,11 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 | 移动与变换图层、平移画布 | 移动和变换工具都可拖动当前图层；变换工具的「变换参数」可设置位置、缩放和旋转，打开时读取当前图层值；有选区时拖动沿用当前选区移动操作 | transform.move/scale/rotate、selection.edit；视图平移只属于当前页面 |
 | 测量距离、缩放画布 | 拖动可读两点距离与角度；点击缩放画布视图，双指缩放沿用已有手势 | canvas.measure；视图缩放只属于当前页面 |
 
-## 工具箱待实现位置
+## 工具参数与未实现选项
 
-左抽屉上部为画室已接入的基础工具，下部为「待实现」灰色区。灰色按钮不可选中、不会触发画布操作，长按与无障碍标签会说明「尚未实现」。清单按手机上的 Krita 6.0.4 源码中实际注册的工具工厂核对，独立工具位与工具内部选项分开：填充阈值、笔刷参数和渐变预设等属于已有工具的选项，不另造假按钮。画室现有铅笔、栅格书法笔及栅格贝塞尔曲线不能代替 Krita 的可编辑矢量路径；相关矢量工具因此单独留位。
+左侧工具栏统一呈现工具图标，不显示“可使用”或“待实现”分类标题。基础文字只有一个工具入口；完整 SVG 排版、富文本与 SVG 源码编辑属于该文字工具的高级参数，集中在参数浮窗中以不可点击的待实现项展示，不另占工具位。设备低于 Android 12 时，基础文字入口仍明确显示系统版本要求且不允许绘画。
 
-| 待实现工具 | 工具 ID | Krita 6.0.4 源码入口 | 所需基础能力 |
-| --- | --- | --- | --- |
-| SVG 文字高级排版 | svg_text_advanced | plugins/tools/svgtexttool/SvgTextToolFactory.cpp | 完整 SVG 排版、富文本与源码编辑；基础可编辑文字已单独实现 |
-| 围合填充、漫画分格编辑 | enclose_fill、comic_panel | plugins/tools/tool_enclose_and_fill/KisToolEncloseAndFillFactory.h；plugins/tools/tool_knife/KisToolKnife.h | 封闭区域计算与分格对象 |
-| 贝塞尔曲线选区、连续区域选区、相似色选区、磁性套索选区 | select_bezier、select_contiguous、select_similar、select_magnetic | plugins/tools/selectiontools/kis_tool_select_path.h、kis_tool_select_contiguous.h、kis_tool_select_similar.h、KisToolSelectMagnetic.h | 像素选区蒙版及相关路径算法 |
-
-清单单一来源为 ArtToolCatalog.kt。兰儿读取 toolbox.catalog 可得到各项 id、label、implemented 与 status；待实现项还返回 Krita 相对源码路径，且没有执行能力。现有工具的 status=basic 只表示本画室已有可用入口，不表示已达到 Krita 完整行为。每次真正完成工具时，应在清单中把它从 pending 移至 implemented，并同时接通画布、工程记录与兰儿入口；保留的灰色位置不能冒充实现。
+清单单一来源为 ArtToolCatalog.kt。兰儿读取 toolbox.catalog 可得到各项 id、label、implemented 与 status；文字工具还返回 advancedOptions，其中 implemented=false、status=planned 表示未来选项，不是已实现的执行能力。现有工具的 status=basic 只表示本画室已有可用入口，不表示已达到 Krita 完整行为。
 
 这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、多节点及多子路径编辑、书法笔矢量轮廓及速度调角、高级矢量路径、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
 

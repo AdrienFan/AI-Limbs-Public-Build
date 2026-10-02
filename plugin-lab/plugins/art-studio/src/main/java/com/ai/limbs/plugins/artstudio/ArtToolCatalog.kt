@@ -53,17 +53,13 @@ internal object ArtToolCatalog {
         val id: String, val label: String, val glyph: String, val source: String
     )
 
-    // Pending entries name Krita factories; advanced text is the remaining portion
-    // of the factory whose basic editable subset is now implemented. A disabled slot must not route
-    // touches to a superficially similar raster tool: that would silently change
-    // artwork when the user expected an unimplemented vector or selection tool.
-    val pending get() = listOf(
-        PendingTool("svg_text_advanced", "SVG 文字高级排版", "T",
-            "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"),
+    // Advanced text is part of the existing text tool's parameters, not another toolbox slot.
+    val textAdvancedOptions = listOf("完整 SVG 排版", "富文本", "SVG 源码编辑")
 
-    ) + if (!ArtText.available) listOf(PendingTool("svg_text", "基础文字需要 Android 12+", "T",
-        "plugins/tools/svgtexttool/SvgTextToolFactory.cpp")) else emptyList()
-
+    // Keep the platform requirement visible on devices that cannot render basic text.
+    val pending get() = if (!ArtText.available) listOf(PendingTool("svg_text",
+        "基础文字需要 Android 12+", "T", "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"))
+        else emptyList()
 
     fun usage(id: String): String = when (id) {
         "ink", "pencil", "soft", "spray", "eraser", "line", "polyline" ->
@@ -80,9 +76,13 @@ internal object ArtToolCatalog {
     fun describe(viewState: JSONObject = ArtStudioViewControl.describe()): JSONObject {
         val tools = JSONArray()
         implemented.forEach { (id, label, _) ->
-            tools.put(JSONObject().put("id", id).put("label", label)
+            val item = JSONObject().put("id", id).put("label", label)
                 .put("implemented", true).put("status", "basic")
-                .put("parameterWindow", JSONObject().put("gesture", "double-click").put("available", true)))
+                .put("parameterWindow", JSONObject().put("gesture", "double-click").put("available", true))
+            if (id == "svg_text") item.put("advancedOptions", JSONArray(textAdvancedOptions.map { option ->
+                JSONObject().put("label", option).put("implemented", false).put("status", "planned")
+            }))
+            tools.put(item)
         }
         pending.forEach { item ->
             tools.put(JSONObject().put("id", item.id).put("label", item.label)
