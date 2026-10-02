@@ -88,7 +88,7 @@ internal object ArtCapabilityHelp {
   "canvas.crop":{"args":{"x":0,"y":0,"width":512,"height":512,"expectedRevision":0},"note":"裁切画布，不缩放图层；示例尺寸须适合当前工程。","summary":"裁切画布"},
   "canvas.measure":{"args":{"x0":0,"y0":0,"x1":100,"y1":100},"note":"两点须落在当前画布内。","summary":"测量画布两点"},
   "color.sample":{"args":{"x":100,"y":100,"sampleMerged":true},"note":"先打开工程；取样点须在画布内且有非透明颜色。","summary":"从画布合成结果取色"},
-  "fill.contiguous":{"args":{"x":100,"y":100,"color":"#FFFFCC80","tolerance":15,"expectedRevision":0},"note":"先选择可见未锁定、未变换的根绘画/图像层；取样点在画布和现有选区内。","summary":"填充当前图层连通区域"},
+  "fill.contiguous":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[100,100],[220,180]],"color":"#FFFFCC80","fillMode":"connected","dragMode":"any","reference":"visible","tolerance":15,"opacitySpread":70,"antialias":1,"feather":3,"expand":1},"summary":"从固定参考填充相连/边界/全局相似色区域，支持图案、软覆盖和拖动批量填充；成功附预览。","note":"替换ID和revision；目标为可见未锁定、无变换/分组的绘画或图像层。单点改x/y并省略points/dragMode。fillMode=boundary配boundaryColor；similar为全局相似色，只用单点，gapClose=0。fillType=pattern配pattern（见参数说明）。reference=current/visible/labels，labels配colorLabels。已有选区始终限制写入。拖动首点固定参考，松手一次提交/撤销；最多512折线点、8192像素取样点、4194304搜索像素、33554432颜色搜索比较。"},
   "layer.create":{"args":{"name":"海面","select":true,"expectedRevision":0},"note":"","summary":"创建画室绘画图层"},
   "layer.group":{"args":{"name":"组","select":true,"expectedRevision":0},"note":"","summary":"创建画室图层组"},
   "layer.vector":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"name":"矢量层","select":true},"note":"","summary":"创建基础矢量图层"},
@@ -239,7 +239,8 @@ internal object ArtCapabilityHelp {
   "calligraphy.profile.delete":{"args":{"id":"PROFILE_ID"},"summary":"删除一个书法参数配置档。","note":"不存在则明确报错；已绘制轮廓和工程历史不受影响，不修改当前面板参数。"},
   "selection.basic_info":{"args":{},"summary":"读取四种基本软选区的默认参数、组合公式与预算。","note":""},
   "selection.adjust":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"expand":-2,"feather":4},"summary":"扩展／收缩并羽化当前选区，不改变作品像素。","note":"仅支持expand/feather，先扩展再羽化；再次羽化会累积。取最新id/revision，无选区报错。"},
-  "selection.coverage":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"x":20.5,"y":20.5},"summary":"只读查询选区某处0..255覆盖率，用于核对软边。","note":"文档像素；像素中心加0.5。无选区报错；需要最新id/revision。"}
+  "selection.coverage":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"x":20.5,"y":20.5},"summary":"只读查询选区某处0..255覆盖率，用于核对软边。","note":"文档像素；像素中心加0.5。无选区报错；需要最新id/revision。"},
+  "fill.info":{"args":{},"summary":"读取连续填充模式、图案资源入口、拖动预算及软覆盖参数。","note":""}
 }
 """
     private const val FIELDS = """
@@ -418,7 +419,12 @@ internal object ArtCapabilityHelp {
   "stopAtDarkest":{"description":"颜色选区正向扩展时是否在更暗或更不透明的脊线停止，默认false；仅expand>0时生效。"},
   "useTilt":{"description":"矢量书法是否使用数位笔倾斜控制笔尖方向，默认false；true时每个采样点须带tilt和orientation。"},
   "outline":{"description":"矩形/椭圆描边，默认brush。brush=当前共享笔刷，basic=普通颜色描边，none=无描边（填充不可为空）。brush/brushPresetId只用于栅格brush；矢量使用颜色描边。","enum":["brush","basic","none"]},
-  "figureFill":{"description":"完整填充对象，默认{mode:none}。mode:none/solid/pattern；solid可传color:#AARRGGBB（缺省本次color）。pattern={kind:checker/stripes/dots/image,tileSize:4–128整数(内置图案),foreground:#AARRGGBB,background:#AARRGGBB,scale:0.1–16,angle:-360–360,offset:[dx,dy]}；默认checker/16/本次color/透明/1/0/[0,0]，offset是图层局部像素且绝对值<=1000000。image必须asset（1–512px RGBA图片，原色平铺，tileSize/前背景色不染色）；取brush.resources(kind=texture)或导入返回asset。矢量仅none/solid。未知字段或不属于当前模式的color/pattern/asset拒绝。"}
+  "figureFill":{"description":"完整填充对象，默认{mode:none}。mode:none/solid/pattern；solid可传color:#AARRGGBB（缺省本次color）。pattern={kind:checker/stripes/dots/image,tileSize:4–128整数(内置图案),foreground:#AARRGGBB,background:#AARRGGBB,scale:0.1–16,angle:-360–360,offset:[dx,dy]}；默认checker/16/本次color/透明/1/0/[0,0]，offset是图层局部像素且绝对值<=1000000。image必须asset（1–512px RGBA图片，原色平铺，tileSize/前背景色不染色）；取brush.resources(kind=texture)或导入返回asset。矢量仅none/solid。未知字段或不属于当前模式的color/pattern/asset拒绝。"},
+  "fillMode":{"description":"连续填充范围connected/boundary/similar，默认connected；分别为相连、边界色围合、全局相似色。"},
+  "dragMode":{"description":"拖动填充off/any/similar，默认off；any填经过的任意区域，similar仅接受与首点相同的预乘RGBA参考色。全局相似色只用off。"},
+  "fillType":{"description":"填充内容solid/pattern，默认solid；solid使用color，pattern使用pattern对象，均乘opacity。"},
+  "useSelectionAsBoundary":{"description":"默认true。现有选区作为搜索边界；false可在选区外判断连通。任何模式最终只在现有选区中写入。"},
+  "pattern":{"description":"平铺对象：kind=checker/stripes/dots/image；tileSize整数4–128默认16，foreground/background为#AARRGGBB（默认color/透明），scale=0.1–16默认1，angle=−360至360默认0，offset=[dx,dy]文档像素默认[0,0]、有限且绝对值<=1000000。image须asset，取brush.resources(kind=texture)或brush.resource.import(kind=texture)返回值；图片边长1–512px，保留原色透明度，不受foreground/background染色。各区域共用原点。"}
 }
 """
     private const val SCOPED_1 = """
@@ -848,7 +854,24 @@ internal object ArtCapabilityHelp {
   "selection.magnetic_create.antialias":{"description":"抗锯齿强度0–1，默认1；0关闭。feather>0时忽略此项。"},
   "selection.magnetic_create.feather":{"description":"羽化半径整数0–32文档像素，默认0；扩缩之后羽化，再组合覆盖率。"},
   "selection.magnetic_create.expand":{"description":"扩展/收缩整数−64至64文档像素，默认0；正数扩展，负数收缩。"},
-  "selection.magnetic_create.mode":{"description":"replace/add/subtract/intersect/xor，默认replace；xor覆盖率=abs(a-b)。"}
+  "selection.magnetic_create.mode":{"description":"replace/add/subtract/intersect/xor，默认replace；xor覆盖率=abs(a-b)。"},
+  "fill.contiguous.points":{"description":"512个以内的文档整数点[[x,y],...]，每项在画布内；与x/y择一。多点须dragMode=any或similar，沿折线逐像素取样，最多8192个不同像素种子。"},
+  "fill.contiguous.x":{"description":"单点填充文档像素整数X；同时提供y，与points择一。首点需在搜索范围与现有选区内。"},
+  "fill.contiguous.y":{"description":"单点填充文档像素整数Y；同时提供x，与points择一。"},
+  "fill.contiguous.tolerance":{"description":"预乘RGBA最大通道差容差0–100%，默认0。0精确匹配；边界模式此项衡量与boundaryColor的差异。"},
+  "fill.contiguous.opacitySpread":{"description":"颜色对应软覆盖硬度整数0–100%，默认100。低于100需tolerance>0；只控制颜色差异，不替代opacity。"},
+  "fill.contiguous.opacity":{"description":"整个填充或擦除的透明度0–1，默认1；与颜色/图案原始透明度及软覆盖相乘，0无写入。"},
+  "fill.contiguous.reference":{"description":"current/visible/labels，默认current；排除背景与参考图像等辅助内容。labels取匹配的可见内容层/带标签组。"},
+  "fill.contiguous.referenceAllLayers":{"description":"旧参数，可继续使用。true=visible，false=current；若也给reference，必须一致。建议新调用使用reference。"},
+  "fill.contiguous.documentId":{"description":"当前工程ID，取document.info；新调用应传入，与revision共同防止写错工程。旧单点调用可省略。"},
+  "fill.contiguous.layerId":{"description":"当前目标绘画/图像层ID，取layer.list；新调用应提供以防选择变化。省略用于旧单点调用。"},
+  "fill.contiguous.expectedRevision":{"description":"当前document.info.revision，替换示例0；新调用应提供。拖动在首点固定，提交时更新则拒绝写入。"},
+  "fill.contiguous.gapClose":{"description":"封闭窄缺口半径整数0–32px，默认0；侵蚀阻断窄通道后恢复边缘，过大可消掉窄区域。全局相似色须0。"},
+  "fill.contiguous.feather":{"description":"羽化半径整数0–32px，默认0；区域联合、扩缩之后羽化，再与选区覆盖率取最小值。"},
+  "fill.contiguous.expand":{"description":"扩展/收缩整数−64至64px，默认0；正数扩展，负数收缩。仅正向扩展使用stopAtDarkest。"},
+  "fill.contiguous.antialias":{"description":"边缘抗锯齿强度0–1，默认0（保留旧单点填充默认）；feather>0时只羽化，不重复抗锯齿。"},
+  "fill.contiguous.erase":{"description":"默认false。true以填充内容透明度生成擦除蒙版；纯色擦除用白色满覆盖，图案擦除保留图案的透明孔洞。"},
+  "fill.contiguous.bounds":{"description":"可选整数{x,y,width,height}文档搜索范围，宽高须>0且与画布相交，裁剪后最多4194304像素；所有软处理限定在此范围。"}
 }
 """
 }

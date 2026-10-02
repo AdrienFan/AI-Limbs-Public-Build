@@ -881,3 +881,28 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 `selection.magnetic_trace` 仅预览吸附轮廓；它不执行软边处理。`selection.bezier_nodes` 返回节点与该分量的 `options`，`selection.bezier_edit` 沿用这些参数重新生成最终蒙版。软曲线组合保留最多32个源分量、8192节点，移动和缩放映射源节点；编辑按当前文档像素半径重新生成。磁性追加也保留当前曲线分量。像素消费者和操作重放读取保存的最终覆盖率，不在历史重放时重新搜索边缘或羽化。其它工具重新生成/处理整体选区会将其固化为统一蒙版。
 
 软选区范围、历史中持有的栅格素材各限制4194304像素/32768扫描段；源分量JSON另限6 MiB，超限明确提示替换选区。空组合结果仍保留可编辑源节点，但阻止像素写入。新包0.2.54，versionCode57，applicationId `com.ai.limbs.payload.artstudio.v0254`。
+
+
+## 0.2.55 连续区域填充
+
+参照用户给出的 Krita 6.0.4 `plugins/tools/basictools/kis_tool_fill.cc`（模式、图案、标签参考、首点资源快照及拖动种子）、`libs/ui/processing/fill_processing_visitor.cpp`（同色/任意区域拖动、共享覆盖参数与连续填充蒙版），以本插件自己的蒙版和像素资产链实现。未复用 Krita 源码；颜色比较采用预乘RGBA最大通道差，缺口用侵蚀阻断窄通道后恢复边缘，扩缩用方形最大/最小滤波，羽化用已有三次盒式高斯近似，不声明逐像素等同 Krita。
+
+工具参数提供：相连区域、指定边界色、全局相似色；单点、拖动任意区域、拖动同色区域；纯色或棋盘/条纹/圆点/RGBA图片图案；软覆盖硬度、抗锯齿、羽化、扩展/收缩、封闭缺口、最暗像素停止扩展；当前层/可见层/颜色标签层参考；选区作为搜索边界、擦除。图案与矩形/多边形使用同一平铺实现，支持颜色、缩放、旋转和偏移、图片选择与导入，所有区域共用文档原点。
+
+拖动在首点固定工程、revision、目标层及参数，蓝线预览取样路径，松手计算并一次提交；不是逐帧写像素。折线逐像素取样，经过窄区域也会形成种子。同色拖动采用与首点相同的预乘RGBA颜色，容差控制每个候选区域的范围。参考在整次计算中固定，重叠区域覆盖率取最大值，再统一扩缩/羽化，与现有软选区取最小值，最后生成一次RGBA填充/擦除资产，避免重复叠加透明度。Esc、右键、双指和切换目标/工具可取消；工程、图层或视图变化时拒绝提交旧手势。
+
+助手入口：`fill.info` 读默认值/范围，`fill.contiguous` 传单点 `x/y` 或拖动 `points`。必须选择可见未锁定、无变换和分组的根绘画/图像层。新调用应绑定实际 `documentId/expectedRevision/layerId`；旧单点入口及 `referenceAllLayers` 参数继续共用同一实现。
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[100,100],[220,180]],"color":"#FFFFCC80","fillMode":"connected","dragMode":"any","reference":"labels","colorLabels":[1],"tolerance":15,"opacitySpread":70,"gapClose":2,"feather":3,"expand":1}
+```
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","x":100,"y":100,"color":"#FF245364","fillMode":"boundary","boundaryColor":"#FF161616","reference":"visible","tolerance":10,"fillType":"pattern","pattern":{"kind":"checker","tileSize":16,"foreground":"#FFE8DCC5","background":"#FFB6C8C2","scale":1,"angle":30,"offset":[0,0]}}
+```
+
+全局相似色改 `fillMode=similar`，使用单点，`dragMode=off/gapClose=0`。`reference=labels` 需先用图层属性或 `layer.properties(colorLabel=...)` 标记参考层。RGBA图片用 `brush.resources(kind=texture)` 或 `brush.resource.import(kind=texture)` 返回的asset作为 `pattern={kind:image,asset:...}`；边长1–512px。图案擦除也保留透明孔洞，纯色擦除忽略颜色透明度，二者均使用工具栏/参数opacity。
+
+范围：软覆盖硬度0–100%（低于100需容差>0）、容差0–100%、抗锯齿0–1（默认0保留旧填充默认）、羽化0–32px、扩缩−64至64px、缺口0–32px。过大的缺口半径会去掉窄区域，有羽化时不重复抗锯齿。已有选区始终限制最终写入；关闭选区搜索边界仅放开搜索连通性。可显式给 `bounds={x,y,width,height}` 限定计算范围，所有软处理留在此范围内。
+
+一次最多512折线点、8192个不同像素种子、4194304搜索像素、33554432颜色搜索像素比较；已被全覆盖的种子跳过，超限明确提示缩小范围/分段，不保留部分写入。PNG资产仍限8MiB；最终PNG与设置一起入既有PIXEL_PASTE历史，撤销、重做、保存/导入和导出不重新搜索或读取后来修改的图案资源。0.2.55、versionCode58、applicationId `com.ai.limbs.payload.artstudio.v0255`；本轮不编译和推送。

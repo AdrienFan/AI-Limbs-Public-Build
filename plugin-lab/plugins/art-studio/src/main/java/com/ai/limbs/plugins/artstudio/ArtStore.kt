@@ -2080,7 +2080,7 @@ internal class ArtStore(private val root: File) {
                 val order = contentOrder(layer)
                 if (type == "PIXEL_PASTE") {
                     validateId(p.getString("asset"))
-                    if(p.optString("action") in setOf("ENCLOSE_FILL","ENCLOSE_ERASE")) {
+                    if(p.optString("action") in setOf("ENCLOSE_FILL","ENCLOSE_ERASE") || p.optString("algorithm")=="shared-soft-multiseed-fill-v1") {
                         val x=p.getInt("x");val y=p.getInt("y");val w=p.getInt("width");val h=p.getInt("height")
                         require(x>=0 && y>=0 && w>0 && h>0 && x.toLong()+w<=state.getInt("width") &&
                             y.toLong()+h<=state.getInt("height") && w.toLong()*h<=ArtEncloseFill.MAX_PIXELS)
@@ -2769,141 +2769,57 @@ internal class ArtStore(private val root: File) {
         } catch(error:Throwable) {assetFile(patchId).delete();assetFile(eraseId).delete();throw error}
     }
 
-    /**
-     * Flood fill the connected region of the active, untransformed root layer.
-     * A transparent PNG overlay is recorded as PIXEL_PASTE, so undo, archive
-     * import and the compositing order all use the established asset pipeline.
-     */
-    fun fillContiguous(actor: String, x: Int, y: Int, color: String,
-                       expectedRevision: Int? = null, tolerance: Int = 0,
-                       referenceAllLayers: Boolean = false,
-                       erase: Boolean = false): JSONObject = locked {
-        require(actor == "AWEI" || actor == "LANER")
-        requireColor(color)
-        require(tolerance in 0..100) { "颜色容差必须在 0–100 之间" }
-        val fill = Color.parseColor(color)
-        if (!erase) require(Color.alpha(fill) > 0) { "填充色不能完全透明；擦除区域请启用擦除模式" }
-        val doc = loadCurrent()
-        if (expectedRevision != null) require(doc.getJSONArray("operations").length() == expectedRevision) {
-            "工程已由另一位编辑者更新，请重新读取画布"
-        }
-        val state = replay(doc)
-        val layer = editableLayer(state)
-        val canvasWidth = state.getInt("width")
-        val canvasHeight = state.getInt("height")
-        require(x in 0 until canvasWidth && y in 0 until canvasHeight) { "填充位置不在画布内" }
-        val area = editingRectangle(state)
-        val shapedSelection = state.optJSONObject("selection")?.takeIf {
-            it.optString("shape", "rect") != "rect"
-        }
-        val region = shapedSelection?.let {
-            Region().apply {
-                setPath(ArtSelection.path(it), Region(0, 0, canvasWidth, canvasHeight))
-            }
-        }
-        if (region != null) require(region.contains(x, y)) {
-            "填充位置不在当前选区内"
-        }
-        val leftLimit = area[0]
-        val topLimit = area[1]
-        val rightLimit = leftLimit + area[2]
-        val bottomLimit = topLimit + area[3]
-        require(x in leftLimit until rightLimit && y in topLimit until bottomLimit) {
-            "填充位置不在选区内"
-        }
-        val view = snapshot(doc)
-        if (!referenceAllLayers) {
-            val isolated = view.getJSONObject("state")
-            isolated.put("background", "#00000000")
-            val visibleLayers = isolated.getJSONArray("layers")
-            for (i in 0 until visibleLayers.length()) {
-                val candidate = visibleLayers.getJSONObject(i)
-                if (candidate.getString("id") != layer.getString("id")) {
-                    candidate.put("visible", false)
-                } else {
-                    candidate.put("opacity", 1.0).put("blend", "normal")
-                }
-            }
-        }
-        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this, view.getJSONObject("state"),
-            canvasWidth, canvasHeight) + canvasWidth.toLong() * canvasHeight * 12, "连续区域填充")
-        val source = ArtRenderer.render(this, view)
+    /** Legacy positional callers share the same engine and defaults as the structured entrance. */
+    fun fillContiguous(actor:String,x:Int,y:Int,color:String,expectedRevision:Int?=null,tolerance:Int=0,
+        referenceAllLayers:Boolean=false,erase:Boolean=false):JSONObject {
+        val p=JSONObject().put("x",x).put("y",y).put("color",color).put("tolerance",tolerance)
+            .put("referenceAllLayers",referenceAllLayers).put("erase",erase)
+        if(expectedRevision!=null)p.put("expectedRevision",expectedRevision)
+        return fillContiguous(actor,p)
+    }
+    /** Compute the complete gesture against one reference while holding the document/revision lock. */
+    fun fillContiguous(actor:String,p:JSONObject):JSONObject=locked {
+        require(actor in setOf("AWEI","LANER"))
+        val doc=loadCurrent()
+        if(p.has("documentId"))require(p.getString("documentId")==doc.getString("id")) {"工程已切换，请重新填充"}
+        if(p.has("expectedRevision"))require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) {"工程已更新，请重新填充"}
+        val state=replay(doc);val layer=editableLayer(state)
+        if(p.has("layerId"))require(p.getString("layerId")==layer.getString("id")) {"目标图层已改变，请重新填充"}
+        val o=ArtContiguousFill.options(p);val request=JSONObject(o.toString()).put("layerId",layer.getString("id"))
+        for(key in listOf("x","y","points","bounds"))if(p.has(key))request.put(key,p.get(key))
+        // Even a transparent/no-op gesture validates its seed contract before returning.
+        ArtContiguousFill.seeds(request,state.getInt("width"),state.getInt("height"))
+        request.put("limitToSelection",o.getBoolean("useSelectionAsBoundary") && state.optJSONObject("selection")!=null)
+        val bounds=ArtColorSelection.bounds(state,request)
+        val source=selectionReference(snapshot(doc),request,bounds.width().toLong()*bounds.height()*64)
+        val resources=mutableMapOf<String,Bitmap>()
+        var overlay:Bitmap?=null
         try {
-            val target = source.getPixel(x, y)
-            if (!erase && !referenceAllLayers && tolerance == 0 && target == fill &&
-                Color.alpha(fill) == 255) return@locked snapshot(doc)
-            val channelLimit = tolerance * 255 / 100
-            // Use a separate visited mask: mutating reference pixels is unsafe as
-            // soon as tolerance can match the marker color.
-            val visited = java.util.BitSet(canvasWidth * canvasHeight)
-            var stack = IntArray(2048)
-            var count = 0
-            fun push(px: Int, py: Int) {
-                if (count == stack.size) stack = stack.copyOf(stack.size * 2)
-                stack[count++] = py * canvasWidth + px
-            }
-            fun matches(px: Int, py: Int): Boolean {
-                if (px !in leftLimit until rightLimit || py !in topLimit until bottomLimit ||
-                    visited.get(py * canvasWidth + px) ||
-                    (region != null && !region.contains(px, py))) return false
-                val pixel = source.getPixel(px, py)
-                return kotlin.math.abs(Color.alpha(pixel) - Color.alpha(target)) <= channelLimit &&
-                    kotlin.math.abs(Color.red(pixel) - Color.red(target)) <= channelLimit &&
-                    kotlin.math.abs(Color.green(pixel) - Color.green(target)) <= channelLimit &&
-                    kotlin.math.abs(Color.blue(pixel) - Color.blue(target)) <= channelLimit
-            }
-            var minX = x; var maxX = x
-            var minY = y; var maxY = y
-            push(x, y)
-            while (count > 0) {
-                val position = stack[--count]
-                val row = position / canvasWidth
-                val seed = position % canvasWidth
-                if (!matches(seed, row)) continue
-                var begin = seed
-                while (begin > leftLimit && matches(begin - 1, row)) begin--
-                var end = seed
-                while (end + 1 < rightLimit && matches(end + 1, row)) end++
-                for (column in begin..end) {
-                    visited.set(row * canvasWidth + column)
-                }
-                minX = minOf(minX, begin); maxX = maxOf(maxX, end)
-                minY = minOf(minY, row); maxY = maxOf(maxY, row)
-                for (neighbor in intArrayOf(row - 1, row + 1)) {
-                    if (neighbor !in topLimit until bottomLimit) continue
-                    var column = begin
-                    while (column <= end) {
-                        if (matches(column, neighbor)) {
-                            push(column, neighbor)
-                            do { column++ } while (column <= end && matches(column, neighbor))
-                        } else column++
-                    }
-                }
-            }
-            val clipped = Bitmap.createBitmap(maxX - minX + 1, maxY - minY + 1,
-                Bitmap.Config.ARGB_8888)
-            val bytes = try {
-                for (row in minY..maxY) {
-                    for (column in minX..maxX) {
-                        if (visited.get(row * canvasWidth + column))
-                            clipped.setPixel(column - minX, row - minY,
-                                if (erase) Color.WHITE else fill)
-                    }
-                }
-                state.optJSONObject("selection")?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.maskBitmap(clipped,it,minX,minY)}
-                ByteArrayOutputStream().use { stream ->
-                    require(clipped.compress(Bitmap.CompressFormat.PNG, 100, stream))
-                    stream.toByteArray()
-                }
-            } finally { clipped.recycle() }
-            require(bytes.size <= MAX_ASSET_BYTES) { "填充区域图片超过 8 MB" }
-            val asset = UUID.randomUUID().toString()
-            atomicBytes(assetFile(asset), bytes)
-            appendToCurrent(actor, "PIXEL_PASTE", JSONObject()
-                .put("asset", asset).put("layerId", layer.getString("id"))
-                .put("action", if (erase) "FILL_CONTIGUOUS_ERASE" else "FILL_CONTIGUOUS")
-                .put("x", minX).put("y", minY))
-        } finally { source.recycle() }
+            val rawMask=ArtContiguousFill.mask(state,source,request)
+            val coverage=rawMask.alpha.count {it.toInt()!=0}
+            if(coverage==0 || o.getDouble("opacity")==0.0)return@locked snapshot(doc).put("changed",false).put("message","填充没有可写入的覆盖区域")
+            val mask=ArtContiguousFill.crop(rawMask)
+            overlay=ArtContiguousFill.paint(mask,o) {id->resources.getOrPut(id) {
+                val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
+                val size=BitmapFactory.Options().apply {inJustDecodeBounds=true};BitmapFactory.decodeFile(file.absolutePath,size)
+                require(size.outWidth in 1..512 && size.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
+                ArtImagePolicy.decodeAsset(file)
+            }}
+            val bitmap=requireNotNull(overlay);val row=IntArray(bitmap.width);var painted=0
+            for(y in 0 until bitmap.height) {bitmap.getPixels(row,0,bitmap.width,0,y,bitmap.width,1);painted+=row.count {Color.alpha(it)>0}}
+            if(painted==0)return@locked snapshot(doc).put("changed",false).put("message","图案或透明度没有可写入的像素")
+            val bytes=ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES);val asset=UUID.randomUUID().toString()
+            try {
+                atomicBytes(assetFile(asset),bytes)
+                val params=JSONObject().put("asset",asset).put("layerId",layer.getString("id"))
+                    .put("action",if(o.getBoolean("erase"))"FILL_CONTIGUOUS_ERASE" else "FILL_CONTIGUOUS")
+                    .put("x",mask.bounds.left).put("y",mask.bounds.top).put("width",mask.bounds.width()).put("height",mask.bounds.height())
+                    .put("settings",o).put("seedInput",if(p.has("points"))JSONArray(p.getJSONArray("points").toString()) else JSONArray().put(JSONArray().put(p.getInt("x")).put(p.getInt("y"))))
+                    .put("algorithm","shared-soft-multiseed-fill-v1").put("coveragePixels",coverage).put("paintedPixels",painted)
+                appendToCurrent(actor,"PIXEL_PASTE",params).put("changed",true).put("fillFeedback",true)
+                    .put("fillResult",JSONObject().put("coveragePixels",coverage).put("paintedPixels",painted).put("fillMode",o.getString("fillMode")))
+            } catch(error:Throwable) {assetFile(asset).delete();throw error}
+        } finally {source.recycle();overlay?.recycle();resources.values.forEach {it.recycle()}}
     }
 
     fun editPixels(actor: String, mode: String, color: String = ""): JSONObject = locked {

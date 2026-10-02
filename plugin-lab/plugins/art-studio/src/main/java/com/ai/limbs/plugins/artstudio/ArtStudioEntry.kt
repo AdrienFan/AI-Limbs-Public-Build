@@ -278,12 +278,8 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("enclose.apply","围合填充当前图层",write) {p->store.encloseFill("LANER",p)}
         capability("patch.info","读取智能修补范围",read) { ArtSmartPatch.info() }
         capability("patch.apply","智能修补当前图层",write) { p -> store.smartPatch("LANER",p) }
-        capability("fill.contiguous", "填充当前图层连通区域", write) { p ->
-            store.fillContiguous("LANER", p.getInt("x"), p.getInt("y"), p.getString("color"),
-                if (p.has("expectedRevision")) p.getInt("expectedRevision") else null,
-                p.optInt("tolerance", 0), p.optBoolean("referenceAllLayers", false),
-                p.optBoolean("erase", false))
-        }
+        capability("fill.info","读取连续填充模式、图案和软覆盖参数",read) {ArtContiguousFill.info()}
+        capability("fill.contiguous","填充相连、边界或全局相似色区域",write) {p->store.fillContiguous("LANER",p)}
         capability("color.sample", "从画布合成结果取色", read) { p ->
             val snapshot = store.current()
             val merged = p.optBoolean("sampleMerged", true)
@@ -714,9 +710,14 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("layerId", optional = true))
         "canvas.measure" -> listOf(p("x0", "number"), p("y0", "number"),
             p("x1", "number"), p("y1", "number"))
-        "fill.contiguous" -> listOf(p("x", "integer"), p("y", "integer"), p("color"),
-            p("expectedRevision", "integer", true), p("tolerance", "integer", true),
-            p("referenceAllLayers", "boolean", true), p("erase", "boolean", true))
+        "fill.info" -> emptyList()
+        "fill.contiguous" -> listOf(p("documentId",optional=true),p("expectedRevision","integer",true),p("layerId",optional=true),
+            p("x","integer",true),p("y","integer",true),p("points","array",true),p("color"),p("tolerance","integer",true),
+            p("referenceAllLayers","boolean",true),p("reference",optional=true),p("erase","boolean",true),p("opacity","number",true),
+            p("fillMode",optional=true),p("dragMode",optional=true),p("fillType",optional=true),p("pattern","object",true),
+            p("boundaryColor",optional=true),p("gapClose","integer",true),p("useSelectionAsBoundary","boolean",true),p("bounds","object",true),
+            p("expand","integer",true))+colorSelectionFields()
+
         "layer.rename" -> listOf(id, p("name"))
         "layer.move" -> listOf(id, p("index", "integer"))
         "layer.set_visibility" -> listOf(id, p("visible", "boolean"))

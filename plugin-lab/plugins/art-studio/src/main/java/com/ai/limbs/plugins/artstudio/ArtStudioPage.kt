@@ -459,9 +459,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var sampleRadius by remember { mutableIntStateOf(0) }
     var sampleBlend by remember { mutableIntStateOf(100) }
     var sampleMerged by remember { mutableStateOf(true) }
-    var fillTolerance by remember { mutableIntStateOf(0) }
-    var fillReferenceAll by remember { mutableStateOf(false) }
-    var fillErase by remember { mutableStateOf(false) }
+    var fillSettings by remember {mutableStateOf(ArtContiguousFill.defaults())}
+    var fillDraft by remember {mutableStateOf(false)}
     var mirrorDirection by remember { mutableStateOf("vertical") }
     var mirrorAngle by remember { mutableFloatStateOf(0f) }
     var mirrorAngleText by remember { mutableStateOf("0") }
@@ -1670,11 +1669,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             colorHexInput = color
                         }
                     }
-                    view.onFill = { x, y ->
-                        perform { store.fillContiguous("AWEI", x, y, color,
-                            tolerance = fillTolerance, referenceAllLayers = fillReferenceAll,
-                            erase = fillErase) }
-                    }
+                    view.fillSettings=fillSettings
+                    view.onFillDraft={fillDraft=it}
+                    view.onFill={p->if(!busy)perform {store.fillContiguous("AWEI",p)}}
                     view.onCrop = { rect ->
                         val x = rect.getDouble("x").toInt().coerceIn(0, state.getInt("width"))
                         val y = rect.getDouble("y").toInt().coerceIn(0, state.getInt("height"))
@@ -2550,23 +2547,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Text("半径内的像素按透明度混合；0 px 精确取单个像素。",
                         style = MaterialTheme.typography.bodySmall)
                 }
-                if (tool == "fill") {
-                    Text("颜色容差：$fillTolerance%")
-                    Slider(value = fillTolerance.toFloat(),
-                        onValueChange = { fillTolerance = it.toInt().coerceIn(0, 100) },
-                        valueRange = 0f..100f, steps = 99)
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("参考所有可见图层", modifier = Modifier.weight(1f))
-                        Switch(checked = fillReferenceAll,
-                            onCheckedChange = { fillReferenceAll = it })
-                    }
-                    Row(verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
-                        Text("擦除连续区域", modifier = Modifier.weight(1f))
-                        Switch(checked = fillErase, onCheckedChange = { fillErase = it })
-                    }
-                    Text("填色或擦除只修改当前图层；容差按每个 RGBA 通道比较。",
-                        style = MaterialTheme.typography.bodySmall)
-                }
+                if(tool=="fill")StudioContiguousFillOptions(store,fillSettings,color,busy,fillDraft,{fillSettings=it},
+                    {canvasRef[0]?.cancelFill()})
                 if (tool == "mirror") {
                     Text("对称轴旋转："+mirrorAngle.roundToInt()+"°（正数逆时针）")
                     Slider(value=mirrorAngle,onValueChange={mirrorAngle=it;mirrorAngleText=it.roundToInt().toString()},
@@ -3226,7 +3208,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            basicSelectionInteraction.cancel()
+            basicSelectionInteraction.cancel();fillInteraction.cancel()
             shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
@@ -3247,11 +3229,11 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     var scene: JSONObject? = null
     var sceneRevision: Int = 0
-        set(value) {if(field!=value){field=value;rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var shapeMultiple: Boolean = false
     var shapeShear: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value){rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {field=value;if(value){fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3361,7 +3343,7 @@ private class StudioCanvas(context: Context) : View(context) {
         set(value) {field=value;basicSelectionInteraction.onDraft=value}
     fun basicSelectionCommand(action:String) {
         try {basicSelectionInteraction.command(action,documentId,sceneRevision,matrix,onBasicSelection)}
-        catch(error:Exception) {basicSelectionInteraction.cancel();Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
+        catch(error:Exception) {basicSelectionInteraction.cancel();fillInteraction.cancel();Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
         invalidate()
     }
     private val freehandInteraction = StudioFreehandInteraction(this)
@@ -3389,14 +3371,14 @@ private class StudioCanvas(context: Context) : View(context) {
     var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
-        set(value) {if(field!=value){field=value;rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var selection: JSONObject? = null
     var selectionVisible = true
     var tool: String = "ink"
         set(value) {
             if (field != value) {
                 field = value
-                basicSelectionInteraction.cancel()
+                basicSelectionInteraction.cancel();fillInteraction.cancel()
                 rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel()
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
@@ -3464,7 +3446,12 @@ private class StudioCanvas(context: Context) : View(context) {
     var onStroke: (JSONArray) -> Unit = {}
     var onCrop: (JSONObject) -> Unit = {}
     var onSampleColor: (Int) -> Unit = {}
-    var onFill: (Int, Int) -> Unit = { _, _ -> }
+    private val fillInteraction=StudioContiguousFillInteraction(this)
+    var fillSettings=ArtContiguousFill.defaults()
+    var onFillDraft:(Boolean)->Unit={}
+        set(value) {field=value;fillInteraction.onDraft=value}
+    var onFill:(JSONObject)->Unit={}
+    fun cancelFill()=fillInteraction.cancel()
     var onCursor: (Int, Int) -> Unit = { _, _ -> }
     var onMove: (Float, Float) -> Unit = { _, _ -> }
     private var zoom = 1f
@@ -3710,6 +3697,7 @@ private class StudioCanvas(context: Context) : View(context) {
         scene?.let { ArtAssistants.draw(canvas,it,matrix,tool=="assistant",assistantInteraction.preview,
             resources.displayMetrics.density) }
         if(tool=="assistant")assistantInteraction.drawDraft(canvas,matrix)
+        if(tool=="fill")fillInteraction.draw(canvas,matrix)
         if(tool=="select_bezier")scene?.let {selectionBezierInteraction.draw(canvas,it,documentId,sceneRevision,matrix,
             selectionBezierEditing,selectionBezierComponent,selectionBezierNode)}
         if(tool in ArtSoftSelection.tools)basicSelectionInteraction.draw(canvas,documentId,sceneRevision,matrix)
@@ -3915,12 +3903,13 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
     override fun onDetachedFromWindow() {
-        basicSelectionInteraction.cancel()
+        basicSelectionInteraction.cancel();fillInteraction.cancel()
         rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();brushBitmapCache.values.forEach {it.recycle()};brushBitmapCache.clear()
         magneticSelectionInteraction.dispose();colorSelectionInteraction.cancel()
         super.onDetachedFromWindow()
     }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="fill" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {cancelFill();return true}
         if(tool in ArtSoftSelection.tools) {
             val action=when(keyCode) {android.view.KeyEvent.KEYCODE_ESCAPE->"cancel";android.view.KeyEvent.KEYCODE_ENTER->"finish";android.view.KeyEvent.KEYCODE_DEL,android.view.KeyEvent.KEYCODE_FORWARD_DEL->"back";else->null}
             if(action!=null) {basicSelectionCommand(action);return true}
@@ -4014,7 +4003,7 @@ private class StudioCanvas(context: Context) : View(context) {
         if (image == null) return true
         if (event.pointerCount >= 2) {
             multitouch = true
-            basicSelectionInteraction.cancel()
+            basicSelectionInteraction.cancel();fillInteraction.cancel()
             shapeInteraction.cancel()
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
@@ -4056,7 +4045,7 @@ private class StudioCanvas(context: Context) : View(context) {
         if(tool in ArtSoftSelection.tools) {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             try {return basicSelectionInteraction.touch(event,documentId,sceneRevision,tool,matrix,shapeBusy,basicSelectionSettings,onBasicSelection)}
-            catch(error:Exception) {basicSelectionInteraction.cancel();android.util.Log.e("ArtStudio","Basic selection gesture failed",error)
+            catch(error:Exception) {basicSelectionInteraction.cancel();fillInteraction.cancel();android.util.Log.e("ArtStudio","Basic selection gesture failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
             finally {invalidate()}
         }
@@ -4292,6 +4281,13 @@ private class StudioCanvas(context: Context) : View(context) {
                 return true
             }
         }
+        if(tool=="fill") {
+            val state=scene ?: return true
+            try {return fillInteraction.touch(event,documentId,sceneRevision,selectedId,matrix,
+                state.getInt("width"),state.getInt("height"),shapeBusy,fillSettings,color,opacity.toDouble(),onFill)}
+            catch(error:Exception) {fillInteraction.cancel();android.util.Log.e("ArtStudio","Continuous fill failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+        }
         if (tool == "svg_text") {
             if (event.actionMasked == MotionEvent.ACTION_UP && image != null &&
                 xy[0] >= 0 && xy[1] >= 0 && xy[0] <= image!!.width && xy[1] <= image!!.height) {
@@ -4378,12 +4374,6 @@ private class StudioCanvas(context: Context) : View(context) {
                     "pan" -> Unit
                     "zoom" -> zoomAt(event.x, event.y)
                     "measure" -> measurement = floatArrayOf(startX, startY, xy[0], xy[1])
-                    "fill" -> {
-                        val sampled = image
-                        if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
-                            xy[0] < sampled.width && xy[1] < sampled.height)
-                            onFill(xy[0].toInt(), xy[1].toInt())
-                    }
                     "sampler" -> {
                         val sampled = image
                         if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&

@@ -14,11 +14,11 @@ internal object ArtColorSelection {
     fun defaults()=JSONObject().put("mode","replace").put("reference","visible").put("tolerance",15)
         .put("opacitySpread",100).put("antialias",1).put("feather",0).put("stopAtDarkest",false).put("colorLabels",JSONArray().put(1))
         .put("expand",0).put("gapClose",0).put("boundaryMode",false).put("boundaryColor","#FF161616").put("limitToSelection",false)
-    fun options(p:JSONObject):JSONObject {
+    fun options(p:JSONObject,maxGap:Int=8):JSONObject {
         val o=defaults();o.keys().forEach {if(p.has(it))o.put(it,p.get(it))}
         require(o.getString("mode") in ArtSoftSelection.modes)
         require(o.getString("reference") in setOf("current","visible","labels"))
-        for((key,range) in listOf("tolerance" to 0..100,"opacitySpread" to 0..100,"expand" to -64..64,"gapClose" to 0..8,"feather" to 0..32)) {
+        for((key,range) in listOf("tolerance" to 0..100,"opacitySpread" to 0..100,"expand" to -64..64,"gapClose" to 0..maxGap,"feather" to 0..32)) {
             val v=o.get(key);require(v is Number&&v.toDouble().isFinite()&&v.toDouble()==v.toInt().toDouble()&&v.toInt() in range) {"颜色选区参数无效：$key"}
         }
         val aa=o.get("antialias");require(aa is Number&&aa.toDouble().isFinite()&&aa.toDouble() in 0.0..1.0)
@@ -50,7 +50,7 @@ internal object ArtColorSelection {
         }
         return r
     }
-    private fun difference(a: Int,b: Int): Int {
+    fun difference(a: Int,b: Int): Int {
         val aa=Color.alpha(a);val ba=Color.alpha(b)
         return maxOf(abs(aa-ba),abs(Color.red(a)*aa/255-Color.red(b)*ba/255),
             abs(Color.green(a)*aa/255-Color.green(b)*ba/255),abs(Color.blue(a)*aa/255-Color.blue(b)*ba/255))
@@ -109,8 +109,9 @@ internal object ArtColorSelection {
         return grown
     }
     data class Result(val selection:JSONObject,val pixels:Int,val sampledColor:String,val coverageSum:Long)
-    fun solve(state:JSONObject,source:Bitmap,p:JSONObject,connected:Boolean):Result {
-        val o=options(p);val r=bounds(state,p);val w=r.width();val h=r.height();val n=w*h
+    data class Mask(val alpha:ByteArray,val bounds:Rect,val sampled:Int)
+    fun mask(state:JSONObject,source:Bitmap,p:JSONObject,connected:Boolean,seedPoints:List<Pair<Int,Int>>?=null,applyEffects:Boolean=true,gapLimit:Int=8):Mask {
+        val o=options(p,gapLimit);val r=bounds(state,p);val w=r.width();val h=r.height();val n=w*h
         ArtImagePolicy.requireBytes(n.toLong()*40,"颜色软选区搜索")
         val x=p.getInt("x");val y=p.getInt("y");require(r.contains(x,y)) {"取样点不在查找范围内"}
         val pixels=IntArray(n);source.getPixels(pixels,0,w,r.left,r.top,w,h)
@@ -134,8 +135,14 @@ internal object ArtColorSelection {
             val membership=ByteArray(n) {i->if(candidate[i].toInt()!=0)255.toByte() else 0}
             val core=if(gap==0)membership else morph(membership,w,h,gap,false)
             val queue=IntArray(n);val visited=ByteArray(n)
-            require(core[seed].toInt()!=0) {"取样点处在边界、现有选区外或缺口处理侵蚀区，请调整取样点／缺口半径"}
-            var head=0;var tail=1;queue[0]=seed;visited[seed]=255.toByte()
+            val seeds=seedPoints ?: listOf(x to y)
+            var head=0;var tail=0
+            for((sx,sy) in seeds) {
+                require(r.contains(sx,sy)) {"拖动取样点不在查找范围内"}
+                val i=(sy-r.top)*w+sx-r.left
+                if(core[i].toInt()!=0 && visited[i].toInt()==0) {visited[i]=255.toByte();queue[tail++]=i}
+            }
+            if(seedPoints==null)require(tail>0) {"取样点处在边界、现有选区外或缺口处理侵蚀区，请调整取样点／缺口半径"}
             while(head<tail) {
                 val i=queue[head++];val col=i%w;val row=i/w
                 fun visit(j:Int) {if(core[j].toInt()!=0&&visited[j].toInt()==0) {visited[j]=255.toByte();queue[tail++]=j}}
@@ -144,11 +151,26 @@ internal object ArtColorSelection {
             val reached=if(gap==0)visited else morph(visited,w,h,gap,true)
             ByteArray(n) {i->if(reached[i].toInt()!=0)candidate[i] else 0}
         }
+        val raw=Mask(output,r,sampled)
+        return if(applyEffects)finish(state,source,raw,p,gapLimit) else raw
+    }
+    fun finish(state:JSONObject,source:Bitmap,raw:Mask,p:JSONObject,gapLimit:Int=8):Mask {
+        val o=options(p,gapLimit);val r=raw.bounds;val w=r.width();val h=r.height();val pixels=IntArray(w*h)
+        source.getPixels(pixels,0,w,r.left,r.top,w,h);var output=raw.alpha
+        val limit=if(o.getBoolean("limitToSelection")) {
+            val selected=state.optJSONObject("selection") ?: error("请先建立查找范围选区")
+            val sampler=ArtSoftSelection.Sampler(selected)
+            ByteArray(w*h) {i->sampler.at(r.left+i%w+0.5,r.top+i/w+0.5).toByte()}
+        } else null
         val expand=o.getInt("expand")
         if(expand!=0)output=if(expand>0&&o.getBoolean("stopAtDarkest"))growAtDarkest(output,pixels,w,h,expand) else morph(output,w,h,abs(expand),expand>0)
         val feather=o.getInt("feather")
         output=if(feather>0)ArtSoftSelection.blur(output,w,h,feather) else antialias(output,w,h,o.getDouble("antialias"))
         if(limit!=null)for(i in output.indices)output[i]=minOf(output[i].toInt() and 255,limit[i].toInt() and 255).toByte()
+        return Mask(output,r,raw.sampled)
+    }
+    fun solve(state:JSONObject,source:Bitmap,p:JSONObject,connected:Boolean):Result {
+        val o=options(p);val mask=mask(state,source,p,connected);val output=mask.alpha;val r=mask.bounds;val sampled=mask.sampled
         val count=output.count {it.toInt()!=0};val sum=output.sumOf {(it.toInt() and 255).toLong()}
         return Result(ArtSoftSelection.fromAlpha(output,r).put("creationOptions",o),count,String.format("#%08X",sampled),sum)
     }
