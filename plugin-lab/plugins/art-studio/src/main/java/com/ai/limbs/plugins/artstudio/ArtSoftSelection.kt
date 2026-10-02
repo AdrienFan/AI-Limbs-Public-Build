@@ -70,7 +70,7 @@ internal object ArtSoftSelection {
             val row=IntArray(w);for(y in 0 until h) {bitmap.getPixels(row,0,w,0,y,w,1);for(x in 0 until w)result[y*w+x]=Color.alpha(row[x]).toByte()}
         } finally {bitmap.recycle()};return result
     }
-    private fun blur(input:ByteArray,w:Int,h:Int,radius:Int):ByteArray {
+    internal fun blur(input:ByteArray,w:Int,h:Int,radius:Int):ByteArray {
         fun pass(src:ByteArray,r:Int,horizontal:Boolean):ByteArray {
             if(r==0)return src
             val out=ByteArray(src.size);val length=if(horizontal)w else h;val lines=if(horizontal)h else w

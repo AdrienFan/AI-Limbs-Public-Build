@@ -843,3 +843,20 @@ AI 原四入口 selection.create/ellipse/polygon/freehand 现有坐标参数保�
 参考 Krita 6.0.4 的 kis_tool_select_rectangular/elliptical/polygonal/outline、kis_pixel_selection.cpp 与 kis_selection_filters.cpp，独立实现覆盖率组合规则。形态处理采用方形邻域最大／最小值，羽化采用三次滚动盒滤波近似高斯、画布外视为0；与Krita的圆盘形态及高斯滤波不逐像素等同。此前章节延后的软选区能力，本轮在四种基本创建工具及共享像素使用链路补齐；颜色／磁性／贝塞尔创建工具的独立抗锯齿和羽化参数仍另行迭代，可用selection.adjust统一处理现有选区。
 
 版本0.2.52 / versionCode55 / applicationId com.ai.limbs.payload.artstudio.v0252。仅源码静态检查与仓库提交，未编译、未运行测试、未推云端；抗锯齿软边、擦除、组合、交互及保存重放待统一部署后实测。
+
+
+### 0.2.53：连续区域与相似色软选区（尚未编译）
+
+selection.contiguous与selection.similar保留现有取样/参考/容差接口，新增opacitySpread（覆盖硬度0–100，默认100）、antialias（0..1，默认1）、feather（0..32 px，默认0）、stopAtDarkest（默认false）、colorLabels（默认[1]）；expand扩展为-64..64 px。连续工具仍是固定取样色的四邻域搜索；相似工具扫描全部区域。两者直接生成上一轮8位coverage蒙版，replace/add/subtract/intersect/xor使用同一覆盖率公式，新历史保存最终蒙版，旧操作不重算。
+
+颜色距离d是预乘RGBA最大通道差，容差T=tolerance*255/100。硬度100保留容差内二值选中；硬度H<100时coverage=clamp((T-d)*255*100/(T*(100-H)),0,255)，d>=T为0，越接近取样色覆盖率越高。边界色模式使用反向曲线。软覆盖要求tolerance>0，精确匹配使用tolerance=0/opacitySpread=100，非法组合明确报错；页面禁用容差0时的硬度调节，软硬度下容差下限为1。
+
+处理顺序：颜色搜索与缺口处理 → 最大/最小覆盖率形态扩展/收缩 → 羽化，或feather=0时的可调抗锯齿 → 与范围限制选区的覆盖率取小值 → 组合。颜色覆盖与空间羽化彼此独立。抗锯齿仅对接触0覆盖的边界采用1px十字邻域（中心权重4、邻居各1）加权平滑，再按强度插值；羽化使用共享三次盒滤波近似高斯。全部结果限制在查找bounds/画布内，单次最多4194304像素和32768非零扫描段；内存不足不缩图搜索。返回selectedPixels为本次生成蒙版非零像素数、coverageSum为覆盖率总和（除以255可得等效全选像素数），不表示组合后面积。
+
+stopAtDarkest仅作用于正expand：先得到正常扩展的覆盖率，再以原非零范围为种子沿8邻域传播。下一像素透明度须不下降，亮度须不增加；上一像素全透明时只检查透明度。进入更暗或更不透明的像素后，不越过局部暗峰向亮区传播。传播始终受正常扩展范围限制，输出保留其软覆盖，不把边缘强制全选。初始颜色搜索不受该开关影响；后续羽化会柔化停止边缘。
+
+新增图层colorLabel属性及图层属性面板选项/列表标记：0无标签，1蓝、2绿、3黄、4橙、5红、6紫、7灰、8棕，是画室自定义稳定ID，不是像素颜色。旧工程缺该属性表示0，复制与保存沿用图层JSON，修改进入撤销历史。reference=labels配colorLabels=[1,2]仅合成匹配的可见内容层；匹配的非零标签组包含其可见子层，无标签组只逐层遍历。保留祖先组、层级顺序、变换、透明度和混合，隐藏层不参加；没有匹配内容明确报错，不改用全部可见层。current/visible原参考规则保持。
+
+AI入口与精简示例：selection.color_info返回默认值、公式、标签目录及设置方法；layer.properties({id:LAYER_ID,colorLabel:1,expectedRevision:REV})设置标签；selection.contiguous({documentId:ID,expectedRevision:REV,layerId:LAYER_ID,x:30,y:30,reference:"labels",colorLabels:[1,2],tolerance:20,opacitySpread:50,antialias:0.75,feather:0,expand:2,stopAtDarkest:true,mode:"xor"})创建选区；相似色改用selection.similar。每次写后更新revision；selection.coverage可只读核对0..255软边。手机两个参数面板均提供全部选项，连续工具另保留边界色和缺口处理。
+
+参考Krita 6.0.4的kis_tool_select_contiguous/similar、KisColorSelectionPolicies.h、kis_fill_painter.cc、KisGrowUntilDarkestPixelSelectionFilter与KisMergeLabeledLayersCommand的规则，独立实现；Krita色彩空间差值、圆盘形态、跨度插值抗锯齿、双扫描自适应增长与本插件的RGBA差值、方形形态、1px边界平滑、队列传播不逐像素等同。版本0.2.53 / versionCode56 / applicationId com.ai.limbs.payload.artstudio.v0253。仅静态检查与仓库提交，未编译、未运行测试、未推云端；实机取样、标签组参考、软边与撤销重放待统一部署验证。

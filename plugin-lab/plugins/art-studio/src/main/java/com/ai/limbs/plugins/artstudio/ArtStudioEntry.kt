@@ -546,6 +546,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         return InProcessCapabilityParameterSpec(key, type, ArtCapabilityHelp.parameterDescription(name, key), !optional)
     }
     val id = p("id")
+    fun colorSelectionFields()=listOf(p("opacitySpread","integer",true),p("antialias","number",true),p("feather","integer",true),p("stopAtDarkest","boolean",true),p("colorLabels","array",true))
     fun basicSelectionFields()=listOf(p("documentId",optional=true),p("expectedRevision","integer",true),p("mode",optional=true),p("antialias","number",true),p("feather","integer",true),p("expand","integer",true))
     fun figureFields()=listOf(p("fixedWidth","number",true),p("fixedHeight","number",true),p("fixedRatio","number",true),
         p("drawFromCenter","boolean",true),p("cornerRadius","number",true),p("outline",optional=true),p("figureFill","object",true))
@@ -591,9 +592,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "reference.show" -> listOf(p("documentId"),p("expectedRevision","integer"),p("visible","boolean"))
         "selection.contiguous" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("x","integer"),p("y","integer"),
             p("mode",optional=true),p("reference",optional=true),p("tolerance","integer",true),p("expand","integer",true),
-            p("gapClose","integer",true),p("boundaryMode","boolean",true),p("boundaryColor",optional=true),p("limitToSelection","boolean",true),p("bounds","object",true))
+            p("gapClose","integer",true),p("boundaryMode","boolean",true),p("boundaryColor",optional=true),p("limitToSelection","boolean",true),p("bounds","object",true))+colorSelectionFields()
         "selection.similar" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("x","integer"),p("y","integer"),
-            p("mode",optional=true),p("reference",optional=true),p("tolerance","integer",true),p("expand","integer",true),p("limitToSelection","boolean",true),p("bounds","object",true))
+            p("mode",optional=true),p("reference",optional=true),p("tolerance","integer",true),p("expand","integer",true),p("limitToSelection","boolean",true),p("bounds","object",true))+colorSelectionFields()
         "selection.magnetic_trace", "selection.magnetic_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("anchors","array"),
             p("mode",optional=true),p("reference",optional=true),p("filterRadius","integer",true),p("searchRadius","integer",true),
             p("threshold","integer",true),p("strength","number",true),p("precision","number",true),p("limitToSelection","boolean",true),p("bounds","object",true)) +
@@ -722,7 +723,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "layer.set_blend" -> listOf(id, p("blend"))
         "layer.properties" -> listOf(id, p("name", optional = true),
             p("opacity", "number", true), p("blend", optional = true),
-            p("visible", "boolean", true), p("locked", "boolean", true))
+            p("visible", "boolean", true), p("locked", "boolean", true),p("colorLabel","integer",true))
         "stroke.add" -> listOf(p("layerId"), p("points", "array"), p("color"), p("width", "number"),
             p("opacity", "number", true), p("tool", optional = true),
             p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true),

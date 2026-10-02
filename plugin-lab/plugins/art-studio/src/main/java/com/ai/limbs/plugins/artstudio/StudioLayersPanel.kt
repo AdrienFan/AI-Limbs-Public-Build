@@ -203,6 +203,8 @@ internal fun StudioLayersPanel(
                     Column(Modifier.weight(1f)) {
                         Text(layer.optString("name"), style = MaterialTheme.typography.bodySmall,
                             maxLines = 1)
+                        if(ArtLayerLabels.value(layer)!=0)Text("● "+ArtLayerLabels.names.getValue(ArtLayerLabels.value(layer)),
+                            color=androidx.compose.ui.graphics.Color(ArtLayerLabels.colors.getValue(ArtLayerLabels.value(layer))),style=MaterialTheme.typography.labelSmall)
                         if (layer.optDouble("opacity", 1.0) < 1.0 || layer.optString("blend") != "normal") {
                             Text((layer.optDouble("opacity", 1.0) * 100).toInt().toString() + "% · " +
                                 layerModes.first { it.first == layer.getString("blend") }.second,
@@ -339,6 +341,7 @@ private fun StudioLayerProperties(
     val id = layer.getString("id")
     var name by remember(id) { mutableStateOf(layer.getString("name")) }
     var opacity by remember(id) { mutableFloatStateOf(layer.getDouble("opacity").toFloat()) }
+    var colorLabel by remember(id) {mutableIntStateOf(ArtLayerLabels.value(layer))}
     var blend by remember(id) { mutableStateOf(layer.getString("blend")) }
     var visible by remember(id) { mutableStateOf(layer.getBoolean("visible")) }
     var locked by remember(id) { mutableStateOf(layer.getBoolean("locked")) }
@@ -369,6 +372,11 @@ private fun StudioLayerProperties(
                         }
                     }
                 }
+                Text("颜色标签")
+                Row(Modifier.horizontalScroll(rememberScrollState())) {
+                    ArtLayerLabels.names.forEach {(value,label)->FilterChip(selected=colorLabel==value,enabled=!busy,
+                        onClick={colorLabel=value},label={Text(label,color=androidx.compose.ui.graphics.Color(ArtLayerLabels.colors.getValue(value)))})}
+                }
                 Text("不透明度：" + (opacity * 100).toInt() + "%")
                 Slider(value = opacity, onValueChange = { opacity = it })
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -383,7 +391,7 @@ private fun StudioLayerProperties(
             TextButton(enabled = name.trim().isNotEmpty() && !busy, onClick = {
                 onSave(JSONObject().put("id", id).put("name", name.trim())
                     .put("opacity", opacity.toDouble()).put("blend", blend)
-                    .put("visible", visible).put("locked", locked))
+                    .put("visible", visible).put("locked", locked).put("colorLabel",colorLabel))
             }) { Text("确定") }
         }, dismissButton = { TextButton(onClick = onDismiss) { Text("取消") } })
 }

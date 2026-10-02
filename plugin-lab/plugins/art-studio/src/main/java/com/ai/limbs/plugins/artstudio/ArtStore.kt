@@ -307,7 +307,12 @@ internal class ArtStore(private val root: File) {
             val asset = UUID.randomUUID().toString()
             val bytes = try { ArtImagePolicy.encodePng(bitmap, MAX_ASSET_BYTES) } finally { bitmap.recycle() }
             atomicBytes(assetFile(asset), bytes)
-            return ArtMenuOperations.rasterLayer(id, name, asset)
+            val result=ArtMenuOperations.rasterLayer(id,name,asset)
+            // Replacing an existing layer retains its explicitly stored label. New/merged layers remain unlabeled.
+            state?.let {s->ArtMenuOperations.layers(s).firstOrNull {it.getString("id")==id}?.let {original->
+                if(original.has("colorLabel"))result.put("colorLabel",ArtLayerLabels.value(original))
+            }}
+            return result
         }
         when (action) {
             "add_new_colorize_mask" -> edit("COLORIZE_CREATE",
@@ -798,7 +803,7 @@ internal class ArtStore(private val root: File) {
     private fun selectionReference(snap: JSONObject,p: JSONObject,workingBytes: Long): android.graphics.Bitmap {
         val view=JSONObject(snap.toString());val state=view.getJSONObject("state");val all=ArtMenuOperations.layers(state)
         val layerId=p.getString("layerId");val target=all.firstOrNull {it.getString("id")==layerId} ?: error("参考图层不存在")
-        require(p.getString("reference") in setOf("current","visible"))
+        require(p.getString("reference") in setOf("current","visible","labels"))
         state.put("background","#00000000")
         if(p.getString("reference")=="current") {
             require(target.getString("kind")!="group") {"当前层参考需要实际内容图层，请选择绘画、图像、文字或矢量层"}
@@ -814,6 +819,9 @@ internal class ArtStore(private val root: File) {
                 layer.put("visible",layer.getString("id") in included)
                 if(layer.getString("id") in included)layer.put("opacity",1.0).put("blend","normal")
             }
+        } else if(p.getString("reference")=="labels") {
+            val included=ArtLayerLabels.referenceIds(state,ArtLayerLabels.parse(p.getJSONArray("colorLabels")))
+            for(layer in all)layer.put("visible",layer.getString("id") in included)
         }
         ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height"))+workingBytes,"选区参考与搜索")
         return ArtRenderer.render(this,view)
@@ -854,12 +862,12 @@ internal class ArtStore(private val root: File) {
         val snap=selectionToolRequest(p);val state=snap.getJSONObject("state");val o=ArtColorSelection.options(p)
         val request=JSONObject(p.toString());o.keys().forEach {request.put(it,o.get(it))}
         val bounds=ArtColorSelection.bounds(state,request)
-        val bitmap=selectionReference(snap,request,bounds.width().toLong()*bounds.height()*24)
+        val bitmap=selectionReference(snap,request,bounds.width().toLong()*bounds.height()*40)
         val result=try {ArtColorSelection.solve(state,bitmap,request,connected)} finally {bitmap.recycle()}
         val selection=ArtBezierSelection.combine(state.optJSONObject("selection"),result.selection,o.getString("mode"),snap.getJSONObject("state").getInt("width"),snap.getJSONObject("state").getInt("height"))
         apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
             .put("selection",selection).put("tool",if(connected)"contiguous" else "similar"))
-            .put("selectedPixels",result.pixels).put("sampledColor",result.sampledColor).put("selectionFeedback",true)
+            .put("selectedPixels",result.pixels).put("coverageSum",result.coverageSum).put("sampledColor",result.sampledColor).put("selectionFeedback",true)
     }
     fun magneticReference(p: JSONObject): ArtMagneticSelection.Image = locked {
         val snap=selectionToolRequest(p);val o=ArtMagneticSelection.options(p)
@@ -2102,6 +2110,10 @@ internal class ArtStore(private val root: File) {
             "LAYER_BLEND" -> find(p.getString("id")).second.put("blend", p.getString("blend").also { require(it in setOf("normal", "multiply", "screen", "add")) })
             "LAYER_PROPERTIES" -> {
                 val layer = find(p.getString("id")).second
+                if(p.has("colorLabel")) {
+                    val label=ArtLayerLabels.value(JSONObject().put("colorLabel",p.get("colorLabel")))
+                    layer.put("colorLabel",label)
+                }
                 val name = p.optString("name", layer.getString("name")).trim().take(100)
                 require(name.isNotBlank()) { "图层名称不能为空" }
                 val opacity = p.optDouble("opacity", layer.getDouble("opacity"))

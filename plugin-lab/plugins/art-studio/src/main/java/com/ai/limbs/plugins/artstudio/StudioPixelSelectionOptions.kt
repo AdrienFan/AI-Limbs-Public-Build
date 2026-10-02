@@ -11,7 +11,7 @@ import org.json.JSONObject
 import kotlin.math.roundToInt
 
 @Composable
-private fun SelectionToolModes(settings: JSONObject,enabled: Boolean,onSet: (String,Any)->Unit) {
+private fun SelectionToolModes(settings:JSONObject,enabled:Boolean,onSet:(String,Any)->Unit,labels:Boolean=false) {
     Text("选区模式")
     Row(Modifier.horizontalScroll(rememberScrollState())) {
         ArtBezierSelection.modes.forEach {(id,label)->FilterChip(selected=settings.getString("mode")==id,
@@ -19,9 +19,18 @@ private fun SelectionToolModes(settings: JSONObject,enabled: Boolean,onSet: (Str
     }
     Text("Shift 添加，Alt 减去，Ctrl 替换，Shift+Alt 相交；模式在开始操作时固定。")
     Text("参考来源")
-    Row {
-        listOf("current" to "当前层","visible" to "全部可见层").forEach {(id,label)->
+    Row(Modifier.horizontalScroll(rememberScrollState())) {
+        (listOf("current" to "当前层","visible" to "全部可见层")+if(labels)listOf("labels" to "颜色标签图层") else emptyList()).forEach {(id,label)->
             FilterChip(selected=settings.getString("reference")==id,enabled=enabled,onClick={onSet("reference",id)},label={Text(label)})}
+    }
+    if(labels && settings.getString("reference")=="labels") {
+        val selected=ArtLayerLabels.parse(settings.getJSONArray("colorLabels"))
+        Row(Modifier.horizontalScroll(rememberScrollState())) {
+            ArtLayerLabels.names.forEach {(id,label)->FilterChip(selected=id in selected,enabled=enabled,
+                onClick={val next=selected.toMutableSet();if(id in next) {if(next.size>1)next.remove(id)} else next.add(id)
+                    onSet("colorLabels",org.json.JSONArray(next.sorted()))},label={Text(label,color=Color(ArtLayerLabels.colors.getValue(id)))})}
+        }
+        Text("先在图层属性中设置颜色标签。匹配的可见内容层合成作参考；匹配的带标签组包含可见子层。无匹配会提示。")
     }
     FilterChip(selected=settings.getBoolean("limitToSelection"),enabled=enabled,
         onClick={onSet("limitToSelection",!settings.getBoolean("limitToSelection"))},label={Text("仅在现有选区范围查找")})
@@ -31,11 +40,21 @@ private fun SelectionToolModes(settings: JSONObject,enabled: Boolean,onSet: (Str
 internal fun StudioColorSelectionOptions(settings: JSONObject,connected: Boolean,busy: Boolean,onSettings: (JSONObject)->Unit) {
     fun set(key: String,value: Any) {onSettings(JSONObject(settings.toString()).put(key,value))}
     Text(if(connected)"点击相近颜色的连续区域，只选中与取样点连通的部分。" else "点击取样颜色，选中参考范围中全部相近颜色，包括不相连的区域。")
-    SelectionToolModes(settings,!busy,::set)
+    SelectionToolModes(settings,!busy,::set,labels=true)
     Text("颜色容差：${settings.getInt("tolerance")}%")
-    Slider(settings.getInt("tolerance").toFloat(),{set("tolerance",it.roundToInt())},enabled=!busy,valueRange=0f..100f)
+    Slider(settings.getInt("tolerance").toFloat(),{set("tolerance",it.roundToInt())},enabled=!busy,valueRange=if(settings.getInt("opacitySpread")<100)1f..100f else 0f..100f)
+    Text("颜色覆盖硬度：${settings.getInt("opacitySpread")}%")
+    Slider(settings.getInt("opacitySpread").toFloat(),{set("opacitySpread",it.roundToInt())},enabled=!busy&&settings.getInt("tolerance")>0,valueRange=0f..100f)
+    Text("100%为容差内全选；降低硬度，让颜色差异产生逐渐降低的覆盖率。容差0时使用100%硬度精确匹配。")
+    Text("抗锯齿：${(settings.getDouble("antialias")*100).roundToInt()}%")
+    Slider(settings.getDouble("antialias").toFloat(),{set("antialias",it.toDouble())},enabled=!busy&&settings.getInt("feather")==0,valueRange=0f..1f)
+    Text("羽化半径：${settings.getInt("feather")} px")
+    Slider(settings.getInt("feather").toFloat(),{set("feather",it.roundToInt())},enabled=!busy,valueRange=0f..32f)
     Text("扩展／收缩：${settings.getInt("expand")} px")
-    Slider(settings.getInt("expand").toFloat(),{set("expand",it.roundToInt())},enabled=!busy,valueRange=-16f..16f,steps=31)
+    Slider(settings.getInt("expand").toFloat(),{set("expand",it.roundToInt())},enabled=!busy,valueRange=-64f..64f)
+    FilterChip(selected=settings.getBoolean("stopAtDarkest"),enabled=!busy,
+        onClick={set("stopAtDarkest",!settings.getBoolean("stopAtDarkest"))},label={Text("扩展到最暗像素时停止")})
+    Text("仅影响正向扩展：可进入更暗或更不透明的像素，不继续越过它走向亮处；不改变原始颜色搜索。先扩展，再羽化；羽化大于0时不重复施加抗锯齿。")
     if(connected) {
         FilterChip(selected=settings.getBoolean("boundaryMode"),enabled=!busy,
             onClick={set("boundaryMode",!settings.getBoolean("boundaryMode"))},label={Text("以指定边界色围住的区域")})
@@ -49,8 +68,7 @@ internal fun StudioColorSelectionOptions(settings: JSONObject,connected: Boolean
         Slider(settings.getInt("gapClose").toFloat(),{set("gapClose",it.roundToInt())},enabled=!busy,valueRange=0f..8f,steps=7)
         Text("用侵蚀断开窄通道，再在原始颜色范围中恢复边缘。取样点必须位于处理后仍存在的区域。")
     }
-    Text("二值选区保留孔洞和分离区域，可继续移动缩放、复制、填色或滤镜。单次范围最多4194304像素、32768扫描段；较大图片可先画矩形选区并勾选范围限制。")
-    ArtColorSelection.pending.forEach {Text("$it（待实现）",color=Color.Gray)}
+    Text("8位软选区保留孔洞和分离区域；笔刷、擦除、复制、填色和滤镜使用同一覆盖率。单次范围最多4194304像素、32768扫描段；较大图片可先画矩形选区并勾选范围限制。")
 }
 @Composable
 internal fun StudioMagneticSelectionOptions(settings: JSONObject,busy: Boolean,hasDraft: Boolean,prepared: Boolean,
