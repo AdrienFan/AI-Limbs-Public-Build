@@ -17,7 +17,7 @@ internal class StudioReferenceInteraction(private val view:View) {
         val virtual=ArtReferences.selectionState(state);val layer=ArtShapes.layer(virtual,ArtReferences.LAYER)
         val selected=ArtShapes.selected(virtual,ArtReferences.LAYER)
         shapes.draw(canvas,layer,selected,toScreen,ArtShapes.items(layer)
-            .filter { it.getString("id") in selected }.none { it.getBoolean("locked") })
+            .filter { it.getString("id") in selected }.none { it.getBoolean("locked") },false)
     }
     fun touch(event:MotionEvent,state:JSONObject,document:String,revision:Int,toScreen:Matrix,
         multiple:Boolean,busy:Boolean,commit:(String,JSONObject)->Unit):Boolean {
@@ -38,7 +38,7 @@ internal class StudioReferenceInteraction(private val view:View) {
         shapes.preserveAspect=ArtReferences.items(state).filter { it.getString("id") in resizeIds }
             .all { it.getBoolean("keepAspect") }
         val consumed=shapes.touch(event,xy,toScreen,virtual,document,revision,ArtReferences.LAYER,
-            multiple,busy) { type,p ->
+            multiple,busy,false) { type,p ->
                 p.remove("layerId")
                 commit(if(type=="SHAPE_TRANSFORM") "REFERENCE_TRANSFORM" else "REFERENCE_SELECT",p)
             }
