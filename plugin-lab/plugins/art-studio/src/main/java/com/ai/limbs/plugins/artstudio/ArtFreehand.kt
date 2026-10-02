@@ -38,6 +38,13 @@ internal object ArtFreehand {
         val mode = p.optString("mode", "curve")
         val precision = p.optDouble("precision", 2.0)
         val closed = p.optBoolean("closed", false)
+        val optimizeRaw=if(p.has("optimizeRaw"))p.getBoolean("optimizeRaw") else false
+        val optimizeCurve=if(p.has("optimizeCurve"))p.getBoolean("optimizeCurve") else true
+        val rawPrecision=if(p.has("rawPrecision"))p.getDouble("rawPrecision") else 1.0
+        val curvePrecision=if(p.has("curvePrecision"))p.getDouble("curvePrecision") else precision
+        val combineAngle=if(p.has("combineAngle"))p.getDouble("combineAngle") else 0.0
+        require(rawPrecision.isFinite()&&rawPrecision in 0.25..32.0&&curvePrecision.isFinite()&&curvePrecision in 0.25..32.0)
+        require(combineAngle.isFinite()&&combineAngle in 0.0..90.0) {"直线合并转角须为0–90度"}
         require(mode in modes) { "路径模式需要 raw、curve 或 straight" }
         require(precision.isFinite() && precision in 0.25..32.0) { "路径精度需要在0.25至32个图层局部像素之间" }
         val samples = p.getJSONArray("points")
@@ -59,9 +66,9 @@ internal object ArtFreehand {
         val geometry = JSONArray().put(source.first().json())
         val commands = JSONArray()
         when (mode) {
-            "raw" -> source.drop(1).forEach { commands.put("L"); geometry.put(it.json()) }
-            "straight" -> simplify(source, precision).drop(1).forEach { commands.put("L"); geometry.put(it.json()) }
-            "curve" -> for (segment in fit(source, precision)) {
+            "raw" -> (if(optimizeRaw)simplify(source,rawPrecision) else source).drop(1).forEach { commands.put("L"); geometry.put(it.json()) }
+            "straight" -> combineLines(simplify(source,precision),source,precision,combineAngle).drop(1).forEach { commands.put("L"); geometry.put(it.json()) }
+            "curve" -> for (segment in if(optimizeCurve)fit(source,curvePrecision) else interpolate(source)) {
                 commands.put("C")
                 geometry.put(segment.p1.json()).put(segment.p2.json()).put(segment.p3.json())
             }
@@ -74,16 +81,45 @@ internal object ArtFreehand {
         val shape = JSONObject().put("id", UUID.randomUUID().toString()).put("kind", "path")
             .put("points", geometry).put("commands", commands).put("closed", closed)
             .put("freehand", JSONObject().put("mode", mode).put("precision", precision)
-                .put("sampleCount", samples.length()))
+                .put("sampleCount", samples.length()).put("optimizeRaw",optimizeRaw).put("optimizeCurve",optimizeCurve)
+                .put("rawPrecision",rawPrecision).put("curvePrecision",curvePrecision).put("combineAngle",combineAngle))
         val style = p.optJSONObject("style")
         if (style != null) {
-            require(style.keys().asSequence().all { it in setOf("fill", "stroke", "strokeWidth", "opacity") }) {
-                "徒手路径样式只支持fill、stroke、strokeWidth、opacity"
+            require(style.keys().asSequence().all { it in setOf("fill", "stroke", "strokeWidth", "opacity","objectStyle") }) {
+                "徒手路径样式仅支持fill、stroke、strokeWidth、opacity、objectStyle"
             }
             style.keys().forEach { key -> shape.put(key, style.get(key)) }
         }
         return ArtShapes.normalize(shape)
     }
+
+    private fun interpolate(points:List<Point>):List<Cubic> = (0 until points.lastIndex).map {i->
+        val a=points[i];val b=points[i+1]
+        val before=points[maxOf(0,i-1)];val after=points[minOf(points.lastIndex,i+2)]
+        Cubic(a,a+(b-before)*(1.0/6.0),b-(after-a)*(1.0/6.0),b)
+    }
+    private fun combineLines(points:List<Point>,source:List<Point>,precision:Double,angle:Double):List<Point> {
+        if(angle==0.0||points.size<3)return points
+        val out=mutableListOf(points.first(),points[1]);var runStart=0;var sourceIndex=(1 until source.size).first {source[it]==points[1]}
+        for(p in points.drop(2)) {
+            var end=sourceIndex+1;while(end<source.size&&source[end]!=p)end++
+            require(end<source.size)
+            val a=out[out.lastIndex-1];val b=out.last();val first=b-a;val next=p-b;val chord=p-a
+            val lengths=first.length()*next.length();val squared=chord.dot(chord)
+            val turn=if(lengths>0)Math.toDegrees(kotlin.math.acos((first.dot(next)/lengths).coerceIn(-1.0,1.0))) else 180.0
+            val valid=turn<=angle&&first.dot(next)>0&&squared>0&&(runStart..end).all {i->
+                val relative=source[i]-a;val t=relative.dot(chord)/squared
+                t in 0.0..1.0&&(relative-chord*t).length()<=precision
+            }
+            if(valid)out[out.lastIndex]=p else {out.add(p);runStart=sourceIndex}
+            sourceIndex=end
+        };return out
+    }
+    fun info()=JSONObject().put("modes",JSONArray(modes)).put("defaults",JSONObject().put("mode","curve").put("precision",2).put("optimizeRaw",false).put("rawPrecision",1).put("optimizeCurve",true).put("combineAngle",0))
+        .put("optimization","Raw preserves samples or independently reduces by rawPrecision; Curve fits with curvePrecision (defaults to precision), or interpolates every sample when optimizeCurve=false; straight combines forward segments within combineAngle and original-sample deviation precision")
+        .put("connection","startEndpoint/endEndpoint={id,subpath,node}, zero-based open endpoints from path.nodes.subpaths; points stay layer-local, target transforms mapped internally, target id/style preserved; same-path opposite endpoints close a loop")
+        .put("style","New paths accept style.objectStyle; connected paths keep destination style; modify after connection with shape.style")
+        .put("limits","2–2048 samples; precisions 0.25–32 local pixels; combineAngle 0–90 degrees, 0 disables extra angular merge; geometry <=2048 segments/6145 points")
 
     /** Distance-based polyline simplification; endpoints and significant corners are retained. */
     private fun simplify(points: List<Point>, precision: Double): List<Point> {

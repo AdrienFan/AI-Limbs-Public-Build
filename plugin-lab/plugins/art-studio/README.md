@@ -767,3 +767,21 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 渐变/虚线调用shape.style，`style:{objectStyle:{strokeCap:round,strokeJoin:bevel,dashArray:[8,4],fillGradient:{type:linear,start:[0,0],end:[100,0],stops:[[0,"#FF245364"],[1,"#FFE8DCC5"]]}}}`，目标带ids数组。
 
 版本 `0.2.48` / versionCode `51` / applicationId `com.ai.limbs.payload.artstudio.v0248`。仅静态检查和开发仓库保存，未编译、未运行测试、未推送云端；运行效果待统一部署验证。
+
+
+### 0.2.49：矢量徒手接续与独立优化（尚未编译）
+
+- 参照 Krita 6.0.4 `plugins/tools/basictools/kis_tool_pencil.cc`、`libs/basicflakes/tools/KoPencilTool.cpp` 的端点命中、connectPaths、多模式优化与combineAngle职责；以本插件 Kotlin 拟合器、子路径节点和矩阵独立实现，未复用源码。
+- Raw默认保留原始采样，optimizeRaw=true以rawPrecision做距离减点；Curve默认沿用分段拟合，curvePrecision独立配置，optimizeCurve=false逐采样段做三次插值。两项优化开关彼此独立；Raw误差默认1，Curve误差省略则沿用旧precision，均0.25–32局部像素。
+- Straight先按precision做距离简化，再以combineAngle合并相邻转角（0–90°，0关闭额外合并）。采用点积/acos比较转角以处理方位角跨0°，不合并反向段；所有被合并的原始采样须在弦投影范围内且偏差不超过precision，避免累计小角度把明显弧线拉直。保留路径端点，闭合边也受偏差保护。
+- shape.freehand可传startEndpoint/endEndpoint:{id,subpath,node}；坐标仍是图层局部。开放且可见/未锁定的既有路径可从任一端接续，必要时反向并交换柄；新轨迹精确接点、接续柄随点移动，原目标节点不经过浮点矩阵往返。接续两条路径可自动合并，接回同路径另一端可闭合；未接续的其他子路径保留。结果使用起点目标（只有终点则使用终点目标）的ID、矩阵和样式，消耗其他目标对象；一笔为一个可撤销历史操作，先校验文档revision再保存，不在重放时重新拟合。
+- 手机“接续已有端点”在12dp屏幕距离内查找开放端点，匹配无关对象层级只限定当前矢量层；闭合模式与接续互斥，接续时不使用Shift，接回另一端自动闭合。起笔捕获参数/样式/版本；新路径可设置高级对象样式，接续预览继承起点目标样式并在其对象坐标里渲染。拖动阶段预览Raw几何，收笔后一次拟合并显示最终路径。高级样式与上批共用；也提供合成所选路径按钮，节点编辑/连接用已有path.combine/path.topology。
+- 兰儿入口shape.freehand_info、shape.freehand，以及path.nodes/path.combine/path.topology/shape.style；元数据有最小示例、参数默认值、端点地址和坐标空间。style.objectStyle支持已有线帽、转角、虚线、填充规则、独立透明度及填充/描边渐变。
+
+简例（shape.freehand，ID/revision替换当前值）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","points":[[100,100],[130,85],[160,110]],"mode":"curve","optimizeCurve":true,"curvePrecision":2,"startEndpoint":{"id":"PATH_ID","subpath":0,"node":2}}
+```
+node=2仅适用于目标子路径有3点且该点为开放端点，请读path.nodes替换。加endEndpoint可桥接另一条路径或接回同路径另一端；Raw优化改mode:raw,optimizeRaw:true,rawPrecision:1；角度合并改mode:straight,precision:2,combineAngle:8。
+
+版本 `0.2.49` / versionCode `52` / applicationId `com.ai.limbs.payload.artstudio.v0249`。仅静态检查和开发仓库保存，未编译、未运行测试、未推送云端；运行效果待统一部署验证。

@@ -370,6 +370,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("path.nodes", "读取路径节点与控制柄", read) { p -> store.pathNodes(p) }
         capability("path.edit", "编辑贝塞尔路径节点", write) { p -> store.apply("LANER","SHAPE_PATH_EDIT",p) }
         capability("shape.calligraphy", "绘制矢量书法笔画", write) { p -> store.calligraphy("LANER",p) }
+        capability("shape.freehand_info","读取徒手路径接续与分模式优化",read) {ArtFreehand.info()}
         capability("shape.freehand", "绘制矢量徒手路径", write) { p -> store.freehand("LANER", p) }
         capability("shape.create", "创建可编辑矢量形状", write) { p ->
             val shape = JSONObject(p.getJSONObject("shape").toString()).put("id", UUID.randomUUID().toString())
@@ -617,7 +618,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("usePressure","boolean",true),p("cap",optional=true),p("color",optional=true),p("opacity","number",true))
         "shape.freehand" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"),
             p("points", "array"), p("mode", optional = true), p("precision", "number", true),
-            p("closed", "boolean", true), p("style", "object", true))
+            p("closed", "boolean", true), p("style", "object", true),p("optimizeRaw","boolean",true),p("rawPrecision","number",true),
+            p("optimizeCurve","boolean",true),p("curvePrecision","number",true),p("combineAngle","number",true),p("startEndpoint","object",true),p("endEndpoint","object",true))
         "shape.create" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("shape", "object"))
         "shape.select", "shape.delete" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"))
         "shape.transform" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("matrix", "array"))

@@ -444,6 +444,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var freehandMode by remember { mutableStateOf("curve") }
     var freehandPrecision by remember { mutableFloatStateOf(2f) }
     var freehandClosed by remember { mutableStateOf(false) }
+    var freehandSettings by remember {mutableStateOf(JSONObject().put("optimizeRaw",false).put("rawPrecision",1).put("optimizeCurve",true).put("curvePrecision",2).put("combineAngle",0).put("connectEndpoints",false).put("objectStyle",ArtObjectStyle.defaults()))}
     var bezierEditing by remember { mutableStateOf(false) }
     var bezierNode by remember { mutableIntStateOf(0) }
     var bezierNodeSelection by remember {mutableStateOf(emptyList<Int>())}
@@ -1534,7 +1535,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         .put("opacity",opacity.toDouble())
                     view.onCalligraphy = { p -> if (!busy) perform { store.calligraphy("AWEI",p) } }
                     view.freehandMode = freehandMode; view.freehandPrecision = freehandPrecision
-                    view.freehandClosed = freehandClosed
+                    view.freehandClosed = freehandClosed;view.freehandSettings=JSONObject(freehandSettings.toString())
                     view.onFreehand = { p -> if (!busy) perform { store.freehand("AWEI", p) } }
                     view.bezierEditing = bezierEditing; view.bezierNode = bezierNode
                     view.bezierNodeType = bezierNodeType; view.bezierClosed = bezierClosed
@@ -2503,7 +2504,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 if (tool == "vector_freehand") {
                     StudioFreehandOptions(current, selected, busy, freehandMode, freehandPrecision,
                         freehandClosed, fillShape, { freehandMode = it }, { freehandPrecision = it },
-                        { freehandClosed = it }, { fillShape = it }, ::edit)
+                        { freehandClosed = it }, { fillShape = it }, ::edit,freehandSettings,{freehandSettings=it})
                 }
                 if (tool == "shape_select") {
                     StudioShapeOptions(current, selected, busy, color, width,
@@ -3365,6 +3366,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var freehandMode: String = "curve"
     var freehandPrecision: Float = 2f
     var freehandClosed: Boolean = false
+    var freehandSettings=JSONObject().put("connectEndpoints",false).put("objectStyle",ArtObjectStyle.defaults())
     var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
@@ -4247,7 +4249,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 val active = ArtShapes.layer(state, selectedId)
                 val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
                 return freehandInteraction.touch(event, toScreen, state, documentId, sceneRevision, selectedId,
-                    shapeBusy, freehandMode, freehandPrecision, freehandClosed, fillShape, color, brushWidth, opacity, onFreehand)
+                    shapeBusy, freehandMode, freehandPrecision, freehandClosed, fillShape, color, brushWidth, opacity, freehandSettings, onFreehand)
             } catch (error: Exception) {
                 freehandInteraction.cancel()
                 android.util.Log.e("ArtStudio", "Freehand path failed", error)

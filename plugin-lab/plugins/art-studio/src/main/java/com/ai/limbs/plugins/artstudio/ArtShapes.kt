@@ -264,6 +264,7 @@ internal object ArtShapes {
                 .put("shapeSelection",JSONObject().put("layerId",layer.getString("id")).put("ids",JSONArray(ids)))
         }
         when(type) {
+            "SHAPE_FREEHAND" -> choose(listOf(ArtFreehandConnect.apply(layer,p)))
             "SHAPE_CREATE" -> {
                 require(all.size<512) { "单个矢量层最多512个对象" }
                 val shape=normalize(p.getJSONObject("shape"))

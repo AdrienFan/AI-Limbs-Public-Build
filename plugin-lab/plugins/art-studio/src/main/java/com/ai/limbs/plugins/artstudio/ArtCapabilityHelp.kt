@@ -188,7 +188,7 @@ internal object ArtCapabilityHelp {
   "shape.hit":{"args":{"documentId":"DOCUMENT_ID","layerId":"VECTOR_LAYER_ID","x":30,"y":30},"note":"","summary":"按真实填充/描边自上向下命中，返回hitId或null；不改变选择。"},
   "shape.box":{"args":{"documentId":"DOCUMENT_ID","layerId":"VECTOR_LAYER_ID","x":0,"y":0,"width":200,"height":200,"contained":true},"note":"","summary":"查询文档矩形中的矢量对象，返回boxedIds；不创建像素选区。"},
   "shape.create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","shape":{"kind":"rectangle","points":[[10,10],[100,80]],"fill":"#FFFFCC80","stroke":"#FF245364","strokeWidth":2}},"note":"目标为可见未锁定矢量层。","summary":"保存可编辑矢量形状，成功附缩略图。"},
-  "shape.freehand":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","points":[[10,10],[50,40],[100,20]],"mode":"curve","style":{"stroke":"#FF245364","strokeWidth":3}},"note":"先创建或选用可见未锁定矢量层；几何须非零。","summary":"将图层局部采样点固化为可编辑矢量路径，重放不重新拟合。"},
+  "shape.freehand":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","points":[[10,10],[50,40],[100,20]],"mode":"curve","style":{"stroke":"#FF245364","strokeWidth":3},"optimizeCurve":true,"curvePrecision":2},"note":"先创建或选用可见未锁定矢量层；几何须非零。 optimizeRaw/rawPrecision独立控制Raw减点；optimizeCurve=false按每段采样插值，true按curvePrecision拟合减段。straight用combineAngle做转角合并并受precision偏差保护。接续可加startEndpoint/endEndpoint:{id:PATH_ID,subpath:0,node:开放端点索引}，先读path.nodes；同路径另一端闭合，跨对象自动合并，目标ID/矩阵/样式保留。成功附预览。","summary":"将图层局部采样点固化为可编辑矢量路径，重放不重新拟合。"},
   "shape.calligraphy":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","samples":[{"x":10,"y":10,"time":0,"pressure":1},{"x":100,"y":80,"time":100,"pressure":0.7}],"width":20,"color":"#FF245364"},"note":"先创建或选用可见未锁定矢量层；几何须非零。","summary":"按时间/压力生成封闭矢量书法轮廓，保存最终几何，可继续节点编辑。"},
   "path.create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","nodes":[{"x":10,"y":10,"out":[40,0],"type":"corner"},{"x":100,"y":80,"in":[70,100],"type":"corner"}],"style":{"stroke":"#FF245364","strokeWidth":3}},"note":"先创建或选用可见未锁定矢量层；几何须非零。","summary":"保存可继续编辑的贝塞尔路径，成功附缩略图。"},
   "path.nodes":{"args":{"documentId":"DOCUMENT_ID","layerId":"VECTOR_LAYER_ID","id":"SHAPE_ID"},"note":"对象必须是path；读取零基节点/段索引及对象局部坐标。 返回nodes全局扁平数组、subpaths每条局部nodes/closed；path.topology用[子路径,局部节点]，path.edit默认全局节点。","summary":"返回路径对象局部nodes、closed、revision和objectToDocument矩阵；编辑前刷新。"},
@@ -221,7 +221,8 @@ internal object ArtCapabilityHelp {
   "path.topology":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","id":"PATH_ID","action":"join","first":[0,2],"second":[1,0]},"note":"ID/revision替换当前值，端点地址取path.nodes.subpaths，示例假定子路径0有3点且子路径1开放。join/merge只允许两个不同的开放端点；同子路径则闭合。break_node/break_segment只传at:[子路径,节点]；零几何或不足节点明确拒绝。成功附预览。","summary":"断开节点或线段、连接开放子路径、合并两个端点。"},
   "path.convert":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"]},"note":"替换ID/revision；支持line/rectangle/ellipse/polygon，已有path保持可编辑。保留ID、矩阵、样式；椭圆与圆角采用四分之一弧的三次近似。","summary":"基础形状转为可编辑节点路径。"},
   "path.combine":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["FIRST_PATH_ID","SECOND_PATH_ID"]},"note":"至少两条同层路径。首ID为结果对象及样式，其余变换映射到首对象局部坐标并删除被合成对象；此动作保留独立子路径，连接端点再调用path.topology。可撤销；成功附预览。","summary":"把多个路径合成一个包含子路径的可编辑对象。"},
-  "shape.style_info":{"args":{},"note":"shape.style传style.objectStyle部分字段，path.create的style也可包含objectStyle。","summary":"返回线帽、转角、虚线、填充规则、独立透明度和线性/径向渐变样式。"}
+  "shape.style_info":{"args":{},"note":"shape.style传style.objectStyle部分字段，path.create的style也可包含objectStyle。","summary":"返回线帽、转角、虚线、填充规则、独立透明度和线性/径向渐变样式。"},
+  "shape.freehand_info":{"args":{},"note":"接续引用读path.nodes.subpaths，高级样式查shape.style_info；既有路径合成用path.combine，端点连接用path.topology。","summary":"返回徒手矢量路径的Raw/Curve优化、转角合并和端点接续范围。"}
 }
 """
     private const val FIELDS = """
@@ -500,7 +501,7 @@ internal object ArtCapabilityHelp {
   "colorize.settings.settings":{"description":"{threshold:1–254整数默认180,gapClose:0–8整数默认0,limitBounds:false,editKeys:true,showOutput:true}；后三项布尔，允许只传要改字段。"},
   "assistant.settings.settings":{"description":"{visible:boolean,snapping:boolean,onlySelected:boolean,thresholdDp:4–64}；只传要改字段，全局visible=false不关闭吸附。"},
   "path.create.style":{"description":"可选{fill,stroke,strokeWidth,opacity,objectStyle}，高级样式结构见shape.style_info。对象和柄坐标同处对象局部空间。"},
-  "shape.freehand.style":{"description":"样式对象{fill:\"#AARRGGBB\",stroke:\"#AARRGGBB\",strokeWidth:0.1–512,opacity:0–1}；只传要改字段。"},
+  "shape.freehand.style":{"description":"新路径样式{fill,stroke,strokeWidth,opacity,objectStyle}，objectStyle结构查shape.style_info。接续使用已有目标的样式；要更换结果样式，成功后调用shape.style。"},
   "shape.style.style":{"description":"样式部分对象{fill:#AARRGGBB,stroke:#AARRGGBB,strokeWidth:0.1–512,opacity:0–1,cornerRadius:0–16384,objectStyle:{...}}。cornerRadius仅矩形。objectStyle支持fillRule:nonzero/evenodd,strokeCap:butt/round/square,strokeJoin:miter/round/bevel,miterLimit:1–100,dashArray:[]或2–16个偶数正长度(0.1–4096局部像素),dashOffset:±1000000,fillOpacity/strokeOpacity:0–1,fillGradient/strokeGradient:null清除或{type:linear/radial,start:[x,y],end:[x,y],stops:[[0,#AARRGGBB],...,[1,#AARRGGBB]]}。渐变2–16站、位置严格递增含0/1、坐标对象局部、起终点不同；径向起点为圆心、终点定义半径。结构也见shape.style_info。"},
   "comic.frame.style":{"description":"样式对象{fill:\"#AARRGGBB\",stroke:\"#AARRGGBB\",strokeWidth:0.1–512,opacity:0–1}；只传要改字段。"},
   "reference.style.style":{"description":"{opacity:0–1,saturation:0–1,visible:boolean,locked:boolean,keepAspect:boolean,name:string}；锁定时只允许单改locked。"},
@@ -703,7 +704,14 @@ internal object ArtCapabilityHelp {
   "path.convert.layerId":{"description":"可见且未锁定的kind=vector层ID，取layer.list；不可修改锁定/隐藏对象。"},
   "path.combine.layerId":{"description":"可见且未锁定的kind=vector层ID，取layer.list；不可修改锁定/隐藏对象。"},
   "path.convert.ids":{"description":"同矢量层的不重复对象ID数组，取shape.list.shapes[].id；convert至少1，combine至少2且全部为path。combine按数组首对象保留ID、样式和局部坐标。"},
-  "path.combine.ids":{"description":"同矢量层的不重复对象ID数组，取shape.list.shapes[].id；convert至少1，combine至少2且全部为path。combine按数组首对象保留ID、样式和局部坐标。"}
+  "path.combine.ids":{"description":"同矢量层的不重复对象ID数组，取shape.list.shapes[].id；convert至少1，combine至少2且全部为path。combine按数组首对象保留ID、样式和局部坐标。"},
+  "shape.freehand.optimizeRaw":{"description":"默认false保留去除连续重复后的Raw采样；true用rawPrecision误差约束减点，仅mode=raw生效。"},
+  "shape.freehand.rawPrecision":{"description":"Raw优化误差，0.25–32图层局部像素，默认1，独立于Curve精度。"},
+  "shape.freehand.optimizeCurve":{"description":"默认true，用分段最小二乘拟合减段；false逐采样段三次插值，保留每个采样位置，仅mode=curve生效。"},
+  "shape.freehand.curvePrecision":{"description":"曲线拟合误差0.25–32图层局部像素；省略沿用precision（默认2），仅优化Curve生效。"},
+  "shape.freehand.combineAngle":{"description":"straight模式允许合并的相邻转角0–90度，默认0关闭额外角度合并；先按precision做距离简化，合并还须前向且所有原始采样到合并弦的偏差<=precision，避免压平回头或弧线。"},
+  "shape.freehand.startEndpoint":{"description":"可选{id:PATH_ID,subpath:零起始子路径,node:局部端点索引}，取同层path.nodes.subpaths，仅开放、可见、未锁定路径端点。points仍是图层局部采样；精确接点和对象矩阵由插件处理。不允许同一个端点用于两端，closed须false；接回同路径的另一端自动闭合。起点目标优先保留ID/样式，否则使用终点目标；合并消耗其他目标对象但保留其未连接子路径。"},
+  "shape.freehand.endEndpoint":{"description":"可选{id:PATH_ID,subpath:零起始子路径,node:局部端点索引}，取同层path.nodes.subpaths，仅开放、可见、未锁定路径端点。points仍是图层局部采样；精确接点和对象矩阵由插件处理。不允许同一个端点用于两端，closed须false；接回同路径的另一端自动闭合。起点目标优先保留ID/样式，否则使用终点目标；合并消耗其他目标对象但保留其未连接子路径。"}
 }
 """
 }

@@ -737,9 +737,10 @@ internal class ArtStore(private val root: File) {
     fun freehand(actor:String, params:JSONObject):JSONObject {
         // Fit on the caller's worker thread; revision checks and the atomic write remain in apply.
         val shape=ArtFreehand.create(params)
-        return apply(actor,"SHAPE_CREATE",JSONObject().put("documentId",params.getString("documentId"))
-            .put("expectedRevision",params.getInt("expectedRevision")).put("layerId",params.getString("layerId"))
-            .put("shape",shape))
+        val p=JSONObject().put("documentId",params.getString("documentId"))
+            .put("expectedRevision",params.getInt("expectedRevision")).put("layerId",params.getString("layerId")).put("shape",shape)
+        for(key in listOf("startEndpoint","endEndpoint"))if(params.has(key))p.put(key,JSONObject(params.getJSONObject(key).toString()))
+        return apply(actor,"SHAPE_FREEHAND",p)
     }
 
 
@@ -1737,6 +1738,7 @@ internal class ArtStore(private val root: File) {
                 "VECTOR_LAYER_CREATE" -> "添加矢量图层"
                 "SHAPE_COMIC_CUT" -> "漫画分格切分"
                 "SHAPE_COMIC_MERGE" -> "漫画分格合并"
+                "SHAPE_FREEHAND" -> "绘制或接续矢量徒手路径"
                 "SHAPE_CREATE" -> "添加矢量形状"
                 "SHAPE_SELECT" -> "选择形状"
                 "SHAPE_TRANSFORM" -> "变换形状"
@@ -1921,7 +1923,7 @@ internal class ArtStore(private val root: File) {
                 state.put("selectedLayerId", id)
             }
             "SHAPE_COMIC_CUT", "SHAPE_COMIC_MERGE" -> ArtComicPanels.apply(state,p)
-            "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT", "SHAPE_PATH_TOPOLOGY", "SHAPE_PATH_CONVERT", "SHAPE_PATH_COMBINE" ->
+            "SHAPE_FREEHAND", "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT", "SHAPE_PATH_TOPOLOGY", "SHAPE_PATH_CONVERT", "SHAPE_PATH_COMBINE" ->
                 ArtShapes.edit(state, type, p)
             "VECTOR_LAYER_CREATE" -> {
                 val id = p.getString("id"); validateId(id)
