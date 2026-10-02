@@ -27,7 +27,7 @@ internal fun StudioColorizeOptions(snapshot: JSONObject,selected: String,busy: B
                 .put("expectedRevision",snapshot.getInt("revision")).put("sourceLayerId",selected))
         }) {Text("从当前线稿建立上色蒙版")}
     } else {
-        val data=layer.getJSONObject("colorize");val settings=data.getJSONObject("settings")
+        val data=layer.getJSONObject("colorize");val settings=ArtColorize.normalizeSettings(data.getJSONObject("settings"),JSONObject())
         val editable=!busy && !layer.getBoolean("locked")
         Text(if(ArtColorize.dirty(state,layer))"线索或源线稿已变化，需更新结果" else "填色结果已更新")
         val sourceName=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==data.getString("sourceLayerId")}?.getString("name") ?: "已删除"
@@ -71,6 +71,18 @@ internal fun StudioColorizeOptions(snapshot: JSONObject,selected: String,busy: B
         Slider(gap,{gap=it},enabled=editable,valueRange=0f..8f,steps=7,onValueChangeFinished={
             onEdit("COLORIZE_SETTINGS",params().put("settings",JSONObject().put("gapClose",gap.roundToInt())))
         })
+        FilterChip(selected=settings.getBoolean("useEdgeDetection"),enabled=editable,onClick={
+            onEdit("COLORIZE_SETTINGS",params().put("settings",JSONObject().put("useEdgeDetection",!settings.getBoolean("useEdgeDetection"))))
+        },label={Text("实心阴影／边缘检测")})
+        Text("边缘尺寸建议接近最细线宽；0不做边缘滤波。关闭时沿用暗线强度。")
+        StudioColorizeNumber(selected,"edgeDetectionSize","边缘检测尺寸",settings.getDouble("edgeDetectionSize"),0f..100f,"px",
+            editable&&settings.getBoolean("useEdgeDetection")) {key,value->onEdit("COLORIZE_SETTINGS",params().put("settings",JSONObject().put(key,value)))}
+        StudioColorizeNumber(selected,"fuzzyRadius","缺口模糊半径",settings.getDouble("fuzzyRadius"),0f..500f,"px",editable) {key,value->
+            onEdit("COLORIZE_SETTINGS",params().put("settings",JSONObject().put(key,value)))}
+        Text("缺口提示约为模糊半径的两倍；增大会合拢短缺口，也可能吞掉窄区域。与上方整数闭合半径可叠加。")
+        StudioColorizeNumber(selected,"cleanUpAmount","清理强度",settings.getDouble("cleanUpAmount"),0f..1f,"",editable) {key,value->
+            onEdit("COLORIZE_SETTINGS",params().put("settings",JSONObject().put(key,value)))}
+        Text("0关闭清理，1最强；合并与较大异色区域竞争的小溢出块，不改线索。背景需明确画透明线索，孤立单色区域不会被猜测删除。修改参数后点击更新填色。")
         Row {
             TextButton(enabled=editable && ArtColorize.items(layer).isNotEmpty(),onClick={
                 confirmationParams=params();confirm="clear"
@@ -91,4 +103,16 @@ internal fun StudioColorizeOptions(snapshot: JSONObject,selected: String,busy: B
             val action=when(confirm) {"clear"->"COLORIZE_CLEAR";"color"->"COLORIZE_PALETTE";else->"COLORIZE_CONVERT"}
             val p=requireNotNull(confirmationParams);confirm="";confirmationParams=null;onEdit(action,p)
         }) {Text("确认")}},dismissButton={TextButton(onClick={confirm="";confirmationParams=null}) {Text("取消")}})
+}
+
+@Composable
+private fun StudioColorizeNumber(maskId:String,key:String,label:String,value:Double,range:ClosedFloatingPointRange<Float>,unit:String,
+    enabled:Boolean,onCommit:(String,Double)->Unit) {
+    var draft by remember(maskId,key,value) {mutableStateOf(value.toString())}
+    val parsed=draft.toDoubleOrNull()?.takeIf {it.isFinite()&&it>=range.start&&it<=range.endInclusive}
+    OutlinedTextField(value=draft,onValueChange={draft=it},enabled=enabled,singleLine=true,
+        label={Text("$label ($unit ${range.start}–${range.endInclusive})")},isError=parsed==null)
+    Slider(parsed?.toFloat() ?: value.toFloat(),{draft=it.toString()},enabled=enabled,valueRange=range,
+        onValueChangeFinished={draft.toDoubleOrNull()?.let {onCommit(key,it)}})
+    TextButton(enabled=enabled&&parsed!=null&&parsed!=value,onClick={onCommit(key,requireNotNull(parsed))}) {Text("应用$label")}
 }

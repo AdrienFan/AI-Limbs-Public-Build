@@ -975,8 +975,9 @@ internal class ArtStore(private val root: File) {
         val masks=ArtMenuOperations.layers(state).filter {it.getString("kind")=="colorize" && (!p.has("maskId") || it.getString("id")==p.getString("maskId"))}.map {
             val copy=JSONObject(it.toString()).put("dirty",ArtColorize.dirty(state,it)).put("canUpdate",ArtColorize.canUpdate(state,it))
                 .put("sourceAvailable",ArtMenuOperations.layers(state).any {source-> source.getString("id")==it.getJSONObject("colorize").getString("sourceLayerId")})
+            val data=copy.getJSONObject("colorize")
+            data.put("settings",ArtColorize.normalizeSettings(data.getJSONObject("settings"),JSONObject()))
             if(!p.optBoolean("includeKeys",false)) {
-                val data=copy.getJSONObject("colorize")
                 data.remove("keys")
                 data.put("keySummaries",JSONArray(ArtColorize.items(it).map {key ->
                     JSONObject().put("id",key.getString("id")).put("color",key.getString("color"))
@@ -1012,7 +1013,7 @@ internal class ArtStore(private val root: File) {
         val result=try {
             val area=ArtColorizeSolver.region(state,bitmap,mask)
             ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,view.getJSONObject("state"),
-                state.getInt("width"),state.getInt("height"))+area.width().toLong()*area.height()*64,"上色蒙版更新")
+                state.getInt("width"),state.getInt("height"))+ArtColorizeSolver.workingBytes(mask,area.width().toLong()*area.height()),"上色蒙版更新")
             ArtColorizeSolver.solve(state,bitmap,mask,area)
         } finally {bitmap.recycle()}
         val outputWidth=result.bitmap.width;val outputHeight=result.bitmap.height
@@ -1025,7 +1026,10 @@ internal class ArtStore(private val root: File) {
                 .put("output",JSONObject().put("asset",asset).put("x",result.x).put("y",result.y)
                     .put("width",outputWidth).put("height",outputHeight))
             apply(actor,"COLORIZE_OUTPUT",params).put("colorizeResult",JSONObject().put("filledPixels",result.filled)
-                .put("seedPixels",result.seeds).put("algorithm","seeded-geodesic-fill"))
+                .put("seedPixels",result.seeds).put("algorithm","prefiltered-seeded-geodesic-fill")
+                .put("cleanedPixels",result.cleanup.pixels).put("cleanedSeedPixels",result.cleanup.seedPixels)
+                .put("cleanedRegions",result.cleanup.regions)
+                .put("settings",ArtColorize.normalizeSettings(mask.getJSONObject("colorize").getJSONObject("settings"),JSONObject())))
         } catch(error:Throwable) {assetFile(asset).delete();throw error}
     }
     fun colorizePreview(p: JSONObject): JSONObject = locked {

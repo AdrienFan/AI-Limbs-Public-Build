@@ -13,13 +13,18 @@ internal object ArtColorize {
     const val MAX_TOTAL_POINTS=32768
     const val MAX_COLORS=32
     const val MAX_PIXELS=4194304
-    val pending=listOf("实心阴影边缘检测","精细出界线索清理","图层组与变换线稿","多尺度大画幅求解","动画与HDR")
+    val pending=listOf("图层组与变换线稿","多尺度大画幅求解","动画与HDR")
     fun settings()=JSONObject().put("threshold",180).put("gapClose",0)
         .put("limitBounds",false).put("editKeys",true).put("showOutput",true)
+        .put("useEdgeDetection",false).put("edgeDetectionSize",4.0).put("fuzzyRadius",0.0).put("cleanUpAmount",0.0)
     fun defaults()=JSONObject().put("settings",settings()).put("maxStrokes",MAX_STROKES)
         .put("maxPoints",MAX_POINTS).put("maxTotalPoints",MAX_TOTAL_POINTS).put("maxColors",MAX_COLORS)
         .put("maxPixels",MAX_PIXELS).put("pending",JSONArray(pending))
-        .put("algorithm","seeded-geodesic-fill").put("coordinateSpace","mask-local; untransformed root only for editing")
+        .put("algorithm","prefiltered-seeded-geodesic-fill")
+        .put("filtering","LoG-style shadow edges + three-box Gaussian approximation; fuzzy screen union; foreign-perimeter region cleanup")
+        .put("ranges",JSONObject().put("useEdgeDetection","boolean").put("edgeDetectionSize","0–100 px")
+            .put("fuzzyRadius","0–500 px (blur sigma); gap hint about 2×radius, not a guaranteed closure width")
+            .put("cleanUpAmount","0–1; zero disables, higher removes more small competing spill regions")).put("coordinateSpace","mask-local; untransformed root only for editing")
     fun items(layer: JSONObject): List<JSONObject> {
         val a=layer.getJSONObject("colorize").getJSONArray("keys")
         return (0 until a.length()).map {a.getJSONObject(it)}
@@ -79,15 +84,22 @@ internal object ArtColorize {
         return out
     }
     fun normalizeSettings(old: JSONObject,patch: JSONObject): JSONObject {
-        val out=JSONObject(old.toString());val allowed=setOf("threshold","gapClose","limitBounds","editKeys","showOutput")
-        patch.keys().asSequence().forEach {key ->
+        val out=settings();val allowed=out.keys().asSequence().toSet()
+        for(input in listOf(old,patch))input.keys().asSequence().forEach {key ->
             require(key in allowed) {"未知蒙版参数：$key"}
-            if(key in setOf("threshold","gapClose")) {
-                val n=patch.getDouble(key)
-                require(n.isFinite() && n==floor(n) && n in (if(key=="threshold")1.0..254.0 else 0.0..8.0))
-                out.put(key,n.toInt())
-            } else {
-                require(patch.get(key) is Boolean);out.put(key,patch.getBoolean(key))
+            when(key) {
+                "threshold","gapClose" -> {
+                    val value=input.get(key);require(value is Number)
+                    val n=value.toDouble()
+                    require(n.isFinite()&&n==floor(n)&&n in (if(key=="threshold")1.0..254.0 else 0.0..8.0))
+                    out.put(key,n.toInt())
+                }
+                "edgeDetectionSize","fuzzyRadius","cleanUpAmount" -> {
+                    val value=input.get(key);require(value is Number)
+                    val n=value.toDouble();val max=when(key) {"edgeDetectionSize"->100.0;"fuzzyRadius"->500.0;else->1.0}
+                    require(n.isFinite()&&n in 0.0..max);out.put(key,n)
+                }
+                else -> {require(input.get(key) is Boolean);out.put(key,input.getBoolean(key))}
             }
         }
         return out
@@ -144,8 +156,8 @@ internal object ArtColorize {
                 changed()
             }
             "COLORIZE_SETTINGS" -> {
-                val old=data.getJSONObject("settings");val next=normalizeSettings(old,p.getJSONObject("settings"))
-                if(listOf("threshold","gapClose","limitBounds").any {old.get(it)!=next.get(it)})changed()
+                val old=normalizeSettings(data.getJSONObject("settings"),JSONObject());val next=normalizeSettings(old,p.getJSONObject("settings"))
+                if(listOf("threshold","gapClose","limitBounds","useEdgeDetection","edgeDetectionSize","fuzzyRadius","cleanUpAmount").any {old.get(it)!=next.get(it)})changed()
                 data.put("settings",next)
             }
             "COLORIZE_OUTPUT" -> {

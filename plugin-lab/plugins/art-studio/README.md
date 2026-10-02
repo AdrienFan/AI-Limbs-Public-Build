@@ -959,3 +959,26 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 最简纯线性调用省略所有gradient字段；轮廓调用先创建选区，再用 `gradientMode:"shape"`；方形用square，对称锥形用symmetric_conical，反螺旋用reverse_spiral。查询/describe即可获取每个字段的默认值、坐标、范围与例子，无需再查源码。
 
 版本0.2.57、versionCode60、applicationId `com.ai.limbs.payload.artstudio.v0257`。本轮只作源码静态核对与本地Git提交；不编译、不运行测试、不推送。已写形状/重复/透明插值/抖动和带洞、多岛距离场的纯逻辑测试，留待云端执行；Android渲染与手机交互需部署后验收。
+
+
+## 0.2.58 上色蒙版过滤与清理
+
+参考 Krita 6.0.4 `libs/image/lazybrush/kis_colorize_stroke_strategy.cpp` 的LoG边缘、Gaussian缺口预过滤及 `KisWatershedWorker.cpp::cleanupForeignEdgeGroups` 的异色边界清理职责；参数界面参照 `plugins/tools/tool_lazybrush/kis_tool_lazy_brush_options_widget.cpp`。独立接入本画室已有的seeded-geodesic-fill，不复用Krita实现，不宣称其watershed分组或像素结果一致。
+
+新增settings：useEdgeDetection布尔默认false；edgeDetectionSize为0–100px，默认4，建议接近最细线宽，0不做边缘检测；fuzzyRadius为0–500px，默认0，允许小数；cleanUpAmount为0–1，默认0关闭，1最强。保留threshold=180、gapClose=0、limitBounds=false、editKeys=true、showOutput=true；旧工程省略新增字段采用这些禁用默认值，已保存输出不自动重算。参数校验拒绝字符串数字、未知字段、非有限数和越界值。
+
+预过滤用alpha加权暗度，不把透明像素隐藏RGB当线稿。开启边缘检测时先以半尺寸模糊，再取负Laplacian正响应、归一化并按尺寸模糊，形成实心阴影的边缘屏障，内部不再整块禁止线索。Gaussian以三次可分离滑动箱滤波近似，radius对应sigma，非整数通过相邻箱半径的方差插值连续参与；计算量随像素数而不是半径×像素数增长。fuzzyRadius把模糊场以screen覆盖合并到原线稿屏障，保留细线并为短缺口增加软阻力；缺口尺寸提示约为2×半径，不保证每种轮廓都封闭。过大尺寸会吞掉窄区。原gapClose仍是独立整数形态学闭合，可叠加。求解使用预过滤高度和阈值屏障；最终填色透明度取原始暗度，保持源线稿/阴影，不将滤波光晕导出成线稿。
+
+清理只处理求解后同色四连通区域：异色接触边占周长比例须超过0.05+0.45×(1-strength)，所有竞争邻区周长须更大，按接触边加权的平均周长须大于自身1.2倍。符合的小溢出块并入周长最大的竞争邻区，同周长时按颜色标签固定排序；替换链严格向大周长增长，避免循环。范围边缘、未填充区和硬线也计周长，但不作为异色竞争者。0强度完全跳过；没有异色竞争的孤立区域保持原样。清理可能忽略部分溢出的线索像素，但不改保存的笔画或调色板；细小的有意色块可降低强度。背景需要画线索并在调色板标记透明，不能凭单色线索猜出背景。
+
+手机沿用上色蒙版参数模块：边缘开关、尺寸、模糊半径、清理强度都有滑条及数字输入/应用按钮；求解参数修改标记结果待更新，编辑/显示开关不会触发重新求解。线索保存和填色更新仍是独立可撤销操作。limitBounds的求解外框增加过滤支撑边距并裁到画布/当前选区。单次最多4194304像素，内存估算基础64字节/求解像素，启用预过滤加24、清理加24，合计最多112，更新还加源渲染工作预算；超限拒绝，无缩图求解。输出仍是冻结PNG，预览/导出读取缓存，不隐式重算。
+
+兰儿沿用入口 `plugin.art.studio.colorize.list`、`plugin.art.studio.colorize.settings`、`plugin.art.studio.colorize.update`。list返回旧蒙版的完整有效settings、参数范围及dirty；settings描述和示例包括所有新字段。调用顺序：先create、stroke写颜色线索（背景需要透明线索），再settings、update，每次取上一步返回的最新revision。
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"maskId":"MASK_ID","settings":{"useEdgeDetection":true,"edgeDetectionSize":4,"fuzzyRadius":3,"cleanUpAmount":0.7}}
+```
+
+随后调用colorize.update，传同一documentId、maskId和新的expectedRevision。返回colorizeResult含filledPixels、seedPixels、cleanedPixels、cleanedSeedPixels、cleanedRegions和实际settings；cleanedSeedPixels表示本次输出忽略的线索像素，原线索可重新计算。两次调用可以分别撤销。
+
+版本0.2.58、versionCode61、applicationId `com.ai.limbs.payload.artstudio.v0258`。本轮只进行静态源码/JSON/契约核对及本地Git提交；不编译、不执行测试、不推送。已写过滤/分数半径/清理/旧默认参数契约用例，留待云端执行；手机渲染、真实缺口与阴影图的视觉效果需部署后验收。

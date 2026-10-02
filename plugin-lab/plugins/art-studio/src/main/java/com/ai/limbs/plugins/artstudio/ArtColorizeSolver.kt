@@ -4,9 +4,14 @@ import android.graphics.*
 import org.json.JSONObject
 import kotlin.math.*
 
-/** Seeded geodesic segmentation with hard dark-line barriers. No model or implicit recomputation. */
+/** Versioned settings drive line prefiltering and seeded geodesic fill; output remains an explicit cached asset. */
 internal object ArtColorizeSolver {
-    data class Result(val bitmap: Bitmap,val x: Int,val y: Int,val filled: Int,val seeds: Int)
+    data class Result(val bitmap: Bitmap,val x: Int,val y: Int,val filled: Int,val seeds: Int,val cleanup: ArtColorizeFilters.Cleanup)
+    fun workingBytes(mask:JSONObject,pixels:Long):Long {
+        val options=ArtColorize.normalizeSettings(mask.getJSONObject("colorize").getJSONObject("settings"),JSONObject())
+        val prefilter=(options.getBoolean("useEdgeDetection")&&options.getDouble("edgeDetectionSize")>0)||options.getDouble("fuzzyRadius")>0
+        return pixels*(64+(if(prefilter)24 else 0)+(if(options.getDouble("cleanUpAmount")>0)24 else 0))
+    }
     private fun strength(pixel: Int): Int {
         val light=(Color.red(pixel)*54+Color.green(pixel)*183+Color.blue(pixel)*19)/256
         return (255-light)*Color.alpha(pixel)/255
@@ -43,7 +48,9 @@ internal object ArtColorizeSolver {
                 }
             }
             if(found) {
-                val pad=mask.getJSONObject("colorize").getJSONObject("settings").getInt("gapClose")+8
+                val options=ArtColorize.normalizeSettings(mask.getJSONObject("colorize").getJSONObject("settings"),JSONObject())
+                val pad=options.getInt("gapClose")+ceil(3*(options.getDouble("fuzzyRadius")+
+                    if(options.getBoolean("useEdgeDetection"))1.5*options.getDouble("edgeDetectionSize") else 0.0)).toInt()+8
                 content.inset(-pad,-pad);content.intersect(bounds);bounds=content
             }
         }
@@ -73,15 +80,14 @@ internal object ArtColorizeSolver {
     }
     fun solve(state: JSONObject,source: Bitmap,mask: JSONObject,area: Rect): Result {
         val w=area.width();val h=area.height();val n=w*h
-        ArtImagePolicy.requireBytes(n.toLong()*64,"上色蒙版求解")
-        val data=mask.getJSONObject("colorize");val settings=data.getJSONObject("settings")
+        ArtImagePolicy.requireBytes(workingBytes(mask,n.toLong()),"上色蒙版求解")
+        val data=mask.getJSONObject("colorize");val settings=ArtColorize.normalizeSettings(data.getJSONObject("settings"),JSONObject())
         val pixels=IntArray(n);source.getPixels(pixels,0,w,area.left,area.top,w,h)
-        val height=ByteArray(n);var barrier=ByteArray(n)
+        val rawHeight=ByteArray(n) {strength(pixels[it]).toByte()}
+        val height=ArtColorizeFilters.height(rawHeight,w,h,settings.getBoolean("useEdgeDetection"),
+            settings.getDouble("edgeDetectionSize"),settings.getDouble("fuzzyRadius"))
         val threshold=settings.getInt("threshold")
-        for(i in 0 until n) {
-            val value=strength(pixels[i]);height[i]=value.toByte()
-            if(value>=threshold)barrier[i]=1
-        }
+        var barrier=ByteArray(n) {if((height[it].toInt() and 255)>=threshold)1 else 0}
         val r=settings.getInt("gapClose")
         if(r>0) {
             barrier=morph(morph(barrier,w,h,r,true,true),w,h,r,true,false)
@@ -135,17 +141,18 @@ internal object ArtColorizeSolver {
             }
             if(x>0)visit(i-1);if(x+1<w)visit(i+1);if(y>0)visit(i-w);if(y+1<h)visit(i+w)
         }
+        val cleanup=ArtColorizeFilters.cleanup(labels,seeds,w,h,settings.getDouble("cleanUpAmount"))
         val output=IntArray(n);var filled=0
         for(i in 0 until n) {
             val label=labels[i];if(label<0)continue
             val c=colors[label];if(c.getBoolean("transparent"))continue
             val pixel=Color.parseColor(c.getString("color"))
             // Tint bright/transparent areas above the source. Dark line pixels remain visible.
-            val alpha=Color.alpha(pixel)*(255-(height[i].toInt() and 255))/255
+            val alpha=Color.alpha(pixel)*(255-(rawHeight[i].toInt() and 255))/255
             output[i]=Color.argb(alpha,Color.red(pixel),Color.green(pixel),Color.blue(pixel));if(alpha>0)filled++
         }
         val result=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)
-        try {result.setPixels(output,0,w,0,0,w,h);return Result(result,area.left,area.top,filled,seedCount)}
+        try {result.setPixels(output,0,w,0,0,w,h);return Result(result,area.left,area.top,filled,seedCount,cleanup)}
         catch(error:Throwable) {result.recycle();throw error}
     }
 }
