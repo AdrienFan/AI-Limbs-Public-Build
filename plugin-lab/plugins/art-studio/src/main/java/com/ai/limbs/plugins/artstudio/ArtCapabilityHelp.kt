@@ -193,10 +193,10 @@ internal object ArtCapabilityHelp {
   "path.create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","nodes":[{"x":10,"y":10,"out":[40,0],"type":"corner"},{"x":100,"y":80,"in":[70,100],"type":"corner"}],"style":{"stroke":"#FF245364","strokeWidth":3}},"note":"先创建或选用可见未锁定矢量层；几何须非零。","summary":"保存可继续编辑的贝塞尔路径，成功附缩略图。"},
   "path.nodes":{"args":{"documentId":"DOCUMENT_ID","layerId":"VECTOR_LAYER_ID","id":"SHAPE_ID"},"note":"对象必须是path；读取零基节点/段索引及对象局部坐标。 返回nodes全局扁平数组、subpaths每条局部nodes/closed；path.topology用[子路径,局部节点]，path.edit默认全局节点。","summary":"返回路径对象局部nodes、closed、revision和objectToDocument矩阵；编辑前刷新。"},
   "path.edit":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","id":"SHAPE_ID","edits":[{"action":"move_node","node":0,"x":20,"y":20}]},"note":"先读path.nodes；坐标是对象局部，不是文档坐标。 支持move_nodes批量移动和node_types/delete_nodes；子路径结构操作用path.topology。","summary":"原子编辑已有路径节点/控制柄/线段，成功附缩略图。"},
-  "shape.select":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"]},"note":"","summary":"改变矢量对象选择，空ids取消；不创建像素选区。"},
+  "shape.select":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"]},"note":"布局查shape.layout_info；样式查shape.style_info并用shape.style。","summary":"改变矢量对象选择，空ids取消；不创建像素选区。"},
   "shape.delete":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"]},"note":"目标为可见未锁定矢量层。","summary":"删除矢量对象"},
   "shape.transform":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"matrix":[1,0,0,1,20,0]},"note":"目标为可见未锁定矢量层。","summary":"原子应用对象增量仿射矩阵，不改变图层整体变换。"},
-  "shape.style":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"style":{"fill":"#FFFFCC80","opacity":0.7}},"note":"目标为可见未锁定矢量层。","summary":"设置基础形状样式"},
+  "shape.style":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"style":{"objectStyle":{"strokeCap":"round","strokeJoin":"bevel","dashArray":[12,6],"dashOffset":0}}},"note":"objectStyle为局部补丁，渐变/线帽/接合/虚线结构与限制查shape.style_info；梯度坐标为对象局部像素，fillGradient/strokeGradient:null清除渐变。先shape.list取ID，每次写入更新revision。","summary":"设置矢量形状纯色与高级对象样式"},
   "brush.info":{"args":{"tool":"ink"},"note":"","summary":"返回dab-v1笔刷默认配置、动态输入、平滑模式及范围。六工具共用引擎；仅读参数，不打开手机。"},
   "brush.presets":{"args":{"tool":"ink"},"note":"","summary":"返回内置与自定义预设摘要；完整配置用brush.preset.get。"},
   "brush.preset.get":{"args":{"id":"builtin:stable"},"note":"id取brush.presets.presets[].id；绘画用stroke.add的brushPresetId。","summary":"返回预设tool/width/opacity/brush完整参数。"},
@@ -222,7 +222,11 @@ internal object ArtCapabilityHelp {
   "path.convert":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"]},"note":"替换ID/revision；支持line/rectangle/ellipse/polygon，已有path保持可编辑。保留ID、矩阵、样式；椭圆与圆角采用四分之一弧的三次近似。","summary":"基础形状转为可编辑节点路径。"},
   "path.combine":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["FIRST_PATH_ID","SECOND_PATH_ID"]},"note":"至少两条同层路径。首ID为结果对象及样式，其余变换映射到首对象局部坐标并删除被合成对象；此动作保留独立子路径，连接端点再调用path.topology。可撤销；成功附预览。","summary":"把多个路径合成一个包含子路径的可编辑对象。"},
   "shape.style_info":{"args":{},"note":"shape.style传style.objectStyle部分字段，path.create的style也可包含objectStyle。","summary":"返回线帽、转角、虚线、填充规则、独立透明度和线性/径向渐变样式。"},
-  "shape.freehand_info":{"args":{},"note":"接续引用读path.nodes.subpaths，高级样式查shape.style_info；既有路径合成用path.combine，端点连接用path.topology。","summary":"返回徒手矢量路径的Raw/Curve优化、转角合并和端点接续范围。"}
+  "shape.freehand_info":{"args":{},"note":"接续引用读path.nodes.subpaths，高级样式查shape.style_info；既有路径合成用path.combine，端点连接用path.topology。","summary":"返回徒手矢量路径的Raw/Curve优化、转角合并和端点接续范围。"},
+  "shape.layout_info":{"args":{},"summary":"返回六种对齐、八种分布、剪切的坐标和约束。","note":"高级样式结构查shape.style_info；shape.list取ID，每次成功后更新expectedRevision。"},
+  "shape.align":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_A","SHAPE_B"],"mode":"left","reference":"selection"},"summary":"按画布轴对齐同矢量层对象。","note":"所选范围>=2，canvas>=1；只接受可见未锁定对象，单次撤销；成功附预览。"},
+  "shape.distribute":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_A","SHAPE_B","SHAPE_C"],"mode":"gap_x"},"summary":"保持两端，均分边、中心或间距。","note":">=3个同层可见未锁定对象；同坐标稳定排序不丢对象，重叠允许负间距；画布轴、轮廓不含描边，单次撤销，成功附预览。"},
+  "shape.shear":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"shearX":0.25,"shearY":0},"summary":"围绕图层局部支点剪切所选对象。","note":"系数不是角度；省略pivot使用所选中心，单次撤销。横向0.25表示每单位Y增加0.25单位X，原样式和节点保留；成功附预览。"}
 }
 """
     private const val FIELDS = """
@@ -711,7 +715,16 @@ internal object ArtCapabilityHelp {
   "shape.freehand.curvePrecision":{"description":"曲线拟合误差0.25–32图层局部像素；省略沿用precision（默认2），仅优化Curve生效。"},
   "shape.freehand.combineAngle":{"description":"straight模式允许合并的相邻转角0–90度，默认0关闭额外角度合并；先按precision做距离简化，合并还须前向且所有原始采样到合并弦的偏差<=precision，避免压平回头或弧线。"},
   "shape.freehand.startEndpoint":{"description":"可选{id:PATH_ID,subpath:零起始子路径,node:局部端点索引}，取同层path.nodes.subpaths，仅开放、可见、未锁定路径端点。points仍是图层局部采样；精确接点和对象矩阵由插件处理。不允许同一个端点用于两端，closed须false；接回同路径的另一端自动闭合。起点目标优先保留ID/样式，否则使用终点目标；合并消耗其他目标对象但保留其未连接子路径。"},
-  "shape.freehand.endEndpoint":{"description":"可选{id:PATH_ID,subpath:零起始子路径,node:局部端点索引}，取同层path.nodes.subpaths，仅开放、可见、未锁定路径端点。points仍是图层局部采样；精确接点和对象矩阵由插件处理。不允许同一个端点用于两端，closed须false；接回同路径的另一端自动闭合。起点目标优先保留ID/样式，否则使用终点目标；合并消耗其他目标对象但保留其未连接子路径。"}
+  "shape.freehand.endEndpoint":{"description":"可选{id:PATH_ID,subpath:零起始子路径,node:局部端点索引}，取同层path.nodes.subpaths，仅开放、可见、未锁定路径端点。points仍是图层局部采样；精确接点和对象矩阵由插件处理。不允许同一个端点用于两端，closed须false；接回同路径的另一端自动闭合。起点目标优先保留ID/样式，否则使用终点目标；合并消耗其他目标对象但保留其未连接子路径。"},
+  "shape.align.ids":{"description":"非空且不重复的同层形状ID数组（shape.list取得），仅可见未锁定对象。align选区范围>=2/画布>=1，distribute>=3，shear>=1；整个操作一次撤销。"},
+  "shape.distribute.ids":{"description":"非空且不重复的同层形状ID数组（shape.list取得），仅可见未锁定对象。align选区范围>=2/画布>=1，distribute>=3，shear>=1；整个操作一次撤销。"},
+  "shape.shear.ids":{"description":"非空且不重复的同层形状ID数组（shape.list取得），仅可见未锁定对象。align选区范围>=2/画布>=1，distribute>=3，shear>=1；整个操作一次撤销。"},
+  "shape.align.mode":{"description":"按画布轴和变换后的路径轮廓范围对齐，不计描边宽度。","enum":["left","center_x","right","top","center_y","bottom"]},
+  "shape.align.reference":{"description":"selection默认，以所选轮廓联合范围为基准，>=2；canvas以画布0,0,width,height为基准，>=1。图层及父组的位移、旋转、缩放均计入。","enum":["selection","canvas"]},
+  "shape.distribute.mode":{"description":"按画布轴分布；边/中心固定首尾坐标均分，gap_x/gap_y按左/顶边排序、固定首尾对象并均分间距；同坐标稳定排序，负间距表示重叠，不计描边。","enum":["left","center_x","right","gap_x","top","center_y","bottom","gap_y"]},
+  "shape.shear.shearX":{"description":"横向剪切系数，有限值−100..100；x增加shearX*(y-pivotY)。与shearY同时应用，奇异矩阵拒绝。"},
+  "shape.shear.shearY":{"description":"纵向剪切系数，有限值−100..100；y增加shearY*(x-pivotX)。水平剪切示例shearX:0.25,shearY:0。"},
+  "shape.shear.pivot":{"description":"可选[x,y]，图层局部支点，有限坐标±1000000；默认所选对象轮廓联合范围中心。与对齐/分布的画布轴语义不同。"}
 }
 """
 }

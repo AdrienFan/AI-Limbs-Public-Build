@@ -15,8 +15,10 @@ internal fun StudioObjectStyleOptions(shapes:List<JSONObject>,busy:Boolean,onCha
     TextButton(enabled=!busy,onClick={expanded=!expanded}) {Text(if(expanded)"收起高级样式" else "高级对象样式")}
     if(!expanded)return
     Text("以首个对象显示参数，修改应用到所选对象。",style=MaterialTheme.typography.labelSmall)
-    for((key,options) in listOf("strokeCap" to ArtObjectStyle.caps,"strokeJoin" to ArtObjectStyle.joins,"fillRule" to linkedMapOf("nonzero" to "非零填充","evenodd" to "奇偶填充")))
+    for((key,options) in listOf("strokeCap" to ArtObjectStyle.caps,"strokeJoin" to ArtObjectStyle.joins,"fillRule" to linkedMapOf("nonzero" to "非零填充","evenodd" to "奇偶填充"))) {
+        Text(when(key) {"strokeCap"->"描边端帽";"strokeJoin"->"描边接合";else->"填充规则"},style=MaterialTheme.typography.labelSmall)
         options.forEach {(id,label)->FilterChip(selected=style.getString(key)==id,enabled=enabled,onClick={onChange(JSONObject().put(key,id))},label={Text(label)})}
+    }
     var miter by remember(ids) {mutableStateOf(style.getDouble("miterLimit").toString())}
     var dash by remember(ids) {mutableStateOf((0 until style.getJSONArray("dashArray").length()).joinToString(",") {style.getJSONArray("dashArray").getDouble(it).toString()})}
     var offset by remember(ids) {mutableStateOf(style.getDouble("dashOffset").toString())}

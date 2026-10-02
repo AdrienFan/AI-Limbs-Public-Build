@@ -376,6 +376,10 @@ class ArtStudioEntry : InProcessPluginEntry {
             val shape = JSONObject(p.getJSONObject("shape").toString()).put("id", UUID.randomUUID().toString())
             p.put("shape", shape); store.apply("LANER", "SHAPE_CREATE", p)
         }
+        capability("shape.layout_info","读取矢量形状布局和剪切范围",read) {ArtShapeLayout.info()}
+        capability("shape.align","对齐所选矢量形状",write) {p->store.apply("LANER","SHAPE_ALIGN",p)}
+        capability("shape.distribute","分布所选矢量形状",write) {p->store.apply("LANER","SHAPE_DISTRIBUTE",p)}
+        capability("shape.shear","剪切所选矢量形状",write) {p->store.apply("LANER","SHAPE_SHEAR",p)}
         capability("shape.select", "选择矢量对象", write) { p ->
             store.apply("LANER", "SHAPE_SELECT", p)
         }
@@ -622,6 +626,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("optimizeCurve","boolean",true),p("curvePrecision","number",true),p("combineAngle","number",true),p("startEndpoint","object",true),p("endEndpoint","object",true))
         "shape.create" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("shape", "object"))
         "shape.select", "shape.delete" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"))
+        "shape.align" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("ids","array"),p("mode"),p("reference",optional=true))
+        "shape.distribute" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("ids","array"),p("mode"))
+        "shape.shear" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("ids","array"),p("shearX","number"),p("shearY","number"),p("pivot","array",true))
         "shape.transform" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("matrix", "array"))
         "shape.style" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("style", "object"))
         "text.create", "text.update" -> listOf(p("documentId"), p("expectedRevision", "integer"),

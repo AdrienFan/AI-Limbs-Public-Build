@@ -435,6 +435,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val toolWindow by ArtStudioToolOptionsControl.state.collectAsState()
     val tool = toolWindow.activeTool
     var shapeMultiple by remember { mutableStateOf(false) }
+    var shapeShear by remember { mutableStateOf(false) }
     var vectorNibAngle by remember { mutableFloatStateOf(45f) }
     var vectorFixation by remember { mutableFloatStateOf(1f) }
     var vectorThinning by remember { mutableFloatStateOf(0f) }
@@ -1488,7 +1489,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     modifier = Modifier.fillMaxSize(), update = { view ->
                     view.documentId = current.getString("id")
                     view.scene = state; view.sceneRevision = current.getInt("revision")
-                    view.shapeMultiple = shapeMultiple; view.shapeBusy = busy
+                    view.shapeMultiple = shapeMultiple; view.shapeShear = shapeShear; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
                     view.colorizeWidth=colorizeWidth;view.colorizeErase=colorizeErase
                     view.onColorizeCreate={p -> if(!busy)perform {store.colorizeCreate("AWEI",p)}}
@@ -2508,7 +2509,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 if (tool == "shape_select") {
                     StudioShapeOptions(current, selected, busy, color, width,
-                        shapeMultiple, { shapeMultiple = it }, ::edit,
+                        shapeMultiple, { shapeMultiple = it }, shapeShear, {shapeShear=it}, ::edit,
                         { bezierEditing = true; bezierNode = 0; ArtStudioToolOptionsControl.select("vector_bezier") })
                 }
                 if (tool == "svg_text") {
@@ -3244,6 +3245,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var sceneRevision: Int = 0
         set(value) {if(field!=value){field=value;rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var shapeMultiple: Boolean = false
+    var shapeShear: Boolean = false
     var shapeBusy: Boolean = false
         set(value) {field=value;if(value){rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
@@ -3817,9 +3819,9 @@ private class StudioCanvas(context: Context) : View(context) {
             if (state != null && active?.getString("kind") == "vector" && ArtShapes.visible(state, active)) {
                 val ids = ArtShapes.selected(state, selectedId)
                 val editable = !ArtMenuOperations.isLocked(state, active) &&
-                    ArtShapes.items(active).filter { it.getString("id") in ids }.none { it.getBoolean("locked") }
+                    ArtShapes.items(active).filter { it.getString("id") in ids }.none { it.getBoolean("locked")||!it.getBoolean("visible") }
                 val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
-                shapeInteraction.draw(canvas, active, ids, toScreen, editable)
+                shapeInteraction.draw(canvas, active, ids, toScreen, editable, shapeShear)
             }
         }
         if (tool == "vector_bezier") {
@@ -4268,7 +4270,7 @@ private class StudioCanvas(context: Context) : View(context) {
             try {
                 val toScreen = Matrix(matrix).apply { preConcat(ArtShapes.layerMatrix(state, active)) }
                 return shapeInteraction.touch(event, local, toScreen, state, documentId,
-                    sceneRevision, selectedId, shapeMultiple, shapeBusy, onShapeEdit)
+                    sceneRevision, selectedId, shapeMultiple, shapeBusy, shapeShear, onShapeEdit)
             } catch (error: Exception) {
                 shapeInteraction.cancel()
                 android.util.Log.e("ArtStudio", "Shape interaction failed", error)

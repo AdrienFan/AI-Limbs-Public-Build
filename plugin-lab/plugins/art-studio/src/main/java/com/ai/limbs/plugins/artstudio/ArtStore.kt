@@ -1741,6 +1741,9 @@ internal class ArtStore(private val root: File) {
                 "SHAPE_FREEHAND" -> "绘制或接续矢量徒手路径"
                 "SHAPE_CREATE" -> "添加矢量形状"
                 "SHAPE_SELECT" -> "选择形状"
+                "SHAPE_ALIGN" -> "对齐形状"
+                "SHAPE_DISTRIBUTE" -> "分布形状"
+                "SHAPE_SHEAR" -> "剪切形状"
                 "SHAPE_TRANSFORM" -> "变换形状"
                 "SHAPE_PATH_EDIT" -> "编辑路径节点"
                 "SHAPE_PATH_TOPOLOGY" -> "断开或连接子路径"
@@ -1923,7 +1926,7 @@ internal class ArtStore(private val root: File) {
                 state.put("selectedLayerId", id)
             }
             "SHAPE_COMIC_CUT", "SHAPE_COMIC_MERGE" -> ArtComicPanels.apply(state,p)
-            "SHAPE_FREEHAND", "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT", "SHAPE_PATH_TOPOLOGY", "SHAPE_PATH_CONVERT", "SHAPE_PATH_COMBINE" ->
+            "SHAPE_ALIGN", "SHAPE_DISTRIBUTE", "SHAPE_SHEAR", "SHAPE_FREEHAND", "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT", "SHAPE_PATH_TOPOLOGY", "SHAPE_PATH_CONVERT", "SHAPE_PATH_COMBINE" ->
                 ArtShapes.edit(state, type, p)
             "VECTOR_LAYER_CREATE" -> {
                 val id = p.getString("id"); validateId(id)

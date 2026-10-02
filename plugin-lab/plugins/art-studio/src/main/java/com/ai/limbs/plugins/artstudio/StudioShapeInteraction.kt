@@ -37,6 +37,7 @@ internal class StudioShapeInteraction(private val view: View) {
     private var editable = false
     var preserveAspect = false
     private var uniformResize = false
+    private var screenFrame=Matrix()
     fun previewMatrix(id:String):Matrix? = if(active && mode!="box" && id in selected) Matrix(delta) else null
     fun cancel() { active=false;rect=null;delta=Matrix();view.invalidate() }
 
@@ -58,7 +59,9 @@ internal class StudioShapeInteraction(private val view: View) {
             points[1].y+dy/length*28f*density)
         else PointF(points[1].x,points[1].y-28f*density)
     }
-    fun draw(canvas:Canvas,layer:JSONObject,ids:List<String>,toScreen:Matrix,canEdit:Boolean) {
+    fun draw(canvas:Canvas,layer:JSONObject,ids:List<String>,toScreen:Matrix,canEdit:Boolean,shear:Boolean) {
+        if(active) {val old=FloatArray(9);val now=FloatArray(9);screenFrame.getValues(old);toScreen.getValues(now)
+            if(old.indices.any {kotlin.math.abs(old[it]-now[it])>0.0001f})cancel()}
         val b=if(active&&mode!="box") rect else ArtShapes.bounds(layer,ids)
         val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
             color=if(canEdit) Color.rgb(120,190,255) else Color.GRAY
@@ -84,7 +87,10 @@ internal class StudioShapeInteraction(private val view: View) {
             val centers=mapped(handles(b),matrix)
             val r=4f*density
             paint.style=Paint.Style.FILL
-            for(p in centers) canvas.drawRect(p.x-r,p.y-r,p.x+r,p.y+r,paint)
+            for((i,p) in centers.withIndex()) {
+                if(shear&&i in setOf(1,3,5,7))canvas.drawPath(Path().apply {moveTo(p.x,p.y-r*1.5f);lineTo(p.x+r*1.5f,p.y);lineTo(p.x,p.y+r*1.5f);lineTo(p.x-r*1.5f,p.y);close()},paint)
+                else canvas.drawRect(p.x-r,p.y-r,p.x+r,p.y+r,paint)
+            }
             val rot=rotationHandle(b,matrix)
             canvas.drawCircle(rot.x,rot.y,5f*density,paint)
         }
@@ -101,6 +107,15 @@ internal class StudioShapeInteraction(private val view: View) {
                 var degrees=Math.toDegrees((current-first).toDouble()).toFloat()
                 if((event.metaState and android.view.KeyEvent.META_CTRL_MASK != 0)) degrees=kotlin.math.round(degrees/45f)*45f
                 delta=Matrix().apply { setRotate(degrees,b.centerX(),b.centerY()) }
+            }
+            "shear" -> {
+                val horizontal=handle==1||handle==5
+                val denominator=if(horizontal) {if(handle==1)-b.height() else b.height()} else {if(handle==7)-b.width() else b.width()}
+                require(kotlin.math.abs(denominator)>0.001f) {"所选范围过窄，不能沿此边剪切"}
+                val coefficient=((if(horizontal)last.x-down.x else last.y-down.y)/denominator).coerceIn(-100f,100f)
+                val pivotX=if(handle==3)b.left else if(handle==7)b.right else b.centerX()
+                val pivotY=if(handle==1)b.bottom else if(handle==5)b.top else b.centerY()
+                delta=Matrix().apply {setSkew(if(horizontal)coefficient else 0f,if(horizontal)0f else coefficient,pivotX,pivotY)}
             }
             "resize" -> {
                 val h=handles(b)[handle]
@@ -124,7 +139,7 @@ internal class StudioShapeInteraction(private val view: View) {
         }
     }
     fun touch(event:MotionEvent,local:FloatArray,toScreen:Matrix,state:JSONObject,
-        documentId:String,currentRevision:Int,currentLayer:String,multiple:Boolean,busy:Boolean,
+        documentId:String,currentRevision:Int,currentLayer:String,multiple:Boolean,busy:Boolean,shear:Boolean,
         commit:(String,JSONObject)->Unit):Boolean {
         if(busy) { cancel();return true }
         val layer=ArtShapes.layer(state,currentLayer)
@@ -135,22 +150,26 @@ internal class StudioShapeInteraction(private val view: View) {
             Toast.makeText(view.context,"画布已更新，请重新操作形状",Toast.LENGTH_SHORT).show()
             return true
         }
+        if(active&&event.actionMasked!=MotionEvent.ACTION_DOWN) {
+            val old=FloatArray(9);val now=FloatArray(9);screenFrame.getValues(old);toScreen.getValues(now)
+            if(old.indices.any {kotlin.math.abs(old[it]-now[it])>0.0001f}) {cancel();error("视图已改变，请重新操作形状")}
+        }
         when(event.actionMasked) {
             MotionEvent.ACTION_DOWN -> {
-                active=true;uniformResize=preserveAspect;document=documentId;revision=currentRevision;layerId=currentLayer
+                active=true;screenFrame=Matrix(toScreen);uniformResize=preserveAspect;document=documentId;revision=currentRevision;layerId=currentLayer
                 add=multiple||(event.metaState and android.view.KeyEvent.META_SHIFT_MASK != 0);selected=ArtShapes.selected(state,currentLayer)
                 down=PointF(local[0],local[1]);last=PointF(down.x,down.y)
                 downScreen=PointF(event.x,event.y);lastScreen=PointF(event.x,event.y);moved=false;delta=Matrix();handle=-1;hit=null
                 rect=ArtShapes.bounds(layer,selected)
                 val layerLocked=ArtMenuOperations.isLocked(state,layer)
                 editable=!layerLocked&&ArtShapes.items(layer).filter { it.getString("id") in selected }
-                    .none { it.getBoolean("locked") }
+                    .none { it.getBoolean("locked")||!it.getBoolean("visible") }
                 val b=rect
                 if(!add&&editable&&b!=null) {
                     val positions=mapped(handles(b),toScreen)+rotationHandle(b,toScreen)
                     handle=positions.indexOfFirst { hypot(it.x-event.x,it.y-event.y)<=12f*density }
                 }
-                if(handle>=0) mode=if(handle==8) "rotate" else "resize" else {
+                if(handle>=0) mode=if(handle==8) "rotate" else if(shear&&handle in setOf(1,3,5,7)) "shear" else "resize" else {
                     val unit=floatArrayOf(1f,0f);toScreen.mapVectors(unit)
                     val scale=hypot(unit[0],unit[1])
                     check(scale>0f&&scale.isFinite())
@@ -160,7 +179,7 @@ internal class StudioShapeInteraction(private val view: View) {
                         if(clicked!=null && clicked !in selected) selected=listOf(clicked)
                         rect=ArtShapes.bounds(layer,selected)
                         editable=!layerLocked&&ArtShapes.items(layer).filter { it.getString("id") in selected }
-                            .none { it.getBoolean("locked") }
+                            .none { it.getBoolean("locked")||!it.getBoolean("visible") }
                         mode="move"
                     } else mode="box"
                 }

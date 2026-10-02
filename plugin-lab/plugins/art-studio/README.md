@@ -785,3 +785,24 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 node=2仅适用于目标子路径有3点且该点为开放端点，请读path.nodes替换。加endEndpoint可桥接另一条路径或接回同路径另一端；Raw优化改mode:raw,optimizeRaw:true,rawPrecision:1；角度合并改mode:straight,precision:2,combineAngle:8。
 
 版本 `0.2.49` / versionCode `52` / applicationId `com.ai.limbs.payload.artstudio.v0249`。仅静态检查和开发仓库保存，未编译、未运行测试、未推送云端；运行效果待统一部署验证。
+
+
+### 0.2.50：基础矢量形状选择布局与剪切（尚未编译）
+
+- 参照 Krita 6.0.4 `libs/flake/commands/KoShapeAlignCommand.cpp`、`KoShapeDistributeCommand.cpp`、`plugins/tools/defaulttool/defaulttool/DefaultTool.cpp` 和 `ShapeShearStrategy.cpp` 的轮廓布局、按位置分布、固定对边剪切与撤销职责；以 Kotlin/Android Matrix 和插件历史独立实现，未复用其源码。宿主不变。
+- 六种对齐：左/水平中心/右、顶/垂直中心/底。reference=selection（默认，至少2个）使用所选轮廓联合范围；reference=canvas（至少1个）使用整张画布范围。UI明确选择基准，不自动切换语义。八种分布：上述六种边/中心加水平/垂直等间距，至少3个对象，保持首尾位置；同坐标用稳定列表排序保留所有对象，重叠时允许负间距。
+- 布局使用画布坐标轴，先将各对象路径连同对象/图层/父组矩阵变换到画布，计算轮廓范围（不计描边），再将位移向量变换回图层局部；不会仅变换已有轴向包围盒造成旋转后范围膨胀；shape.list的documentBounds也共享该路径范围计算。间距按左/顶边排序，以首尾对象外边距和各自宽/高计算，固定首尾对象，允许中间宽对象或负间距。
+- 形状选择参数增加对齐基准与六种对齐、八种分布按钮，以及“交互剪切”开关。开启后边中点显示菱形：上/下边横向剪切，左/右边纵向剪切，固定相对边；角点缩放、圆点旋转仍可使用。拖动只预览delta，收手通过现有SHAPE_TRANSFORM记录一次撤销。框选/平移原有交互保留，多选开关/Shift优先框选；剪切模式下先结束多选再拖柄。图层局部范围宽/高<=0.001时对应剪切明确拒绝；交互系数限制±100。视图坐标改变或多指触摸取消当前操作，防止混合坐标帧。
+- 新增兰儿入口shape.layout_info、shape.align、shape.distribute、shape.shear。shearX/shearY为图层局部系数（不是角度），pivot:[x,y]省略则使用所选中心；系数±100、支点坐标±1000000，矩阵退化明确拒绝。同层对象须可见未锁定，图层/父组须可见未锁定，写入仍需当前expectedRevision。批量布局一次历史操作；重放通过相同布局分支，不修改路径节点或对象样式。
+- 渐变、虚线、端帽与接合样式沿用0.2.48已实现的共享ArtObjectStyle/StudioObjectStyleOptions，在形状选择“高级对象样式”中操作；本批明确分组标签并补入口说明。支持线性/径向填充或描边渐变、2–16色标（API，UI编辑起终两色）、虚线数组与偏移、三种线帽/接合及尖角限值。shape.style接收style.objectStyle局部补丁，shape.style_info返回范围；命中、框选、缩略图和栅格导出共用样式渲染。
+
+简例（替换ID和当前revision，各次成功后刷新revision）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["A","B"],"mode":"left","reference":"selection"}
+```
+以上调用shape.align；shape.distribute示例改ids为至少3个并用mode:"gap_x"（不传reference）；shape.shear示例用ids:["A"],shearX:0.25,shearY:0，可加pivot:[100,100]。样式简例（shape.style）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["A"],"style":{"objectStyle":{"strokeCap":"round","strokeJoin":"bevel","dashArray":[12,6],"fillGradient":{"type":"linear","start":[0,0],"end":[100,0],"stops":[[0,"#FFFF8800"],[1,"#FF3388FF"]]}}}}
+```
+
+版本 `0.2.50` / versionCode `53` / applicationId `com.ai.limbs.payload.artstudio.v0250`。仅静态检查和仓库提交，未编译、未运行测试、未推送云端；交互及升级后的历史重放待统一部署验证。

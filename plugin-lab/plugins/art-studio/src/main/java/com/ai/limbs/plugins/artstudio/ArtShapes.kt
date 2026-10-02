@@ -113,7 +113,7 @@ internal object ArtShapes {
             matrix(encode(lm))
             for(shape in all) {
                 normalize(shape)
-                val b=bounds(shape);lm.mapRect(b)
+                val b=documentBounds(shape,lm)
                 require(listOf(b.left,b.top,b.right,b.bottom).all {
                     it.isFinite()&&kotlin.math.abs(it)<=1000000f
                 }) { "矢量形状或父组变换超出可编辑范围" }
@@ -179,6 +179,11 @@ internal object ArtShapes {
     }
     fun bounds(shape:JSONObject):RectF = RectF().also {
         val p=path(shape);p.transform(matrix(shape.getJSONArray("matrix")));p.computeBounds(it,true)
+    }
+    fun documentBounds(shape:JSONObject,layerToDocument:Matrix):RectF = RectF().also {
+        val outline=path(shape);outline.transform(matrix(shape.getJSONArray("matrix")))
+        outline.transform(layerToDocument);outline.computeBounds(it,true)
+        require(listOf(it.left,it.top,it.right,it.bottom).all {value->value.isFinite()})
     }
     fun bounds(layer:JSONObject,ids:List<String>):RectF? {
         val selected=items(layer).filter { it.getString("id") in ids }
@@ -303,6 +308,7 @@ internal object ArtShapes {
                     }
                 }
             }
+            "SHAPE_ALIGN", "SHAPE_DISTRIBUTE", "SHAPE_SHEAR" -> choose(ArtShapeLayout.apply(state,layer,type,p))
             "SHAPE_TRANSFORM" -> {
                 val ids=ids(p.getJSONArray("ids"))
                 transformIds(layer,ids,matrix(p.getJSONArray("matrix")));choose(ids)
@@ -334,7 +340,7 @@ internal object ArtShapes {
         val shapes=JSONArray()
         val lm=layerMatrix(state,layer)
         for(shape in items(layer)) {
-            val b=bounds(shape);lm.mapRect(b)
+            val b=documentBounds(shape,lm)
             shapes.put(JSONObject(shape.toString()).put("documentBounds",JSONObject()
                 .put("x",b.left.toDouble()).put("y",b.top.toDouble())
                 .put("width",b.width().toDouble()).put("height",b.height().toDouble())))

@@ -14,7 +14,7 @@ import java.util.UUID
 
 @Composable
 internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Boolean,
-    color:String,width:Float,multiple:Boolean,onMultiple:(Boolean)->Unit,
+    color:String,width:Float,multiple:Boolean,onMultiple:(Boolean)->Unit,shear:Boolean,onShear:(Boolean)->Unit,
     onEdit:(String,JSONObject)->Unit,onPathEdit:()->Unit) {
     val state=snapshot.getJSONObject("state")
     val layer=ArtMenuOperations.layers(state).firstOrNull { it.getString("id")==selectedLayer }
@@ -34,7 +34,7 @@ internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Bo
     val ids=ArtShapes.selected(state,selectedLayer)
     val visible=ArtShapes.visible(state,layer)
     val canEdit=ids.isNotEmpty()&&visible&&!ArtMenuOperations.isLocked(state,layer)&&
-        ArtShapes.items(layer).filter { it.getString("id") in ids }.none { it.getBoolean("locked") }
+        ArtShapes.items(layer).filter { it.getString("id") in ids }.none { it.getBoolean("locked")||!it.getBoolean("visible") }
     val canFill = ArtShapes.items(layer).any { it.getString("id") in ids && ArtShapes.canFill(it) }
     fun parameters(selected:List<String> = ids):JSONObject = JSONObject()
         .put("documentId",snapshot.getString("id")).put("expectedRevision",snapshot.getInt("revision"))
@@ -43,7 +43,24 @@ internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Bo
     Text("已选 "+ids.size+" 个形状",style=MaterialTheme.typography.labelSmall)
     FilterChip(selected=multiple,onClick={onMultiple(!multiple)},enabled=!busy,
         label={Text("多选")})
-    Text("点选或拖框；方块缩放，圆点旋转。",style=MaterialTheme.typography.labelSmall)
+    FilterChip(selected=shear,onClick={onShear(!shear)},enabled=!busy,label={Text("交互剪切")})
+    Text(if(shear)"菱形边中点剪切，对边固定；角点缩放，圆点旋转。" else "点选或拖框；方块缩放，圆点旋转。",style=MaterialTheme.typography.labelSmall)
+    if(shear&&multiple)Text("剪切前请关闭多选，再拖动菱形边中点。",style=MaterialTheme.typography.labelSmall)
+    var reference by remember {mutableStateOf("selection")}
+    Text("对齐与分布（画布坐标，轮廓范围不含描边）",style=MaterialTheme.typography.labelSmall)
+    Row(horizontalArrangement=Arrangement.spacedBy(4.dp)) {
+        for((id,label) in listOf("selection" to "所选范围","canvas" to "画布"))
+            FilterChip(selected=reference==id,onClick={reference=id},enabled=!busy,label={Text(label)})
+    }
+    ArtShapeLayout.alignments.entries.chunked(2).forEach {row->Row {
+        row.forEach {(mode,label)->TextButton(enabled=!busy&&canEdit&&(reference=="canvas"||ids.size>=2),
+            onClick={onEdit("SHAPE_ALIGN",parameters().put("mode",mode).put("reference",reference))}) {Text(label)}}
+    }}
+    ArtShapeLayout.distributions.entries.chunked(2).forEach {row->Row {
+        row.forEach {(mode,label)->TextButton(enabled=!busy&&canEdit&&ids.size>=3,
+            onClick={onEdit("SHAPE_DISTRIBUTE",parameters().put("mode",mode))}) {Text(label)}}
+    }}
+    Text("分布至少选3个，固定两端；重叠对象允许负间距。",style=MaterialTheme.typography.labelSmall)
     if(!canEdit&&ids.isNotEmpty()) Text("锁定或隐藏的对象不能修改。",style=MaterialTheme.typography.labelSmall)
     TextButton(onClick={onEdit("SHAPE_SELECT",parameters(ArtShapes.items(layer)
         .filter { it.getBoolean("visible") }.map { it.getString("id") }))},enabled=!busy&&visible) { Text("全选形状") }
