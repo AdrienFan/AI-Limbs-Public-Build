@@ -1066,15 +1066,18 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         scope.launch {
             try {
                 val catalog = withContext(Dispatchers.IO) { ArtText.fonts() }
-                require(catalog.getBoolean("available")) { "当前设备没有可用的基础文字渲染接口或中英文字体" }
+                require(catalog.getBoolean("available")) { "当前设备没有可用的文字渲染接口或字体" }
                 val fields = capturedLayer?.getJSONObject("text")?.let { JSONObject(it.toString()) }
                     ?: JSONObject().put("content", "").put("fontId", catalog.getString("defaultFontId"))
                         .put("fontSize", 48.0).put("boxWidth", minOf(640, state!!.getInt("width")))
                         .put("lineSpacing", 1.2).put("align", "left").put("color", color)
                 fields.put("documentId", capturedDocument).put("expectedRevision", capturedRevision)
-                    .put("x", capturedLayer?.getDouble("x") ?: atX)
-                    .put("y", capturedLayer?.getDouble("y") ?: atY)
+                    .put("x", capturedLayer?.let { ArtText.anchor(it).first } ?: atX)
+                    .put("y", capturedLayer?.let { ArtText.anchor(it).second } ?: atY)
                 capturedLayer?.let { fields.put("id", it.getString("id")) }
+                fields.put("geometryChoices",withContext(Dispatchers.IO) {
+                    store.textGeometry(JSONObject().put("documentId",capturedDocument)).getJSONArray("geometries")
+                })
                 textFonts = catalog.getJSONArray("fonts")
                 textDialog = fields
             } catch (error: Exception) {
@@ -2555,13 +2558,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     TextButton(onClick = { openTextEditor() }, enabled = !busy && current != null) {
                         Text("新建文字")
                     }
-                    // Planned text features share the text parameter window; they cannot execute yet.
-                    Text("高级排版", style = MaterialTheme.typography.labelLarge)
-                    ArtToolCatalog.textAdvancedOptions.forEach { option ->
-                        TextButton(onClick = { }, enabled = false) {
-                            Text("$option（待实现）", style = MaterialTheme.typography.labelSmall)
-                        }
-                    }
+                    Text("富文本、SVG 源码、双向／竖排、路径与形状内文字在同一编辑窗口设置。",style=MaterialTheme.typography.bodySmall)
+                    Text(ArtText.NOTICE,style=MaterialTheme.typography.bodySmall)
                 }
                 if (tool == "sampler") {
                     FilterChip(selected = sampleMerged, onClick = { sampleMerged = true },

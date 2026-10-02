@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.61",
+  "version": "0.2.62",
   "api": {
     "target": 1,
     "min": 1
@@ -242,7 +242,11 @@
       "plugin.art.studio.selection.coverage",
       "plugin.art.studio.fill.info",
       "plugin.art.studio.gradient.info",
-      "plugin.art.studio.gradient.draw"
+      "plugin.art.studio.gradient.draw",
+      "plugin.art.studio.text.info",
+      "plugin.art.studio.text.source",
+      "plugin.art.studio.text.geometry",
+      "plugin.art.studio.text.svg_validate"
     ],
     "services": [],
     "providers": [

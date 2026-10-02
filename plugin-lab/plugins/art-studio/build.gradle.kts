@@ -9,18 +9,22 @@ plugins {
 android {
     namespace = "com.ai.limbs.plugins.artstudio"
     compileSdk = 36
+    ndkVersion = "27.0.12077973"
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.artstudio.v0261"
+        applicationId = "com.ai.limbs.payload.artstudio.v0262"
         minSdk = 29
         targetSdk = 34
-        versionCode = 64
-        versionName = "0.2.61"
+        versionCode = 65
+        versionName = "0.2.62"
+        ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86") }
+        externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures { buildConfig = false; compose = true }
+    externalNativeBuild { cmake { path = file("src/main/cpp/CMakeLists.txt"); version = "3.31.0" } }
     androidResources { additionalParameters += listOf("--package-id", "0x80") }
 }
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }

@@ -7,7 +7,7 @@ import org.junit.Test
 
 class ArtCapabilityHelpTest {
     @Test fun everyExampleMatchesItsRegisteredParameterContract() {
-        assertEquals(207, ArtCapabilityHelp.names().size)
+        assertEquals(211, ArtCapabilityHelp.names().size)
         for (name in ArtCapabilityHelp.names()) {
             val fields = parametersFor(name)
             val example = ArtCapabilityHelp.example(name)

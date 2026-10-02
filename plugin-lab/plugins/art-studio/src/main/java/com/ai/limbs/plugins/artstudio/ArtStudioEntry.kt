@@ -92,10 +92,17 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.changeDockPanels(p.getString("command"), p.optString("panel").takeIf { it.isNotBlank() },
                 if (p.has("enabled")) p.getBoolean("enabled") else null)
         }
-        capability("text.fonts", "读取基础文字可用字体", read) {
+        capability("text.info", "读取文字排版与 SVG 支持范围", read) { ArtTextSpec.info() }
+        capability("text.source", "读取文字原文与样式", read) { p -> store.textSource(p) }
+        capability("text.geometry", "读取文字可引用的矢量形状快照", read) { p -> store.textGeometry(p) }
+        capability("text.svg_validate", "检查 SVG 文字源码", read) { p ->
+            val source=JSONObject(p.toString()).put("sourceMode","svg")
+            JSONObject().put("valid",true).put("text",ArtText.prepare(source)).put("rendered",false)
+        }
+        capability("text.fonts", "读取文字可用字体", read) {
             ArtText.fonts()
         }
-        capability("text.create", "添加基础可编辑文字", write) { p ->
+        capability("text.create", "添加可编辑富文本或 SVG 文字", write) { p ->
             store.writeText("LANER", p, false)
         }
         capability("text.update", "修改可编辑文字", write) { p ->
@@ -658,11 +665,20 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "shape.shear" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("ids","array"),p("shearX","number"),p("shearY","number"),p("pivot","array",true))
         "shape.transform" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("matrix", "array"))
         "shape.style" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("ids", "array"), p("style", "object"))
+        "text.info" -> emptyList()
+        "text.source" -> listOf(p("documentId"),id)
+        "text.geometry" -> listOf(p("documentId"))
+        "text.svg_validate" -> listOf(p("svgSource"),p("fontId",optional=true),p("fontSize","number",true),p("boxWidth","integer",true))
         "text.create", "text.update" -> listOf(p("documentId"), p("expectedRevision", "integer"),
-            p("content"), p("fontId", optional = true), p("fontSize", "number", true),
+            p("content",optional=true),p("sourceMode",optional=true),p("svgSource",optional=true),p("spans","array",true),
+            p("fontId", optional = true), p("fontSize", "number", true),
             p("boxWidth", "integer", true), p("lineSpacing", "number", true), p("align", optional = true),
-            p("color", optional = true), p("x", "number", true), p("y", "number", true)) +
-            if (name == "text.update") listOf(id) else emptyList()
+            p("color", optional = true),p("strokeColor",optional=true),p("strokeWidth","number",true),
+            p("letterSpacing","number",true),p("wordSpacing","number",true),p("baselineShift","number",true),
+            p("underline","boolean",true),p("strike","boolean",true),p("language",optional=true),p("fontFeatures",optional=true),
+            p("writingMode",optional=true),p("textOrientation",optional=true),p("direction",optional=true),
+            p("textPath","object",true),p("shapeInside","object",true),p("clearGeometry","boolean",true),
+            p("x", "number", true), p("y", "number", true)) + if (name == "text.update") listOf(id) else emptyList()
         "menu.execute" -> listOf(p("action"), p("parameters", "object", true),
             p("documentId", optional = true), p("expectedRevision", "integer", true))
         "image.set_background" -> listOf(p("color"))

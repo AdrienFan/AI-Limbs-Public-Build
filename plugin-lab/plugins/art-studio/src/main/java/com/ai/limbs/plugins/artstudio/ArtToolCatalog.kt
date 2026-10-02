@@ -47,18 +47,18 @@ internal object ArtToolCatalog {
         Triple("pan", "平移画布", "✋"),
         Triple("zoom", "缩放画布", "⌕"),
         Triple("measure", "测量距离", "⌁")
-    ) + if (ArtText.available) listOf(Triple("svg_text", "文字（基础可编辑）", "T")) else emptyList()
+    ) + if (ArtText.available) listOf(Triple("svg_text", "文字", "T")) else emptyList()
 
     data class PendingTool(
         val id: String, val label: String, val glyph: String, val source: String
     )
 
     // Advanced text is part of the existing text tool's parameters, not another toolbox slot.
-    val textAdvancedOptions = listOf("完整 SVG 排版", "富文本", "SVG 源码编辑")
+    val textAdvancedOptions = listOf("富文本", "SVG 文字源码编辑", "复杂塑形与双向文字", "竖排", "路径／形状内文字")
 
     // Keep the platform requirement visible on devices that cannot render basic text.
     val pending get() = if (!ArtText.available) listOf(PendingTool("svg_text",
-        "基础文字需要 Android 12+", "T", "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"))
+        "文字需要 Android 12+", "T", "plugins/tools/svgtexttool/SvgTextToolFactory.cpp"))
         else emptyList()
 
     fun usage(id: String): String = when (id) {
@@ -80,7 +80,7 @@ internal object ArtToolCatalog {
                 .put("implemented", true).put("status", "basic")
                 .put("parameterWindow", JSONObject().put("gesture", "double-click").put("available", true))
             if (id == "svg_text") item.put("advancedOptions", JSONArray(textAdvancedOptions.map { option ->
-                JSONObject().put("label", option).put("implemented", false).put("status", "planned")
+                JSONObject().put("label", option).put("implemented", true).put("status", "implemented")
             }))
             tools.put(item)
         }
@@ -92,7 +92,7 @@ internal object ArtToolCatalog {
                     .put("drawingEnabled", false)))
         }
         val zoomMode = viewState.getString("zoomToolMode")
-        return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE)
+        return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE).put("text", ArtTextSpec.info())
             .put("parameterWindowCapability", "$ART_ID.view.tool_options")
             .put("colorSelections",ArtColorSelection.info()).put("magneticSelection",ArtMagneticSelection.info())
             .put("comicPanels",ArtComicPanels.info())

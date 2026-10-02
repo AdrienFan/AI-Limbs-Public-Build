@@ -1874,6 +1874,35 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+    fun textSource(p: JSONObject): JSONObject = locked {
+        val snapshot=current();require(p.getString("documentId")==snapshot.getString("id"))
+        val state=snapshot.getJSONObject("state");val layers=state.getJSONArray("layers")
+        val layer=(0 until layers.length()).map {layers.getJSONObject(it)}.firstOrNull {it.getString("id")==p.getString("id")} ?: error("文字图层不存在")
+        require(layer.getString("kind")=="text")
+        val anchor=ArtText.anchor(layer)
+        JSONObject().put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
+            .put("id",layer.getString("id")).put("text",JSONObject(layer.getJSONObject("text").toString()))
+            .put("x",anchor.first).put("y",anchor.second).put("scale",layer.getDouble("scale")).put("rotation",layer.getDouble("rotation"))
+    }
+    fun textGeometry(p: JSONObject): JSONObject = locked {
+        val snapshot=current();require(p.getString("documentId")==snapshot.getString("id"))
+        val state=snapshot.getJSONObject("state");val layers=state.getJSONArray("layers")
+        val choices=JSONArray()
+        for(i in 0 until layers.length()) {
+            val layer=layers.getJSONObject(i)
+            if(layer.getString("kind")!="vector"||!ArtShapes.visible(state,layer))continue
+            for(shape in ArtShapes.items(layer)) if(shape.getBoolean("visible")) {
+                val frozen=JSONObject(shape.toString());val matrix=ArtShapes.matrix(shape.getJSONArray("matrix"))
+                matrix.postConcat(layerMatrix(layer,layers));frozen.put("matrix",ArtShapes.encode(matrix))
+                choices.put(JSONObject().put("layerId",layer.getString("id")).put("id",shape.getString("id"))
+                    .put("label",layer.getString("name")+" · "+shape.getString("kind")+" · "+shape.getString("id").take(8))
+                    .put("shape",frozen).put("canFill",ArtShapes.canFill(shape)))
+            }
+        }
+        JSONObject().put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
+            .put("geometries",choices).put("coordinates","frozen document coordinates; create text at x=0,y=0")
+    }
+
     /** Text creation and updates share the same locked source/cache transaction on both clients. */
     fun writeText(actor: String, p: JSONObject, update: Boolean): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
@@ -1891,10 +1920,18 @@ internal class ArtStore(private val root: File) {
             !lockedByParent(previous, layers)) { "请选择未锁定的文字图层" }
         val source = previous?.optJSONObject("text")?.let { JSONObject(it.toString()) } ?: JSONObject()
         p.keys().forEach { source.put(it, p.get(it)) }
-        val text = ArtText.normalize(source)
-        val x = if (p.has("x")) p.getDouble("x") else previous?.getDouble("x") ?: 0.0
-        val y = if (p.has("y")) p.getDouble("y") else previous?.getDouble("y") ?: 0.0
+        if(p.optBoolean("clearGeometry")) { source.remove("textPath");source.remove("shapeInside") }
+        if(p.has("textPath")) { source.remove("shapeInside");source.put("textPath",p.getJSONObject("textPath")) }
+        if(p.has("shapeInside")) { source.remove("textPath");source.put("shapeInside",p.getJSONObject("shapeInside")) }
+        if(p.has("content")&&!p.has("svgSource")&&source.optString("sourceMode")=="svg")
+            require(p.has("sourceMode")&&p.getString("sourceMode")!="svg") {"SVG 文字请更新 svgSource，或明确 sourceMode=plain/rich 转换正文"}
+        if(p.has("sourceMode")&&p.getString("sourceMode")=="plain")source.put("spans",JSONArray())
+        val text = ArtText.prepare(source)
+        val anchor = previous?.let { ArtText.anchor(it) } ?: (0.0 to 0.0)
+        val x = if (p.has("x")) p.getDouble("x") else anchor.first
+        val y = if (p.has("y")) p.getDouble("y") else anchor.second
         require(x.isFinite() && y.isFinite()) { "文字位置无效" }
+        ArtTextShaper.load(root)
         val bitmap = ArtText.render(text, ArtImagePolicy.renderBytes(this, state,
             state.getInt("width"), state.getInt("height")))
         val asset = UUID.randomUUID().toString()
@@ -1902,7 +1939,12 @@ internal class ArtStore(private val root: File) {
         atomicBytes(assetFile(asset), bytes)
         try {
             val result = appendToCurrent(actor, if (update) "TEXT_UPDATE" else "TEXT_CREATE",
-                JSONObject().put("id", id).put("asset", asset).put("text", text).put("x", x).put("y", y))
+                JSONObject().put("id", id).put("asset", asset).put("text", text).also { parameters ->
+                    val angle=Math.toRadians(previous?.getDouble("rotation") ?: 0.0);val scale=previous?.getDouble("scale") ?: 1.0
+                    val ox=text.getDouble("cacheOriginX");val oy=text.getDouble("cacheOriginY")
+                    parameters.put("x",x+scale*(cos(angle)*ox-sin(angle)*oy))
+                        .put("y",y+scale*(sin(angle)*ox+cos(angle)*oy))
+                })
             result.put("textLayerId", id).put("textNotice", ArtText.NOTICE)
         } catch (error: Throwable) { assetFile(asset).delete(); throw error }
     }

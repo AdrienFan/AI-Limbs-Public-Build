@@ -1078,3 +1078,41 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 基座`host.clipboard@1`当前是DECLARED、不可申请的源语，本轮未修改或绕过它；系统剪贴板读取只在已有Host手机展示入口上执行用户粘贴动作，后台业务只处理明确交付的图片数据。所有参考图都保持作品导出之外的视图对象，并沿用工程保存、归档、撤销和图片反馈。
 
 版本0.2.61、versionCode64、applicationId `com.ai.limbs.payload.artstudio.v0261`，共207项能力。本轮仅静态源码、JSON/声明/版本和传输核对及Ubuntu Git提交，不编译、不运行测试、不推送。已写13项ZIP/来源/入口契约用例供云端后续执行；剪贴板权限、跨进程content读取、真实HTTP图片、图层透明度和手机文件选择器需部署后验收。
+
+## 0.2.62 文字排版、富文本与 SVG 文字源码
+
+这一轮参照本地 Krita 6.0.4 的 `libs/flake/text/KoSvgTextShape_p_layout.cpp`（脚本塑形、字距、textLength、逐字定位、锚点及路径定位阶段）、`KoSvgTextShapeLayoutFunc_inShape.cpp`（形状内排版）、`KoSvgTextLoader.cpp` 和 `KoSvgTextShapeMarkupConverter.cpp` 的职责划分。没有复制 Krita 的 Qt/GPL 实现。画室自行管理源数据、布局、几何及缓存，使用独立的 HarfBuzz 11.0.1 塑形库（Old MIT；源码、许可与来源校验见 `third_party/harfbuzz/README.md`）。
+
+- 文字层仍是原来的 `kind=text`，原文与全部参数保留，PNG 是显示／导出缓存。旧基础文字层仍可读；已有工程打开、撤销重放与缓存导出不要求重新塑形或原字体仍在。编辑失败不写历史，不自动替换字体。新文字功能源数据需 0.2.62 或之后版本编辑。
+- `sourceMode=plain/rich/svg`。富文本为最多 128 个有序、不重叠、完整字符簇边界的 UTF-16 `[start,end)` 样式段：字体 ID、字号、颜色、描边、字符簇／空格间距、语言与 OpenType 功能、基线偏移、下划线和删除线。手机正文编辑会调整区间，选区按钮应用当前样式；选择加粗／斜体使用字体菜单里的真实字重／斜体字体，不合成缺失字体样式。
+- 显式加载系统 `fonts.xml` 声明的全部字体，保留 TTC 索引和变体轴；字体对象按需创建。JNI 直接向 HarfBuzz 提交该字体的直接内存及变体轴，按脚本／样式塑形，得到真实连字、组合标记、阿拉伯文／印度文字等 OpenType 字形；Unicode 双向运行按视觉顺序排布。每行保留段落基方向，塑形上下文限于该行，避免跨行连接。缺少实际字形会明确拒绝，使用者必须选择字体或为不同脚本明确设置 spans。最终仍用 `Canvas.drawGlyphs` 与显式 `Font` 绘制，不调用默认 Typeface、drawText、系统私有字体初始化或进程模式分支。
+- 横排、`vertical-rl`、`vertical-lr`；`boxWidth` 在竖排时是每列的行进高度。`textOrientation=mixed/upright/sideways`：混合模式中中日韩脚本使用竖排字形，其余脚本整段侧转；直立模式使用字体竖排特性。不是完整 CSS Unicode Vertical_Orientation 排版，标点混排与字体专用竖排指标仍需实机核对。
+- `textPath={d,startOffset,normalOffset}` 或 `textPath={shape:快照}` 为单段横排路径文字；使用真实塑形字形及切线方向。路径要求一个连续子路径，长度不足、字形定位越界明确拒绝。`shapeInside={d,padding,fillRule}` 或 `{shape:快照}` 为闭合形状内排版；以 1/4px Region 投影整条行带的所有缺口，保留凹形与孔洞，不用包围盒冒充区域。空白留距及完整文字空间不足时拒绝保存。原形状的后续修改不自动重排文字，需重新选择快照。
+- 缓存记录源坐标原点 `cacheOriginX/Y`。文字锚点与缓存左上角分开；更新时按原图层的缩放／旋转补偿边界变化，保留组关系、缩放、旋转、锁定及显隐。手机与 AI 都使用 `ArtStore.writeText` 和原来的跨进程锁，必须带 documentId／expectedRevision。
+
+手机的唯一文字工具入口已移除灰色占位，正文／富文本与 SVG 源码共用编辑窗口；支持选中文本应用样式、方向／竖排、OpenType 参数、路径 d、形状几何快照与文字锚点。几何选择按钮使用画布坐标，并明确将锚点设为 0,0。SVG 编辑模式以内嵌源码为排版来源，界面说明其显式属性优先；检查按钮只解析源码，不渲染。普通／富文本可生成 SVG 源码；引用的形状快照必须由用户明确提供对应 d 后才能转换，没有隐藏的近似路径替换。
+
+兰儿入口新增 `text.info`、`text.source`、`text.geometry`、`text.svg_validate`；扩展原有 `text.create/update`，每个参数和能力都有简例。共 211 个声明能力。最小操作：
+
+```json
+// 先 text.fonts 选字体，document.info 取最新 documentId/revision。
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"sourceMode":"rich","content":"晨光与海","fontSize":48,"spans":[{"start":2,"end":4,"color":"#FFCC8844","underline":true}],"x":30,"y":30}
+// text.update：先 text.source 取原文及区间，再修改排版；未传字段保留。
+{"documentId":"DOCUMENT_ID","expectedRevision":1,"id":"TEXT_LAYER_ID","writingMode":"vertical-rl","direction":"auto","boxWidth":400}
+// text.create：路径使用文字源局部坐标；快照来自 text.geometry 时从 x=0,y=0 创建。
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"content":"沿着风走","textPath":{"d":"M0 80 C120 0 240 160 360 80","startOffset":0},"x":20,"y":100}
+// SVG 可先 text.svg_validate；有效并不表示已渲染。
+{"svgSource":"<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"20\" y=\"60\" font-size=\"40\" fill=\"#245364\">晨光<tspan fill=\"#cc8844\">与海</tspan></text></svg>"}
+```
+
+### SVG 的实际范围
+
+实现的是严格的 `AI_LIMBS_SVG_TEXT_1` 文字配置档，**不是完整 SVG 标准**，`text.info.svg.completeSvgStandard=false`。支持本地 svg/text/tspan/textPath/defs/path/rect/ellipse、嵌套富文本、x/y/dx/dy/rotate、单个连续段的 textLength 与 spacing/spacingAndGlyphs、text-anchor、inline-size、shape-inside、字体及文字 CSS 展示属性、px/pt/pc/mm/cm/in/em/%、SVG RGBA 颜色和本地 # 引用。SVG `viewBox` 定义源原点，采用 1:1 文档单位，显式 width/height 需与 viewBox 尺寸一致；没有整幅 SVG 视口缩放／裁切行为。下划线／删除线按实际字形绘制，并非 Krita 的完整装饰连续曲线。
+
+外部资源、样式表选择器、绘画渐变／paint server、滤镜、动画、文本 transform 矩阵、多区域环绕、嵌套 textLength、SVG font 嵌入等仍未支持；未知语法明确拒绝。`unicode-bidi` 支持 normal/plaintext，根 text 支持段落 direction；逐 tspan 改方向或 embed/isolate/override 尚未支持，可在正文中显式使用 Unicode 双向控制符。自动换行区不接受逐字坐标或旋转；逐字定位不能切开塑形字符簇。沿路径使用横排行进方向、左侧、align/exact。圆角 defs 几何请用 path 的 d；颜色支持 hex 与说明中的基础颜色，其他 CSS 颜色形式会明确提示。上述仍属于与 Krita／完整 SVG 的差距，不能标成已完全补齐。
+
+塑形原生模块由插件自行从已验签 APK 资源中提取、校验并加载，Host 展示与后台业务都走同一代码；没有改基座。云端流程已准备 NDK 27.0.12077973／CMake 3.31.0 与四 ABI，静态 C++ 运行库及 16KiB 页对齐；本轮没有触发这个流程。版本 **0.2.62 / code65 / artstudio.v0262**。
+
+已完成源数据／能力声明、示例／字段、版本和源码差异静态审查；补 14 个纯源数据、富文本区间和严格 SVG 解析的云端测试用例，但**没有执行测试、Gradle、NDK、编译、推送或安装验收**。待云编译与设备验收重点：JNI 四 ABI 的加载／许可资源、显式缺字提示、阿拉伯文／印度文字／组合符号与连字、段落内双向混排、竖排字形、复杂凹形及孔洞、路径旋转与描边、SVG 位置列表／嵌套样式、缓存边界与旋转后的编辑、撤销重做／工程重开，以及 Host／Resident 一致性。
+
+本轮还修复累计能力说明的 CI 静态门禁：补齐34个参数的通用 FIELDS 说明，移除 SCOPED_1 中四个被 SCOPED_2 覆盖的重复键。保持此前运行时实际有效的 SCOPED_2 值；不改选区、填充和渐变的业务行为。

@@ -1,227 +1,163 @@
 package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
 import android.graphics.fonts.Font
 import android.graphics.fonts.FontVariationAxis
+import android.os.Build
 import android.util.Xml
 import org.xmlpull.v1.XmlPullParser
-import java.io.File
-import android.os.Build
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.File
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
-import kotlin.math.ceil
 
-/** Explicit glyph APIs do not resolve the uninitialized default Typeface in app_process. */
+/** Fonts are constructed explicitly; rendering never resolves Android's default Typeface. */
 internal object ArtText {
-    const val NOTICE = "基础横排文字：支持中文、预组合拉丁字母、日文和预组合韩文；复杂塑形、组合符号、双向文字、Emoji、富文本及 SVG 编辑待实现。"
+    const val NOTICE = "支持富文本、显式字体 OpenType 塑形、双向文字、竖排、路径／形状内文字及 SVG 文字源码；SVG 为已声明的文字配置档，并非完整 SVG 标准。显示使用可编辑源数据的 PNG 缓存。"
     val available: Boolean get() = Build.VERSION.SDK_INT >= 31
-    private fun requireAvailable() = require(available) { "基础文字需要 Android 12 或以上的显式字形绘制接口" }
-
-    private data class Face(val id: String, val font: Font, val languages: String) {
+    private fun requireAvailable() = require(available) { "文字需要 Android 12 或以上的显式字形绘制接口" }
+    internal class Face(val id: String, val file: File, val index: Int, val weight: Int,
+        val slant: Int, val settings: String, val family: String, val languages: String) {
+        val font: Font by lazy {
+            val builder = Font.Builder(file).setTtcIndex(index).setWeight(weight).setSlant(slant)
+            if (settings.isNotEmpty()) builder.setFontVariationSettings(settings)
+            builder.build()
+        }
         val cmap by lazy { Cmap(font.buffer.duplicate().order(ByteOrder.BIG_ENDIAN), font.ttcIndex) }
-        fun describe() = JSONObject().put("id", id)
-            .put("label", requireNotNull(font.file).name + " · " + font.ttcIndex +
-                " · " + font.style.weight + if (font.style.slant == 1) " 斜体" else "")
+        fun describe() = JSONObject().put("id", id).put("family", family).put("languages", languages)
+            .put("weight", weight).put("italic", slant == 1)
+            .put("label", file.name + " · " + index + " · " + weight + if (slant == 1) " 斜体" else "")
+        fun contains(cp: Int) = cmap.glyph(cp) != 0
     }
     private val faces: List<Face> by lazy {
         requireAvailable()
         configuredFonts().distinctBy { it.id }.sortedWith(compareBy<Face>(
-            { kotlin.math.abs(it.font.style.weight - 400) },
-            { it.font.style.slant },
-            { if (it.languages.split(',').any { language -> language.startsWith("zh-Hans") }) 0 else 1 },
-            { it.id }))
+            { kotlin.math.abs(it.weight - 400) }, { it.slant },
+            { if (it.languages.split(',').any { language -> language.startsWith("zh-Hans") }) 0 else 1 }, { it.id }))
     }
-    /** fonts.xml is Android's installed compatibility font configuration, not a process font map.
-     * Select declared CJK families and construct Font directly, without initializing Typeface.
-     */
     private fun configuredFonts(): List<Face> {
         val configuration = File("/system/etc/fonts.xml")
         require(configuration.isFile && configuration.canRead()) { "系统字体配置不可读取：/system/etc/fonts.xml" }
         val result = mutableListOf<Face>()
         configuration.inputStream().use { input ->
-            val parser = Xml.newPullParser()
-            parser.setInput(input, "UTF-8")
-            var languages = ""
+            val parser = Xml.newPullParser(); parser.setInput(input, "UTF-8")
+            var languages = ""; var family = ""; var familyNumber = 0
             var event = parser.eventType
             while (event != XmlPullParser.END_DOCUMENT) {
-                if (event == XmlPullParser.START_TAG && parser.name == "family")
+                if (event == XmlPullParser.START_TAG && parser.name == "family") {
                     languages = parser.getAttributeValue(null, "lang").orEmpty()
+                    family = parser.getAttributeValue(null, "name").orEmpty()
+                    familyNumber++
+                }
                 if (event == XmlPullParser.START_TAG && parser.name == "font") {
                     val fontDepth = parser.depth
                     val weight = parser.getAttributeValue(null, "weight")?.toInt() ?: 400
                     val index = parser.getAttributeValue(null, "index")?.toInt() ?: 0
                     val slant = if (parser.getAttributeValue(null, "style") == "italic") 1 else 0
-                    val axes = mutableListOf<FontVariationAxis>()
-                    val filename = StringBuilder()
+                    val axes = mutableListOf<FontVariationAxis>(); val filename = StringBuilder()
                     var child = parser.next()
                     while (!(child == XmlPullParser.END_TAG && parser.depth == fontDepth)) {
                         require(child != XmlPullParser.END_DOCUMENT) { "系统字体配置未闭合" }
-                        if (child == XmlPullParser.TEXT && parser.depth == fontDepth)
-                            filename.append(parser.text)
+                        if (child == XmlPullParser.TEXT && parser.depth == fontDepth) filename.append(parser.text)
                         if (child == XmlPullParser.START_TAG && parser.name == "axis") {
                             val tag = requireNotNull(parser.getAttributeValue(null, "tag"))
                             val value = requireNotNull(parser.getAttributeValue(null, "stylevalue")).toFloat()
-                            require(tag.length == 4 && value.isFinite()) { "系统字体变体配置无效" }
-                            axes.add(FontVariationAxis(tag, value))
+                            require(tag.length == 4 && value.isFinite()); axes.add(FontVariationAxis(tag, value))
                         }
                         child = parser.next()
                     }
-                    // This feature offers CJK families with Latin glyphs, not a language fallback chain.
-                    if (languages.split(',').any { it.startsWith("zh") || it.startsWith("ja") || it.startsWith("ko") }) {
-                        val name = filename.toString().trim()
-                        require(name.isNotEmpty())
-                        val file = File("/system/fonts", name).canonicalFile
-                        require(file.parentFile == File("/system/fonts").canonicalFile && file.isFile && file.canRead()) {
-                            "系统声明的中英文字体不可读取：" + name
-                        }
-                        val settings = axes.joinToString { "'" + it.tag + "' " + it.styleValue }
-                        val builder = Font.Builder(file).setTtcIndex(index).setWeight(weight).setSlant(slant)
-                        if (settings.isNotEmpty()) builder.setFontVariationSettings(settings)
-                        val font = builder.build()
-                        val key = file.absolutePath + "#" + index + "#" + weight + "#" + slant + "#" + settings
-                        result.add(Face(key, font, languages))
-                    }
+                    val name = filename.toString().trim(); require(name.isNotEmpty())
+                    val file = File("/system/fonts", name).canonicalFile
+                    require(file.parentFile == File("/system/fonts").canonicalFile && file.isFile && file.canRead()) { "系统声明字体不可读取：$name" }
+                    val settings = axes.joinToString { "'" + it.tag + "' " + it.styleValue }
+                    val key = file.absolutePath + "#" + index + "#" + weight + "#" + slant + "#" + settings
+                    result.add(Face(key, file, index, weight, slant, settings,
+                        family.ifBlank { "family-$familyNumber" }, languages))
                 }
-                if (event == XmlPullParser.END_TAG && parser.name == "family") languages = ""
+                if (event == XmlPullParser.END_TAG && parser.name == "family") { languages = ""; family = "" }
                 event = parser.next()
             }
         }
         return result
     }
     fun fonts(): JSONObject {
-        if (!available) return JSONObject().put("available", false)
-            .put("reason", "基础文字需要 Android 12 或以上").put("fonts", JSONArray())
-        val chinese = faces.filter { it.cmap.glyph(0x4E2D) != 0 && it.cmap.glyph(65) != 0 }
-        return JSONObject().put("available", chinese.isNotEmpty())
-            .put("defaultFontId", chinese.firstOrNull()?.id ?: JSONObject.NULL)
-            .put("fonts", JSONArray(chinese.map { it.describe() })).put("notice", NOTICE)
-            .put("renderMode", "raster_cache").put("editable", true).put("layout", "basic_horizontal_no_shaping")
+        if (!available) return JSONObject().put("available", false).put("reason", "文字需要 Android 12 或以上").put("fonts", JSONArray())
+        return JSONObject().put("available", faces.isNotEmpty()).put("defaultFontId", defaultFontId())
+            .put("fonts", JSONArray(faces.map { it.describe() })).put("notice", NOTICE)
+            .put("renderMode", "raster_cache").put("editable", true).put("layout", "harfbuzz_bidi_svg_text_profile")
+            .put("automaticFontSubstitution", false)
     }
     fun defaultFontId(): String {
         requireAvailable()
-        return faces.firstOrNull { it.cmap.glyph(0x4E2D) != 0 && it.cmap.glyph(65) != 0 }?.id
-            ?: error("系统没有可用的中英文字体")
+        return faces.firstOrNull { it.languages.split(',').any { lang -> lang.startsWith("zh") } && it.contains(0x4E2D) && it.contains(65) }?.id
+            ?: error("系统没有可用的默认中英文字体，请明确指定 fontId")
     }
-
-    /** Source parameters remain editable; PNG is only a portable render cache. */
-    fun normalize(p: JSONObject): JSONObject {
-        val content = p.getString("content").replace("\r\n", "\n").replace('\r', '\n')
-        require(content.isNotBlank() && content.length <= 4096) { "文字需要 1–4096 个字符，且不能全为空白" }
-        require(content.count { it == '\n' } < 128) { "文字最多 128 行" }
-        val size = p.optDouble("fontSize", 48.0)
-        val box = p.optInt("boxWidth", 640)
-        val spacing = p.optDouble("lineSpacing", 1.2)
-        val align = p.optString("align", "left")
-        val color = p.optString("color", "#FF000000")
-        require(size.isFinite() && size in 6.0..512.0) { "字号需要在 6–512 像素之间" }
-        require(box in 1..16384 && spacing.isFinite() && spacing in 1.0..3.0) { "文字框宽度或行距无效" }
-        require(align in setOf("left", "center", "right")) { "对齐方式需要为 left/center/right" }
-        require(color.matches(Regex("#[A-Fa-f0-9]{8}"))) { "文字颜色需要为 #AARRGGBB" }
-        val fontId = if (p.has("fontId")) p.getString("fontId") else defaultFontId()
-        return JSONObject().put("content", content).put("fontId", fontId).put("fontSize", size)
-            .put("boxWidth", box).put("lineSpacing", spacing).put("align", align).put("color", color)
+    internal fun face(id: String): Face = faces.firstOrNull { it.id == id }
+        ?: error("原字体在当前设备不可用，请明确选择当前字体后重新编辑")
+    private fun resolveFont(family: String, weight: Int?, italic: Boolean?, current: String): String {
+        val original = face(current)
+        require(!family.contains(',')) { "SVG font-family 需明确指定一个 text.fonts 返回的 family" }
+        val key = family.ifBlank { original.family }
+        return faces.firstOrNull { it.family == key && it.weight == (weight ?: original.weight) && it.slant == (italic?.let { v -> if(v) 1 else 0 } ?: original.slant) }?.id
+            ?: error("指定字体族／字重／斜体未安装：$key；请从 text.fonts 明确选择")
     }
-
+    fun normalize(p: JSONObject): JSONObject = ArtTextSpec.normalize(JSONObject(p.toString()).also {
+        if (!it.has("fontId")) it.put("fontId", defaultFontId())
+    })
+    fun prepare(p: JSONObject): JSONObject {
+        val input = JSONObject(p.toString())
+        if (!input.has("fontId")) input.put("fontId", defaultFontId())
+        if (input.optString("sourceMode", if(input.has("svgSource")) "svg" else "plain") == "svg") {
+            val parsed = ArtSvgText.parse(input.getString("svgSource"), ArtTextSpec.style(input), ::resolveFont)
+            for (key in listOf("boxWidth", "lineSpacing", "align", "writingMode", "direction", "textOrientation"))
+                if (input.has(key)) parsed.put(key, input.get(key))
+            return normalize(parsed)
+        }
+        input.remove("svgSource"); input.remove("svgChunks"); input.remove("svgViewBox")
+        return normalize(input)
+    }
+    fun svgSource(p: JSONObject): String {
+        if(p.optString("sourceMode")=="svg")return p.getString("svgSource")
+        fun escape(value:String)=value.replace("&","&amp;").replace("<","&lt;").replace(">","&gt;").replace("\"","&quot;")
+        fun rgba(value:String)="#"+value.substring(3)+value.substring(1,3)
+        fun attributes(style:JSONObject):String {
+            val f=face(style.getString("fontId"))
+            return "font-family=\"${escape(f.family)}\" font-size=\"${style.getDouble("fontSize")}\" font-weight=\"${f.weight}\" font-style=\"${if(f.slant==1) "italic" else "normal"}\" fill=\"${rgba(style.getString("color"))}\" "+
+                "stroke=\"${rgba(style.getString("strokeColor"))}\" stroke-width=\"${style.getDouble("strokeWidth")}\" letter-spacing=\"${style.getDouble("letterSpacing")}\" word-spacing=\"${style.getDouble("wordSpacing")}\" baseline-shift=\"${style.getDouble("baselineShift")}\" "+
+                "text-decoration=\"${listOfNotNull(if(style.getBoolean("underline")) "underline" else null,if(style.getBoolean("strike")) "line-through" else null).joinToString(" ").ifBlank {"none"}}\" xml:lang=\"${escape(style.getString("language"))}\""+
+                if(style.getString("fontFeatures").isBlank()) "" else " font-feature-settings=\""+style.getString("fontFeatures").split(',').joinToString(",") {s->val pair=s.trim().split('=');"'${pair[0]}' ${pair[1]}"}+"\""
+        }
+        val normalized=normalize(p);val content=normalized.getString("content");val spans=normalized.getJSONArray("spans");val text=StringBuilder();var start=0
+        for(i in 0 until spans.length()) {
+            val span=spans.getJSONObject(i);text.append(escape(content.substring(start,span.getInt("start"))))
+            text.append("<tspan ${attributes(span)}>${escape(content.substring(span.getInt("start"),span.getInt("end")))}</tspan>");start=span.getInt("end")
+        }
+        text.append(escape(content.substring(start)))
+        val geometry=normalized.optJSONObject("textPath") ?: normalized.optJSONObject("shapeInside")
+        require(geometry==null||geometry.has("d")) {"形状快照转换 SVG 需要显式提供路径 d；可以在源码编辑器另写 defs"}
+        val defs=geometry?.let {"<defs><path id=\"text-geometry\" d=\"${escape(it.getString("d"))}\"/></defs>"}.orEmpty()
+        val writing=normalized.getString("writingMode");val direction=normalized.getString("direction")
+        val anchor=when(normalized.getString("align")){"center"->"middle";"right","end"->"end";else->"start"}
+        val inline=if(geometry==null) "inline-size=\"${normalized.getInt("boxWidth")}\"" else if(normalized.has("shapeInside")) "shape-inside=\"url(#text-geometry)\" shape-padding=\"${geometry.getDouble("padding")}\"" else ""
+        val body=if(normalized.has("textPath")) {
+            require(!content.contains('\n')&&geometry!!.getDouble("normalOffset")==0.0) {"路径源码转换需单段且 normalOffset=0"}
+            "<textPath href=\"#text-geometry\" startOffset=\"${geometry.getDouble("startOffset")}\">$text</textPath>"
+        } else text.toString()
+        return "<svg xmlns=\"http://www.w3.org/2000/svg\"><!-- AI Limbs SVG text profile -->$defs<text ${attributes(normalized)} writing-mode=\"$writing\" direction=\"$direction\" text-orientation=\"${normalized.getString("textOrientation")}\" text-anchor=\"$anchor\" white-space=\"pre-wrap\" line-height=\"${normalized.getDouble("lineSpacing")}\" $inline>$body</text></svg>"
+    }
+    fun anchor(layer: JSONObject): Pair<Double,Double> {
+        val text=layer.getJSONObject("text");val angle=Math.toRadians(layer.getDouble("rotation"));val scale=layer.getDouble("scale")
+        val x=text.optDouble("cacheOriginX",0.0);val y=text.optDouble("cacheOriginY",0.0)
+        return (layer.getDouble("x")-scale*(kotlin.math.cos(angle)*x-kotlin.math.sin(angle)*y)) to
+            (layer.getDouble("y")-scale*(kotlin.math.sin(angle)*x+kotlin.math.cos(angle)*y))
+    }
     fun render(text: JSONObject, extraBytes: Long): Bitmap {
         requireAvailable()
-        val face = faces.firstOrNull { it.id == text.getString("fontId") }
-            ?: error("原字体在当前设备不可用，请明确选择当前字体后重新编辑")
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            textSize = text.getDouble("fontSize").toFloat()
-            color = Color.parseColor(text.getString("color"))
-        }
-        val metrics = Paint.FontMetrics()
-        face.font.getMetrics(paint, metrics)
-        data class Glyph(val id: Int, val advance: Float, val bounds: RectF)
-        val lines = mutableListOf(mutableListOf<Glyph>())
-        val widths = mutableListOf(0f)
-        val box = text.getInt("boxWidth").toFloat()
-        val content = text.getString("content")
-        var offset = 0
-        while (offset < content.length) {
-            val cp = Character.codePointAt(content, offset)
-            offset += Character.charCount(cp)
-            if (cp == 10) {
-                lines.add(mutableListOf()); widths.add(0f); continue
-            }
-            val script = Character.UnicodeScript.of(cp)
-            val category = Character.getType(cp)
-            require(script in setOf(Character.UnicodeScript.HAN, Character.UnicodeScript.LATIN,
-                Character.UnicodeScript.HIRAGANA, Character.UnicodeScript.KATAKANA,
-                Character.UnicodeScript.HANGUL, Character.UnicodeScript.COMMON) &&
-                category !in setOf(Character.NON_SPACING_MARK.toInt(), Character.COMBINING_SPACING_MARK.toInt(),
-                    Character.ENCLOSING_MARK.toInt(), Character.FORMAT.toInt(), Character.CONTROL.toInt(),
-                    Character.SURROGATE.toInt()) && cp !in 0x1F000..0x1FFFF &&
-                cp !in 0x1100..0x11FF && cp !in 0xA960..0xA97F && cp !in 0xD7B0..0xD7FF) {
-                "当前基础文字不支持此字符的排版 U+" + cp.toString(16).uppercase() + "；" + NOTICE
-            }
-            val glyphId = face.cmap.glyph(cp)
-            require(glyphId != 0) { "所选字体缺少字符 U+" + cp.toString(16).uppercase() + "，请选择合适字体" }
-            val bounds = RectF()
-            val advance = face.font.getGlyphBounds(glyphId, paint, bounds)
-            require(advance.isFinite() && advance >= 0f && advance <= box) { "文字框太窄，无法容纳所选字号" }
-            if (widths.last() + advance > box && lines.last().isNotEmpty()) {
-                lines.add(mutableListOf()); widths.add(0f)
-            }
-            require(lines.size <= 512) { "自动换行后的文字行数过多，请增加文字框宽度" }
-            lines.last().add(Glyph(glyphId, advance, bounds))
-            widths[widths.lastIndex] += advance
-        }
-        val step = (metrics.descent - metrics.ascent) * text.getDouble("lineSpacing").toFloat()
-        var top = 0f
-        var bottom = metrics.descent - metrics.ascent + (lines.size - 1) * step
-        var left = 0f
-        var right = box
-        fun lineStart(i: Int) = when (text.getString("align")) {
-            "center" -> (box - widths[i]) / 2
-            "right" -> box - widths[i]
-            else -> 0f
-        }
-        for (i in lines.indices) {
-            var x = lineStart(i)
-            val baseline = -metrics.ascent + i * step
-            for (glyph in lines[i]) {
-                left = minOf(left, x + glyph.bounds.left)
-                right = maxOf(right, x + glyph.bounds.right)
-                top = minOf(top, baseline + glyph.bounds.top)
-                bottom = maxOf(bottom, baseline + glyph.bounds.bottom)
-                x += glyph.advance
-            }
-        }
-        val width = ceil((right - left).toDouble()).toInt().coerceAtLeast(1) + 2
-        val height = ceil((bottom - top).toDouble()).toInt().coerceAtLeast(1) + 2
-        ArtImagePolicy.requireDimensions(width, height)
-        ArtImagePolicy.requireBytes(width.toLong() * height * 32 + extraBytes, "文字排版与渲染")
-        val bitmap = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
-        bitmap.density = Bitmap.DENSITY_NONE
-        try {
-            val canvas = Canvas(bitmap)
-            for (i in lines.indices) {
-                if (lines[i].isEmpty()) continue
-                val ids = IntArray(lines[i].size)
-                val positions = FloatArray(ids.size * 2)
-                var x = lineStart(i) - left + 1f
-                for (g in ids.indices) {
-                    ids[g] = lines[i][g].id
-                    positions[g * 2] = x
-                    positions[g * 2 + 1] = -metrics.ascent + i * step - top + 1f
-                    x += lines[i][g].advance
-                }
-                canvas.drawGlyphs(ids, 0, positions, 0, ids.size, face.font, paint)
-            }
-            text.put("cacheWidth", width).put("cacheHeight", height)
-            return bitmap
-        } catch (error: Throwable) { bitmap.recycle(); throw error }
+        return ArtTextLayout.render(text, extraBytes)
     }
-
     /** OpenType Unicode cmap format 4/12. No shaping substitutions or guessed glyphs. */
-    private class Cmap(private val data: ByteBuffer, index: Int) {
+    internal class Cmap(private val data: ByteBuffer, index: Int) {
         private fun u16(p: Int) = data.getShort(p).toInt() and 0xFFFF
         private fun u32(p: Int): Int {
             val value = data.getInt(p).toLong() and 0xFFFFFFFFL
