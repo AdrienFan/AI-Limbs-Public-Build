@@ -21,8 +21,8 @@ internal object ArtBrush {
             time+(b.time-time)*t,tilt+(b.tilt-tilt)*t,rotation+(b.rotation-rotation)*t)
     }
     data class Dab(val sample:Sample,val size:Double,val flow:Double,val angle:Double,val ordinal:Int)
-    fun supports(tool:String)=tool in tools || tool in setOf("mirror","dyna","line")
-    fun engineTool(stroke:JSONObject)=if(stroke.getString("tool") in setOf("mirror","dyna","line"))stroke.optString("brushTool","ink") else stroke.getString("tool")
+    fun supports(tool:String)=tool in tools || tool in setOf("mirror","dyna","line","rectangle","ellipse")
+    fun engineTool(stroke:JSONObject)=if(stroke.getString("tool") in setOf("mirror","dyna","line","rectangle","ellipse"))stroke.optString("brushTool","ink") else stroke.getString("tool")
     fun defaults(tool:String):JSONObject {
         require(tool in tools)
         val dynamics=JSONObject()
@@ -179,11 +179,11 @@ internal object ArtBrush {
     }
     fun prepare(stroke:JSONObject,brush:JSONObject,seed:Int,finished:Boolean=true):JSONObject {
         require(seed>=0);val settings=settings(engineTool(stroke),brush)
-        if(stroke.getString("tool")=="line") {
-            // Straight geometry must reach both endpoints; cursor smoothing and timed airbrushing are freehand-only.
+        if(stroke.getString("tool")=="line" || stroke.getString("tool") in ArtFigure.tools) {
+            // Figure geometry must reach both endpoints; cursor smoothing and timed airbrushing are freehand-only.
             if(settings.getJSONObject("smoothing").getString("mode")!="pixel_perfect")settings.getJSONObject("smoothing").put("mode","none")
             settings.put("airbrushRate",0)
-            if(!stroke.getBoolean("useSensors"))channels.keys.forEach {key ->
+            if(stroke.getString("tool")=="line" && !stroke.getBoolean("useSensors"))channels.keys.forEach {key ->
                 val rule=settings.getJSONObject("dynamics").getJSONObject(key)
                 if(rule.getString("sensor") in setOf("pressure","speed","tilt","rotation"))rule.put("enabled",false)
             }
@@ -199,6 +199,7 @@ internal object ArtBrush {
         if(stroke.getString("tool")=="mirror")ArtMirror.validateStored(stroke)
         if(stroke.getString("tool")=="dyna")ArtDyna.validateStored(stroke)
         if(stroke.getString("tool")=="line")ArtLine.validateStored(stroke)
+        if(stroke.getString("tool") in ArtFigure.tools)ArtFigure.validateStored(stroke)
         samples(stroke.getJSONArray("brushInput"));samples(stroke.getJSONArray("points"))
     }
     fun noise(seed:Int,index:Int,salt:Int):Double {
@@ -250,16 +251,18 @@ internal object ArtBrush {
         val p=brush.getJSONObject(key);if(p.has("asset"))p.getString("asset") else null
     }.toSet()
     fun renderOverhead(state:JSONObject,width:Int,height:Int):Long {
-        val layers=state.getJSONArray("layers");var enabled=false;val assets=mutableSetOf<String>()
+        val layers=state.getJSONArray("layers");var enabled=false;var figure=false;val assets=mutableSetOf<String>()
         for(i in 0 until layers.length()) {
             val strokes=layers.getJSONObject(i).getJSONArray("strokes")
-            for(n in 0 until strokes.length())strokes.getJSONObject(n).optJSONObject("brush")?.let {
-                enabled=true;assets.addAll(assetIds(it))
+            for(n in 0 until strokes.length()) {
+                val stroke=strokes.getJSONObject(n)
+                stroke.optJSONObject("brush")?.let {enabled=true;assets.addAll(assetIds(it))}
+                if(stroke.has("figureVersion")) {enabled=true;figure=true;assets.addAll(ArtFigure.assetIds(stroke))}
             }
         }
         if(!enabled)return 0
         // One opacity/erase layer plus bounded decoded-image cache and temporary masks/arrays.
-        return width.toLong()*height*4+if(assets.isEmpty())128L*128*12 else (min(8,assets.size)+6L)*512*512*4
+        return width.toLong()*height*(if(figure)8 else 4)+if(assets.isEmpty())128L*128*16 else (min(8,assets.size)+7L)*512*512*4
     }
     fun info(tool:String)=JSONObject().put("tool",tool).put("engine","dab-v1").put("defaults",defaults(tool))
         .put("modes",JSONObject(modes)).put("sensors",JSONObject(sensors)).put("channels",JSONObject(channels))

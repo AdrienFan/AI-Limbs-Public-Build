@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.45",
+  "version": "0.2.46",
   "api": {
     "target": 1,
     "min": 1
@@ -207,7 +207,10 @@
       "plugin.art.studio.dyna.stroke",
       "plugin.art.studio.line.info",
       "plugin.art.studio.line.geometry",
-      "plugin.art.studio.line.draw"
+      "plugin.art.studio.line.draw",
+      "plugin.art.studio.figure.info",
+      "plugin.art.studio.figure.geometry",
+      "plugin.art.studio.figure.draw"
     ],
     "services": [],
     "providers": [

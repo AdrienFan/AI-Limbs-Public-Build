@@ -166,6 +166,7 @@ internal object ArtRenderer {
     fun drawStroke(canvas: Canvas, stroke: JSONObject,
         logicalWidth: Int = canvas.width, logicalHeight: Int = canvas.height,
         resources: ((String) -> Bitmap)? = null) {
+        if(stroke.has("figureVersion")) {ArtFigureRenderer.draw(canvas,stroke,resources);return}
         if (stroke.has("brush")) {
             if(stroke.getString("tool")=="mirror") {
                 ArtMirror.validateStored(stroke);ArtMirror.requireBudget(stroke)

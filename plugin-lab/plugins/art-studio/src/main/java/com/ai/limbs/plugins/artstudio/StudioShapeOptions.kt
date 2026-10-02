@@ -60,6 +60,14 @@ internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Bo
     TextButton(onClick={style(JSONObject().put("fill","#00000000"))},enabled=!busy&&canEdit&&canFill) { Text("取消填充") }
     TextButton(onClick={style(JSONObject().put("stroke",color).put("strokeWidth",width.toDouble()))},
         enabled=!busy&&canEdit) { Text("应用描边") }
+    val rectangles=ArtShapes.items(layer).filter {it.getString("id") in ids}
+    if(rectangles.isNotEmpty()&&rectangles.all {it.getString("kind")=="rectangle"}) {
+        var corner by remember(selectedLayer,ids) {mutableStateOf(rectangles.first().optDouble("cornerRadius",0.0).toString())}
+        val value=corner.toDoubleOrNull()
+        OutlinedTextField(corner,{corner=it},label={Text("矩形圆角半径")},enabled=!busy&&canEdit,singleLine=true)
+        TextButton(enabled=!busy&&canEdit&&value!=null&&value.isFinite()&&value in 0.0..16384.0,
+            onClick={style(JSONObject().put("cornerRadius",requireNotNull(value)))}) {Text("应用圆角")}
+    }
     TextButton(onClick={onEdit("SHAPE_DELETE",parameters())},enabled=!busy&&canEdit) { Text("删除形状") }
     captured?.let { original ->
         val x=dx.toFloatOrNull();val y=dy.toFloatOrNull()

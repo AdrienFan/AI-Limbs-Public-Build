@@ -9,6 +9,7 @@ import android.graphics.RectF
 import android.graphics.Region
 import org.json.JSONArray
 import org.json.JSONObject
+import kotlin.math.abs
 
 /** Geometry remains editable source; no pixels are used as object identity. */
 internal object ArtShapes {
@@ -94,6 +95,11 @@ internal object ArtShapes {
             .put("visible",shape.optBoolean("visible",true)).put("locked",shape.optBoolean("locked",false))
         if (!shape.has("matrix")) shape.put("matrix",JSONArray(identity))
         matrix(shape.getJSONArray("matrix"))
+        if(kind=="rectangle" || shape.has("cornerRadius")) {
+            val radius=shape.optDouble("cornerRadius",0.0)
+            require(radius.isFinite()&&radius in 0.0..16384.0 && (kind=="rectangle" || radius==0.0)) {"仅矩形支持圆角半径"}
+            if(kind=="rectangle")shape.put("cornerRadius",radius)
+        }
         val rawBounds = RectF(); path(shape).computeBounds(rawBounds,true)
         require(rawBounds.width() > 0f || rawBounds.height() > 0f) { "请画出非零大小的形状" }
         if (kind in setOf("rectangle", "ellipse", "polygon")) require(rawBounds.width() > 0f && rawBounds.height() > 0f)
@@ -130,7 +136,10 @@ internal object ArtShapes {
         return Path().apply {
             when(shape.getString("kind")) {
                 "line" -> { moveTo(x,y);lineTo(u,v) }
-                "rectangle" -> addRect(minOf(x,u),minOf(y,v),maxOf(x,u),maxOf(y,v),Path.Direction.CW)
+                "rectangle" -> {
+                    val radius=minOf(shape.optDouble("cornerRadius",0.0).toFloat(),abs(u-x)/2,abs(v-y)/2)
+                    addRoundRect(minOf(x,u),minOf(y,v),maxOf(x,u),maxOf(y,v),radius,radius,Path.Direction.CW)
+                }
                 "ellipse" -> addOval(minOf(x,u),minOf(y,v),maxOf(x,u),maxOf(y,v),Path.Direction.CW)
                 "polygon" -> {
                     moveTo(x,y)
@@ -311,7 +320,8 @@ internal object ArtShapes {
             "SHAPE_STYLE" -> {
                 val ids=ids(p.getJSONArray("ids"));choose(ids);require(ids.isNotEmpty())
                 val style=p.getJSONObject("style")
-                require(style.keys().asSequence().all { it in setOf("fill","stroke","strokeWidth","opacity") }) { "尚未实现此形状属性" }
+                require(style.keys().asSequence().all { it in setOf("fill","stroke","strokeWidth","opacity","cornerRadius") }) { "尚未实现此形状属性" }
+                if(style.has("cornerRadius"))require(all.filter {it.getString("id") in ids}.all {it.getString("kind")=="rectangle"}) {"圆角半径只适用于矩形"}
                 for(shape in all.filter { it.getString("id") in ids }) {
                     require(!shape.getBoolean("locked")) { "形状已锁定" }
                     val next=JSONObject(shape.toString());style.keys().forEach { key -> next.put(key,style.get(key)) }

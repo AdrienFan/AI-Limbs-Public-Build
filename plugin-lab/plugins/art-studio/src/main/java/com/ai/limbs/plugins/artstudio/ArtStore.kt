@@ -1019,6 +1019,32 @@ internal class ArtStore(private val root: File) {
         apply(actor,"STROKE_ADD",stroke)
     }
 
+    fun figureGeometry(p:JSONObject):JSONObject = locked {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
+        ArtShapes.layerMatrix(snap.getJSONObject("state"),ArtMenuOperations.layers(snap.getJSONObject("state")).first {it.getString("id")==p.getString("layerId")})
+        ArtFigure.geometry(p).put("coordinateSpace","layer-local").put("revision",snap.getInt("revision"))
+    }
+    fun figureDraw(actor:String,p:JSONObject):JSONObject = locked {
+        val snap=current();val state=snap.getJSONObject("state")
+        require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
+        val layer=ArtMenuOperations.layers(state).first {it.getString("id")==p.getString("layerId")}
+        require(layer.getString("kind") in setOf("paint","vector") && !ArtMenuOperations.isLocked(state,layer) && ArtShapes.visible(state,layer)) {"请选择可编辑的绘画或矢量图层"}
+        if(layer.getString("kind")=="paint")apply(actor,"STROKE_ADD",JSONObject(p.toString()).put("id",UUID.randomUUID().toString()))
+        else {
+            require(!p.has("brush")&&!p.has("brushPresetId")) {"矢量形状不使用栅格笔刷配置"}
+            val geometry=ArtFigure.geometry(p);val fill=geometry.getJSONObject("figureFill")
+            require(fill.getString("mode")!="pattern") {"图案填充请使用绘画图层"}
+            val shape=JSONObject().put("id",UUID.randomUUID().toString()).put("kind",geometry.getString("tool"))
+                .put("points",geometry.getJSONArray("figureCorners")).put("cornerRadius",geometry.getDouble("effectiveRadius"))
+                .put("stroke",if(geometry.getString("outline")=="none")"#00000000" else p.getString("color"))
+                .put("strokeWidth",p.getDouble("width")).put("opacity",p.optDouble("opacity",1.0))
+                .put("fill",if(fill.getString("mode")=="solid")fill.getString("color") else "#00000000")
+            apply(actor,"SHAPE_CREATE",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+                .put("layerId",p.getString("layerId")).put("shape",shape))
+        }
+    }
+
     fun lineGeometry(p:JSONObject):JSONObject = locked {
         val snap=current()
         require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
@@ -1132,7 +1158,18 @@ internal class ArtStore(private val root: File) {
         var normalized = JSONObject(params.toString())
         if(type=="STROKE_ADD") {
             val tool=normalized.optString("tool","pencil")
-            if(ArtBrush.supports(tool)) {
+            if(tool in ArtFigure.tools) {
+                normalized=ArtFigure.geometry(normalized.put("tool",tool))
+                ArtFigure.assetIds(normalized).forEach {id ->
+                    val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
+                    val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
+                    BitmapFactory.decodeFile(file.absolutePath,bounds)
+                    require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
+                }
+            }
+            if(tool in ArtFigure.tools && normalized.getString("outline")!="brush") {
+                require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"仅当前笔刷描边使用brush/brushPresetId"}
+            } else if(ArtBrush.supports(tool)) {
                 normalized.put("tool",tool)
                 if(tool=="mirror") {
                     val state=snapshot(doc).getJSONObject("state")
@@ -1148,6 +1185,7 @@ internal class ArtStore(private val root: File) {
                 if(brushTool=="calligraphy" && normalized.has("nibAngle") && !patch.has("tip") && preset==null)
                     config.getJSONObject("tip").put("angle",normalized.getDouble("nibAngle"))
                 ArtBrush.assetIds(config).forEach { require(assetFile(it).isFile) {"笔刷资源不存在"} }
+                if(tool in ArtFigure.tools)normalized.put("points",ArtFigure.outlinePoints(normalized))
                 normalized=ArtBrush.prepare(normalized,config,normalized.optInt("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE)))
             } else require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"该工具不使用栅格笔刷引擎"}
         }
@@ -2076,6 +2114,7 @@ internal class ArtStore(private val root: File) {
                     if (point.length() >= 3) require(point.getDouble(2) in 0.0..1.0)
                 }
                 if(p.has("brush"))ArtBrush.validateStored(p)
+                if(p.has("figureVersion"))ArtFigure.validateStored(p)
                 requireColor(p.optString("color", "#FF000000"))
                 require(p.getDouble("width") in 0.1..512.0)
                 require(p.optDouble("opacity", 1.0) in 0.0..1.0)
@@ -2084,7 +2123,8 @@ internal class ArtStore(private val root: File) {
                     "line", "rectangle", "ellipse", "polygon", "polyline", "bezier", "gradient"))
                 require(when (tool) {
                     "line" -> p.has("brush") || points.length()==2
-                    "rectangle", "ellipse", "gradient" -> points.length() == 2
+                    "rectangle", "ellipse" -> p.has("figureVersion") || points.length()==2
+                    "gradient" -> points.length()==2
                     "polygon" -> points.length() >= 3
                     "polyline" -> points.length() >= 2
                     "bezier" -> points.length() in 4..1024 && (points.length() - 1) % 3 == 0

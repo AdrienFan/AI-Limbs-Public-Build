@@ -710,3 +710,21 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 {"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[20,30,0.3,0],[80,55,0.7,50],[160,95,1,100]],"color":"#FF245364","width":6,"brushTool":"ink","useSensors":true,"angleStep":15}
 ```
 沿尺规：`angleStep:0, assistantId:"GUIDE_ID"`；整体移动起点：`lineOffset:[10,0]`（文档像素）；矢量层省略 `brush/brushPresetId`。新入口通过 capability 元数据直接携带简例和字段约束。版本 `0.2.45` / versionCode `48` / applicationId `com.ai.limbs.payload.artstudio.v0245`。本批只做静态检查和开发仓库保存，未执行编译、测试或云端推送，运行效果待后续部署验证。
+
+
+### 0.2.46：矩形、椭圆约束与栅格轮廓/图案（尚未编译）
+
+- 参照 Krita 6.0.4 的 `plugins/tools/basictools/kis_tool_rectangle.cc` / `kis_tool_ellipse.cc`，以及 `libs/ui/tool/kis_tool_rectangle_base.cpp` 的 applyConstraints/中心控制、`kis_figure_painting_tool_helper.cpp` 的笔刷轮廓/填充职责；以本插件 Kotlin、Android Path 和 dab-v1 实现，未复用源码。
+- `fixedWidth/fixedHeight/fixedRatio` 为0时自由；两项尺寸均固定时宽高优先，宽+比例派生高，否则比例从高派生宽。输入始终是图层局部两个原始角点；`drawFromCenter` 将首点解释为中心、次点为边缘，自由宽高取位移的两倍，固定值仍是完整尺寸。手机提供尺寸/比例输入与应用按钮；Shift 在自由时约束1:1，有既定约束时临时解除，Ctrl 临时中心绘制。
+- 矩形 `cornerRadius` 实际不超过短边一半；栅格和矢量共用圆角轮廓。矢量对象保留可编辑属性，选择矩形后也能在形状参数面板、`shape.style(style.cornerRadius)` 修改圆角，命中/框选/边界/渲染均读同一路径。
+- 栅格 `outline=brush/basic/none`：当前六类笔刷共享预设、笔尖、纹理和曲线，轮廓闭合、压力固定1，以几何弧长合成采样时间，不使用加权平滑/稳定器/定时喷绘，像素完美仍可用。保留尖角精确采样；轮廓最多10000采样，超出直接拒绝。无描边与无填充不能同时使用。预览与提交都走 ArtFigure 约束和 ArtFigureRenderer；样式/种子/工程/版本/图层在起笔捕获，切换或双指视图手势取消草稿。
+- `figureFill` 为 none/solid/pattern；图案支持棋盘、条纹、圆点及1–512px RGBA图片平铺，可设置缩放、旋转和偏移。图片通过共享 `brush.resource.import(kind=texture)` 或手机“导入图案图片”保存，读取原色和透明度。图案填充与轮廓一次合成透明度；橡皮作为整体透明度蒙版清除。资源按既有嵌套 asset 字段随工程保存、导入重映射；内存预算包括两层合成与图片缓存。矢量填充仅 none/solid，图案和栅格笔刷配置需绘画层。
+- 兰儿入口：`figure.info` 读参数，`figure.geometry` 仅读求边界，`figure.draw` 按图层输出栅格/可编辑矢量；`stroke.add(tool=rectangle/ellipse)` 接入同一栅格链路。保存 figureVersion=1、figureInput、figureBounds、figureCorners、effectiveRadius 和 brushInput/最终 points，重放不再计算约束或轮廓。原有无 figureVersion 的栅格图形仍按既有记录渲染。
+
+简例（调用 figure.draw，ID/revision 替换为当前值）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","tool":"rectangle","points":[[40,50],[200,140]],"color":"#FF245364","width":6,"cornerRadius":12,"figureFill":{"mode":"pattern","pattern":{"kind":"checker","tileSize":16,"foreground":"#FFE8DCC5","background":"#FFB6C8C2"}}}
+```
+椭圆改为 `tool:ellipse, cornerRadius:0`；固定160×90且从中心起笔加 `fixedWidth:160, fixedHeight:90, drawFromCenter:true`；图片图案使用 `figureFill:{mode:pattern,pattern:{kind:image,asset:TILE_ASSET,scale:1,angle:0,offset:[0,0]}}`；矢量层省略 brush/brushPresetId 且填充限 none/solid。能力元数据自带字段约束和简例。
+
+版本 `0.2.46` / versionCode `49` / applicationId `com.ai.limbs.payload.artstudio.v0246`。本批只做静态检查和开发仓库保存，未编译、未运行测试、未推送云端；运行效果待之后部署验证。
