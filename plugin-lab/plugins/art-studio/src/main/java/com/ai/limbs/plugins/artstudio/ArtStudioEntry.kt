@@ -361,6 +361,11 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("comic.frame","创建漫画分格框",write) {p->store.comicFrame("LANER",p)}
         capability("comic.cut","切分漫画矢量分格",write) {p->store.comicEdit("LANER","cut",p)}
         capability("comic.merge","合并相邻漫画分格",write) {p->store.comicEdit("LANER","merge",p)}
+        capability("path.topology_info","读取子路径和多节点编辑范围",read) {ArtPathTopology.info()}
+        capability("path.topology","断开路径、连接子路径或合并端点",write) {p->store.apply("LANER","SHAPE_PATH_TOPOLOGY",p)}
+        capability("path.convert","将基础形状转换为可编辑路径",write) {p->store.apply("LANER","SHAPE_PATH_CONVERT",p)}
+        capability("path.combine","将多个路径合成一个子路径对象",write) {p->store.apply("LANER","SHAPE_PATH_COMBINE",p)}
+        capability("shape.style_info","读取高级对象样式范围",read) {ArtObjectStyle.info()}
         capability("path.create", "创建可编辑贝塞尔路径", write) { p -> store.pathCreate("LANER",p) }
         capability("path.nodes", "读取路径节点与控制柄", read) { p -> store.pathNodes(p) }
         capability("path.edit", "编辑贝塞尔路径节点", write) { p -> store.apply("LANER","SHAPE_PATH_EDIT",p) }
@@ -600,6 +605,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "shape.hit" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"), p("tolerance", "number", true))
         "shape.box" -> listOf(p("documentId"), p("layerId"), p("x", "number"), p("y", "number"),
             p("width", "number"), p("height", "number"), p("contained", "boolean", true))
+        "path.topology" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),id,p("action"),p("at","array",true),p("first","array",true),p("second","array",true))
+        "path.convert", "path.combine" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("ids","array"))
         "path.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("nodes","array"),p("closed","boolean",true),p("style","object",true))
         "path.nodes" -> listOf(p("documentId"),p("layerId"),id)

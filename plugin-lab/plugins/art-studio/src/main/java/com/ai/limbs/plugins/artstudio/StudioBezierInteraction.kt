@@ -19,6 +19,13 @@ internal class StudioBezierInteraction(private val view:View) {
     private var lastTap=0L
     private var editContext:JSONObject?=null
     private var editNodes=mutableListOf<ArtPathGeometry.Node>()
+    var nodeSelection=emptyList<Int>()
+    var multiple=false
+    var boxSelect=false
+    var onSelection:(List<Int>)->Unit={}
+    private var boxStart:FloatArray?=null
+    private var boxEnd:FloatArray?=null
+    private var editShape:JSONObject?=null
     private var editClosed=false
     private var editIndex=-1
     private var editSide=""
@@ -29,12 +36,12 @@ internal class StudioBezierInteraction(private val view:View) {
 
     fun cancel() {
         val had=context!=null||editContext!=null
-        context=null;draft.clear();pressed=false;editContext=null;editNodes.clear()
+        context=null;draft.clear();pressed=false;editContext=null;editNodes.clear();editShape=null;boxStart=null;boxEnd=null
         if(had) view.invalidate()
     }
     fun interrupt() {
         if(pressed&&target.isBlank()&&draft.isNotEmpty()) draft.removeAt(draft.lastIndex)
-        pressed=false;editContext=null;editNodes.clear()
+        pressed=false;editContext=null;editNodes.clear();editShape=null;boxStart=null;boxEnd=null
         if(draft.isEmpty()) context=null
         view.invalidate()
     }
@@ -69,7 +76,7 @@ internal class StudioBezierInteraction(private val view:View) {
         val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply { color=if(locked) Color.GRAY else Color.rgb(95,190,255) }
         for(i in nodes.indices) {
             val p=screen(nodes[i].point,m);paint.style=Paint.Style.FILL
-            val radius=if(i==index) 5f*density else 3f*density
+            val radius=if(i==index||i in nodeSelection) 5f*density else 3f*density
             canvas.drawRect(p[0]-radius,p[1]-radius,p[0]+radius,p[1]+radius,paint)
         }
         if(index in nodes.indices) {
@@ -91,7 +98,14 @@ internal class StudioBezierInteraction(private val view:View) {
             val active=p!=null&&p.getString("id")==shape.getString("id")&&
                 p.getInt("expectedRevision")==revision
             val nodes=if(active) editNodes else ArtPathGeometry.nodes(shape)
-            if(active) outline(canvas,nodes,editClosed,m)
+            if(active&&editShape!=null) {
+                val path=ArtPathTopology.path(requireNotNull(editShape));path.transform(m)
+                canvas.drawPath(path,Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.rgb(70,180,240);style=Paint.Style.STROKE;strokeWidth=1.5f*density})
+            }
+            if(boxStart!=null&&boxEnd!=null) {
+                val a=requireNotNull(boxStart);val b=requireNotNull(boxEnd)
+                canvas.drawRect(minOf(a[0],b[0]),minOf(a[1],b[1]),maxOf(a[0],b[0]),maxOf(a[1],b[1]),Paint().apply {color=Color.rgb(95,190,255);style=Paint.Style.STROKE;strokeWidth=density})
+            }
             decorations(canvas,nodes,m,node.coerceIn(0,nodes.lastIndex),shape.getBoolean("locked")||
                 ArtMenuOperations.isLocked(state,ArtShapes.layer(state,layer)))
         } else {
@@ -172,52 +186,56 @@ internal class StudioBezierInteraction(private val view:View) {
     }
     private fun editTouch(e:MotionEvent,state:JSONObject,document:String,revision:Int,layer:String,m:Matrix,
         activeNode:Int,onNode:(Int)->Unit,onSelect:(JSONObject)->Unit,commit:(JSONObject)->Unit):Boolean {
-        editContext?.let { checkContext(it,document,revision,layer) }
+        editContext?.let {checkContext(it,document,revision,layer)}
         val shape=selected(state,layer)
+        fun select(indices:List<Int>) {nodeSelection=indices.distinct().sorted();onSelection(nodeSelection)}
         if(e.actionMasked==MotionEvent.ACTION_DOWN) {
-            editContext=null
-            if(shape==null) { selectAt(e,state,document,revision,layer,m,onNode,onSelect);return true }
-            val matrix=Matrix(m).apply { preConcat(ArtShapes.matrix(shape.getJSONArray("matrix"))) }
-            editNodes=ArtPathGeometry.nodes(shape);editClosed=shape.getBoolean("closed")
-            editIndex=-1;editSide=""
+            editContext=null;editShape=null;boxStart=null;boxEnd=null
+            if(shape==null) {select(emptyList());selectAt(e,state,document,revision,layer,m,onNode,onSelect);return true}
+            val matrix=Matrix(m).apply {preConcat(ArtShapes.matrix(shape.getJSONArray("matrix")))}
+            editNodes=ArtPathGeometry.nodes(shape);editIndex=-1;editSide=""
+            nodeSelection=nodeSelection.filter {it in editNodes.indices}
             val active=activeNode.coerceIn(0,editNodes.lastIndex)
-            if(active in editNodes.indices) {
+            if(!boxSelect&&nodeSelection.size<=1) {
                 val n=editNodes[active]
-                if(near(e,n.point,matrix,6f)) editIndex=active else {
-                    if(n.incoming!=null&&near(e,n.incoming!!,matrix)) { editIndex=active;editSide="in" }
-                    else if(n.outgoing!=null&&near(e,n.outgoing!!,matrix)) { editIndex=active;editSide="out" }
-                }
+                if(near(e,n.point,matrix,6f))editIndex=active
+                else if(n.incoming!=null&&near(e,n.incoming!!,matrix)) {editIndex=active;editSide="in"}
+                else if(n.outgoing!=null&&near(e,n.outgoing!!,matrix)) {editIndex=active;editSide="out"}
             }
-            if(editIndex<0) {
-                editIndex=editNodes.indices.filter { near(e,editNodes[it].point,matrix) }
-                    .minByOrNull { val p=screen(editNodes[it].point,matrix);hypot(e.x-p[0],e.y-p[1]) }?:-1
+            if(editIndex<0&&!boxSelect)editIndex=editNodes.indices.filter {near(e,editNodes[it].point,matrix)}
+                .minByOrNull {val p=screen(editNodes[it].point,matrix);hypot(e.x-p[0],e.y-p[1])} ?: -1
+            if(editIndex<0&&!boxSelect) {select(emptyList());selectAt(e,state,document,revision,layer,m,onNode,onSelect);return true}
+            editContext=JSONObject().put("documentId",document).put("expectedRevision",revision).put("layerId",layer).put("id",shape.getString("id"))
+            frame=matrix;pointerStart=local(e,matrix)
+            if(boxSelect) {boxStart=floatArrayOf(e.x,e.y);boxEnd=floatArrayOf(e.x,e.y);return true}
+            val additive=multiple||e.metaState and android.view.KeyEvent.META_SHIFT_ON!=0
+            if(additive&&editSide.isBlank()) {
+                val updated=if(editIndex in nodeSelection)nodeSelection.filter {it!=editIndex} else nodeSelection+editIndex
+                select(updated);onNode(editIndex);editContext=null;view.invalidate();return true
             }
-            if(editIndex<0) { selectAt(e,state,document,revision,layer,m,onNode,onSelect);return true }
-            onNode(editIndex);view.invalidate()
-            if(shape.getBoolean("locked")||ArtMenuOperations.isLocked(state,ArtShapes.layer(state,layer))) return true
-            editContext=JSONObject().put("documentId",document).put("expectedRevision",revision).put("layerId",layer)
-                .put("id",shape.getString("id"))
-            frame=matrix
-            pointerStart=local(e,matrix)
-            val n=editNodes[editIndex]
-            grab=if(editSide=="in") requireNotNull(n.incoming) else if(editSide=="out") requireNotNull(n.outgoing) else n.point
+            if(editSide.isNotBlank()||editIndex !in nodeSelection)select(listOf(editIndex))
+            onNode(editIndex)
+            if(shape.getBoolean("locked")||ArtMenuOperations.isLocked(state,ArtShapes.layer(state,layer))) {editContext=null;return true}
+            val n=editNodes[editIndex];grab=if(editSide=="in")requireNotNull(n.incoming) else if(editSide=="out")requireNotNull(n.outgoing) else n.point
         }
-        val p=editContext?:return true
+        val p=editContext ?: return true
         if(e.actionMasked in setOf(MotionEvent.ACTION_MOVE,MotionEvent.ACTION_UP)) {
-            val current=shape?:error("路径选择已改变")
-            require(current.getString("id")==p.getString("id"))
-            val matrix=Matrix(m).apply { preConcat(ArtShapes.matrix(current.getJSONArray("matrix"))) };sameFrame(matrix)
-            val point=grab+(local(e,matrix)-pointerStart)
-            val action=JSONObject().put("action",if(editSide.isBlank()) "move_node" else "move_handle")
-                .put("node",editIndex).put("x",point.x).put("y",point.y)
-            if(editSide.isNotBlank()) action.put("side",editSide)
-            editNodes=ArtPathGeometry.nodes(current);ArtPathGeometry.apply(editNodes,editClosed,action)
-            if(e.actionMasked==MotionEvent.ACTION_UP) {
-                val original=ArtPathGeometry.nodes(current)[editIndex]
-                val old=if(editSide=="in") original.incoming else if(editSide=="out") original.outgoing else original.point
-                editContext=null
-                if(old!=null&&(point-old).length()>0.000001)
-                    commit(JSONObject(p.toString()).put("edits",JSONArray().put(action)))
+            val current=shape ?: error("路径选择已改变");require(current.getString("id")==p.getString("id"))
+            val matrix=Matrix(m).apply {preConcat(ArtShapes.matrix(current.getJSONArray("matrix")))};sameFrame(matrix)
+            if(boxStart!=null) {
+                boxEnd=floatArrayOf(e.x,e.y)
+                if(e.actionMasked==MotionEvent.ACTION_UP) {
+                    val a=requireNotNull(boxStart);val b=requireNotNull(boxEnd)
+                    val anchors=ArtPathGeometry.nodes(current);val picked=anchors.indices.filter {i->val xy=screen(anchors[i].point,matrix);xy[0] in minOf(a[0],b[0])..maxOf(a[0],b[0])&&xy[1] in minOf(a[1],b[1])..maxOf(a[1],b[1])}
+                    select(if(multiple||e.metaState and android.view.KeyEvent.META_SHIFT_ON!=0)nodeSelection+picked else picked)
+                    nodeSelection.firstOrNull()?.let {onNode(it)};editContext=null;boxStart=null;boxEnd=null
+                }
+            } else {
+                val delta=local(e,matrix)-pointerStart
+                val action=if(editSide.isBlank())JSONObject().put("action","move_nodes").put("nodes",JSONArray(nodeSelection)).put("dx",delta.x).put("dy",delta.y)
+                    else JSONObject().put("action","move_handle").put("node",editIndex).put("side",editSide).put("x",(grab+delta).x).put("y",(grab+delta).y)
+                editShape=ArtPathTopology.edited(current,JSONArray().put(action));editNodes=ArtPathGeometry.nodes(requireNotNull(editShape))
+                if(e.actionMasked==MotionEvent.ACTION_UP) {editContext=null;editShape=null;if(delta.length()>0.000001)commit(JSONObject(p.toString()).put("edits",JSONArray().put(action)))}
             }
         }
         view.invalidate();return true

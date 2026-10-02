@@ -254,6 +254,8 @@ internal object ArtBrush {
     fun renderOverhead(state:JSONObject,width:Int,height:Int):Long {
         val layers=state.getJSONArray("layers");var enabled=false;var figure=false;val assets=mutableSetOf<String>()
         for(i in 0 until layers.length()) {
+            val layer=layers.getJSONObject(i)
+            if(layer.getString("kind")=="vector" && ArtShapes.items(layer).any {it.has("objectStyle")})enabled=true
             val strokes=layers.getJSONObject(i).getJSONArray("strokes")
             for(n in 0 until strokes.length()) {
                 val stroke=strokes.getJSONObject(n)

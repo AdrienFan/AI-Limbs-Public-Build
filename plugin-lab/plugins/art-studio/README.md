@@ -746,3 +746,24 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 折线改 `tool:polyline` 并省略 figureFill；三次曲线改 `tool:bezier, points:[[30,120],[70,20],[150,220],[210,100]]` 并省略 figureFill。笔刷预设加 `brushPresetId:PRESET_ID`，图片填充加 `figureFill:{mode:pattern,pattern:{kind:image,asset:TILE_ASSET}}`。
 
 版本 `0.2.47` / versionCode `50` / applicationId `com.ai.limbs.payload.artstudio.v0247`。本批仅静态检查和开发仓库提交；未编译、未运行测试、未推送云端，实际运行待之后部署验证。
+
+
+### 0.2.48：可编辑子路径、多节点与高级对象样式（尚未编译）
+
+- 参照 Krita 6.0.4 的 `libs/flake/commands/KoPathBreakAtPointCommand.cpp`、`KoSubpathJoinCommand.cpp`、`KoPathPointMergeCommand.cpp`、`tools/KoPathTool.cpp::convertToPath` 和 `KoShapeStroke.cpp`。独立以 Kotlin 的节点/控制柄、Android Path/Matrix/Paint 实现，未复用源码；业务仍全部在插件。
+- 原有 points/commands 的 L/C 扩展 M（下一子路径起点，耗1点）、Z（闭合，不耗点），单一路径的 closed 仍保留。多子路径 closed=false，闭合信息由各 Z 保存；nodeModes对应全局逻辑节点，闭合重复端点不计入节点。最多64子路径、总2048段/6145几何点；每个开放子路径至少2节点。已有单路径接口、记录及节点地址保持原义。
+- path.edit 支持全局节点，或 subpath+局部 node/segment；新增 move_nodes/node_types/delete_nodes 的批量移动、改类型、删点。手机有点选叠加、Shift增减、拖框、全选/清空；关闭叠加/框选后可拖动任一选中节点整体移动，柄随节点平移。几何预览与提交均走同一子路径编辑器，视图变换或工程上下文变化中止拖动。
+- path.topology: break_node在内部节点复制端点断开，保留两侧曲线；闭合路径从该节点打开；break_segment移除对应后段；join可连接不同子路径或闭合同子路径，必要时反向并交换入出柄；merge将两端点移到中点并保留相邻柄偏移。仅开放端点可连接/合并，零几何、断开后不足节点明确拒绝。
+- path.convert保留对象ID、矩阵和样式，将直线/多边形精确转段，矩形含圆角、椭圆用四分之一弧三次曲线（kappa近似）。path.combine将同层多个路径坐标映射到首对象局部空间，首对象ID/样式保留，其他对象在同一可撤销操作中消耗；独立子路径随后用topology连接。两种操作均有手机入口。
+- shape.style(style.objectStyle)与path.create(style.objectStyle)支持线帽、转角、尖角限值、实线/虚线及偏移、nonzero/evenodd填充规则、填充/描边独立透明度、线性/径向填充和描边渐变。渐变坐标为对象局部，2–16个严格递增色站（手机面板编辑两端颜色），径向end定义半径。新高级样式将填充和描边一次合成对象透明度；无objectStyle的历史记录保留原有按画笔透明度绘制的语义。命中/框选使用同样的线帽、转角、虚线几何和填充规则，填充只覆盖闭合子路径。图片导出/缩略图共用对象渲染器；工程序列化原样保存样式与命令。
+- 兰儿入口：path.topology_info、path.topology、path.convert、path.combine、shape.style_info，以及原有path.nodes/path.edit/shape.style。元数据自带最小示例、零起始地址与局部坐标说明，仅读入口不附加画布反馈。高级对象合成面的内存已加入既有预算。
+
+简例（ID与revision替换为当前值；地址取path.nodes.subpaths）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","id":"PATH_ID","action":"break_node","at":[0,1]}
+```
+将上例传path.topology；断开后重读path.nodes，再传 `action:join, first:[0,1], second:[1,0]`（示例两条开放子路径各2点），或改 `action:merge`。
+批量移动调用path.edit，`edits:[{action:move_nodes,nodes:[0,1],dx:10,dy:5}]`。
+渐变/虚线调用shape.style，`style:{objectStyle:{strokeCap:round,strokeJoin:bevel,dashArray:[8,4],fillGradient:{type:linear,start:[0,0],end:[100,0],stops:[[0,"#FF245364"],[1,"#FFE8DCC5"]]}}}`，目标带ids数组。
+
+版本 `0.2.48` / versionCode `51` / applicationId `com.ai.limbs.payload.artstudio.v0248`。仅静态检查和开发仓库保存，未编译、未运行测试、未推送云端；运行效果待统一部署验证。

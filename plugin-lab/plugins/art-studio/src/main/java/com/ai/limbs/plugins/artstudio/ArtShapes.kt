@@ -62,17 +62,8 @@ internal object ArtShapes {
         when (kind) {
             "path" -> {
                 require(points.length() in 2..ArtFreehand.MAX_GEOMETRY_POINTS)
-                val commands = shape.getJSONArray("commands")
-                require(commands.length() in 1..ArtFreehand.MAX_SEGMENTS)
-                var consumed = 1
-                for (n in 0 until commands.length()) consumed += when (commands.getString(n)) {
-                    "L" -> 1
-                    "C" -> 3
-                    else -> error("路径仅支持直线L和三次贝塞尔C")
-                }
-                require(consumed == points.length()) { "路径命令与几何点数量不匹配" }
-                shape.put("closed", shape.optBoolean("closed", false))
-                ArtPathGeometry.validateModes(shape)
+                shape.put("closed",shape.optBoolean("closed",false))
+                ArtPathTopology.parts(shape)
             }
             "polygon" -> require(points.length() in 3..2048)
             else -> require(points.length() == 2)
@@ -100,6 +91,7 @@ internal object ArtShapes {
             require(radius.isFinite()&&radius in 0.0..16384.0 && (kind=="rectangle" || radius==0.0)) {"仅矩形支持圆角半径"}
             if(kind=="rectangle")shape.put("cornerRadius",radius)
         }
+        if(shape.has("objectStyle"))shape.put("objectStyle",ArtObjectStyle.settings(shape))
         val rawBounds = RectF(); path(shape).computeBounds(rawBounds,true)
         require(rawBounds.width() > 0f || rawBounds.height() > 0f) { "请画出非零大小的形状" }
         if (kind in setOf("rectangle", "ellipse", "polygon")) require(rawBounds.width() > 0f && rawBounds.height() > 0f)
@@ -134,6 +126,7 @@ internal object ArtShapes {
         val x=p0.getDouble(0).toFloat();val y=p0.getDouble(1).toFloat()
         val u=p1.getDouble(0).toFloat();val v=p1.getDouble(1).toFloat()
         return Path().apply {
+            fillType=if(ArtObjectStyle.settings(shape).getString("fillRule")=="evenodd")Path.FillType.EVEN_ODD else Path.FillType.WINDING
             when(shape.getString("kind")) {
                 "line" -> { moveTo(x,y);lineTo(u,v) }
                 "rectangle" -> {
@@ -146,59 +139,39 @@ internal object ArtShapes {
                     for(n in 1 until a.length()) { val p=a.getJSONArray(n);lineTo(p.getDouble(0).toFloat(),p.getDouble(1).toFloat()) }
                     close()
                 }
-                "path" -> {
-                    moveTo(x,y)
-                    val commands=shape.getJSONArray("commands")
-                    var index=1
-                    fun next():FloatArray {
-                        val p=a.getJSONArray(index++)
-                        return floatArrayOf(p.getDouble(0).toFloat(),p.getDouble(1).toFloat())
-                    }
-                    for(n in 0 until commands.length()) when(commands.getString(n)) {
-                        "L" -> { val p=next();lineTo(p[0],p[1]) }
-                        "C" -> { val c1=next();val c2=next();val p=next()
-                            cubicTo(c1[0],c1[1],c2[0],c2[1],p[0],p[1]) }
-                        else -> error("不支持的路径命令")
-                    }
-                    if(shape.getBoolean("closed")) close()
-                }
+                "path" -> addPath(ArtPathTopology.path(shape))
                 else -> error("不支持的形状")
             }
         }
     }
     fun canFill(shape:JSONObject):Boolean = shape.getString("kind") != "line" &&
-        (shape.getString("kind") != "path" || shape.getBoolean("closed"))
+        (shape.getString("kind") != "path" || ArtPathTopology.parts(shape).any {it.closed})
 
     fun draw(canvas: Canvas, layer: JSONObject) {
         for(shape in items(layer)) {
             if(!shape.getBoolean("visible") || shape.getDouble("opacity")==0.0) continue
             val path=path(shape)
             canvas.save();canvas.concat(matrix(shape.getJSONArray("matrix")))
-            val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                strokeWidth=shape.getDouble("strokeWidth").toFloat()
-                strokeJoin=Paint.Join.ROUND;strokeCap=Paint.Cap.ROUND
+            if(shape.has("objectStyle")) {
+                val save=canvas.saveLayer(null,Paint().apply {alpha=(255*shape.getDouble("opacity")).toInt()})
+                try {
+                    if(canFill(shape))canvas.drawPath(fillPath(shape),ArtObjectStyle.paint(shape,false))
+                    canvas.drawPath(path,ArtObjectStyle.paint(shape,true))
+                } finally {canvas.restoreToCount(save)}
+            } else {
+                fun paint(stroke:Boolean)=ArtObjectStyle.paint(shape,stroke).apply {alpha=(alpha*shape.getDouble("opacity")).toInt()}
+                if(canFill(shape))canvas.drawPath(fillPath(shape),paint(false));canvas.drawPath(path,paint(true))
             }
-            fun setColor(key:String) {
-                val c=Color.parseColor(shape.getString(key))
-                paint.color=c;paint.alpha=(Color.alpha(c)*shape.getDouble("opacity")).toInt()
-            }
-            if(canFill(shape)) {
-                setColor("fill");paint.style=Paint.Style.FILL;canvas.drawPath(path,paint)
-            }
-            setColor("stroke");paint.style=Paint.Style.STROKE;canvas.drawPath(path,paint)
             canvas.restore()
         }
     }
+    private fun fillPath(shape:JSONObject)=if(shape.getString("kind")=="path")ArtPathTopology.path(shape,true) else path(shape)
     private fun coverage(shape:JSONObject):Path {
         val source=path(shape);val area=Path()
-        if(canFill(shape) && Color.alpha(Color.parseColor(shape.getString("fill")))>0)
-            area.addPath(source)
-        if(Color.alpha(Color.parseColor(shape.getString("stroke")))>0) {
-            val outline=Path()
-            Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                style=Paint.Style.STROKE;strokeWidth=shape.getDouble("strokeWidth").toFloat()
-                strokeCap=Paint.Cap.ROUND;strokeJoin=Paint.Join.ROUND
-            }.getFillPath(source,outline)
+        if(canFill(shape) && ArtObjectStyle.visible(shape,false))
+            area.addPath(fillPath(shape))
+        if(ArtObjectStyle.visible(shape,true)) {
+            val outline=Path();ArtObjectStyle.paint(shape,true,false).getFillPath(source,outline)
             check(area.op(outline,Path.Op.UNION)) { "形状描边合并失败" }
         }
         area.transform(matrix(shape.getJSONArray("matrix")))
@@ -308,6 +281,27 @@ internal object ArtShapes {
                 result.keys().forEach { key -> shape.put(key,result.get(key)) }
                 choose(listOf(id))
             }
+            "SHAPE_PATH_TOPOLOGY", "SHAPE_PATH_CONVERT", "SHAPE_PATH_COMBINE" -> {
+                val ids=if(type=="SHAPE_PATH_TOPOLOGY")listOf(p.getString("id")) else ids(p.getJSONArray("ids"))
+                require(ids.isNotEmpty()&&ids.distinct().size==ids.size&&ids.all {id->all.any {it.getString("id")==id}})
+                val chosen=ids.map {id->all.first {it.getString("id")==id}};require(chosen.none {it.getBoolean("locked")||!it.getBoolean("visible")})
+                when(type) {
+                    "SHAPE_PATH_TOPOLOGY"->{val shape=chosen.single();val next=ArtPathTopology.topology(shape,p);next.keys().forEach {shape.put(it,next.get(it))};choose(ids)}
+                    "SHAPE_PATH_CONVERT"->{chosen.forEach {shape->val next=ArtPathTopology.converted(shape);shape.remove("cornerRadius");next.keys().forEach {shape.put(it,next.get(it))}};choose(ids)}
+                    else->{
+                        require(chosen.size>=2&&chosen.all {it.getString("kind")=="path"}) {"先将形状转路径，再合成子路径对象"}
+                        val target=chosen.first();val inverse=Matrix();require(matrix(target.getJSONArray("matrix")).invert(inverse))
+                        val parts=mutableListOf<ArtPathTopology.Part>()
+                        chosen.forEach {shape->
+                            val transform=matrix(shape.getJSONArray("matrix")).apply {postConcat(inverse)}
+                            fun map(v:ArtPathGeometry.Vec):ArtPathGeometry.Vec {val a=floatArrayOf(v.x.toFloat(),v.y.toFloat());transform.mapPoints(a);return ArtPathGeometry.Vec(a[0].toDouble(),a[1].toDouble())}
+                            ArtPathTopology.parts(shape).forEach {part->parts.add(ArtPathTopology.Part(part.nodes.map {ArtPathGeometry.Node(map(it.point),it.incoming?.let {h->map(h)},it.outgoing?.let {h->map(h)},it.type)}.toMutableList(),part.closed))}
+                        }
+                        val next=ArtPathTopology.write(target,parts);next.keys().forEach {target.put(it,next.get(it))}
+                        layer.put("shapes",JSONArray(all.filter {it.getString("id")==ids.first()||it.getString("id") !in ids}));choose(listOf(ids.first()))
+                    }
+                }
+            }
             "SHAPE_TRANSFORM" -> {
                 val ids=ids(p.getJSONArray("ids"))
                 transformIds(layer,ids,matrix(p.getJSONArray("matrix")));choose(ids)
@@ -320,11 +314,14 @@ internal object ArtShapes {
             "SHAPE_STYLE" -> {
                 val ids=ids(p.getJSONArray("ids"));choose(ids);require(ids.isNotEmpty())
                 val style=p.getJSONObject("style")
-                require(style.keys().asSequence().all { it in setOf("fill","stroke","strokeWidth","opacity","cornerRadius") }) { "尚未实现此形状属性" }
+                require(style.keys().asSequence().all { it in setOf("fill","stroke","strokeWidth","opacity","cornerRadius","objectStyle") }) { "尚未实现此形状属性" }
                 if(style.has("cornerRadius"))require(all.filter {it.getString("id") in ids}.all {it.getString("kind")=="rectangle"}) {"圆角半径只适用于矩形"}
                 for(shape in all.filter { it.getString("id") in ids }) {
                     require(!shape.getBoolean("locked")) { "形状已锁定" }
-                    val next=JSONObject(shape.toString());style.keys().forEach { key -> next.put(key,style.get(key)) }
+                    val next=JSONObject(shape.toString());style.keys().forEach { key ->
+                        if(key=="objectStyle") {val merged=ArtObjectStyle.settings(next);val patch=style.getJSONObject(key);patch.keys().forEach {merged.put(it,patch.get(it))};next.put(key,merged)}
+                        else next.put(key,style.get(key))
+                    }
                     val normalized=normalize(next);normalized.keys().forEach { key -> shape.put(key,normalized.get(key)) }
                 }
             }

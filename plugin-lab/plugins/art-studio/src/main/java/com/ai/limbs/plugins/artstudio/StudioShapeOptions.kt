@@ -68,6 +68,10 @@ internal fun StudioShapeOptions(snapshot:JSONObject,selectedLayer:String,busy:Bo
         TextButton(enabled=!busy&&canEdit&&value!=null&&value.isFinite()&&value in 0.0..16384.0,
             onClick={style(JSONObject().put("cornerRadius",requireNotNull(value)))}) {Text("应用圆角")}
     }
+    val objects=ArtShapes.items(layer).filter {it.getString("id") in ids}
+    TextButton(enabled=!busy&&canEdit&&objects.any {it.getString("kind")!="path"},onClick={onEdit("SHAPE_PATH_CONVERT",parameters())}) {Text("形状转路径")}
+    TextButton(enabled=!busy&&canEdit&&objects.size>=2&&objects.all {it.getString("kind")=="path"},onClick={onEdit("SHAPE_PATH_COMBINE",parameters())}) {Text("合成子路径对象")}
+    StudioObjectStyleOptions(objects,busy||!canEdit) {patch->style(JSONObject().put("objectStyle",patch))}
     TextButton(onClick={onEdit("SHAPE_DELETE",parameters())},enabled=!busy&&canEdit) { Text("删除形状") }
     captured?.let { original ->
         val x=dx.toFloatOrNull();val y=dy.toFloatOrNull()

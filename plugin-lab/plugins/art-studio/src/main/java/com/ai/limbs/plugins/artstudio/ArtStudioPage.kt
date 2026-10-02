@@ -446,6 +446,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var freehandClosed by remember { mutableStateOf(false) }
     var bezierEditing by remember { mutableStateOf(false) }
     var bezierNode by remember { mutableIntStateOf(0) }
+    var bezierNodeSelection by remember {mutableStateOf(emptyList<Int>())}
+    var bezierMultiple by remember {mutableStateOf(false)}
+    var bezierBox by remember {mutableStateOf(false)}
     var bezierNodeType by remember { mutableStateOf("symmetric") }
     var bezierClosed by remember { mutableStateOf(false) }
     var color by remember { mutableStateOf("#FF161616") }
@@ -589,6 +592,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val canvasRef = remember { arrayOfNulls<StudioCanvas>(1) }
     val mutex = remember { Mutex() }
     val selected = snapshot?.optJSONObject("state")?.optString("selectedLayerId") ?: ""
+    LaunchedEffect(snapshot?.optString("id"),selected,snapshot?.optJSONObject("state")?.optJSONObject("shapeSelection")?.optJSONArray("ids")?.toString(),tool) {
+        bezierNodeSelection=emptyList();bezierNode=0
+    }
 
     fun requestPresentationMode(mode: String) {
         presentationError = null
@@ -1533,6 +1539,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.bezierEditing = bezierEditing; view.bezierNode = bezierNode
                     view.bezierNodeType = bezierNodeType; view.bezierClosed = bezierClosed
                     view.onBezierNode = { bezierNode = it }
+                    view.bezierNodeSelection=bezierNodeSelection;view.bezierMultiple=bezierMultiple;view.bezierBox=bezierBox
+                    view.onBezierSelection={bezierNodeSelection=it}
                     view.onBezierCreate = { p -> if (!busy) perform { store.pathCreate("AWEI", p) } }
                     view.image = image
                     view.gridVisible = viewOptions.gridVisible
@@ -2471,10 +2479,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         bezierNodeType, bezierClosed, fillShape, { mode ->
                             if (mode != bezierEditing && canvasRef[0]?.bezierHasDraft == true)
                                 Toast.makeText(context,"请先完成或取消当前路径",Toast.LENGTH_SHORT).show()
-                            else bezierEditing = mode
+                            else {bezierEditing = mode;bezierNodeSelection=emptyList()}
                         }, { bezierNode = it }, { bezierNodeType = it },
                         { bezierClosed = it }, { fillShape = it },
-                        { canvasRef[0]?.bezierCommand(it) }, ::edit)
+                        { canvasRef[0]?.bezierCommand(it) }, ::edit,bezierNodeSelection,bezierMultiple,bezierBox,
+                        {bezierNodeSelection=it},{bezierMultiple=it},{bezierBox=it})
                 }
                 if (tool == "reference_images") {
                     StudioReferenceOptions(current,busy,referenceMultiple,{referenceMultiple=it},{
@@ -3344,6 +3353,14 @@ private class StudioCanvas(context: Context) : View(context) {
     var bezierNodeType: String = "symmetric"
     var bezierClosed: Boolean = false
     var onBezierNode: (Int) -> Unit = {}
+    var bezierNodeSelection:List<Int> = emptyList()
+        set(value) {field=value;bezierInteraction.nodeSelection=value;invalidate()}
+    var bezierMultiple=false
+        set(value) {field=value;bezierInteraction.multiple=value}
+    var bezierBox=false
+        set(value) {field=value;bezierInteraction.boxSelect=value}
+    var onBezierSelection:(List<Int>)->Unit={}
+        set(value) {field=value;bezierInteraction.onSelection=value}
     var onBezierCreate: (JSONObject) -> Unit = {}
     var freehandMode: String = "curve"
     var freehandPrecision: Float = 2f

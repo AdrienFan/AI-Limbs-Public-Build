@@ -724,7 +724,7 @@ internal class ArtStore(private val root: File) {
         val transform=ArtShapes.layerMatrix(state,layer).apply { preConcat(ArtShapes.matrix(shape.getJSONArray("matrix"))) }
         JSONObject().put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
             .put("layerId",layer.getString("id")).put("id",shape.getString("id"))
-            .put("nodes",ArtPathGeometry.json(nodes)).put("closed",shape.getBoolean("closed"))
+            .put("nodes",ArtPathGeometry.json(nodes)).put("closed",shape.getBoolean("closed")).put("subpaths",ArtPathTopology.describe(shape))
             .put("objectToDocument",ArtShapes.encode(transform)).put("coordinateSpace","object-local")
             .put("locked",ArtMenuOperations.isLocked(state,layer)||shape.getBoolean("locked"))
             .put("visible",ArtShapes.visible(state,layer)&&shape.getBoolean("visible")&&shape.getDouble("opacity")>0.0)
@@ -1741,6 +1741,9 @@ internal class ArtStore(private val root: File) {
                 "SHAPE_SELECT" -> "选择形状"
                 "SHAPE_TRANSFORM" -> "变换形状"
                 "SHAPE_PATH_EDIT" -> "编辑路径节点"
+                "SHAPE_PATH_TOPOLOGY" -> "断开或连接子路径"
+                "SHAPE_PATH_CONVERT" -> "形状转路径"
+                "SHAPE_PATH_COMBINE" -> "合成子路径对象"
                 "SHAPE_DELETE" -> "删除形状"
                 "SHAPE_STYLE" -> "形状样式"
                 "TEXT_CREATE" -> "添加文字"
@@ -1918,7 +1921,7 @@ internal class ArtStore(private val root: File) {
                 state.put("selectedLayerId", id)
             }
             "SHAPE_COMIC_CUT", "SHAPE_COMIC_MERGE" -> ArtComicPanels.apply(state,p)
-            "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT" ->
+            "SHAPE_CREATE", "SHAPE_SELECT", "SHAPE_TRANSFORM", "SHAPE_DELETE", "SHAPE_STYLE", "SHAPE_PATH_EDIT", "SHAPE_PATH_TOPOLOGY", "SHAPE_PATH_CONVERT", "SHAPE_PATH_COMBINE" ->
                 ArtShapes.edit(state, type, p)
             "VECTOR_LAYER_CREATE" -> {
                 val id = p.getString("id"); validateId(id)

@@ -40,33 +40,7 @@ internal object ArtPathGeometry {
     fun json(nodes:List<Node>):JSONArray=JSONArray(nodes.map { n -> JSONObject()
         .put("x",n.point.x).put("y",n.point.y).put("in",n.incoming?.json()?:JSONObject.NULL)
         .put("out",n.outgoing?.json()?:JSONObject.NULL).put("type",n.type) })
-    fun nodes(shape:JSONObject):MutableList<Node> {
-        require(shape.getString("kind")=="path") { "此对象不是可编辑路径" }
-        val a=shape.getJSONArray("points");val commands=shape.getJSONArray("commands")
-        val nodes=mutableListOf(Node(point(a.getJSONArray(0))))
-        var cursor=1
-        for(i in 0 until commands.length()) {
-            when(commands.getString(i)) {
-                "L" -> nodes.add(Node(point(a.getJSONArray(cursor++))))
-                "C" -> {
-                    nodes.last().outgoing=point(a.getJSONArray(cursor++))
-                    val incoming=point(a.getJSONArray(cursor++))
-                    nodes.add(Node(point(a.getJSONArray(cursor++)),incoming=incoming))
-                }
-                else -> error("不支持的路径命令")
-            }
-        }
-        require(cursor==a.length())
-        if(shape.getBoolean("closed")&&nodes.size>1&&
-            (nodes.first().point-nodes.last().point).length()<=0.000001) {
-            nodes.first().incoming=nodes.last().incoming;nodes.removeAt(nodes.lastIndex)
-        }
-        shape.optJSONArray("nodeModes")?.let { modes ->
-            require(modes.length()==nodes.size) { "节点类型数量不匹配" }
-            nodes.forEachIndexed { i,n -> n.type=modes.getString(i);require(n.type in types) }
-        }
-        return nodes
-    }
+    fun nodes(shape:JSONObject):MutableList<Node> = ArtPathTopology.parts(shape).flatMap {it.nodes}.toMutableList()
     fun validateModes(shape:JSONObject) { if(shape.has("nodeModes")) nodes(shape) }
     fun segmentCount(nodes:List<Node>,closed:Boolean)=if(closed) nodes.size else nodes.size-1
     fun supports(nodes:List<Node>,closed:Boolean,index:Int,side:String):Boolean =
@@ -113,7 +87,7 @@ internal object ArtPathGeometry {
         val shape=JSONObject().put("id",UUID.randomUUID().toString()).put("kind","path")
         val g=geometry(nodes,closed);g.keys().forEach { shape.put(it,g.get(it)) }
         p.optJSONObject("style")?.let { style ->
-            require(style.keys().asSequence().all { it in setOf("fill","stroke","strokeWidth","opacity") })
+            require(style.keys().asSequence().all { it in setOf("fill","stroke","strokeWidth","opacity","objectStyle") })
             style.keys().forEach { shape.put(it,style.get(it)) }
         }
         return ArtShapes.normalize(shape)
@@ -218,12 +192,6 @@ internal object ArtPathGeometry {
         return result
     }
     fun edited(shape:JSONObject,edits:JSONArray):JSONObject {
-        require(edits.length() in 1..64) { "每次路径编辑需要1至64个动作" }
-        val nodes=nodes(shape);var closed=shape.getBoolean("closed")
-        for(i in 0 until edits.length()) closed=apply(nodes,closed,edits.getJSONObject(i))
-        val result=JSONObject(shape.toString());val g=geometry(nodes,closed)
-        g.keys().forEach { result.put(it,g.get(it)) }
-        result.put("geometryEdited",true)
-        return ArtShapes.normalize(result)
+        return ArtPathTopology.edited(shape,edits)
     }
 }
