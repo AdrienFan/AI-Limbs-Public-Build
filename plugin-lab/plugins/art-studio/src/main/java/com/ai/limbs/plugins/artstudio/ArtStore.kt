@@ -996,8 +996,13 @@ internal class ArtStore(private val root: File) {
     }
 
     fun assistantStroke(actor: String,p: JSONObject): JSONObject = locked {
-        val projected=assistantProject(p)
-        val state=current().getJSONObject("state")
+        val snap=current()
+        val projected=if(p.optString("tool","ink")=="dyna") {
+            require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
+            // Dynamic filtering precedes guide projection; passing projected raw input here would reverse that order.
+            JSONObject().put("points",p.getJSONArray("points")).put("assistantId",p.getString("id"))
+        } else assistantProject(p)
+        val state=snap.getJSONObject("state")
         val layer=ArtMenuOperations.layers(state).first { it.getString("id")==p.getString("layerId") }
         require(layer.getString("kind")=="paint") { "尺规绘画需要绘画图层" }
         val inverse=android.graphics.Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse))
@@ -1109,6 +1114,7 @@ internal class ArtStore(private val root: File) {
                     val state=snapshot(doc).getJSONObject("state")
                     normalized=ArtMirror.normalize(normalized,state.getInt("width"),state.getInt("height"))
                 }
+                if(tool=="dyna")normalized=ArtDyna.normalize(normalized,snapshot(doc).getJSONObject("state"))
                 val brushTool=ArtBrush.engineTool(normalized)
                 val preset=if(normalized.has("brushPresetId"))brushPreset(normalized.getString("brushPresetId")) else null
                 require(preset==null || preset.getString("tool")==brushTool) {"预设与当前工具不匹配"}

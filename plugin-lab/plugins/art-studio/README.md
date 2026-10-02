@@ -1,3 +1,21 @@
+## 0.2.44 动态画笔（开发源码，尚未编译）
+
+参照用户提供的Krita 6.0.4 `plugins/tools/tool_dyna/kis_tool_dyna.cpp`（Dyna过滤后调用Freehand）以及 `libs/ui/tool/kis_painting_information_builder.cpp` / `kis_tool_freehand_helper.cpp`（位置调整再进入共享平滑/笔刷），由本插件实现采样惯性阶段。现有Mass/Drag及默认值保持：质量 `1+159×Mass`，阻尼 `0.5×Drag²`，范围0–1。不是移植Krita引擎源码，也不新增该文件中未启用的固定笔角/动态笔宽控制。
+
+动态画笔可选六支现有栅格笔，接入同一预设、笔尖、纹理、压力/速度/倾斜/方向曲线、流量、间距、散布、持续喷绘、加权平滑、稳定器与像素模式面板；笔粗、颜色、透明度与自由画笔共享。手机和兰儿的顺序一致：原始指针 → 惯性过滤 → 可选尺规吸附 → 共享平滑/稳定器 → 笔刷印章。尺规投影在惯性之后，避免先吸附再过滤反而偏离尺规；后续平滑作用于投影轨迹。静止喷绘采样仍保留传感器及时间并继续逐采样惯性处理。抬笔不强追原始指针；共享平滑的finish只补到惯性轨迹终点。
+
+每笔保存原始动态输入、惯性/尺规中间点、Mass/Drag、完整笔刷与最终轨迹；重放、撤销恢复、缩略图及导出不会重复计算惯性，不随后续工具设置或尺规编辑变化。旧版无brush的动态笔触按原格式渲染。
+
+兰儿入口：`plugin.art.studio.dyna.info`、`plugin.art.studio.dyna.stroke`；每项都有参数说明和简洁示例。原有 `stroke.add(tool=dyna)`、`assistant.stroke(tool=dyna)` 同步支持 `brushTool`、完整brush/预设与Mass/Drag。直接入口可选assistantId绑定可见启用尺规。直接轨迹为图层局部坐标，assistant.stroke输入为文档坐标；均传原始指针点。
+
+```json
+{"layerId":"PAINT_LAYER_ID","points":[[20,30,0.4,0],[120,70,0.8,16],[180,150,1,32]],"color":"#FF245364","width":6,"mass":0.5,"drag":0.15,"brushTool":"ink","brush":{"smoothing":{"mode":"weighted","window":8}},"expectedRevision":0}
+```
+
+替换当前图层ID及最新revision；沿尺规可用assistant.stroke额外传documentId/id/tool=dyna。主笔类型与brushPresetId须匹配，细节按需读取brush.info(tool=brushTool)。继续使用共享采样、印章、粒子和内存预算，超限明确拒绝。
+
+版本0.2.44 / versionCode47 / applicationId v0244。仅做静态源码、元数据及传输完整性检查；不编译、不运行测试、不推送，实机效果等后续云编译验收。使用本插件dab-v1引擎，未兼容Krita全部引擎及.kpp/.abr资源。
+
 ## 0.2.43 多重画笔（开发源码，尚未编译）
 
 多重画笔新增 `mirrorAngle`（-360–360度，正数逆时针）；镜像、四象限与雪花模式按旋转后的轴反射，随机平移旋转确定性偏移。旋转对称的相对角步长不随轴角变化（轴线显示旋转）；自定子画笔及间隔复制保留原布局，与Krita对应变换的语义一致。八种模式、原有基础画笔数量含义和48支总上限保留。

@@ -21,7 +21,7 @@ internal object ArtAssistants {
         "parallel_ruler" to "平行尺", "ellipse" to "椭圆", "concentric_ellipse" to "同心椭圆",
         "vanishing_point" to "消失点")
     val pending = listOf("三次曲线尺规", "透视网格", "透视椭圆", "双点透视组合", "鱼眼", "曲线透视", "局部作用区域", "固定长度单位")
-    val brushTools = setOf("ink","pencil","soft","spray","eraser","calligraphy","mirror")
+    val brushTools = setOf("ink","pencil","soft","spray","eraser","calligraphy","mirror","dyna")
     fun count(type: String) = when(type) {
         "vanishing_point" -> 1
         "ellipse","concentric_ellipse" -> 3

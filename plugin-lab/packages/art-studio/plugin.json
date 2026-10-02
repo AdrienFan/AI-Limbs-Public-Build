@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.43",
+  "version": "0.2.44",
   "api": {
     "target": 1,
     "min": 1
@@ -202,7 +202,9 @@
       "plugin.art.studio.brush.resources",
       "plugin.art.studio.brush.resource.import",
       "plugin.art.studio.mirror.info",
-      "plugin.art.studio.mirror.stroke"
+      "plugin.art.studio.mirror.stroke",
+      "plugin.art.studio.dyna.info",
+      "plugin.art.studio.dyna.stroke"
     ],
     "services": [],
     "providers": [

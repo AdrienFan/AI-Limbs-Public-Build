@@ -177,6 +177,9 @@ internal object ArtRenderer {
                         t.getDouble(1).toFloat(),t.getDouble(3).toFloat(),t.getDouble(5).toFloat(),0f,0f,1f))}
                 }
                 ArtBrushRenderer.draw(canvas,regular,resources,transforms)
+            } else if(stroke.getString("tool")=="dyna") {
+                ArtDyna.validateStored(stroke)
+                ArtBrushRenderer.draw(canvas,JSONObject(stroke.toString()).put("tool",ArtBrush.engineTool(stroke)),resources)
             } else ArtBrushRenderer.draw(canvas,stroke,resources)
             return
         }

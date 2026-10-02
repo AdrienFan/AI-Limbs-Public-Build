@@ -430,6 +430,10 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("layer.move_down", "下移同级图层", write) { p ->
             store.apply("LANER", "LAYER_MOVE_STEP", p.put("direction", "down"))
         }
+        capability("dyna.info","读取动态画笔参数与处理顺序",read) {ArtDyna.info()}
+        capability("dyna.stroke","使用共享笔刷绘制动态笔触",write) {p ->
+            p.put("tool","dyna").put("id",UUID.randomUUID().toString());store.apply("LANER","STROKE_ADD",p)
+        }
         capability("mirror.info","读取多重画笔参数与链路",read) {ArtMirror.info()}
         capability("mirror.stroke","使用笔刷引擎绘制多重笔触",write) {p ->
             p.put("tool","mirror").put("id",UUID.randomUUID().toString());store.apply("LANER","STROKE_ADD",p)
@@ -525,11 +529,15 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         return InProcessCapabilityParameterSpec(key, type, ArtCapabilityHelp.parameterDescription(name, key), !optional)
     }
     val id = p("id")
+    fun dynaFields()=listOf(p("mass","number",true),p("drag","number",true))
     fun mirrorFields()=listOf(p("brushTool",optional=true),p("mirrorAngle","number",true),p("mirrorDirection",optional=true),
         p("mirrorCount","integer",true),p("mirrorRadius","number",true),p("mirrorSeed","integer",true),
         p("mirrorCenters","array",true),p("mirrorIntervalX","integer",true),p("mirrorIntervalY","integer",true),
         p("axisX","number",true),p("axisY","number",true))
     return when (name) {
+        "dyna.stroke" -> listOf(p("layerId"),p("points","array"),p("color"),p("width","number"),
+            p("opacity","number",true),p("brushTool",optional=true),p("brush","object",true),p("brushPresetId",optional=true),
+            p("brushSeed","integer",true),p("documentId",optional=true),p("expectedRevision","integer",true),p("assistantId",optional=true))+dynaFields()
         "mirror.stroke" -> listOf(p("layerId"),p("points","array"),p("color"),p("width","number"),
             p("opacity","number",true),p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true),
             p("documentId",optional=true),p("expectedRevision","integer",true))+mirrorFields()
@@ -633,7 +641,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "assistant.project" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("points","array"))
         "assistant.stroke" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("layerId"),p("points","array"),p("width","number"),
             p("tool",optional=true),p("color",optional=true),p("opacity","number",true),p("nibAngle","number",true),
-            p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true))+mirrorFields()
+            p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true))+mirrorFields()+dynaFields()
         "view.tool_options" -> listOf(p("action"), p("toolId", optional = true),
             p("xDp", "number", true), p("yDp", "number", true))
         "view.zoom_tool" -> listOf(p("mode"))
@@ -685,7 +693,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("mirrorIntervalX", "integer", true), p("mirrorIntervalY", "integer", true),
             p("axisX", "number", true),
             p("axisY", "number", true), p("mass", "number", true),
-            p("drag", "number", true), p("nibAngle", "number", true))+mirrorFields()
+            p("drag", "number", true), p("nibAngle", "number", true),p("assistantId",optional=true))+mirrorFields()+dynaFields()
         "stroke.erase" -> listOf(p("layerId"), p("strokeId"))
         "selection.create", "selection.ellipse" -> listOf(p("x", "number"), p("y", "number"),
             p("width", "number"), p("height", "number"))

@@ -471,6 +471,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var mirrorCenters by remember { mutableStateOf(JSONArray()) }
     var mirrorIntervalX by remember { mutableIntStateOf(1024) }
     var mirrorIntervalY by remember { mutableIntStateOf(1024) }
+    var dynaBrushTool by remember { mutableStateOf("ink") }
     var dynaMass by remember { mutableFloatStateOf(0.5f) }
     var dynaDrag by remember { mutableFloatStateOf(0.15f) }
     var nibAngle by remember { mutableFloatStateOf(45f) }
@@ -1493,7 +1494,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onAssistantCreated = { assistantAdding=false }
                     view.onAssistantEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
                     view.onAssistedStroke = { p -> if(!busy) perform { store.apply("AWEI","STROKE_ADD",p) } }
-                    view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool=="mirror")mirrorBrushTool else if(tool in ArtBrush.tools)tool else "ink").toString())
+                    view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool=="mirror")mirrorBrushTool else if(tool=="dyna")dynaBrushTool else if(tool in ArtBrush.tools)tool else "ink").toString())
                     view.brushAssetFile = store::assetFile
                     view.referenceBitmaps = referenceBitmaps
                     view.referenceMultiple = referenceMultiple
@@ -1548,7 +1549,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         else if (mirrorCenters.length() >= 11)
                             Toast.makeText(context, "最多添加 11 支子画笔", Toast.LENGTH_SHORT).show()
                     }
-                    view.dynaMass = dynaMass; view.dynaDrag = dynaDrag
+                    view.dynaMass = dynaMass; view.dynaDrag = dynaDrag;view.dynaBrushTool=dynaBrushTool
                     view.nibAngle = nibAngle
                     view.fillShape = fillShape
                     view.bezierContinuous = bezierContinuous
@@ -2355,8 +2356,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     ArtBrush.tools.forEach { (id,label)->FilterChip(selected=mirrorBrushTool==id,
                         onClick={mirrorBrushTool=id},label={Text(label)}) }
                 }
+                if(tool=="dyna") {
+                    Text("动态画笔笔刷",style=MaterialTheme.typography.titleSmall)
+                    ArtBrush.tools.forEach {(id,label)->FilterChip(selected=dynaBrushTool==id,
+                        onClick={dynaBrushTool=id},label={Text(label)})}
+                }
                 if(ArtBrush.supports(tool)) {
-                    val engineTool=if(tool=="mirror")mirrorBrushTool else tool
+                    val engineTool=if(tool=="mirror")mirrorBrushTool else if(tool=="dyna")dynaBrushTool else tool
                     StudioBrushOptions(store,engineTool,rasterBrushes.getJSONObject(engineTool),width,opacity,busy,
                         {updated -> rasterBrushes=JSONObject(rasterBrushes.toString()).put(engineTool,updated)},
                         {w,o -> width=w;opacity=o})
@@ -2677,7 +2683,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Text("阻力：${(dynaDrag * 100).toInt()}%")
                     Slider(value = dynaDrag, onValueChange = { dynaDrag = it },
                         valueRange = 0f..1f)
-                    Text("按 Krita 动态工具的质量与阻力公式平滑轨迹；同一笔画保留绘制时参数。",
+                    Text("惯性过滤后进入尺规与共享笔刷控制；Mass/Drag含义保留，同一笔保存当时参数。",
                         style = MaterialTheme.typography.bodySmall)
                 }
                 if (tool == "zoom") {
@@ -3322,6 +3328,7 @@ private class StudioCanvas(context: Context) : View(context) {
             }
         }
     var nibAngle: Float = 45f
+    var dynaBrushTool:String = "ink"
     var dynaMass: Float = 0.5f
     var dynaDrag: Float = 0.15f
     var mirrorCount: Int = 6
@@ -3882,6 +3889,7 @@ private class StudioCanvas(context: Context) : View(context) {
     private fun brushOptions():JSONObject {
         val p=JSONObject().put("tool",tool).put("color",color).put("width",brushWidth.toDouble()).put("opacity",opacity.toDouble())
         if(ArtBrush.supports(tool))p.put("brush",JSONObject(brushSettings.toString()))
+        if(tool=="dyna")p.put("brushTool",dynaBrushTool).put("mass",dynaMass.toDouble()).put("drag",dynaDrag.toDouble())
         if(tool=="mirror")p.put("brushTool",mirrorBrushTool).put("mirrorDirection",mirrorDirection)
             .put("mirrorAngle",mirrorAngle.toDouble()).put("mirrorCount",mirrorCount).put("mirrorRadius",mirrorRadius.toDouble())
             .put("mirrorSeed",kotlin.random.Random.nextInt(Int.MAX_VALUE)).put("mirrorCenters",JSONArray(mirrorCenters.toString()))

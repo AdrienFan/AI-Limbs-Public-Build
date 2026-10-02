@@ -205,7 +205,9 @@ internal object ArtCapabilityHelp {
   "brush.resources":{"args":{"kind":"tip"},"note":"","summary":"返回已导入图像资源的asset/name/kind/尺寸，kind可省略。"},
   "brush.resource.import":{"args":{"kind":"tip","name":"墨点","base64":"IMAGE_BASE64"},"note":"tip用brush.tip={shape:image,asset:返回asset}；texture用brush.texture={kind:image,asset:返回asset}。笔尖黑色着墨/白色透明，纹理白色保留/黑色减弱；alpha参与。","summary":"导入笔尖或纹理图像，返回asset；最长边512像素、8MiB、最多128个。"},
   "mirror.info":{"args":{},"note":"仅读参数；完整引擎配置用brush.info(tool=brushTool)，预设用brush.presets。","summary":"返回多重画笔八种模式、角度范围/语义、主笔类型和总印章预算。"},
-  "mirror.stroke":{"args":{"layerId":"PAINT_LAYER_ID","points":[[80,100,0.4,0],[180,180,1,100]],"color":"#FF245364","width":6,"mirrorDirection":"vertical","mirrorAngle":45,"brushTool":"ink","brush":{"smoothing":{"mode":"stabilizer","delay":10}},"expectedRevision":0},"note":"目标须为未锁定绘画层，替换图层ID及最新revision；中心省略用画布尺寸的一半（图层局部）。brushPresetId与brushTool须同类。沿尺规用assistant.stroke(tool=mirror)，传相同多重参数。","summary":"多重画笔专用入口：主笔用完整dab-v1笔刷/稳定器，轴旋转后生成副笔；成功附预览。"}
+  "mirror.stroke":{"args":{"layerId":"PAINT_LAYER_ID","points":[[80,100,0.4,0],[180,180,1,100]],"color":"#FF245364","width":6,"mirrorDirection":"vertical","mirrorAngle":45,"brushTool":"ink","brush":{"smoothing":{"mode":"stabilizer","delay":10}},"expectedRevision":0},"note":"目标须为未锁定绘画层，替换图层ID及最新revision；中心省略用画布尺寸的一半（图层局部）。brushPresetId与brushTool须同类。沿尺规用assistant.stroke(tool=mirror)，传相同多重参数。","summary":"多重画笔专用入口：主笔用完整dab-v1笔刷/稳定器，轴旋转后生成副笔；成功附预览。"},
+  "dyna.info":{"args":{},"note":"仅读参数；主笔完整引擎配置按brushTool查询brush.info，预设查询brush.presets。","summary":"返回动态画笔Mass/Drag范围、惯性映射、共享控制及尺规顺序。"},
+  "dyna.stroke":{"args":{"layerId":"PAINT_LAYER_ID","points":[[20,30,0.4,0],[120,70,0.8,16],[180,150,1,32]],"color":"#FF245364","width":6,"mass":0.5,"drag":0.15,"brushTool":"ink","brush":{"smoothing":{"mode":"weighted","window":8}},"expectedRevision":0},"note":"目标须为未锁定绘画层；替换图层ID和最新revision。传原始指针轨迹，不要预先计算惯性。assistantId可选，取assistant.list；或用assistant.stroke(tool=dyna,id=尺规ID)，输入文档坐标。","summary":"动态画笔专用入口：惯性过滤→尺规→共享笔刷/稳定器；保存最终轨迹，成功附预览。"}
 }
 """
     private const val FIELDS = """
@@ -344,11 +346,12 @@ internal object ArtCapabilityHelp {
   "cap":{"description":"矢量书法笔端形状，默认round。","enum":["flat","round"]},
   "xDp":{"description":"工具窗X位置，内容左上角为原点，非负有限dp；move时必填。"},
   "yDp":{"description":"工具窗Y位置，内容左上角为原点，非负有限dp；move时必填。"},
-  "brush":{"description":"六工具及多重画笔共享的部分配置对象；完整默认结构见brush.info.defaults。tip形状round/ellipse/square/image、ratio=.05–1、hardness=0–1、angle=-360–360；texture.kind=none/grain/canvas/checker/image、strength=0–1、scale=.1–16、invert布尔；图像须asset。spacing=.02–2，flow=0–1，scatter=0–2，count=1–64整数，jitter=0–360，airbrushRate=0–120次/秒。smoothing={mode:none/weighted/stabilizer/pixel_perfect,window:2–64整数,strength:0–1,delay:0–128,smoothPressure:布尔,finish:布尔}。dynamics的size/opacity/spacing/angle各为{enabled:布尔,sensor:pressure/speed/tilt/rotation/direction/random,curve:[[0,0],[1,1]]}，曲线2–16点、x递增含0/1、x/y=0–1。像素完美建议1px、方笔尖、关闭笔径动态。未知字段拒绝。"},
-  "brushPresetId":{"description":"brush.presets返回的预设id；须与tool一致，brush可覆盖部分参数；实际width/color/opacity仍以本次笔触为准。 多重画笔按brushTool匹配预设。"},
+  "brush":{"description":"六工具及多重/动态画笔共享的部分配置对象；完整默认结构见brush.info.defaults。tip形状round/ellipse/square/image、ratio=.05–1、hardness=0–1、angle=-360–360；texture.kind=none/grain/canvas/checker/image、strength=0–1、scale=.1–16、invert布尔；图像须asset。spacing=.02–2，flow=0–1，scatter=0–2，count=1–64整数，jitter=0–360，airbrushRate=0–120次/秒。smoothing={mode:none/weighted/stabilizer/pixel_perfect,window:2–64整数,strength:0–1,delay:0–128,smoothPressure:布尔,finish:布尔}。dynamics的size/opacity/spacing/angle各为{enabled:布尔,sensor:pressure/speed/tilt/rotation/direction/random,curve:[[0,0],[1,1]]}，曲线2–16点、x递增含0/1、x/y=0–1。像素完美建议1px、方笔尖、关闭笔径动态。未知字段拒绝。"},
+  "brushPresetId":{"description":"brush.presets返回的预设id；须与tool一致，brush可覆盖部分参数；实际width/color/opacity仍以本次笔触为准。 多重/动态画笔按brushTool匹配预设。"},
   "brushSeed":{"description":"可选非负整数随机种子0–2147483647；省略由画室生成并保存，重复渲染效果一致。"},
   "mirrorAngle":{"description":"多重画笔对称轴旋转角，-360–360°，默认0；正数在图层局部坐标中逆时针。镜像/雪花旋转轴；随机平移旋转偏移；radial仅轴线显示受影响，copytranslate/interval布置不变。"},
-  "brushTool":{"description":"多重画笔主笔类型，默认ink；六支栅格笔共享完整引擎与预设。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]}
+  "brushTool":{"description":"多重/动态画笔主笔类型，默认ink；六支栅格笔共享完整引擎与预设。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]},
+  "assistantId":{"description":"动态画笔可选尺规ID，取assistant.list；须可见并启用。惯性过滤之后投影，不依赖手机起笔阈值。其他工具请用assistant.stroke。"}
 }
 """
     private const val SCOPED = """
@@ -441,11 +444,11 @@ internal object ArtCapabilityHelp {
   "shape.box.height":{"description":"区域尺寸，有限正数，文档像素。"},
   "stroke.add.width":{"description":"笔粗0.1–512图层局部像素。"},
   "stroke.add.tool":{"description":"栅格绘画工具；建议显式传入。","enum":["pencil","ink","eraser","soft","spray","mirror","dyna","calligraphy","line","rectangle","ellipse","polygon","polyline","bezier","gradient"]},
-  "stroke.add.points":{"description":"图层局部点[[x,y],[x,y,pressure],...]；1–10000点，pressure=0–1。line/rectangle/ellipse/gradient恰好2点；polygon>=3，polyline>=2；bezier为起点+每段控制点1/2/终点，4–1024点且(点数-1)%3=0。 六支栅格笔及多重画笔支持[x,y,pressure,timeMs,tilt,rotation]，可省略末尾项；timeMs非递减且0–180000，省略按16ms/点；tilt/rotation=0–1，缺省0。speed按像素/ms归一化到0–1；rotation是笔方向角输入。其他工具仍为2–3项。"},
+  "stroke.add.points":{"description":"图层局部点[[x,y],[x,y,pressure],...]；1–10000点，pressure=0–1。line/rectangle/ellipse/gradient恰好2点；polygon>=3，polyline>=2；bezier为起点+每段控制点1/2/终点，4–1024点且(点数-1)%3=0。 六支栅格笔及多重/动态画笔支持[x,y,pressure,timeMs,tilt,rotation]，可省略末尾项；timeMs非递减且0–180000，省略按16ms/点；tilt/rotation=0–1，缺省0。speed按像素/ms归一化到0–1；rotation是笔方向角输入。其他工具仍为2–3项。"},
   "stroke.add.gradientEndColor":{"description":"渐变末色#AARRGGBB；省略为color的全透明版本。"},
-  "assistant.stroke.tool":{"description":"沿尺规的栅格画笔，默认ink。 mirror使用brushTool选主笔，投影主轨迹后复制副笔。","enum":["ink","pencil","soft","spray","eraser","calligraphy","mirror"]},
+  "assistant.stroke.tool":{"description":"沿尺规的栅格画笔，默认ink。 mirror使用brushTool选主笔，投影主轨迹后复制副笔。 dyna先惯性过滤，再沿指定尺规投影；Mass/Drag默认0.5/0.15。","enum":["ink","pencil","soft","spray","eraser","calligraphy","mirror","dyna"]},
   "assistant.stroke.width":{"description":"笔粗0.1–512图层局部像素。"},
-  "assistant.stroke.points":{"description":"1–10000个文档坐标[x,y]或[x,y,pressure]，pressure=0–1；投影后转换为图层局部。 六支栅格笔及多重画笔可传pressure/timeMs/tilt/rotation，格式与stroke.add.points相同。"},
+  "assistant.stroke.points":{"description":"1–10000个文档坐标[x,y]或[x,y,pressure]，pressure=0–1；投影后转换为图层局部。 六支栅格笔及多重/动态画笔可传pressure/timeMs/tilt/rotation，格式与stroke.add.points相同。"},
   "assistant.project.points":{"description":"1–10000个文档坐标[x,y]或[x,y,pressure]，pressure=0–1；只返回投影坐标。"},
   "assistant.create.points":{"description":"文档像素[x,y]二维点：ruler/infinite_ruler/parallel_ruler为2点；ellipse/concentric_ellipse为3点，前2点主轴，第3点位于主轴两端之间侧方的椭圆上；vanishing_point为1点。"},
   "assistant.create.type":{"description":"尺规类型。","enum":["ruler","infinite_ruler","parallel_ruler","ellipse","concentric_ellipse","vanishing_point"]},
@@ -639,7 +642,15 @@ internal object ArtCapabilityHelp {
   "stroke.add.axisX":{"description":"多重画笔对称中心的图层局部x坐标；默认当前画布尺寸的一半，须在画布尺寸范围内。"},
   "stroke.add.axisY":{"description":"多重画笔对称中心的图层局部y坐标；默认当前画布尺寸的一半，须在画布尺寸范围内。"},
   "assistant.stroke.axisX":{"description":"多重画笔对称中心的图层局部x坐标；默认当前画布尺寸的一半，须在画布尺寸范围内。"},
-  "assistant.stroke.axisY":{"description":"多重画笔对称中心的图层局部y坐标；默认当前画布尺寸的一半，须在画布尺寸范围内。"}
+  "assistant.stroke.axisY":{"description":"多重画笔对称中心的图层局部y坐标；默认当前画布尺寸的一半，须在画布尺寸范围内。"},
+  "dyna.stroke.points":{"description":"原始图层局部点[x,y,pressure,timeMs,tilt,rotation]，末尾四项可省略；1–10000点、压力/倾斜/方向0–1；时间非递减0–180000ms，省略按16ms/点。禁止把已过滤轨迹当原始输入，否则会再计算惯性。 高Mass且采样很少时位移会小，须传足够密集的原始采样。"},
+  "dyna.stroke.width":{"description":"笔粗0.1–512图层局部像素。"},
+  "dyna.stroke.mass":{"description":"动态画笔Mass，0–1，默认0.5；实际质量1+159×Mass，逐采样积分。"},
+  "dyna.stroke.drag":{"description":"动态画笔Drag，0–1，默认0.15；阻尼0.5×Drag²，保留原有语义。"},
+  "assistant.stroke.mass":{"description":"动态画笔Mass，0–1，默认0.5；实际质量1+159×Mass，逐采样积分。"},
+  "assistant.stroke.drag":{"description":"动态画笔Drag，0–1，默认0.15；阻尼0.5×Drag²，保留原有语义。"},
+  "stroke.add.mass":{"description":"动态画笔Mass，0–1，默认0.5；实际质量1+159×Mass，逐采样积分。"},
+  "stroke.add.drag":{"description":"动态画笔Drag，0–1，默认0.15；阻尼0.5×Drag²，保留原有语义。"}
 }
 """
 }

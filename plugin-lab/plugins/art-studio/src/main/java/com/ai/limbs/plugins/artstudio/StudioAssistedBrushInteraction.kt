@@ -20,6 +20,15 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
     private var session:ArtAssistants.SnapSession?=null
     private val samples=mutableListOf<AssistantPoint>()
     private val sensors=mutableListOf<JSONArray>()
+    private val dynaSamples=mutableListOf<AssistantPoint>()
+    private var dynaFilter:ArtDyna.Filter?=null
+    private var sourceState:JSONObject?=null
+    private fun feed(point:AssistantPoint) {
+        if(dynaFilter==null) {session?.project(point);return}
+        val filtered=dynaFilter!!.accept(ArtBrush.Sample(point.x,point.y,1.0,0.0))
+        val position=AssistantPoint(filtered.x,filtered.y)
+        dynaSamples.add(position);session?.project(position)
+    }
     private var started=0L
     val active get()=capture!=null
     var density=1f
@@ -30,11 +39,11 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
                 require(samples.size<ArtBrush.MAX_SAMPLES)
                 val t=(SystemClock.uptimeMillis()-started).toDouble();require(t<=180000)
                 samples.add(samples.last());val sensor=JSONArray(sensors.last().toString()).put(1,t);sensors.add(sensor)
-                session?.project(samples.last());view?.postInvalidateOnAnimation();view?.postDelayed(this,32)
+                feed(samples.last());view?.postInvalidateOnAnimation();view?.postDelayed(this,32)
             } catch(error:Exception) { cancel();android.widget.Toast.makeText(view?.context,error.message,android.widget.Toast.LENGTH_SHORT).show() }
         }
     }
-    fun cancel() {view?.removeCallbacks(tick);capture=null;style=null;session=null;samples.clear();sensors.clear()}
+    fun cancel() {view?.removeCallbacks(tick);capture=null;style=null;session=null;samples.clear();sensors.clear();dynaSamples.clear();dynaFilter=null;sourceState=null}
     private fun same(m:Matrix):Boolean {
         val a=FloatArray(9);val b=FloatArray(9);m.getValues(a);viewMatrix.getValues(b)
         return a.indices.all {abs(a[it]-b[it])<0.001f}
@@ -49,6 +58,10 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
             capture=JSONObject().put("documentId",documentId).put("expectedRevision",revision).put("layerId",layerId).put("canvasWidth",state.getInt("width")).put("canvasHeight",state.getInt("height"))
             style=JSONObject(options.toString()).put("id",java.util.UUID.randomUUID().toString())
             if(options.has("brush"))style!!.put("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE))
+            sourceState=state
+            if(style!!.getString("tool")=="dyna") {
+                style=ArtDyna.settings(style!!);dynaFilter=ArtDyna.Filter(style!!.getDouble("mass"),style!!.getDouble("drag"))
+            }
             viewMatrix=Matrix(toScreen);started=event.eventTime
             if(snap) {
                 val start=floatArrayOf(event.x,event.y);inverseView.mapPoints(start)
@@ -64,7 +77,7 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
             require(samples.size<ArtBrush.MAX_SAMPLES) {"单笔超过10000点，请分段绘制"}
             val elapsed=time-started;require(elapsed in 0..180000) {"单笔最长3分钟，请分段绘制"}
             val p=floatArrayOf(x,y);inverseView.mapPoints(p);val point=AssistantPoint(p[0].toDouble(),p[1].toDouble())
-            samples.add(point);session?.project(point)
+            samples.add(point);feed(point)
             sensors.add(JSONArray().put(pressure.coerceIn(if(style!!.has("brush"))0f else 0.1f,1f).toDouble()).put(elapsed)
                 .put((tilt/(PI/2)).coerceIn(0.0,1.0)).put(((orientation+PI)/(2*PI)).coerceIn(0.0,1.0)))
         }
@@ -85,7 +98,10 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
         };return true
     }
     private fun parameters():JSONObject {
-        val points=JSONArray();val projected=session?.complete(samples) ?: samples
+        val points=JSONArray()
+        val projected=if(style!!.getString("tool")=="dyna") {
+            session?.complete(dynaSamples);samples // Save raw input; shared preview/commit perform inertia before guide projection.
+        } else session?.complete(samples) ?: samples
         projected.forEachIndexed {i,p ->
             val v=floatArrayOf(p.x.toFloat(),p.y.toFloat());inverseLayer.mapPoints(v)
             val point=JSONArray().put(v[0]).put(v[1]).put(sensors[i].getDouble(0))
@@ -100,7 +116,9 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
         if(capture==null || samples.isEmpty())return
         val layer=Matrix();require(inverseLayer.invert(layer));canvas.save()
         try {
-            canvas.concat(viewMatrix);canvas.concat(layer);val raw=parameters()
+            canvas.concat(viewMatrix);canvas.concat(layer)
+            val input=parameters()
+            val raw=if(input.getString("tool")=="dyna")ArtDyna.normalize(input,requireNotNull(sourceState)) else input
             val stroke=if(raw.has("brush"))ArtBrush.prepare(raw,raw.getJSONObject("brush"),raw.getInt("brushSeed"),false) else raw
             ArtRenderer.drawStroke(canvas,stroke,resources=resources)
         } finally {canvas.restore()}
