@@ -730,9 +730,52 @@ internal class ArtStore(private val root: File) {
             .put("visible",ArtShapes.visible(state,layer)&&shape.getBoolean("visible")&&shape.getDouble("opacity")>0.0)
     }
 
-    fun calligraphy(actor:String,p:JSONObject):JSONObject = apply(actor,"SHAPE_CREATE",JSONObject()
-        .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
-        .put("layerId",p.getString("layerId")).put("shape",ArtCalligraphy.create(p)))
+    fun calligraphy(actor:String,p:JSONObject):JSONObject = locked {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id")&&p.getInt("expectedRevision")==snap.getInt("revision")) {"工程或版本已变化，请重新读取"}
+        val options=JSONObject(p.toString())
+        if(p.has("profileId")) {
+            val saved=calligraphyProfile(p.getString("profileId")).getJSONObject("settings")
+            for(key in ArtCalligraphy.settingKeys)if(!p.has(key))options.put(key,saved.get(key))
+        }
+        val guide=ArtCalligraphy.guide(snap.getJSONObject("state"),p.getString("layerId"),options)
+        val shape=ArtCalligraphy.create(options,guide)
+        apply(actor,"SHAPE_CREATE",JSONObject().put("documentId",p.getString("documentId"))
+            .put("expectedRevision",p.getInt("expectedRevision")).put("layerId",p.getString("layerId")).put("shape",shape))
+    }
+
+    private fun calligraphyProfileFile()=File(root,"calligraphy-profiles.json")
+    fun calligraphyProfiles():JSONObject=locked {
+        val list=readBrushList(calligraphyProfileFile())
+        require(list.length()<=128)
+        val seen=mutableSetOf<String>()
+        for(i in 0 until list.length()) {
+            val item=list.getJSONObject(i);val id=item.getString("id");validateId(id);require(seen.add(id))
+            require(item.getString("name").length in 1..64)
+            val settings=item.getJSONObject("settings");require(settings.keys().asSequence().all {it in ArtCalligraphy.settingKeys})
+            item.put("settings",ArtCalligraphy.settings(settings))
+        }
+        JSONObject().put("profiles",list)
+    }
+    fun calligraphyProfile(id:String):JSONObject=locked {
+        validateId(id);val list=calligraphyProfiles().getJSONArray("profiles")
+        (0 until list.length()).map {list.getJSONObject(it)}.firstOrNull {it.getString("id")==id} ?: error("书法配置档不存在")
+    }
+    fun saveCalligraphyProfile(p:JSONObject):JSONObject=locked {
+        val id=if(p.has("id"))p.getString("id") else UUID.randomUUID().toString();validateId(id)
+        val name=p.getString("name").trim();require(name.length in 1..64)
+        val settings=p.getJSONObject("settings");require(settings.keys().asSequence().all {it in ArtCalligraphy.settingKeys}) {"配置档只保存书法参数，不保存工程或路径引用"}
+        val item=JSONObject().put("id",id).put("name",name).put("settings",ArtCalligraphy.settings(settings))
+        val old=calligraphyProfiles().getJSONArray("profiles");val out=JSONArray()
+        for(i in 0 until old.length())if(old.getJSONObject(i).getString("id")!=id)out.put(old.getJSONObject(i))
+        require(out.length()<128) {"书法配置档最多128个"};out.put(item)
+        atomic(calligraphyProfileFile(),out.toString());item
+    }
+    fun deleteCalligraphyProfile(id:String):JSONObject=locked {
+        validateId(id);val old=calligraphyProfiles().getJSONArray("profiles");val out=JSONArray();var found=false
+        for(i in 0 until old.length()) {val item=old.getJSONObject(i);if(item.getString("id")==id)found=true else out.put(item)}
+        require(found) {"书法配置档不存在"};atomic(calligraphyProfileFile(),out.toString());JSONObject().put("deleted",id)
+    }
 
     fun freehand(actor:String, params:JSONObject):JSONObject {
         // Fit on the caller's worker thread; revision checks and the atomic write remain in apply.

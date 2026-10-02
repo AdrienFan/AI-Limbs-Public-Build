@@ -806,3 +806,25 @@ node=2仅适用于目标子路径有3点且该点为开放端点，请读path.no
 ```
 
 版本 `0.2.50` / versionCode `53` / applicationId `com.ai.limbs.payload.artstudio.v0250`。仅静态检查和仓库提交，未编译、未运行测试、未推送云端；交互及升级后的历史重放待统一部署验证。
+
+
+### 0.2.51：矢量书法路径、倾斜、惯性与配置档（尚未编译）
+
+- 参照 Krita 6.0.4 `plugins/tools/karbonplugins/tools/CalligraphyTool/KarbonCalligraphyTool.cpp` 的calculateNewPoint/setAngle/setMass/setDrag，以及 `KarbonCalligraphyOptionWidget.cpp` 的配置档保存、加载、删除职责；以现有椭圆笔尖扫掠、PathMeasure、Android数位笔事件与插件JSON存储独立实现，未复用其源码，宿主不变。
+- 跟随模式显式指定当前矢量层的可见路径、子路径（零起始）及正/反向；当前选中路径有快捷按钮，也可在参数面板选路径。对象矩阵先变换到图层局部；按鼠标累计移动距离推进弧长，从子路径起点（反向终点）开始，到末端停止，闭合路径只走一圈，不跳到其他子路径。原导引不改变，生成独立可编辑轮廓。导引只读，允许锁定路径，但绘制层与父组仍须可见未锁定。中心轨迹按不超过4局部像素插点，避免稀疏鼠标事件跳过曲线，最多1000中心点，超限明确拒绝、请分段。跟随时惯性/平滑不参与，避免偏离导引。
+- 数位笔倾斜开关要求stylus/eraser输入以及AXIS_TILT、AXIS_ORIENTATION两个设备轴；不支持明确提示，手指/鼠标需关闭。当前与历史事件均采样，Android屏幕方位转成图层局部方向后，笔尖取倾斜方位的垂直方向，并按fixation与轨迹法向混合。API每点tilt=0–90度（离竖直）和orientation=0–360度（图层+X顺时针）。直立时保持本笔最近非零倾斜方向，起笔直立使用设置角；倾斜控制方向，不额外改变笔宽。实际硬件支持及方向效果待部署验证。
+- Mass 0–20/Drag 0–1，逐输入点计算velocity=velocity*(1-drag)+(cursor-position)/(mass²+1)，再position+=velocity；因此采样密度会影响惯性，时间仍用于现有速度变细和平滑。默认0/1保留旧直接输入，新质量/阻力不强行将收笔终点吸到指针。惯性后再使用已有时间平滑，笔压和椭圆笔尖扫掠共享同一几何逻辑，轮廓段数仍<=2048。UI预览与写入同一函数，最终几何随SHAPE_CREATE保存，历史重放不重新计算惯性或读取导引。
+- 新增calligraphy.info、calligraphy.profiles/profile.get/profile.save/profile.delete；已有shape.calligraphy新增mass/drag/useTilt/followPath/followPathId/followSubpath/followReverse/profileId。profileId装载完整设置，本次显式字段覆盖。请求仍需当前documentId/expectedRevision，解析配置档与导引、生成几何到写入在同一存储锁内；工程变更明确拒绝。
+- 配置档保存于画室持久根目录calligraphy-profiles.json，复用现有原子写入，不与栅格笔刷预设混用。最多128档，UUID为键，名称1–64字符。保存笔宽/颜色/透明度、笔尖/笔压/平滑/Mass/Drag/倾斜/跟随方向等全部行为参数；不保存工程、路径ID或子路径引用，跨工程加载后须选择导引。UI支持加载、另存、更新选中和删除，IO在协程工作线程。删除只删参数档，不改当前面板参数或已画轮廓；取消手势、切工程/改版本、变换视图和多指操作不提交半笔。
+
+简例：shape.calligraphy（ID/revision替换当前值）
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","samples":[{"x":10,"y":10,"time":0,"pressure":1},{"x":50,"y":35,"time":50,"pressure":0.8},{"x":100,"y":80,"time":100,"pressure":0.7}],"width":20,"mass":3,"drag":0.7}
+```
+跟随加followPath:true,followPathId:"PATH_ID",followSubpath:0；反向加followReverse:true。倾斜加useTilt:true且每个sample均包含tilt:30,orientation:45；角度均为度。calligraphy.profile.save最小例：
+```json
+{"name":"稳健书法","settings":{"width":24,"angle":45,"mass":3,"drag":0.7,"useTilt":false}}
+```
+保存返回档ID；读取/删除用calligraphy.profile.get/delete({id:"PROFILE_ID"})，更新在save请求加id。调用shape.calligraphy可加profileId:"PROFILE_ID"，显式width等覆盖；followPath档仍须请求提供路径引用。
+
+版本 `0.2.51` / versionCode `54` / applicationId `com.ai.limbs.payload.artstudio.v0251`。仅静态检查和仓库提交，未编译、未运行测试、未推送云端；硬件倾斜、交互预览、配置档跨升级读取与历史重放待统一部署验证。

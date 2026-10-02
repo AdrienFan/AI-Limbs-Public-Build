@@ -189,7 +189,7 @@ internal object ArtCapabilityHelp {
   "shape.box":{"args":{"documentId":"DOCUMENT_ID","layerId":"VECTOR_LAYER_ID","x":0,"y":0,"width":200,"height":200,"contained":true},"note":"","summary":"查询文档矩形中的矢量对象，返回boxedIds；不创建像素选区。"},
   "shape.create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","shape":{"kind":"rectangle","points":[[10,10],[100,80]],"fill":"#FFFFCC80","stroke":"#FF245364","strokeWidth":2}},"note":"目标为可见未锁定矢量层。","summary":"保存可编辑矢量形状，成功附缩略图。"},
   "shape.freehand":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","points":[[10,10],[50,40],[100,20]],"mode":"curve","style":{"stroke":"#FF245364","strokeWidth":3},"optimizeCurve":true,"curvePrecision":2},"note":"先创建或选用可见未锁定矢量层；几何须非零。 optimizeRaw/rawPrecision独立控制Raw减点；optimizeCurve=false按每段采样插值，true按curvePrecision拟合减段。straight用combineAngle做转角合并并受precision偏差保护。接续可加startEndpoint/endEndpoint:{id:PATH_ID,subpath:0,node:开放端点索引}，先读path.nodes；同路径另一端闭合，跨对象自动合并，目标ID/矩阵/样式保留。成功附预览。","summary":"将图层局部采样点固化为可编辑矢量路径，重放不重新拟合。"},
-  "shape.calligraphy":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","samples":[{"x":10,"y":10,"time":0,"pressure":1},{"x":100,"y":80,"time":100,"pressure":0.7}],"width":20,"color":"#FF245364"},"note":"先创建或选用可见未锁定矢量层；几何须非零。","summary":"按时间/压力生成封闭矢量书法轮廓，保存最终几何，可继续节点编辑。"},
+  "shape.calligraphy":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","samples":[{"x":10,"y":10,"time":0,"pressure":1},{"x":100,"y":80,"time":100,"pressure":0.7}],"width":20,"color":"#FF245364"},"note":"同层可见未锁定矢量层；几何非零；Mass/Drag默认0/1保留直接轨迹。跟随加followPath:true,followPathId:PATH_ID,followSubpath:0，followReverse:true反向；useTilt:true时每点加tilt:30,orientation:45（度，图层坐标）。profileId加载已存设置，显式参数覆盖；规则查calligraphy.info，成功附预览。","summary":"按时间/压力生成封闭矢量书法轮廓，保存最终几何，可继续节点编辑。"},
   "path.create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","nodes":[{"x":10,"y":10,"out":[40,0],"type":"corner"},{"x":100,"y":80,"in":[70,100],"type":"corner"}],"style":{"stroke":"#FF245364","strokeWidth":3}},"note":"先创建或选用可见未锁定矢量层；几何须非零。","summary":"保存可继续编辑的贝塞尔路径，成功附缩略图。"},
   "path.nodes":{"args":{"documentId":"DOCUMENT_ID","layerId":"VECTOR_LAYER_ID","id":"SHAPE_ID"},"note":"对象必须是path；读取零基节点/段索引及对象局部坐标。 返回nodes全局扁平数组、subpaths每条局部nodes/closed；path.topology用[子路径,局部节点]，path.edit默认全局节点。","summary":"返回路径对象局部nodes、closed、revision和objectToDocument矩阵；编辑前刷新。"},
   "path.edit":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","id":"SHAPE_ID","edits":[{"action":"move_node","node":0,"x":20,"y":20}]},"note":"先读path.nodes；坐标是对象局部，不是文档坐标。 支持move_nodes批量移动和node_types/delete_nodes；子路径结构操作用path.topology。","summary":"原子编辑已有路径节点/控制柄/线段，成功附缩略图。"},
@@ -226,7 +226,12 @@ internal object ArtCapabilityHelp {
   "shape.layout_info":{"args":{},"summary":"返回六种对齐、八种分布、剪切的坐标和约束。","note":"高级样式结构查shape.style_info；shape.list取ID，每次成功后更新expectedRevision。"},
   "shape.align":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_A","SHAPE_B"],"mode":"left","reference":"selection"},"summary":"按画布轴对齐同矢量层对象。","note":"所选范围>=2，canvas>=1；只接受可见未锁定对象，单次撤销；成功附预览。"},
   "shape.distribute":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_A","SHAPE_B","SHAPE_C"],"mode":"gap_x"},"summary":"保持两端，均分边、中心或间距。","note":">=3个同层可见未锁定对象；同坐标稳定排序不丢对象，重叠允许负间距；画布轴、轮廓不含描边，单次撤销，成功附预览。"},
-  "shape.shear":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"shearX":0.25,"shearY":0},"summary":"围绕图层局部支点剪切所选对象。","note":"系数不是角度；省略pivot使用所选中心，单次撤销。横向0.25表示每单位Y增加0.25单位X，原样式和节点保留；成功附预览。"}
+  "shape.shear":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"shearX":0.25,"shearY":0},"summary":"围绕图层局部支点剪切所选对象。","note":"系数不是角度；省略pivot使用所选中心，单次撤销。横向0.25表示每单位Y增加0.25单位X，原样式和节点保留；成功附预览。"},
+  "calligraphy.info":{"args":{},"summary":"返回矢量书法笔跟随、倾斜、惯性和配置档规则。","note":"跟随ID取shape.list，子路径取path.nodes.subpaths；参数配置与栅格brush.preset独立。"},
+  "calligraphy.profiles":{"args":{},"summary":"列出持久保存的完整书法配置档。","note":"返回profiles:[{id,name,settings}]，最多128档；不读取或切换画布。"},
+  "calligraphy.profile.get":{"args":{"id":"PROFILE_ID"},"summary":"按UUID读取完整书法参数配置档。","note":"ID取calligraphy.profiles；shape.calligraphy可传profileId，显式参数覆盖档中值。"},
+  "calligraphy.profile.save":{"args":{"name":"稳健书法","settings":{"width":24,"angle":45,"mass":3,"drag":0.7,"useTilt":false}},"summary":"保存书法参数，传id更新同档，省略id新建。","note":"返回{id,name,settings}，未给的设置使用calligraphy.info默认值；不修改画布，最多128档。"},
+  "calligraphy.profile.delete":{"args":{"id":"PROFILE_ID"},"summary":"删除一个书法参数配置档。","note":"不存在则明确报错；已绘制轮廓和工程历史不受影响，不修改当前面板参数。"}
 }
 """
     private const val FIELDS = """
@@ -724,7 +729,22 @@ internal object ArtCapabilityHelp {
   "shape.distribute.mode":{"description":"按画布轴分布；边/中心固定首尾坐标均分，gap_x/gap_y按左/顶边排序、固定首尾对象并均分间距；同坐标稳定排序，负间距表示重叠，不计描边。","enum":["left","center_x","right","gap_x","top","center_y","bottom","gap_y"]},
   "shape.shear.shearX":{"description":"横向剪切系数，有限值−100..100；x增加shearX*(y-pivotY)。与shearY同时应用，奇异矩阵拒绝。"},
   "shape.shear.shearY":{"description":"纵向剪切系数，有限值−100..100；y增加shearY*(x-pivotX)。水平剪切示例shearX:0.25,shearY:0。"},
-  "shape.shear.pivot":{"description":"可选[x,y]，图层局部支点，有限坐标±1000000；默认所选对象轮廓联合范围中心。与对齐/分布的画布轴语义不同。"}
+  "shape.shear.pivot":{"description":"可选[x,y]，图层局部支点，有限坐标±1000000；默认所选对象轮廓联合范围中心。与对齐/分布的画布轴语义不同。"},
+  "shape.calligraphy.samples":{"description":"2–1000个{x,y,time,pressure?}；x/y为图层局部像素±1000000，time为非递减毫秒0..1e12，pressure0–1默认1。useTilt=true每点另需tilt:0–90（离竖直倾角）和orientation:0–360（从图层+X顺时针），笔尖垂直倾斜方向；直立保持本笔最近方向。跟随模式按累计鼠标距离沿路径弧长前进，最多1000个中心点、间隔<=4局部像素。"},
+  "shape.calligraphy.mass":{"description":"矢量书法质量0–20，默认0；惯性质量为mass²+1，逐输入点积分。跟随模式不参与，区别于栅格dyna的0–1质量映射。"},
+  "shape.calligraphy.drag":{"description":"阻力0–1，默认1，旧速度乘(1-drag)；越大越抑制惯性。Mass=0/Drag=1保持直接输入；收笔不强制跳到鼠标终点。跟随模式不参与。"},
+  "shape.calligraphy.useTilt":{"description":"默认false固定自定义角度；true使用每点tilt/orientation决定笔尖方向，并与fixation混合。Android交互要求数位笔提供AXIS_TILT与AXIS_ORIENTATION，缺轴明确提示。"},
+  "shape.calligraphy.followPath":{"description":"默认false自由书写；true须给followPathId，按鼠标累计距离沿所选子路径前进，从其端点开始。路径保留，笔画为独立可编辑闭合轮廓；此模式Mass/Drag/smoothing不参与。"},
+  "shape.calligraphy.followPathId":{"description":"followPath=true必填，同目标矢量层的可见kind:path对象UUID，取shape.list。只读导引可使用锁定路径；绘制所在图层与父组须可见未锁定。"},
+  "shape.calligraphy.followSubpath":{"description":"零起始子路径索引，默认0，取path.nodes.subpaths。只跟随该子路径，不跳到其他轮廓；闭合路径只走一圈。配置档不保存这个工程引用。"},
+  "shape.calligraphy.followReverse":{"description":"默认false从子路径起点开始；true从终点反向前进。达到路径末端后停止延长，输入点仍按约束校验。"},
+  "shape.calligraphy.profileId":{"description":"可选配置档UUID，取calligraphy.profiles；先装载档中完整参数，再以本次显式设置覆盖。路径ID与子路径仍由本次请求指定；最终几何保存后不依赖配置档。"},
+  "shape.calligraphy.smoothing":{"description":"0–1，默认0，惯性后的时间指数平滑；跟随模式不参与，避免切过路径转角。"},
+  "calligraphy.profile.get.id":{"description":"配置档UUID，取calligraphy.profiles.profiles[].id；save省略新建、提供则保存到此UUID，get/delete不存在明确报错。"},
+  "calligraphy.profile.delete.id":{"description":"配置档UUID，取calligraphy.profiles.profiles[].id；save省略新建、提供则保存到此UUID，get/delete不存在明确报错。"},
+  "calligraphy.profile.save.id":{"description":"配置档UUID，取calligraphy.profiles.profiles[].id；save省略新建、提供则保存到此UUID，get/delete不存在明确报错。"},
+  "calligraphy.profile.save.name":{"description":"配置档名称，去除首尾空白后1–64字符；同名档可有不同UUID。"},
+  "calligraphy.profile.save.settings":{"description":"只接受width0.1–512、angle0–180、fixation0–1、thinning−1..1、smoothing0–1、opacity0–1、usePressure/useTilt/followPath/followReverse布尔、cap:flat/round、color:#AARRGGBB、mass0–20、drag0–1；省略项默认值查calligraphy.info。禁止samples/documentId/路径ID/子路径引用。"}
 }
 """
 }

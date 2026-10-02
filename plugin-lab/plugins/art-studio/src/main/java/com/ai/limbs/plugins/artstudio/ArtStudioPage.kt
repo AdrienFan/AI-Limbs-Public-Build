@@ -436,12 +436,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val tool = toolWindow.activeTool
     var shapeMultiple by remember { mutableStateOf(false) }
     var shapeShear by remember { mutableStateOf(false) }
-    var vectorNibAngle by remember { mutableFloatStateOf(45f) }
-    var vectorFixation by remember { mutableFloatStateOf(1f) }
-    var vectorThinning by remember { mutableFloatStateOf(0f) }
-    var vectorSmoothing by remember { mutableFloatStateOf(0f) }
-    var vectorPressure by remember { mutableStateOf(true) }
-    var vectorCap by remember { mutableStateOf("round") }
+    var vectorCalligraphySettings by remember {mutableStateOf(ArtCalligraphy.settings(JSONObject()))}
     var freehandMode by remember { mutableStateOf("curve") }
     var freehandPrecision by remember { mutableFloatStateOf(2f) }
     var freehandClosed by remember { mutableStateOf(false) }
@@ -1529,11 +1524,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.referenceBitmaps = referenceBitmaps
                     view.referenceMultiple = referenceMultiple
                     view.onReferenceEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
-                    view.calligraphyOptions = JSONObject().put("width",width.toDouble())
-                        .put("angle",vectorNibAngle.toDouble()).put("fixation",vectorFixation.toDouble())
-                        .put("thinning",vectorThinning.toDouble()).put("smoothing",vectorSmoothing.toDouble())
-                        .put("usePressure",vectorPressure).put("cap",vectorCap).put("color",color)
-                        .put("opacity",opacity.toDouble())
+                    view.calligraphyOptions = JSONObject(vectorCalligraphySettings.toString()).put("width",width.toDouble())
+                        .put("color",color).put("opacity",opacity.toDouble())
                     view.onCalligraphy = { p -> if (!busy) perform { store.calligraphy("AWEI",p) } }
                     view.freehandMode = freehandMode; view.freehandPrecision = freehandPrecision
                     view.freehandClosed = freehandClosed;view.freehandSettings=JSONObject(freehandSettings.toString())
@@ -2497,10 +2489,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     })
                 }
                 if (tool == "vector_calligraphy") {
-                    StudioCalligraphyOptions(current,selected,busy,vectorNibAngle,vectorFixation,
-                        vectorThinning,vectorSmoothing,vectorPressure,vectorCap,
-                        {vectorNibAngle=it},{vectorFixation=it},{vectorThinning=it},
-                        {vectorSmoothing=it},{vectorPressure=it},{vectorCap=it},::edit)
+                    StudioCalligraphyOptions(store,current,selected,busy,vectorCalligraphySettings,width,color,opacity,
+                        {vectorCalligraphySettings=it},{w,c,o->width=w;color=c;opacity=o},::edit)
                 }
                 if (tool == "vector_freehand") {
                     StudioFreehandOptions(current, selected, busy, freehandMode, freehandPrecision,

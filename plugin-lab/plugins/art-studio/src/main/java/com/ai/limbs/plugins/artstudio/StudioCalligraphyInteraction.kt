@@ -15,10 +15,11 @@ internal class StudioCalligraphyInteraction(private val view: View) {
     private var preview: JSONObject?=null
     private var frame=Matrix()
     private var started=0L
+    private var guide:JSONObject?=null
 
     fun cancel() {
         if(captured==null && samples.length()==0) return
-        captured=null;samples=JSONArray();preview=null;view.invalidate()
+        captured=null;samples=JSONArray();preview=null;guide=null;view.invalidate()
     }
     private fun current(document: String,revision: Int,layer: String): Boolean {
         val p=captured ?: return false
@@ -26,7 +27,9 @@ internal class StudioCalligraphyInteraction(private val view: View) {
             p.getString("layerId")==layer
     }
     fun draw(canvas: Canvas,toScreen: Matrix,document: String,revision: Int,layer: String) {
-        if(!current(document,revision,layer)) return
+        if(!current(document,revision,layer)) {cancel();return}
+        val old=FloatArray(9);val now=FloatArray(9);frame.getValues(old);toScreen.getValues(now)
+        if(old.indices.any {kotlin.math.abs(old[it]-now[it])>0.0001f}) {cancel();return}
         val shape=preview
         canvas.save()
         try {
@@ -46,18 +49,28 @@ internal class StudioCalligraphyInteraction(private val view: View) {
                     color=Color.parseColor(p.getString("color"))
                     alpha=(Color.alpha(color)*p.getDouble("opacity")).toInt()
                 }
-                canvas.translate(s.getDouble("x").toFloat(),s.getDouble("y").toFloat())
-                canvas.rotate(p.getDouble("angle").toFloat())
+                val source=guide
+                val xy=if(source!=null)ArtCalligraphy.start(source,p.getBoolean("followReverse")) else floatArrayOf(s.getDouble("x").toFloat(),s.getDouble("y").toFloat())
+                canvas.translate(xy[0],xy[1])
+                canvas.rotate((ArtCalligraphy.nibAngle(ArtCalligraphy.settings(p),s,p.getDouble("angle")*kotlin.math.PI/180)*180/kotlin.math.PI).toFloat())
                 canvas.drawOval(-width/2f,-kotlin.math.max(0.05f,width*0.025f),
                     width/2f,kotlin.math.max(0.05f,width*0.025f),paint)
             }
         } finally { canvas.restore() }
     }
-    private fun add(x: Float,y: Float,time: Long,pressure: Float,inverse: Matrix) {
+    private fun add(x: Float,y: Float,time: Long,pressure: Float,tilt:Float,orientation:Float,inverse: Matrix) {
         val xy=floatArrayOf(x,y);inverse.mapPoints(xy)
         val t=(time-started).coerceAtLeast(0L).toDouble()
         val s=JSONObject().put("x",xy[0].toDouble()).put("y",xy[1].toDouble())
             .put("time",t).put("pressure",pressure.coerceIn(0f,1f).toDouble())
+        if(requireNotNull(captured).getBoolean("useTilt")) {
+            require(tilt.isFinite()&&tilt>=0&&tilt<=(kotlin.math.PI/2).toFloat()&&orientation.isFinite()) {"设备倾斜数据超出范围"}
+            // Android azimuth 0 points up; transform the direction into the layer's coordinate frame.
+            val direction=floatArrayOf(kotlin.math.sin(orientation),-kotlin.math.cos(orientation));inverse.mapVectors(direction)
+            check(kotlin.math.hypot(direction[0],direction[1])>0f)
+            val degrees=(Math.toDegrees(kotlin.math.atan2(direction[1],direction[0]).toDouble())+360)%360
+            s.put("tilt",tilt.toDouble()*90.0/(kotlin.math.PI/2).toFloat()).put("orientation",degrees)
+        }
         if(samples.length()>0) {
             val last=samples.getJSONObject(samples.length()-1)
             if(kotlin.math.hypot(s.getDouble("x")-last.getDouble("x"),
@@ -84,6 +97,13 @@ internal class StudioCalligraphyInteraction(private val view: View) {
             }
             captured=JSONObject(options.toString()).put("documentId",document)
                 .put("expectedRevision",revision).put("layerId",layer)
+            ArtCalligraphy.settings(requireNotNull(captured))
+            if(requireNotNull(captured).getBoolean("useTilt")) {
+                require(event.getToolType(0) in setOf(MotionEvent.TOOL_TYPE_STYLUS,MotionEvent.TOOL_TYPE_ERASER)) {"倾斜模式需要数位笔；鼠标或手指请关闭倾斜模式"}
+                val device=event.device ?: error("无法读取数位笔设备")
+                require(device.getMotionRange(MotionEvent.AXIS_TILT)!=null&&device.getMotionRange(MotionEvent.AXIS_ORIENTATION)!=null) {"数位笔设备未报告倾斜与方位轴，请关闭倾斜模式"}
+            }
+            guide=ArtCalligraphy.guide(state,layer,requireNotNull(captured))
             frame=Matrix(toScreen);started=event.eventTime
         }
         val p=captured ?: return true
@@ -96,11 +116,11 @@ internal class StudioCalligraphyInteraction(private val view: View) {
             if(event.getToolType(0)==MotionEvent.TOOL_TYPE_STYLUS ||
                 event.getToolType(0)==MotionEvent.TOOL_TYPE_ERASER) value else 1f
         when(event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> add(event.x,event.y,event.eventTime,pressure(event.pressure),inverse)
+            MotionEvent.ACTION_DOWN -> add(event.x,event.y,event.eventTime,pressure(event.pressure),event.getAxisValue(MotionEvent.AXIS_TILT),event.getAxisValue(MotionEvent.AXIS_ORIENTATION),inverse)
             MotionEvent.ACTION_MOVE,MotionEvent.ACTION_UP -> {
                 for(i in 0 until event.historySize) add(event.getHistoricalX(i),event.getHistoricalY(i),
-                    event.getHistoricalEventTime(i),pressure(event.getHistoricalPressure(i)),inverse)
-                add(event.x,event.y,event.eventTime,pressure(event.pressure),inverse)
+                    event.getHistoricalEventTime(i),pressure(event.getHistoricalPressure(i)),event.getHistoricalAxisValue(MotionEvent.AXIS_TILT,i),event.getHistoricalAxisValue(MotionEvent.AXIS_ORIENTATION,i),inverse)
+                add(event.x,event.y,event.eventTime,pressure(event.pressure),event.getAxisValue(MotionEvent.AXIS_TILT),event.getAxisValue(MotionEvent.AXIS_ORIENTATION),inverse)
             }
         }
         if(event.actionMasked==MotionEvent.ACTION_UP) {
@@ -109,7 +129,7 @@ internal class StudioCalligraphyInteraction(private val view: View) {
             cancel()
             if(moved) commit(result)
         } else if(samples.length()>=2) {
-            preview=ArtCalligraphy.create(JSONObject(p.toString()).put("samples",samples))
+            preview=ArtCalligraphy.create(JSONObject(p.toString()).put("samples",samples),guide)
         }
         view.invalidate();return true
     }

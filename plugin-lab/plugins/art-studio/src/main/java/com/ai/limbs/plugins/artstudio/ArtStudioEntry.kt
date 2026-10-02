@@ -369,6 +369,11 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("path.create", "创建可编辑贝塞尔路径", write) { p -> store.pathCreate("LANER",p) }
         capability("path.nodes", "读取路径节点与控制柄", read) { p -> store.pathNodes(p) }
         capability("path.edit", "编辑贝塞尔路径节点", write) { p -> store.apply("LANER","SHAPE_PATH_EDIT",p) }
+        capability("calligraphy.info","读取矢量书法笔参数和跟随规则",read) {ArtCalligraphy.info()}
+        capability("calligraphy.profiles","列出完整书法配置档",read) {store.calligraphyProfiles()}
+        capability("calligraphy.profile.get","读取书法配置档",read) {p->store.calligraphyProfile(p.getString("id"))}
+        capability("calligraphy.profile.save","保存或更新书法配置档",write) {p->store.saveCalligraphyProfile(p)}
+        capability("calligraphy.profile.delete","删除书法配置档",write) {p->store.deleteCalligraphyProfile(p.getString("id"))}
         capability("shape.calligraphy", "绘制矢量书法笔画", write) { p -> store.calligraphy("LANER",p) }
         capability("shape.freehand_info","读取徒手路径接续与分模式优化",read) {ArtFreehand.info()}
         capability("shape.freehand", "绘制矢量徒手路径", write) { p -> store.freehand("LANER", p) }
@@ -619,7 +624,11 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "shape.calligraphy" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("samples","array"),p("width","number",true),p("angle","number",true),
             p("fixation","number",true),p("thinning","number",true),p("smoothing","number",true),
-            p("usePressure","boolean",true),p("cap",optional=true),p("color",optional=true),p("opacity","number",true))
+            p("usePressure","boolean",true),p("cap",optional=true),p("color",optional=true),p("opacity","number",true),
+            p("mass","number",true),p("drag","number",true),p("useTilt","boolean",true),p("followPath","boolean",true),
+            p("followPathId",optional=true),p("followSubpath","integer",true),p("followReverse","boolean",true),p("profileId",optional=true))
+        "calligraphy.profile.get", "calligraphy.profile.delete" -> listOf(id)
+        "calligraphy.profile.save" -> listOf(p("id",optional=true),p("name"),p("settings","object"))
         "shape.freehand" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"),
             p("points", "array"), p("mode", optional = true), p("precision", "number", true),
             p("closed", "boolean", true), p("style", "object", true),p("optimizeRaw","boolean",true),p("rawPrecision","number",true),
