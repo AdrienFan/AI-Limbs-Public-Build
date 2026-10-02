@@ -396,6 +396,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
+    val mutex = remember { Mutex() }
     val viewOptions by ArtStudioViewControl.state.collectAsState()
     val canvasZoom by ArtStudioViewControl.canvasZoom.collectAsState()
     var remainingContext by remember { mutableStateOf(JSONObject()) }
@@ -462,6 +463,54 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var sampleRadius by remember { mutableIntStateOf(0) }
     var sampleBlend by remember { mutableIntStateOf(100) }
     var sampleMerged by remember { mutableStateOf(true) }
+    var sampleTarget by remember { mutableStateOf("foreground") }
+    var samplePaletteId by remember { mutableStateOf<String?>(null) }
+    var colorWorkspace by remember { mutableStateOf(ArtColorWorkspace.defaults()) }
+    var colorWorkspaceReady by remember { mutableStateOf(false) }
+    var backgroundColor by remember { mutableStateOf("#FFFFFFFF") }
+    var backgroundHexInput by remember { mutableStateOf("#FFFFFFFF") }
+    var paletteName by remember { mutableStateOf("") }
+    var paletteBusy by remember { mutableStateOf(false) }
+
+    fun acceptColorWorkspace(next: JSONObject, updateColors: Boolean = true) {
+        colorWorkspace = next
+        if (updateColors) {
+            color = next.getString("foreground"); colorHexInput = color
+            backgroundColor = next.getString("background"); backgroundHexInput = backgroundColor
+        }
+        val palettes = next.getJSONArray("palettes")
+        if (samplePaletteId != null && (0 until palettes.length()).none {
+            palettes.getJSONObject(it).getString("id") == samplePaletteId }) samplePaletteId = null
+    }
+    fun changePalette(action: () -> JSONObject) {
+        if (!paletteBusy) scope.launch {
+            paletteBusy = true
+            try { acceptColorWorkspace(withContext(Dispatchers.IO) { mutex.withLock { action() } }, false) }
+            catch (error: Exception) {
+                host.logger.e("ArtStudio", "Color palette edit failed", error)
+                Toast.makeText(context, error.message ?: "调色板操作失败", Toast.LENGTH_LONG).show()
+            } finally { paletteBusy = false }
+        }
+    }
+    // Debounce pointer-driven color edits; take/render/write operations stay on the worker thread.
+    LaunchedEffect(color, backgroundColor, colorWorkspaceReady) {
+        if (colorWorkspaceReady && (color != colorWorkspace.getString("foreground") ||
+            backgroundColor != colorWorkspace.getString("background"))) {
+            val foreground = color; val background = backgroundColor
+            val changeForeground = foreground != colorWorkspace.getString("foreground")
+            val changeBackground = background != colorWorkspace.getString("background")
+            delay(200)
+            try {
+                val next = withContext(Dispatchers.IO) { mutex.withLock { store.setColorEdits(if (changeForeground) foreground else null, if (changeBackground) background else null) } }
+                if (color == foreground && backgroundColor == background) acceptColorWorkspace(next)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Color persistence failed", error)
+                Toast.makeText(context, error.message ?: "保存颜色失败", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
     var fillSettings by remember {mutableStateOf(ArtContiguousFill.defaults())}
     var fillDraft by remember {mutableStateOf(false)}
     var mirrorDirection by remember { mutableStateOf("vertical") }
@@ -590,7 +639,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var revision by remember { mutableStateOf("") }
     var documents by remember { mutableStateOf(JSONArray()) }
     val canvasRef = remember { arrayOfNulls<StudioCanvas>(1) }
-    val mutex = remember { Mutex() }
     val selected = snapshot?.optJSONObject("state")?.optString("selectedLayerId") ?: ""
     LaunchedEffect(snapshot?.optString("id"),selected,snapshot?.optJSONObject("state")?.optJSONObject("shapeSelection")?.optJSONArray("ids")?.toString(),tool) {
         bezierNodeSelection=emptyList();bezierNode=0
@@ -979,7 +1027,25 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
     LaunchedEffect(store) {
         refresh()
+        try {
+            acceptColorWorkspace(withContext(Dispatchers.IO) { store.colorState() })
+            colorWorkspaceReady = true
+        } catch (error: Exception) {
+            host.logger.e("ArtStudio", "Color workspace load failed", error)
+            Toast.makeText(context, error.message ?: "读取颜色资源失败", Toast.LENGTH_LONG).show()
+        }
         while (true) {
+            if (colorWorkspaceReady && !paletteBusy && color == colorWorkspace.getString("foreground") &&
+                backgroundColor == colorWorkspace.getString("background")) {
+                try {
+                    val colors = withContext(Dispatchers.IO) { store.colorState() }
+                    if (colors.getLong("revision") != colorWorkspace.getLong("revision")) acceptColorWorkspace(colors)
+                } catch (error: Exception) {
+                    colorWorkspaceReady = false
+                    host.logger.e("ArtStudio", "Color workspace refresh failed", error)
+                    Toast.makeText(context, error.message ?: "颜色资源读取失败，请重新打开画室", Toast.LENGTH_LONG).show()
+                }
+            }
             val menuData=withContext(Dispatchers.IO) { store.menuUiState() }
             remainingContext=menuData
             acceptDockState(menuData.getJSONObject("dockPanels"))
@@ -1312,7 +1378,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 112 -> perform { store.pasteAsNew("AWEI", it) }
                 116 -> perform { store.editPixels("AWEI", "CLEAR") }
                 117 -> perform { store.editPixels("AWEI", "FILL", color) }
-                118 -> backgroundFillDialog = true
+                118 -> { backgroundFillColor = backgroundColor; backgroundFillDialog = true }
             }
         }
         menuBridge.onFileCommand = { command ->
@@ -1613,23 +1679,33 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.gradientSettings=gradientSettings
                     view.onGradientDraft={gradientDraft=it}
                     view.onGradient={p->if(!busy)perform {store.apply("AWEI","STROKE_ADD",p)}}
-                    view.sampleRadius = sampleRadius; view.sampleMerged = sampleMerged
                     view.onSampleCoordinate = { x, y ->
-                        scope.launch {
-                            try {
-                                val pixel = withContext(Dispatchers.IO) {
-                                    mutex.withLock {
-                                        val source = ArtColorSampler.renderSource(
-                                            store, store.current(), selected)
-                                        try { ArtColorSampler.sample(source, x, y, sampleRadius) }
-                                        finally { source.recycle() }
+                        if (!busy && !paletteBusy && colorWorkspaceReady) {
+                            val request = JSONObject().put("documentId", current.getString("id"))
+                                .put("expectedRevision", current.getInt("revision"))
+                                .put("x", x).put("y", y).put("radius", sampleRadius).put("blend", sampleBlend)
+                                .put("sampleMerged", sampleMerged).put("target", sampleTarget)
+                                .put("baseColor", if (sampleTarget == "background") backgroundColor else color)
+                            if (!sampleMerged) request.put("layerId", selected)
+                            samplePaletteId?.let { request.put("paletteId", it) }
+                            scope.launch {
+                                paletteBusy = true
+                                try {
+                                    val result = withContext(Dispatchers.IO) { mutex.withLock { store.sampleColor(request, pick = true) } }
+                                    // Preserve any later manual edit while the document was being rendered.
+                                    val next = result.getJSONObject("colorState")
+                                    val foreground = color; val background = backgroundColor
+                                    acceptColorWorkspace(next, false)
+                                    if (request.getString("target") == "foreground" && foreground == request.getString("baseColor")) {
+                                        color = next.getString("foreground"); colorHexInput = color
                                     }
-                                }
-                                view.onSampleColor(pixel)
-                            } catch (error: Exception) {
-                                host.logger.e("ArtStudio", "Layer color sampling failed", error)
-                                Toast.makeText(context, error.toString(),
-                                    Toast.LENGTH_SHORT).show()
+                                    if (request.getString("target") == "background" && background == request.getString("baseColor")) {
+                                        backgroundColor = next.getString("background"); backgroundHexInput = backgroundColor
+                                    }
+                                } catch (error: Exception) {
+                                    host.logger.e("ArtStudio", "Color sampling failed", error)
+                                    Toast.makeText(context, error.message ?: "取色失败", Toast.LENGTH_LONG).show()
+                                } finally { paletteBusy = false }
                             }
                         }
                     }
@@ -1680,16 +1756,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         openTextEditor(if (hit) selectedLayer else null, x, y)
                     }
                     view.onCursor = { x, y -> canvasCursor = x to y }
-                    view.onSampleColor = { pixel ->
-                        val sampled = if (sampleBlend == 100) pixel else
-                            ArtColorSampler.blend(Color.parseColor(color), pixel, sampleBlend)
-                        if (Color.alpha(sampled) == 0)
-                            Toast.makeText(context, "透明区域没有可取的颜色", Toast.LENGTH_SHORT).show()
-                        else {
-                            color = String.format(java.util.Locale.ROOT, "#%08X", sampled)
-                            colorHexInput = color
-                        }
-                    }
                     view.fillSettings=fillSettings
                     view.onFillDraft={fillDraft=it}
                     view.onFill={p->if(!busy)perform {store.fillContiguous("AWEI",p)}}
@@ -2562,12 +2628,69 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Text(ArtText.NOTICE,style=MaterialTheme.typography.bodySmall)
                 }
                 if (tool == "sampler") {
+                    if (!colorWorkspaceReady) Text("颜色资源尚不可用；若读取失败，请重新打开画室。")
                     FilterChip(selected = sampleMerged, onClick = { sampleMerged = true },
                         label = { Text("合成画布") })
                     FilterChip(selected = !sampleMerged, onClick = { sampleMerged = false },
                         label = { Text("当前图层") })
-                    if (!sampleMerged) Text("当前仅支持可见根绘画层或图像层。",
+                    if (!sampleMerged) Text("当前层内容投影：支持隐藏层、组内及变换；组取可见子层合成。忽略当前层与父组的合成不透明度／混合，不含背景。",
                         style = MaterialTheme.typography.bodySmall)
+                    Text("取色目标")
+                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        listOf("foreground" to "前景色", "background" to "背景色", "none" to "只收集").forEach { (id, label) ->
+                            FilterChip(selected = sampleTarget == id, onClick = { sampleTarget = id },
+                                label = { Text(label) }, enabled = !paletteBusy)
+                        }
+                    }
+                    Text("前景 $color ／ 背景 $backgroundColor", style = MaterialTheme.typography.bodySmall)
+                    OutlinedTextField(backgroundHexInput, { value ->
+                        val normalized = value.uppercase(java.util.Locale.ROOT).take(9)
+                        backgroundHexInput = normalized
+                        if (normalized.matches(Regex("#[0-9A-F]{8}"))) backgroundColor = normalized
+                    }, label = { Text("背景色 #AARRGGBB（不改变画布背景）") }, singleLine = true, enabled = !paletteBusy)
+                    Text("加入指定调色板（取色完成后去重保存）")
+                    Row(Modifier.horizontalScroll(rememberScrollState())) {
+                        FilterChip(selected = samplePaletteId == null, onClick = { samplePaletteId = null }, label = { Text("不加入") })
+                        val palettes = colorWorkspace.getJSONArray("palettes")
+                        for (i in 0 until palettes.length()) {
+                            val item = palettes.getJSONObject(i)
+                            FilterChip(selected = samplePaletteId == item.getString("id"), onClick = {
+                                samplePaletteId = item.getString("id"); paletteName = item.getString("name")
+                            }, label = { Text(item.getString("name")) }, enabled = !paletteBusy)
+                        }
+                    }
+                    OutlinedTextField(paletteName, { paletteName = it.take(64) }, label = { Text("调色板名称") }, singleLine = true)
+                    Row {
+                        TextButton(enabled = colorWorkspaceReady && !paletteBusy && paletteName.isNotBlank(), onClick = {
+                            val name = paletteName
+                            changePalette { store.saveColorPalette(JSONObject().put("name", name)) }
+                        }) { Text("新建") }
+                        TextButton(enabled = !paletteBusy && samplePaletteId != null && paletteName.isNotBlank(), onClick = {
+                            val id = samplePaletteId!!; val name = paletteName
+                            changePalette { store.saveColorPalette(JSONObject().put("id", id).put("name", name)) }
+                        }) { Text("改名") }
+                        TextButton(enabled = !paletteBusy && samplePaletteId != null, onClick = {
+                            val id = samplePaletteId!!
+                            changePalette { store.deleteColorPalette(id) }
+                        }) { Text("删除") }
+                    }
+                    samplePaletteId?.let { id ->
+                        val items = colorWorkspace.getJSONArray("palettes")
+                        val item = (0 until items.length()).map { items.getJSONObject(it) }.firstOrNull { it.getString("id") == id }
+                        item?.let {
+                            val colors = it.getJSONArray("colors")
+                            Text("已保存 ${colors.length()} 色；点击色块设为前景色。")
+                            Row(Modifier.horizontalScroll(rememberScrollState())) {
+                                for (i in 0 until colors.length()) {
+                                    val shade = colors.getString(i)
+                                    TextButton(onClick = { color = shade; colorHexInput = shade }, enabled = !paletteBusy) {
+                                        Text("●", color = androidx.compose.ui.graphics.Color(Color.parseColor(shade)))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (sampleTarget == "none") Text("只收集不改前景／背景；请选择调色板。混合时以前景色为基准。", style = MaterialTheme.typography.bodySmall)
                     Text("取色半径：$sampleRadius px")
                     Slider(value = sampleRadius.toFloat(),
                         onValueChange = { sampleRadius = it.roundToInt().coerceIn(0, 32) },
@@ -2878,6 +3001,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             label = { Text("背景颜色 #AARRGGBB") }, singleLine = true) },
         confirmButton = { TextButton(onClick = {
             val fill = backgroundFillColor
+            backgroundColor = fill; backgroundHexInput = fill
             backgroundFillDialog = false
             perform { store.editPixels("AWEI", "FILL", fill) }
         }, enabled = backgroundFillColor.matches(Regex("#[0-9A-F]{8}"))) { Text("填充") } },
@@ -3410,8 +3534,6 @@ private class StudioCanvas(context: Context) : View(context) {
                 invalidate()
             }
         }
-    var sampleRadius: Int = 0
-    var sampleMerged: Boolean = true
     var onSampleCoordinate: (Int, Int) -> Unit = { _, _ -> }
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
@@ -3463,7 +3585,6 @@ private class StudioCanvas(context: Context) : View(context) {
     var onText: (Double, Double, Boolean) -> Unit = { _, _, _ -> }
     var onStroke: (JSONArray) -> Unit = {}
     var onCrop: (JSONObject) -> Unit = {}
-    var onSampleColor: (Int) -> Unit = {}
     private val fillInteraction=StudioContiguousFillInteraction(this)
     var fillSettings=ArtContiguousFill.defaults()
     var onFillDraft:(Boolean)->Unit={}
@@ -4405,10 +4526,7 @@ private class StudioCanvas(context: Context) : View(context) {
                         val sampled = image
                         if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
                             xy[0] < sampled.width && xy[1] < sampled.height)
-                            if (sampleMerged)
-                                onSampleColor(ArtColorSampler.sample(sampled,
-                                    xy[0].toInt(), xy[1].toInt(), sampleRadius))
-                            else onSampleCoordinate(xy[0].toInt(), xy[1].toInt())
+                            onSampleCoordinate(xy[0].toInt(), xy[1].toInt())
                     }
                     "dyna" -> {
                         if (points.length() > 0) {

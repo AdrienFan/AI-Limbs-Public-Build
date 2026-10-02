@@ -290,30 +290,15 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("patch.apply","智能修补当前图层",write) { p -> store.smartPatch("LANER",p) }
         capability("fill.info","读取连续填充模式、图案和软覆盖参数",read) {ArtContiguousFill.info()}
         capability("fill.contiguous","填充相连、边界或全局相似色区域",write) {p->store.fillContiguous("LANER",p)}
-        capability("color.sample", "从画布合成结果取色", read) { p ->
-            val snapshot = store.current()
-            val merged = p.optBoolean("sampleMerged", true)
-            val sourceId = if (merged) null else p.getString("layerId")
-            val bitmap = ArtColorSampler.renderSource(store, snapshot, sourceId)
-            try {
-                val x = p.getInt("x"); val y = p.getInt("y")
-                val radius = p.optInt("radius", 0)
-                val sampled = ArtColorSampler.sample(bitmap, x, y, radius)
-                val blend = p.optInt("blend", 100)
-                require(blend in 0..100) { "取色混合必须在 0–100% 之间" }
-                val color = if (blend == 100) sampled else {
-                    val baseColor = p.getString("baseColor")
-                    require(baseColor.matches(Regex("#[A-Fa-f0-9]{8}"))) { "当前颜色必须是 #AARRGGBB" }
-                    ArtColorSampler.blend(android.graphics.Color.parseColor(baseColor), sampled, blend)
-                }
-                require(android.graphics.Color.alpha(color) > 0) { "透明区域没有可取的颜色" }
-                JSONObject().put("color", String.format(java.util.Locale.ROOT,
-                    "#%08X", color)).put("x", x).put("y", y).put("radius", radius)
-                    .put("blend", blend).put("sampleMerged", merged)
-            } finally {
-                bitmap.recycle()
-            }
-        }
+        capability("color.info", "读取取色目标、图层投影和调色板边界", read) { ArtColorSampler.info() }
+        capability("color.state", "读取共享前景背景颜色及调色板", read) { store.colorState() }
+        capability("color.set", "设置共享前景或背景颜色", write) { p -> store.setColor(p) }
+        capability("color.palette.list", "列出指定取色调色板", read) { store.colorState() }
+        capability("color.palette.save", "新建或编辑调色板", write) { p -> store.saveColorPalette(p) }
+        capability("color.palette.delete", "删除取色调色板", write) { p -> store.deleteColorPalette(p.getString("id")) }
+        capability("color.sample", "只读取合成或指定层颜色", read) { p -> store.sampleColor(p) }
+        capability("color.pick", "取色到前景背景或指定调色板", write) { p -> store.sampleColor(p, pick = true) }
+
         capability("layer.list", "列出画室图层", read) {
             val snapshot = store.current()
             snapshot.getJSONObject("state").put("revision", snapshot.getJSONArray("operations").length())
@@ -753,10 +738,15 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "layer.create", "layer.group" -> listOf(p("name", optional = true), p("parentId", optional = true),
             p("select", "boolean", true))
         "layer.search" -> listOf(p("query"))
-        "color.sample" -> listOf(p("x", "integer"), p("y", "integer"),
+        "color.info", "color.state", "color.palette.list" -> emptyList()
+        "color.set" -> listOf(p("target"), p("color"))
+        "color.palette.save" -> listOf(p("id", optional = true), p("name"), p("colors", "array", true))
+        "color.palette.delete" -> listOf(p("id"))
+        "color.sample", "color.pick" -> listOf(p("x", "integer"), p("y", "integer"),
             p("radius", "integer", true), p("blend", "integer", true),
             p("baseColor", optional = true), p("sampleMerged", "boolean", true),
-            p("layerId", optional = true))
+            p("layerId", optional = true), p("documentId", optional = true), p("expectedRevision", "integer", true)) +
+            if (name == "color.pick") listOf(p("target", optional = true), p("paletteId", optional = true)) else emptyList()
         "canvas.measure" -> listOf(p("x0", "number"), p("y0", "number"),
             p("x1", "number"), p("y1", "number"))
         "fill.info" -> emptyList()

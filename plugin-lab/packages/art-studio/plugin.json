@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.63",
+  "version": "0.2.64",
   "api": {
     "target": 1,
     "min": 1
@@ -246,7 +246,14 @@
       "plugin.art.studio.text.info",
       "plugin.art.studio.text.source",
       "plugin.art.studio.text.geometry",
-      "plugin.art.studio.text.svg_validate"
+      "plugin.art.studio.text.svg_validate",
+      "plugin.art.studio.color.info",
+      "plugin.art.studio.color.state",
+      "plugin.art.studio.color.set",
+      "plugin.art.studio.color.palette.list",
+      "plugin.art.studio.color.palette.save",
+      "plugin.art.studio.color.palette.delete",
+      "plugin.art.studio.color.pick"
     ],
     "services": [],
     "providers": [

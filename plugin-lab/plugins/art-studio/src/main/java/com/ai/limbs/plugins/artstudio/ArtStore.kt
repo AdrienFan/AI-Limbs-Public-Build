@@ -137,6 +137,79 @@ internal class ArtStore(private val root: File) {
 
     fun current(): JSONObject = locked { snapshot(loadCurrent()) }
 
+    private fun colorWorkspaceFile() = File(root, "color-workspace.json")
+    fun colorState(): JSONObject = locked {
+        val file = colorWorkspaceFile()
+        if (file.isFile) {
+            require(file.length() <= 1024 * 1024) { "颜色资源文件超限" }
+            ArtColorWorkspace.validate(JSONObject(file.readText()))
+        } else ArtColorWorkspace.defaults()
+    }
+    private fun saveColorState(next: JSONObject): JSONObject {
+        val previous = colorState()
+        val before = JSONObject(previous.toString()).apply { remove("revision") }
+        val after = JSONObject(next.toString()).apply { remove("revision") }
+        if (before.toString() == after.toString()) return previous
+        require(previous.getLong("revision") < Long.MAX_VALUE)
+        next.put("revision", previous.getLong("revision") + 1)
+        atomic(colorWorkspaceFile(), ArtColorWorkspace.validate(next).toString())
+        return next
+    }
+    fun setColor(p: JSONObject): JSONObject = locked {
+        val target = ArtColorWorkspace.target(p.getString("target"))
+        require(target != "none") { "设置颜色需指定 foreground/background" }
+        val next = colorState().put(target, ArtColorWorkspace.color(p.getString("color")))
+        saveColorState(next)
+    }
+    fun setColorEdits(foreground: String?, background: String?): JSONObject = locked {
+        val next = colorState()
+        if (foreground != null) next.put("foreground", ArtColorWorkspace.color(foreground))
+        if (background != null) next.put("background", ArtColorWorkspace.color(background))
+        saveColorState(next)
+    }
+    fun saveColorPalette(p: JSONObject): JSONObject = locked {
+        saveColorState(ArtColorWorkspace.savePalette(colorState(), p))
+    }
+    fun deleteColorPalette(id: String): JSONObject = locked {
+        saveColorState(ArtColorWorkspace.deletePalette(colorState(), id))
+    }
+    /** Sampling and resource updates share the file lock across Host/Resident; no document write. */
+    fun sampleColor(p: JSONObject, pick: Boolean = false): JSONObject = locked {
+        val snap = current()
+        if (p.has("documentId")) require(p.getString("documentId") == snap.getString("id")) { "工程已切换，请重新取色" }
+        if (p.has("expectedRevision")) require(p.getInt("expectedRevision") == snap.getInt("revision")) { "工程已更新，请重新取色" }
+        val merged = p.optBoolean("sampleMerged", true)
+        val layerId = if (merged) null else p.optString("layerId", snap.getJSONObject("state").getString("selectedLayerId"))
+        val x = p.getInt("x"); val y = p.getInt("y"); val radius = p.optInt("radius", 0)
+        val blend = p.optInt("blend", 100)
+        require(radius in 0..32 && blend in 0..100)
+        val workspace = if (pick) colorState() else null
+        val target = if (pick) ArtColorWorkspace.target(p.optString("target", "foreground")) else "none"
+        val paletteId = if (pick && p.has("paletteId")) p.getString("paletteId") else null
+        // Reject invalid destinations before allocating or updating any resource.
+        if (paletteId != null) ArtColorWorkspace.palette(workspace!!, paletteId)
+        val base = if (blend == 100) null else if (p.has("baseColor")) ArtColorWorkspace.color(p.getString("baseColor"))
+            else {
+                require(pick && target != "none") { "blend<100须传baseColor，或使用color.pick并指定前景/背景目标" }
+                workspace!!.getString(target)
+            }
+        val bitmap = ArtColorSampler.renderSource(this, snap, layerId)
+        val sampled = try { ArtColorSampler.sample(bitmap, x, y, radius) } finally { bitmap.recycle() }
+        val value = if (base == null) sampled else ArtColorSampler.blend(Color.parseColor(base), sampled, blend)
+        require(Color.alpha(value) > 0) { "透明区域没有可取的颜色" }
+        val color = String.format(java.util.Locale.ROOT, "#%08X", value)
+        val result = JSONObject().put("color", color).put("rawColor", String.format(java.util.Locale.ROOT, "#%08X", sampled))
+            .put("x", x).put("y", y).put("radius", radius).put("blend", blend).put("sampleMerged", merged)
+            .put("documentId", snap.getString("id")).put("revision", snap.getInt("revision"))
+        if (layerId != null) result.put("layerId", layerId)
+        if (pick) {
+            val (next, added) = ArtColorWorkspace.picked(workspace!!, color, target, paletteId)
+            result.put("target", target).put("paletteAdded", added).put("colorState", saveColorState(next))
+            if (paletteId != null) result.put("paletteId", paletteId)
+        }
+        result
+    }
+
     fun shapes(p: JSONObject, hit: Boolean = false, box: Boolean = false): JSONObject = locked {
         val snapshot = snapshot(loadCurrent())
         require(p.getString("documentId") == snapshot.getString("id")) { "工程已切换" }

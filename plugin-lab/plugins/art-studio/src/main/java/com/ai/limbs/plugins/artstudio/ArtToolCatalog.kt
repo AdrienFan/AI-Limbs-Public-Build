@@ -70,6 +70,7 @@ internal object ArtToolCatalog {
         "move" -> "拖动移动当前图层；存在选区时移动选区内容。"
         "pan" -> "拖动画布调整显示位置，不改变作品。"
         "measure" -> "拖动测量画布中的距离。"
+        "sampler" -> "点击取色；双击设置前景／背景／只收集、合成／当前层、半径混合及指定调色板。"
         else -> "双击工具打开参数浮窗；浮窗关闭后仍保留当前工具和参数。"
     }
 
@@ -94,7 +95,7 @@ internal object ArtToolCatalog {
         val zoomMode = viewState.getString("zoomToolMode")
         return JSONObject().put("tools", tools).put("textScope", ArtText.NOTICE).put("text", ArtTextSpec.info())
             .put("parameterWindowCapability", "$ART_ID.view.tool_options")
-            .put("colorSelections",ArtColorSelection.info()).put("magneticSelection",ArtMagneticSelection.info())
+            .put("colorSampler",ArtColorSampler.info()).put("colorSelections",ArtColorSelection.info()).put("magneticSelection",ArtMagneticSelection.info())
             .put("comicPanels",ArtComicPanels.info())
             .put("bezierSelection",ArtBezierSelection.info())
             .put("encloseFill",ArtEncloseFill.info())

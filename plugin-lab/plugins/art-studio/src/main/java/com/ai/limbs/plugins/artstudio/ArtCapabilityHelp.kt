@@ -87,7 +87,7 @@ internal object ArtCapabilityHelp {
   "canvas.region":{"args":{"documentId":"DOCUMENT_ID","x":0,"y":0,"width":256,"height":256,"maxEdge":512},"note":"示例区域须落在当前画布内。","summary":"查看画布局部放大图"},
   "canvas.crop":{"args":{"x":0,"y":0,"width":512,"height":512,"expectedRevision":0},"note":"裁切画布，不缩放图层；示例尺寸须适合当前工程。","summary":"裁切画布"},
   "canvas.measure":{"args":{"x0":0,"y0":0,"x1":100,"y1":100},"note":"两点须落在当前画布内。","summary":"测量画布两点"},
-  "color.sample":{"args":{"x":100,"y":100,"sampleMerged":true},"note":"先打开工程；取样点须在画布内且有非透明颜色。","summary":"从画布合成结果取色"},
+  "color.sample":{"args":{"x":100,"y":100,"sampleMerged":true},"summary":"只读取色，不改共享颜色/调色板。","note":"先打开工程；false用layerId或当前层，支持隐藏/组内/变换/文字/矢量/组投影。坐标是文档像素，透明结果拒绝。blend<100须baseColor。"},
   "fill.contiguous":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[100,100],[220,180]],"color":"#FFFFCC80","fillMode":"connected","dragMode":"any","reference":"visible","tolerance":15,"opacitySpread":70,"antialias":1,"feather":3,"expand":1},"summary":"从固定参考填充相连/边界/全局相似色区域，支持图案、软覆盖和拖动批量填充；成功附预览。","note":"替换ID和revision；目标为可见未锁定、无变换/分组的绘画或图像层。单点改x/y并省略points/dragMode。fillMode=boundary配boundaryColor；similar为全局相似色，只用单点，gapClose=0。fillType=pattern配pattern（见参数说明）。reference=current/visible/labels，labels配colorLabels。已有选区始终限制写入。拖动首点固定参考，松手一次提交/撤销；最多512折线点、8192像素取样点、4194304搜索像素、33554432颜色搜索比较。"},
   "layer.create":{"args":{"name":"海面","select":true,"expectedRevision":0},"note":"","summary":"创建画室绘画图层"},
   "layer.group":{"args":{"name":"组","select":true,"expectedRevision":0},"note":"","summary":"创建画室图层组"},
@@ -254,7 +254,14 @@ internal object ArtCapabilityHelp {
   "text.info":{"args":{},"note":"","summary":"返回富文本字段、UTF-16 索引、OpenType 塑形与 SVG 文字配置档；completeSvgStandard=false 并列出未支持语法。"},
   "text.source":{"args":{"documentId":"DOCUMENT_ID","id":"TEXT_LAYER_ID"},"note":"","summary":"读取可编辑原文、spans、SVG 源码、几何、缓存元数据与文字锚点；不修改工程。"},
   "text.geometry":{"args":{"documentId":"DOCUMENT_ID"},"note":"使用返回的 shape 原样传入，并从 x=0,y=0 创建；以后原形状修改不会自动同步。","summary":"返回可见矢量形状的冻结画布坐标快照，可作为 textPath.shape/shapeInside.shape。"},
-  "text.svg_validate":{"args":{"svgSource":"<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"20\" y=\"60\" font-size=\"40\" fill=\"#245364\">晨光<tspan fill=\"#cc8844\">与海</tspan></text></svg>"},"note":"先 text.info 查看范围，字体使用 text.fonts 的单个 family；外部资源、未知语法会明确拒绝。","summary":"解析并校验 SVG 文字，返回规范文字源；不渲染、不写工程。"}
+  "text.svg_validate":{"args":{"svgSource":"<svg xmlns=\"http://www.w3.org/2000/svg\"><text x=\"20\" y=\"60\" font-size=\"40\" fill=\"#245364\">晨光<tspan fill=\"#cc8844\">与海</tspan></text></svg>"},"note":"先 text.info 查看范围，字体使用 text.fonts 的单个 family；外部资源、未知语法会明确拒绝。","summary":"解析并校验 SVG 文字，返回规范文字源；不渲染、不写工程。"},
+  "color.info":{"args":{},"summary":"取色范围：前景/背景/none、图层投影规则、半径/混合及调色板边界。","note":""},
+  "color.state":{"args":{},"summary":"读取插件共享 foreground/background、资源revision与palettes（含id/name/colors）。","note":"资源不进入作品撤销历史；background与画布背景无关。"},
+  "color.set":{"args":{"target":"background","color":"#FF203040"},"summary":"设置共享前景或背景颜色。","note":"手机画笔使用foreground；不改画布背景或作品revision。"},
+  "color.palette.list":{"args":{},"summary":"列出调色板 id/name/colors 及共享颜色。","note":"取palettes[].id用于color.pick.paletteId。"},
+  "color.palette.save":{"args":{"name":"夜色","colors":["#FF203040","#FFFFCC80"]},"summary":"创建/改名/替换调色板颜色。","note":"新建省略id，取返回palettes中的新id；编辑须传已有id。省略colors保留原色；显式[]清空。独立资源，不随工程导出。"},
+  "color.palette.delete":{"args":{"id":"PALETTE_ID"},"summary":"删除指定调色板。","note":"id取color.palette.list；不会删除作品像素。"},
+  "color.pick":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"x":100,"y":100,"target":"background","sampleMerged":false,"layerId":"LAYER_ID","paletteId":"PALETTE_ID"},"summary":"取色到前景/背景/none，可同时加入指定调色板。","note":"ID/revision取当前工程，paletteId取color.palette.list，可省略；target默认foreground，none仅收集/返回。blend<100缺省用目标共享色，none须baseColor。半径平均后混合，完整ARGB去重；失败无部分资源写入。"}
 }
 """
     private const val FIELDS = """
@@ -348,8 +355,8 @@ internal object ArtCapabilityHelp {
   "selectionOutline":{"description":"默认false；true在预览中显示选区轮廓，不写作品。"},
   "cropWidth":{"description":"导出裁切宽度，正整数像素；默认原画宽度，须与x满足画布范围。"},
   "cropHeight":{"description":"导出裁切高度，正整数像素；默认原画高度，须与y满足画布范围。"},
-  "radius":{"description":"取色方形采样半径0–32像素，默认0。"},
-  "sampleMerged":{"description":"默认true从合成图取色；false须传根绘画/图像layerId。"},
+  "radius":{"description":"取色圆盘半径0–32文档像素，默认0单像素；边缘按画布范围裁切，按alpha加权RGB并平均alpha。"},
+  "sampleMerged":{"description":"默认true取含背景的可见合成；false取layerId或当前层投影，支持隐藏/组内/变换/文字/矢量/组。当前层与祖先opacity/blend归一；组保留可见子层合成。"},
   "referenceAllLayers":{"description":"默认false仅当前层；true合成可见层作为连通填色参考，不改变写入目标。"},
   "erase":{"description":"默认false；true擦除目标区域，false写入非透明color。"},
   "reference":{"description":"参考current为指定图层，visible为可见合成层；不含背景/参考图像/尺规，默认visible。","enum":["current","visible"]},
@@ -478,7 +485,9 @@ internal object ArtCapabilityHelp {
   "unitDpi":{"description":"每尺规物理单位换算DPI，默认96，有限1–2400；不是作品打印DPI。"},
   "useVertical":{"description":"默认true；two_vanishing_points在两消失点方向外允许与地平线垂直的第三方向；预览中心不改变消失点。"},
   "wordSpacing":{"description":"空格额外间距 -64..256 px。"},
-  "writingMode":{"description":"horizontal-tb=横排；vertical-rl=竖排从右至左；vertical-lr=竖排从左至右。","enum":["horizontal-tb","vertical-rl","vertical-lr"]}
+  "writingMode":{"description":"horizontal-tb=横排；vertical-rl=竖排从右至左；vertical-lr=竖排从左至右。","enum":["horizontal-tb","vertical-rl","vertical-lr"]},
+  "paletteId":{"description":"调色板ID，取color.palette.list.palettes[].id；提供时取色同时去重加入该板，不自动新建。"},
+  "colors":{"description":"最多512项#AARRGGBB数组，完整ARGB去重。新板省略为空；编辑省略保留；显式[]清空。"}
 }
 """
     private const val SCOPED_1 = """
@@ -620,7 +629,6 @@ internal object ArtCapabilityHelp {
   "view.zoom_tool.mode":{"description":"只设置手机缩放工具方向，不立即缩放。","enum":["in","out","toggle"]},
   "view.presentation.mode":{"description":"手机画室显示模式。","enum":["normal","fullscreen_portrait","fullscreen_landscape"]},
   "view.tool_options.action":{"description":"show需toolId；move需非负xDp/yDp；其他动作不必传坐标。","enum":["show","minimize","restore","close","move"]},
-  "color.sample.blend":{"description":"取色与baseColor混合百分比0–100，默认100；<100须传baseColor。"},
   "selection.contiguous.tolerance":{"description":"预乘RGBA最大通道差容差整数0–100%，默认15；0配opacitySpread=100精确匹配。"},
   "selection.similar.tolerance":{"description":"预乘RGBA最大通道差容差整数0–100%，默认15；0配opacitySpread=100精确匹配。"},
   "enclose.apply.tolerance":{"description":"预乘RGBA颜色差容差0–100%，默认15。"},
@@ -1022,7 +1030,24 @@ internal object ArtCapabilityHelp {
   "text.update.y":{"description":"文字源锚点 Y（父组坐标）；更新未传保留原锚点。使用画布几何快照创建时传0。"},
   "text.update.boxWidth":{"description":"1..16384 px；横排为换行宽度，竖排为每列行进高度。"},
   "text.source.id":{"description":"kind=text 的文字图层 ID，取 layer.list.layers[].id。"},
-  "text.svg_validate.svgSource":{"description":"SVG 或 text 根源码≤128KiB；先 text.info 查看已支持文字配置档。源码内字体族取 text.fonts.family，不读取外部资源。"}
+  "text.svg_validate.svgSource":{"description":"SVG 或 text 根源码≤128KiB；先 text.info 查看已支持文字配置档。源码内字体族取 text.fonts.family，不读取外部资源。"},
+  "color.sample.layerId":{"description":"sampleMerged=false的图层ID，省略当前层；取layer.list。合成=true时不使用。当前层投影取文档画布内，不含背景或参考图/尺规。"},
+  "color.sample.documentId":{"description":"可选工程ID，取document.info.id；防止取色时工程切换。"},
+  "color.sample.expectedRevision":{"description":"可选作品修订号，取document.info.revision替换示例0；不等时拒绝取样，不改变作品。"},
+  "color.sample.x":{"description":"原画文档X整数像素，0至画布width-1；与图层变换无关。"},
+  "color.sample.y":{"description":"原画文档Y整数像素，0至画布height-1；与图层变换无关。"},
+  "color.sample.blend":{"description":"与基准色混合百分比0–100，默认100纯取样；sample的<100须baseColor，pick可用目标前景/背景色，none须baseColor。"},
+  "color.pick.layerId":{"description":"sampleMerged=false的图层ID，省略当前层；取layer.list。合成=true时不使用。当前层投影取文档画布内，不含背景或参考图/尺规。"},
+  "color.pick.documentId":{"description":"可选工程ID，取document.info.id；防止取色时工程切换。"},
+  "color.pick.expectedRevision":{"description":"可选作品修订号，取document.info.revision替换示例0；不等时拒绝取样，不改变作品。"},
+  "color.pick.x":{"description":"原画文档X整数像素，0至画布width-1；与图层变换无关。"},
+  "color.pick.y":{"description":"原画文档Y整数像素，0至画布height-1；与图层变换无关。"},
+  "color.pick.blend":{"description":"与基准色混合百分比0–100，默认100纯取样；sample的<100须baseColor，pick可用目标前景/背景色，none须baseColor。"},
+  "color.pick.target":{"description":"取色目标foreground（默认）/background/none；none不改变共享颜色，可只存paletteId。不是手机/AI页面目标。","enum":["foreground","background","none"]},
+  "color.set.target":{"description":"共享foreground前景色或background背景色；不修改图像背景。","enum":["foreground","background"]},
+  "color.palette.save.id":{"description":"已有调色板ID，取color.palette.list.palettes[].id；save省略则新建，显式未知ID拒绝。"},
+  "color.palette.delete.id":{"description":"已有调色板ID，取color.palette.list.palettes[].id；save省略则新建，显式未知ID拒绝。"},
+  "color.palette.save.name":{"description":"调色板名称1–64字，去首尾空白；允许同名，身份由id区分。"}
 }
 """
 }

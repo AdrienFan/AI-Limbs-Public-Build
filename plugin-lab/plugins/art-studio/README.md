@@ -1121,3 +1121,30 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 ## 0.2.63 智能修补编译修正
 
 0.2.62 的云编译 Run 37021404110 在 Kotlin 编译阶段失败：智能修补整数参数提示使用了未加括号的字符串模板，中文被纳入变量名。改用显式模板括号，参数校验与修补算法不变；全部画室 Kotlin 源码已静态检查同类相邻中文模板。版本0.2.63、versionCode66、applicationId `com.ai.limbs.payload.artstudio.v0263`。本地仅执行源码与声明检查，重新提交既有云编译；编译结果与实机效果仍待确认。
+
+## 0.2.64 颜色取样目标、调色板与完整图层投影
+
+参照本机 Krita 6.0.4 的 `kis_tool_colorsampler.cc`（目标切换、合成/当前层、完成后向所选调色板去重添加）及 `kis_color_sampler_stroke_strategy.cpp`（半径与当前目标色混合、最终颜色提交）独立实现，未复制 Qt/Krita 源码。沿用本插件的圆盘 alpha 加权 RGB、平均 alpha 和预乘混合；不承诺与 Krita 色彩空间计算逐像素一致。
+
+- 手机双击颜色取样：前景／背景／只收集，合成画布／当前层，0–32px 半径，0–100% 混合，指定调色板。可新建、改名、删除调色板；点击保存色块选前景。新建后从列表明确选择目标板。背景色是独立画笔资源，不是作品画布底色；编辑菜单的背景填充会用它预填。
+- 取样和目标／调色板写入共用插件文件锁，捕获 documentId/revision 后执行；无效板、超限、透明结果、变更工程会明确拒绝，失败不产生部分资源更新。成功不修改作品修订号／像素／撤销历史。手机和后台取色都使用相同原分辨率业务路径，不取工具标记、上色线索编辑覆盖或预览缩略图。
+- 当前层限制已放开：绘画、图像、文字缓存、矢量、上色蒙版输出、组及其变换，隐藏层与隐藏父组均可取样。保留当前层及全部父组的文档变换；当前层与父组的 opacity/blend 归一，仅取自身内容投影。选组时保留可见子层（含隐藏子组的遮断）及其 opacity/blend。不包含画布背景；合成来源仍包含背景。
+- 插件共享唯一资源 `color-workspace.json`：foreground/background、资源 revision、palettes[{id,name,colors}]。64板／512色每板，完整 ARGB 去重，颜色保留 alpha。手机手动颜色更改在200ms静止后保存；后台颜色更新由前台已有轮询同步。调色板独立于工程，不包含在工程导出或作品撤销中；不能直接导入 Krita 调色板格式。
+- 仍有明确边界：只取文档画布范围内、8位sRGB渲染投影；不取 HDR/ICC 原始色值，不取画布外图层／参考图像／尺规。按 image.limits 的完整分辨率内存预算渲染，超限拒绝，不缩小代替原图。
+
+AI 入口和最短流程（实际命名空间 `plugin.art.studio.`，简例及字段约束随能力搜索提供）：
+
+```json
+color.info {}
+color.state {}
+color.palette.save {"name":"夜色","colors":["#FF203040"]}
+color.palette.list {}
+color.pick {"x":100,"y":100,"target":"background","paletteId":"PALETTE_ID"}
+color.pick {"x":100,"y":100,"target":"none","sampleMerged":false,"layerId":"LAYER_ID","paletteId":"PALETTE_ID"}
+color.set {"target":"foreground","color":"#FFFFCC80"}
+color.sample {"x":100,"y":100,"sampleMerged":false,"layerId":"LAYER_ID"}
+```
+
+paletteId取列表的palettes[].id，layerId取layer.list；坐标为原画文档整数像素。pick可带documentId/expectedRevision守卫；target默认foreground。blend<100默认用目标共享色，可显式baseColor；none或只读取的sample需baseColor。color.sample保留READ_ONLY，无隐式修改；新color.pick是PERSISTENT_WRITE，返回color/rawColor、文档revision、paletteAdded及colorState。palette.save编辑传id，省略colors保留，显式[]清空；未知id不新建。背景可用color.set单独设置，不依赖手机画室打开。
+
+版本0.2.64、versionCode67、applicationId `com.ai.limbs.payload.artstudio.v0264`，218项能力，仅改画室插件。进行源码／JSON／声明／版本静态核对，补10项资源事务、ARGB去重、容量、隐藏／组内／变换／组投影及入口契约云端用例，**未编译、未执行测试、未推云端**。部署后仍需验收实际像素／字形／蒙版输出、半透明混合、变换组采样、Host/Resident同步、手机触控响应和工程切换拒绝。
