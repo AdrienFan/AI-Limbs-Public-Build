@@ -980,15 +980,15 @@ internal class ArtStore(private val root: File) {
         val raw=p.getJSONArray("points");require(raw.length() in 1..10000)
         val samples=(0 until raw.length()).map { i ->
             val q=raw.getJSONArray(i)
-            require(q.length() in 2..3 && q.getDouble(0).isFinite() && q.getDouble(1).isFinite() &&
+            require(q.length() in 2..(if(p.optString("tool","ink") in ArtBrush.tools)6 else 3) && q.getDouble(0).isFinite() && q.getDouble(1).isFinite() &&
                 kotlin.math.abs(q.getDouble(0))<=1_000_000 && kotlin.math.abs(q.getDouble(1))<=1_000_000)
-            if(q.length()==3) require(q.getDouble(2) in 0.0..1.0)
+            if(q.length()>=3) require(q.getDouble(2) in 0.0..1.0)
             AssistantPoint(q.getDouble(0),q.getDouble(1))
         }
         val projection=ArtAssistants.Projection(source,samples.first())
         val output=JSONArray()
         samples.forEachIndexed { i,q -> val next=projection.project(q).json()
-            if(raw.getJSONArray(i).length()==3) next.put(raw.getJSONArray(i).getDouble(2))
+            for(n in 2 until raw.getJSONArray(i).length())next.put(raw.getJSONArray(i).getDouble(n))
             output.put(next)
         }
         JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
@@ -1005,7 +1005,7 @@ internal class ArtStore(private val root: File) {
         for(i in 0 until raw.length()) {
             val q=raw.getJSONArray(i);val v=floatArrayOf(q.getDouble(0).toFloat(),q.getDouble(1).toFloat())
             inverse.mapPoints(v)
-            output.put(JSONArray().put(v[0]).put(v[1]).put(if(q.length()==3)q.getDouble(2) else 1.0))
+            val point=JSONArray().put(v[0]).put(v[1]);for(n in 2 until q.length())point.put(q.getDouble(n));output.put(point)
         }
         val tool=p.optString("tool","ink");require(tool in ArtAssistants.brushTools) { "此画笔尚未实现尺规吸附" }
         val stroke=JSONObject(p.toString()).put("id",UUID.randomUUID().toString()).put("tool",tool)
@@ -1021,6 +1021,73 @@ internal class ArtStore(private val root: File) {
         ArtReferencePreview.overview(this,snap,includeAssistants=true)
     }
 
+    private fun brushPresetFile()=File(root,"brush-presets.json")
+    private fun brushResourceFile()=File(root,"brush-resources.json")
+    private fun readBrushList(file:File)=if(file.exists())JSONArray(file.readText()) else JSONArray()
+    private fun builtInBrushPresets():List<JSONObject> {
+        val presets=ArtBrush.tools.map { (tool,label)->JSONObject().put("id","builtin:"+tool).put("name",label)
+            .put("tool",tool).put("width",if(tool=="spray")40 else 6).put("opacity",1).put("builtin",true).put("brush",ArtBrush.defaults(tool)) }.toMutableList()
+        presets.add(JSONObject().put("id","builtin:pixel").put("name","像素铅笔").put("tool","pencil").put("width",1).put("opacity",1).put("builtin",true)
+            .put("brush",ArtBrush.settings("pencil",JSONObject("""{"flow":1,"tip":{"shape":"square"},"texture":{"kind":"none"},"dynamics":{"size":{"enabled":false}},"smoothing":{"mode":"pixel_perfect"}}"""))))
+        presets.add(JSONObject().put("id","builtin:stable").put("name","稳定线稿").put("tool","ink").put("width",6).put("opacity",1).put("builtin",true)
+            .put("brush",ArtBrush.settings("ink",JSONObject("""{"smoothing":{"mode":"stabilizer","delay":12}}"""))))
+        return presets
+    }
+    fun brushPresets(tool:String?=null,full:Boolean=false):JSONObject=locked {
+        require(tool==null || tool in ArtBrush.tools)
+        val all=builtInBrushPresets()+readBrushList(brushPresetFile()).let { a->(0 until a.length()).map {a.getJSONObject(it)} }
+        val result=JSONArray()
+        all.filter {tool==null || it.getString("tool")==tool}.forEach { preset->
+            val item=JSONObject(preset.toString());if(!full)item.remove("brush");result.put(item)
+        };JSONObject().put("presets",result)
+    }
+    fun brushPreset(id:String):JSONObject=locked {
+        val list=brushPresets(full=true).getJSONArray("presets")
+        (0 until list.length()).map {list.getJSONObject(it)}.firstOrNull {it.getString("id")==id}
+            ?: error("笔刷预设不存在")
+    }
+    fun saveBrushPreset(p:JSONObject):JSONObject=locked {
+        val id=p.optString("id",UUID.randomUUID().toString());validateId(id)
+        val name=p.getString("name").trim();require(name.length in 1..64)
+        val tool=p.getString("tool");val brush=ArtBrush.settings(tool,p.getJSONObject("brush"))
+        ArtBrush.assetIds(brush).forEach { require(assetFile(it).isFile) {"笔刷资源不存在"} }
+        val width=p.optDouble("width",6.0);val opacity=p.optDouble("opacity",1.0)
+        require(width.isFinite() && width in 0.1..512.0 && opacity.isFinite() && opacity in 0.0..1.0)
+        val item=JSONObject().put("id",id).put("name",name).put("tool",tool).put("brush",brush)
+            .put("width",width).put("opacity",opacity).put("builtin",false)
+        val old=readBrushList(brushPresetFile());val out=JSONArray()
+        for(i in 0 until old.length())if(old.getJSONObject(i).getString("id")!=id)out.put(old.getJSONObject(i))
+        require(out.length()<128) {"自定义预设最多128个"};out.put(item);atomic(brushPresetFile(),out.toString());item
+    }
+    fun deleteBrushPreset(id:String):JSONObject=locked {
+        validateId(id);val old=readBrushList(brushPresetFile());val out=JSONArray();var found=false
+        for(i in 0 until old.length()) { val item=old.getJSONObject(i)
+            if(item.getString("id")==id)found=true else out.put(item) }
+        require(found) {"自定义预设不存在"};atomic(brushPresetFile(),out.toString());JSONObject().put("deleted",id)
+    }
+    fun brushResources(kind:String?=null):JSONObject=locked {
+        require(kind==null || kind in setOf("tip","texture"));val all=readBrushList(brushResourceFile());val out=JSONArray()
+        for(i in 0 until all.length()) {val item=all.getJSONObject(i);if(kind==null || item.getString("kind")==kind)out.put(item)}
+        JSONObject().put("resources",out)
+    }
+    fun importBrushResource(p:JSONObject):JSONObject=locked {
+        val kind=p.getString("kind");require(kind in setOf("tip","texture"))
+        val name=p.optString("name",if(kind=="tip")"图像笔尖" else "图像纹理").trim();require(name.length in 1..64)
+        val encoded=p.getString("base64");require(encoded.length<=12*1024*1024)
+        val bytes=Base64.decode(encoded,Base64.DEFAULT);require(bytes.isNotEmpty() && bytes.size<=8*1024*1024)
+        val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
+        BitmapFactory.decodeByteArray(bytes,0,bytes.size,bounds)
+        require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"笔刷图像边长须为1–512像素"}
+        val id=UUID.randomUUID().toString();val list=readBrushList(brushResourceFile());require(list.length()<128) {"笔刷图像最多128个"}
+        ArtImagePolicy.requireBytes(bounds.outWidth.toLong()*bounds.outHeight*32+bytes.size,"导入笔刷图像")
+        val image=BitmapFactory.decodeByteArray(bytes,0,bytes.size,BitmapFactory.Options().apply {inScaled=false;inPreferredConfig=Bitmap.Config.ARGB_8888}) ?: error("无法解码笔刷图像")
+        try {atomicBytes(assetFile(id),ArtImagePolicy.encodePng(image,MAX_ASSET_BYTES))}
+        finally {image.recycle()}
+        val item=JSONObject().put("id",id).put("asset",id).put("name",name).put("kind",kind)
+            .put("width",bounds.outWidth).put("height",bounds.outHeight)
+        list.put(item);atomic(brushResourceFile(),list.toString());item
+    }
+
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
@@ -1033,7 +1100,21 @@ internal class ArtStore(private val root: File) {
             require(params.getInt("expectedRevision") == doc.getJSONArray("operations").length()) { "工程已被另一端修改，请刷新后重试" }
         }
         val operationId = UUID.randomUUID().toString()
-        val normalized = JSONObject(params.toString())
+        var normalized = JSONObject(params.toString())
+        if(type=="STROKE_ADD") {
+            val tool=normalized.optString("tool","pencil")
+            if(tool in ArtBrush.tools) {
+                normalized.put("tool",tool)
+                val preset=if(normalized.has("brushPresetId"))brushPreset(normalized.getString("brushPresetId")) else null
+                require(preset==null || preset.getString("tool")==tool) {"预设与当前工具不匹配"}
+                val patch=if(normalized.has("brush"))normalized.getJSONObject("brush") else JSONObject()
+                val config=ArtBrush.settings(tool,patch,preset?.getJSONObject("brush") ?: ArtBrush.defaults(tool))
+                if(tool=="calligraphy" && normalized.has("nibAngle") && !patch.has("tip") && preset==null)
+                    config.getJSONObject("tip").put("angle",normalized.getDouble("nibAngle"))
+                ArtBrush.assetIds(config).forEach { require(assetFile(it).isFile) {"笔刷资源不存在"} }
+                normalized=ArtBrush.prepare(normalized,config,normalized.optInt("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE)))
+            } else require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"该工具不使用栅格笔刷引擎"}
+        }
         if (type == "SELECTION_EDIT" && normalized.optString("action") == "COPY") {
             normalized.put("copyId", operationId)
         }
@@ -1533,7 +1614,7 @@ internal class ArtStore(private val root: File) {
         val state = snapshot.getJSONObject("state")
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
         ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this, state,
-            state.getInt("width"), state.getInt("height"))+
+            state.getInt("width"), state.getInt("height"))+ArtBrush.renderOverhead(state,state.getInt("width"),state.getInt("height"))+
             ArtReferences.items(state).size*ArtReferences.PREVIEW_EDGE.toLong()*ArtReferences.PREVIEW_EDGE*8, "画布合成与参考预览")
     }
 
@@ -1954,10 +2035,11 @@ internal class ArtStore(private val root: File) {
                 require(points.length() in 1..10000)
                 for (i in 0 until points.length()) {
                     val point = points.getJSONArray(i)
-                    require(point.length() in 2..3)
+                    require(point.length() in 2..(if(p.has("brush"))6 else 3))
                     require(point.getDouble(0).isFinite() && point.getDouble(1).isFinite())
-                    if (point.length() == 3) require(point.getDouble(2) in 0.0..1.0)
+                    if (point.length() >= 3) require(point.getDouble(2) in 0.0..1.0)
                 }
+                if(p.has("brush"))ArtBrush.validateStored(p)
                 requireColor(p.optString("color", "#FF000000"))
                 require(p.getDouble("width") in 0.1..512.0)
                 require(p.optDouble("opacity", 1.0) in 0.0..1.0)

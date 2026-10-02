@@ -471,6 +471,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var dynaMass by remember { mutableFloatStateOf(0.5f) }
     var dynaDrag by remember { mutableFloatStateOf(0.15f) }
     var nibAngle by remember { mutableFloatStateOf(45f) }
+    var rasterBrushes by remember { mutableStateOf(JSONObject().apply {ArtBrush.tools.keys.forEach {put(it,ArtBrush.defaults(it))}}) }
     var fillShape by remember { mutableStateOf(false) }
     var bezierContinuous by remember { mutableStateOf(false) }
     var gradientMode by remember { mutableStateOf("linear") }
@@ -1489,6 +1490,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onAssistantCreated = { assistantAdding=false }
                     view.onAssistantEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
                     view.onAssistedStroke = { p -> if(!busy) perform { store.apply("AWEI","STROKE_ADD",p) } }
+                    view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool in ArtBrush.tools)tool else "ink").toString())
+                    view.brushAssetFile = store::assetFile
                     view.referenceBitmaps = referenceBitmaps
                     view.referenceMultiple = referenceMultiple
                     view.onReferenceEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
@@ -2343,6 +2346,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             if (pending != null) {
                 Text("该工具尚未实现，当前仅提供说明入口，不能用于绘画。")
             } else {
+                if(tool in ArtBrush.tools)StudioBrushOptions(store,tool,rasterBrushes.getJSONObject(tool),width,opacity,busy,
+                    {updated -> rasterBrushes=JSONObject(rasterBrushes.toString()).put(tool,updated)},
+                    {w,o -> width=w;opacity=o})
                 if(tool=="colorize_mask") {
                     StudioColorizeOptions(current,selected,busy,colorizeWidth,colorizeErase,color,
                         {colorizeWidth=it},{colorizeErase=it},{color=it},
@@ -2641,13 +2647,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             } else Toast.makeText(context, "请输入有效的位置、缩放和角度", Toast.LENGTH_SHORT).show()
                         }) { Text("应用变换") }
                     }
-                }
-                if (tool == "calligraphy") {
-                    Text("固定角度：${nibAngle.roundToInt()}°")
-                    Slider(value = nibAngle, onValueChange = { nibAngle = it },
-                        valueRange = 0f..180f)
-                    Text("笔尖宽度使用当前笔粗；触笔压力控制实际宽度。",
-                        style = MaterialTheme.typography.bodySmall)
                 }
                 if (tool == "dyna") {
                     Text("惯性：${(dynaMass * 100).toInt()}%")
@@ -3146,7 +3145,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3166,10 +3165,10 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     var scene: JSONObject? = null
     var sceneRevision: Int = 0
-        set(value) {if(field!=value){field=value;comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var shapeMultiple: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value){comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {field=value;if(value){rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3211,7 +3210,21 @@ private class StudioCanvas(context: Context) : View(context) {
     var smartPatchOptions=ArtSmartPatch.info().getJSONObject("defaults")
     var onSmartPatch: (JSONObject)->Unit = {}
     private val assistantInteraction = StudioAssistantInteraction().apply { density=context.resources.displayMetrics.density }
-    private val assistedBrushInteraction = StudioAssistedBrushInteraction().apply { density=context.resources.displayMetrics.density }
+    private val assistedBrushInteraction = StudioAssistedBrushInteraction(this).apply { density=context.resources.displayMetrics.density }
+    private val rasterBrushInteraction=StudioAssistedBrushInteraction(this)
+    var brushSettings=ArtBrush.defaults("ink")
+    var brushAssetFile:((String)->java.io.File)?=null
+    private val brushBitmapCache=linkedMapOf<String,Bitmap>()
+    private val brushReader:(String)->Bitmap = {id ->
+        brushBitmapCache[id] ?: run {
+            val file=requireNotNull(brushAssetFile)(id)
+            val bounds=android.graphics.BitmapFactory.Options().apply {inJustDecodeBounds=true}
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath,bounds)
+            require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512)
+            if(brushBitmapCache.size>=8) {val key=brushBitmapCache.keys.first();brushBitmapCache.remove(key)!!.recycle()}
+            ArtImagePolicy.decodeAsset(file).also {brushBitmapCache[id]=it}
+        }
+    }
     var assistantAdding: Boolean = true
         set(value) { if(field!=value){field=value;assistantInteraction.cancel();invalidate()} }
     var assistantType: String = "ruler"
@@ -3242,18 +3255,19 @@ private class StudioCanvas(context: Context) : View(context) {
     var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
-        set(value) {if(field!=value){field=value;comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var selection: JSONObject? = null
     var selectionVisible = true
     var tool: String = "ink"
         set(value) {
             if (field != value) {
                 field = value
+                rasterBrushInteraction.cancel();assistedBrushInteraction.cancel()
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
                 referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
-                assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
+                assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
                 points = JSONArray()
@@ -3568,7 +3582,9 @@ private class StudioCanvas(context: Context) : View(context) {
         encloseFillInteraction.draw(canvas)
         colorizeInteraction.draw(canvas)
         smartPatchInteraction.draw(canvas)
-        assistedBrushInteraction.draw(canvas)
+        try {assistedBrushInteraction.draw(canvas,brushReader);rasterBrushInteraction.draw(canvas,brushReader)}
+        catch(error:Exception) {assistedBrushInteraction.cancel();rasterBrushInteraction.cancel()
+            Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
         if (tool == "mirror") {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val guide = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -3772,6 +3788,7 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
     override fun onDetachedFromWindow() {
+        rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();brushBitmapCache.values.forEach {it.recycle()};brushBitmapCache.clear()
         magneticSelectionInteraction.dispose();colorSelectionInteraction.cancel()
         super.onDetachedFromWindow()
     }
@@ -3841,7 +3858,7 @@ private class StudioCanvas(context: Context) : View(context) {
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
             referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
-            assistantInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
+            assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
@@ -3975,7 +3992,7 @@ private class StudioCanvas(context: Context) : View(context) {
             try {
                 val options=JSONObject().put("tool",tool).put("color",color)
                     .put("width",brushWidth.toDouble()).put("opacity",opacity.toDouble())
-                if(tool=="calligraphy")options.put("nibAngle",nibAngle.toDouble())
+                if(tool in ArtBrush.tools)options.put("brush",brushSettings)
                 return assistedBrushInteraction.touch(event,assistantState,documentId,sceneRevision,selectedId,
                     matrix,shapeBusy,options,onAssistedStroke)
             } catch(error:Exception) {
@@ -3986,6 +4003,16 @@ private class StudioCanvas(context: Context) : View(context) {
                 if(event.actionMasked in setOf(MotionEvent.ACTION_UP,MotionEvent.ACTION_CANCEL))assistedStrokeRouting=false
                 invalidate()
             }
+        }
+        if(tool in ArtBrush.tools) {
+            val state=scene ?: return true
+            try {
+                return rasterBrushInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
+                    JSONObject().put("tool",tool).put("color",color).put("width",brushWidth.toDouble())
+                        .put("opacity",opacity.toDouble()).put("brush",brushSettings),onAssistedStroke,false)
+            } catch(error:Exception) {rasterBrushInteraction.cancel()
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
+            } finally {invalidate()}
         }
         if(tool=="reference_images") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN) requestFocus()

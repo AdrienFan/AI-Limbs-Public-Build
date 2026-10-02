@@ -29,13 +29,22 @@ internal object ArtRenderer {
         }
         val renderWidth = kotlin.math.round(width * factor).toInt().coerceAtLeast(1)
         val renderHeight = kotlin.math.round(height * factor).toInt().coerceAtLeast(1)
-        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(store, state, renderWidth, renderHeight), "画布合成")
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(store, state, renderWidth, renderHeight)+ArtBrush.renderOverhead(state,renderWidth,renderHeight), "画布合成")
         val bitmap = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bitmap)
         canvas.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
         val background = Color.parseColor(state.getString("background"))
         if (opaque) canvas.drawColor(Color.WHITE)
         canvas.drawColor(background)
+        val brushResources = linkedMapOf<String, Bitmap>()
+        val brushReader: (String) -> Bitmap = { id -> brushResources[id] ?: run {
+            val file=store.assetFile(id)
+            val bounds=android.graphics.BitmapFactory.Options().apply {inJustDecodeBounds=true}
+            android.graphics.BitmapFactory.decodeFile(file.absolutePath,bounds)
+            require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"笔刷资源边长须为1–512像素"}
+            if(brushResources.size>=8) {val first=brushResources.keys.first();brushResources.remove(first)!!.recycle()}
+            ArtImagePolicy.decodeAsset(file).also {brushResources[id]=it}
+        } }
         val layers = state.getJSONArray("layers")
         fun compositePaint(layer: JSONObject): Paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             alpha = (layer.getDouble("opacity") * 255).toInt().coerceIn(0, 255)
@@ -96,7 +105,7 @@ internal object ArtRenderer {
                         val strokes = layer.getJSONArray("strokes")
                         val order = layer.optJSONArray("contentOrder")
                         if (order == null) {
-                            for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s), width, height)
+                            for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s), width, height, brushReader)
                         } else {
                             val byId = (0 until strokes.length()).associate {
                                 val stroke = strokes.getJSONObject(it)
@@ -105,7 +114,7 @@ internal object ArtRenderer {
                             for (n in 0 until order.length()) {
                                 val event = order.getJSONObject(n)
                                 when (event.getString("kind")) {
-                                    "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it, width, height) }
+                                    "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it, width, height, brushReader) }
                                     "clear", "fill" -> {
                                         val editPaint = Paint(Paint.ANTI_ALIAS_FLAG)
                                         if (event.getString("kind") == "clear") {
@@ -151,11 +160,13 @@ internal object ArtRenderer {
         } catch (error: Throwable) {
             bitmap.recycle()
             throw error
-        }
+        } finally { brushResources.values.forEach { it.recycle() } }
     }
 
     fun drawStroke(canvas: Canvas, stroke: JSONObject,
-        logicalWidth: Int = canvas.width, logicalHeight: Int = canvas.height) {
+        logicalWidth: Int = canvas.width, logicalHeight: Int = canvas.height,
+        resources: ((String) -> Bitmap)? = null) {
+        if (stroke.has("brush")) { ArtBrushRenderer.draw(canvas, stroke, resources);return }
         val points = stroke.getJSONArray("points")
         if (points.length() == 0) return
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

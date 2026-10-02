@@ -430,6 +430,13 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("layer.move_down", "下移同级图层", write) { p ->
             store.apply("LANER", "LAYER_MOVE_STEP", p.put("direction", "down"))
         }
+        capability("brush.info","读取栅格笔刷引擎参数",read) {p -> ArtBrush.info(p.optString("tool","ink"))}
+        capability("brush.presets","列出笔刷预设",read) {p -> store.brushPresets(p.optString("tool").takeIf {it.isNotBlank()})}
+        capability("brush.preset.get","读取完整笔刷预设",read) {p -> store.brushPreset(p.getString("id"))}
+        capability("brush.preset.save","保存自定义笔刷预设",write) {p -> store.saveBrushPreset(p)}
+        capability("brush.preset.delete","删除自定义笔刷预设",write) {p -> store.deleteBrushPreset(p.getString("id"))}
+        capability("brush.resources","列出图像笔尖和纹理",read) {p -> store.brushResources(p.optString("kind").takeIf {it.isNotBlank()})}
+        capability("brush.resource.import","导入笔尖或纹理图像",write) {p -> store.importBrushResource(p)}
         capability("stroke.add", "添加结构化笔画", write) { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "STROKE_ADD", p)
         }
@@ -515,6 +522,12 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
     }
     val id = p("id")
     return when (name) {
+        "brush.info","brush.presets" -> listOf(p("tool",optional=true))
+        "brush.preset.get","brush.preset.delete" -> listOf(id)
+        "brush.preset.save" -> listOf(p("id",optional=true),p("name"),p("tool"),p("brush","object"),
+            p("width","number",true),p("opacity","number",true))
+        "brush.resources" -> listOf(p("kind",optional=true))
+        "brush.resource.import" -> listOf(p("kind"),p("base64"),p("name",optional=true))
         "layer.vector" -> listOf(p("documentId"), p("expectedRevision", "integer"),
             p("name", optional = true), p("parentId", optional = true), p("select", "boolean", true))
         "reference.list" -> listOf(p("documentId"))
@@ -608,7 +621,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "assistant.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("settings","object"))
         "assistant.project" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("points","array"))
         "assistant.stroke" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("layerId"),p("points","array"),p("width","number"),
-            p("tool",optional=true),p("color",optional=true),p("opacity","number",true),p("nibAngle","number",true))
+            p("tool",optional=true),p("color",optional=true),p("opacity","number",true),p("nibAngle","number",true),
+            p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true))
         "view.tool_options" -> listOf(p("action"), p("toolId", optional = true),
             p("xDp", "number", true), p("yDp", "number", true))
         "view.zoom_tool" -> listOf(p("mode"))
@@ -650,6 +664,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("visible", "boolean", true), p("locked", "boolean", true))
         "stroke.add" -> listOf(p("layerId"), p("points", "array"), p("color"), p("width", "number"),
             p("opacity", "number", true), p("tool", optional = true),
+            p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true),
             p("fillShape", "boolean", true), p("gradientMode", optional = true),
             p("gradientReverse", "boolean", true),
             p("gradientEndColor", optional = true),

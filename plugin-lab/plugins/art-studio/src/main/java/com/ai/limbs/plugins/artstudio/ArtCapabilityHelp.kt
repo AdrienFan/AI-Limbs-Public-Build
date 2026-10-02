@@ -100,7 +100,7 @@ internal object ArtCapabilityHelp {
   "layer.set_opacity":{"args":{"id":"PAINT_LAYER_ID","opacity":0.7,"expectedRevision":0},"note":"","summary":"设置图层不透明度"},
   "layer.set_blend":{"args":{"id":"PAINT_LAYER_ID","blend":"multiply","expectedRevision":0},"note":"","summary":"设置图层混合模式"},
   "layer.properties":{"args":{"id":"PAINT_LAYER_ID","opacity":0.8,"visible":true,"expectedRevision":0},"note":"","summary":"批量修改图层属性"},
-  "stroke.add":{"args":{"layerId":"PAINT_LAYER_ID","points":[[10,10],[100,80]],"tool":"ink","color":"#FF245364","width":6,"expectedRevision":0},"note":"目标须是未锁定绘画层；形状/渐变两点格式见points，参数可选值见tool。","summary":"在绘画层保存一笔结构化轨迹、形状或渐变；遵循选区，成功附缩略图。 gradient铺满当前画布尺寸的图层局部矩形，受选区剪裁；两点只定义渐变方向和范围。"},
+  "stroke.add":{"args":{"layerId":"PAINT_LAYER_ID","points":[[10,10],[100,80]],"tool":"ink","color":"#FF245364","width":6,"expectedRevision":0,"brush":{"smoothing":{"mode":"stabilizer","delay":10},"dynamics":{"size":{"sensor":"pressure","curve":[[0,0.15],[1,1]]}}}},"note":"目标须是未锁定绘画层；形状/渐变两点格式见points，参数可选值见tool。 六支栅格笔支持brush部分配置或brushPresetId；引擎字段/默认值见brush.info。存入最终轨迹与完整参数；随机效果保存seed。","summary":"在绘画层保存一笔结构化轨迹、形状或渐变；遵循选区，成功附缩略图。 gradient铺满当前画布尺寸的图层局部矩形，受选区剪裁；两点只定义渐变方向和范围。"},
   "stroke.erase":{"args":{"layerId":"PAINT_LAYER_ID","strokeId":"STROKE_ID","expectedRevision":0},"note":"strokeId取document.info.state.layers中目标绘画层的strokes[].id；删除整笔，不是橡皮擦轨迹。","summary":"删除绘画层的一笔已保存笔画，成功附缩略图。"},
   "selection.create":{"args":{"x":10,"y":10,"width":100,"height":80,"expectedRevision":0},"note":"以文档像素建立选区。","summary":"创建真实矩形像素选区，不直接改作品像素。"},
   "selection.ellipse":{"args":{"x":10,"y":10,"width":100,"height":80,"expectedRevision":0},"note":"以文档像素建立选区。","summary":"创建椭圆形选区"},
@@ -196,7 +196,14 @@ internal object ArtCapabilityHelp {
   "shape.select":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"]},"note":"","summary":"改变矢量对象选择，空ids取消；不创建像素选区。"},
   "shape.delete":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"]},"note":"目标为可见未锁定矢量层。","summary":"删除矢量对象"},
   "shape.transform":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"matrix":[1,0,0,1,20,0]},"note":"目标为可见未锁定矢量层。","summary":"原子应用对象增量仿射矩阵，不改变图层整体变换。"},
-  "shape.style":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"style":{"fill":"#FFFFCC80","opacity":0.7}},"note":"目标为可见未锁定矢量层。","summary":"设置基础形状样式"}
+  "shape.style":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"VECTOR_LAYER_ID","ids":["SHAPE_ID"],"style":{"fill":"#FFFFCC80","opacity":0.7}},"note":"目标为可见未锁定矢量层。","summary":"设置基础形状样式"},
+  "brush.info":{"args":{"tool":"ink"},"note":"","summary":"返回dab-v1笔刷默认配置、动态输入、平滑模式及范围。六工具共用引擎；仅读参数，不打开手机。"},
+  "brush.presets":{"args":{"tool":"ink"},"note":"","summary":"返回内置与自定义预设摘要；完整配置用brush.preset.get。"},
+  "brush.preset.get":{"args":{"id":"builtin:stable"},"note":"id取brush.presets.presets[].id；绘画用stroke.add的brushPresetId。","summary":"返回预设tool/width/opacity/brush完整参数。"},
+  "brush.preset.save":{"args":{"name":"兰儿线稿","tool":"ink","brush":{"smoothing":{"mode":"stabilizer","delay":10}}},"note":"传自定义id可更新；最多128个，内置不可改。width/opacity用于面板加载，stroke.add仍显式传笔粗/透明度。","summary":"保存完整自定义预设，返回ID；brush允许部分参数，未写项采用工具默认值。"},
+  "brush.preset.delete":{"args":{"id":"CUSTOM_PRESET_ID"},"note":"id取brush.presets；内置预设不可删除。","summary":"删除自定义预设；历史笔触已保存参数，删除不改变作品。"},
+  "brush.resources":{"args":{"kind":"tip"},"note":"","summary":"返回已导入图像资源的asset/name/kind/尺寸，kind可省略。"},
+  "brush.resource.import":{"args":{"kind":"tip","name":"墨点","base64":"IMAGE_BASE64"},"note":"tip用brush.tip={shape:image,asset:返回asset}；texture用brush.texture={kind:image,asset:返回asset}。笔尖黑色着墨/白色透明，纹理白色保留/黑色减弱；alpha参与。","summary":"导入笔尖或纹理图像，返回asset；最长边512像素、8MiB、最多128个。"}
 }
 """
     private const val FIELDS = """
@@ -334,7 +341,10 @@ internal object ArtCapabilityHelp {
   "usePressure":{"description":"默认true使用samples中的pressure。"},
   "cap":{"description":"矢量书法笔端形状，默认round。","enum":["flat","round"]},
   "xDp":{"description":"工具窗X位置，内容左上角为原点，非负有限dp；move时必填。"},
-  "yDp":{"description":"工具窗Y位置，内容左上角为原点，非负有限dp；move时必填。"}
+  "yDp":{"description":"工具窗Y位置，内容左上角为原点，非负有限dp；move时必填。"},
+  "brush":{"description":"六工具共享的部分配置对象；完整默认结构见brush.info.defaults。tip形状round/ellipse/square/image、ratio=.05–1、hardness=0–1、angle=-360–360；texture.kind=none/grain/canvas/checker/image、strength=0–1、scale=.1–16、invert布尔；图像须asset。spacing=.02–2，flow=0–1，scatter=0–2，count=1–64整数，jitter=0–360，airbrushRate=0–120次/秒。smoothing={mode:none/weighted/stabilizer/pixel_perfect,window:2–64整数,strength:0–1,delay:0–128,smoothPressure:布尔,finish:布尔}。dynamics的size/opacity/spacing/angle各为{enabled:布尔,sensor:pressure/speed/tilt/rotation/direction/random,curve:[[0,0],[1,1]]}，曲线2–16点、x递增含0/1、x/y=0–1。像素完美建议1px、方笔尖、关闭笔径动态。未知字段拒绝。"},
+  "brushPresetId":{"description":"brush.presets返回的预设id；须与tool一致，brush可覆盖部分参数；实际width/color/opacity仍以本次笔触为准。"},
+  "brushSeed":{"description":"可选非负整数随机种子0–2147483647；省略由画室生成并保存，重复渲染效果一致。"}
 }
 """
     private const val SCOPED = """
@@ -427,11 +437,11 @@ internal object ArtCapabilityHelp {
   "shape.box.height":{"description":"区域尺寸，有限正数，文档像素。"},
   "stroke.add.width":{"description":"笔粗0.1–512图层局部像素。"},
   "stroke.add.tool":{"description":"栅格绘画工具；建议显式传入。","enum":["pencil","ink","eraser","soft","spray","mirror","dyna","calligraphy","line","rectangle","ellipse","polygon","polyline","bezier","gradient"]},
-  "stroke.add.points":{"description":"图层局部点[[x,y],[x,y,pressure],...]；1–10000点，pressure=0–1。line/rectangle/ellipse/gradient恰好2点；polygon>=3，polyline>=2；bezier为起点+每段控制点1/2/终点，4–1024点且(点数-1)%3=0。"},
+  "stroke.add.points":{"description":"图层局部点[[x,y],[x,y,pressure],...]；1–10000点，pressure=0–1。line/rectangle/ellipse/gradient恰好2点；polygon>=3，polyline>=2；bezier为起点+每段控制点1/2/终点，4–1024点且(点数-1)%3=0。 六支栅格笔还支持[x,y,pressure,timeMs,tilt,rotation]，可省略末尾项；timeMs非递减且0–180000，省略按16ms/点；tilt/rotation=0–1，缺省0。speed按像素/ms归一化到0–1；rotation是笔方向角输入。其他工具仍为2–3项。"},
   "stroke.add.gradientEndColor":{"description":"渐变末色#AARRGGBB；省略为color的全透明版本。"},
   "assistant.stroke.tool":{"description":"沿尺规的栅格画笔，默认ink。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]},
   "assistant.stroke.width":{"description":"笔粗0.1–512图层局部像素。"},
-  "assistant.stroke.points":{"description":"1–10000个文档坐标[x,y]或[x,y,pressure]，pressure=0–1；投影后转换为图层局部。"},
+  "assistant.stroke.points":{"description":"1–10000个文档坐标[x,y]或[x,y,pressure]，pressure=0–1；投影后转换为图层局部。 六支栅格笔可传pressure/timeMs/tilt/rotation，格式与stroke.add.points相同。"},
   "assistant.project.points":{"description":"1–10000个文档坐标[x,y]或[x,y,pressure]，pressure=0–1；只返回投影坐标。"},
   "assistant.create.points":{"description":"文档像素[x,y]二维点：ruler/infinite_ruler/parallel_ruler为2点；ellipse/concentric_ellipse为3点，前2点主轴，第3点位于主轴两端之间侧方的椭圆上；vanishing_point为1点。"},
   "assistant.create.type":{"description":"尺规类型。","enum":["ruler","infinite_ruler","parallel_ruler","ellipse","concentric_ellipse","vanishing_point"]},
@@ -607,7 +617,17 @@ internal object ArtCapabilityHelp {
   "layer.set_lock.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
   "layer.set_blend.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
   "layer.properties.id":{"description":"图层ID，取layer.list.layers[].id；不能传形状、尺规或工程ID。"},
-  "text.update.id":{"description":"已有kind=text图层ID，取layer.list.layers[].id；不是工程ID。"}
+  "text.update.id":{"description":"已有kind=text图层ID，取layer.list.layers[].id；不是工程ID。"},
+  "brush.info.tool":{"description":"栅格笔工具ID；info默认ink；presets省略列全部。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]},
+  "brush.presets.tool":{"description":"栅格笔工具ID；info默认ink；presets省略列全部。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]},
+  "brush.preset.save.tool":{"description":"栅格笔工具ID；info默认ink；presets省略列全部。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]},
+  "brush.resources.kind":{"description":"tip=图像笔尖；texture=图像纹理。","enum":["tip","texture"]},
+  "brush.resource.import.kind":{"description":"tip=图像笔尖；texture=图像纹理。","enum":["tip","texture"]},
+  "brush.preset.get.id":{"description":"笔刷预设ID。get支持builtin:*；save省略新建、UUID更新；delete仅自定义UUID。"},
+  "brush.preset.save.id":{"description":"笔刷预设ID。get支持builtin:*；save省略新建、UUID更新；delete仅自定义UUID。"},
+  "brush.preset.delete.id":{"description":"笔刷预设ID。get支持builtin:*；save省略新建、UUID更新；delete仅自定义UUID。"},
+  "brush.preset.save.width":{"description":"保存预设笔粗，0.1–512px，默认6；面板加载时应用；stroke.add仍传本次width。"},
+  "brush.preset.save.opacity":{"description":"保存预设不透明度，0–1，默认1；面板加载时应用；stroke.add可显式传本次opacity。"}
 }
 """
 }
