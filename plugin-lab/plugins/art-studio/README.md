@@ -140,7 +140,7 @@ AI 能力直接操作相同的私有工程；对带外部 URI 的工程，兰儿
 
 清单单一来源为 ArtToolCatalog.kt。兰儿读取 toolbox.catalog 可得到各项 id、label、implemented 与 status；文字工具还返回 advancedOptions，其中 implemented=false、status=planned 表示未来选项，不是已实现的执行能力。现有工具的 status=basic 只表示本画室已有可用入口，不表示已达到 Krita 完整行为。
 
-这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、多节点及多子路径编辑、书法笔矢量轮廓及速度调角、高级矢量路径、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。渐变提供前景色到透明或指定终点色的线性／径向／角度基础模式，不具备 Krita 的完整预设和混合选项。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
+这仅是 Krita 左侧工具的第一批真实操作：尚缺颜色标签图层参考及边界填充、渐变预设与色彩空间、多节点及多子路径编辑、书法笔矢量轮廓及速度调角、高级矢量路径、完整 SVG 文字排版、高级变换、参考图像、辅助尺规、蒙版及磁性套索、相似色等其他选区。它们各自需要补画笔引擎、矢量对象、像素选区蒙版或相应的资源类型；不得将现有笔画、矩形选区或移动操作改名冒充。连续区域填充默认按 RGBA 像素完全匹配，容差 0–100 映射到每个通道 0–255 的最大差值；可参考所有可见图层，但仍只写当前图层；正常填色仍拒绝完全透明的颜色；擦除模式用独立掩码清除图层像素；选择非根图层、隐藏/锁定或已变换的图层时也会拒绝，避免编辑到错误像素。这段记录的是当时的线性／径向／角度基础渐变；九种形状、多色标、重复及抖动的后续扩展见0.2.57章节。动态画笔当前只移入质量／阻力轨迹过滤，Krita 的固定角度与速度相关笔宽尚未移入；栅格书法笔不生成 Krita 的矢量轮廓。这些工具在本画室的数据模型中实现；完整 Krita 行为与手机端交互需按各项边界验收。
 
 ## 右侧手风琴布局
 
@@ -935,3 +935,27 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 标签参考加 `reference:"labels",colorLabels:[1,2]`，先用layer.properties设置图层标签；贝塞尔只传nodes，其他围合只传points。默认includeContour=false会排除触边区域，想填整个围合范围时设true。手机和能力共用同一Store/算法；成功仍带图像反馈，changed=false表示无有效输出。
 
 版本0.2.56、versionCode59、applicationId `com.ai.limbs.payload.artstudio.v0256`。本轮只做源码静态核对与本地Git提交，不编译、不运行测试、不推送；已补纯逻辑覆盖率/节点契约测试供后续云编译执行。Android混合、软边和手机交互需部署后验收。
+
+## 0.2.57 渐变工具
+
+参考 Krita 6.0.4 的 `kis_gradient_painter.cc` 中形状/重复策略、`kis_polygonal_gradient_shape_strategy.cpp` 的轮廓渐变职责，以及 `plugins/tools/basictools/kis_tool_gradient.cc` 的参数入口，独立实现本插件的RGBA8渐变内核。九种形状为linear、bilinear、radial、square、angular、symmetric_conical、spiral、reverse_spiral、shape。双线性是线性投影的绝对值（首点中线两侧对称），不是二维双线性纹理插值；方形随拖动方向旋转，锥形/对称锥形按角度变化，正/反螺旋为距离加正/反角度。
+
+多色标2–16个，使用 `[[position,"#AARRGGBB"],...]`，位置严格递增且含0和1；支持透明度。颜色插值可选编码sRGB或linear_rgb，均使用预乘alpha避免完全透明色标的隐藏RGB污染边缘。默认省略色标时使用前景到透明，仍可指定旧gradientEndColor。重复支持none夹取、forward取小数部分、alternate往返；负坐标和整数接缝明确处理。普通交替周期为2，螺旋交替为1；渐变Reverse在重复后使用1-t，反转整个色标序列。手机切换螺旋时先选forward，可再改none/alternate。
+
+轮廓模式必须先建立非空选区：变换到图层局部后取非零覆盖轮廓，虚拟透明外边界和选区孔洞均作为距离种子；采用二维精确网格欧氏距离变换，按每个四连通岛的最深距离归一化。边界为末色、最深处为首色，只有1像素厚且没有内部深度的岛使用末色。凹边、洞和分离小岛都会参与，最终透明度仍乘原软选区一次。此方案与Krita的多边形边权/极值求解不同，不宣称逐像素一致；轮廓色域来自固定选区，方向两点仅用于拖动触发，不定义其中心。
+
+抖动在RGB量化前加入固定种子与图层局部坐标的±0.5量化级噪声，抖动种子保存后稳定重放；不对alpha加噪、不生成透明色标原本没有的覆盖。gradientAntialias=0–1通过四个子像素颜色样本的预乘平均平滑解析渐变/重复接缝；shape使用距离场并忽略该值。透明度沿用工具栏参数。色标查找二分，几何方向预计算，像素循环复用颜色缓冲，避免每像素创建颜色数组。
+
+手机独立渐变手势在首点固定工程ID、revision、图层、视图/图层矩阵、参数及软选区。拖动预览最多256px、100ms更新一次；图层缩略图最多128px，预览与完整图使用同一数学/颜色内核，近似取样不是最终像素。松手仅提交一次；取消、Esc、右键、双指、工具/工程切换及busy清除草稿，版本或图层矩阵变化拒绝旧手势。参数面板可编辑色标、增加/删除中间色标、选重复/反向/插值、设置抖动种子及接缝平滑。
+
+新渐变仍是STROKE_ADD，保存gradientVersion=1、完整色标、种子、固定图层局部外框和当时选区/selectionToLayer矩阵。主画布、图层缩略图、图像反馈及PNG导出共用内核；文档裁剪/扩画布移动根图层时保留固定局部外框，不重新铺满后来扩大的画布。支持可编辑绘画层及其父组/图层变换。单次局部处理范围最多4194304像素，超限请先建立较小选区；工作预算包含最大渐变临时缓冲及软选区，超限明确拒绝。旧无gradientVersion的线性/径向/角度笔画保留原有shader语义，以维持旧工程外观。
+
+兰儿新增入口 `plugin.art.studio.gradient.info` 与 `plugin.art.studio.gradient.draw`；现有stroke.add也接入新参数。gradient.draw必传documentId、expectedRevision、layerId、points与color，points恰好两个图层局部点，至少相距0.01px；width由入口固定为1，与渐变覆盖面积无关。
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[40,40],[160,100]],"color":"#FF245364","gradientMode":"spiral","gradientStops":[[0,"#FF245364"],[0.45,"#FFFFC878"],[1,"#00000000"]],"gradientRepeat":"forward","gradientDither":true,"gradientSeed":7,"gradientAntialias":0.5}
+```
+
+最简纯线性调用省略所有gradient字段；轮廓调用先创建选区，再用 `gradientMode:"shape"`；方形用square，对称锥形用symmetric_conical，反螺旋用reverse_spiral。查询/describe即可获取每个字段的默认值、坐标、范围与例子，无需再查源码。
+
+版本0.2.57、versionCode60、applicationId `com.ai.limbs.payload.artstudio.v0257`。本轮只作源码静态核对与本地Git提交；不编译、不运行测试、不推送。已写形状/重复/透明插值/抖动和带洞、多岛距离场的纯逻辑测试，留待云端执行；Android渲染与手机交互需部署后验收。

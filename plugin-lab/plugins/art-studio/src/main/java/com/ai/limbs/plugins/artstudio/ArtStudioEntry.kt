@@ -274,6 +274,9 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("selection.bezier_nodes","读取曲线选区节点",read) {p->store.bezierSelectionNodes(p)}
         capability("selection.bezier_edit","编辑曲线选区节点",write) {p->store.bezierSelectionEdit("LANER",p)}
         capability("selection.preview","检查当前选区轮廓",read) {p->store.selectionPreview(p)}
+        capability("gradient.info","读取渐变形状、色标、重复与抖动参数",read) {ArtGradient.info()}
+        capability("gradient.draw","绘制多色标及轮廓渐变",write) {p->store.apply("LANER","STROKE_ADD",
+            JSONObject(p.toString()).put("id",UUID.randomUUID().toString()).put("tool","gradient").put("width",1))}
         capability("enclose.info","读取围合填充范围与默认参数",read) {ArtEncloseFill.info()}
         capability("enclose.apply","围合填充当前图层",write) {p->store.encloseFill("LANER",p)}
         capability("patch.info","读取智能修补范围",read) { ArtSmartPatch.info() }
@@ -542,6 +545,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         return InProcessCapabilityParameterSpec(key, type, ArtCapabilityHelp.parameterDescription(name, key), !optional)
     }
     val id = p("id")
+    fun gradientFields()=listOf(p("gradientMode",optional=true),p("gradientReverse","boolean",true),p("gradientEndColor",optional=true),
+        p("gradientStops","array",true),p("gradientRepeat",optional=true),p("gradientDither","boolean",true),p("gradientSeed","integer",true),
+        p("gradientInterpolation",optional=true),p("gradientAntialias","number",true))
     fun softSelectionFields()=listOf(p("antialias","number",true),p("feather","integer",true),p("expand","integer",true))
     fun colorSelectionFields()=listOf(p("opacitySpread","integer",true),p("antialias","number",true),p("feather","integer",true),p("stopAtDarkest","boolean",true),p("colorLabels","array",true))
     fun basicSelectionFields()=listOf(p("documentId",optional=true),p("expectedRevision","integer",true),p("mode",optional=true),p("antialias","number",true),p("feather","integer",true),p("expand","integer",true))
@@ -663,6 +669,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.bezier_nodes" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("componentIndex","integer",true))
         "selection.bezier_edit" -> listOf(p("documentId"),p("expectedRevision","integer"),p("edits","array"),p("componentIndex","integer",true))
         "selection.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
+        "gradient.info" -> emptyList()
+        "gradient.draw" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("points","array"),p("color"),p("opacity","number",true))+gradientFields()
         "enclose.info" -> emptyList()
         "enclose.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("shape"),
             p("points","array",true),p("nodes","array",true),p("color",optional=true),p("mode",optional=true),p("regionColor",optional=true),
@@ -732,7 +740,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true),
             p("fillShape", "boolean", true), p("gradientMode", optional = true),
             p("gradientReverse", "boolean", true),
-            p("gradientEndColor", optional = true),
+            p("gradientEndColor", optional = true),p("gradientStops","array",true),p("gradientRepeat",optional=true),
+            p("gradientDither","boolean",true),p("gradientSeed","integer",true),p("gradientInterpolation",optional=true),p("gradientAntialias","number",true),
             p("mirrorDirection", optional = true), p("mirrorCount", "integer", true),
             p("mirrorRadius", "number", true), p("mirrorSeed", "integer", true),
             p("mirrorCenters", "array", true),

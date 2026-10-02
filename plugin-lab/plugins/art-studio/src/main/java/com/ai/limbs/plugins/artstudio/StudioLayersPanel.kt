@@ -472,13 +472,14 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                 val strokes=layer.getJSONArray("strokes")
                 val order=layer.optJSONArray("contentOrder")
                 if(order==null) {
-                    for(n in 0 until strokes.length()) ArtRenderer.drawStroke(canvas,strokes.getJSONObject(n))
+                    for(n in 0 until strokes.length()) {val stroke=strokes.getJSONObject(n)
+                        if(stroke.has("gradientVersion"))ArtGradient.draw(canvas,stroke,128) else ArtRenderer.drawStroke(canvas,stroke)}
                 } else {
                     val byId=(0 until strokes.length()).associate { strokes.getJSONObject(it).getString("id") to strokes.getJSONObject(it) }
                     for(n in 0 until order.length()) {
                         val event=order.getJSONObject(n)
                         when(event.getString("kind")) {
-                            "stroke" -> byId[event.getString("id")]?.let { ArtRenderer.drawStroke(canvas,it) }
+                            "stroke" -> byId[event.getString("id")]?.let { if(it.has("gradientVersion"))ArtGradient.draw(canvas,it,128) else ArtRenderer.drawStroke(canvas,it) }
                             "paste","erase" -> drawAsset(canvas,event.getString("asset"),event.getInt("x"),event.getInt("y"),ArtPixelBlend.paint(event))
                             "clear","fill" -> {
                                 val clip=event.optJSONObject("selection");val erase=event.getString("kind")=="clear"

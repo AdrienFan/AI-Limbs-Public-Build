@@ -496,11 +496,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var rasterBrushes by remember { mutableStateOf(JSONObject().apply {ArtBrush.tools.keys.forEach {put(it,ArtBrush.defaults(it))}}) }
     var fillShape by remember { mutableStateOf(false) }
     var bezierContinuous by remember { mutableStateOf(false) }
-    var gradientMode by remember { mutableStateOf("linear") }
-    var gradientReverse by remember { mutableStateOf(false) }
-    var gradientToColor by remember { mutableStateOf(false) }
-    var gradientEndInput by remember { mutableStateOf("#FFFFFFFF") }
-    var gradientEndColor by remember { mutableStateOf("#FFFFFFFF") }
+    var gradientSettings by remember {mutableStateOf(ArtGradient.defaults())}
+    var gradientDraft by remember {mutableStateOf(false)}
     var newCanvas by remember { mutableStateOf(false) }
     var presentationDialog by remember { mutableStateOf(false) }
     var presentationError by remember { mutableStateOf<String?>(null) }
@@ -1587,8 +1584,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.nibAngle = nibAngle
                     view.fillShape = fillShape
                     view.bezierContinuous = bezierContinuous
-                    view.gradientMode = gradientMode; view.gradientReverse = gradientReverse
-                    view.gradientEndColor = if (gradientToColor) gradientEndColor else null
+                    view.gradientSettings=gradientSettings
+                    view.onGradientDraft={gradientDraft=it}
+                    view.onGradient={p->if(!busy)perform {store.apply("AWEI","STROKE_ADD",p)}}
                     view.sampleRadius = sampleRadius; view.sampleMerged = sampleMerged
                     view.onSampleCoordinate = { x, y ->
                         scope.launch {
@@ -1646,11 +1644,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 .put("axisY", state.getInt("height") * mirrorCenterY.toDouble())
                             if (tool in setOf("rectangle", "ellipse", "polygon"))
                                 stroke.put("fillShape", fillShape)
-                            if (tool == "gradient") {
-                                stroke.put("gradientMode", gradientMode)
-                                    .put("gradientReverse", gradientReverse)
-                                if (gradientToColor) stroke.put("gradientEndColor", gradientEndColor)
-                            }
                             if (tool == "calligraphy") stroke.put("nibAngle", nibAngle.toDouble())
                             if (tool == "dyna") stroke.put("mass", dynaMass.toDouble())
                                 .put("drag", dynaDrag.toDouble())
@@ -2660,34 +2653,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             style = MaterialTheme.typography.labelSmall)
                     }
                 }
-                if (tool == "gradient") {
-                    FilterChip(selected = gradientMode == "linear",
-                        onClick = { gradientMode = "linear" }, label = { Text("线性") })
-                    FilterChip(selected = gradientMode == "radial",
-                        onClick = { gradientMode = "radial" }, label = { Text("径向") })
-                    FilterChip(selected = gradientMode == "angular",
-                        onClick = { gradientMode = "angular" }, label = { Text("角度") })
-                    FilterChip(selected = !gradientToColor,
-                        onClick = { gradientToColor = false }, label = { Text("前景色 → 透明") })
-                    FilterChip(selected = gradientToColor,
-                        onClick = { gradientToColor = true }, label = { Text("前景色 → 终点色") })
-                    if (gradientToColor) {
-                        OutlinedTextField(gradientEndInput, { gradientEndInput = it.take(9) },
-                            label = { Text("终点颜色 #AARRGGBB") }, singleLine = true)
-                        TextButton(onClick = {
-                            if (gradientEndInput.matches(Regex("#[0-9A-Fa-f]{8}")))
-                                gradientEndColor = gradientEndInput.uppercase(java.util.Locale.ROOT)
-                            else Toast.makeText(context, "请输入 #AARRGGBB 格式颜色",
-                                Toast.LENGTH_SHORT).show()
-                        }) { Text("应用终点色") }
-                        Text("当前终点色：$gradientEndColor", style = MaterialTheme.typography.bodySmall)
-                    }
-                    FilterChip(selected = gradientReverse,
-                        onClick = { gradientReverse = !gradientReverse },
-                        label = { Text("反向颜色") })
-                    Text("线性／径向用终点定范围，角度用终点定方向；反向会互换颜色。",
-                        style = MaterialTheme.typography.bodySmall)
-                }
+                if(tool=="gradient")StudioGradientOptions(gradientSettings,color,busy,gradientDraft,
+                    {gradientSettings=it},{canvasRef[0]?.cancelGradient()})
                 if (tool == "transform") {
                     if (selectedLayer == null) {
                         Text("请先选择要变换的图层。")
@@ -3211,7 +3178,7 @@ private class StudioCanvas(context: Context) : View(context) {
         if (field != value) {
             field = value
             basicSelectionInteraction.cancel();fillInteraction.cancel()
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3235,7 +3202,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeMultiple: Boolean = false
     var shapeShear: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value){encloseFillInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {field=value;if(value){gradientInteraction.cancel();encloseFillInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3274,7 +3241,7 @@ private class StudioCanvas(context: Context) : View(context) {
     fun encloseFillCommand(command:String) {
         if(shapeBusy)return
         try {encloseFillInteraction.command(command,documentId,sceneRevision,selectedId,matrix,onEncloseFill)}
-        catch(error:Exception) {encloseFillInteraction.cancel();android.util.Log.e("ArtStudio","Enclose fill command failed",error)
+        catch(error:Exception) {gradientInteraction.cancel();encloseFillInteraction.cancel();android.util.Log.e("ArtStudio","Enclose fill command failed",error)
             Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
         invalidate()
     }
@@ -3394,7 +3361,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
-                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
@@ -3412,9 +3379,12 @@ private class StudioCanvas(context: Context) : View(context) {
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
     var opacity: Float = 1f
-    var gradientMode: String = "linear"
-    var gradientReverse: Boolean = false
-    var gradientEndColor: String? = null
+    private val gradientInteraction=StudioGradientInteraction(this)
+    var gradientSettings=ArtGradient.defaults()
+    var onGradientDraft:(Boolean)->Unit={}
+        set(value) {field=value;gradientInteraction.onDraft=value}
+    var onGradient:(JSONObject)->Unit={}
+    fun cancelGradient() {gradientInteraction.cancel()}
     var fillShape: Boolean = false
     var bezierContinuous: Boolean = false
         set(value) {
@@ -3615,11 +3585,11 @@ private class StudioCanvas(context: Context) : View(context) {
         val actual=fitScale()*zoom
         panX=width/2f-fittedCenterX(bitmap,fitScale())+(bitmap.width/2f-bounds.centerX())*actual
         panY=(bitmap.height/2f-bounds.centerY())*actual
-        referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();publishZoom()
+        referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();publishZoom()
     }
 
     fun fitToWindow() {
-        encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
+        gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
         zoom = 1f
         angle = 0f
         panX = 0f
@@ -3715,6 +3685,10 @@ private class StudioCanvas(context: Context) : View(context) {
         if(tool=="select_magnetic")magneticSelectionInteraction.draw(canvas)
         if(tool=="comic_panel")comicPanelInteraction.draw(canvas)
         encloseFillInteraction.draw(canvas)
+        try {gradientInteraction.draw(canvas,matrix)} catch(error:Exception) {
+            gradientInteraction.cancel();android.util.Log.e("ArtStudio","Gradient preview failed",error)
+            Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()
+        }
         colorizeInteraction.draw(canvas)
         smartPatchInteraction.draw(canvas)
         try {rasterPathInteraction.draw(canvas,matrix,brushReader);figureInteraction.draw(canvas,matrix,brushReader);lineInteraction.draw(canvas,matrix,brushReader);assistedBrushInteraction.draw(canvas,brushReader);rasterBrushInteraction.draw(canvas,brushReader)}
@@ -3848,7 +3822,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 freehandInteraction.draw(canvas, toScreen, documentId, sceneRevision, selectedId)
             }
         }
-        if (points.length() > 0 && tool !in listOf("pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
+        if (points.length() > 0 && tool !in listOf("gradient", "pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure")) {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
             val preview = JSONObject().put("points", points).put("tool", tool)
                 .put("color", color).put("width", brushWidth.toDouble()).put("opacity", opacity.toDouble())
@@ -3856,11 +3830,6 @@ private class StudioCanvas(context: Context) : View(context) {
                 .put("previewWidth", bitmap.width).put("previewHeight", bitmap.height)
             if (tool in setOf("rectangle", "ellipse", "polygon"))
                 preview.put("fillShape", fillShape)
-            if (tool == "gradient") {
-                preview.put("gradientMode", gradientMode)
-                    .put("gradientReverse", gradientReverse)
-                gradientEndColor?.let { preview.put("gradientEndColor", it) }
-            }
             if (tool == "calligraphy") preview.put("nibAngle", nibAngle.toDouble())
             if (tool == "dyna") preview.put("mass", dynaMass.toDouble())
                 .put("drag", dynaDrag.toDouble())
@@ -3952,14 +3921,15 @@ private class StudioCanvas(context: Context) : View(context) {
             if(!selectionBezierEditing && keyCode==android.view.KeyEvent.KEYCODE_ENTER) {selectionBezierCommand("finish");return true}
             if(!selectionBezierEditing && keyCode==android.view.KeyEvent.KEYCODE_DEL) {selectionBezierCommand("back");return true}
         }
+        if(tool=="gradient" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {gradientInteraction.cancel();return true}
         if(tool=="enclose_fill" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
+            gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="colorize_mask" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
+            colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="smart_patch" && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {
-            smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
+            smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel();invalidate();return true
         }
         if(tool=="assistant") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {assistantInteraction.cancel();invalidate();return true}
@@ -4018,7 +3988,7 @@ private class StudioCanvas(context: Context) : View(context) {
             shapeInteraction.cancel()
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
-            referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
+            referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
             rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
@@ -4104,6 +4074,15 @@ private class StudioCanvas(context: Context) : View(context) {
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
         }
+        if(tool=="gradient") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            val state=scene ?: return true
+            try {return gradientInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
+                gradientSettings,color,opacity.toDouble(),onGradient)}
+            catch(error:Exception) {gradientInteraction.cancel();android.util.Log.e("ArtStudio","Gradient gesture failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+            finally {invalidate()}
+        }
         if(tool=="enclose_fill") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
@@ -4111,7 +4090,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return encloseFillInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
                     encloseFillOptions,color,onEncloseFill)
             } catch(error:Exception) {
-                encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
+                gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Enclose fill gesture failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -4123,7 +4102,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return colorizeInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
                     color,colorizeWidth,colorizeErase,onColorizeCreate,onColorizeStroke)
             } catch(error:Exception) {
-                colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
+                colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Colorize key stroke failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -4135,7 +4114,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return smartPatchInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,
                     shapeBusy,smartPatchOptions,onSmartPatch)
             } catch(error:Exception) {
-                smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
+                smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Smart patch mask failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -4223,7 +4202,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 return referenceInteraction.touch(event,state,documentId,sceneRevision,matrix,
                     referenceMultiple,shapeBusy,onReferenceEdit)
             } catch(error:Exception) {
-                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
+                referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
                 android.util.Log.e("ArtStudio","Reference interaction failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             }
@@ -4357,7 +4336,7 @@ private class StudioCanvas(context: Context) : View(context) {
                     .put("x", minOf(startX, xy[0])).put("y", minOf(startY, xy[1]))
                     .put("width", kotlin.math.abs(xy[0] - startX))
                     .put("height", kotlin.math.abs(xy[1] - startY))
-                else if (tool in listOf("line", "rectangle", "ellipse", "gradient"))
+                else if (tool in listOf("line", "rectangle", "ellipse"))
                     points = shapePoints(local[0], local[1])
                 else if (tool == "bezier")
                     points = JSONArray(pathVertices.toString()).put(JSONArray()
@@ -4404,7 +4383,7 @@ private class StudioCanvas(context: Context) : View(context) {
                             onStroke(JSONArray(points.toString()))
                         }
                     }
-                    "line", "rectangle", "ellipse", "gradient" -> {
+                    "line", "rectangle", "ellipse" -> {
                         points = shapePoints(local[0], local[1])
                         onStroke(JSONArray(points.toString()))
                     }

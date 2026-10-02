@@ -160,6 +160,7 @@ internal object ArtRenderer {
     fun drawStroke(canvas: Canvas, stroke: JSONObject,
         logicalWidth: Int = canvas.width, logicalHeight: Int = canvas.height,
         resources: ((String) -> Bitmap)? = null) {
+        if(stroke.has("gradientVersion")) {ArtGradient.draw(canvas,stroke);return}
         stroke.optJSONObject("selection")?.let {s ->
             val regular=JSONObject(stroke.toString());regular.remove("selection");regular.remove("selectionToLayer")
             if(s.has("coverage"))regular.put("selectionCoveragePass",true)

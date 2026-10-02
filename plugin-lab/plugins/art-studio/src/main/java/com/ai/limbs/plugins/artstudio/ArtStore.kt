@@ -1297,6 +1297,9 @@ internal class ArtStore(private val root: File) {
                 normalized.put("selection",JSONObject(s.toString())).put("selectionToLayer",ArtShapes.encode(inverse))
             }
         }
+        if(type=="STROKE_ADD"&&normalized.optString("tool")=="gradient") {
+            normalized=ArtGradient.prepare(normalized,snapshot(doc).getJSONObject("state"))
+        }
         if (type == "SELECTION_EDIT" && normalized.optString("action") == "COPY") {
             normalized.put("copyId", operationId)
         }
@@ -1848,11 +1851,7 @@ internal class ArtStore(private val root: File) {
                 "GROUP_CREATE" -> "新建图层组"
                 "LAYER_DELETE" -> "删除图层"
                 "STROKE_ADD" -> when (operation.getJSONObject("parameters").optString("tool")) {
-                    "gradient" -> when (operation.getJSONObject("parameters").optString("gradientMode", "linear")) {
-                        "radial" -> "径向渐变"
-                        "angular" -> "角度渐变"
-                        else -> "线性渐变"
-                    }
+                    "gradient" -> ArtGradient.modes.getValue(operation.getJSONObject("parameters").optString("gradientMode","linear"))+"渐变"
                     "mirror" -> "多重画笔"
                     "dyna" -> "动态画笔"
                     "calligraphy" -> "斜头书法笔"
@@ -2322,7 +2321,8 @@ internal class ArtStore(private val root: File) {
                     }
                     p.put("axisX", axisX).put("axisY", axisY)
                 }
-                if (tool == "gradient") {
+                if (tool == "gradient" && p.has("gradientVersion"))ArtGradient.validateStored(p)
+                if (tool == "gradient" && !p.has("gradientVersion")) {
                     val mode = p.optString("gradientMode", "linear")
                     require(mode in setOf("linear", "radial", "angular")) { "渐变模式无效" }
                     p.put("gradientMode", mode)

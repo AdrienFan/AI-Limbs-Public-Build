@@ -252,6 +252,7 @@ internal object ArtBrush {
         val p=brush.getJSONObject(key);if(p.has("asset"))p.getString("asset") else null
     }.toSet()
     fun renderOverhead(state:JSONObject,width:Int,height:Int):Long {
+        var gradientBytes=0L
         val layers=state.getJSONArray("layers");var enabled=false;var figure=false;var softBytes=0L;val assets=mutableSetOf<String>()
         state.optJSONObject("selection")?.takeIf {it.has("coverage")}?.let {s->softBytes=(s.getInt("maskWidth")+2L)*(s.getInt("maskHeight")+2)*4}
         for(i in 0 until layers.length()) {
@@ -262,13 +263,14 @@ internal object ArtBrush {
             val strokes=layers.getJSONObject(i).getJSONArray("strokes")
             for(n in 0 until strokes.length()) {
                 val stroke=strokes.getJSONObject(n);reserve(stroke.optJSONObject("selection"))
+                if(stroke.has("gradientVersion"))gradientBytes=maxOf(gradientBytes,ArtGradient.overhead(stroke))
                 stroke.optJSONObject("brush")?.let {enabled=true;assets.addAll(assetIds(it))}
                 if(stroke.has("figureVersion") || stroke.has("pathVersion")) {enabled=true;figure=true;assets.addAll(ArtFigure.assetIds(stroke))}
             }
         }
-        if(!enabled)return softBytes
+        if(!enabled)return softBytes+gradientBytes
         // One opacity/erase layer plus bounded decoded-image cache and temporary masks/arrays.
-        return softBytes+width.toLong()*height*(if(figure)8 else 4)+if(assets.isEmpty())128L*128*16 else (min(8,assets.size)+7L)*512*512*4
+        return softBytes+gradientBytes+width.toLong()*height*(if(figure)8 else 4)+if(assets.isEmpty())128L*128*16 else (min(8,assets.size)+7L)*512*512*4
     }
     fun info(tool:String)=JSONObject().put("tool",tool).put("engine","dab-v1").put("defaults",defaults(tool))
         .put("modes",JSONObject(modes)).put("sensors",JSONObject(sensors)).put("channels",JSONObject(channels))

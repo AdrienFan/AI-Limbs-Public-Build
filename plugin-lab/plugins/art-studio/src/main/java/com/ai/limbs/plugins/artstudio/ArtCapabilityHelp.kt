@@ -105,7 +105,7 @@ internal object ArtCapabilityHelp {
   "layer.set_opacity":{"args":{"id":"PAINT_LAYER_ID","opacity":0.7,"expectedRevision":0},"note":"","summary":"设置图层不透明度"},
   "layer.set_blend":{"args":{"id":"PAINT_LAYER_ID","blend":"multiply","expectedRevision":0},"note":"","summary":"设置图层混合模式"},
   "layer.properties":{"args":{"id":"PAINT_LAYER_ID","opacity":0.8,"visible":true,"expectedRevision":0,"colorLabel":1},"note":"标签0–8；layer.list读colorLabel，旧层缺字段表示无标签0。","summary":"批量修改图层属性或设置颜色标签"},
-  "stroke.add":{"args":{"layerId":"PAINT_LAYER_ID","points":[[10,10],[100,80]],"tool":"ink","color":"#FF245364","width":6,"expectedRevision":0,"brush":{"smoothing":{"mode":"stabilizer","delay":10},"dynamics":{"size":{"sensor":"pressure","curve":[[0,0.15],[1,1]]}}}},"note":"目标须是未锁定绘画层；形状/渐变两点格式见points，参数可选值见tool。 六支栅格笔支持brush部分配置或brushPresetId；引擎字段/默认值见brush.info。存入最终轨迹与完整参数；随机效果保存seed。","summary":"在绘画层保存一笔结构化轨迹、形状或渐变；遵循选区，成功附缩略图。 gradient铺满当前画布尺寸的图层局部矩形，受选区剪裁；两点只定义渐变方向和范围。"},
+  "stroke.add":{"args":{"layerId":"PAINT_LAYER_ID","points":[[10,10],[100,80]],"tool":"ink","color":"#FF245364","width":6,"expectedRevision":0,"brush":{"smoothing":{"mode":"stabilizer","delay":10},"dynamics":{"size":{"sensor":"pressure","curve":[[0,0.15],[1,1]]}}}},"note":"目标须是未锁定绘画层；形状/渐变两点格式见points，参数可选值见tool。 六支栅格笔支持brush部分配置或brushPresetId；引擎字段/默认值见brush.info。存入最终轨迹与完整参数；随机效果保存seed。 渐变参数见gradient.info；新渐变冻结局部填充外框与软选区，轮廓模式需已有选区。","summary":"保存一笔结构化轨迹、形状或渐变；渐变支持九种形状、多色标及重复/抖动，成功附缩略图。"},
   "stroke.erase":{"args":{"layerId":"PAINT_LAYER_ID","strokeId":"STROKE_ID","expectedRevision":0},"note":"strokeId取document.info.state.layers中目标绘画层的strokes[].id；删除整笔，不是橡皮擦轨迹。","summary":"删除绘画层的一笔已保存笔画，成功附缩略图。"},
   "selection.create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"mode":"add","antialias":1,"feather":4,"expand":2,"x":20,"y":20,"width":120,"height":80},"summary":"创建矩形软选区，可替换／添加／减去／相交／异或。","note":"documentId/revision取document.info；文档像素，参数处理后再组合。默认replace/AA=1/feather=0/expand=0；成功返回选区检查缩图。"},
   "selection.ellipse":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"mode":"add","antialias":1,"feather":4,"expand":2,"x":20,"y":20,"width":120,"height":80},"summary":"创建椭圆软选区，可替换／添加／减去／相交／异或。","note":"documentId/revision取document.info；文档像素，参数处理后再组合。默认replace/AA=1/feather=0/expand=0；成功返回选区检查缩图。"},
@@ -240,7 +240,9 @@ internal object ArtCapabilityHelp {
   "selection.basic_info":{"args":{},"summary":"读取四种基本软选区的默认参数、组合公式与预算。","note":""},
   "selection.adjust":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"expand":-2,"feather":4},"summary":"扩展／收缩并羽化当前选区，不改变作品像素。","note":"仅支持expand/feather，先扩展再羽化；再次羽化会累积。取最新id/revision，无选区报错。"},
   "selection.coverage":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"x":20.5,"y":20.5},"summary":"只读查询选区某处0..255覆盖率，用于核对软边。","note":"文档像素；像素中心加0.5。无选区报错；需要最新id/revision。"},
-  "fill.info":{"args":{},"summary":"读取连续填充模式、图案资源入口、拖动预算及软覆盖参数。","note":""}
+  "fill.info":{"args":{},"summary":"读取连续填充模式、图案资源入口、拖动预算及软覆盖参数。","note":""},
+  "gradient.info":{"args":{},"summary":"读取九种渐变形状、多色标、重复、抖动和插值默认值及范围。","note":"轮廓渐变需先建立非空选区；参数均在插件方处理。"},
+  "gradient.draw":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[40,40],[160,100]],"color":"#FF245364","gradientMode":"spiral","gradientStops":[[0,"#FF245364"],[0.45,"#FFFFC878"],[1,"#00000000"]],"gradientRepeat":"forward","gradientDither":true,"gradientSeed":7,"gradientAntialias":0.5},"summary":"保存带固定选区、色标与抖动种子的渐变笔画；一次撤销，成功附图像反馈。","note":"ID/版本取document.info和layer.list；points是图层局部两个点。最简用gradientMode:linear，不传色标为color→透明；轮廓改shape并先创建选区，反向用gradientReverse:true，整个渐变受软选区限制一次。范围最多4194304局部像素；超限先缩小选区。"}
 }
 """
     private const val FIELDS = """
@@ -309,8 +311,8 @@ internal object ArtCapabilityHelp {
   "toolId":{"description":"toolbox.catalog.tools[].id；planned项只能展示说明，不能执行绘画。"},
   "type":{"description":"辅助尺规类型，取toolbox.catalog.assistants.types。"},
   "fillShape":{"description":"默认false；仅rectangle/ellipse/polygon可设true，用color填充内部。"},
-  "gradientMode":{"description":"渐变类型，默认linear。","enum":["linear","radial","angular"]},
-  "gradientReverse":{"description":"默认false；true交换渐变首尾颜色。"},
+  "gradientMode":{"description":"仅渐变：linear/bilinear/radial/square/angular/symmetric_conical/spiral/reverse_spiral/shape，默认linear；shape需已有非空选区。","enum":["linear","bilinear","radial","square","angular","symmetric_conical","spiral","reverse_spiral","shape"]},
+  "gradientReverse":{"description":"默认false；true在形状和重复处理后使用1-t，反转整个多色标序列。"},
   "mirrorDirection":{"description":"多重画笔方式，默认vertical。","enum":["vertical","horizontal","quad","radial","snowflake","translate","copytranslate","interval"]},
   "mirrorCount":{"description":"旋转/雪花对称数量2–12，默认6。"},
   "mirrorRadius":{"description":"随机平移半径0–512像素，默认80。"},
@@ -424,7 +426,13 @@ internal object ArtCapabilityHelp {
   "dragMode":{"description":"拖动填充off/any/similar，默认off；any填经过的任意区域，similar仅接受与首点相同的预乘RGBA参考色。全局相似色只用off。"},
   "fillType":{"description":"填充内容solid/pattern，默认solid；solid使用color，pattern使用pattern对象，均乘opacity。"},
   "useSelectionAsBoundary":{"description":"默认true。现有选区作为搜索边界；false可在选区外判断连通。任何模式最终只在现有选区中写入。"},
-  "pattern":{"description":"平铺对象：kind=checker/stripes/dots/image；tileSize整数4–128默认16，foreground/background为#AARRGGBB（默认color/透明），scale=0.1–16默认1，angle=−360至360默认0，offset=[dx,dy]文档像素默认[0,0]、有限且绝对值<=1000000。image须asset，取brush.resources(kind=texture)或brush.resource.import(kind=texture)返回值；图片边长1–512px，保留原色透明度，不受foreground/background染色。各区域共用原点。"}
+  "pattern":{"description":"平铺对象：kind=checker/stripes/dots/image；tileSize整数4–128默认16，foreground/background为#AARRGGBB（默认color/透明），scale=0.1–16默认1，angle=−360至360默认0，offset=[dx,dy]文档像素默认[0,0]、有限且绝对值<=1000000。image须asset，取brush.resources(kind=texture)或brush.resource.import(kind=texture)返回值；图片边长1–512px，保留原色透明度，不受foreground/background染色。各区域共用原点。"},
+  "gradientStops":{"description":"可选2–16个色标[[position,#AARRGGBB],...]，位置0–1严格递增且首0尾1，支持透明度；优先于color/gradientEndColor端点。省略为color→gradientEndColor（或前景全透明）。预乘RGBA插值避免透明色晕。"},
+  "gradientRepeat":{"description":"none夹到[0,1]（默认）；forward小数部分正向重复（含负坐标）；alternate三角波交替，螺旋按1周期往返，其他形状按2周期往返。反向颜色在重复后执行。","enum":["none","forward","alternate"]},
+  "gradientDither":{"description":"默认false；true在RGB量化前加固定坐标/种子的±0.5量化级噪声，缓解8位色带；不对alpha加噪、不改变全透明像素。"},
+  "gradientSeed":{"description":"抖动种子整数0–2147483647，默认0；保存后预览、重放和导出固定，坐标为图层局部像素。"},
+  "gradientInterpolation":{"description":"srgb（默认）或linear_rgb；前者插值编码sRGB通道，后者先线性化再插值。均先按alpha预乘再还原，保留透明色标。","enum":["srgb","linear_rgb"]},
+  "gradientAntialias":{"description":"0–1，默认0；非shape使用4个子像素颜色取样的预乘平均并按强度混合，平滑重复及角度接缝。shape使用像素距离场，忽略此值；最终仍按现有软选区覆盖一次。"}
 }
 """
     private const val SCOPED_1 = """
@@ -886,7 +894,15 @@ internal object ArtCapabilityHelp {
   "fill.contiguous.expand":{"description":"扩展/收缩整数−64至64px，默认0；正数扩展，负数收缩。仅正向扩展使用stopAtDarkest。"},
   "fill.contiguous.antialias":{"description":"边缘抗锯齿强度0–1，默认0（保留旧单点填充默认）；feather>0时只羽化，不重复抗锯齿。"},
   "fill.contiguous.erase":{"description":"默认false。true以填充内容透明度生成擦除蒙版；纯色擦除用白色满覆盖，图案擦除保留图案的透明孔洞。"},
-  "fill.contiguous.bounds":{"description":"可选整数{x,y,width,height}文档搜索范围，宽高须>0且与画布相交，裁剪后最多4194304像素；所有软处理限定在此范围。"}
+  "fill.contiguous.bounds":{"description":"可选整数{x,y,width,height}文档搜索范围，宽高须>0且与画布相交，裁剪后最多4194304像素；所有软处理限定在此范围。"},
+  "stroke.add.gradientMode":{"description":"linear投影；bilinear对投影取绝对值（两侧对称）；radial距离；square沿拖动方向旋转的方形；angular角度；symmetric_conical角度往返；spiral/reverse_spiral距离加正/反角度；shape依非零选区轮廓距离，边缘末色、每个连通岛深处首色。shape非Krita轮廓算法逐像素复刻。","enum":["linear","bilinear","radial","square","angular","symmetric_conical","spiral","reverse_spiral","shape"]},
+  "stroke.add.gradientEndColor":{"description":"可选#AARRGGBB末色；省略用color全透明版本。gradientStops存在时端点色由色标定义。"},
+  "gradient.draw.gradientMode":{"description":"linear投影；bilinear对投影取绝对值（两侧对称）；radial距离；square沿拖动方向旋转的方形；angular角度；symmetric_conical角度往返；spiral/reverse_spiral距离加正/反角度；shape依非零选区轮廓距离，边缘末色、每个连通岛深处首色。shape非Krita轮廓算法逐像素复刻。","enum":["linear","bilinear","radial","square","angular","symmetric_conical","spiral","reverse_spiral","shape"]},
+  "gradient.draw.gradientEndColor":{"description":"可选#AARRGGBB末色；省略用color全透明版本。gradientStops存在时端点色由色标定义。"},
+  "gradient.draw.points":{"description":"图层局部二维点[[x0,y0],[x1,y1]]，恰好2点，有限值±1000000，距离至少0.01px；定义方向/长度，shape仅用拖动触发。图层变换及父组会在合成时应用。"},
+  "gradient.draw.layerId":{"description":"未锁定且父组未锁定的paint层ID，取layer.list；可为组内/变换层，成功仍写该层。"},
+  "gradient.draw.color":{"description":"必填#AARRGGBB前景色；无gradientStops时为首色，有色标时使用色标颜色。"},
+  "gradient.draw.opacity":{"description":"整个渐变透明度0–1，默认1，乘色标alpha与固定软选区覆盖一次。"}
 }
 """
 }
