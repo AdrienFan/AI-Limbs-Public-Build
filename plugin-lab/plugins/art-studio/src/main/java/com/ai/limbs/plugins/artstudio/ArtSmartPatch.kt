@@ -44,7 +44,8 @@ internal object ArtSmartPatch {
     fun options(p: JSONObject): Options {
         fun integer(key: String, default: Int, range: IntRange): Int {
             val value=if(p.has(key))p.get(key) else default
-            require(value is Number) {"$key需要整数"};val n=value.toDouble()
+            // Braces stop the adjacent Chinese diagnostic from becoming part of the Kotlin identifier.
+            require(value is Number) {"${key}需要整数"};val n=value.toDouble()
             require(n.isFinite() && n==floor(n) && n>=range.first && n<=range.last) { "$key 超出范围" }
             return n.toInt()
         }
