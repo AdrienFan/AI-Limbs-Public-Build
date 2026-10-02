@@ -18,11 +18,13 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 internal object ArtRenderer {
-    fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false, maxEdge: Int? = null, colorizeKeys: Boolean = false): Bitmap {
+    fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false, maxEdge: Int? = null, colorizeKeys: Boolean = false, logicalSize: Pair<Int,Int>? = null): Bitmap {
         val state = snapshot.getJSONObject("state")
         val width = state.getInt("width")
         val height = state.getInt("height")
         ArtImagePolicy.requireDimensions(width, height)
+        val strokeWidth=logicalSize?.first ?: width;val strokeHeight=logicalSize?.second ?: height
+        ArtImagePolicy.requireDimensions(strokeWidth,strokeHeight)
         val factor = if (maxEdge == null) 1.0 else {
             require(maxEdge in 64..1024)
             (maxEdge.toDouble() / maxOf(width, height)).coerceAtMost(1.0)
@@ -120,7 +122,7 @@ internal object ArtRenderer {
                         val strokes = layer.getJSONArray("strokes")
                         val order = layer.optJSONArray("contentOrder")
                         if (order == null) {
-                            for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s), width, height, brushReader)
+                            for (s in 0 until strokes.length()) drawStroke(local, strokes.getJSONObject(s), strokeWidth, strokeHeight, brushReader)
                         } else {
                             val byId = (0 until strokes.length()).associate {
                                 val stroke = strokes.getJSONObject(it)
@@ -129,7 +131,7 @@ internal object ArtRenderer {
                             for (n in 0 until order.length()) {
                                 val event = order.getJSONObject(n)
                                 when (event.getString("kind")) {
-                                    "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it, width, height, brushReader) }
+                                    "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it, strokeWidth, strokeHeight, brushReader) }
                                     "clear", "fill" -> {
                                         val clip=event.optJSONObject("selection");val erase=event.getString("kind")=="clear"
                                         ArtSoftSelection.draw(local,clip,erase=erase) {
@@ -141,6 +143,7 @@ internal object ArtRenderer {
                                                 (event.getInt("x")+event.getInt("width")).toFloat(),(event.getInt("y")+event.getInt("height")).toFloat(),paint)
                                         }
                                     }
+                                    "move_pixels" -> ArtMovePixels.draw(local,event,store)
                                     "paste", "erase" -> {
                                         val inserted = ArtImagePolicy.decodeAsset(store.assetFile(event.getString("asset")))
                                         try {

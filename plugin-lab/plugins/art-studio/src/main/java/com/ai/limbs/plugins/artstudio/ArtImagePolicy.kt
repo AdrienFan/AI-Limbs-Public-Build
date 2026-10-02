@@ -203,6 +203,17 @@ internal object ArtImagePolicy {
             val id = node.getString(key)
             if (seenAssets.add(id)) largestAsset = maxOf(largestAsset, assetPixels(store.assetFile(id)))
         }
-        return width.toLong() * height * (3L + depth) * 4 + largestAsset * 4
+        var moveMaskWork=0L
+        for(layer in byId.values)layer.optJSONArray("contentOrder")?.let {order->
+            for(i in 0 until order.length()) {
+                val event=order.getJSONObject(i)
+                if(event.getString("kind")=="move_pixels") {
+                    val mask=event.getJSONObject("sourceSelection")
+                    moveMaskWork=maxOf(moveMaskWork,mask.getInt("maskWidth").toLong()*mask.getInt("maskHeight")*6)
+                }
+            }
+        }
+        // Moving a soft selection needs a temporary erase surface plus its decoded/padded mask.
+        return width.toLong() * height * (3L + depth + (if(moveMaskWork>0)1L else 0L)) * 4 + largestAsset * 4 + moveMaskWork
     }
 }

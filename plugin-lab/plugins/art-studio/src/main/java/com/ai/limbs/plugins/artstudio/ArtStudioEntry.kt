@@ -253,6 +253,12 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("crop.preview", "查看裁剪框与构图线预览", read) { p -> store.cropGeometry(p,preview=true) }
         capability("crop.apply", "确认裁剪画布或图层边界", write) { p -> store.crop("LANER",p) }
         capability("canvas.crop", "裁切画布（兼容原入口）", write) { p -> store.apply("LANER","CROP",p) }
+        capability("move.info", "读取移动范围、拾取和单位约束", read) { ArtMove.info().put("settings",store.moveSettings()) }
+        capability("move.settings", "读取移动工具设置", read) { store.moveSettings() }
+        capability("move.configure", "保存移动工具设置", write) { p -> store.configureMove(p) }
+        capability("move.hit", "按可见像素拾取图层或所属组", read) { p -> store.moveHit(p) }
+        capability("move.apply", "移动图层或真正搬移选区像素", write) { p -> store.move("LANER",p) }
+        capability("move.nudge", "按移动工具键盘步进平移", write) { p -> store.moveNudge("LANER",p) }
         capability("canvas.measure", "测量画布两点", read) { p ->
             val x0 = p.getDouble("x0"); val y0 = p.getDouble("y0")
             val x1 = p.getDouble("x1"); val y1 = p.getDouble("y1")
@@ -548,6 +554,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
     fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
         return InProcessCapabilityParameterSpec(key, type, ArtCapabilityHelp.parameterDescription(name, key), !optional)
     }
+    fun moveSettingsFields()=listOf(
+        p("layerMode",optional=true),p("moveScope",optional=true),p("unit",optional=true),p("ppi","number",true),
+        p("step","number",true),p("largeMultiplier","number",true),p("alphaThreshold","integer",true),p("ignoreLocked","boolean",true))
     val id = p("id")
     fun gradientFields()=listOf(p("gradientMode",optional=true),p("gradientReverse","boolean",true),p("gradientEndColor",optional=true),
         p("gradientStops","array",true),p("gradientRepeat",optional=true),p("gradientDither","boolean",true),p("gradientSeed","integer",true),
@@ -790,6 +799,11 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.edit" -> listOf(p("layerId"), p("action"), p("dx", "number", true),
             p("dy", "number", true), p("factor", "number", true), p("degrees", "number", true),
             p("copyId", optional = true))
+        "move.info", "move.settings" -> emptyList()
+        "move.configure" -> moveSettingsFields()+p("expectedSettingsRevision","integer")
+        "move.hit" -> listOf(p("x","integer"),p("y","integer"),p("layerMode",optional=true),p("alphaThreshold","integer",true),p("ignoreLocked","boolean",true),p("documentId",optional=true),p("expectedRevision","integer",true))
+        "move.apply" -> listOf(p("dx","number"),p("dy","number"),p("documentId"),p("expectedRevision","integer"),p("layerId",optional=true),p("pickX","integer",true),p("pickY","integer",true))+moveSettingsFields()
+        "move.nudge" -> listOf(p("direction"),p("large","boolean",true),p("documentId"),p("expectedRevision","integer"),p("layerId",optional=true))+moveSettingsFields()
         "crop.info" -> emptyList()
         "canvas.crop" -> listOf(p("width","integer"),p("height","integer"),p("x","number",true),p("y","number",true))
         "crop.geometry", "crop.preview", "crop.apply" -> listOf(p("width", "integer"),p("height", "integer"),

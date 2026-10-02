@@ -112,7 +112,7 @@ internal object ArtCapabilityHelp {
   "selection.polygon":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"mode":"add","antialias":1,"feather":4,"expand":2,"points":[[20,20],[140,30],[100,100],[30,80]]},"summary":"创建多边形软选区，可替换／添加／减去／相交／异或。","note":"documentId/revision取document.info；文档像素，参数处理后再组合。默认replace/AA=1/feather=0/expand=0；成功返回选区检查缩图。"},
   "selection.freehand":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"mode":"add","antialias":1,"feather":4,"expand":2,"points":[[20,20],[140,30],[100,100],[30,80]]},"summary":"创建自由套索软选区，可替换／添加／减去／相交／异或。","note":"documentId/revision取document.info；文档像素，参数处理后再组合。默认replace/AA=1/feather=0/expand=0；成功返回选区检查缩图。"},
   "selection.clear":{"args":{"expectedRevision":0},"note":"取消选区；清除选区内作品像素使用edit.clear。","summary":"取消像素选区，不清除作品。"},
-  "selection.edit":{"args":{"layerId":"PAINT_LAYER_ID","action":"MOVE","dx":10,"dy":0,"expectedRevision":0},"note":"先创建选区，且目标绘画层须有与选区相交的结构化笔画；操作整笔，不是像素剪切。","summary":"编辑选区内结构化笔画"},
+  "selection.edit":{"args":{"layerId":"PAINT_LAYER_ID","action":"MOVE","dx":10,"dy":0,"expectedRevision":0},"note":"先创建选区，且目标绘画层须有与选区相交的结构化笔画；操作整笔，不是像素剪切。 MOVE现在按覆盖率切出/清除/粘贴选区像素（paint/image），位移取整；历史旧操作仍按原格式重放，其它动作不变。","summary":"编辑选区内结构化笔画"},
   "transform.move":{"args":{"id":"PAINT_LAYER_ID","x":20,"y":30,"expectedRevision":0},"note":"x/y是图层的绝对位置，不是移动增量。","summary":"设置图层位置"},
   "transform.scale":{"args":{"id":"PAINT_LAYER_ID","scale":1.2,"expectedRevision":0},"note":"scale是图层绝对缩放倍率。","summary":"设置图层缩放"},
   "transform.rotate":{"args":{"id":"PAINT_LAYER_ID","rotation":15,"expectedRevision":0},"note":"rotation是图层绝对角度，正值顺时针。","summary":"设置图层角度"},
@@ -265,7 +265,13 @@ internal object ArtCapabilityHelp {
   "crop.info":{"args":{},"summary":"读取裁剪目标、锁定与构图线","note":"frame不可用：缺动画帧数据；layer为保留源内容的裁剪边界。"},
   "crop.geometry":{"args":{"x":0,"y":0,"width":512,"height":512},"summary":"解析裁剪框，不写工程","note":"返回plan和构图线；锁定后尺寸见plan。x/y为左上角文档整数像素。"},
   "crop.preview":{"args":{"x":0,"y":0,"width":512,"height":512,"guides":"thirds","maxEdge":512},"summary":"查看当前画布上的拟裁剪框","note":"只读JPEG图块，未裁剪；框外扩展区不预测隐藏源内容。使用返回plan的ID/revision确认。"},
-  "crop.apply":{"args":{"x":0,"y":0,"width":512,"height":512,"documentId":"DOCUMENT_ID","expectedRevision":0},"summary":"确认裁剪画布或图层边界","note":"先geometry/preview；替换ID/revision并使用返回plan。canvas保留框外源；layer保留源和变换，后续绘制受边界约束；取消无需调用。"}
+  "crop.apply":{"args":{"x":0,"y":0,"width":512,"height":512,"documentId":"DOCUMENT_ID","expectedRevision":0},"summary":"确认裁剪画布或图层边界","note":"先geometry/preview；替换ID/revision并使用返回plan。canvas保留框外源；layer保留源和变换，后续绘制受边界约束；取消无需调用。"},
+  "move.info":{"args":{},"summary":"读取移动模式与像素搬移约束","note":"像素模式支持paint/image含变换和组内，保留源笔画和框外内容；其它类型整层移动。"},
+  "move.settings":{"args":{},"summary":"读取共享移动工具设置","note":"独立revision；默认px/PPI72/step1/largeMultiplier10；手机与AI共用。"},
+  "move.configure":{"args":{"expectedSettingsRevision":0,"unit":"mm","ppi":300,"step":0.1,"largeMultiplier":10},"summary":"保存移动工具单位与步进","note":"先settings读取revision替换示例0；资源设置不写作品历史；PPI仅本工具换算，不改变导出。"},
+  "move.hit":{"args":{"x":100,"y":100,"layerMode":"content"},"summary":"按实际可见像素拾取图层","note":"只读返回hit/layerId/editable和工程守卫；坐标原画整数像素；group拾取最近父组，无命中不猜层。"},
+  "move.apply":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","moveScope":"selection","dx":20,"dy":0,"unit":"px"},"summary":"搬移选区像素或整个图层","note":"替换ID/revision；auto有选区用当前paint/image搬像素，无选区整层。像素覆盖切出、原位擦除再粘贴；选区随移；零位移不切像素。内容拾取整层需layerMode=content/group和pickX/Y。"},
+  "move.nudge":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"direction":"right","large":true},"summary":"按工具步进微移当前层／选区","note":"替换ID/revision；方向文档坐标；忽略内容拾取模式，使用当前层；large使用largeMultiplier，至少1文档像素。"}
 }
 """
     private const val FIELDS = """
@@ -498,7 +504,19 @@ internal object ArtCapabilityHelp {
   "lockHeight":{"description":"默认false；true以fixedHeight覆盖请求高度，与lockRatio互斥。"},
   "allowGrow":{"description":"默认true，可在画布外建立裁剪框；false要求框完全在画布内，API越界拒绝。"},
   "lockWidth":{"description":"默认false；true以fixedWidth覆盖请求宽度，与lockRatio互斥。"},
-  "ratio":{"description":"宽/高有限数1/128–128，默认1；仅lockRatio=true使用。"}
+  "ratio":{"description":"宽/高有限数1/128–128，默认1；仅lockRatio=true使用。"},
+  "layerMode":{"description":"current默认：指定/活动层；content：命中点最上方可见内容层；group：命中内容层的最近父组，无组则内容层。选区模式使用当前层；nudge与面板数值输入始终当前层。","enum":["current","content","group"]},
+  "moveScope":{"description":"auto默认：非空选区时搬移当前paint/image像素，否则整层；layer始终整层且不移动选区；selection要求非空选区且为paint/image，含组内与变换。不自动栅格化。","enum":["auto","layer","selection"]},
+  "unit":{"description":"位移/步进单位px/mm/cm/in/pt；默认共享move.settings.unit，API应显式px避免设置变化改变单位。pickX/Y及hit.x/y始终文档像素。","enum":["px","mm","cm","in","pt"]},
+  "ppi":{"description":"工具级每英寸像素数1–2400，默认72；mm=ppi/25.4，cm=ppi/2.54，in=ppi，pt=ppi/72。工程没有印刷DPI元数据；不改变导出。"},
+  "step":{"description":"方向键基础步进，使用unit，默认1px；有限正数0.0001–16384，换算后≤16384px；最终键盘步进取整且至少1文档像素。"},
+  "largeMultiplier":{"description":"large或Shift方向键使用的步进倍数1–100，默认10；放大后每轴仍须≤16384文档像素。"},
+  "alphaThreshold":{"description":"拾取实际源alpha×层及父组opacity的阈值整数1–255，默认1；隐藏/零opacity不命中，按视觉层序。最多128个可见内容层。"},
+  "ignoreLocked":{"description":"默认false：锁定层仍可命中，但移动明确拒绝；true拾取时跳过锁定层及其锁定父组。不会绕过权限。"},
+  "expectedSettingsRevision":{"description":"move.configure必填资源revision，先move.settings.revision替换示例0；与作品expectedRevision不同，过期拒绝。"},
+  "pickX":{"description":"layerMode=content/group且整层时必填拾取起点X，文档整数像素且在画布内；不是移动后位置。选区模式不拾取其它层。"},
+  "pickY":{"description":"layerMode=content/group且整层时必填拾取起点Y，文档整数像素且在画布内；与pickX一起用于实际像素命中。"},
+  "large":{"description":"默认false；true基础step×largeMultiplier，等同Shift＋方向键。"}
 }
 """
     private const val SCOPED_1 = """
@@ -770,7 +788,51 @@ internal object ArtCapabilityHelp {
   "crop.apply.guides":{"description":"仅预览构图线，不写进画作；默认thirds；none/thirds/fifths/golden/diagonal/cross。","enum":["none","thirds","fifths","golden","diagonal","cross"]},
   "crop.apply.layerId":{"description":"target=layer时取layer.list.layers[].id；省略用活动层，支持paint/image/text/vector/group/colorize；拒绝锁定层/父组。"},
   "crop.apply.documentId":{"description":"geometry/preview可选工程守卫；apply必填，使用plan.documentId或document.info.id；替换示例DOCUMENT_ID。"},
-  "crop.apply.expectedRevision":{"description":"geometry/preview可选；apply必填；取plan.expectedRevision或document.info.revision替换示例0，过期拒绝。"}
+  "crop.apply.expectedRevision":{"description":"geometry/preview可选；apply必填；取plan.expectedRevision或document.info.revision替换示例0，过期拒绝。"},
+  "move.configure.layerMode":{"description":"current默认：指定/活动层；content：命中点最上方可见内容层；group：命中内容层的最近父组，无组则内容层。选区模式使用当前层；nudge与面板数值输入始终当前层。","enum":["current","content","group"]},
+  "move.configure.moveScope":{"description":"auto默认：非空选区时搬移当前paint/image像素，否则整层；layer始终整层且不移动选区；selection要求非空选区且为paint/image，含组内与变换。不自动栅格化。","enum":["auto","layer","selection"]},
+  "move.configure.unit":{"description":"位移/步进单位px/mm/cm/in/pt；默认共享move.settings.unit，API应显式px避免设置变化改变单位。pickX/Y及hit.x/y始终文档像素。","enum":["px","mm","cm","in","pt"]},
+  "move.configure.ppi":{"description":"工具级每英寸像素数1–2400，默认72；mm=ppi/25.4，cm=ppi/2.54，in=ppi，pt=ppi/72。工程没有印刷DPI元数据；不改变导出。"},
+  "move.configure.step":{"description":"方向键基础步进，使用unit，默认1px；有限正数0.0001–16384，换算后≤16384px；最终键盘步进取整且至少1文档像素。"},
+  "move.configure.largeMultiplier":{"description":"large或Shift方向键使用的步进倍数1–100，默认10；放大后每轴仍须≤16384文档像素。"},
+  "move.configure.alphaThreshold":{"description":"拾取实际源alpha×层及父组opacity的阈值整数1–255，默认1；隐藏/零opacity不命中，按视觉层序。最多128个可见内容层。"},
+  "move.configure.ignoreLocked":{"description":"默认false：锁定层仍可命中，但移动明确拒绝；true拾取时跳过锁定层及其锁定父组。不会绕过权限。"},
+  "move.configure.expectedSettingsRevision":{"description":"move.configure必填资源revision，先move.settings.revision替换示例0；与作品expectedRevision不同，过期拒绝。"},
+  "move.hit.x":{"description":"拾取X，原画文档整数像素0..width-1，与工具unit无关。"},
+  "move.hit.y":{"description":"拾取Y，原画文档整数像素0..height-1，与工具unit无关。"},
+  "move.hit.layerMode":{"description":"current默认：指定/活动层；content：命中点最上方可见内容层；group：命中内容层的最近父组，无组则内容层。选区模式使用当前层；nudge与面板数值输入始终当前层。","enum":["current","content","group"]},
+  "move.hit.alphaThreshold":{"description":"拾取实际源alpha×层及父组opacity的阈值整数1–255，默认1；隐藏/零opacity不命中，按视觉层序。最多128个可见内容层。"},
+  "move.hit.ignoreLocked":{"description":"默认false：锁定层仍可命中，但移动明确拒绝；true拾取时跳过锁定层及其锁定父组。不会绕过权限。"},
+  "move.hit.documentId":{"description":"apply/nudge必填当前document.info.id，替换示例DOCUMENT_ID；hit可选守卫。整次拾取/搬移同一工程锁内完成。"},
+  "move.hit.expectedRevision":{"description":"apply/nudge必填document.info.revision或hit.expectedRevision，替换示例0；hit可选；工程/版本变化拒绝且不写入。"},
+  "move.apply.layerMode":{"description":"current默认：指定/活动层；content：命中点最上方可见内容层；group：命中内容层的最近父组，无组则内容层。选区模式使用当前层；nudge与面板数值输入始终当前层。","enum":["current","content","group"]},
+  "move.apply.moveScope":{"description":"auto默认：非空选区时搬移当前paint/image像素，否则整层；layer始终整层且不移动选区；selection要求非空选区且为paint/image，含组内与变换。不自动栅格化。","enum":["auto","layer","selection"]},
+  "move.apply.unit":{"description":"位移/步进单位px/mm/cm/in/pt；默认共享move.settings.unit，API应显式px避免设置变化改变单位。pickX/Y及hit.x/y始终文档像素。","enum":["px","mm","cm","in","pt"]},
+  "move.apply.ppi":{"description":"工具级每英寸像素数1–2400，默认72；mm=ppi/25.4，cm=ppi/2.54，in=ppi，pt=ppi/72。工程没有印刷DPI元数据；不改变导出。"},
+  "move.apply.step":{"description":"方向键基础步进，使用unit，默认1px；有限正数0.0001–16384，换算后≤16384px；最终键盘步进取整且至少1文档像素。"},
+  "move.apply.largeMultiplier":{"description":"large或Shift方向键使用的步进倍数1–100，默认10；放大后每轴仍须≤16384文档像素。"},
+  "move.apply.alphaThreshold":{"description":"拾取实际源alpha×层及父组opacity的阈值整数1–255，默认1；隐藏/零opacity不命中，按视觉层序。最多128个可见内容层。"},
+  "move.apply.ignoreLocked":{"description":"默认false：锁定层仍可命中，但移动明确拒绝；true拾取时跳过锁定层及其锁定父组。不会绕过权限。"},
+  "move.apply.dx":{"description":"ΔX使用unit换算为文档像素，每轴±16384；整层可小数，像素搬移四舍五入为整数；零位移不切像素。父组变换逆映射位移。"},
+  "move.apply.dy":{"description":"ΔY使用unit换算为文档像素，每轴±16384；向下为正；整层可小数，像素搬移取整；不随画面缩放/旋转改变键盘方向。"},
+  "move.apply.documentId":{"description":"apply/nudge必填当前document.info.id，替换示例DOCUMENT_ID；hit可选守卫。整次拾取/搬移同一工程锁内完成。"},
+  "move.apply.expectedRevision":{"description":"apply/nudge必填document.info.revision或hit.expectedRevision，替换示例0；hit可选；工程/版本变化拒绝且不写入。"},
+  "move.apply.layerId":{"description":"当前模式或选区模式可指定layer.list.layers[].id，省略活动层；内容拾取模式不同时指定layerId；拒绝隐藏/透明/锁定层和父组。"},
+  "move.apply.pickX":{"description":"layerMode=content/group且整层时必填拾取起点X，文档整数像素且在画布内；不是移动后位置。选区模式不拾取其它层。"},
+  "move.apply.pickY":{"description":"layerMode=content/group且整层时必填拾取起点Y，文档整数像素且在画布内；与pickX一起用于实际像素命中。"},
+  "move.nudge.layerMode":{"description":"current默认：指定/活动层；content：命中点最上方可见内容层；group：命中内容层的最近父组，无组则内容层。选区模式使用当前层；nudge与面板数值输入始终当前层。","enum":["current","content","group"]},
+  "move.nudge.moveScope":{"description":"auto默认：非空选区时搬移当前paint/image像素，否则整层；layer始终整层且不移动选区；selection要求非空选区且为paint/image，含组内与变换。不自动栅格化。","enum":["auto","layer","selection"]},
+  "move.nudge.unit":{"description":"位移/步进单位px/mm/cm/in/pt；默认共享move.settings.unit，API应显式px避免设置变化改变单位。pickX/Y及hit.x/y始终文档像素。","enum":["px","mm","cm","in","pt"]},
+  "move.nudge.ppi":{"description":"工具级每英寸像素数1–2400，默认72；mm=ppi/25.4，cm=ppi/2.54，in=ppi，pt=ppi/72。工程没有印刷DPI元数据；不改变导出。"},
+  "move.nudge.step":{"description":"方向键基础步进，使用unit，默认1px；有限正数0.0001–16384，换算后≤16384px；最终键盘步进取整且至少1文档像素。"},
+  "move.nudge.largeMultiplier":{"description":"large或Shift方向键使用的步进倍数1–100，默认10；放大后每轴仍须≤16384文档像素。"},
+  "move.nudge.alphaThreshold":{"description":"拾取实际源alpha×层及父组opacity的阈值整数1–255，默认1；隐藏/零opacity不命中，按视觉层序。最多128个可见内容层。"},
+  "move.nudge.ignoreLocked":{"description":"默认false：锁定层仍可命中，但移动明确拒绝；true拾取时跳过锁定层及其锁定父组。不会绕过权限。"},
+  "move.nudge.direction":{"description":"文档坐标方向left/right/up/down；当前层或选区，nudge不按内容重选层。","enum":["left","right","up","down"]},
+  "move.nudge.large":{"description":"默认false；true基础step×largeMultiplier，等同Shift＋方向键。"},
+  "move.nudge.documentId":{"description":"apply/nudge必填当前document.info.id，替换示例DOCUMENT_ID；hit可选守卫。整次拾取/搬移同一工程锁内完成。"},
+  "move.nudge.expectedRevision":{"description":"apply/nudge必填document.info.revision或hit.expectedRevision，替换示例0；hit可选；工程/版本变化拒绝且不写入。"},
+  "move.nudge.layerId":{"description":"当前模式或选区模式可指定layer.list.layers[].id，省略活动层；内容拾取模式不同时指定layerId；拒绝隐藏/透明/锁定层和父组。"}
 }
 """
     private const val SCOPED_2 = """

@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.65",
+  "version": "0.2.66",
   "api": {
     "target": 1,
     "min": 1
@@ -66,6 +66,12 @@
       "plugin.art.studio.crop.geometry",
       "plugin.art.studio.crop.preview",
       "plugin.art.studio.crop.apply",
+      "plugin.art.studio.move.info",
+      "plugin.art.studio.move.settings",
+      "plugin.art.studio.move.configure",
+      "plugin.art.studio.move.hit",
+      "plugin.art.studio.move.apply",
+      "plugin.art.studio.move.nudge",
       "plugin.art.studio.canvas.measure",
       "plugin.art.studio.color.sample",
       "plugin.art.studio.fill.contiguous",

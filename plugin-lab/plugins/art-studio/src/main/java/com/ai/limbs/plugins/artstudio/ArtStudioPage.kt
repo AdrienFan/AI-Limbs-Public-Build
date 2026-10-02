@@ -424,6 +424,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var selectionBezierSettings by remember {mutableStateOf(ArtSoftSelection.defaults())}
     var basicSelectionSettings by remember {mutableStateOf(ArtSoftSelection.defaults())}
     var basicSelectionDraft by remember {mutableStateOf(false)}
+    var moveSettings by remember {mutableStateOf(ArtMove.defaults())}
+    var moveSettingsReady by remember {mutableStateOf(false)}
+    var moveSettingsBusy by remember {mutableStateOf(false)}
     var cropSettings by remember {mutableStateOf(ArtCrop.defaults())}
     var cropDraft by remember {mutableStateOf<JSONObject?>(null)}
     var contiguousSettings by remember {mutableStateOf(ArtColorSelection.defaults())}
@@ -495,6 +498,17 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
     // Debounce pointer-driven color edits; take/render/write operations stay on the worker thread.
+    fun changeMoveSettings(p:JSONObject) {
+        if(moveSettingsReady && !moveSettingsBusy && !busy)scope.launch {
+            moveSettingsBusy=true
+            val captured=JSONObject(p.toString()).put("expectedSettingsRevision",moveSettings.getLong("revision"))
+            try {moveSettings=withContext(Dispatchers.IO) {mutex.withLock {store.configureMove(captured)}}}
+            catch(error:Exception) {
+                host.logger.e("ArtStudio","Move settings edit failed",error)
+                Toast.makeText(context,error.message,Toast.LENGTH_LONG).show()
+            } finally {moveSettingsBusy=false}
+        }
+    }
     LaunchedEffect(color, backgroundColor, colorWorkspaceReady) {
         if (colorWorkspaceReady && (color != colorWorkspace.getString("foreground") ||
             backgroundColor != colorWorkspace.getString("background"))) {
@@ -1050,6 +1064,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
             val menuData=withContext(Dispatchers.IO) { store.menuUiState() }
             remainingContext=menuData
+            if(!moveSettingsBusy) {
+                val nextMove=menuData.getJSONObject("moveSettings")
+                if(!moveSettingsReady || nextMove.getLong("revision")>moveSettings.getLong("revision"))moveSettings=nextMove
+                moveSettingsReady=true
+            }
             acceptDockState(menuData.getJSONObject("dockPanels"))
             val settings=menuData.getJSONObject("settings")
             if(settings.toString()!=remainingSettings.toString()) {
@@ -1761,6 +1780,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.fillSettings=fillSettings
                     view.onFillDraft={fillDraft=it}
                     view.onFill={p->if(!busy)perform {store.fillContiguous("AWEI",p)}}
+                    view.moveSettings=moveSettings;view.moveBusy=busy || moveSettingsBusy || !moveSettingsReady
+                    view.onMoveTool={p->if(!busy && !moveSettingsBusy && moveSettingsReady)perform {store.move("AWEI",p)}}
+                    view.onMoveNudge={direction,large->if(!busy && !moveSettingsBusy && moveSettingsReady) {
+                        val p=JSONObject(moveSettings.toString()).apply {remove("revision");put("documentId",current.getString("id"));put("expectedRevision",current.getInt("revision"));put("layerId",selected);put("direction",direction);put("large",large)}
+                        perform {store.moveNudge("AWEI",p)}
+                    }}
                     view.cropSettings=cropSettings
                     view.onCropDraft={cropDraft=it}
                     view.onCrop={p->if(!busy)perform {store.crop("AWEI",p)}}
@@ -2521,6 +2546,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         {command -> canvasRef[0]?.selectionBezierCommand(command)},
                         {p -> if(!busy)perform {store.bezierSelectionEdit("AWEI",p)}})
                 }
+                if(tool=="move")StudioMoveOptions(moveSettings,busy || moveSettingsBusy,moveSettingsReady,
+                    {p->changeMoveSettings(p)},
+                    {dx,dy->
+                        if(!busy && !moveSettingsBusy && moveSettingsReady) {
+                            val p=JSONObject(moveSettings.toString()).apply {remove("revision");put("documentId",current.getString("id"));put("expectedRevision",current.getInt("revision"));put("layerId",selected);put("layerMode","current");put("dx",dx);put("dy",dy)}
+                            perform {store.move("AWEI",p)}
+                        }
+                    },{direction,large->canvasRef[0]?.moveNudge(direction,large)})
                 if(tool=="crop")StudioCropOptions(cropSettings,cropDraft,busy,
                     {next->
                         try {canvasRef[0]?.cropSettings=next;cropSettings=next}
@@ -3336,7 +3369,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            cropInteraction.cancel()
+            moveInteraction.cancel();cropInteraction.cancel()
             basicSelectionInteraction.cancel();fillInteraction.cancel()
             shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
@@ -3358,11 +3391,11 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     var scene: JSONObject? = null
     var sceneRevision: Int = 0
-        set(value) {if(field!=value){field=value;cropInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;moveInteraction.cancel();cropInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var shapeMultiple: Boolean = false
     var shapeShear: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value){cropInteraction.pause();gradientInteraction.cancel();encloseFillInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {field=value;if(value){moveInteraction.cancel();cropInteraction.pause();gradientInteraction.cancel();encloseFillInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3509,7 +3542,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
-        set(value) {if(field!=value){field=value;cropInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;moveInteraction.cancel();cropInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var selection: JSONObject? = null
     var selectionVisible = true
     var tool: String = "ink"
@@ -3527,7 +3560,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeCreationContext = null
                 points = JSONArray()
                 pathVertices = JSONArray()
-                cropInteraction.cancel()
+                moveInteraction.cancel();cropInteraction.cancel()
                 measurement = null
                 lastPathTap = 0L
                 invalidate()
@@ -3614,6 +3647,17 @@ private class StudioCanvas(context: Context) : View(context) {
     private var multitouch = false
     private var points = JSONArray()
     private var pathVertices = JSONArray()
+    private val moveInteraction=StudioMoveInteraction().apply {density=resources.displayMetrics.density}
+    var moveSettings=ArtMove.defaults()
+        set(value) {if(field.toString()!=value.toString()){field=value;moveInteraction.cancel();invalidate()}}
+    var moveBusy=false
+        set(value) {field=value;if(value)moveInteraction.cancel()}
+    var onMoveTool:(JSONObject)->Unit={}
+    var onMoveNudge:(String,Boolean)->Unit={_,_->}
+    fun moveNudge(direction:String,large:Boolean) {
+        if(moveBusy)return
+        moveInteraction.cancel();onMoveNudge(direction,large);invalidate()
+    }
     private val cropInteraction=StudioCropInteraction().apply {density=resources.displayMetrics.density}
     var cropSettings=ArtCrop.defaults()
         set(value) {cropInteraction.configure(value,scene);field=value;invalidate()}
@@ -3627,7 +3671,7 @@ private class StudioCanvas(context: Context) : View(context) {
     }
     fun cropCommand(action:String) {
         if(shapeBusy)return
-        try {when(action) {"cancel"->cropInteraction.cancel();"finish"->cropInteraction.finish(documentId,sceneRevision,selectedId,onCrop);else->error("未知裁剪操作")}}
+        try {when(action) {"cancel"->{moveInteraction.cancel();cropInteraction.cancel()};"finish"->cropInteraction.finish(documentId,sceneRevision,selectedId,onCrop);else->error("未知裁剪操作")}}
         catch(error:Exception) {android.util.Log.e("ArtStudio","Crop command failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
         finally {invalidate()}
     }
@@ -3926,6 +3970,7 @@ private class StudioCanvas(context: Context) : View(context) {
             canvas.restore()
         }
         if(tool=="crop")cropInteraction.draw(canvas,matrix)
+        if(tool=="move")moveInteraction.draw(canvas,matrix)
         measurement?.let { mark ->
             canvas.save(); canvas.concat(matrix)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -4044,13 +4089,20 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
     override fun onDetachedFromWindow() {
-        cropInteraction.cancel()
+        moveInteraction.cancel();cropInteraction.cancel()
         basicSelectionInteraction.cancel();fillInteraction.cancel()
         rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();brushBitmapCache.values.forEach {it.recycle()};brushBitmapCache.clear()
         magneticSelectionInteraction.dispose();colorSelectionInteraction.cancel()
         super.onDetachedFromWindow()
     }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(tool=="move") {
+            if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {moveInteraction.cancel();invalidate();return true}
+            if(!event.isCtrlPressed && !event.isMetaPressed) {
+                val direction=when(keyCode) {android.view.KeyEvent.KEYCODE_DPAD_LEFT->"left";android.view.KeyEvent.KEYCODE_DPAD_RIGHT->"right";android.view.KeyEvent.KEYCODE_DPAD_UP->"up";android.view.KeyEvent.KEYCODE_DPAD_DOWN->"down";else->null}
+                if(direction!=null) {moveNudge(direction,event.isShiftPressed);return true}
+            }
+        }
         if(tool=="crop") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {cropCommand("cancel");return true}
             if(keyCode==android.view.KeyEvent.KEYCODE_ENTER) {cropCommand("finish");return true}
@@ -4168,7 +4220,7 @@ private class StudioCanvas(context: Context) : View(context) {
             }
             pinch = distance; pinchAngle = rotation
             points = JSONArray(); pathVertices = JSONArray(); lastPathTap = 0L
-            cropInteraction.pause()
+            moveInteraction.cancel();cropInteraction.pause()
             invalidate(); return true
         }
         pinch = 0f
@@ -4177,7 +4229,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 event.actionMasked == MotionEvent.ACTION_CANCEL) {
                 multitouch = false
                 points = JSONArray()
-                cropInteraction.pause()
+                moveInteraction.cancel();cropInteraction.pause()
                 invalidate()
             }
             return true
@@ -4189,11 +4241,18 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(tool=="move") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            val state=scene ?: return true
+            try {return moveInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,moveBusy,moveSettings,onMoveTool)}
+            catch(error:Exception) {moveInteraction.cancel();android.util.Log.e("ArtStudio","Move gesture failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+            finally {invalidate()}
+        }
         if(tool=="crop") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
             try {return cropInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy)}
-            catch(error:Exception) {cropInteraction.pause();android.util.Log.e("ArtStudio","Crop gesture failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+            catch(error:Exception) {moveInteraction.cancel();cropInteraction.pause();android.util.Log.e("ArtStudio","Crop gesture failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
             finally {invalidate()}
         }
         if(tool in ArtSoftSelection.tools) {
@@ -4482,7 +4541,7 @@ private class StudioCanvas(context: Context) : View(context) {
                             .put("expectedRevision", sceneRevision).put("layerId", selectedId)
                     }
                 } else shapeCreationContext = null
-                cropInteraction.cancel()
+                moveInteraction.cancel();cropInteraction.cancel()
                 if (tool !in listOf("pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
                     points.put(JSONArray().put(local[0]).put(local[1])
                         .put(event.pressure.coerceIn(0.1f, 1f)))
@@ -4526,7 +4585,7 @@ private class StudioCanvas(context: Context) : View(context) {
                     onCursor(xy[0].toInt(), xy[1].toInt())
                 }
                 when (tool) {
-                    "move", "transform" -> onMove(xy[0] - startX, xy[1] - startY)
+                    "transform" -> onMove(xy[0] - startX, xy[1] - startY)
                     "pan" -> Unit
                     "zoom" -> zoomAt(event.x, event.y)
                     "measure" -> measurement = floatArrayOf(startX, startY, xy[0], xy[1])
@@ -4593,14 +4652,14 @@ private class StudioCanvas(context: Context) : View(context) {
                     else -> if (points.length() > 0) onStroke(JSONArray(points.toString()))
                 }
                 if (tool !in listOf("polygon", "polyline", "bezier")) points = JSONArray()
-                cropInteraction.cancel()
+                moveInteraction.cancel();cropInteraction.cancel()
             }
             MotionEvent.ACTION_CANCEL -> {
                 shapeCreationContext = null
                 multitouch = false
                 points = JSONArray()
                 pathVertices = JSONArray()
-                cropInteraction.cancel()
+                moveInteraction.cancel();cropInteraction.cancel()
             }
         }
         invalidate(); return true

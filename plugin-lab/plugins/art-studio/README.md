@@ -1172,3 +1172,32 @@ crop.geometry {"x":20,"y":20,"width":200,"height":100,"target":"layer","layerId"
 替换示例ID/revision；从geometry/preview返回的plan原样传给apply，删除仅preview使用的maxEdge。完整能力222项。版本0.2.65、versionCode68、applicationId `com.ai.limbs.payload.artstudio.v0265`。只改画室插件；静态检查并新增10项几何/交集云端用例，**未编译、未执行测试、未推云端**。
 
 部署后验收：在画布右下角画笔/文字/图片/矢量/上色蒙版及旋转缩放父组各放标记，从非零原点裁剪并确认标记正确投影；向外扩展检查源内容复现；参考图/尺规对齐；取消与松手均不写历史；控制点、锁宽高/比例/中心及双指手势；组/层裁剪、重复交集、空交集、透明橡皮与层混合、撤销/重做、保存/重开/导出/取色一致；AI预览返回图片和绑定旧revision拒绝。帧裁剪依赖留待动画功能迭代。
+
+## 0.2.66 移动图层与选区像素（开发源码，未编译）
+
+参照本机 Krita 6.0.4 `plugins/tools/basictools/kis_tool_move.cc`（当前层/按内容拾取、选区优先、拖动锁轴/精细移动、键盘步进）、`strokes/move_selection_stroke_strategy.cpp`（覆盖率切出、原位清除、移动后合成与选区偏移）、`kis_tool_movetooloptionswidget.cpp` 和 `wdgmovetool.ui`（工具单位、步长、放大倍数及配置保存），由画室自身事件模型实现，未复制Qt/Krita源码。
+
+修正旧实现：它只按笔画控制点是否碰选区来挑选整条笔画，并移动所有点。新移动工具按8位文档空间投影×选区覆盖率切出PNG、按同一覆盖率原位擦除、在位移后source-over合成，不修改或删除源笔画记录，选区外内容保持。支持绘画和图像层，包括父组旋转/缩放/平移，逆变换存储文档到层的坐标；只对选中的层产生像素事件，层位置/角度/比例、其它层和原有内容事件保留。选区框跟随内容移动；贝塞尔/复合选区的归一化控制点与curveBasis保留。捕获窗口包含选区范围内的画布外图层源内容，不临时持久改画布尺寸，可继续搬移之前移到画布外的内容。移动到已有内容上使用SRC_OVER；保留真实软覆盖，不把羽化强转成硬选区。
+
+模式明确：moveScope=auto在非空选区时搬当前层像素，无选区整层；layer始终整层且不移动选区；selection须非空且层为paint/image。文字、矢量、组和上色蒙版支持整层，像素模式明确拒绝，不自动扁平化/栅格化。选区位移取整文档像素，0位移不切/粘贴（防止软alpha被无意义重复合成）；整层支持小数位移，经父组逆线性变换，不把文档位移误当父组坐标。一次应用一条历史事件，撤销/重做、保存/重开/导出/取色使用相同渲染器和资源。已有`selection.edit(action=MOVE)`参数兼容并接入新像素路径；**旧SELECTION_EDIT历史按原格式重放**，不悄悄改变已经保存的旧作品；其它旧动作保持原行为。
+
+内容拾取使用1×1文档投影检查实际alpha，而非包围框、控制点或当前合成颜色；逐组视觉绘制顺序由上往下，考虑隐藏、祖先opacity和裁剪边界，透明孔洞可命中下层。group模式返回命中内容层的最近父组，无父组则该层。默认ignoreLocked=false可命中锁定层并报告editable=false，写入拒绝；开启该项才跳过锁定层/父组。拾取不包含参考图像、尺规或画布背景。READ_ONLY的move.hit不选层；内容模式拖动在同一工程锁/绑定revision内重新检查起点命中并移动/选层，未命中不猜测、不写历史。点击的零位移仅选择命中层，无选层变化则无操作。
+
+移动工具共享资源`move-settings.json`，独立revision与expectedSettingsRevision防覆盖，手机400ms轮询与Resident/Host共用。字段：layerMode=current/content/group、moveScope=auto/layer/selection、unit=px/mm/cm/in/pt、ppi=72、step=1、largeMultiplier=10、alphaThreshold=1、ignoreLocked=false。**PPI仅工具单位换算**：目前工程没有印刷DPI元数据，默认72不是声称工程为72DPI；不改变导出像素尺寸。单位切换保留原像素步进，修改PPI可改变物理单位换算。方向键在文档轴上移动，Shift×largeMultiplier，至少1文档像素，独立于屏幕zoom/angle；参数面板带普通/放大方向按钮和数值位移，二者始终当前层。拖动只显示位移线/数值，松手才应用，Esc或双指手势取消拖动，不写半笔历史；Shift拖动锁轴，Alt拖动以1/5精度移动。
+
+兰儿入口为 `plugin.art.studio.move.info` / `move.settings` / `move.configure` / `move.hit` / `move.apply` / `move.nudge`，搜索均带简例与关键字段约束。
+
+```json
+move.settings {}
+move.configure {"expectedSettingsRevision":0,"unit":"mm","ppi":300,"step":0.1,"largeMultiplier":10}
+move.hit {"x":100,"y":100,"layerMode":"content"}
+move.apply {"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","moveScope":"selection","dx":20,"dy":0,"unit":"px"}
+move.apply {"documentId":"DOCUMENT_ID","expectedRevision":0,"moveScope":"layer","layerMode":"group","pickX":100,"pickY":100,"dx":10,"dy":20,"unit":"px"}
+move.nudge {"documentId":"DOCUMENT_ID","expectedRevision":0,"direction":"right","large":true}
+```
+
+替换ID/作品revision和设置revision；apply/nudge强制作品身份守卫；hit可选同样守卫，返回可供下一步使用的documentId/expectedRevision。API位移应显式unit，物理单位可显式ppi；省略从共享设置读取。拾取坐标永远原画整数像素，与unit无关。像素投影为8位sRGB，非HDR/ICC原始值；选区范围≤4194304像素、边长≤16384、坐标±1000000；每轴单次位移±16384；像素事件使用共享对象矩阵限制（元素绝对值≤1000000、行列式绝对值≥1e-8），不可逆/超限变换拒绝；最多128可见内容拾取候选；仍受image.limits预算限制，超限明确拒绝。
+
+版本0.2.66、versionCode69、applicationId `com.ai.limbs.payload.artstudio.v0266`，228项能力。补12项单位、步进、量化、选区框、父组可见性、绘制次序及覆盖alpha用例；只做静态源码/JSON/schema/版本/传输完整性核对，**未编译、未执行测试、未推云端**。
+
+部署后须实机验收：一笔跨越选区边界，仅框内像素移动而框外笔画留原位；硬/软/羽化/孔洞/贝塞尔/异或选区；半透明内容、重叠SRC_OVER及零位移；组内变换层、裁剪边界与画布外来回搬移；图片层和粘贴/填充/渐变等contentOrder内容；不透明/透明孔洞、隐藏父组、父组opacity、锁定及最近组拾取；单位转换、方向键/Shift倍数与屏幕旋转；撤销/重开/导出/取色一致；工程切换/版本变化拒绝、资源写入失败不留无主PNG，以及Host/Resident设置同步。实际像素与触控响应尚未验收。

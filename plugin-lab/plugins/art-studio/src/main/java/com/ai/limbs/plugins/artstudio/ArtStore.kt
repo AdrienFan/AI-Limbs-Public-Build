@@ -137,6 +137,87 @@ internal class ArtStore(private val root: File) {
 
     fun current(): JSONObject = locked { snapshot(loadCurrent()) }
 
+    private fun moveSettingsFile()=File(root,"move-settings.json")
+    fun moveSettings():JSONObject=locked {
+        val file=moveSettingsFile()
+        if(file.isFile)ArtMove.validateSettings(JSONObject(file.readText())) else ArtMove.defaults()
+    }
+    fun configureMove(p:JSONObject):JSONObject=locked {
+        val old=moveSettings();require(p.getLong("expectedSettingsRevision")==old.getLong("revision")) {"移动工具设置已更新，请重新读取"}
+        val next=ArtMove.settings(old,p)
+        if(next.toString()==old.toString())return@locked old
+        require(old.getLong("revision")<Long.MAX_VALUE)
+        next.put("revision",old.getLong("revision")+1);atomic(moveSettingsFile(),next.toString());next
+    }
+    private fun moveSnapshot(p:JSONObject,write:Boolean):JSONObject {
+        val snap=current()
+        if(write || p.has("documentId"))require(p.getString("documentId")==snap.getString("id")) {"工程已切换，请重新开始移动"}
+        if(write || p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已更新，请重新开始移动"}
+        return snap
+    }
+    fun moveHit(p:JSONObject):JSONObject=locked {
+        val snap=moveSnapshot(p,false)
+        val options=ArtMove.settings(moveSettings(),p)
+        if(options.getString("layerMode")=="current")options.put("layerMode","content")
+        ArtMove.hit(this,snap,p.getInt("x"),p.getInt("y"),options)
+            .put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+    }
+    fun moveNudge(actor:String,p:JSONObject):JSONObject=locked {
+        val options=ArtMove.settings(moveSettings(),p)
+        val delta=ArtMove.nudge(p.getString("direction"),p.optBoolean("large",false),options)
+        move(actor,JSONObject(p.toString()).put("dx",delta.first).put("dy",delta.second).put("unit","px")
+            .put("layerMode","current"))
+    }
+    fun move(actor:String,p:JSONObject):JSONObject=locked {
+        require(actor in setOf("AWEI","LANER"))
+        val snap=moveSnapshot(p,true);val state=snap.getJSONObject("state")
+        val options=ArtMove.settings(moveSettings(),p)
+        val pixels=ArtMove.selectionMode(state,options.getString("moveScope"))
+        val id=if(pixels || options.getString("layerMode")=="current")p.optString("layerId",state.getString("selectedLayerId")) else {
+            require(!p.has("layerId")) {"内容拾取模式不同时指定layerId"}
+            val hit=ArtMove.hit(this,snap,p.getInt("pickX"),p.getInt("pickY"),options)
+            require(hit.getBoolean("hit")) {"该位置没有命中可移动图层"};hit.getString("layerId")
+        }
+        val layer=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==id} ?: error("移动图层不存在")
+        require(layer.getString("kind") in setOf("paint","image","text","vector","group","colorize"))
+        require(ArtMove.visibility(state,layer)>0 && !ArtMenuOperations.isLocked(state,layer)) {"移动图层或父组已隐藏、透明或锁定"}
+        if(pixels)require(layer.getString("kind") in setOf("paint","image")) {"选区像素搬移只支持绘画层和图像层；请显式切换整层模式，不自动栅格化"}
+        val (dx,dy)=ArtMove.delta(p,options,pixels)
+        val receipt=JSONObject().put("layerId",id).put("mode",if(pixels)"pixels" else "layer")
+            .put("documentDx",dx).put("documentDy",dy).put("unit",p.optString("unit",options.getString("unit")))
+        if(dx==0.0 && dy==0.0) {
+            if(id==state.getString("selectedLayerId"))return@locked snap.put("movement",receipt.put("operationApplied",false))
+            return@locked appendToCurrent(actor,"MOVE_LAYER",JSONObject().put("layerId",id).put("x",layer.getDouble("x")).put("y",layer.getDouble("y")))
+                .put("movement",receipt.put("operationApplied",true).put("selectedLayerOnly",true))
+        }
+        if(!pixels) {
+            val offset=floatArrayOf(dx.toFloat(),dy.toFloat())
+            if(layer.optString("parentId").isNotBlank()) {
+                val parent=ArtMenuOperations.layers(state).first {it.getString("id")==layer.getString("parentId")}
+                val inverse=Matrix();require(ArtShapes.layerMatrix(state,parent).invert(inverse));inverse.mapVectors(offset)
+            }
+            val x=layer.getDouble("x")+offset[0];val y=layer.getDouble("y")+offset[1]
+            require(x.isFinite() && y.isFinite() && kotlin.math.abs(x)<=1000000 && kotlin.math.abs(y)<=1000000)
+            appendToCurrent(actor,"MOVE_LAYER",JSONObject().put("layerId",id).put("x",x).put("y",y))
+                .put("movement",receipt.put("operationApplied",true))
+        } else {
+            val selection=state.getJSONObject("selection")
+            val movedSelection=ArtMove.shiftedSelection(selection,dx,dy)
+            val inverse=Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse)) {"图层变换不可逆"}
+            val capture=ArtMovePixels.capture(this,snap,id,selection)
+            val asset=UUID.randomUUID().toString()
+            val params=JSONObject().put("layerId",id).put("asset",asset).put("sourceSelection",capture.mask)
+                .put("selectionToLayer",ArtShapes.encode(inverse)).put("selection",movedSelection)
+                .put("x",capture.bounds.left).put("y",capture.bounds.top).put("width",capture.bounds.width()).put("height",capture.bounds.height())
+                .put("dx",dx.toInt()).put("dy",dy.toInt())
+            ArtMovePixels.validate(params)
+            atomicBytes(assetFile(asset),capture.bytes)
+            val result=try {appendToCurrent(actor,"MOVE_PIXELS",params)}
+                catch(error:Throwable) {assetFile(asset).delete();throw error}
+            result.put("movement",receipt.put("operationApplied",true).put("visiblePixels",capture.visiblePixels).put("sourceStrokeRecordsRetained",true))
+        }
+    }
+
     private fun colorWorkspaceFile() = File(root, "color-workspace.json")
     fun colorState(): JSONObject = locked {
         val file = colorWorkspaceFile()
@@ -255,13 +336,13 @@ internal class ArtStore(private val root: File) {
 
     fun menuContext(): JSONObject = locked {
         JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
-            .put("layerClipboard", layerClipboard.isFile)
+            .put("layerClipboard", layerClipboard.isFile).put("moveSettings",moveSettings())
             .put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
     }
 
     fun menuUiState(): JSONObject = locked {
         JSONObject().put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
-            .put("layerClipboard",layerClipboard.isFile)
+            .put("moveSettings",moveSettings()).put("layerClipboard",layerClipboard.isFile)
             .put("request", if (menuUiRequest.isFile) JSONObject(menuUiRequest.readText()) else JSONObject.NULL)
     }
 
@@ -1429,6 +1510,14 @@ internal class ArtStore(private val root: File) {
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
+        if(type=="SELECTION_EDIT" && params.getString("action")=="MOVE") {
+            val request=JSONObject(params.toString()).put("moveScope","selection").put("layerMode","current").put("unit","px")
+            if(!request.has("dx"))request.put("dx",0.0)
+            if(!request.has("dy"))request.put("dy",0.0)
+            if(!request.has("documentId"))request.put("documentId",doc.getString("id"))
+            if(!request.has("expectedRevision"))request.put("expectedRevision",doc.getJSONArray("operations").length())
+            return@locked move(actor,request)
+        }
         if (type=="SELECTION_TOOL" || type=="SELECTION_BEZIER" || type.startsWith("SHAPE_") || type.startsWith("REFERENCE_") || type.startsWith("ASSISTANT_") || type.startsWith("COLORIZE_") ||
             (type=="STROKE_ADD" && params.has("documentId")) || type == "VECTOR_LAYER_CREATE") {
             require(params.getString("documentId") == doc.getString("id")) { "工程已切换，请重新读取工程" }
@@ -2145,6 +2234,8 @@ internal class ArtStore(private val root: File) {
                     else -> "绘制笔画"
                 }
                 "STROKE_ERASE" -> "删除笔画"
+                "MOVE_LAYER" -> "移动图层"
+                "MOVE_PIXELS" -> "移动选区像素"
                 "TRANSFORM" -> "变换图层"
                 "CROP" -> "裁剪画布"
                 "LAYER_CROP" -> "裁剪图层边界"
@@ -2620,6 +2711,20 @@ internal class ArtStore(private val root: File) {
                 val index = (0 until strokes.length()).firstOrNull { strokes.getJSONObject(it).getString("id") == p.getString("strokeId") }
                     ?: error("笔画不存在")
                 strokes.remove(index)
+            }
+            "MOVE_LAYER" -> {
+                val layer=find(p.getString("layerId")).second
+                require(!lockedByParent(layer,layers))
+                for(key in listOf("x","y")) {val value=p.getDouble(key);require(value.isFinite() && kotlin.math.abs(value)<=1000000);layer.put(key,value)}
+                state.put("selectedLayerId",layer.getString("id"))
+            }
+            "MOVE_PIXELS" -> {
+                val layer=find(p.getString("layerId")).second
+                require(layer.getString("kind") in setOf("paint","image") && !lockedByParent(layer,layers))
+                ArtMovePixels.validate(p);validateId(p.getString("asset"));ArtSelection.validate(p.getJSONObject("selection"))
+                contentOrder(layer).put(JSONObject(p.toString()).put("kind","move_pixels"))
+                state.put("selection",JSONObject(p.getJSONObject("selection").toString()))
+                state.put("selectedLayerId",layer.getString("id"))
             }
             "TRANSFORM" -> {
                 val layer = find(p.getString("id")).second
