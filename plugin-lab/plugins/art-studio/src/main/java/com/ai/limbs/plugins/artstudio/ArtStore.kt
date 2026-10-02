@@ -997,9 +997,9 @@ internal class ArtStore(private val root: File) {
 
     fun assistantStroke(actor: String,p: JSONObject): JSONObject = locked {
         val snap=current()
-        val projected=if(p.optString("tool","ink")=="dyna") {
+        val projected=if(p.optString("tool","ink") in setOf("dyna","line")) {
             require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
-            // Dynamic filtering precedes guide projection; passing projected raw input here would reverse that order.
+            // Dynamic filtering and straight-line geometry resolve their own document-space guide projection.
             JSONObject().put("points",p.getJSONArray("points")).put("assistantId",p.getString("id"))
         } else assistantProject(p)
         val state=snap.getJSONObject("state")
@@ -1017,6 +1017,30 @@ internal class ArtStore(private val root: File) {
             .put("assistantId",projected.getString("assistantId")).put("points",output)
             .put("width",p.getDouble("width"))
         apply(actor,"STROKE_ADD",stroke)
+    }
+
+    fun lineGeometry(p:JSONObject):JSONObject = locked {
+        val snap=current()
+        require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
+        ArtLine.geometry(p,snap.getJSONObject("state")).put("coordinateSpace","layer-local")
+            .put("revision",snap.getInt("revision"))
+    }
+    fun lineDraw(actor:String,p:JSONObject):JSONObject = locked {
+        val snap=current();val state=snap.getJSONObject("state")
+        require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
+        val layer=ArtMenuOperations.layers(state).first {it.getString("id")==p.getString("layerId")}
+        require(layer.getString("kind") in setOf("paint","vector") && !ArtMenuOperations.isLocked(state,layer) && ArtShapes.visible(state,layer)) {"请选择可编辑的绘画或矢量图层"}
+        if(layer.getString("kind")=="paint")apply(actor,"STROKE_ADD",JSONObject(p.toString()).put("tool","line").put("id",UUID.randomUUID().toString()))
+        else {
+            require(!p.has("brushPresetId") && !p.has("brush")) {"矢量直线不使用栅格笔刷配置"}
+            val line=ArtLine.geometry(p,state)
+            val endpoints=ArtBrush.samples(line.getJSONArray("lineEndpoints"))
+            val shape=JSONObject().put("id",UUID.randomUUID().toString()).put("kind","line").put("points",JSONArray(endpoints.map {JSONArray().put(it.x).put(it.y)}))
+                .put("stroke",p.getString("color")).put("strokeWidth",p.getDouble("width"))
+                .put("opacity",p.optDouble("opacity",1.0)).put("fill","#00000000")
+            apply(actor,"SHAPE_CREATE",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+                .put("layerId",p.getString("layerId")).put("shape",shape))
+        }
     }
 
     fun assistantPreview(p: JSONObject): JSONObject = locked {
@@ -1115,6 +1139,7 @@ internal class ArtStore(private val root: File) {
                     normalized=ArtMirror.normalize(normalized,state.getInt("width"),state.getInt("height"))
                 }
                 if(tool=="dyna")normalized=ArtDyna.normalize(normalized,snapshot(doc).getJSONObject("state"))
+                if(tool=="line")normalized=ArtLine.geometry(normalized,snapshot(doc).getJSONObject("state"))
                 val brushTool=ArtBrush.engineTool(normalized)
                 val preset=if(normalized.has("brushPresetId"))brushPreset(normalized.getString("brushPresetId")) else null
                 require(preset==null || preset.getString("tool")==brushTool) {"预设与当前工具不匹配"}
@@ -2058,7 +2083,8 @@ internal class ArtStore(private val root: File) {
                 require(tool in setOf("pencil", "ink", "eraser", "soft", "spray", "mirror", "dyna", "calligraphy",
                     "line", "rectangle", "ellipse", "polygon", "polyline", "bezier", "gradient"))
                 require(when (tool) {
-                    "line", "rectangle", "ellipse", "gradient" -> points.length() == 2
+                    "line" -> p.has("brush") || points.length()==2
+                    "rectangle", "ellipse", "gradient" -> points.length() == 2
                     "polygon" -> points.length() >= 3
                     "polyline" -> points.length() >= 2
                     "bezier" -> points.length() in 4..1024 && (points.length() - 1) % 3 == 0

@@ -21,7 +21,7 @@ internal object ArtAssistants {
         "parallel_ruler" to "平行尺", "ellipse" to "椭圆", "concentric_ellipse" to "同心椭圆",
         "vanishing_point" to "消失点")
     val pending = listOf("三次曲线尺规", "透视网格", "透视椭圆", "双点透视组合", "鱼眼", "曲线透视", "局部作用区域", "固定长度单位")
-    val brushTools = setOf("ink","pencil","soft","spray","eraser","calligraphy","mirror","dyna")
+    val brushTools = setOf("ink","pencil","soft","spray","eraser","calligraphy","mirror","dyna","line")
     fun count(type: String) = when(type) {
         "vanishing_point" -> 1
         "ellipse","concentric_ellipse" -> 3
@@ -155,10 +155,10 @@ internal object ArtAssistants {
             return result
         }
     }
-    class SnapSession(state: JSONObject,val start: AssistantPoint,val tolerance: Double) {
+    class SnapSession(state: JSONObject,val start: AssistantPoint,val tolerance: Double,allowedTypes:Set<String> = types.keys) {
         private val options=settings(state)
         private val candidates=items(state).filter { a ->
-            a.getBoolean("visible") && a.getBoolean("enabled") &&
+            a.getString("type") in allowedTypes && a.getBoolean("visible") && a.getBoolean("enabled") &&
                 (!options.getBoolean("onlySelected") || a.getString("id")==selected(state)) &&
                 !(a.getString("type")=="vanishing_point" && (start-points(a)[0]).length()<0.01) &&
                 !(a.getString("type")=="concentric_ellipse" && (start-ellipse(a).center).length()<0.01)

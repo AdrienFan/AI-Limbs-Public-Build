@@ -695,3 +695,18 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 示例包含真实有效的数字、动作名和格式，同时如实说明动态对象、剪贴板、选区、图层锁定等前置条件。PNG/JPEG导出保存原尺寸文件并返回路径；它不会返回原尺寸图片块，实际预览使用 `view.command` 或 `canvas.region`。此轮不改变导出或传输机制。
 
 版本0.2.41 / versionCode44 / appId v0241。增加云端 JVM 用例检查全部示例与注册参数的必填字段、类型、枚举、颜色和坐标说明；静态清单检查保证示例与manifest能力集合完全一致。只允许云端编译，安装后仍需通过实际 `capability.describe` 验收新说明。
+
+
+### 0.2.45：当前笔刷直线与绘制中调整（尚未编译）
+
+- 参照 Krita 6.0.4 `plugins/tools/basictools/kis_tool_line.cc` 的 `continuePrimaryAction/straightLine/snapToAssistants`，以及 `kis_tool_line_helper.cpp` 的传感器沿线重排与平移行为；采用插件自身 Kotlin/dab-v1 引擎实现，未复用 Krita 源码。
+- 绘画层直线使用当前六类笔刷中的主笔（自由画笔/铅笔/软笔/喷枪/橡皮/栅格书法）、共享预设、笔尖、纹理和动态曲线。保留实际历史事件的压力/相对时间/倾斜/笔方向角，沿最终首尾轴按起点距离重排并去掉超出终点的采样，笔刷印章间插值。关闭设备传感器后，对应动态通道不参与；方向和随机通道仍可用。直线不运行自由轨迹的加权平滑/稳定器，禁用停驻定时喷绘，像素完美模式可用。
+- 默认拖动抬手完成；起笔后 Alt 平移整条线（起笔时已按 Alt 要先松开再按），Shift 按文档角度 15° 约束。手机可开启“抬手暂存”，抬手后切换“移动起点”再拖动，或改终点，最后“完成直线/取消”；Enter/Esc 同样可用。选择工程/图层/工具、更新版本、双指视图操作及退出页面取消草稿；提交绑定起笔的 documentId/revision/layerId。
+- 可吸附可见且启用的直尺、无限尺、平行尺、消失点；直线不沿椭圆变为曲线。手机在角度约束时优先角度，移动中保持线段平移；API 同时指定非零 angleStep 与 assistantId 会明确拒绝。角度与平移在文档空间完成，采样与线段端点保存为图层局部。矢量层仍创建可编辑的两端点描边线段，不应用栅格纹理/传感器。
+- 兰儿入口：`line.info` 读范围，`line.geometry` 只算端点/采样，`line.draw` 绘画/矢量统一入口；`stroke.add(tool=line)` 和 `assistant.stroke(tool=line)` 接入同一几何/笔刷链路。`lineInput/lineEndpoints/lineVersion=1` 与通用 brushInput/最终 points 固化历史，重放不重算尺规；原有无 brush 的直线记录继续按原格式渲染。
+
+简例（ID 和 revision 换成当前值）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[20,30,0.3,0],[80,55,0.7,50],[160,95,1,100]],"color":"#FF245364","width":6,"brushTool":"ink","useSensors":true,"angleStep":15}
+```
+沿尺规：`angleStep:0, assistantId:"GUIDE_ID"`；整体移动起点：`lineOffset:[10,0]`（文档像素）；矢量层省略 `brush/brushPresetId`。新入口通过 capability 元数据直接携带简例和字段约束。版本 `0.2.45` / versionCode `48` / applicationId `com.ai.limbs.payload.artstudio.v0245`。本批只做静态检查和开发仓库保存，未执行编译、测试或云端推送，运行效果待后续部署验证。

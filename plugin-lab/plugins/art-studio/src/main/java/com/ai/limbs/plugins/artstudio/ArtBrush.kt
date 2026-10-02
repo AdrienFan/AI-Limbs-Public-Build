@@ -21,8 +21,8 @@ internal object ArtBrush {
             time+(b.time-time)*t,tilt+(b.tilt-tilt)*t,rotation+(b.rotation-rotation)*t)
     }
     data class Dab(val sample:Sample,val size:Double,val flow:Double,val angle:Double,val ordinal:Int)
-    fun supports(tool:String)=tool in tools || tool in setOf("mirror","dyna")
-    fun engineTool(stroke:JSONObject)=if(stroke.getString("tool") in setOf("mirror","dyna"))stroke.optString("brushTool","ink") else stroke.getString("tool")
+    fun supports(tool:String)=tool in tools || tool in setOf("mirror","dyna","line")
+    fun engineTool(stroke:JSONObject)=if(stroke.getString("tool") in setOf("mirror","dyna","line"))stroke.optString("brushTool","ink") else stroke.getString("tool")
     fun defaults(tool:String):JSONObject {
         require(tool in tools)
         val dynamics=JSONObject()
@@ -179,6 +179,15 @@ internal object ArtBrush {
     }
     fun prepare(stroke:JSONObject,brush:JSONObject,seed:Int,finished:Boolean=true):JSONObject {
         require(seed>=0);val settings=settings(engineTool(stroke),brush)
+        if(stroke.getString("tool")=="line") {
+            // Straight geometry must reach both endpoints; cursor smoothing and timed airbrushing are freehand-only.
+            if(settings.getJSONObject("smoothing").getString("mode")!="pixel_perfect")settings.getJSONObject("smoothing").put("mode","none")
+            settings.put("airbrushRate",0)
+            if(!stroke.getBoolean("useSensors"))channels.keys.forEach {key ->
+                val rule=settings.getJSONObject("dynamics").getJSONObject(key)
+                if(rule.getString("sensor") in setOf("pressure","speed","tilt","rotation"))rule.put("enabled",false)
+            }
+        }
         val raw=stroke.getJSONArray("points");val output=process(samples(raw),settings,finished)
         val result=JSONObject(stroke.toString()).put("brush",settings).put("brushSeed",seed)
             .put("brushInput",JSONArray(raw.toString())).put("brushProcessed",true).put("points",JSONArray(output.map {it.json()}))
@@ -189,6 +198,7 @@ internal object ArtBrush {
         settings(engineTool(stroke),stroke.getJSONObject("brush"))
         if(stroke.getString("tool")=="mirror")ArtMirror.validateStored(stroke)
         if(stroke.getString("tool")=="dyna")ArtDyna.validateStored(stroke)
+        if(stroke.getString("tool")=="line")ArtLine.validateStored(stroke)
         samples(stroke.getJSONArray("brushInput"));samples(stroke.getJSONArray("points"))
     }
     fun noise(seed:Int,index:Int,salt:Int):Double {
