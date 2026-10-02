@@ -429,6 +429,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var magneticImage by remember {mutableStateOf<ArtMagneticSelection.Image?>(null)}
     var magneticDraft by remember {mutableStateOf(false)}
     var comicPanelSettings by remember {mutableStateOf(ArtComicPanels.defaults())}
+    var encloseFillDraft by remember {mutableStateOf(false)}
     var encloseFillSettings by remember {mutableStateOf(ArtEncloseFill.defaults())}
     var smartPatchSettings by remember { mutableStateOf(ArtSmartPatch.info().getJSONObject("defaults")) }
     var assistantAdding by remember { mutableStateOf(true) }
@@ -1511,6 +1512,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.comicPanelOptions=comicPanelSettings
                     view.onComicPanel={mode,p -> if(!busy)perform {store.comicEdit("AWEI",mode,p)}}
                     view.encloseFillOptions=encloseFillSettings
+                    view.onEncloseFillDraft={encloseFillDraft=it}
                     view.onEncloseFill={p -> if(!busy)perform {store.encloseFill("AWEI",p)}}
                     view.smartPatchOptions = smartPatchSettings
                     view.onSmartPatch = { p -> if(!busy)perform { store.smartPatch("AWEI",p) } }
@@ -2457,7 +2459,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         {p -> if(!busy)perform {store.apply("AWEI","SHAPE_STYLE",p)}})
                 }
                 if(tool=="enclose_fill") {
-                    StudioEncloseFillOptions(encloseFillSettings,busy,color,{colorText=color;colorDialog=true},{encloseFillSettings=it})
+                    StudioEncloseFillOptions(store,encloseFillSettings,busy,encloseFillDraft,color,{colorText=color;colorDialog=true},{encloseFillSettings=it},{command->canvasRef[0]?.encloseFillCommand(command)})
                 }
                 if(tool=="smart_patch") {
                     StudioSmartPatchOptions(smartPatchSettings,busy,{smartPatchSettings=it})
@@ -3233,7 +3235,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var shapeMultiple: Boolean = false
     var shapeShear: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value){fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {field=value;if(value){encloseFillInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3266,7 +3268,16 @@ private class StudioCanvas(context: Context) : View(context) {
     private val comicPanelInteraction=StudioComicPanelInteraction()
     var comicPanelOptions=ArtComicPanels.defaults()
     var onComicPanel: (String,JSONObject)->Unit = {_,_->}
-    private val encloseFillInteraction=StudioEncloseFillInteraction()
+    private val encloseFillInteraction=StudioEncloseFillInteraction(this)
+    var onEncloseFillDraft:(Boolean)->Unit={}
+        set(value) {field=value;encloseFillInteraction.onDraft=value}
+    fun encloseFillCommand(command:String) {
+        if(shapeBusy)return
+        try {encloseFillInteraction.command(command,documentId,sceneRevision,selectedId,matrix,onEncloseFill)}
+        catch(error:Exception) {encloseFillInteraction.cancel();android.util.Log.e("ArtStudio","Enclose fill command failed",error)
+            Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
+        invalidate()
+    }
     var encloseFillOptions=ArtEncloseFill.defaults()
     var onEncloseFill: (JSONObject)->Unit = {}
     private val colorizeInteraction=StudioColorizeInteraction()

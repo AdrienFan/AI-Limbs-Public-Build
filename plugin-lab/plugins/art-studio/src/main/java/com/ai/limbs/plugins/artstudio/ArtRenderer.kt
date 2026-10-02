@@ -129,9 +129,7 @@ internal object ArtRenderer {
                                     "paste", "erase" -> {
                                         val inserted = ArtImagePolicy.decodeAsset(store.assetFile(event.getString("asset")))
                                         try {
-                                            val insertPaint = Paint(Paint.FILTER_BITMAP_FLAG)
-                                            if (event.getString("kind") == "erase")
-                                                insertPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+                                            val insertPaint = ArtPixelBlend.paint(event)
                                             local.drawBitmap(inserted, event.getInt("x").toFloat(),
                                                 event.getInt("y").toFloat(), insertPaint)
                                         } finally { inserted.recycle() }

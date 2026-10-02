@@ -462,11 +462,11 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                 it.optString("parentId") == layer.optString("id") && it.optBoolean("visible", true)
             }.forEach { drawLayer(canvas, it, siblings, docW, docH, depth + 1) }
             else -> {
-                if(layer.getString("kind") in setOf("image", "text")) drawAsset(canvas,layer.getString("asset"),0,0,false)
+                if(layer.getString("kind") in setOf("image", "text")) drawAsset(canvas,layer.getString("asset"),0,0,Paint(Paint.FILTER_BITMAP_FLAG))
                 if(layer.getString("kind")=="colorize") {
                     val data=layer.getJSONObject("colorize")
                     if(data.getJSONObject("settings").getBoolean("showOutput") && layer.getString("asset").isNotBlank())
-                        drawAsset(canvas,layer.getString("asset"),data.getInt("outputX"),data.getInt("outputY"),false)
+                        drawAsset(canvas,layer.getString("asset"),data.getInt("outputX"),data.getInt("outputY"),Paint(Paint.FILTER_BITMAP_FLAG))
                 }
                 if(layer.getString("kind")=="vector") ArtShapes.draw(canvas,layer)
                 val strokes=layer.getJSONArray("strokes")
@@ -479,7 +479,7 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                         val event=order.getJSONObject(n)
                         when(event.getString("kind")) {
                             "stroke" -> byId[event.getString("id")]?.let { ArtRenderer.drawStroke(canvas,it) }
-                            "paste","erase" -> drawAsset(canvas,event.getString("asset"),event.getInt("x"),event.getInt("y"),event.getString("kind")=="erase")
+                            "paste","erase" -> drawAsset(canvas,event.getString("asset"),event.getInt("x"),event.getInt("y"),ArtPixelBlend.paint(event))
                             "clear","fill" -> {
                                 val clip=event.optJSONObject("selection");val erase=event.getString("kind")=="clear"
                                 ArtSoftSelection.draw(canvas,clip,erase=erase) {
@@ -500,7 +500,7 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
         canvas.restore()
     }
 
-    private fun drawAsset(canvas:Canvas,asset:String,x:Int,y:Int,erase:Boolean) {
+    private fun drawAsset(canvas:Canvas,asset:String,x:Int,y:Int,paint:Paint) {
         val source=requireNotNull(store)
         val image=decoded[asset] ?: run {
             val file=source.assetFile(asset)
@@ -515,8 +515,6 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
             result
         }
         val bounds=assetBounds.getValue(asset)
-        val paint=Paint(Paint.FILTER_BITMAP_FLAG)
-        if(erase) paint.xfermode=android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_OUT)
         canvas.drawBitmap(image,Rect(0,0,image.width,image.height),
             RectF(x.toFloat(),y.toFloat(),(x+bounds.first).toFloat(),(y+bounds.second).toFloat()),paint)
     }

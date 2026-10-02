@@ -2086,8 +2086,10 @@ internal class ArtStore(private val root: File) {
                             y.toLong()+h<=state.getInt("height") && w.toLong()*h<=ArtEncloseFill.MAX_PIXELS)
                     }
                     val kind = if (p.optString("action") in setOf("FILL_CONTIGUOUS_ERASE","ENCLOSE_ERASE")) "erase" else "paste"
+                    val blend=ArtPixelBlend.validate(p.optString("blend","normal"))
+                    require(kind!="erase" || blend=="normal") {"擦除记录不能使用颜色混合模式"}
                     order.put(JSONObject().put("kind", kind).put("asset", p.getString("asset"))
-                        .put("x", p.getInt("x")).put("y", p.getInt("y")))
+                        .put("blend",blend).put("x", p.getInt("x")).put("y", p.getInt("y")))
                 } else {
                     val x = p.getInt("x"); val y = p.getInt("y")
                     val width = p.getInt("width"); val height = p.getInt("height")
@@ -2700,36 +2702,36 @@ internal class ArtStore(private val root: File) {
         val state=replay(doc);val layer=editableLayer(state);ArtEncloseFill.target(layer)
         require(p.getString("layerId")==layer.getString("id")) {"目标图层已改变，请重新围合"}
         val settings=ArtEncloseFill.options(p)
-        val color=if(settings.getBoolean("erase")) Color.WHITE else Color.parseColor(p.getString("color").also {requireColor(it)})
-        require(settings.getBoolean("erase") || Color.alpha(color)>0) {"填充色不能完全透明，请使用擦除模式"}
-        val points=ArtEncloseFill.points(p.getJSONArray("points"))
-        val area=ArtEncloseFill.area(state,settings,points)
-        val view=if(settings.getString("reference")=="current")
-            ArtMenuOperations.isolated(snapshot(doc),setOf(layer.getString("id")),layer.getString("id")) else snapshot(doc)
-        val viewState=view.getJSONObject("state");viewState.put("background","#00000000")
-        if(settings.getString("reference")=="current")ArtMenuOperations.layers(viewState)
-            .first {it.getString("id")==layer.getString("id")}.put("opacity",1.0).put("blend","normal")
-        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,viewState,state.getInt("width"),state.getInt("height"))+
-            area.rect.width().toLong()*area.rect.height()*96,"围合填充")
-        val source=ArtRenderer.render(this,view)
-        val result=try {ArtEncloseFill.solve(state,source,settings,area,color)} finally {source.recycle()}
-        val receipt=JSONObject().put("filledPixels",result.pixels).put("selectedRegions",result.regions)
-            .put("algorithm","enclosed-rgba-regions").put("reference",settings.getString("reference"))
-        if(result.pixels==0) {
-            result.bitmap.recycle()
-            return@locked snapshot(doc).put("encloseResult",receipt.put("changed",false).put("message","没有符合条件的可写入区域"))
-        }
-        val bytes=try {ArtImagePolicy.encodePng(result.bitmap,MAX_ASSET_BYTES)} finally {result.bitmap.recycle()}
-        val asset=UUID.randomUUID().toString()
+        val color=if(settings.getBoolean("erase"))Color.WHITE else Color.parseColor(p.getString("color").also {requireColor(it)})
+        require(settings.getBoolean("erase") || settings.getString("fillType")=="pattern" || Color.alpha(color)>0) {"填充色不能完全透明，请使用擦除模式"}
+        val request=ArtEncloseFill.geometry(p,settings).put("layerId",layer.getString("id"))
+        val points=if(request.has("points"))ArtEncloseFill.points(request.getJSONArray("points")) else emptyList()
+        val area=ArtEncloseFill.area(state,request,points)
+        val source=selectionReference(snapshot(doc),request,area.rect.width().toLong()*area.rect.height()*96)
+        val resources=mutableMapOf<String,Bitmap>();var overlay:Bitmap?=null
         try {
-            atomicBytes(assetFile(asset),bytes)
-            appendToCurrent(actor,"PIXEL_PASTE",JSONObject().put("asset",asset).put("layerId",layer.getString("id"))
-                .put("action",if(settings.getBoolean("erase"))"ENCLOSE_ERASE" else "ENCLOSE_FILL")
-                .put("x",area.rect.left).put("y",area.rect.top).put("width",area.rect.width()).put("height",area.rect.height())
-                .put("settings",settings).put("points",JSONArray().apply {points.forEach {put(JSONArray().put(it.first).put(it.second))}})
-                .put("filledPixels",result.pixels).put("algorithm","enclosed-rgba-regions"))
-                .put("encloseResult",receipt.put("changed",true))
-        } catch(error: Throwable) {assetFile(asset).delete();throw error}
+            val result=ArtEncloseFill.solve(state,source,request,area,color) {id->resources.getOrPut(id) {
+                val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
+                val size=BitmapFactory.Options().apply {inJustDecodeBounds=true};BitmapFactory.decodeFile(file.absolutePath,size)
+                require(size.outWidth in 1..512 && size.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
+                ArtImagePolicy.decodeAsset(file)
+            }}
+            overlay=result.bitmap
+            val receipt=JSONObject().put("filledPixels",result.pixels).put("selectedRegions",result.regions)
+                .put("algorithm","shared-soft-enclose-v2").put("reference",settings.getString("reference")).put("blend",settings.getString("blend"))
+            if(result.pixels==0)return@locked snapshot(doc).put("encloseResult",receipt.put("changed",false).put("message","没有符合条件的可写入区域"))
+            val bytes=ArtImagePolicy.encodePng(result.bitmap,MAX_ASSET_BYTES);val asset=UUID.randomUUID().toString()
+            try {
+                atomicBytes(assetFile(asset),bytes)
+                val params=JSONObject().put("asset",asset).put("layerId",layer.getString("id"))
+                    .put("action",if(settings.getBoolean("erase"))"ENCLOSE_ERASE" else "ENCLOSE_FILL")
+                    .put("x",area.rect.left).put("y",area.rect.top).put("width",area.rect.width()).put("height",area.rect.height())
+                    .put("settings",settings).put("blend",settings.getString("blend"))
+                    .put("filledPixels",result.pixels).put("algorithm","shared-soft-enclose-v2")
+                val geometry=if(request.has("nodes"))"nodes" else "points";params.put(geometry,request.getJSONArray(geometry))
+                appendToCurrent(actor,"PIXEL_PASTE",params).put("encloseResult",receipt.put("changed",true))
+            } catch(error:Throwable) {assetFile(asset).delete();throw error}
+        } finally {source.recycle();overlay?.recycle();resources.values.forEach {it.recycle()}}
     }
 
     /** Compute pixels under the same document lock; only a complete result enters history. */

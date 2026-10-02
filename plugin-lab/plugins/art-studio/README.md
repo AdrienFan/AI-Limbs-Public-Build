@@ -588,7 +588,7 @@ smart_patch 从灰色工具格升级为基础局部纹理修补。单击选中�
 
 兰儿入口为 plugin.art.studio.enclose.info 和 plugin.art.studio.enclose.apply。apply 必须绑定 documentId、expectedRevision、layerId、shape 和文档像素坐标 points；矩形/椭圆恰好两个点、套索至少三个点、画笔至少一个点。非擦除时还必须 color=#AARRGGBB。其他字段与 info.defaults 相同。成功修改后在原结果中附带 thumbnail 与 mcp_content；进一步看细节仍用 canvas.region。
 
-贝塞尔围合、按外围轮廓颜色判定、图案填充、颜色标签参考组、最暗像素停止扩展、变换及组内图层写入、HDR 和动画保持灰色。基础版参数、算法和结果需编译及手机实测验收；本次仅完成源码静态检查与本地提交，没有执行编译、构建或测试，也没有上传云端。
+上述为0.2.34基础版范围；贝塞尔、图案变换、标签参考、最暗停止和软边已在0.2.56补充，见后文。仍待补按外围轮廓颜色判定、变换及组内目标写入、HDR和动画。基础版参数、算法和结果需编译及手机实测验收；本次仅完成源码静态检查与本地提交，没有执行编译、构建或测试，也没有上传云端。
 
 ## 贝塞尔曲线选区（0.2.35 源码，待编译验收）
 
@@ -906,3 +906,32 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 范围：软覆盖硬度0–100%（低于100需容差>0）、容差0–100%、抗锯齿0–1（默认0保留旧填充默认）、羽化0–32px、扩缩−64至64px、缺口0–32px。过大的缺口半径会去掉窄区域，有羽化时不重复抗锯齿。已有选区始终限制最终写入；关闭选区搜索边界仅放开搜索连通性。可显式给 `bounds={x,y,width,height}` 限定计算范围，所有软处理留在此范围内。
 
 一次最多512折线点、8192个不同像素种子、4194304搜索像素、33554432颜色搜索像素比较；已被全覆盖的种子跳过，超限明确提示缩小范围/分段，不保留部分写入。PNG资产仍限8MiB；最终PNG与设置一起入既有PIXEL_PASTE历史，撤销、重做、保存/导入和导出不重新搜索或读取后来修改的图案资源。0.2.55、versionCode58、applicationId `com.ai.limbs.payload.artstudio.v0255`；本轮不编译和推送。
+
+
+## 0.2.56 围合填充
+
+参考 Krita 6.0.4 的 `KisPathEnclosingProducer::addPathShape`、`KisToolEncloseAndFill::slot_delegateTool_enclosingMaskProduced`、`KisEncloseAndFillProcessingVisitor::fillPaintDevice` 以及 `KisEncloseAndFillPainter::Private::applyPostProcessing` 的职责和处理顺序，独立实现于本插件 RGBA8/Android 渲染管线，未复制其源码，不声称滤波或颜色差逐像素一致。
+
+贝塞尔围合直接复用逻辑节点和三次曲线构造：节点及控制柄为绝对文档坐标，末段也参与闭合，EVEN_ODD处理自交。手机点按放节点、拖动拉对称控制柄，回到首点或参数窗“完成围合”提交；可退回节点或取消。完成前无工程写入，工程/版本/图层/矩阵变化、工具切换、双指及Esc清除或拒绝旧草稿；首点固定颜色与参数，草稿期间禁止改变围合参数。
+
+软覆盖硬度opacitySpread=100仍为二值；否则按共享颜色选区距离公式产生0–255覆盖率。颜色/透明联合取max，排除条件及反选保留补集软覆盖。分区仍采用四邻域固定种子比较，现有选区不影响区域封闭判定。扩缩增为-64–64px，羽化0–32px、AA强度0–1；先扩缩（可最暗/alpha脊线停止）再羽化或AA，feather>0时不重复AA。为扩边预留处理外框，后处理可以超出原围合边界但不超画布；总处理范围最多4194304像素，参考渲染加96字节/处理像素预检。现有软选区仅以min相交一次，不再硬裁后重复乘alpha。
+
+参考支持current、visible及labels；标签取ArtLayerLabels的可见内容层/带标签组参考，空匹配明确报错，背景和辅助对象不入参考。只写入当前可见未锁定、未变换的根paint/image层。图案与连续填充共用同一选择/导入/平铺控件和ArtPatternRenderer：checker、stripes、dots及1–512px图片，前/背景#AARRGGBB，单元4–128px、缩放0.1–16、旋转±360度及文档偏移。图案以文档原点连续平铺，资产不随区域重置；透明图案也可作为擦除覆盖。
+
+填充可选17种Android BlendMode：normal、multiply、screen、overlay、darken、lighten、add、difference、exclusion、hard_light、soft_light、color_dodge、color_burn、hue、saturation、color、luminosity。混合对当前目标层的原始像素执行，再合成图层，与参考来源无关；erase仅允许normal并使用DST_OUT。最终PNG及blend保存在已有PIXEL_PASTE历史，主画布预览/导出共用ArtRenderer，图层缩略图也使用同一ArtPixelBlend映射；撤销、重做、保存/导入不重算颜色搜索或图案。旧无blend字段的像素记录按原有normal schema处理；未知模式拒绝。零有效alpha（含透明图案/opacity0）不入历史，失败不留下新结果资产。
+
+兰儿仍使用 `plugin.art.studio.enclose.info` 和 `plugin.art.studio.enclose.apply`，新字段与简洁示例可直接搜索/describe获取。ID及版本取document.info/layer.list；最简纯色调用：
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","shape":"rect","points":[[10,10],[100,100]],"includeContour":true,"color":"#FF245364"}
+```
+
+贝塞尔图案及软覆盖示例：
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","shape":"bezier","nodes":[{"x":20,"y":20,"out":[65,0]},{"x":120,"y":20,"in":[80,0]},{"x":120,"y":100},{"x":20,"y":100}],"includeContour":true,"color":"#FF245364","fillType":"pattern","pattern":{"kind":"stripes","foreground":"#FF245364","background":"#00000000","scale":1.5,"angle":30,"offset":[8,4]},"opacitySpread":50,"antialias":0.8,"expand":2,"stopAtDarkest":true,"blend":"multiply"}
+```
+
+标签参考加 `reference:"labels",colorLabels:[1,2]`，先用layer.properties设置图层标签；贝塞尔只传nodes，其他围合只传points。默认includeContour=false会排除触边区域，想填整个围合范围时设true。手机和能力共用同一Store/算法；成功仍带图像反馈，changed=false表示无有效输出。
+
+版本0.2.56、versionCode59、applicationId `com.ai.limbs.payload.artstudio.v0256`。本轮只做源码静态核对与本地Git提交，不编译、不运行测试、不推送；已补纯逻辑覆盖率/节点契约测试供后续云编译执行。Android混合、软边和手机交互需部署后验收。

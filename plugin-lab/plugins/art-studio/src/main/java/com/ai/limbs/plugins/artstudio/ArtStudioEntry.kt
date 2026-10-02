@@ -665,10 +665,11 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
         "enclose.info" -> emptyList()
         "enclose.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("shape"),
-            p("points","array"),p("color",optional=true),p("mode",optional=true),p("regionColor",optional=true),
+            p("points","array",true),p("nodes","array",true),p("color",optional=true),p("mode",optional=true),p("regionColor",optional=true),
             p("tolerance","integer",true),p("includeContour","boolean",true),p("invert","boolean",true),
             p("reference",optional=true),p("width","integer",true),p("opacity","number",true),
-            p("erase","boolean",true),p("expand","integer",true),p("feather","integer",true),p("gapClose","integer",true))
+            p("erase","boolean",true),p("expand","integer",true),p("gapClose","integer",true),
+            p("fillType",optional=true),p("pattern","object",true),p("blend",optional=true))+colorSelectionFields()
         "patch.info" -> emptyList()
         "patch.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("points","array"),p("width","number"),p("patchRadius","integer",true),

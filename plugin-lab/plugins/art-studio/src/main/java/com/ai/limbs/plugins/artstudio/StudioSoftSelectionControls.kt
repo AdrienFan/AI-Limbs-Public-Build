@@ -14,5 +14,5 @@ internal fun StudioSoftSelectionControls(settings:JSONObject,enabled:Boolean,onS
     Slider(settings.getInt("expand").toFloat(),{onSet("expand",it.roundToInt())},enabled=enabled,valueRange=-64f..64f)
     Text("羽化半径：${settings.getInt("feather")} px")
     Slider(settings.getInt("feather").toFloat(),{onSet("feather",it.roundToInt())},enabled=enabled,valueRange=0f..32f)
-    Text("先扩展／收缩，再羽化，再组合；羽化大于0时不重复抗锯齿。软边使用0–255覆盖率，单次范围最多4194304像素。")
+    Text("先扩展／收缩，再羽化，再应用覆盖率；羽化大于0时不重复抗锯齿。软边使用0–255覆盖率，单次范围最多4194304像素。")
 }
