@@ -2752,7 +2752,7 @@ internal class ArtStore(private val root: File) {
         ArtMenuOperations.layers(viewState).first { it.getString("id")==layer.getString("id") }
             .put("visible",true).put("opacity",1.0).put("blend","normal")
         ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,viewState,state.getInt("width"),state.getInt("height"))+
-            mask.width.toLong()*mask.height*64,"智能修补")
+            ArtSmartPatch.workingBytes(mask.width,mask.height),"智能修补")
         val source=ArtRenderer.render(this,view)
         val result=try { ArtSmartPatch.repair(source,mask,state.optJSONObject("selection")) } finally { source.recycle() }
         val patchBytes: ByteArray;val eraseBytes: ByteArray
@@ -2767,11 +2767,13 @@ internal class ArtStore(private val root: File) {
             val params=JSONObject().put("layerId",layer.getString("id")).put("x",mask.left).put("y",mask.top)
                 .put("width",mask.width).put("height",mask.height)
                 .put("patch",JSONObject().put("asset",patchId)).put("erase",JSONObject().put("asset",eraseId))
-                .put("algorithm","local-patchmatch").put("maskPixels",result.pixels)
-                .put("comparisons",result.work).put("settings",JSONObject(p.toString())
+                .put("algorithm","multiscale-patchmatch").put("maskPixels",result.pixels)
+                .put("comparisons",result.work).put("levels",ArtSmartPatch.levelReports(result.levels))
+                .put("settings",JSONObject(p.toString())
                     .apply { remove("points");remove("documentId");remove("expectedRevision");remove("layerId") })
             appendToCurrent(actor,"PIXEL_REPAIR",params).put("repair",JSONObject()
-                .put("maskPixels",result.pixels).put("comparisons",result.work).put("algorithm","local-patchmatch"))
+                .put("maskPixels",result.pixels).put("comparisons",result.work).put("algorithm","multiscale-patchmatch")
+                .put("levels",ArtSmartPatch.levelReports(result.levels)).put("nativeOutput",true))
         } catch(error:Throwable) {assetFile(patchId).delete();assetFile(eraseId).delete();throw error}
     }
 

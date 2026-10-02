@@ -982,3 +982,26 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 随后调用colorize.update，传同一documentId、maskId和新的expectedRevision。返回colorizeResult含filledPixels、seedPixels、cleanedPixels、cleanedSeedPixels、cleanedRegions和实际settings；cleanedSeedPixels表示本次输出忽略的线索像素，原线索可重新计算。两次调用可以分别撤销。
 
 版本0.2.58、versionCode61、applicationId `com.ai.limbs.payload.artstudio.v0258`。本轮只进行静态源码/JSON/契约核对及本地Git提交；不编译、不执行测试、不推送。已写过滤/分数半径/清理/旧默认参数契约用例，留待云端执行；手机渲染、真实缺口与阴影图的视觉效果需部署后验收。
+
+
+## 0.2.59 多尺度智能修补
+
+参照 Krita 6.0.4 `plugins/tools/tool_smart_patch/kis_inpaint.cpp` 中MaskedImage的图像金字塔、NNF升采样、逐层匹配和从较高分辨率源重建的职责，以及同目录工具参数入口，独立实现本插件的纯RGBA8数组内核 `ArtPatchPyramid`。不复用其C++/Qt实现，不宣称匹配场、EM优化或像素结果等同。本轮替换先前单尺度算法，不保留第二套旧求解器；已记录PIXEL_REPAIR仍重放原PNG，旧工程不会重新求解。
+
+原涂抹上限32768提升为1048576像素，原搜索外框1048576提升为8388608像素，searchRadius由16–256扩展为16–1024原尺寸px。路径仍≤4096二维文档点，width仍1–256px，patchRadius仍1–8px，accuracy仍1–100，feather仍0–8。硬上限不表示每台设备都能处理极限范围；局部工作估算约100字节/搜索像素，并计入当前图层渲染预算。512000000次预算包含补丁颜色比较与纹理投票，取消/无纹理/内存或计算超限明确失败，不写资产与历史，不自动缩图。此前32K/1M的限制文本属于当时版本，以上限和patch.info为准。
+
+新增levels=0–6（默认0自动）、refinementStep=0–64（默认0自动）和seed=0–2147483647（默认0）。1层明确单尺度，2–6指定层数；自动规划最多6层，在小蒙版或下一层失去全部有效纹理前停止。指定层数的粗层缺少有效纹理时拒绝，不能保证任意涂抹都能建满6层。金字塔每次2×2预乘alpha平均，奇数边长向上取整，任何子像素被涂抹则父像素不可作为源纹理并清零，避免待移除物体污染粗层。完整源补丁须完全不与蒙版相交、中心alpha>0；透明隐藏RGB不参与距离。
+
+从粗到细逐层缩放物理补丁/搜索半径，用完整源补丁的多源波前建立有效位移场，再把粗层位移作为细层候选。各层以传播、固定种子随机搜索优化匹配；每两轮以预乘alpha的稀疏补丁投票更新未知区域。已知像素不修改。最终层从原尺寸源纹理投票，而不是放大低分辨率修补图片。refinementStep明确值按scale换算；0自动使用ceil(sqrt(levelArea/(1024+accuracy×32)))并限制1–64。每个网格含蒙版的格子选一个匹配点，位移传播到格内像素；只有满足完整补丁及搜索范围约束的位移才参与。所有蒙版像素都进行纹理投票，稀疏匹配会牺牲局部细节一致性；小间距更细也更慢，复杂结构仍需人工查看结果。
+
+输出仍遵循当前未变换、未分组可见根paint/image层，不新增跨层取样。旧柔边与当时软选区仅限制写入：先按蒙版内部距离融合源像素，再乘软选区覆盖，完整替换掩码只作用于有效覆盖像素。修补PNG和擦除PNG由同一PIXEL_REPAIR原子保存，可一次撤销；成功回传原尺寸图像反馈。超过预算或找不到源纹理时，不写入部分结果。
+
+手机智能修补参数新增层数、细化间距和随机种子，搜索半径滑条扩展到1024；默认自动规划。涂抹手势首点固定工程、revision、图层、参数、选区和视图，松手一次提交；busy/取消/视图变化清理草稿。现有 `plugin.art.studio.patch.info` 及 `plugin.art.studio.patch.apply` 入口直接提供范围、默认、字段说明和简洁例子，能力数仍199。
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[100,100],[180,120]],"width":48,"searchRadius":192,"accuracy":40,"levels":0,"refinementStep":0,"seed":7}
+```
+
+先选择目标图层，并换成当前ID/revision；levels=1可明确单尺度，levels=4要求四层；想细化更多可显式refinementStep=1。返回repair含maskPixels、comparisons（含投票）、algorithm=multiscale-patchmatch、nativeOutput=true、levels（粗→细数组，各项width/height/scale/maskPixels/refinementStep/refinementCenters）。实际处理范围由蒙版包围盒加searchRadius+patchRadius得到，不能仅按涂抹像素估算内存。
+
+版本0.2.59、versionCode62、applicationId `com.ai.limbs.payload.artstudio.v0259`。仅进行源码静态/JSON/声明/版本核对与本地Git提交，不编译、不执行测试、不推送。已写奇数金字塔、禁止受污染源补丁、原尺寸输出、已知像素不变、可重复求解及超过旧32K蒙版的用例，留待云端执行；手机性能、大区域纹理与接缝的实际视觉效果需部署后验收。

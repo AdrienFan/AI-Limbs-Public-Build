@@ -681,7 +681,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "patch.info" -> emptyList()
         "patch.apply" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
             p("points","array"),p("width","number"),p("patchRadius","integer",true),
-            p("accuracy","integer",true),p("searchRadius","integer",true),p("feather","integer",true))
+            p("accuracy","integer",true),p("searchRadius","integer",true),p("feather","integer",true),
+            p("levels","integer",true),p("refinementStep","integer",true),p("seed","integer",true))
         "assistant.list", "assistant.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
         "assistant.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("type"),p("points","array"),p("name",optional=true))
         "assistant.select", "assistant.delete" -> listOf(p("documentId"),p("expectedRevision","integer"),id)

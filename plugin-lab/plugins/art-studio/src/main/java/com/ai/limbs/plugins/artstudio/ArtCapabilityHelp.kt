@@ -57,7 +57,7 @@ internal object ArtCapabilityHelp {
   "session.list":{"args":{},"note":"","summary":"列出画室会话"},
   "comic.info":{"args":{},"note":"","summary":"读取漫画分格范围与默认参数"},
   "enclose.info":{"args":{},"note":"","summary":"读取围合形状、软覆盖、标签参考、图案变换和17种混合模式的默认值及边界。"},
-  "patch.info":{"args":{},"note":"","summary":"读取智能修补范围"},
+  "patch.info":{"args":{},"note":"","summary":"读取多尺度智能修补参数、自动规划方式与像素/内存/计算边界。"},
   "selection.color_info":{"args":{},"note":"","summary":"读取颜色软选区默认参数、覆盖公式、处理顺序及图层标签ID与设置入口。"},
   "selection.magnetic_info":{"args":{},"note":"","summary":"读取磁性套索参数与范围"},
   "selection.bezier_info":{"args":{},"note":"","summary":"读取贝塞尔曲线选区范围"},
@@ -162,7 +162,7 @@ internal object ArtCapabilityHelp {
   "assistant.settings":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"settings":{"snapping":true,"onlySelected":true}},"note":"","summary":"设置尺规显示和手机吸附；全局隐藏不关闭吸附，单尺规隐藏/禁用不参与吸附。"},
   "assistant.project":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"id":"ASSISTANT_ID","points":[[10,20],[150,90]]},"note":"指定尺规须visible=true且enabled=true；不使用手机起笔距离，不写作品。","summary":"计算沿尺规坐标"},
   "assistant.stroke":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","id":"ASSISTANT_ID","points":[[10,20],[150,90]],"width":6,"tool":"ink","color":"#FF245364"},"note":"目标为绘画层，使用指定尺规投影文档坐标，不依赖手机起笔距离。 指定尺规须可见且启用；完成的笔迹不随以后尺规变化。","summary":"沿尺规绘画"},
-  "patch.apply":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[100,100],[110,105]],"width":8},"note":"先选中可见未锁定、未变换根绘画/图像层；涂抹附近须有可用纹理。 单次蒙版最多32768像素；结果固化，不在重放时重新求解。","summary":"用附近未涂抹纹理做局部PatchMatch并固化像素；不扩散重画整幅作品。"},
+  "patch.apply":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[100,100],[110,105]],"width":48,"searchRadius":192,"accuracy":40,"levels":0,"refinementStep":0,"seed":7},"note":"目标需为选中的可见未锁定、未变换根paint/image层。涂抹≤1048576像素，搜索外框≤8388608，另检验内存/512000000次比较和投票预算。levels=0自动规划，1单尺度，2–6指定；refinementStep=0自动，1逐像素更慢。缺纹理或预算超限明确失败，不写历史。repair.levels返回实际层尺寸/scale/细化间距/匹配点数。最终原尺寸输出，选区限制写入；结果冻结不重新求解。","summary":"由粗到细PatchMatch，原尺寸纹理投票修补并固化PNG，可一次撤销。"},
   "enclose.apply":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","shape":"bezier","nodes":[{"x":20,"y":20,"out":[65,0]},{"x":120,"y":20,"in":[80,0]},{"x":120,"y":100},{"x":20,"y":100}],"color":"#FF245364","includeContour":true,"fillType":"pattern","pattern":{"kind":"stripes","foreground":"#FF245364","background":"#00000000","scale":1.5,"angle":30,"offset":[8,4]},"opacitySpread":50,"antialias":0.8,"expand":2,"stopAtDarkest":true,"reference":"labels","colorLabels":[1],"blend":"multiply"},"note":"ID/版本取document.info及layer.list，先用layer.properties设colorLabel；labels未匹配会报错。最简调用：shape:rect,points:[[10,10],[100,100]],color:\"#FF245364\",includeContour:true；其他几何不传nodes。贝塞尔只传nodes。固化PNG并一次撤销，不修改已有选区。feather>0时跳过AA，默认includeContour:false会排除触边背景。","summary":"按真实闭合三次曲线或套索等围合分区，写入软覆盖纯色/变换图案，支持标签参考及目标层内混合。"},
   "colorize.create":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"sourceLayerId":"PAINT_LAYER_ID","name":"海面上色"},"note":"源须为可见未变换的根绘画/图像线稿层。","summary":"在线稿层上方创建独立填色蒙版并选中；保留暗线，不改源层。"},
   "colorize.stroke":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"maskId":"MASK_ID","points":[[30,30],[50,40]],"width":8,"color":"#FFFFCC80"},"note":"添加线索后调用colorize.update生成填色。","summary":"保存颜色线索及选区剪裁，尚不生成填色。"},
@@ -350,7 +350,7 @@ internal object ArtCapabilityHelp {
   "bounds":{"description":"文档整数矩形{x,y,width,height}；尺寸>0，与画布须相交，搜索范围最多4194304像素。"},
   "anchors":{"description":"磁性锚点[[x,y],...]，文档像素；trace为1–128点，create为3–128点。"},
   "filterRadius":{"description":"Sobel边缘采样半径1–4像素，默认1。"},
-  "searchRadius":{"description":"搜索半径像素；磁性2–64默认16，修补16–256默认64。"},
+  "searchRadius":{"description":"搜索半径像素；磁性2–64默认16，修补16–1024默认64。"},
   "threshold":{"description":"磁性边缘阈值0–255，默认24。"},
   "strength":{"description":"磁性边缘偏好1–20，默认8。"},
   "precision":{"description":"简化误差像素；矢量徒手0.25–32默认2，磁性0.25–4默认0.75。"},
@@ -544,7 +544,7 @@ internal object ArtCapabilityHelp {
   "patch.apply.points":{"description":"1–4096个文档像素二维点[[x,y],...]，形成涂抹蒙版。"},
   "patch.apply.width":{"description":"涂抹蒙版笔粗1–256文档像素。"},
   "patch.apply.feather":{"description":"修补边缘羽化0–8像素，默认2。"},
-  "patch.apply.searchRadius":{"description":"纹理搜索半径16–256像素，默认64。"},
+  "patch.apply.searchRadius":{"description":"原尺寸纹理搜索半径整数16–1024px，默认64；逐层按scale缩放。扩大范围可帮助覆盖大物体，但增加局部外框和内存。"},
   "enclose.apply.points":{"description":"仅非贝塞尔：文档像素[[x,y],...]；rect/ellipse恰好2个对角点，lasso为3–2048点自动闭合，brush为1–2048点。与nodes互斥。"},
   "enclose.apply.width":{"description":"仅brush使用，笔粗整数1–256文档像素，默认32。"},
   "enclose.apply.feather":{"description":"羽化整数0–32文档像素，默认0；大于0时跳过AA。处理范围包含软边外扩，最多4194304像素。"},
@@ -902,7 +902,10 @@ internal object ArtCapabilityHelp {
   "gradient.draw.points":{"description":"图层局部二维点[[x0,y0],[x1,y1]]，恰好2点，有限值±1000000，距离至少0.01px；定义方向/长度，shape仅用拖动触发。图层变换及父组会在合成时应用。"},
   "gradient.draw.layerId":{"description":"未锁定且父组未锁定的paint层ID，取layer.list；可为组内/变换层，成功仍写该层。"},
   "gradient.draw.color":{"description":"必填#AARRGGBB前景色；无gradientStops时为首色，有色标时使用色标颜色。"},
-  "gradient.draw.opacity":{"description":"整个渐变透明度0–1，默认1，乘色标alpha与固定软选区覆盖一次。"}
+  "gradient.draw.opacity":{"description":"整个渐变透明度0–1，默认1，乘色标alpha与固定软选区覆盖一次。"},
+  "patch.apply.levels":{"description":"整数0–6，默认0自动：按剩余蒙版和完整纹理补丁规划粗层；1明确单尺度，2–6指定层数。指定粗层缺少未涂抹补丁时拒绝。repair.levels返回实际计划。"},
+  "patch.apply.refinementStep":{"description":"原尺寸细化点间距整数0–64，默认0按各层面积/accuracy自动选1–64；1逐像素匹配，计算量高。明确值逐层按scale换算。大值做稀疏匹配并把位移传播到像素，每个原尺寸蒙版像素仍参与纹理投票；不缩小最终输出。"},
+  "patch.apply.seed":{"description":"随机种子整数0–2147483647，默认0；同一图层、蒙版和参数可重复生成相同匹配。冻结PNG重放不再计算。"}
 }
 """
 }
