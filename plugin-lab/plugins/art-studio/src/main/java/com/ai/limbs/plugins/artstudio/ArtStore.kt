@@ -633,31 +633,137 @@ internal class ArtStore(private val root: File) {
         JSONObject().put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
             .put("references",JSONArray(ArtReferences.items(snapshot.getJSONObject("state"))))
             .put("selectedIds",JSONArray(ArtReferences.ids(snapshot.getJSONObject("state"))))
-            .put("coordinateSpace","document").put("storage","embedded").put("exported",false)
+            .put("coordinateSpace","document").put("storage","embedded-or-linked-snapshot").put("exported",false)
+            .put("referenceInfo",ArtReferenceFiles.info())
     }
-    fun referenceAdd(actor:String,p:JSONObject):JSONObject = locked {
+    fun referenceAdd(actor:String,p:JSONObject):JSONObject = locked {referenceImage(actor,p)}
+    private fun referenceImage(actor:String,p:JSONObject,replacing:JSONObject?=null):JSONObject {
         val before=snapshot(loadCurrent())
         require(p.getString("documentId")==before.getString("id") &&
             p.getInt("expectedRevision")==before.getInt("revision")) { "工程已切换或更新，请刷新" }
         val state=before.getJSONObject("state")
-        require(ArtReferences.items(state).size<ArtReferences.MAX) { "一个工程最多16张参考图像" }
+        require(replacing!=null||ArtReferences.items(state).size<ArtReferences.MAX) { "一个工程最多16张参考图像" }
+        if(replacing!=null)require(!replacing.getBoolean("locked")) {"请先解锁参考图像"}
         val (bitmap,metadata)=ArtImagePolicy.decode(imageBytes(p.getString("base64")),p.optJSONObject("confirmResize"),
             ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height"))+
                 ArtReferences.MAX*ArtReferences.PREVIEW_EDGE.toLong()*ArtReferences.PREVIEW_EDGE*8)
         val w=bitmap.width;val h=bitmap.height
         val png=try { ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES) } finally { bitmap.recycle() }
-        val id=UUID.randomUUID().toString();val asset=UUID.randomUUID().toString()
+        val id=replacing?.getString("id") ?: UUID.randomUUID().toString();val asset=UUID.randomUUID().toString()
         val scale=minOf(1.0,state.getInt("height")*0.5/h)
         val transform=if(p.has("matrix")) p.getJSONArray("matrix")
             else JSONArray(listOf(scale,0.0,0.0,scale,state.getInt("width")+32.0,0.0))
-        val ref=ArtReferences.normalize(JSONObject().put("id",id).put("asset",asset)
-            .put("width",w).put("height",h).put("matrix",transform).put("name",p.optString("name","参考图像")))
+        val raw=if(replacing==null)JSONObject() else JSONObject(replacing.toString())
+        raw.put("id",id).put("asset",asset).put("width",w).put("height",h).put("matrix",transform)
+            .put("name",p.optString("name",replacing?.getString("name") ?: "参考图像"))
+        if(p.has("externalSource"))raw.put("externalSource",p.getString("externalSource"))
+        val ref=ArtReferences.normalize(raw)
         atomicBytes(assetFile(asset),png)
         try {
-            apply(actor,"REFERENCE_ADD",JSONObject().put("documentId",p.getString("documentId"))
+            return apply(actor,if(replacing==null)"REFERENCE_ADD" else "REFERENCE_REPLACE",JSONObject().put("documentId",p.getString("documentId"))
                 .put("expectedRevision",p.getInt("expectedRevision")).put("reference",ref))
                 .put("imageImport",metadata).put("referenceId",id)
         } catch(error:Throwable) { assetFile(asset).delete();throw error }
+    }
+    private fun referenceRequest(p:JSONObject):JSONObject {
+        val snap=current();require(p.getString("documentId")==snap.getString("id")&&p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
+        return snap
+    }
+    fun referenceLink(actor:String,p:JSONObject):JSONObject = locked {
+        referenceRequest(p)
+        val source=ArtReferenceFiles.location(p.getString("location")).toString()
+        val q=JSONObject(p.toString())
+        if(!q.has("base64"))q.put("base64",Base64.encodeToString(ArtReferenceFiles.read(source),Base64.NO_WRAP))
+        if(!p.optBoolean("embedded",false))q.put("externalSource",source)
+        referenceImage(actor,q)
+    }
+    fun referenceRefresh(actor:String,p:JSONObject):JSONObject = locked {
+        val state=referenceRequest(p).getJSONObject("state")
+        val ref=ArtReferences.items(state).firstOrNull {it.getString("id")==p.getString("id")} ?: error("参考图像不存在")
+        require(ref.has("externalSource")) {"此参考没有外部链接"};require(!ref.getBoolean("locked")) {"请先解锁参考图像"}
+        val q=JSONObject(p.toString()).put("matrix",ref.getJSONArray("matrix"))
+        if(!q.has("base64"))q.put("base64",Base64.encodeToString(ArtReferenceFiles.read(ref.getString("externalSource")),Base64.NO_WRAP))
+        referenceImage(actor,q,ref)
+    }
+    fun referencePaste(actor:String,p:JSONObject):JSONObject = locked {
+        referenceRequest(p)
+        val q=JSONObject(p.toString())
+        if(!q.has("base64")) {
+            val clip=clipboardInfo();require(clip.has("asset")) {"画室剪贴板没有图片；系统剪贴板请在手机前台粘贴"}
+            val file=assetFile(clip.getString("asset"));require(file.isFile&&file.length() in 1..ArtReferenceFiles.IMAGE_BYTES.toLong()) {"画室剪贴板图片丢失或超限"}
+            q.put("base64",Base64.encodeToString(file.readBytes(),Base64.NO_WRAP))
+        }
+        referenceImage(actor,q).put("clipboardSource",if(p.has("base64"))"supplied-image" else "studio")
+    }
+    fun referenceCapture(actor:String,p:JSONObject):JSONObject = locked {
+        val snap=referenceRequest(p);val source=p.getString("source");require(source in setOf("layer","visible"))
+        val state=JSONObject(snap.getJSONObject("state").toString())
+        if(source=="layer") {
+            val id=p.optString("layerId",state.getString("selectedLayerId"))
+            val target=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==id} ?: error("源图层不存在")
+            require(target.getString("kind")!="colorize_mask") {"请使用上色蒙版的父图层生成参考"}
+            val keep=ArtMenuOperations.subtree(state,id).map {it.getString("id")}.toMutableSet()
+            val forceVisible=mutableSetOf(id)
+            var node=target;var depth=0
+            while(node.optString("parentId").isNotEmpty()) {
+                require(++depth<=ArtMenuOperations.layers(state).size)
+                node=ArtMenuOperations.layers(state).first {it.getString("id")==node.getString("parentId")};keep.add(node.getString("id"));forceVisible.add(node.getString("id"))
+            }
+            ArtMenuOperations.layers(state).forEach {layer->layer.put("visible",layer.getString("id") in keep &&
+                (layer.getString("id") in forceVisible||layer.getBoolean("visible")))}
+            state.put("background","#00000000")
+        }
+        val frame=JSONObject(snap.toString()).put("state",state)
+        val bitmap=ArtRenderer.render(this,frame,maxEdge=if(p.has("maxEdge"))p.getInt("maxEdge") else null)
+        val bytes=try {ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES)} finally {bitmap.recycle()}
+        referenceImage(actor,JSONObject(p.toString()).put("base64",Base64.encodeToString(bytes,Base64.NO_WRAP)))
+            .put("generatedReference",JSONObject().put("source",source).put("sourceRevision",snap.getInt("revision"))
+                .put("includesReferences",false).put("includesAssistants",false).put("canvasExtent",true))
+    }
+    fun referenceCollectionBytes(p:JSONObject):ByteArray = locked {
+        val state=referenceRequest(p).getJSONObject("state");val all=ArtReferences.items(state)
+        val ids=if(p.has("ids"))ArtShapes.ids(p.getJSONArray("ids")) else all.map {it.getString("id")}
+        require(ids.isNotEmpty()&&ids.distinct().size==ids.size&&ids.all {id->all.any {it.getString("id")==id}}) {"请选择有效参考图像"}
+        ArtImagePolicy.requireBytes(4L*ArtReferenceFiles.COLLECTION_BYTES,"参考集合导出")
+        ArtReferenceFiles.encode(all.filter {it.getString("id") in ids},p.optBoolean("keepLinks",false)) {asset->
+            val file=assetFile(asset);require(file.length() in 1..ArtReferenceFiles.IMAGE_BYTES.toLong());file.readBytes()}
+    }
+    fun referenceCollectionExport(p:JSONObject):JSONObject = locked {
+        val bytes=referenceCollectionBytes(p)
+        val name=p.optString("fileName","Reference-${System.currentTimeMillis()}.ailrefs")
+        require(name.matches(Regex("[A-Za-z0-9_-]{1,80}\\.ailrefs"))) {"文件名须为字母/数字/下划线/连字符加.ailrefs"}
+        val file=File(exportDirectory(),name);require(!file.exists()) {"同名集合已存在，请换文件名"}
+        atomicBytes(file,bytes)
+        JSONObject().put("documentId",p.getString("documentId")).put("revision",p.getInt("expectedRevision"))
+            .put("collectionExport",JSONObject().put("path",file.absolutePath).put("bytes",bytes.size)
+                .put("keepLinks",p.optBoolean("keepLinks",false)).put("format",ArtReferenceFiles.FORMAT))
+    }
+    fun referenceCollectionImport(actor:String,p:JSONObject):JSONObject = locked {
+        val state=referenceRequest(p).getJSONObject("state")
+        val text=p.getString("base64");require(text.length<=2*ArtReferenceFiles.COLLECTION_BYTES) {"集合输入超过32 MiB"}
+        val reserve=6L*ArtReferenceFiles.COLLECTION_BYTES+ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height"))
+        ArtImagePolicy.requireBytes(reserve,"参考集合导入")
+        val collection=ArtReferenceFiles.decode(Base64.decode(text,Base64.DEFAULT))
+        require(ArtReferences.items(state).size+collection.references.size<=ArtReferences.MAX) {"参考集合超过工程16张上限"}
+        val prepared=collection.references.map {source->
+            val q=JSONObject(source.toString());val data=collection.images.getValue(q.getString("image"));q.remove("image")
+            if(!p.optBoolean("keepLinks",false))q.remove("externalSource")
+            q.put("id",UUID.randomUUID().toString()).put("asset",UUID.randomUUID().toString())
+            val normalized=ArtReferences.normalize(q)
+            ArtImagePolicy.requireBytes(reserve+normalized.getInt("width").toLong()*normalized.getInt("height")*8,"参考集合图片验证")
+            val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true;inScaled=false}
+            BitmapFactory.decodeByteArray(data,0,data.size,bounds)
+            require(bounds.outWidth==q.getInt("width")&&bounds.outHeight==q.getInt("height")) {"集合图片与尺寸声明不一致"}
+            val image=BitmapFactory.decodeByteArray(data,0,data.size,BitmapFactory.Options().apply {inScaled=false;inPreferredConfig=Bitmap.Config.ARGB_8888})
+                ?: error("参考集合PNG无法解码")
+            try {require(image.width==q.getInt("width")&&image.height==q.getInt("height")) {"集合图片与尺寸声明不一致"}} finally {image.recycle()}
+            normalized to data
+        }
+        try {
+            prepared.forEach {(ref,bytes)->atomicBytes(assetFile(ref.getString("asset")),bytes)}
+            apply(actor,"REFERENCE_BATCH_ADD",JSONObject(p.toString()).put("references",JSONArray(prepared.map {it.first})))
+                .put("referenceIds",JSONArray(prepared.map {it.first.getString("id")})).put("collectionImported",prepared.size)
+        } catch(error:Throwable) {prepared.forEach {assetFile(it.first.getString("asset")).delete()};throw error}
     }
     fun referenceBitmaps(snapshot:JSONObject):Map<String,Bitmap> = locked {
         val map=mutableMapOf<String,Bitmap>()
@@ -1832,6 +1938,9 @@ internal class ArtStore(private val root: File) {
                 "ASSISTANT_SETTINGS" -> "辅助尺规设置"
                 "REFERENCE_SHOW" -> "参考图像整体显隐"
                 "REFERENCE_ADD" -> "添加参考图像"
+                "REFERENCE_BATCH_ADD" -> "导入参考集合"
+                "REFERENCE_REPLACE" -> "刷新外部参考"
+                "REFERENCE_EMBED" -> "参考图转为内嵌"
                 "REFERENCE_SELECT" -> "选择参考图像"
                 "REFERENCE_TRANSFORM" -> "变换参考图像"
                 "REFERENCE_STYLE" -> "参考图像样式"
@@ -2001,7 +2110,7 @@ internal class ArtStore(private val root: File) {
         }
         when (type) {
             "ASSISTANT_CREATE","ASSISTANT_SELECT","ASSISTANT_UPDATE","ASSISTANT_DELETE","ASSISTANT_SETTINGS" -> ArtAssistants.edit(state,type,p)
-            "REFERENCE_ADD","REFERENCE_SELECT","REFERENCE_TRANSFORM","REFERENCE_STYLE","REFERENCE_DELETE","REFERENCE_SHOW" -> ArtReferences.edit(state,type,p)
+            "REFERENCE_ADD","REFERENCE_BATCH_ADD","REFERENCE_REPLACE","REFERENCE_EMBED","REFERENCE_SELECT","REFERENCE_TRANSFORM","REFERENCE_STYLE","REFERENCE_DELETE","REFERENCE_SHOW" -> ArtReferences.edit(state,type,p)
             "COLORIZE_CREATE","COLORIZE_STROKE","COLORIZE_REMOVE_STROKE","COLORIZE_CLEAR",
             "COLORIZE_PALETTE","COLORIZE_SETTINGS","COLORIZE_OUTPUT","COLORIZE_CONVERT" -> ArtColorize.edit(state,type,p)
             "TEXT_CREATE", "TEXT_UPDATE" -> {

@@ -20,7 +20,7 @@ internal object ArtCanvasFeedback {
         name.startsWith("comic.") -> name!="comic.info"
         name.startsWith("colorize.") -> name !in setOf("colorize.list","colorize.preview")
         name.startsWith("assistant.") -> name !in setOf("assistant.list","assistant.project","assistant.preview")
-        name.startsWith("reference.") -> name !in setOf("reference.list","reference.preview","reference.region")
+        name.startsWith("reference.") -> name !in setOf("reference.info","reference.list","reference.preview","reference.region","reference.collection_export")
         name in setOf("gradient.draw", "text.create", "text.update", "mirror.stroke", "dyna.stroke", "line.draw", "path.draw", "figure.draw") -> true
         name.startsWith("path.") -> name !in setOf("path.nodes","path.info","path.geometry","path.topology_info")
         name.startsWith("shape.") -> name !in setOf("shape.list", "shape.hit", "shape.box", "shape.style_info", "shape.freehand_info","shape.layout_info")

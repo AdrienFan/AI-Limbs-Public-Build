@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.60",
+  "version": "0.2.61",
   "api": {
     "target": 1,
     "min": 1
@@ -69,6 +69,14 @@
       "plugin.art.studio.layer.search",
       "plugin.art.studio.layer.create",
       "plugin.art.studio.layer.vector",
+      "plugin.art.studio.reference.info",
+      "plugin.art.studio.reference.paste",
+      "plugin.art.studio.reference.link",
+      "plugin.art.studio.reference.refresh",
+      "plugin.art.studio.reference.embed",
+      "plugin.art.studio.reference.capture",
+      "plugin.art.studio.reference.collection_import",
+      "plugin.art.studio.reference.collection_export",
       "plugin.art.studio.reference.list",
       "plugin.art.studio.reference.preview",
       "plugin.art.studio.reference.region",

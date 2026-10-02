@@ -344,6 +344,14 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("layer.vector", "创建基础矢量图层", write) { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "VECTOR_LAYER_CREATE", p)
         }
+        capability("reference.info","读取参考导入与集合规则",read) { ArtReferenceFiles.info() }
+        capability("reference.paste","粘贴图片为参考",write) {p->store.referencePaste("LANER",p)}
+        capability("reference.link","导入外部参考图片链接",write) {p->store.referenceLink("LANER",p)}
+        capability("reference.refresh","刷新外部参考图片",write) {p->store.referenceRefresh("LANER",p)}
+        capability("reference.embed","参考链接转为内嵌",write) {p->store.apply("LANER","REFERENCE_EMBED",p)}
+        capability("reference.capture","从图层或画布生成参考",write) {p->store.referenceCapture("LANER",p)}
+        capability("reference.collection_import","导入参考图集合",write) {p->store.referenceCollectionImport("LANER",p)}
+        capability("reference.collection_export","导出参考图集合",write) {p->store.referenceCollectionExport(p)}
         capability("reference.list","读取参考图像",read) { p -> store.referenceList(p) }
         capability("reference.preview","查看参考与画布",read) { p -> store.referencePreview(p) }
         capability("reference.region","查看参考图像局部细节",read) { p -> store.referenceRegion(p) }
@@ -583,6 +591,18 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "brush.resource.import" -> listOf(p("kind"),p("base64"),p("name",optional=true))
         "layer.vector" -> listOf(p("documentId"), p("expectedRevision", "integer"),
             p("name", optional = true), p("parentId", optional = true), p("select", "boolean", true))
+        "reference.info" -> emptyList()
+        "reference.paste" -> listOf(p("documentId"),p("expectedRevision","integer"),p("base64",optional=true),
+            p("name",optional=true),p("matrix","array",true),p("confirmResize","object",true))
+        "reference.link" -> listOf(p("documentId"),p("expectedRevision","integer"),p("location"),p("embedded","boolean",true),
+            p("base64",optional=true),p("name",optional=true),p("matrix","array",true),p("confirmResize","object",true))
+        "reference.refresh" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("base64",optional=true),p("confirmResize","object",true))
+        "reference.embed" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array"))
+        "reference.capture" -> listOf(p("documentId"),p("expectedRevision","integer"),p("source"),p("layerId",optional=true),
+            p("name",optional=true),p("matrix","array",true),p("maxEdge","integer",true),p("confirmResize","object",true))
+        "reference.collection_import" -> listOf(p("documentId"),p("expectedRevision","integer"),p("base64"),p("keepLinks","boolean",true))
+        "reference.collection_export" -> listOf(p("documentId"),p("expectedRevision","integer"),p("ids","array",true),
+            p("keepLinks","boolean",true),p("fileName",optional=true))
         "reference.list" -> listOf(p("documentId"))
         "reference.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
         "reference.region" -> listOf(p("documentId"),id,p("x","integer"),p("y","integer"),

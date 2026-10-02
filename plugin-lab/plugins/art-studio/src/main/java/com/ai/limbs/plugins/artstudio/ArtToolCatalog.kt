@@ -100,6 +100,7 @@ internal object ArtToolCatalog {
             .put("encloseFill",ArtEncloseFill.info())
             .put("colorize",ArtColorize.defaults())
             .put("smartPatch",ArtSmartPatch.info())
+            .put("referenceImages",ArtReferenceFiles.info())
             .put("assistants",JSONObject().put("types",JSONObject(ArtAssistants.types)).put("typeInfos",ArtAssistants.typeInfo())
                 .put("units",JSONObject(ArtAssistantGeometry.units))
                 .put("pending",JSONArray(ArtAssistants.pending)).put("maxObjects",ArtAssistants.MAX)

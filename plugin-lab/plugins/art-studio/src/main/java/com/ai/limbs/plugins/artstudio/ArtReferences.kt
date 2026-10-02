@@ -29,6 +29,10 @@ internal object ArtReferences {
         }
         for(key in listOf("visible","keepAspect")) r.put(key,r.optBoolean(key,true))
         r.put("locked",r.optBoolean("locked",false)).put("name",r.optString("name","参考图像").take(100))
+        if(r.has("externalSource")) {
+            require(r.get("externalSource") is String);ArtReferenceFiles.location(r.getString("externalSource"))
+        }
+        r.put("storage",if(r.has("externalSource"))"linked_snapshot" else "embedded")
         return r
     }
     fun validate(state: JSONObject) {
@@ -40,12 +44,23 @@ internal object ArtReferences {
     fun edit(state: JSONObject,type: String,p: JSONObject) {
         if(type=="REFERENCE_SHOW") { state.put("referencesVisible",p.getBoolean("visible"));return }
         val refs=items(state).toMutableList()
-        if(type=="REFERENCE_ADD") {
+        if(type=="REFERENCE_BATCH_ADD") {
+            val incoming=p.getJSONArray("references")
+            require(incoming.length() in 1..MAX && refs.size+incoming.length()<=MAX) {"参考集合超过工程16张上限"}
+            val added=(0 until incoming.length()).map {normalize(incoming.getJSONObject(it))}
+            require((refs+added).map {it.getString("id")}.distinct().size==refs.size+added.size)
+            refs.addAll(added);state.put("referenceSelection",JSONArray(added.map {it.getString("id")}))
+        } else if(type=="REFERENCE_REPLACE") {
+            val next=normalize(p.getJSONObject("reference"));val index=refs.indexOfFirst {it.getString("id")==next.getString("id")}
+            require(index>=0) {"参考图像已删除"};require(!refs[index].getBoolean("locked")) {"请先解锁参考图像"}
+            refs[index]=next;state.put("referenceSelection",JSONArray().put(next.getString("id")))
+        } else if(type=="REFERENCE_ADD") {
             require(refs.size<MAX) { "一个工程最多16张参考图像" }
             val r=normalize(p.getJSONObject("reference"));require(refs.none { it.getString("id")==r.getString("id") })
             refs.add(r);state.put("referenceSelection",JSONArray().put(r.getString("id")))
         } else {
             val selected=ArtShapes.ids(p.getJSONArray("ids")).distinct()
+            if(type=="REFERENCE_EMBED")require(selected.isNotEmpty()) {"请选择需要内嵌的参考图像"}
             require(selected.all { id -> refs.any { it.getString("id")==id } }) { "参考图像已删除，请刷新" }
             if(type=="REFERENCE_SELECT") state.put("referenceSelection",JSONArray(selected))
             else {
@@ -53,6 +68,7 @@ internal object ArtReferences {
                 if(type!="REFERENCE_STYLE") require(targets.none { it.getBoolean("locked") }) { "参考图像已锁定" }
                 when(type) {
                     "REFERENCE_DELETE" -> refs.removeAll(targets.toSet())
+                    "REFERENCE_EMBED" -> targets.forEach {it.remove("externalSource")}
                     "REFERENCE_TRANSFORM" -> {
                         val delta=ArtShapes.matrix(p.getJSONArray("matrix"))
                         require(targets.all { it.getBoolean("visible") }) { "参考图像隐藏，不能变换" }

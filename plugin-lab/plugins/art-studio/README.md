@@ -1047,3 +1047,34 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 这里的透视椭圆采用方形内接圆的射影映射，Krita采用四角拟合椭圆；样条最近点搜索、鱼眼延伸轴段、圆族预览密度和数值退化阈值也为本插件独立实现，不承诺与Krita逐像素相同。此前章节的“复杂助手待实现”清单为历史记录，本版本已移除手机待实现提示。
 
 版本0.2.60、versionCode63、applicationId `com.ai.limbs.payload.artstudio.v0260`。仅源码静态、JSON/能力契约及版本核对与Ubuntu Git提交，不编译、不执行测试、不推送。已写12项几何/入口/单位回归用例供后续云端执行；触控、长笔画吸附、保存重放与视觉效果待部署后验收。
+
+## 0.2.61 参考图像来源、快照与集合
+
+参照用户提供的 Krita 6.0.4 `ToolReferenceImages`、`ToolReferenceImagesWidget`、`KisReferenceImage` 的剪贴板/图层/可见画布生成及内嵌/外部文件引用规则，和 `KisReferenceImageCollection` 的图片+元数据集合，独立实现适合本画室的输入及归档；不复制Krita/Qt内核，也不声称兼容`.krf`。
+
+- 手机前台可粘贴系统剪贴板首项的图片URI/图片链接；画室像素剪贴板也可粘贴。数据共用原有图片识别、PNG资产、尺寸确认和内存预算。后台AI入口 `reference.paste` 使用画室剪贴板，或调用者明确提供的图片Base64。
+- 外部来源支持HTTPS图片、绝对文件路径、file URI、手机授权的content URI。默认保存当前PNG快照及`externalSource`；打开、保存、撤销、导出作品和导入集合不读取外部来源。只有明确`reference.refresh`更新快照；失败不改工程。手机文件链接通过OpenDocument持久化读取权限；Resident不借用Host的content权限，后台可提供本次授权取得的图片Base64。
+- `reference.embed`解除来源链接、保留当前图片；刷新保留对象ID、排列、矩阵、样式，换新资产供撤销/重做；如果源像素尺寸改变，外框按新尺寸改变。锁定参考须先解锁。
+- `reference.capture(source=layer/visible)` 从选中/指定层或可见画布生成独立PNG。layer支持组，保持文档变换/祖先透明度、隐藏子层规则，透明背景；visible含画布背景和可见层。两者都不含参考图、辅助尺规或编辑覆盖，默认画布原像素范围，可用maxEdge=64–1024显式缩小。快照不随源层后续修改变化。
+- `.ailrefs`为本插件ZIP集合：`manifest.json`及`images/0.png`等图片，保存顺序、矩阵、名称、不透明度、饱和度、显隐、锁定和比例参数。默认便携内嵌，`keepLinks=true`可保留来源，快照始终包含。导入追加所有图片，重新生成对象/资产ID，一次提交/撤销；任何条目、解码、容量或几何验证失败都不部分导入。导出选中项或全部，工程revision不变。
+
+每工程16张、每图8MiB、集合压缩输入及展开总量各32MiB、清单1MiB；拒绝未知/重复/越界ZIP条目，读取过程限制字节数；PNG尺寸先预读核对再完整解码。沿用动态内存预算，超限明确拒绝，不静默缩小集合中的图片。HTTPS最多3次重定向、每次连接/读取15秒，禁止明文或非HTTPS跳转；不接受URL用户名密码。网络及文件读取都在后台IO执行，手机界面不等待同步下载。
+
+新增兰儿入口（前缀`plugin.art.studio.`）：`reference.info`、`reference.paste`、`reference.link`、`reference.refresh`、`reference.embed`、`reference.capture`、`reference.collection_import`、`reference.collection_export`，均带短说明、字段约束和最小示例；`toolbox.catalog.referenceImages`同步返回规则。
+
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"location":"/storage/emulated/0/Download/reference.png","embedded":false}
+```
+此为`reference.link`；也可换HTTPS图片地址。ID和revision换成当前值，成功后从`reference.list`查`referenceId/externalSource`，更新用`reference.refresh`。
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"source":"visible"}
+```
+此为`reference.capture`；从当前层改为`source:layer`，显式源层另带`layerId`。
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"fileName":"Reference-Collection.ailrefs","keepLinks":false}
+```
+此为`reference.collection_export`，默认导出全部到画室exports目录，返回实际path和bytes；同名拒绝覆盖。手机使用系统文件选择器保存。导入用真实文件ZIP字节的`base64`配`keepLinks`；不自动读取外部来源。`reference.paste`省略base64读取画室像素剪贴板（先用edit.copy/copy_merged），传base64则直接粘贴本次图片数据。
+
+基座`host.clipboard@1`当前是DECLARED、不可申请的源语，本轮未修改或绕过它；系统剪贴板读取只在已有Host手机展示入口上执行用户粘贴动作，后台业务只处理明确交付的图片数据。所有参考图都保持作品导出之外的视图对象，并沿用工程保存、归档、撤销和图片反馈。
+
+版本0.2.61、versionCode64、applicationId `com.ai.limbs.payload.artstudio.v0261`，共207项能力。本轮仅静态源码、JSON/声明/版本和传输核对及Ubuntu Git提交，不编译、不运行测试、不推送。已写13项ZIP/来源/入口契约用例供云端后续执行；剪贴板权限、跨进程content读取、真实HTTP图片、图层透明度和手机文件选择器需部署后验收。

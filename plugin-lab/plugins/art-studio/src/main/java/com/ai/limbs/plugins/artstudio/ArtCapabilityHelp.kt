@@ -150,7 +150,7 @@ internal object ArtCapabilityHelp {
   "text.update":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"id":"TEXT_LAYER_ID","content":"晨光与海"},"note":"须是已有文字层；未传样式保留原值。","summary":"替换已有文字层完整正文，省略样式保留原值，保留图层移动/缩放/旋转。"},
   "assistant.list":{"args":{"documentId":"DOCUMENT_ID"},"note":"","summary":"返回尺规、revision、settings、types、typeInfos（点数/顺序/简例）和units；尺规不导出为作品像素。"},
   "assistant.preview":{"args":{"documentId":"DOCUMENT_ID"},"note":"","summary":"返回包含辅助线及画布外控制点的256px检查图，不是作品导出。"},
-  "reference.list":{"args":{"documentId":"DOCUMENT_ID"},"note":"","summary":"返回嵌入references、选择、矩阵和revision；参考对象独立于图层，不导出为作品。"},
+  "reference.list":{"args":{"documentId":"DOCUMENT_ID"},"note":"","summary":"读取参考图ID、矩阵、样式、storage与可选externalSource；linked_snapshot只在明确刷新时读取来源。"},
   "reference.preview":{"args":{"documentId":"DOCUMENT_ID"},"note":"","summary":"返回含画布外参考的256px检查图，不影响作品导出。"},
   "selection.preview":{"args":{"documentId":"DOCUMENT_ID"},"note":"","summary":"返回含选区浅蓝覆盖与轮廓的256px预览；导出不含选区标记。"},
   "colorize.list":{"args":{"documentId":"DOCUMENT_ID"},"note":"","summary":"返回蒙版源、脏状态、调色板、完整有效设置与过滤参数范围；includeKeys控制完整坐标。"},
@@ -242,7 +242,15 @@ internal object ArtCapabilityHelp {
   "selection.coverage":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"x":20.5,"y":20.5},"summary":"只读查询选区某处0..255覆盖率，用于核对软边。","note":"文档像素；像素中心加0.5。无选区报错；需要最新id/revision。"},
   "fill.info":{"args":{},"summary":"读取连续填充模式、图案资源入口、拖动预算及软覆盖参数。","note":""},
   "gradient.info":{"args":{},"summary":"读取九种渐变形状、多色标、重复、抖动和插值默认值及范围。","note":"轮廓渐变需先建立非空选区；参数均在插件方处理。"},
-  "gradient.draw":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[40,40],[160,100]],"color":"#FF245364","gradientMode":"spiral","gradientStops":[[0,"#FF245364"],[0.45,"#FFFFC878"],[1,"#00000000"]],"gradientRepeat":"forward","gradientDither":true,"gradientSeed":7,"gradientAntialias":0.5},"summary":"保存带固定选区、色标与抖动种子的渐变笔画；一次撤销，成功附图像反馈。","note":"ID/版本取document.info和layer.list；points是图层局部两个点。最简用gradientMode:linear，不传色标为color→透明；轮廓改shape并先创建选区，反向用gradientReverse:true，整个渐变受软选区限制一次。范围最多4194304局部像素；超限先缩小选区。"}
+  "gradient.draw":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[40,40],[160,100]],"color":"#FF245364","gradientMode":"spiral","gradientStops":[[0,"#FF245364"],[0.45,"#FFFFC878"],[1,"#00000000"]],"gradientRepeat":"forward","gradientDither":true,"gradientSeed":7,"gradientAntialias":0.5},"summary":"保存带固定选区、色标与抖动种子的渐变笔画；一次撤销，成功附图像反馈。","note":"ID/版本取document.info和layer.list；points是图层局部两个点。最简用gradientMode:linear，不传色标为color→透明；轮廓改shape并先创建选区，反向用gradientReverse:true，整个渐变受软选区限制一次。范围最多4194304局部像素；超限先缩小选区。"},
+  "reference.info":{"args":{},"summary":"读取剪贴板来源、外部链接快照、.ailrefs集合格式和大小边界。","note":"仅读参数，无需打开工程。"},
+  "reference.paste":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0},"summary":"画室剪贴板图片转参考；显式base64可接收系统图片数据。","note":"系统剪贴板由手机前台读取；后台不读取系统剪贴板。省略base64使用edit.clipboard_info的画室图片。"},
+  "reference.link":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"location":"/storage/emulated/0/Download/reference.png","embedded":false},"summary":"导入HTTPS/文件图片并保留来源链接，或直接内嵌。","note":"换成存在可读的图片路径/HTTPS地址。默认保存PNG快照，只有reference.refresh读取更新。content URI需手机授权读取或本次提供base64。"},
+  "reference.refresh":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"id":"REFERENCE_ID"},"summary":"从已保存外部来源更新参考快照，保留ID、矩阵与样式。","note":"ID取reference.list.references且有externalSource，须未锁定；失败不修改工程。图片尺寸变化会改变外框，矩阵不变。"},
+  "reference.embed":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"ids":["REFERENCE_ID"]},"summary":"参考快照转为内嵌图片，解除外部来源。","note":"须未锁定；不重新读取来源，图片及矩阵保持。可撤销。"},
+  "reference.capture":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"source":"visible"},"summary":"当前层/可见画布合成为独立参考图片快照。","note":"layer为选中层或显式layerId（可组），含文档变换/祖先透明度，透明背景；visible含背景与可见图层。默认画布原尺寸，参考/尺规均不含；maxEdge可明确缩小。"},
+  "reference.collection_import":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"base64":"BASE64_AILREFS_BYTES","keepLinks":false},"summary":"一次导入参考图集合，保留图片、顺序、矩阵和样式。","note":"base64替换真实.ailrefs ZIP字节；追加并生成新ID，一次撤销整组。默认便携内嵌，keepLinks保留来源但不自动联网。不兼容Krita.krf。"},
+  "reference.collection_export":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"keepLinks":false,"fileName":"Reference-Collection.ailrefs"},"summary":"导出参考集合到画室exports目录，返回path/bytes，不改工程。","note":"ids省略导出全部；否则按原排列导出选中项。图片快照始终包含，默认移除外部链接。同名文件拒绝覆盖；最多16图、每图8MiB、集合及展开总量32MiB。"}
 }
 """
     private const val FIELDS = """
@@ -916,7 +924,25 @@ internal object ArtCapabilityHelp {
   "gradient.draw.opacity":{"description":"整个渐变透明度0–1，默认1，乘色标alpha与固定软选区覆盖一次。"},
   "patch.apply.levels":{"description":"整数0–6，默认0自动：按剩余蒙版和完整纹理补丁规划粗层；1明确单尺度，2–6指定层数。指定粗层缺少未涂抹补丁时拒绝。repair.levels返回实际计划。"},
   "patch.apply.refinementStep":{"description":"原尺寸细化点间距整数0–64，默认0按各层面积/accuracy自动选1–64；1逐像素匹配，计算量高。明确值逐层按scale换算。大值做稀疏匹配并把位移传播到像素，每个原尺寸蒙版像素仍参与纹理投票；不缩小最终输出。"},
-  "patch.apply.seed":{"description":"随机种子整数0–2147483647，默认0；同一图层、蒙版和参数可重复生成相同匹配。冻结PNG重放不再计算。"}
+  "patch.apply.seed":{"description":"随机种子整数0–2147483647，默认0；同一图层、蒙版和参数可重复生成相同匹配。冻结PNG重放不再计算。"},
+  "reference.link.base64":{"description":"本次授权读取的图片字节Base64，最多8MiB；可省略直接读取文件/HTTPS来源。content来源后台必须提供；不是图片路径。"},
+  "reference.refresh.base64":{"description":"本次授权读取的图片字节Base64，最多8MiB；可省略直接读取文件/HTTPS来源。content来源后台必须提供；不是图片路径。"},
+  "reference.paste.base64":{"description":"可选系统图片数据Base64，最多8MiB；省略读取画室像素剪贴板，绝不自动改读系统剪贴板。"},
+  "reference.link.location":{"description":"HTTPS图片地址、绝对文件路径、file/content URI，最长4096，不接受账号密码。文件须可读，content须手机权限或显式base64。"},
+  "reference.link.embedded":{"description":"默认false保存链接+当前PNG快照；true仅内嵌，不保存外部来源。"},
+  "reference.link.matrix":{"description":"参考绝对仿射矩阵[a,b,c,d,tx,ty]，文档像素；可逆、有限且变换后四角abs<=1000000。省略放画布右侧并适配。"},
+  "reference.paste.matrix":{"description":"参考绝对仿射矩阵[a,b,c,d,tx,ty]，文档像素；可逆、有限且变换后四角abs<=1000000。省略放画布右侧并适配。"},
+  "reference.capture.matrix":{"description":"参考绝对仿射矩阵[a,b,c,d,tx,ty]，文档像素；可逆、有限且变换后四角abs<=1000000。省略放画布右侧并适配。"},
+  "reference.collection_import.keepLinks":{"description":"默认false生成内嵌便携副本；true保留externalSource，但集合始终携带快照且导入不会读取外部来源。"},
+  "reference.collection_export.keepLinks":{"description":"默认false生成内嵌便携副本；true保留externalSource，但集合始终携带快照且导入不会读取外部来源。"},
+  "reference.collection_export.fileName":{"description":"输出文件名，字母/数字/下划线/连字符1–80个加.ailrefs；默认按时间命名，同名拒绝覆盖。"},
+  "reference.collection_export.ids":{"description":"可选参考ID数组，须不重复且存在；取reference.list.references[].id。省略全部，按原参考排列输出。"},
+  "reference.collection_import.base64":{"description":"真实.ailrefs集合ZIP的Base64；压缩字节及展开总量最多32MiB，最多16图、每图8MiB、清单1MiB；不是.ailart/.krf或单张图片。"},
+  "reference.capture.source":{"description":"layer当前/指定图层独立快照；visible画布可见合成含背景。两者均不含参考图、尺规和编辑覆盖。","enum":["layer","visible"]},
+  "reference.capture.layerId":{"description":"source=layer时可选源层ID，取layer.list；省略选中层，支持绘画/矢量/图片/文字/组，不接受colorize_mask。"},
+  "reference.capture.maxEdge":{"description":"显式缩小参考快照长边64–1024文档输出像素；省略保持画布原尺寸，不放大。"},
+  "reference.refresh.id":{"description":"参考图像ID，取reference.list.references[].id；需未锁定；refresh还需externalSource。"},
+  "reference.embed.ids":{"description":"参考图像ID数组，取reference.list.references[].id；需未锁定；refresh还需externalSource。"}
 }
 """
 }

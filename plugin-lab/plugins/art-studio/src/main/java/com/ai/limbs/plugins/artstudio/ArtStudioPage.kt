@@ -435,6 +435,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var assistantAdding by remember { mutableStateOf(true) }
     var assistantType by remember { mutableStateOf("ruler") }
     var referenceImportContext by remember { mutableStateOf<JSONObject?>(null) }
+    var referenceCollectionContext by remember {mutableStateOf<JSONObject?>(null)}
+    var referenceCollectionExportContext by remember {mutableStateOf<JSONObject?>(null)}
     var textDialog by remember { mutableStateOf<JSONObject?>(null) }
     var textFonts by remember { mutableStateOf(JSONArray()) }
     val toolWindow by ArtStudioToolOptionsControl.state.collectAsState()
@@ -677,8 +679,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 if(operationResult.optBoolean("comicPanelFeedback") && !operationResult.getBoolean("changed"))
                     Toast.makeText(context,operationResult.getString("message"),Toast.LENGTH_SHORT).show()
-                if(operationResult.has("referenceId") && serial==renderSerial)
+                if((operationResult.has("referenceId")||operationResult.has("referenceIds")) && serial==renderSerial)
                     canvasRef[0]?.fitReferences(snapshot?.getJSONObject("state"))
+                if(operationResult.has("collectionSaved"))Toast.makeText(context,"参考集合已保存",Toast.LENGTH_SHORT).show()
                 onSuccess?.invoke()
             } catch (request: ArtImageResizeRequired) {
                 resizeRequest = request.plan
@@ -828,8 +831,28 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 null,null,null)?.use { cursor -> if(cursor.moveToFirst()) cursor.getString(0) else "参考图像" } ?: "参考图像"
             val params=JSONObject(captured.toString()).put("name",name)
                 .put("base64",android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP))
+            if(captured.optBoolean("linkedFile",false)) {
+                context.contentResolver.takePersistableUriPermission(uri,android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                params.put("externalSource",uri.toString())
+            }
             if(confirmation!=null) params.put("confirmResize",confirmation)
             store.referenceAdd("AWEI",params)
+        }
+    }
+    val importReferenceCollection=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) {uri->
+        val captured=referenceCollectionContext;referenceCollectionContext=null
+        if(uri!=null&&captured!=null)perform {
+            val bytes=context.contentResolver.openInputStream(uri)?.use {ArtReferenceFiles.readLimited(it,ArtReferenceFiles.COLLECTION_BYTES)} ?: error("无法读取参考集合")
+            store.referenceCollectionImport("AWEI",JSONObject(captured.toString()).put("base64",android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP)))
+        }
+    }
+    val exportReferenceCollection=rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) {uri->
+        val captured=referenceCollectionExportContext;referenceCollectionExportContext=null
+        if(uri!=null&&captured!=null)perform {
+            val bytes=store.referenceCollectionBytes(captured)
+            val output=context.contentResolver.openOutputStream(uri,"wt") ?: error("无法写入参考集合")
+            output.use {it.write(bytes)}
+            JSONObject().put("collectionSaved",uri.toString())
         }
     }
     val openExternal = rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -2491,7 +2514,23 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         addReference.launch(arrayOf("image/*"))
                     },{canvasRef[0]?.fitReferences()}, {type,p ->
                         if(!busy) perform { store.apply("AWEI",type,p) }
-                    })
+                    }, {action,p->if(!busy)when(action) {
+                        "link_file"->{referenceImportContext=JSONObject(p.toString()).put("linkedFile",true);addReference.launch(arrayOf("image/*"))}
+                        "collection_import"->{referenceCollectionContext=JSONObject(p.toString());importReferenceCollection.launch(arrayOf("application/octet-stream","application/zip"))}
+                        "collection_export"->{referenceCollectionExportContext=JSONObject(p.toString());exportReferenceCollection.launch("References.ailrefs")}
+                        else->perform {confirmation->val q=JSONObject(p.toString());if(confirmation!=null)q.put("confirmResize",confirmation)
+                            when(action) {
+                                "paste_system"->store.referencePaste("AWEI",q.put("base64",android.util.Base64.encodeToString(ArtReferenceFiles.clipboard(context),android.util.Base64.NO_WRAP)))
+                                "paste_studio"->store.referencePaste("AWEI",q)
+                                "link"->{q.put("base64",android.util.Base64.encodeToString(ArtReferenceFiles.read(q.getString("location"),context.contentResolver),android.util.Base64.NO_WRAP));store.referenceLink("AWEI",q)}
+                                "capture"->store.referenceCapture("AWEI",q)
+                                "refresh"->{val a=ArtReferences.items(store.current().getJSONObject("state")).first {it.getString("id")==q.getString("id")}
+                                    q.put("base64",android.util.Base64.encodeToString(ArtReferenceFiles.read(a.getString("externalSource"),context.contentResolver),android.util.Base64.NO_WRAP));store.referenceRefresh("AWEI",q)}
+                                "embed"->store.apply("AWEI","REFERENCE_EMBED",q)
+                                else->error("未知参考操作")
+                            }
+                        }
+                    }})
                 }
                 if (tool == "vector_calligraphy") {
                     StudioCalligraphyOptions(store,current,selected,busy,vectorCalligraphySettings,width,color,opacity,
