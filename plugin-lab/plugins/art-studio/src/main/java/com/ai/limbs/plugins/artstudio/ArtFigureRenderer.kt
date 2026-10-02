@@ -7,8 +7,8 @@ import kotlin.math.*
 /** Fill and outline are composited once, including patterned erase masks, in preview and export alike. */
 internal object ArtFigureRenderer {
     fun draw(canvas:Canvas,p:JSONObject,resources:((String)->Bitmap)?) {
-        ArtFigure.validateStored(p)
-        val path=ArtFigure.path(p);val fill=p.getJSONObject("figureFill")
+        if(p.has("pathVersion"))ArtRasterPath.validateStored(p) else ArtFigure.validateStored(p)
+        val path=if(p.has("pathVersion"))ArtRasterPath.path(p) else ArtFigure.path(p);val fill=p.getJSONObject("figureFill")
         var tile:Bitmap?=null
         val composite=Paint().apply {alpha=(255*p.optDouble("opacity",1.0)).roundToInt().coerceIn(0,255)
             if(p.getString("brushTool")=="eraser")xfermode=PorterDuffXfermode(PorterDuff.Mode.DST_OUT)}

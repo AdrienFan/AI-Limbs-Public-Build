@@ -728,3 +728,21 @@ AI 新入口 selection.color_info、selection.contiguous、selection.similar、s
 椭圆改为 `tool:ellipse, cornerRadius:0`；固定160×90且从中心起笔加 `fixedWidth:160, fixedHeight:90, drawFromCenter:true`；图片图案使用 `figureFill:{mode:pattern,pattern:{kind:image,asset:TILE_ASSET,scale:1,angle:0,offset:[0,0]}}`；矢量层省略 brush/brushPresetId 且填充限 none/solid。能力元数据自带字段约束和简例。
 
 版本 `0.2.46` / versionCode `49` / applicationId `com.ai.limbs.payload.artstudio.v0246`。本批只做静态检查和开发仓库保存，未编译、未运行测试、未推送云端；运行效果待之后部署验证。
+
+
+### 0.2.47：栅格多边形、折线、三次曲线的共享笔刷（尚未编译）
+
+- 参照 Krita 6.0.4 的 `plugins/tools/tool_polygon/kis_tool_polygon.cc`、`tool_polyline/kis_tool_polyline.cc`、`basictools/kis_tool_path.cc`，以及 `libs/ui/tool/kis_tool_polyline_base.cpp` 的多点草稿/撤点/结束职责、`kis_figure_painting_tool_helper.cpp` 的 StrokeStyleBrush/FillStylePattern；本插件独立采用 Android Path/PathMeasure 与 dab-v1 实现，未复用源码。
+- polygon 自动闭合，polyline 保持开放，三次 bezier 为起点+每段两个控制点和终点。线段逐段保留精确转角，三次曲线逐段按弧长生成采样并保留锚点；原始控制点独立保存于 `pathInput`，最终笔刷采样与随机种子进入不可变历史。最多2048折线/多边形控制点、1024曲线控制点、10000笔刷采样，零长度或超预算明确拒绝。
+- 三工具共享六种栅格笔刷、预设、笔尖、纹理和动态曲线。几何路径压力固定1、倾角/旋转0、按采样序号合成时间；关闭加权平滑、稳定器与停驻喷绘，保留像素完美。`outline=brush/basic`，polygon 可用 none 加非空填充。
+- 多边形 `figureFill` 支持 none/solid/pattern。棋盘、条纹、圆点及1–512px RGBA图片平铺复用 ArtFigureRenderer，图案缩放/角度/偏移、透明度合成、橡皮蒙版、资源保存/导入重映射和内存预算使用同一链路。折线及栅格曲线不接受填充；矢量工具不受此批修改影响。旧的无pathVersion记录继续按原有记录语义重放。
+- 手机保留逐点/双击完成、单段四点曲线/连续曲线模式，新增完成/撤回一点/取消按钮及 Enter/Delete/Escape。首点捕获工程版本、图层变换、样式和随机种子；工程/版本/图层/工具切换或双指视图手势取消草稿。预览完整路径和保存共用生成器及渲染器，不完整曲线段仅显示控制线。
+- 兰儿入口 `path.info / path.geometry / path.draw`，以及已有 `stroke.add(tool=polygon/polyline/bezier)`；每个入口提供精简示例和参数范围。绘画仍传原始控制点，不传 geometry 返回的 outlinePoints。
+
+简例（调用 path.draw，ID/revision 替换为当前值）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","tool":"polygon","points":[[40,50],[180,40],[210,150],[80,180]],"color":"#FF245364","width":6,"figureFill":{"mode":"pattern","pattern":{"kind":"checker","tileSize":16,"foreground":"#FFE8DCC5","background":"#FFB6C8C2"}}}
+```
+折线改 `tool:polyline` 并省略 figureFill；三次曲线改 `tool:bezier, points:[[30,120],[70,20],[150,220],[210,100]]` 并省略 figureFill。笔刷预设加 `brushPresetId:PRESET_ID`，图片填充加 `figureFill:{mode:pattern,pattern:{kind:image,asset:TILE_ASSET}}`。
+
+版本 `0.2.47` / versionCode `50` / applicationId `com.ai.limbs.payload.artstudio.v0247`。本批仅静态检查和开发仓库提交；未编译、未运行测试、未推送云端，实际运行待之后部署验证。

@@ -430,6 +430,9 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("layer.move_down", "下移同级图层", write) { p ->
             store.apply("LANER", "LAYER_MOVE_STEP", p.put("direction", "down"))
         }
+        capability("path.info","读取栅格路径笔刷和多边形填充说明",read) {ArtRasterPath.info()}
+        capability("path.geometry","计算路径控制点及笔刷轮廓采样",read) {p->store.rasterPathGeometry(p)}
+        capability("path.draw","当前笔刷描栅格路径与多边形图案填充",write) {p->store.rasterPathDraw("LANER",p)}
         capability("figure.info","读取矩形椭圆约束与描边填充",read) {ArtFigure.info()}
         capability("figure.geometry","计算矩形椭圆边界及有效圆角",read) {p->store.figureGeometry(p)}
         capability("figure.draw","绘制矩形椭圆或可编辑矢量形状",write) {p->store.figureDraw("LANER",p)}
@@ -544,6 +547,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         p("mirrorCenters","array",true),p("mirrorIntervalX","integer",true),p("mirrorIntervalY","integer",true),
         p("axisX","number",true),p("axisY","number",true))
     return when (name) {
+        "path.geometry" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("tool"),p("points","array"),p("outline",optional=true),p("figureFill","object",true),p("color",optional=true),p("brushTool",optional=true))
+        "path.draw" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("tool"),p("points","array"),p("color"),p("width","number"),
+            p("opacity","number",true),p("brushTool",optional=true),p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true),p("outline",optional=true),p("figureFill","object",true))
         "figure.geometry" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("tool"),p("points","array"))+figureFields()
         "figure.draw" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("tool"),p("points","array"),p("color"),p("width","number"),
             p("opacity","number",true),p("brushTool",optional=true),p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true))+figureFields()

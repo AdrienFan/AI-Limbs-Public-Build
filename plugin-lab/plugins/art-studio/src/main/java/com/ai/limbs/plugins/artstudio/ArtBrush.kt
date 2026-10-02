@@ -21,8 +21,8 @@ internal object ArtBrush {
             time+(b.time-time)*t,tilt+(b.tilt-tilt)*t,rotation+(b.rotation-rotation)*t)
     }
     data class Dab(val sample:Sample,val size:Double,val flow:Double,val angle:Double,val ordinal:Int)
-    fun supports(tool:String)=tool in tools || tool in setOf("mirror","dyna","line","rectangle","ellipse")
-    fun engineTool(stroke:JSONObject)=if(stroke.getString("tool") in setOf("mirror","dyna","line","rectangle","ellipse"))stroke.optString("brushTool","ink") else stroke.getString("tool")
+    fun supports(tool:String)=tool in tools || tool in setOf("mirror","dyna","line","rectangle","ellipse","polygon","polyline","bezier")
+    fun engineTool(stroke:JSONObject)=if(stroke.getString("tool") in setOf("mirror","dyna","line","rectangle","ellipse","polygon","polyline","bezier"))stroke.optString("brushTool","ink") else stroke.getString("tool")
     fun defaults(tool:String):JSONObject {
         require(tool in tools)
         val dynamics=JSONObject()
@@ -179,7 +179,7 @@ internal object ArtBrush {
     }
     fun prepare(stroke:JSONObject,brush:JSONObject,seed:Int,finished:Boolean=true):JSONObject {
         require(seed>=0);val settings=settings(engineTool(stroke),brush)
-        if(stroke.getString("tool")=="line" || stroke.getString("tool") in ArtFigure.tools) {
+        if(stroke.getString("tool")=="line" || stroke.getString("tool") in ArtFigure.tools || stroke.getString("tool") in ArtRasterPath.tools) {
             // Figure geometry must reach both endpoints; cursor smoothing and timed airbrushing are freehand-only.
             if(settings.getJSONObject("smoothing").getString("mode")!="pixel_perfect")settings.getJSONObject("smoothing").put("mode","none")
             settings.put("airbrushRate",0)
@@ -200,6 +200,7 @@ internal object ArtBrush {
         if(stroke.getString("tool")=="dyna")ArtDyna.validateStored(stroke)
         if(stroke.getString("tool")=="line")ArtLine.validateStored(stroke)
         if(stroke.getString("tool") in ArtFigure.tools)ArtFigure.validateStored(stroke)
+        if(stroke.getString("tool") in ArtRasterPath.tools)ArtRasterPath.validateStored(stroke)
         samples(stroke.getJSONArray("brushInput"));samples(stroke.getJSONArray("points"))
     }
     fun noise(seed:Int,index:Int,salt:Int):Double {
@@ -257,7 +258,7 @@ internal object ArtBrush {
             for(n in 0 until strokes.length()) {
                 val stroke=strokes.getJSONObject(n)
                 stroke.optJSONObject("brush")?.let {enabled=true;assets.addAll(assetIds(it))}
-                if(stroke.has("figureVersion")) {enabled=true;figure=true;assets.addAll(ArtFigure.assetIds(stroke))}
+                if(stroke.has("figureVersion") || stroke.has("pathVersion")) {enabled=true;figure=true;assets.addAll(ArtFigure.assetIds(stroke))}
             }
         }
         if(!enabled)return 0

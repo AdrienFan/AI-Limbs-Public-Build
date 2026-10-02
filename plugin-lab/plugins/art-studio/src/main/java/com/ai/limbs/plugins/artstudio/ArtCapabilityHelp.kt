@@ -213,7 +213,10 @@ internal object ArtCapabilityHelp {
   "line.draw":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","points":[[20,30,0.3,0,0,0],[80,55,0.7,50,0.2,0.1],[160,95,1,100,0.3,0.2]],"color":"#FF245364","width":6,"brushTool":"ink","useSensors":true,"angleStep":15},"note":"替换ID和最新revision；绘画层用brushTool及brushPresetId/brush，矢量层省略brush/brushPresetId，用颜色/粗细/透明度。沿尺规改用assistantId=尺规ID且angleStep=0；成功附预览。","summary":"当前笔刷描直线；支持传感器、尺规、角度和起点平移，矢量层创建可编辑线段。"},
   "figure.info":{"args":{},"note":"仅读范围。共享笔刷配置查brush.info，预设查brush.presets。图案图片通过brush.resource.import(kind=texture)导入，取返回asset。","summary":"返回矩形/椭圆尺寸约束、中心、圆角、轮廓及图案填充说明。"},
   "figure.geometry":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","tool":"rectangle","points":[[160,120],[200,150]],"fixedWidth":160,"fixedHeight":90,"drawFromCenter":true,"cornerRadius":12},"note":"替换ID与最新revision；只计算不绘画，返回figureBounds/figureCorners/effectiveRadius。drawFromCenter=true时第一点是中心，第二点是边缘；绘画时仍传原始points，避免再解释约束。","summary":"计算固定尺寸或比例、中心和矩形圆角。"},
-  "figure.draw":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","tool":"rectangle","points":[[40,50],[200,140]],"color":"#FF245364","width":6,"brushTool":"ink","cornerRadius":12,"figureFill":{"mode":"pattern","pattern":{"kind":"checker","tileSize":16,"foreground":"#FFE8DCC5","background":"#FFB6C8C2"}}},"note":"替换ID与最新revision；tool可改ellipse（cornerRadius=0）。绘画层outline=brush/basic/none，brushPresetId/brush只用于brush；图案可选checker/stripes/dots/image，image须asset。矢量层省略brush/brushPresetId，填充只用none/solid。成功附预览。","summary":"共享笔刷描矩形/椭圆，支持尺寸约束、中心、圆角和图案填充；矢量输出可编辑。"}
+  "figure.draw":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","tool":"rectangle","points":[[40,50],[200,140]],"color":"#FF245364","width":6,"brushTool":"ink","cornerRadius":12,"figureFill":{"mode":"pattern","pattern":{"kind":"checker","tileSize":16,"foreground":"#FFE8DCC5","background":"#FFB6C8C2"}}},"note":"替换ID与最新revision；tool可改ellipse（cornerRadius=0）。绘画层outline=brush/basic/none，brushPresetId/brush只用于brush；图案可选checker/stripes/dots/image，image须asset。矢量层省略brush/brushPresetId，填充只用none/solid。成功附预览。","summary":"共享笔刷描矩形/椭圆，支持尺寸约束、中心、圆角和图案填充；矢量输出可编辑。"},
+  "path.info":{"args":{},"note":"参数/预设/资源结构分别查brush.info、brush.presets、brush.resources(kind=texture)。","summary":"返回多边形、折线、三次贝塞尔栅格路径的描边、填充和采样范围。"},
+  "path.geometry":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","tool":"bezier","points":[[30,120],[70,20],[150,220],[210,100]]},"note":"替换当前ID和revision；仅读返回pathInput及brush描边的outlinePoints。绘画仍传原始控制点，不传采样结果。","summary":"校验路径控制点，按弧长生成笔刷轮廓采样。"},
+  "path.draw":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"PAINT_LAYER_ID","tool":"polygon","points":[[40,50],[180,40],[210,150],[80,180]],"color":"#FF245364","width":6,"brushTool":"ink","figureFill":{"mode":"pattern","pattern":{"kind":"checker","tileSize":16,"foreground":"#FFE8DCC5","background":"#FFB6C8C2"}}},"note":"替换当前ID和revision，绘画层专用。折线改tool:polyline；三次曲线tool:bezier，点为起点+每段控制1/控制2/终点，figureFill只允许none。outline默认brush，可用basic；polygon可none配非空填充。成功附预览。","summary":"共享当前笔刷/预设描栅格多边形、折线或三次曲线；多边形支持图案填充。"}
 }
 """
     private const val FIELDS = """
@@ -356,7 +359,7 @@ internal object ArtCapabilityHelp {
   "brushPresetId":{"description":"brush.presets返回的预设id；须与tool一致，brush可覆盖部分参数；实际width/color/opacity仍以本次笔触为准。 多重/动态画笔及直线/矩形/椭圆按brushTool匹配预设。"},
   "brushSeed":{"description":"可选非负整数随机种子0–2147483647；省略由画室生成并保存，重复渲染效果一致。"},
   "mirrorAngle":{"description":"多重画笔对称轴旋转角，-360–360°，默认0；正数在图层局部坐标中逆时针。镜像/雪花旋转轴；随机平移旋转偏移；radial仅轴线显示受影响，copytranslate/interval布置不变。"},
-  "brushTool":{"description":"多重/动态画笔、直线或矩形/椭圆笔刷轮廓的主笔类型，默认ink；六支栅格笔共享引擎与预设。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]},
+  "brushTool":{"description":"多重/动态画笔、直线或矩形/椭圆笔刷轮廓的主笔类型，默认ink；六支栅格笔共享引擎与预设。 多边形/折线/三次贝塞尔笔刷轮廓也使用此字段。","enum":["ink","pencil","soft","spray","eraser","calligraphy"]},
   "assistantId":{"description":"动态画笔或直线的可选尺规ID，取assistant.list；须可见且启用。dyna在惯性之后投影；line只接受ruler/infinite_ruler/parallel_ruler/vanishing_point，angleStep须为0。"},
   "useSensors":{"description":"直线是否使用压力、速度、倾斜和笔方向角驱动动态曲线，默认true；false固定笔径/流量等设备传感器通道。几何方向/随机通道仍可用。"},
   "angleStep":{"description":"直线角度步长（文档空间），0=自由，或1–180°；默认0，Shift等价15。保持长度旋转到最近倍数，与assistantId不能同时指定。"},
@@ -460,7 +463,7 @@ internal object ArtCapabilityHelp {
   "shape.box.height":{"description":"区域尺寸，有限正数，文档像素。"},
   "stroke.add.width":{"description":"笔粗0.1–512图层局部像素。"},
   "stroke.add.tool":{"description":"栅格绘画工具；建议显式传入。","enum":["pencil","ink","eraser","soft","spray","mirror","dyna","calligraphy","line","rectangle","ellipse","polygon","polyline","bezier","gradient"]},
-  "stroke.add.points":{"description":"图层局部点[[x,y],[x,y,pressure],...]；1–10000点，pressure=0–1。rectangle/ellipse为2个原始角点（支持figure约束，轮廓由引擎生成）；gradient恰好2点；line为2–10000点，首尾定线；polygon>=3，polyline>=2；bezier为起点+每段控制点1/2/终点，4–1024点且(点数-1)%3=0。 六支栅格笔及多重/动态画笔及直线支持[x,y,pressure,timeMs,tilt,rotation]，可省略末尾项；timeMs非递减且0–180000，省略按16ms/点；tilt/rotation=0–1，缺省0。speed按像素/ms归一化到0–1；rotation是笔方向角输入。其他工具仍为2–3项。"},
+  "stroke.add.points":{"description":"图层局部点[[x,y],[x,y,pressure],...]；1–10000点，pressure=0–1。rectangle/ellipse为2个原始角点（支持figure约束，轮廓由引擎生成）；gradient恰好2点；line为2–10000点，首尾定线；polygon>=3，polyline>=2；bezier为起点+每段控制点1/2/终点，4–1024点且(点数-1)%3=0。 六支栅格笔及多重/动态画笔及直线支持[x,y,pressure,timeMs,tilt,rotation]，可省略末尾项；timeMs非递减且0–180000，省略按16ms/点；tilt/rotation=0–1，缺省0。speed按像素/ms归一化到0–1；rotation是笔方向角输入。其他工具仍为2–3项。 polygon/polyline/bezier的新笔画接入path.draw同一引擎，保存原始pathInput与最终笔刷points；填充仅polygon。"},
   "stroke.add.gradientEndColor":{"description":"渐变末色#AARRGGBB；省略为color的全透明版本。"},
   "assistant.stroke.tool":{"description":"沿尺规的栅格画笔，默认ink。 mirror使用brushTool选主笔，投影主轨迹后复制副笔。 dyna先惯性过滤，再沿指定尺规投影；Mass/Drag默认0.5/0.15。 line按brushTool选择笔刷，首尾定直线，只接受直线尺规，angleStep须为0。","enum":["ink","pencil","soft","spray","eraser","calligraphy","mirror","dyna","line"]},
   "assistant.stroke.width":{"description":"笔粗0.1–512图层局部像素。"},
@@ -676,7 +679,16 @@ internal object ArtCapabilityHelp {
   "figure.draw.points":{"description":"两个原始图层局部点[[x0,y0],[x1,y1]]。默认为拖拽起角和终角；drawFromCenter=true为中心与边缘。固定宽高/比例在这两个原始点上求最终边界；不要传已约束的轮廓。栅格笔刷轮廓自动闭合、压力固定1，非自由指针轨迹；轮廓最多10000采样，过长会明确拒绝。"},
   "figure.draw.tool":{"description":"本入口的几何类型。","enum":["rectangle","ellipse"]},
   "figure.draw.brush":{"description":"仅绘画层outline=brush使用共享dab-v1部分配置，结构见brush.info；保留笔尖、纹理和动态曲线，关闭weighted/stabilizer与定时airbrush，pixel_perfect可用。"},
-  "figure.draw.width":{"description":"描边宽0.1–512图层局部像素；无描边时仍须传有效值。"}
+  "figure.draw.width":{"description":"描边宽0.1–512图层局部像素；无描边时仍须传有效值。"},
+  "path.geometry.tool":{"description":"栅格路径类型，绘画层专用。","enum":["polygon","polyline","bezier"]},
+  "path.geometry.points":{"description":"图层局部原始控制点[[x,y],...]；polygon:3–2048点并自动闭合；polyline:2–2048点且保持开放；bezier:4–1024点，起点+重复的两个控制点和终点三元组(1+3n)。可含旧式第三项压力，但几何笔刷压力固定1；不接受触摸时间/倾角。笔刷弧长采样最多10000点，超限明确拒绝。"},
+  "path.geometry.outline":{"description":"默认brush=当前共享笔刷；basic=普通颜色描边；none仅polygon且填充非空。brush/brushPresetId只在brush描边有效。","enum":["brush","basic","none"]},
+  "path.geometry.figureFill":{"description":"完整填充对象，默认{mode:none}。mode:none/solid/pattern；solid可传color:#AARRGGBB（缺省本次color）。pattern={kind:checker/stripes/dots/image,tileSize:4–128整数(内置图案),foreground:#AARRGGBB,background:#AARRGGBB,scale:0.1–16,angle:-360–360,offset:[dx,dy]}；默认checker/16/本次color/透明/1/0/[0,0]，offset是图层局部像素且绝对值<=1000000。image必须asset（1–512px RGBA图片，原色平铺，tileSize/前背景色不染色）；取brush.resources(kind=texture)或导入返回asset。矢量仅none/solid。未知字段或不属于当前模式的color/pattern/asset拒绝。 本入口仅polygon支持solid/pattern；polyline/bezier只能none。"},
+  "path.draw.tool":{"description":"栅格路径类型，绘画层专用。","enum":["polygon","polyline","bezier"]},
+  "path.draw.points":{"description":"图层局部原始控制点[[x,y],...]；polygon:3–2048点并自动闭合；polyline:2–2048点且保持开放；bezier:4–1024点，起点+重复的两个控制点和终点三元组(1+3n)。可含旧式第三项压力，但几何笔刷压力固定1；不接受触摸时间/倾角。笔刷弧长采样最多10000点，超限明确拒绝。"},
+  "path.draw.outline":{"description":"默认brush=当前共享笔刷；basic=普通颜色描边；none仅polygon且填充非空。brush/brushPresetId只在brush描边有效。","enum":["brush","basic","none"]},
+  "path.draw.figureFill":{"description":"完整填充对象，默认{mode:none}。mode:none/solid/pattern；solid可传color:#AARRGGBB（缺省本次color）。pattern={kind:checker/stripes/dots/image,tileSize:4–128整数(内置图案),foreground:#AARRGGBB,background:#AARRGGBB,scale:0.1–16,angle:-360–360,offset:[dx,dy]}；默认checker/16/本次color/透明/1/0/[0,0]，offset是图层局部像素且绝对值<=1000000。image必须asset（1–512px RGBA图片，原色平铺，tileSize/前背景色不染色）；取brush.resources(kind=texture)或导入返回asset。矢量仅none/solid。未知字段或不属于当前模式的color/pattern/asset拒绝。 本入口仅polygon支持solid/pattern；polyline/bezier只能none。"},
+  "path.draw.brush":{"description":"共享dab-v1部分配置，结构见brush.info。笔尖/纹理/动态曲线与预设共用；几何采样固定压力1、倾角/旋转0、合成时间，weighted/stabilizer/airbrush停驻关闭，pixel_perfect可用。"}
 }
 """
 }

@@ -21,8 +21,8 @@ internal object ArtCanvasFeedback {
         name.startsWith("colorize.") -> name !in setOf("colorize.list","colorize.preview")
         name.startsWith("assistant.") -> name !in setOf("assistant.list","assistant.project","assistant.preview")
         name.startsWith("reference.") -> name !in setOf("reference.list","reference.preview","reference.region")
-        name in setOf("text.create", "text.update", "mirror.stroke", "dyna.stroke", "line.draw", "figure.draw") -> true
-        name.startsWith("path.") -> name != "path.nodes"
+        name in setOf("text.create", "text.update", "mirror.stroke", "dyna.stroke", "line.draw", "path.draw", "figure.draw") -> true
+        name.startsWith("path.") -> name !in setOf("path.nodes","path.info","path.geometry")
         name.startsWith("shape.") -> name !in setOf("shape.list", "shape.hit", "shape.box")
         name.startsWith("selection.") -> name !in setOf("selection.bezier_info","selection.bezier_nodes","selection.preview","selection.color_info","selection.magnetic_info","selection.magnetic_trace")
         name.startsWith("stroke.") || name.startsWith("transform.") -> true

@@ -476,7 +476,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var dynaDrag by remember { mutableFloatStateOf(0.15f) }
     var nibAngle by remember { mutableFloatStateOf(45f) }
     var figureBrushTool by remember {mutableStateOf("ink")}
-    var figureOptions by remember {mutableStateOf(JSONObject().apply {ArtFigure.tools.forEach {put(it,ArtFigure.defaults())}})}
+    var figureOptions by remember {mutableStateOf(JSONObject().apply {(ArtFigure.tools+ArtRasterPath.tools).forEach {put(it,if(it in ArtFigure.tools)ArtFigure.defaults() else ArtRasterPath.defaults())}})}
     var lineBrushTool by remember {mutableStateOf("ink")}
     var lineUseSensors by remember {mutableStateOf(true)}
     var lineSnap by remember {mutableStateOf(false)}
@@ -1513,9 +1513,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onLineDraft={value -> lineDraft=value;if(!value)lineMoveStart=false}
                     view.onLine={p -> if(!busy)perform {store.lineDraw("AWEI",p)}}
                     view.figureBrushTool=figureBrushTool
-                    if(tool in ArtFigure.tools)view.figureSettings=JSONObject(figureOptions.getJSONObject(tool).toString())
+                    if(tool in ArtFigure.tools || tool in ArtRasterPath.tools)view.figureSettings=JSONObject(figureOptions.getJSONObject(tool).toString())
                     view.onFigure={p -> if(!busy)perform {store.figureDraw("AWEI",p)}}
-                    view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool=="mirror")mirrorBrushTool else if(tool=="dyna")dynaBrushTool else if(tool=="line")lineBrushTool else if(tool in ArtFigure.tools)figureBrushTool else if(tool in ArtBrush.tools)tool else "ink").toString())
+                    view.onRasterPath={p -> if(!busy)perform {store.rasterPathDraw("AWEI",p)}}
+                    view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool=="mirror")mirrorBrushTool else if(tool=="dyna")dynaBrushTool else if(tool=="line")lineBrushTool else if(tool in ArtFigure.tools || tool in ArtRasterPath.tools)figureBrushTool else if(tool in ArtBrush.tools)tool else "ink").toString())
                     view.brushAssetFile = store::assetFile
                     view.referenceBitmaps = referenceBitmaps
                     view.referenceMultiple = referenceMultiple
@@ -2392,7 +2393,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             onClick={lineBrushTool=id},label={Text(label)})}
                     } else Text("矢量直线使用描边颜色、笔粗和透明度，保持可编辑。",style=MaterialTheme.typography.labelSmall)
                 }
-                if(tool in ArtFigure.tools) {
+                if(tool in ArtFigure.tools || tool in ArtRasterPath.tools) {
                     val options=figureOptions.getJSONObject(tool)
                     StudioFigureOptions(store,tool,selectedLayer?.getString("kind")=="paint",options,color,busy,
                         {updated ->figureOptions=JSONObject(figureOptions.toString()).put(tool,updated)})
@@ -2403,8 +2404,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                 }
                 if(ArtBrush.supports(tool) && (tool!="line" || selectedLayer?.getString("kind")=="paint") &&
-                    (tool !in ArtFigure.tools || (selectedLayer?.getString("kind")=="paint" && figureOptions.getJSONObject(tool).getString("outline")=="brush"))) {
-                    val engineTool=if(tool=="mirror")mirrorBrushTool else if(tool=="dyna")dynaBrushTool else if(tool=="line")lineBrushTool else if(tool in ArtFigure.tools)figureBrushTool else tool
+                    (tool !in ArtFigure.tools && tool !in ArtRasterPath.tools || (selectedLayer?.getString("kind")=="paint" && figureOptions.getJSONObject(tool).getString("outline")=="brush"))) {
+                    val engineTool=if(tool=="mirror")mirrorBrushTool else if(tool=="dyna")dynaBrushTool else if(tool=="line")lineBrushTool else if(tool in ArtFigure.tools || tool in ArtRasterPath.tools)figureBrushTool else tool
                     StudioBrushOptions(store,engineTool,rasterBrushes.getJSONObject(engineTool),width,opacity,busy||(tool=="line"&&lineDraft),
                         {updated -> rasterBrushes=JSONObject(rasterBrushes.toString()).put(engineTool,updated)},
                         {w,o -> width=w;opacity=o})
@@ -2646,14 +2647,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                             style = MaterialTheme.typography.labelSmall)
                     }
                 }
-                if (tool == "polygon") {
-                    TextButton(onClick = { fillShape = !fillShape },
-                        modifier = Modifier.fillMaxWidth().semantics {
-                            contentDescription = if (fillShape) "取消形状填充" else "填充形状"
-                        }) {
-                        Text(if (fillShape) "填充：前景色" else "填充：无",
-                            style = MaterialTheme.typography.labelSmall)
-                    }
+                if(tool in ArtRasterPath.tools) {
+                    Text("逐点绘制；多边形/折线双击结束，三次曲线每段为两个控制点和终点。",style=MaterialTheme.typography.labelSmall)
+                    for((action,label) in listOf("finish" to "完成路径","back" to "撤回一点","cancel" to "取消路径"))
+                        TextButton(enabled=!busy,onClick={canvasRef[0]?.rasterPathCommand(action)}) {Text(label)}
                 }
                 if (tool == "bezier") {
                     TextButton(onClick = { bezierContinuous = !bezierContinuous },
@@ -3215,7 +3212,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); figureInteraction.cancel();lineInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
+            shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
             fitToWindow()
         }
@@ -3235,10 +3232,10 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     var scene: JSONObject? = null
     var sceneRevision: Int = 0
-        set(value) {if(field!=value){field=value;figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var shapeMultiple: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value){figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {field=value;if(value){rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3282,6 +3279,13 @@ private class StudioCanvas(context: Context) : View(context) {
     private val assistantInteraction = StudioAssistantInteraction().apply { density=context.resources.displayMetrics.density }
     private val assistedBrushInteraction = StudioAssistedBrushInteraction(this).apply { density=context.resources.displayMetrics.density }
     private val rasterBrushInteraction=StudioAssistedBrushInteraction(this)
+    private val rasterPathInteraction=StudioRasterPathInteraction().apply {density=context.resources.displayMetrics.density}
+    var onRasterPath:(JSONObject)->Unit={}
+    fun rasterPathCommand(action:String) {
+        try {rasterPathInteraction.command(action,documentId,sceneRevision,selectedId,shapeBusy,onRasterPath)}
+        catch(error:Exception) {rasterPathInteraction.cancel();android.util.Log.e("ArtStudio","Raster path command failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
+        finally {invalidate()}
+    }
     private val figureInteraction=StudioFigureInteraction()
     var figureSettings=ArtFigure.defaults()
     var figureBrushTool="ink"
@@ -3300,7 +3304,7 @@ private class StudioCanvas(context: Context) : View(context) {
         set(value) {field=value;lineInteraction.onDraft=value}
     fun lineCommand(command:String) {
         try {lineInteraction.command(command,documentId,sceneRevision,selectedId,shapeBusy,onLine)}
-        catch(error:Exception) {figureInteraction.cancel();lineInteraction.cancel();android.util.Log.e("ArtStudio","Line command failed",error)
+        catch(error:Exception) {rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();android.util.Log.e("ArtStudio","Line command failed",error)
             Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
         finally {invalidate()}
     }
@@ -3347,19 +3351,19 @@ private class StudioCanvas(context: Context) : View(context) {
     var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
-        set(value) {if(field!=value){field=value;figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var selection: JSONObject? = null
     var selectionVisible = true
     var tool: String = "ink"
         set(value) {
             if (field != value) {
                 field = value
-                figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel()
+                rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel()
                 shapeInteraction.cancel()
                 freehandInteraction.cancel()
                 calligraphyInteraction.cancel()
                 referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
-                figureInteraction.cancel();lineInteraction.cancel();assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
+                rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
                 bezierInteraction.cancel()
                 shapeCreationContext = null
                 points = JSONArray()
@@ -3677,8 +3681,8 @@ private class StudioCanvas(context: Context) : View(context) {
         encloseFillInteraction.draw(canvas)
         colorizeInteraction.draw(canvas)
         smartPatchInteraction.draw(canvas)
-        try {figureInteraction.draw(canvas,matrix,brushReader);lineInteraction.draw(canvas,matrix,brushReader);assistedBrushInteraction.draw(canvas,brushReader);rasterBrushInteraction.draw(canvas,brushReader)}
-        catch(error:Exception) {figureInteraction.cancel();lineInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel()
+        try {rasterPathInteraction.draw(canvas,matrix,brushReader);figureInteraction.draw(canvas,matrix,brushReader);lineInteraction.draw(canvas,matrix,brushReader);assistedBrushInteraction.draw(canvas,brushReader);rasterBrushInteraction.draw(canvas,brushReader)}
+        catch(error:Exception) {rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel()
             Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
         if (tool == "mirror") {
             canvas.save(); canvas.concat(matrix); canvas.concat(layerMatrix())
@@ -3888,12 +3892,16 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
     override fun onDetachedFromWindow() {
-        figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();brushBitmapCache.values.forEach {it.recycle()};brushBitmapCache.clear()
+        rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();brushBitmapCache.values.forEach {it.recycle()};brushBitmapCache.clear()
         magneticSelectionInteraction.dispose();colorSelectionInteraction.cancel()
         super.onDetachedFromWindow()
     }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
-        if(tool in ArtFigure.tools && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {figureInteraction.cancel();invalidate();return true}
+        if(tool in ArtRasterPath.tools) {
+            val action=when(keyCode) {android.view.KeyEvent.KEYCODE_ESCAPE->"cancel";android.view.KeyEvent.KEYCODE_ENTER->"finish";android.view.KeyEvent.KEYCODE_DEL,android.view.KeyEvent.KEYCODE_FORWARD_DEL->"back";else->null}
+            if(action!=null) {rasterPathCommand(action);return true}
+        }
+        if(tool in ArtFigure.tools && keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {rasterPathInteraction.cancel();figureInteraction.cancel();invalidate();return true}
         if(tool=="line") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {lineCommand("cancel");return true}
             if(keyCode==android.view.KeyEvent.KEYCODE_ENTER) {lineCommand("finish");return true}
@@ -3958,7 +3966,7 @@ private class StudioCanvas(context: Context) : View(context) {
     private fun brushOptions():JSONObject {
         val p=JSONObject().put("tool",tool).put("color",color).put("width",brushWidth.toDouble()).put("opacity",opacity.toDouble())
         if(ArtBrush.supports(tool))p.put("brush",JSONObject(brushSettings.toString()))
-        if(tool in ArtFigure.tools) {
+        if(tool in ArtFigure.tools || tool in ArtRasterPath.tools) {
             figureSettings.keys().forEach {key ->p.put(key,figureSettings.get(key))}
             p.put("brushTool",figureBrushTool)
             if(p.getString("outline")!="brush")p.remove("brush")
@@ -3982,7 +3990,7 @@ private class StudioCanvas(context: Context) : View(context) {
             freehandInteraction.cancel()
             calligraphyInteraction.cancel()
             referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel()
-            figureInteraction.cancel();lineInteraction.cancel();assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
+            rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();assistantInteraction.cancel();assistedBrushInteraction.cancel();rasterBrushInteraction.cancel();assistedStrokeRouting=false
             bezierInteraction.interrupt()
             shapeCreationContext = null
             val dx = event.getX(1) - event.getX(0)
@@ -4110,24 +4118,31 @@ private class StudioCanvas(context: Context) : View(context) {
             } finally {invalidate()}
         }
         if (tool == "mirror" && mirrorOriginPlacement) {
-            figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
+            rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
             if (event.actionMasked == MotionEvent.ACTION_UP)
                 onMirrorOrigin(local[0].toDouble(), local[1].toDouble())
             invalidate()
             return true
         }
         if (tool == "mirror" && mirrorDirection == "copytranslate" && mirrorPlacement) {
-            figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
+            rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
             if (event.actionMasked == MotionEvent.ACTION_UP)
                 onMirrorPoint(local[0].toDouble(), local[1].toDouble())
             invalidate()
             return true
         }
+        if(tool in ArtRasterPath.tools) {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            val state=scene ?: return true
+            try {return rasterPathInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,brushOptions(),bezierContinuous,onRasterPath)}
+            catch(error:Exception) {rasterPathInteraction.cancel();android.util.Log.e("ArtStudio","Raster path drawing failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+            finally {invalidate()}
+        }
         if(tool in ArtFigure.tools) {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
             try {return figureInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,brushOptions(),onFigure)}
-            catch(error:Exception) {figureInteraction.cancel();android.util.Log.e("ArtStudio","Figure drawing failed",error)
+            catch(error:Exception) {rasterPathInteraction.cancel();figureInteraction.cancel();android.util.Log.e("ArtStudio","Figure drawing failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
             finally {invalidate()}
         }
@@ -4136,7 +4151,7 @@ private class StudioCanvas(context: Context) : View(context) {
             val state=scene ?: return true
             try {return lineInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
                 brushOptions(),lineHold,lineMoveStart,onLine)}
-            catch(error:Exception) {figureInteraction.cancel();lineInteraction.cancel();android.util.Log.e("ArtStudio","Line drawing failed",error)
+            catch(error:Exception) {rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();android.util.Log.e("ArtStudio","Line drawing failed",error)
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
             finally {invalidate()}
         }

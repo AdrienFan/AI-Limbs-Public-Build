@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.46",
+  "version": "0.2.47",
   "api": {
     "target": 1,
     "min": 1
@@ -210,7 +210,10 @@
       "plugin.art.studio.line.draw",
       "plugin.art.studio.figure.info",
       "plugin.art.studio.figure.geometry",
-      "plugin.art.studio.figure.draw"
+      "plugin.art.studio.figure.draw",
+      "plugin.art.studio.path.info",
+      "plugin.art.studio.path.geometry",
+      "plugin.art.studio.path.draw"
     ],
     "services": [],
     "providers": [

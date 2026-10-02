@@ -1019,6 +1019,20 @@ internal class ArtStore(private val root: File) {
         apply(actor,"STROKE_ADD",stroke)
     }
 
+    fun rasterPathGeometry(p:JSONObject):JSONObject = locked {
+        val snap=snapshot(loadCurrent());require(p.getString("documentId")==snap.getString("id")&&p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已改变，请刷新"}
+        val state=snap.getJSONObject("state");val layer=ArtMenuOperations.layers(state).first {it.getString("id")==p.getString("layerId")}
+        require(layer.getString("kind")=="paint");ArtShapes.layerMatrix(state,layer)
+        val geometry=ArtRasterPath.normalize(p)
+        if(geometry.getString("outline")=="brush")geometry.put("outlinePoints",ArtRasterPath.outlinePoints(geometry))
+        geometry.put("coordinateSpace","layer-local").put("revision",snap.getInt("revision"))
+    }
+    fun rasterPathDraw(actor:String,p:JSONObject):JSONObject = locked {
+        val snap=snapshot(loadCurrent());require(p.getString("documentId")==snap.getString("id")&&p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已改变，请刷新"}
+        val state=snap.getJSONObject("state");val layer=ArtMenuOperations.layers(state).first {it.getString("id")==p.getString("layerId")}
+        require(layer.getString("kind")=="paint"&&!ArtMenuOperations.isLocked(state,layer)&&ArtShapes.visible(state,layer)) {"请选择可编辑的绘画图层"}
+        apply(actor,"STROKE_ADD",JSONObject(p.toString()).put("id",UUID.randomUUID().toString()))
+    }
     fun figureGeometry(p:JSONObject):JSONObject = locked {
         val snap=current()
         require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请刷新"}
@@ -1158,8 +1172,8 @@ internal class ArtStore(private val root: File) {
         var normalized = JSONObject(params.toString())
         if(type=="STROKE_ADD") {
             val tool=normalized.optString("tool","pencil")
-            if(tool in ArtFigure.tools) {
-                normalized=ArtFigure.geometry(normalized.put("tool",tool))
+            if(tool in ArtFigure.tools || tool in ArtRasterPath.tools) {
+                normalized=if(tool in ArtFigure.tools)ArtFigure.geometry(normalized.put("tool",tool)) else ArtRasterPath.normalize(normalized.put("tool",tool))
                 ArtFigure.assetIds(normalized).forEach {id ->
                     val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
                     val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
@@ -1167,7 +1181,7 @@ internal class ArtStore(private val root: File) {
                     require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
                 }
             }
-            if(tool in ArtFigure.tools && normalized.getString("outline")!="brush") {
+            if((tool in ArtFigure.tools || tool in ArtRasterPath.tools) && normalized.getString("outline")!="brush") {
                 require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"仅当前笔刷描边使用brush/brushPresetId"}
             } else if(ArtBrush.supports(tool)) {
                 normalized.put("tool",tool)
@@ -1186,6 +1200,7 @@ internal class ArtStore(private val root: File) {
                     config.getJSONObject("tip").put("angle",normalized.getDouble("nibAngle"))
                 ArtBrush.assetIds(config).forEach { require(assetFile(it).isFile) {"笔刷资源不存在"} }
                 if(tool in ArtFigure.tools)normalized.put("points",ArtFigure.outlinePoints(normalized))
+                if(tool in ArtRasterPath.tools)normalized.put("points",ArtRasterPath.outlinePoints(normalized))
                 normalized=ArtBrush.prepare(normalized,config,normalized.optInt("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE)))
             } else require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"该工具不使用栅格笔刷引擎"}
         }
@@ -2115,6 +2130,7 @@ internal class ArtStore(private val root: File) {
                 }
                 if(p.has("brush"))ArtBrush.validateStored(p)
                 if(p.has("figureVersion"))ArtFigure.validateStored(p)
+                if(p.has("pathVersion"))ArtRasterPath.validateStored(p)
                 requireColor(p.optString("color", "#FF000000"))
                 require(p.getDouble("width") in 0.1..512.0)
                 require(p.optDouble("opacity", 1.0) in 0.0..1.0)
@@ -2127,7 +2143,7 @@ internal class ArtStore(private val root: File) {
                     "gradient" -> points.length()==2
                     "polygon" -> points.length() >= 3
                     "polyline" -> points.length() >= 2
-                    "bezier" -> points.length() in 4..1024 && (points.length() - 1) % 3 == 0
+                    "bezier" -> p.has("pathVersion") || (points.length() in 4..1024 && (points.length() - 1) % 3 == 0)
                     else -> true
                 }) { "形状顶点数量无效" }
                 if (p.optBoolean("fillShape", false))
