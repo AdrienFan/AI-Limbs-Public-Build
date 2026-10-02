@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.42",
+  "version": "0.2.43",
   "api": {
     "target": 1,
     "min": 1
@@ -200,7 +200,9 @@
       "plugin.art.studio.brush.preset.save",
       "plugin.art.studio.brush.preset.delete",
       "plugin.art.studio.brush.resources",
-      "plugin.art.studio.brush.resource.import"
+      "plugin.art.studio.brush.resource.import",
+      "plugin.art.studio.mirror.info",
+      "plugin.art.studio.mirror.stroke"
     ],
     "services": [],
     "providers": [

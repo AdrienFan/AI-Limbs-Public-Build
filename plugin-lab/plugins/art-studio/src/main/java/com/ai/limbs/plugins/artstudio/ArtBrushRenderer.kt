@@ -6,7 +6,7 @@ import kotlin.math.*
 
 /** Shared dab renderer for live preview, replay, thumbnails and exports. */
 internal object ArtBrushRenderer {
-    fun draw(canvas:Canvas,stroke:JSONObject,resources:((String)->Bitmap)?) {
+    fun draw(canvas:Canvas,stroke:JSONObject,resources:((String)->Bitmap)?,copies:List<Matrix>?=null) {
         val b=stroke.getJSONObject("brush");val tip=b.getJSONObject("tip");val texture=b.getJSONObject("texture")
         val pixel=b.getJSONObject("smoothing").getString("mode")=="pixel_perfect"
         val seed=stroke.getInt("brushSeed");val edge=128
@@ -29,11 +29,11 @@ internal object ArtBrushRenderer {
             };Bitmap.createBitmap(pixels,edge,edge,Bitmap.Config.ARGB_8888)
         }
         var textureBitmap:Bitmap?=null
-        val saved=canvas.saveLayer(null,Paint().apply {
+        val composite=Paint().apply {
             val c=Color.parseColor(stroke.optString("color","#FF000000"))
             alpha=(Color.alpha(c)*stroke.optDouble("opacity",1.0)).roundToInt().coerceIn(0,255)
             if(stroke.getString("tool")=="eraser")xfermode=PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
-        })
+        }
         try {
             val tipShader=BitmapShader(tipBitmap,Shader.TileMode.CLAMP,Shader.TileMode.CLAMP)
             val textureShader=if(texture.getString("kind")=="none")null else {
@@ -66,27 +66,37 @@ internal object ArtBrushRenderer {
                 colorFilter=PorterDuffColorFilter(Color.rgb(Color.red(color),Color.green(color),Color.blue(color)),PorterDuff.Mode.SRC_IN)
             }
             val matrix=Matrix();val count=b.getInt("count");val scatter=b.getDouble("scatter")
-            ArtBrush.dabs(stroke) { dab->
-                for(i in 0 until count) {
-                    val a=2*PI*ArtBrush.noise(seed,dab.ordinal*count+i,13)
-                    val r=sqrt(ArtBrush.noise(seed,dab.ordinal*count+i,29))*scatter*dab.size
-                    val x=(dab.sample.x+cos(a)*r).toFloat();val y=(dab.sample.y+sin(a)*r).toFloat()
-                    val size=(if(stroke.getString("tool")=="spray")max(0.1,dab.size*0.08) else dab.size).toFloat()
-                    val angle=dab.angle+(ArtBrush.noise(seed,dab.ordinal*count+i,41)-0.5)*b.getDouble("jitter")
-                    matrix.reset();matrix.postTranslate(-tipBitmap.width/2f,-tipBitmap.height/2f)
-                    matrix.postScale(size/tipBitmap.width,size*tip.getDouble("ratio").toFloat()/tipBitmap.height)
-                    matrix.postRotate(angle.toFloat());matrix.postTranslate(x,y);tipShader.setLocalMatrix(matrix)
-                    paint.alpha=(255*dab.flow).roundToInt().coerceIn(0,255)
-                    val reach=size*0.75f+1
-                    val clip=canvas.save()
-                    try {
-                        canvas.translate(x,y);canvas.rotate(angle.toFloat())
-                        canvas.clipRect(-size/2,-size*tip.getDouble("ratio").toFloat()/2,size/2,size*tip.getDouble("ratio").toFloat()/2)
-                        canvas.rotate(-angle.toFloat());canvas.translate(-x,-y)
-                        canvas.drawRect(x-reach,y-reach,x+reach,y+reach,paint)
-                    } finally {canvas.restoreToCount(clip)}
-                }
+            // Share masks and shaders across all hands instead of rebuilding imported tips per copy.
+            fun drawOne() {
+                val saved=canvas.saveLayer(null,composite)
+                try {
+                    ArtBrush.dabs(stroke) { dab->
+                        for(i in 0 until count) {
+                            val a=2*PI*ArtBrush.noise(seed,dab.ordinal*count+i,13)
+                            val r=sqrt(ArtBrush.noise(seed,dab.ordinal*count+i,29))*scatter*dab.size
+                            val x=(dab.sample.x+cos(a)*r).toFloat();val y=(dab.sample.y+sin(a)*r).toFloat()
+                            val size=(if(stroke.getString("tool")=="spray")max(0.1,dab.size*0.08) else dab.size).toFloat()
+                            val angle=dab.angle+(ArtBrush.noise(seed,dab.ordinal*count+i,41)-0.5)*b.getDouble("jitter")
+                            matrix.reset();matrix.postTranslate(-tipBitmap.width/2f,-tipBitmap.height/2f)
+                            matrix.postScale(size/tipBitmap.width,size*tip.getDouble("ratio").toFloat()/tipBitmap.height)
+                            matrix.postRotate(angle.toFloat());matrix.postTranslate(x,y);tipShader.setLocalMatrix(matrix)
+                            paint.alpha=(255*dab.flow).roundToInt().coerceIn(0,255)
+                            val reach=size*0.75f+1
+                            val clip=canvas.save()
+                            try {
+                                canvas.translate(x,y);canvas.rotate(angle.toFloat())
+                                canvas.clipRect(-size/2,-size*tip.getDouble("ratio").toFloat()/2,size/2,size*tip.getDouble("ratio").toFloat()/2)
+                                canvas.rotate(-angle.toFloat());canvas.translate(-x,-y)
+                                canvas.drawRect(x-reach,y-reach,x+reach,y+reach,paint)
+                            } finally {canvas.restoreToCount(clip)}
+                        }
+                    }
+                } finally {canvas.restoreToCount(saved)}
             }
-        } finally {canvas.restoreToCount(saved);tipBitmap.recycle();textureBitmap?.recycle()}
+            if(copies==null)drawOne() else for(transform in copies) {
+                val saved=canvas.save()
+                try {canvas.concat(transform);drawOne()} finally {canvas.restoreToCount(saved)}
+            }
+        } finally {tipBitmap.recycle();textureBitmap?.recycle()}
     }
 }

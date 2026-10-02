@@ -166,7 +166,20 @@ internal object ArtRenderer {
     fun drawStroke(canvas: Canvas, stroke: JSONObject,
         logicalWidth: Int = canvas.width, logicalHeight: Int = canvas.height,
         resources: ((String) -> Bitmap)? = null) {
-        if (stroke.has("brush")) { ArtBrushRenderer.draw(canvas, stroke, resources);return }
+        if (stroke.has("brush")) {
+            if(stroke.getString("tool")=="mirror") {
+                ArtMirror.validateStored(stroke);ArtMirror.requireBudget(stroke)
+                val copies=stroke.getJSONArray("mirrorTransforms")
+                val regular=JSONObject(stroke.toString()).put("tool",ArtBrush.engineTool(stroke))
+                val transforms=(0 until copies.length()).map {i ->
+                    val t=copies.getJSONArray(i)
+                    android.graphics.Matrix().apply {setValues(floatArrayOf(t.getDouble(0).toFloat(),t.getDouble(2).toFloat(),t.getDouble(4).toFloat(),
+                        t.getDouble(1).toFloat(),t.getDouble(3).toFloat(),t.getDouble(5).toFloat(),0f,0f,1f))}
+                }
+                ArtBrushRenderer.draw(canvas,regular,resources,transforms)
+            } else ArtBrushRenderer.draw(canvas,stroke,resources)
+            return
+        }
         val points = stroke.getJSONArray("points")
         if (points.length() == 0) return
         val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {

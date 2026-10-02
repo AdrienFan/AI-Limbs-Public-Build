@@ -459,6 +459,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var fillReferenceAll by remember { mutableStateOf(false) }
     var fillErase by remember { mutableStateOf(false) }
     var mirrorDirection by remember { mutableStateOf("vertical") }
+    var mirrorAngle by remember { mutableFloatStateOf(0f) }
+    var mirrorAngleText by remember { mutableStateOf("0") }
+    var mirrorBrushTool by remember { mutableStateOf("ink") }
     var mirrorCount by remember { mutableIntStateOf(6) }
     var mirrorRadius by remember { mutableFloatStateOf(80f) }
     var mirrorPlacement by remember { mutableStateOf(false) }
@@ -1490,7 +1493,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onAssistantCreated = { assistantAdding=false }
                     view.onAssistantEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
                     view.onAssistedStroke = { p -> if(!busy) perform { store.apply("AWEI","STROKE_ADD",p) } }
-                    view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool in ArtBrush.tools)tool else "ink").toString())
+                    view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool=="mirror")mirrorBrushTool else if(tool in ArtBrush.tools)tool else "ink").toString())
                     view.brushAssetFile = store::assetFile
                     view.referenceBitmaps = referenceBitmaps
                     view.referenceMultiple = referenceMultiple
@@ -1522,6 +1525,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.selectionVisible=remainingSettings.optBoolean("selectionVisible",true)
                     view.tool = tool; view.color = color; view.brushWidth = width
                     view.opacity = opacity; view.mirrorDirection = mirrorDirection
+                    view.mirrorAngle = mirrorAngle;view.mirrorBrushTool=mirrorBrushTool
                     view.mirrorCount = mirrorCount; view.mirrorRadius = mirrorRadius
                     view.mirrorPlacement = mirrorPlacement; view.mirrorCenters = mirrorCenters
                     view.mirrorIntervalX = mirrorIntervalX; view.mirrorIntervalY = mirrorIntervalY
@@ -2346,9 +2350,17 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             if (pending != null) {
                 Text("该工具尚未实现，当前仅提供说明入口，不能用于绘画。")
             } else {
-                if(tool in ArtBrush.tools)StudioBrushOptions(store,tool,rasterBrushes.getJSONObject(tool),width,opacity,busy,
-                    {updated -> rasterBrushes=JSONObject(rasterBrushes.toString()).put(tool,updated)},
-                    {w,o -> width=w;opacity=o})
+                if(tool=="mirror") {
+                    Text("主笔类型",style=MaterialTheme.typography.titleSmall)
+                    ArtBrush.tools.forEach { (id,label)->FilterChip(selected=mirrorBrushTool==id,
+                        onClick={mirrorBrushTool=id},label={Text(label)}) }
+                }
+                if(ArtBrush.supports(tool)) {
+                    val engineTool=if(tool=="mirror")mirrorBrushTool else tool
+                    StudioBrushOptions(store,engineTool,rasterBrushes.getJSONObject(engineTool),width,opacity,busy,
+                        {updated -> rasterBrushes=JSONObject(rasterBrushes.toString()).put(engineTool,updated)},
+                        {w,o -> width=w;opacity=o})
+                }
                 if(tool=="colorize_mask") {
                     StudioColorizeOptions(current,selected,busy,colorizeWidth,colorizeErase,color,
                         {colorizeWidth=it},{colorizeErase=it},{color=it},
@@ -2493,6 +2505,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         style = MaterialTheme.typography.bodySmall)
                 }
                 if (tool == "mirror") {
+                    Text("对称轴旋转："+mirrorAngle.roundToInt()+"°（正数逆时针）")
+                    Slider(value=mirrorAngle,onValueChange={mirrorAngle=it;mirrorAngleText=it.roundToInt().toString()},
+                        valueRange=-360f..360f,enabled=!busy)
+                    OutlinedTextField(mirrorAngleText,{mirrorAngleText=it},label={Text("精确角度（-360–360°）")},singleLine=true,enabled=!busy)
+                    TextButton(enabled=!busy,onClick={
+                        val value=mirrorAngleText.toFloatOrNull()
+                        if(value!=null && value.isFinite() && value in -360f..360f)mirrorAngle=value
+                        else Toast.makeText(context,"角度须为-360–360°",Toast.LENGTH_SHORT).show()
+                    }) {Text("应用角度")}
+                    Text("旋转对称只改变轴线显示；自定子画笔及间隔复制保持原来的布置。",style=MaterialTheme.typography.bodySmall)
                     FilterChip(selected = mirrorDirection == "vertical",
                         onClick = { mirrorDirection = "vertical"; mirrorPlacement = false },
                         label = { Text("左右镜像") })
@@ -3315,6 +3337,8 @@ private class StudioCanvas(context: Context) : View(context) {
     var mirrorCenters: JSONArray = JSONArray()
         set(value) { field = value; invalidate() }
     var onMirrorPoint: (Double, Double) -> Unit = { _, _ -> }
+    var mirrorAngle:Float = 0f
+    var mirrorBrushTool:String = "ink"
     var mirrorSeed: Int = 0
     var mirrorDirection: String = "vertical"
         set(value) {
@@ -3593,17 +3617,22 @@ private class StudioCanvas(context: Context) : View(context) {
                 strokeWidth = 1.5f / (fit * zoom)
                 pathEffect = android.graphics.DashPathEffect(floatArrayOf(9f, 6f), 0f)
             }
+            if(mirrorDirection !in setOf("copytranslate","interval"))canvas.rotate(-mirrorAngle,mirrorAxisX,mirrorAxisY)
             if (mirrorDirection == "vertical")
-                canvas.drawLine(mirrorAxisX, 0f,
-                    mirrorAxisX, bitmap.height.toFloat(), guide)
+                canvas.drawLine(mirrorAxisX, mirrorAxisY-bitmap.width-bitmap.height,
+                    mirrorAxisX, mirrorAxisY+bitmap.width+bitmap.height, guide)
             else if (mirrorDirection == "horizontal")
-                canvas.drawLine(0f, mirrorAxisY,
-                    bitmap.width.toFloat(), mirrorAxisY, guide)
+                canvas.drawLine(mirrorAxisX-bitmap.width-bitmap.height, mirrorAxisY,
+                    mirrorAxisX+bitmap.width+bitmap.height, mirrorAxisY, guide)
             else if (mirrorDirection == "quad") {
-                canvas.drawLine(mirrorAxisX, 0f,
-                    mirrorAxisX, bitmap.height.toFloat(), guide)
-                canvas.drawLine(0f, mirrorAxisY,
-                    bitmap.width.toFloat(), mirrorAxisY, guide)
+                canvas.drawLine(mirrorAxisX, mirrorAxisY-bitmap.width-bitmap.height,
+                    mirrorAxisX, mirrorAxisY+bitmap.width+bitmap.height, guide)
+                canvas.drawLine(mirrorAxisX-bitmap.width-bitmap.height, mirrorAxisY,
+                    mirrorAxisX+bitmap.width+bitmap.height, mirrorAxisY, guide)
+            }
+            else if (mirrorDirection == "translate") {
+                canvas.drawLine(mirrorAxisX-bitmap.width-bitmap.height,mirrorAxisY,mirrorAxisX+bitmap.width+bitmap.height,mirrorAxisY,guide)
+                canvas.drawLine(mirrorAxisX,mirrorAxisY-bitmap.width-bitmap.height,mirrorAxisX,mirrorAxisY+bitmap.width+bitmap.height,guide)
             }
             else if (mirrorDirection == "copytranslate") {
                 val center = Paint(Paint.ANTI_ALIAS_FLAG).apply {
@@ -3850,6 +3879,17 @@ private class StudioCanvas(context: Context) : View(context) {
         return super.onKeyDown(keyCode,event)
     }
 
+    private fun brushOptions():JSONObject {
+        val p=JSONObject().put("tool",tool).put("color",color).put("width",brushWidth.toDouble()).put("opacity",opacity.toDouble())
+        if(ArtBrush.supports(tool))p.put("brush",JSONObject(brushSettings.toString()))
+        if(tool=="mirror")p.put("brushTool",mirrorBrushTool).put("mirrorDirection",mirrorDirection)
+            .put("mirrorAngle",mirrorAngle.toDouble()).put("mirrorCount",mirrorCount).put("mirrorRadius",mirrorRadius.toDouble())
+            .put("mirrorSeed",kotlin.random.Random.nextInt(Int.MAX_VALUE)).put("mirrorCenters",JSONArray(mirrorCenters.toString()))
+            .put("mirrorIntervalX",mirrorIntervalX).put("mirrorIntervalY",mirrorIntervalY)
+            .put("axisX",mirrorAxisX.toDouble()).put("axisY",mirrorAxisY.toDouble())
+        return p
+    }
+
     override fun onTouchEvent(event: MotionEvent): Boolean {
         if (image == null) return true
         if (event.pointerCount >= 2) {
@@ -3985,14 +4025,26 @@ private class StudioCanvas(context: Context) : View(context) {
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
         }
+        if (tool == "mirror" && mirrorOriginPlacement) {
+            rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
+            if (event.actionMasked == MotionEvent.ACTION_UP)
+                onMirrorOrigin(local[0].toDouble(), local[1].toDouble())
+            invalidate()
+            return true
+        }
+        if (tool == "mirror" && mirrorDirection == "copytranslate" && mirrorPlacement) {
+            rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();assistedStrokeRouting=false
+            if (event.actionMasked == MotionEvent.ACTION_UP)
+                onMirrorPoint(local[0].toDouble(), local[1].toDouble())
+            invalidate()
+            return true
+        }
         val assistantState=scene
         if(event.actionMasked==MotionEvent.ACTION_DOWN) assistedStrokeRouting =
             tool in ArtAssistants.brushTools && assistantState!=null && ArtAssistants.settings(assistantState).getBoolean("snapping")
         if(assistedStrokeRouting && assistantState!=null) {
             try {
-                val options=JSONObject().put("tool",tool).put("color",color)
-                    .put("width",brushWidth.toDouble()).put("opacity",opacity.toDouble())
-                if(tool in ArtBrush.tools)options.put("brush",brushSettings)
+                val options=brushOptions()
                 return assistedBrushInteraction.touch(event,assistantState,documentId,sceneRevision,selectedId,
                     matrix,shapeBusy,options,onAssistedStroke)
             } catch(error:Exception) {
@@ -4004,12 +4056,11 @@ private class StudioCanvas(context: Context) : View(context) {
                 invalidate()
             }
         }
-        if(tool in ArtBrush.tools) {
+        if(ArtBrush.supports(tool)) {
             val state=scene ?: return true
             try {
                 return rasterBrushInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy,
-                    JSONObject().put("tool",tool).put("color",color).put("width",brushWidth.toDouble())
-                        .put("opacity",opacity.toDouble()).put("brush",brushSettings),onAssistedStroke,false)
+                    brushOptions(),onAssistedStroke,false)
             } catch(error:Exception) {rasterBrushInteraction.cancel()
                 Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true
             } finally {invalidate()}
@@ -4102,18 +4153,6 @@ private class StudioCanvas(context: Context) : View(context) {
                     local[0] <= source.getInt("cacheWidth") && local[1] <= source.getInt("cacheHeight")
                 onText(xy[0].toDouble(), xy[1].toDouble(), hit)
             }
-            return true
-        }
-        if (tool == "mirror" && mirrorOriginPlacement) {
-            if (event.actionMasked == MotionEvent.ACTION_UP)
-                onMirrorOrigin(local[0].toDouble(), local[1].toDouble())
-            invalidate()
-            return true
-        }
-        if (tool == "mirror" && mirrorDirection == "copytranslate" && mirrorPlacement) {
-            if (event.actionMasked == MotionEvent.ACTION_UP)
-                onMirrorPoint(local[0].toDouble(), local[1].toDouble())
-            invalidate()
             return true
         }
         when (event.actionMasked) {

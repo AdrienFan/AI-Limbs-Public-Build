@@ -21,6 +21,8 @@ internal object ArtBrush {
             time+(b.time-time)*t,tilt+(b.tilt-tilt)*t,rotation+(b.rotation-rotation)*t)
     }
     data class Dab(val sample:Sample,val size:Double,val flow:Double,val angle:Double,val ordinal:Int)
+    fun supports(tool:String)=tool in tools || tool=="mirror"
+    fun engineTool(stroke:JSONObject)=if(stroke.getString("tool")=="mirror")stroke.optString("brushTool","ink") else stroke.getString("tool")
     fun defaults(tool:String):JSONObject {
         require(tool in tools)
         val dynamics=JSONObject()
@@ -176,15 +178,16 @@ internal object ArtBrush {
         return out
     }
     fun prepare(stroke:JSONObject,brush:JSONObject,seed:Int,finished:Boolean=true):JSONObject {
-        require(seed>=0);val settings=settings(stroke.getString("tool"),brush)
+        require(seed>=0);val settings=settings(engineTool(stroke),brush)
         val raw=stroke.getJSONArray("points");val output=process(samples(raw),settings,finished)
         val result=JSONObject(stroke.toString()).put("brush",settings).put("brushSeed",seed)
             .put("brushInput",JSONArray(raw.toString())).put("brushProcessed",true).put("points",JSONArray(output.map {it.json()}))
-        dabs(result) { };return result
+        dabs(result) { };if(result.getString("tool")=="mirror")ArtMirror.requireBudget(result);return result
     }
     fun validateStored(stroke:JSONObject) {
         require(stroke.getBoolean("brushProcessed") && stroke.getInt("brushSeed")>=0)
-        settings(stroke.getString("tool"),stroke.getJSONObject("brush"))
+        settings(engineTool(stroke),stroke.getJSONObject("brush"))
+        if(stroke.getString("tool")=="mirror")ArtMirror.validateStored(stroke)
         samples(stroke.getJSONArray("brushInput"));samples(stroke.getJSONArray("points"))
     }
     fun noise(seed:Int,index:Int,salt:Int):Double {

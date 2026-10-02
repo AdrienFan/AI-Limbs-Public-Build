@@ -980,7 +980,7 @@ internal class ArtStore(private val root: File) {
         val raw=p.getJSONArray("points");require(raw.length() in 1..10000)
         val samples=(0 until raw.length()).map { i ->
             val q=raw.getJSONArray(i)
-            require(q.length() in 2..(if(p.optString("tool","ink") in ArtBrush.tools)6 else 3) && q.getDouble(0).isFinite() && q.getDouble(1).isFinite() &&
+            require(q.length() in 2..(if(ArtBrush.supports(p.optString("tool","ink")))6 else 3) && q.getDouble(0).isFinite() && q.getDouble(1).isFinite() &&
                 kotlin.math.abs(q.getDouble(0))<=1_000_000 && kotlin.math.abs(q.getDouble(1))<=1_000_000)
             if(q.length()>=3) require(q.getDouble(2) in 0.0..1.0)
             AssistantPoint(q.getDouble(0),q.getDouble(1))
@@ -1103,13 +1103,18 @@ internal class ArtStore(private val root: File) {
         var normalized = JSONObject(params.toString())
         if(type=="STROKE_ADD") {
             val tool=normalized.optString("tool","pencil")
-            if(tool in ArtBrush.tools) {
+            if(ArtBrush.supports(tool)) {
                 normalized.put("tool",tool)
+                if(tool=="mirror") {
+                    val state=snapshot(doc).getJSONObject("state")
+                    normalized=ArtMirror.normalize(normalized,state.getInt("width"),state.getInt("height"))
+                }
+                val brushTool=ArtBrush.engineTool(normalized)
                 val preset=if(normalized.has("brushPresetId"))brushPreset(normalized.getString("brushPresetId")) else null
-                require(preset==null || preset.getString("tool")==tool) {"预设与当前工具不匹配"}
+                require(preset==null || preset.getString("tool")==brushTool) {"预设与当前工具不匹配"}
                 val patch=if(normalized.has("brush"))normalized.getJSONObject("brush") else JSONObject()
-                val config=ArtBrush.settings(tool,patch,preset?.getJSONObject("brush") ?: ArtBrush.defaults(tool))
-                if(tool=="calligraphy" && normalized.has("nibAngle") && !patch.has("tip") && preset==null)
+                val config=ArtBrush.settings(brushTool,patch,preset?.getJSONObject("brush") ?: ArtBrush.defaults(brushTool))
+                if(brushTool=="calligraphy" && normalized.has("nibAngle") && !patch.has("tip") && preset==null)
                     config.getJSONObject("tip").put("angle",normalized.getDouble("nibAngle"))
                 ArtBrush.assetIds(config).forEach { require(assetFile(it).isFile) {"笔刷资源不存在"} }
                 normalized=ArtBrush.prepare(normalized,config,normalized.optInt("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE)))
@@ -2071,7 +2076,7 @@ internal class ArtStore(private val root: File) {
                         drag.isFinite() && drag in 0.0..1.0) { "动态画笔的惯性和阻力必须在 0–1 之间" }
                     p.put("mass", mass).put("drag", drag)
                 }
-                if (tool == "mirror") {
+                if (tool == "mirror" && !p.has("brush")) {
                     val direction = p.optString("mirrorDirection", "vertical")
                     require(direction in setOf("vertical", "horizontal", "quad", "radial", "snowflake",
                         "translate", "copytranslate", "interval")) {

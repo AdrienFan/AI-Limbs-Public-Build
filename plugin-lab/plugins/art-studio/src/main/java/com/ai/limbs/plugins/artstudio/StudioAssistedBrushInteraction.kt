@@ -46,7 +46,7 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
             cancel();val layer=ArtMenuOperations.layers(state).first {it.getString("id")==layerId}
             require(layer.getString("kind")=="paint" && !layer.getBoolean("locked")) {"请使用未锁定绘画图层"}
             require(toScreen.invert(inverseView) && ArtShapes.layerMatrix(state,layer).invert(inverseLayer))
-            capture=JSONObject().put("documentId",documentId).put("expectedRevision",revision).put("layerId",layerId)
+            capture=JSONObject().put("documentId",documentId).put("expectedRevision",revision).put("layerId",layerId).put("canvasWidth",state.getInt("width")).put("canvasHeight",state.getInt("height"))
             style=JSONObject(options.toString()).put("id",java.util.UUID.randomUUID().toString())
             if(options.has("brush"))style!!.put("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE))
             viewMatrix=Matrix(toScreen);started=event.eventTime
@@ -93,7 +93,8 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
             points.put(point)
         }
         val out=JSONObject(style!!.toString()).put("layerId",capture!!.getString("layerId")).put("points",points)
-        session?.active?.let {out.put("assistantId",it.id)};return out
+        session?.active?.let {out.put("assistantId",it.id)}
+        return if(out.getString("tool")=="mirror")ArtMirror.normalize(out,capture!!.getInt("canvasWidth"),capture!!.getInt("canvasHeight")) else out
     }
     fun draw(canvas:Canvas,resources:((String)->Bitmap)?=null) {
         if(capture==null || samples.isEmpty())return
