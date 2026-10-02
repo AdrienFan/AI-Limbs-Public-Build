@@ -261,7 +261,11 @@ internal object ArtCapabilityHelp {
   "color.palette.list":{"args":{},"summary":"列出调色板 id/name/colors 及共享颜色。","note":"取palettes[].id用于color.pick.paletteId。"},
   "color.palette.save":{"args":{"name":"夜色","colors":["#FF203040","#FFFFCC80"]},"summary":"创建/改名/替换调色板颜色。","note":"新建省略id，取返回palettes中的新id；编辑须传已有id。省略colors保留原色；显式[]清空。独立资源，不随工程导出。"},
   "color.palette.delete":{"args":{"id":"PALETTE_ID"},"summary":"删除指定调色板。","note":"id取color.palette.list；不会删除作品像素。"},
-  "color.pick":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"x":100,"y":100,"target":"background","sampleMerged":false,"layerId":"LAYER_ID","paletteId":"PALETTE_ID"},"summary":"取色到前景/背景/none，可同时加入指定调色板。","note":"ID/revision取当前工程，paletteId取color.palette.list，可省略；target默认foreground，none仅收集/返回。blend<100缺省用目标共享色，none须baseColor。半径平均后混合，完整ARGB去重；失败无部分资源写入。"}
+  "color.pick":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"x":100,"y":100,"target":"background","sampleMerged":false,"layerId":"LAYER_ID","paletteId":"PALETTE_ID"},"summary":"取色到前景/背景/none，可同时加入指定调色板。","note":"ID/revision取当前工程，paletteId取color.palette.list，可省略；target默认foreground，none仅收集/返回。blend<100缺省用目标共享色，none须baseColor。半径平均后混合，完整ARGB去重；失败无部分资源写入。"},
+  "crop.info":{"args":{},"summary":"读取裁剪目标、锁定与构图线","note":"frame不可用：缺动画帧数据；layer为保留源内容的裁剪边界。"},
+  "crop.geometry":{"args":{"x":0,"y":0,"width":512,"height":512},"summary":"解析裁剪框，不写工程","note":"返回plan和构图线；锁定后尺寸见plan。x/y为左上角文档整数像素。"},
+  "crop.preview":{"args":{"x":0,"y":0,"width":512,"height":512,"guides":"thirds","maxEdge":512},"summary":"查看当前画布上的拟裁剪框","note":"只读JPEG图块，未裁剪；框外扩展区不预测隐藏源内容。使用返回plan的ID/revision确认。"},
+  "crop.apply":{"args":{"x":0,"y":0,"width":512,"height":512,"documentId":"DOCUMENT_ID","expectedRevision":0},"summary":"确认裁剪画布或图层边界","note":"先geometry/preview；替换ID/revision并使用返回plan。canvas保留框外源；layer保留源和变换，后续绘制受边界约束；取消无需调用。"}
 }
 """
     private const val FIELDS = """
@@ -487,7 +491,14 @@ internal object ArtCapabilityHelp {
   "wordSpacing":{"description":"空格额外间距 -64..256 px。"},
   "writingMode":{"description":"horizontal-tb=横排；vertical-rl=竖排从右至左；vertical-lr=竖排从左至右。","enum":["horizontal-tb","vertical-rl","vertical-lr"]},
   "paletteId":{"description":"调色板ID，取color.palette.list.palettes[].id；提供时取色同时去重加入该板，不自动新建。"},
-  "colors":{"description":"最多512项#AARRGGBB数组，完整ARGB去重。新板省略为空；编辑省略保留；显式[]清空。"}
+  "colors":{"description":"最多512项#AARRGGBB数组，完整ARGB去重。新板省略为空；编辑省略保留；显式[]清空。"},
+  "lockRatio":{"description":"默认false；true按ratio约束宽高，整数像素四舍五入；与宽/高锁定互斥。"},
+  "fromCenter":{"description":"默认false；true锁定造成尺寸改变时保持请求框中心；手机绘制/调整以中心为锚。x/y始终为左上角。"},
+  "guides":{"description":"仅预览构图线，不写进画作；默认thirds；none/thirds/fifths/golden/diagonal/cross。","enum":["none","thirds","fifths","golden","diagonal","cross"]},
+  "lockHeight":{"description":"默认false；true以fixedHeight覆盖请求高度，与lockRatio互斥。"},
+  "allowGrow":{"description":"默认true，可在画布外建立裁剪框；false要求框完全在画布内，API越界拒绝。"},
+  "lockWidth":{"description":"默认false；true以fixedWidth覆盖请求宽度，与lockRatio互斥。"},
+  "ratio":{"description":"宽/高有限数1/128–128，默认1；仅lockRatio=true使用。"}
 }
 """
     private const val SCOPED_1 = """
@@ -707,7 +718,59 @@ internal object ArtCapabilityHelp {
   "assistant.create.fixedLength":{"description":"默认0自由长度；正值仅ruler可用，按lengthUnit/unitDpi换算后0.01–1000000像素。保持起点和方向调整终点；拖动仍保持长度。"},
   "assistant.create.lengthUnit":{"description":"固定长度单位px/mm/cm/in/pt，默认px；物理单位使用该尺规保存的unitDpi换算。","enum":["px","mm","cm","in","pt"]},
   "assistant.create.unitDpi":{"description":"每尺规物理单位换算DPI，默认96，有限1–2400；不是作品打印DPI。"},
-  "assistant.create.useVertical":{"description":"默认true；two_vanishing_points在两消失点方向外允许与地平线垂直的第三方向；预览中心不改变消失点。"}
+  "assistant.create.useVertical":{"description":"默认true；two_vanishing_points在两消失点方向外允许与地平线垂直的第三方向；预览中心不改变消失点。"},
+  "crop.geometry.x":{"description":"裁剪框左上角文档整数像素，默认0，±16384；允许负数时须allowGrow=true。"},
+  "crop.geometry.y":{"description":"裁剪框左上角文档整数像素，默认0，±16384；允许负数时须allowGrow=true。"},
+  "crop.geometry.width":{"description":"请求宽度整数1–16384；锁宽/比例可能调整，以返回plan为准；仍受image.limits预算限制。"},
+  "crop.geometry.height":{"description":"请求高度整数1–16384；锁高/比例可能调整，以返回plan为准；仍受image.limits预算限制。"},
+  "crop.geometry.target":{"description":"canvas默认：改画布范围并平移根层/参考图/尺规；layer：当前或layerId图层/组的持久裁剪边界；frame缺动画数据明确拒绝。","enum":["canvas","layer","frame"]},
+  "crop.geometry.allowGrow":{"description":"默认true，可在画布外建立裁剪框；false要求框完全在画布内，API越界拒绝。"},
+  "crop.geometry.lockWidth":{"description":"默认false；true以fixedWidth覆盖请求宽度，与lockRatio互斥。"},
+  "crop.geometry.lockHeight":{"description":"默认false；true以fixedHeight覆盖请求高度，与lockRatio互斥。"},
+  "crop.geometry.fixedWidth":{"description":"锁定宽度整数1–16384，默认512；只有lockWidth=true时使用。"},
+  "crop.geometry.fixedHeight":{"description":"锁定高度整数1–16384，默认512；只有lockHeight=true时使用。"},
+  "crop.geometry.lockRatio":{"description":"默认false；true按ratio约束宽高，整数像素四舍五入；与宽/高锁定互斥。"},
+  "crop.geometry.ratio":{"description":"宽/高有限数1/128–128，默认1；仅lockRatio=true使用。"},
+  "crop.geometry.fromCenter":{"description":"默认false；true锁定造成尺寸改变时保持请求框中心；手机绘制/调整以中心为锚。x/y始终为左上角。"},
+  "crop.geometry.guides":{"description":"仅预览构图线，不写进画作；默认thirds；none/thirds/fifths/golden/diagonal/cross。","enum":["none","thirds","fifths","golden","diagonal","cross"]},
+  "crop.geometry.layerId":{"description":"target=layer时取layer.list.layers[].id；省略用活动层，支持paint/image/text/vector/group/colorize；拒绝锁定层/父组。"},
+  "crop.geometry.documentId":{"description":"geometry/preview可选工程守卫；apply必填，使用plan.documentId或document.info.id；替换示例DOCUMENT_ID。"},
+  "crop.geometry.expectedRevision":{"description":"geometry/preview可选；apply必填；取plan.expectedRevision或document.info.revision替换示例0，过期拒绝。"},
+  "crop.preview.x":{"description":"裁剪框左上角文档整数像素，默认0，±16384；允许负数时须allowGrow=true。"},
+  "crop.preview.y":{"description":"裁剪框左上角文档整数像素，默认0，±16384；允许负数时须allowGrow=true。"},
+  "crop.preview.width":{"description":"请求宽度整数1–16384；锁宽/比例可能调整，以返回plan为准；仍受image.limits预算限制。"},
+  "crop.preview.height":{"description":"请求高度整数1–16384；锁高/比例可能调整，以返回plan为准；仍受image.limits预算限制。"},
+  "crop.preview.target":{"description":"canvas默认：改画布范围并平移根层/参考图/尺规；layer：当前或layerId图层/组的持久裁剪边界；frame缺动画数据明确拒绝。","enum":["canvas","layer","frame"]},
+  "crop.preview.allowGrow":{"description":"默认true，可在画布外建立裁剪框；false要求框完全在画布内，API越界拒绝。"},
+  "crop.preview.lockWidth":{"description":"默认false；true以fixedWidth覆盖请求宽度，与lockRatio互斥。"},
+  "crop.preview.lockHeight":{"description":"默认false；true以fixedHeight覆盖请求高度，与lockRatio互斥。"},
+  "crop.preview.fixedWidth":{"description":"锁定宽度整数1–16384，默认512；只有lockWidth=true时使用。"},
+  "crop.preview.fixedHeight":{"description":"锁定高度整数1–16384，默认512；只有lockHeight=true时使用。"},
+  "crop.preview.lockRatio":{"description":"默认false；true按ratio约束宽高，整数像素四舍五入；与宽/高锁定互斥。"},
+  "crop.preview.ratio":{"description":"宽/高有限数1/128–128，默认1；仅lockRatio=true使用。"},
+  "crop.preview.fromCenter":{"description":"默认false；true锁定造成尺寸改变时保持请求框中心；手机绘制/调整以中心为锚。x/y始终为左上角。"},
+  "crop.preview.guides":{"description":"仅预览构图线，不写进画作；默认thirds；none/thirds/fifths/golden/diagonal/cross。","enum":["none","thirds","fifths","golden","diagonal","cross"]},
+  "crop.preview.layerId":{"description":"target=layer时取layer.list.layers[].id；省略用活动层，支持paint/image/text/vector/group/colorize；拒绝锁定层/父组。"},
+  "crop.preview.documentId":{"description":"geometry/preview可选工程守卫；apply必填，使用plan.documentId或document.info.id；替换示例DOCUMENT_ID。"},
+  "crop.preview.expectedRevision":{"description":"geometry/preview可选；apply必填；取plan.expectedRevision或document.info.revision替换示例0，过期拒绝。"},
+  "crop.preview.maxEdge":{"description":"预览图最大边整数64–1024，默认512；只缩放反馈，未改变工程。"},
+  "crop.apply.x":{"description":"裁剪框左上角文档整数像素，默认0，±16384；允许负数时须allowGrow=true。"},
+  "crop.apply.y":{"description":"裁剪框左上角文档整数像素，默认0，±16384；允许负数时须allowGrow=true。"},
+  "crop.apply.width":{"description":"请求宽度整数1–16384；锁宽/比例可能调整，以返回plan为准；仍受image.limits预算限制。"},
+  "crop.apply.height":{"description":"请求高度整数1–16384；锁高/比例可能调整，以返回plan为准；仍受image.limits预算限制。"},
+  "crop.apply.target":{"description":"canvas默认：改画布范围并平移根层/参考图/尺规；layer：当前或layerId图层/组的持久裁剪边界；frame缺动画数据明确拒绝。","enum":["canvas","layer","frame"]},
+  "crop.apply.allowGrow":{"description":"默认true，可在画布外建立裁剪框；false要求框完全在画布内，API越界拒绝。"},
+  "crop.apply.lockWidth":{"description":"默认false；true以fixedWidth覆盖请求宽度，与lockRatio互斥。"},
+  "crop.apply.lockHeight":{"description":"默认false；true以fixedHeight覆盖请求高度，与lockRatio互斥。"},
+  "crop.apply.fixedWidth":{"description":"锁定宽度整数1–16384，默认512；只有lockWidth=true时使用。"},
+  "crop.apply.fixedHeight":{"description":"锁定高度整数1–16384，默认512；只有lockHeight=true时使用。"},
+  "crop.apply.lockRatio":{"description":"默认false；true按ratio约束宽高，整数像素四舍五入；与宽/高锁定互斥。"},
+  "crop.apply.ratio":{"description":"宽/高有限数1/128–128，默认1；仅lockRatio=true使用。"},
+  "crop.apply.fromCenter":{"description":"默认false；true锁定造成尺寸改变时保持请求框中心；手机绘制/调整以中心为锚。x/y始终为左上角。"},
+  "crop.apply.guides":{"description":"仅预览构图线，不写进画作；默认thirds；none/thirds/fifths/golden/diagonal/cross。","enum":["none","thirds","fifths","golden","diagonal","cross"]},
+  "crop.apply.layerId":{"description":"target=layer时取layer.list.layers[].id；省略用活动层，支持paint/image/text/vector/group/colorize；拒绝锁定层/父组。"},
+  "crop.apply.documentId":{"description":"geometry/preview可选工程守卫；apply必填，使用plan.documentId或document.info.id；替换示例DOCUMENT_ID。"},
+  "crop.apply.expectedRevision":{"description":"geometry/preview可选；apply必填；取plan.expectedRevision或document.info.revision替换示例0，过期拒绝。"}
 }
 """
     private const val SCOPED_2 = """

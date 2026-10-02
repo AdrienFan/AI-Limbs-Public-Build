@@ -248,6 +248,11 @@ class ArtStudioEntry : InProcessPluginEntry {
                 if (p.has("documentId")) p.getString("documentId") else null,
                 if (p.has("expectedRevision")) p.getInt("expectedRevision") else null,p.optBoolean("selectionOutline",false))
         }
+        capability("crop.info", "读取裁剪交互、边界及帧依赖", read) { ArtCrop.info() }
+        capability("crop.geometry", "解析受约束裁剪框", read) { p -> store.cropGeometry(p) }
+        capability("crop.preview", "查看裁剪框与构图线预览", read) { p -> store.cropGeometry(p,preview=true) }
+        capability("crop.apply", "确认裁剪画布或图层边界", write) { p -> store.crop("LANER",p) }
+        capability("canvas.crop", "裁切画布（兼容原入口）", write) { p -> store.apply("LANER","CROP",p) }
         capability("canvas.measure", "测量画布两点", read) { p ->
             val x0 = p.getDouble("x0"); val y0 = p.getDouble("y0")
             val x1 = p.getDouble("x1"); val y1 = p.getDouble("y1")
@@ -412,8 +417,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             "layer.set_lock" to "LAYER_LOCK", "layer.set_blend" to "LAYER_BLEND",
             "layer.properties" to "LAYER_PROPERTIES",
             "selection.clear" to "SELECTION_CLEAR",
-            "selection.edit" to "SELECTION_EDIT",
-            "canvas.crop" to "CROP").forEach { (name, type) ->
+            "selection.edit" to "SELECTION_EDIT").forEach { (name, type) ->
             val label = when (name) {
                 "layer.select" -> "选择活动图层"
                 "layer.rename" -> "重命名图层"
@@ -786,8 +790,14 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.edit" -> listOf(p("layerId"), p("action"), p("dx", "number", true),
             p("dy", "number", true), p("factor", "number", true), p("degrees", "number", true),
             p("copyId", optional = true))
-        "canvas.crop" -> listOf(p("width", "integer"), p("height", "integer"),
-            p("x", "number", true), p("y", "number", true))
+        "crop.info" -> emptyList()
+        "canvas.crop" -> listOf(p("width","integer"),p("height","integer"),p("x","number",true),p("y","number",true))
+        "crop.geometry", "crop.preview", "crop.apply" -> listOf(p("width", "integer"),p("height", "integer"),
+            p("x","integer",true),p("y","integer",true),p("target",optional=true),p("allowGrow","boolean",true),
+            p("lockWidth","boolean",true),p("lockHeight","boolean",true),p("fixedWidth","integer",true),p("fixedHeight","integer",true),
+            p("lockRatio","boolean",true),p("ratio","number",true),p("fromCenter","boolean",true),p("guides",optional=true),
+            p("layerId",optional=true),p("documentId",optional=name!="crop.apply"),p("expectedRevision","integer",optional=name!="crop.apply")) +
+            if(name=="crop.preview")listOf(p("maxEdge","integer",true)) else emptyList()
         "transform.move" -> listOf(id, p("x", "number"), p("y", "number"))
         "transform.scale" -> listOf(id, p("scale", "number"))
         "transform.rotate" -> listOf(id, p("rotation", "number"))

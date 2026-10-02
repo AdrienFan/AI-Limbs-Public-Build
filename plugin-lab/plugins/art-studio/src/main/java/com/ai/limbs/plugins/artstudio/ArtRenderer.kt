@@ -66,16 +66,32 @@ internal object ArtRenderer {
                 val scale = layer.getDouble("scale").toFloat()
                 target.scale(scale, scale)
                 val paint = compositePaint(layer)
+                layer.optJSONArray("cropClip")?.let { clip ->
+                    require(clip.length()==0 || clip.length() in 3..128)
+                    if (clip.length()==0) target.clipRect(0f,0f,0f,0f)
+                    else {
+                        val path=Path()
+                        for(n in 0 until clip.length()) {
+                            val point=clip.getJSONArray(n);require(point.length()==2)
+                            val x=point.getDouble(0);val y=point.getDouble(1)
+                            require(x.isFinite() && y.isFinite() && kotlin.math.abs(x)<=100000000 && kotlin.math.abs(y)<=100000000)
+                            if(n==0)path.moveTo(x.toFloat(),y.toFloat()) else path.lineTo(x.toFloat(),y.toFloat())
+                        }
+                        path.close();target.clipPath(path)
+                    }
+                }
                 if (layer.getString("kind") == "group") {
                     // Isolate the complete group before applying opacity or blend once.
-                    target.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), paint)
+                    target.saveLayer(null, paint)
                     draw(target, layer.getString("id"), depth + 1)
                     target.restore()
                 } else {
                     val buffer = Bitmap.createBitmap(renderWidth, renderHeight, Bitmap.Config.ARGB_8888)
                     try {
                         val local = Canvas(buffer)
-                        local.scale(renderWidth.toFloat() / width, renderHeight.toFloat() / height)
+                        // Rasterize into the output viewport using the complete document transform.
+                        // Cropping shifts layers: a local [0,newWidth] buffer would discard retained source.
+                        local.setMatrix(target.matrix)
                         if (layer.getString("kind") in setOf("image", "text")) {
                             ArtImagePolicy.decodeAsset(store.assetFile(layer.getString("asset"))).let { image ->
                                 try { local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG)) }
@@ -94,9 +110,8 @@ internal object ArtRenderer {
                                 } finally {output.recycle()}
                             }
                             if(edit) {
-                                local.saveLayer(0f,0f,width.toFloat(),height.toFloat(),null)
+                                local.saveLayer(null,null)
                                 try {
-                                    local.clipRect(0f,0f,width.toFloat(),height.toFloat())
                                     ArtColorize.items(layer).forEach {ArtColorize.drawKey(local,it)}
                                 } finally {local.restore()}
                             }
@@ -138,8 +153,11 @@ internal object ArtRenderer {
                                 }
                             }
                         }
-                        target.drawBitmap(buffer, null,
-                            android.graphics.RectF(0f, 0f, width.toFloat(), height.toFloat()), paint)
+                        target.save()
+                        try {
+                            target.setMatrix(Matrix())
+                            target.drawBitmap(buffer,0f,0f,paint)
+                        } finally {target.restore()}
                     } finally { buffer.recycle() }
                 }
                 target.restore()

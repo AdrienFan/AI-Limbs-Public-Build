@@ -1499,6 +1499,52 @@ internal class ArtStore(private val root: File) {
         result.put("lastOperationId", operation.getString("id"))
     }
 
+    private fun cropPlan(p: JSONObject): Pair<JSONObject, JSONObject> {
+        val snap = current()
+        if (p.has("documentId")) require(p.getString("documentId") == snap.getString("id")) { "工程已切换，请重新建立裁剪框" }
+        if (p.has("expectedRevision")) require(p.getInt("expectedRevision") == snap.getInt("revision")) { "工程已更新，请重新建立裁剪框" }
+        val state = snap.getJSONObject("state")
+        val plan = ArtCrop.resolve(p, state.getInt("width"), state.getInt("height"))
+            .put("documentId", snap.getString("id")).put("expectedRevision", snap.getInt("revision"))
+        if (plan.getString("target") == "layer") {
+            val id = p.optString("layerId", state.getString("selectedLayerId"))
+            val layer = ArtMenuOperations.layers(state).firstOrNull { it.getString("id") == id } ?: error("裁剪图层不存在")
+            require(!lockedByParent(layer, state.getJSONArray("layers"))) { "图层或父组已锁定" }
+            require(layer.getString("kind") in setOf("paint","image","text","vector","group","colorize"))
+            plan.put("layerId", id)
+        }
+        return snap to plan
+    }
+    fun cropGeometry(p: JSONObject, preview: Boolean = false): JSONObject = locked {
+        val (snap, plan) = cropPlan(p)
+        if (preview) ArtCropPreview.create(this,snap,plan,p.optInt("maxEdge",512))
+        else JSONObject().put("plan",plan).put("operationApplied",false)
+            .put("guideLines",JSONArray(ArtCrop.lines(ArtCrop.rect(plan),plan.getString("guides")).map {JSONArray(it.toList())}))
+    }
+    fun crop(actor: String, p: JSONObject): JSONObject = locked {
+        require(actor in setOf("AWEI","LANER"))
+        require(p.has("documentId") && p.has("expectedRevision")) {"确认裁剪须提供工程ID与预期版本"}
+        val (snap, plan) = cropPlan(p)
+        if (plan.getString("target") == "canvas") {
+            ArtImagePolicy.requireDimensions(plan.getInt("width"),plan.getInt("height"))
+            appendToCurrent(actor,"CROP",plan).put("cropResult",plan)
+        } else {
+            val state=snap.getJSONObject("state");val layer=ArtMenuOperations.layers(state).first {it.getString("id")==plan.getString("layerId")}
+            val inverse=Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse)) {"图层变换不可逆"}
+            val rect=ArtCrop.rect(plan)
+            val points=floatArrayOf(rect.x.toFloat(),rect.y.toFloat(),rect.right.toFloat(),rect.y.toFloat(),
+                rect.right.toFloat(),rect.bottom.toFloat(),rect.x.toFloat(),rect.bottom.toFloat())
+            inverse.mapPoints(points);require(points.all {it.isFinite() && kotlin.math.abs(it)<=100000000f}) {"裁剪边界的图层坐标过大"}
+            var clip=(points.indices step 2).map {points[it].toDouble() to points[it+1].toDouble()}
+            layer.optJSONArray("cropClip")?.let {old->
+                val previous=(0 until old.length()).map {i->val q=old.getJSONArray(i);q.getDouble(0) to q.getDouble(1)}
+                clip=ArtCrop.intersect(previous,clip)
+            }
+            appendToCurrent(actor,"LAYER_CROP",JSONObject(plan.toString()).put("clip",JSONArray(clip.map {JSONArray().put(it.first).put(it.second)})))
+                .put("cropResult",plan.put("sourceRetained",true).put("clipVertices",clip.size))
+        }
+    }
+
     fun cropToSelection(actor: String): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val state = replay(loadCurrent())
@@ -2101,6 +2147,7 @@ internal class ArtStore(private val root: File) {
                 "STROKE_ERASE" -> "删除笔画"
                 "TRANSFORM" -> "变换图层"
                 "CROP" -> "裁剪画布"
+                "LAYER_CROP" -> "裁剪图层边界"
                 "CANVAS_RESIZE" -> "更改画布大小"
                 "IMAGE_BACKGROUND" -> "更改图像背景色与透明度"
                 "LAYER_RENAME" -> "重命名图层"
@@ -2675,6 +2722,16 @@ internal class ArtStore(private val root: File) {
                     }
                 }
             }
+            "LAYER_CROP" -> {
+                val layer=find(p.getString("layerId")).second
+                require(!lockedByParent(layer,layers)) {"图层已锁定"}
+                val clip=p.getJSONArray("clip");require(clip.length()==0 || clip.length() in 3..128)
+                for(i in 0 until clip.length()) {
+                    val point=clip.getJSONArray(i);require(point.length()==2)
+                    require((0..1).all {point.getDouble(it).isFinite() && kotlin.math.abs(point.getDouble(it))<=100000000})
+                }
+                layer.put("cropClip",JSONArray(clip.toString()))
+            }
             "CROP", "CANVAS_RESIZE" -> {
                 ArtImagePolicy.requireDimensions(p.getInt("width"), p.getInt("height"))
                 state.put("width", p.getInt("width"))
@@ -2689,6 +2746,11 @@ internal class ArtStore(private val root: File) {
                         layer.put("x", layer.getDouble("x") - dx)
                         layer.put("y", layer.getDouble("y") - dy)
                     }
+                }
+                // Reference matrices are document-space geometry, like assistant points.
+                for(reference in ArtReferences.items(state)) {
+                    val matrix=reference.getJSONArray("matrix")
+                    matrix.put(4,matrix.getDouble(4)-dx);matrix.put(5,matrix.getDouble(5)-dy)
                 }
                 for(a in ArtAssistants.items(state)) {
                     a.put("points",JSONArray(ArtAssistants.points(a).map { point ->

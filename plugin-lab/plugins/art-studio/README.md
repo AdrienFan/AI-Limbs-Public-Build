@@ -1148,3 +1148,27 @@ color.sample {"x":100,"y":100,"sampleMerged":false,"layerId":"LAYER_ID"}
 paletteId取列表的palettes[].id，layerId取layer.list；坐标为原画文档整数像素。pick可带documentId/expectedRevision守卫；target默认foreground。blend<100默认用目标共享色，可显式baseColor；none或只读取的sample需baseColor。color.sample保留READ_ONLY，无隐式修改；新color.pick是PERSISTENT_WRITE，返回color/rawColor、文档revision、paletteAdded及colorState。palette.save编辑传id，省略colors保留，显式[]清空；未知id不新建。背景可用color.set单独设置，不依赖手机画室打开。
 
 版本0.2.64、versionCode67、applicationId `com.ai.limbs.payload.artstudio.v0264`，218项能力，仅改画室插件。进行源码／JSON／声明／版本静态核对，补10项资源事务、ARGB去重、容量、隐藏／组内／变换／组投影及入口契约云端用例，**未编译、未执行测试、未推云端**。部署后仍需验收实际像素／字形／蒙版输出、半透明混合、变换组采样、Host/Resident同步、手机触控响应和工程切换拒绝。
+
+## 0.2.65 裁剪画布与图层边界（开发源码，未编译）
+
+以本机 Krita 6.0.4 `plugins/tools/tool_crop/kis_tool_crop.cc`（创建、控制点拖动、确认/取消、canvas/image/layer/frame分流及构图线）、`kis_constrained_rect.cpp`（宽高、比例、中心和allowGrow约束）、`wdg_tool_crop.ui` 参数布局为行为参照，自行实现整数几何与Android交互，未复制Qt/GPL实现。
+
+手机裁剪工具现在松手保留框，支持内部整体拖移和八个控制点、坐标输入、明确确认/取消、Enter/Esc、双指缩放/旋转时保留框。切工程、活动层、工具或工程revision更新会取消旧框，确认绑定建立框时的工程/revision。固定宽/高（可同时）、比例锁（与宽/高锁互斥）、中心绘制/调整、允许边界外扩展及六种构图线接入参数面板：none/thirds/fifths/golden/diagonal/cross。整数宽高1–16384、原点±16384、比例宽/高1/128–128，最终仍受image.limits预算限制。
+
+两种已实现范围必须区分：
+- canvas：改变画布视口及原点，不缩放源内容；根层、参考图矩阵、尺规与局部作用区一起平移，清除旧选区；框外源数据保留，可通过扩展重新显示。背景沿用工程背景。修复旧渲染的局部新画布大小缓冲提前截断问题：栅格层以完整文档变换投影到输出视口，再单独合成，组使用当前可见范围隔离；没有自动扁平化。
+- layer：仅当前/指定paint、image、text、vector、group、colorize层，在其局部坐标存储凸多边形cropClip；逆变换文档矩形，重复裁剪取交集，空交集保留为空层。图层位置/角度/缩放及源数据保留，后续绘制和子层内容也受该边界约束；与Krita删除框外像素的裁剪不同。移动或旋转图层时边界随层走。撤销恢复旧边界；最多128顶点，拒绝锁定层/父组和不可逆变换。
+- **frame尚未实现**：工程目前没有动画帧数据、动画时间轴或逐帧内容，因此不提供假的“当前帧”。API传target=frame明确拒绝；作品足迹历史不代替动画帧。本轮不宣称补齐帧裁剪，也未提供Krita image模式的破坏性全层裁剪。
+
+兰儿入口：`plugin.art.studio.crop.info`、`crop.geometry`、`crop.preview`、`crop.apply`。每项搜索带参数约束和最短示例，无需查源码。取消是丢弃只读plan，无持久写入。geometry返回完整plan和文档构图线；preview返回当前画布上框与辅助线的JPEG图块（64–1024最大边），不裁剪、不预测画布外隐藏源内容。apply必须绑定documentId/expectedRevision，使用返回plan确认；旧`canvas.crop`保持原参数与浮点x/y兼容，仍直接裁切画布。
+
+```json
+crop.info {}
+crop.preview {"x":-32,"y":-32,"width":576,"height":576,"allowGrow":true,"guides":"thirds","maxEdge":512}
+crop.apply {"documentId":"DOCUMENT_ID","expectedRevision":0,"x":-32,"y":-32,"width":576,"height":576,"target":"canvas","allowGrow":true}
+crop.geometry {"x":20,"y":20,"width":200,"height":100,"target":"layer","layerId":"LAYER_ID","lockRatio":true,"ratio":2}
+```
+
+替换示例ID/revision；从geometry/preview返回的plan原样传给apply，删除仅preview使用的maxEdge。完整能力222项。版本0.2.65、versionCode68、applicationId `com.ai.limbs.payload.artstudio.v0265`。只改画室插件；静态检查并新增10项几何/交集云端用例，**未编译、未执行测试、未推云端**。
+
+部署后验收：在画布右下角画笔/文字/图片/矢量/上色蒙版及旋转缩放父组各放标记，从非零原点裁剪并确认标记正确投影；向外扩展检查源内容复现；参考图/尺规对齐；取消与松手均不写历史；控制点、锁宽高/比例/中心及双指手势；组/层裁剪、重复交集、空交集、透明橡皮与层混合、撤销/重做、保存/重开/导出/取色一致；AI预览返回图片和绑定旧revision拒绝。帧裁剪依赖留待动画功能迭代。

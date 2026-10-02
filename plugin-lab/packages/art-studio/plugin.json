@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.64",
+  "version": "0.2.65",
   "api": {
     "target": 1,
     "min": 1
@@ -62,6 +62,10 @@
       "plugin.art.studio.canvas.inspect",
       "plugin.art.studio.canvas.region",
       "plugin.art.studio.canvas.crop",
+      "plugin.art.studio.crop.info",
+      "plugin.art.studio.crop.geometry",
+      "plugin.art.studio.crop.preview",
+      "plugin.art.studio.crop.apply",
       "plugin.art.studio.canvas.measure",
       "plugin.art.studio.color.sample",
       "plugin.art.studio.fill.contiguous",
