@@ -1005,3 +1005,45 @@ AI入口与精简示例：selection.color_info返回默认值、公式、标签�
 先选择目标图层，并换成当前ID/revision；levels=1可明确单尺度，levels=4要求四层；想细化更多可显式refinementStep=1。返回repair含maskPixels、comparisons（含投票）、algorithm=multiscale-patchmatch、nativeOutput=true、levels（粗→细数组，各项width/height/scale/maskPixels/refinementStep/refinementCenters）。实际处理范围由蒙版包围盒加searchRadius+patchRadius得到，不能仅按涂抹像素估算内存。
 
 版本0.2.59、versionCode62、applicationId `com.ai.limbs.payload.artstudio.v0259`。仅进行源码静态/JSON/声明/版本核对与本地Git提交，不编译、不执行测试、不推送。已写奇数金字塔、禁止受污染源补丁、原尺寸输出、已知像素不变、可重复求解及超过旧32K蒙版的用例，留待云端执行；手机性能、大区域纹理与接缝的实际视觉效果需部署后验收。
+
+## 0.2.60 复杂绘画辅助尺规、局部作用区和长度单位
+
+参照用户提供的 Krita 6.0.4 中 SplineAssistant、PerspectiveAssistant、PerspectiveEllipseAssistant、TwoPointAssistant、FisheyePointAssistant、CurvilinearPerspectiveAssistant、RulerAssistant 与 kis_assistant_tool 的控制点、起笔/方向锁定和长度单位规则，独立实现插件内的 Kotlin 几何与手机交互；不引入 Qt/Krita 源码或运行时。
+
+| 类型 | 创建点顺序 | 吸附规则 |
+|---|---|---|
+| `spline` | 起点、终点、起点柄、终点柄 | 三次曲线最近点；后续采样限制参数窗口维持连续性 |
+| `perspective_grid` | 按顺序的四角，非退化凸四边形 | 起笔须在四角内；根据最初运动选水平/竖直透视方向，一笔锁定 |
+| `perspective_ellipse` | 按顺序的四角，非退化凸四边形 | 单位方形内接圆的透视映射；曲线最近点 |
+| `two_vanishing_points` | 两消失点、预览中心 | 两个消失点方向，可选与地平线垂直的第三方向，一笔锁定 |
+| `fisheye` | 轴两端、轴段内侧方一点 | 椭圆族；起笔决定所在轴段和椭圆高度，支持相邻延伸轴段；轴上为直线极限 |
+| `curvilinear_perspective` | 两消失点 | 两点与起笔确定圆弧族；三点共线时为地平线极限 |
+
+已有六种基础尺规保持可用。手机工具参数可新建、选择、拖控制点、拖本体整体移动，双点可切换垂直方向；网格可调1–100分段，鱼眼/曲线透视可调4–16预览线组，消失点/双点4–64组。参数坐标为文档像素。所有助手共用一笔锁定流程，预览显示辅助线和控制点，但不把尺规导出到作品。
+
+局部作用区适用于所有尺规：`localEnabled:true` 配 `localBounds:{x,y,width,height}`，矩形内起笔才参与吸附，一笔锁定后可以越界；手机可拖矩形两角和输入坐标/宽高，移动尺规或裁剪偏移时矩形同步平移。网格自身还要求四角内起笔。控制点/消失点处退化起笔明确排除；显式指定尺规的接口同样执行起笔条件。
+
+固定长度适用于 `ruler`：`fixedLength:0` 自由，正值按 `lengthUnit:px/mm/cm/in/pt` 和 `unitDpi:96`（1–2400）换算，保持第一点与方向调整终点，拖动控制点仍保持长度。此工程格式尚无打印DPI；物理单位按明确保存的每尺规DPI换算，不更改作品打印分辨率。固定后像素长度须0.01–1000000，所有控制点与区域两角的坐标绝对值不超过1000000。
+
+兰儿入口保留原九项 `assistant.*` 能力；`toolbox.catalog.assistants.typeInfos` 也可在没有打开工程时读取类型示例：
+- `assistant.list` 返回 `typeInfos`（每类型点数、顺序、最小点坐标示例）、单位和默认值。
+- `assistant.create/update` 支持显示、锁定、分段、局部范围、固定长度单位、垂直方向，元数据直接说明字段与简例。
+- `assistant.project/stroke` 共用几何和起笔约束，压力/时间等采样字段保留。自由、铅笔、软笔、喷枪、橡皮擦、栅格书法、多重和动态画笔支持新曲线尺规；直线只接受基础直线尺规、透视网格及双消失点的直线方向。
+
+最小例（先替换工程ID与最新revision）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"type":"perspective_grid","points":[[20,20],[280,40],[220,220],[40,200]],"subdivisions":8}
+```
+局部作用区更新：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"id":"ASSISTANT_ID","changes":{"localEnabled":true,"localBounds":{"x":0,"y":0,"width":300,"height":240}}}
+```
+直尺固定10厘米（原直尺两点给定方向）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"id":"RULER_ID","changes":{"fixedLength":10,"lengthUnit":"cm","unitDpi":96}}
+```
+其他类型用 `assistant.list.typeInfos[type].examplePoints` 直接创建；查询/创建后用返回的最新revision，再调用 `assistant.project` 或 `assistant.stroke`。尺规及参数随工程、撤销/重做、归档保存；落笔后的最终像素轨迹固化，后来移动或删除尺规不改变已有作品。
+
+这里的透视椭圆采用方形内接圆的射影映射，Krita采用四角拟合椭圆；样条最近点搜索、鱼眼延伸轴段、圆族预览密度和数值退化阈值也为本插件独立实现，不承诺与Krita逐像素相同。此前章节的“复杂助手待实现”清单为历史记录，本版本已移除手机待实现提示。
+
+版本0.2.60、versionCode63、applicationId `com.ai.limbs.payload.artstudio.v0260`。仅源码静态、JSON/能力契约及版本核对与Ubuntu Git提交，不编译、不执行测试、不推送。已写12项几何/入口/单位回归用例供后续云端执行；触控、长笔画吸附、保存重放与视觉效果待部署后验收。

@@ -1053,7 +1053,9 @@ internal class ArtStore(private val root: File) {
         JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
             .put("assistants",JSONArray(ArtAssistants.items(state)))
             .put("selectedId",ArtAssistants.selected(state)).put("settings",ArtAssistants.settings(state))
-            .put("types",JSONObject(ArtAssistants.types)).put("pending",JSONArray(ArtAssistants.pending))
+            .put("types",JSONObject(ArtAssistants.types)).put("typeInfos",ArtAssistants.typeInfo()).put("pending",JSONArray(ArtAssistants.pending))
+            .put("units",JSONObject(ArtAssistantGeometry.units)).put("unitPolicy","fixedLength: ruler only; physical units use saved per-guide unitDpi, default96; no print DPI change")
+            .put("defaults",JSONObject().put("localEnabled",false).put("fixedLength",0).put("lengthUnit","px").put("unitDpi",96).put("useVertical",true))
             .put("coordinateSpace","document").put("exported",false)
             .put("supportedBrushTools",JSONArray(ArtAssistants.brushTools.toList()))
     }
@@ -2468,6 +2470,9 @@ internal class ArtStore(private val root: File) {
                     a.put("points",JSONArray(ArtAssistants.points(a).map { point ->
                         AssistantPoint(point.x-dx,point.y-dy).json()
                     }))
+                    if(a.has("localBounds"))a.getJSONObject("localBounds").apply {
+                        put("x",getDouble("x")-dx);put("y",getDouble("y")-dy)
+                    }
                 }
                 state.put("selection", JSONObject.NULL)
             }

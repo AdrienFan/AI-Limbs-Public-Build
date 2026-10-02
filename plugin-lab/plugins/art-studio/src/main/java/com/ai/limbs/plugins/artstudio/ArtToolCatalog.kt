@@ -14,7 +14,7 @@ internal object ArtToolCatalog {
         Triple("enclose_fill","围合填充（基础）","⬟"),
         Triple("colorize_mask","上色蒙版编辑（基础）","▦"),
         Triple("smart_patch","智能修补（局部纹理）","✚"),
-        Triple("assistant","绘画辅助尺规（基础）","⌖"),
+        Triple("assistant","绘画辅助尺规","⌖"),
         Triple("reference_images","参考图像","▧"),
         Triple("vector_calligraphy", "矢量书法笔", "✒"),
         Triple("vector_bezier", "可编辑贝塞尔路径", "⌁"),
@@ -100,7 +100,8 @@ internal object ArtToolCatalog {
             .put("encloseFill",ArtEncloseFill.info())
             .put("colorize",ArtColorize.defaults())
             .put("smartPatch",ArtSmartPatch.info())
-            .put("assistants",JSONObject().put("types",JSONObject(ArtAssistants.types))
+            .put("assistants",JSONObject().put("types",JSONObject(ArtAssistants.types)).put("typeInfos",ArtAssistants.typeInfo())
+                .put("units",JSONObject(ArtAssistantGeometry.units))
                 .put("pending",JSONArray(ArtAssistants.pending)).put("maxObjects",ArtAssistants.MAX)
                 .put("coordinateSpace","document").put("exported",false)
                 .put("supportedBrushTools",JSONArray(ArtAssistants.brushTools.toList())))

@@ -156,7 +156,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("assistant.create","创建辅助尺规",write) { p ->
             val a=JSONObject().put("id",UUID.randomUUID().toString()).put("type",p.getString("type"))
                 .put("points",p.getJSONArray("points"))
-            if(p.has("name"))a.put("name",p.getString("name"))
+            for(key in ArtAssistants.editableFields-"points")if(p.has(key))a.put(key,p.get(key))
             store.apply("LANER","ASSISTANT_CREATE",JSONObject(p.toString()).put("assistant",a))
         }
         capability("assistant.select","选择辅助尺规",write) { p -> store.apply("LANER","ASSISTANT_SELECT",p) }
@@ -684,7 +684,10 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("accuracy","integer",true),p("searchRadius","integer",true),p("feather","integer",true),
             p("levels","integer",true),p("refinementStep","integer",true),p("seed","integer",true))
         "assistant.list", "assistant.preview" -> listOf(p("documentId"),p("expectedRevision","integer",true))
-        "assistant.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("type"),p("points","array"),p("name",optional=true))
+        "assistant.create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("type"),p("points","array"),p("name",optional=true),
+            p("visible","boolean",true),p("enabled","boolean",true),p("locked","boolean",true),p("subdivisions","integer",true),p("rays","integer",true),
+            p("localEnabled","boolean",true),p("localBounds","object",true),p("fixedLength","number",true),p("lengthUnit",optional=true),
+            p("unitDpi","number",true),p("useVertical","boolean",true))
         "assistant.select", "assistant.delete" -> listOf(p("documentId"),p("expectedRevision","integer"),id)
         "assistant.update" -> listOf(p("documentId"),p("expectedRevision","integer"),id,p("changes","object"))
         "assistant.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("settings","object"))

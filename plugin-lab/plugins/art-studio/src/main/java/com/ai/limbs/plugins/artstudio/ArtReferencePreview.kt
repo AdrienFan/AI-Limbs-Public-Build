@@ -27,9 +27,9 @@ internal object ArtReferencePreview {
         if(includeAssistants && ArtAssistants.settings(state).getBoolean("visible")) {
             for(a in ArtAssistants.items(state).filter { it.getBoolean("visible") }) {
                 for(p in ArtAssistants.points(a)) bounds.union(p.x.toFloat(),p.y.toFloat())
-                if(ArtAssistants.points(a).size==3) {
-                    val r=RectF();ArtAssistants.path(a).computeBounds(r,true);bounds.union(r)
-                }
+                val path=ArtAssistants.path(a)
+                if(!path.isEmpty) {val r=RectF();path.computeBounds(r,true);bounds.union(r)}
+                for(p in ArtAssistants.localCorners(a))bounds.union(p.x.toFloat(),p.y.toFloat())
             }
         }
         val edge=ArtCanvasFeedback.THUMBNAIL_EDGE

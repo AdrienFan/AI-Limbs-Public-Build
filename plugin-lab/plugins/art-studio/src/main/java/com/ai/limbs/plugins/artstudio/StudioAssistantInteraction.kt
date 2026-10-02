@@ -5,7 +5,7 @@ import android.graphics.Matrix
 import android.view.MotionEvent
 import org.json.JSONArray
 import org.json.JSONObject
-import kotlin.math.hypot
+import kotlin.math.*
 
 /** One document/revision/matrix capture per assistant edit; commit only on release. */
 internal class StudioAssistantInteraction {
@@ -42,22 +42,13 @@ internal class StudioAssistantInteraction {
             original=null;preview=null;handle=-1;selectionOnly=false;origin=point
             val radius=22.0*density
             val hit=ArtAssistants.items(state).asReversed().filter { it.getBoolean("visible") }.mapNotNull { a ->
-                val handles=ArtAssistants.points(a).map { p ->
+                val handles=(ArtAssistants.points(a)+ArtAssistants.localCorners(a)).map { p ->
                     val t=floatArrayOf(p.x.toFloat(),p.y.toFloat());toScreen.mapPoints(t);t
                 }
                 val nearest=handles.indices.minByOrNull { hypot((handles[it][0]-event.x).toDouble(),(handles[it][1]-event.y).toDouble()) }
                 val distance=nearest?.let { hypot((handles[it][0]-event.x).toDouble(),(handles[it][1]-event.y).toDouble()) } ?: Double.POSITIVE_INFINITY
                 if(distance<=radius) Triple(a,nearest!!,distance) else if(ArtAssistants.settings(state).getBoolean("visible")) {
-                    val aPoints=ArtAssistants.points(a)
-                    val screenOrigin=AssistantPoint(event.x.toDouble(),event.y.toDouble())
-                    val sample=if(aPoints.size==1) aPoints[0] else {
-                        ArtAssistants.Projection(JSONObject(a.toString()).apply {
-                            if(getString("type")=="parallel_ruler")put("type","infinite_ruler")
-                            if(getString("type")=="concentric_ellipse")put("type","ellipse")
-                        },point).project(point)
-                    }
-                    val t=floatArrayOf(sample.x.toFloat(),sample.y.toFloat());toScreen.mapPoints(t)
-                    val d=hypot(t[0]-screenOrigin.x,t[1]-screenOrigin.y)
+                    val d=ArtAssistants.hitDistance(a,point,toScreen)
                     if(d<=radius*0.55) Triple(a,-1,d) else null
                 } else null
             }.minByOrNull { it.third }
@@ -86,15 +77,30 @@ internal class StudioAssistantInteraction {
         }
         if(!selectionOnly && original!=null && event.actionMasked in setOf(MotionEvent.ACTION_MOVE,MotionEvent.ACTION_UP)) {
             val a=JSONObject(original!!.toString());val old=ArtAssistants.points(a)
-            val next=if(handle>=0) old.mapIndexed { i,p -> if(i==handle) point else p } else old.map { it+(point-origin) }
-            a.put("points",JSONArray(next.map { it.json() }));preview=a
+            if(handle>=old.size) {
+                val opposite=ArtAssistants.localCorners(a)[1-(handle-old.size)]
+                val x=minOf(point.x,opposite.x);val y=minOf(point.y,opposite.y)
+                a.put("localBounds",JSONObject().put("x",x).put("y",y)
+                    .put("width",maxOf(0.01,abs(point.x-opposite.x))).put("height",maxOf(0.01,abs(point.y-opposite.y))))
+            } else {
+                val next=if(handle>=0)old.mapIndexed {i,p->if(i==handle)point else p} else old.map {it+(point-origin)}
+                a.put("points",JSONArray(next.map {it.json()}))
+                if(handle<0&&a.has("localBounds")) {
+                    val b=a.getJSONObject("localBounds");b.put("x",b.getDouble("x")+point.x-origin.x).put("y",b.getDouble("y")+point.y-origin.y)
+                }
+            }
+            if(a.getString("type")=="ruler"&&a.optDouble("fixedLength",0.0)>0&&ArtAssistants.geometryValid(a))
+                preview=ArtAssistants.normalize(a) else preview=a
         }
         if(event.actionMasked==MotionEvent.ACTION_UP) {
             val a=preview
             val request=JSONObject(capture.toString())
-            if(a!=null && !selectionOnly && a.getJSONArray("points").toString()!=original!!.getJSONArray("points").toString()) {
-                ArtAssistants.normalize(a)
-                request.put("id",a.getString("id")).put("changes",JSONObject().put("points",a.getJSONArray("points")))
+            if(a!=null && !selectionOnly && (a.getJSONArray("points").toString()!=original!!.getJSONArray("points").toString() ||
+                    a.optJSONObject("localBounds")?.toString()!=original!!.optJSONObject("localBounds")?.toString())) {
+                val normalized=ArtAssistants.normalize(a)
+                val changes=JSONObject().put("points",normalized.getJSONArray("points"))
+                if(normalized.has("localBounds"))changes.put("localBounds",normalized.getJSONObject("localBounds"))
+                request.put("id",a.getString("id")).put("changes",changes)
                 cancel();onEdit("ASSISTANT_UPDATE",request)
             } else {
                 request.put("id",original?.getString("id") ?: "")

@@ -7,7 +7,7 @@ import kotlin.math.*
 
 /** Geometry is resolved in document space; sensor samples and immutable endpoints stay layer-local. */
 internal object ArtLine {
-    val guideTypes=setOf("ruler","infinite_ruler","parallel_ruler","vanishing_point")
+    val guideTypes=setOf("ruler","infinite_ruler","parallel_ruler","vanishing_point","perspective_grid","two_vanishing_points")
     fun settings(p:JSONObject):JSONObject {
         val tool=p.optString("brushTool","ink");require(tool in ArtBrush.tools)
         val step=p.optDouble("angleStep",0.0)

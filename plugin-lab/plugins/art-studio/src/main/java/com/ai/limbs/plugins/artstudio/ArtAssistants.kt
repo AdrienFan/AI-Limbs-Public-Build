@@ -19,12 +19,36 @@ internal object ArtAssistants {
     const val MAX = 32
     val types = linkedMapOf("ruler" to "直尺", "infinite_ruler" to "无限直尺",
         "parallel_ruler" to "平行尺", "ellipse" to "椭圆", "concentric_ellipse" to "同心椭圆",
-        "vanishing_point" to "消失点")
-    val pending = listOf("三次曲线尺规", "透视网格", "透视椭圆", "双点透视组合", "鱼眼", "曲线透视", "局部作用区域", "固定长度单位")
+        "vanishing_point" to "消失点", "spline" to "样条", "perspective_grid" to "透视网格",
+        "perspective_ellipse" to "透视椭圆", "two_vanishing_points" to "双消失点",
+        "fisheye" to "鱼眼", "curvilinear_perspective" to "曲线透视")
+    val pending = emptyList<String>()
+    val editableFields=setOf("points","name","visible","enabled","locked","subdivisions","rays",
+        "localEnabled","localBounds","fixedLength","lengthUnit","unitDpi","useVertical")
+    val pointHelp=mapOf("ruler" to "起点、终点", "infinite_ruler" to "两点确定方向", "parallel_ruler" to "两点确定平行方向",
+        "ellipse" to "主轴两端、轴段内侧方一点", "concentric_ellipse" to "主轴两端、轴段内侧方一点",
+        "vanishing_point" to "消失点", "spline" to "起点、终点、起点柄、终点柄",
+        "perspective_grid" to "依次排列的四角，须构成凸四边形", "perspective_ellipse" to "依次排列的四角，须构成凸四边形",
+        "two_vanishing_points" to "左消失点、右消失点、预览中心", "fisheye" to "轴两端、轴段内侧方一点",
+        "curvilinear_perspective" to "两个消失点")
+    fun typeInfo()=JSONObject().apply { types.forEach { (type,label)->
+        val example=when(type) {
+            "spline"->listOf(AssistantPoint(20.0,100.0),AssistantPoint(280.0,100.0),AssistantPoint(80.0,20.0),AssistantPoint(220.0,180.0))
+            "perspective_grid","perspective_ellipse"->listOf(AssistantPoint(20.0,20.0),AssistantPoint(280.0,40.0),AssistantPoint(220.0,220.0),AssistantPoint(40.0,200.0))
+            "two_vanishing_points"->listOf(AssistantPoint(20.0,80.0),AssistantPoint(280.0,80.0),AssistantPoint(150.0,150.0))
+            "ellipse","concentric_ellipse","fisheye"->listOf(AssistantPoint(20.0,100.0),AssistantPoint(280.0,100.0),AssistantPoint(150.0,160.0))
+            "vanishing_point"->listOf(AssistantPoint(150.0,80.0))
+            else->listOf(AssistantPoint(20.0,100.0),AssistantPoint(280.0,100.0))
+        }
+        put(type,JSONObject().put("label",label).put("pointCount",count(type)).put("pointOrder",pointHelp.getValue(type))
+            .put("examplePoints",JSONArray(example.map {it.json()})).put("maxRays",if(type in setOf("fisheye","curvilinear_perspective"))16 else 64))
+        }
+    }
     val brushTools = setOf("ink","pencil","soft","spray","eraser","calligraphy","mirror","dyna","line")
     fun count(type: String) = when(type) {
         "vanishing_point" -> 1
-        "ellipse","concentric_ellipse" -> 3
+        "ellipse","concentric_ellipse","two_vanishing_points","fisheye" -> 3
+        "spline","perspective_grid","perspective_ellipse" -> 4
         else -> { require(type in types); 2 }
     }
     fun items(state: JSONObject): List<JSONObject> {
@@ -52,17 +76,38 @@ internal object ArtAssistants {
             val p=raw.getJSONArray(i)
             require(p.length()==2 && (0..1).all { p.getDouble(it).isFinite() && abs(p.getDouble(it))<=1_000_000.0 }) { "控制点坐标无效" }
         }
-        val p=points(a)
+        var p=points(a)
         if(p.size>=2) require((p[1]-p[0]).length()>=0.01) { "尺规两端不能重合" }
-        if(p.size==3) require(geometryValid(a)) { "第三点须位于主轴两端之间的侧方，不能在主轴上，椭圆须在可编辑范围内" }
-        for(key in listOf("visible","enabled","locked")) if(a.has(key)) require(a.get(key) is Boolean) { "尺规开关必须为布尔值" }
+        for(key in listOf("fixedLength","unitDpi")) if(a.has(key))require(a.get(key) is Number)
+        val length=a.optDouble("fixedLength",0.0);val unit=a.optString("lengthUnit","px");val dpi=a.optDouble("unitDpi",96.0)
+        if(a.has("lengthUnit"))require(a.get("lengthUnit") is String)
+        val pixels=ArtAssistantGeometry.pixels(length,unit,dpi)
+        require(length==0.0 || (type=="ruler" && pixels in 0.01..1_000_000.0)) { "固定长度仅适用于直尺，换算后须为0.01–1000000像素；0为自由长度" }
+        if(length>0) {
+            p=listOf(p[0],p[0]+(p[1]-p[0])*(pixels/(p[1]-p[0]).length()))
+            require(p.all {abs(it.x)<=1_000_000&&abs(it.y)<=1_000_000}) {"固定长度端点超出可编辑范围"}
+            a.put("points",JSONArray(p.map {it.json()}))
+        }
+        a.put("fixedLength",length).put("lengthUnit",unit).put("unitDpi",dpi)
+        require(geometryValid(a)) { "尺规几何无效；椭圆/鱼眼第三点须位于轴段内侧方" }
+        for(key in listOf("visible","enabled","locked","localEnabled","useVertical")) if(a.has(key)) require(a.get(key) is Boolean) { "尺规开关必须为布尔值" }
+        if(a.has("localBounds")) {
+            val b=a.getJSONObject("localBounds")
+            for(key in listOf("x","y","width","height"))require(b.get(key) is Number && b.getDouble(key).isFinite())
+            require(abs(b.getDouble("x"))<=1_000_000&&abs(b.getDouble("y"))<=1_000_000 &&
+                b.getDouble("width") in 0.01..2_000_000.0&&b.getDouble("height") in 0.01..2_000_000.0&&
+                abs(b.getDouble("x")+b.getDouble("width"))<=1_000_000&&abs(b.getDouble("y")+b.getDouble("height"))<=1_000_000) {"局部作用区无效"}
+        }
+        require(!a.optBoolean("localEnabled",false)||a.has("localBounds")) {"启用局部作用区须提供localBounds"}
+        a.put("localEnabled",a.optBoolean("localEnabled",false)).put("useVertical",a.optBoolean("useVertical",true))
         if(a.has("name"))require(a.get("name") is String)
         for(key in listOf("subdivisions","rays")) if(a.has(key)) require(a.get(key) is Number && a.getDouble(key)==a.getInt(key).toDouble())
         a.put("name",a.optString("name",types.getValue(type)).take(100))
         a.put("visible",a.optBoolean("visible",true)).put("enabled",a.optBoolean("enabled",true))
             .put("locked",a.optBoolean("locked",false))
         val sub=a.optInt("subdivisions",10); require(sub in 0..100)
-        val rays=a.optInt("rays",16); require(rays in 4..64)
+        val rays=a.optInt("rays",16); require(rays in 4..(if(type in setOf("fisheye","curvilinear_perspective"))16 else 64))
+        if(type=="perspective_grid")require(sub in 1..100)
         return a.put("subdivisions",sub).put("rays",rays)
     }
     fun validate(state: JSONObject) {
@@ -100,7 +145,7 @@ internal object ArtAssistants {
                     if(selected(state)==p.getString("id")) state.put("selectedAssistantId","")
                 } else {
                     val update=p.getJSONObject("changes");val keys=update.keys().asSequence().toList()
-                    require(keys.isNotEmpty() && keys.all { it in setOf("points","name","visible","enabled","locked","subdivisions","rays") })
+                    require(keys.isNotEmpty() && keys.all { it in editableFields })
                     require(!a.getBoolean("locked") || keys==listOf("locked")) { "请先解锁尺规" }
                     keys.forEach { a.put(it,update.get(it)) }
                     state.put("selectedAssistantId",a.getString("id"))
@@ -130,14 +175,16 @@ internal object ArtAssistants {
         val id=assistant.getString("id")
         private val type=assistant.getString("type")
         private val h=points(assistant)
-        private val oval=if(h.size==3) ellipse(assistant) else null
+        private val oval=if(type in setOf("ellipse","concentric_ellipse")) ellipse(assistant) else null
+        private val advanced=if(type in ArtAssistantGeometry.advanced)ArtAssistantGeometry.Projection(assistant,start) else null
         val radiusScale: Double = if(type=="concentric_ellipse") {
             val e=requireNotNull(oval);val d=start-e.center
             hypot(d.dot(e.axis)/e.a,d.dot(e.normal)/e.b).also { require(it>1e-8) { "不能从同心椭圆中心起笔" } }
         } else 1.0
-        init { if(type=="vanishing_point") require((start-h[0]).length()>=0.01) { "不能从消失点本身起笔" } }
+        init { require(ArtAssistantGeometry.eligible(assistant,start)) {"起笔不在尺规作用区内，或位于退化位置"} }
+        fun resetTracking() {advanced?.resetTracking()}
         fun project(p: AssistantPoint): AssistantPoint {
-            val result=when(type) {
+            val result=if(advanced!=null)advanced.project(p) else when(type) {
                 "ruler" -> line(p,h[0],h[1],true)
                 "infinite_ruler" -> line(p,h[0],h[1])
                 "parallel_ruler" -> line(p,start,start+(h[1]-h[0]))
@@ -160,8 +207,7 @@ internal object ArtAssistants {
         private val candidates=items(state).filter { a ->
             a.getString("type") in allowedTypes && a.getBoolean("visible") && a.getBoolean("enabled") &&
                 (!options.getBoolean("onlySelected") || a.getString("id")==selected(state)) &&
-                !(a.getString("type")=="vanishing_point" && (start-points(a)[0]).length()<0.01) &&
-                !(a.getString("type")=="concentric_ellipse" && (start-ellipse(a).center).length()<0.01)
+                ArtAssistantGeometry.eligible(a,start)
         }.map { Projection(it,start) }.filter { (it.project(start)-start).length()<=tolerance }
         private var decided=false
         var active: Projection?=null;private set
@@ -175,6 +221,7 @@ internal object ArtAssistants {
         fun complete(points: List<AssistantPoint>): List<AssistantPoint> {
             if(!decided) points.forEach { project(it) }
             val guide=active ?: return points
+            guide.resetTracking()
             return points.map(guide::project)
         }
     }
@@ -185,7 +232,7 @@ internal object ArtAssistants {
     fun geometryValid(a: JSONObject): Boolean {
         val p=points(a)
         if(p.size>=2 && (p[1]-p[0]).length()<0.01)return false
-        if(p.size==3) {
+        if(a.getString("type") in setOf("ellipse","concentric_ellipse","fisheye")) {
             val c=(p[0]+p[1])*0.5;val major=(p[1]-p[0]).length()*0.5
             val axis=(p[1]-p[0])*(1.0/(2*major));val n=AssistantPoint(-axis.y,axis.x);val d=p[2]-c
             val divisor=1.0-d.dot(axis).pow(2)/major.pow(2)
@@ -195,19 +242,47 @@ internal object ArtAssistants {
             val rx=hypot(major*axis.x,minor*n.x);val ry=hypot(major*axis.y,minor*n.y)
             if(abs(c.x)+rx>1_000_000 || abs(c.y)+ry>1_000_000)return false
         }
+        if(a.getString("type") in setOf("perspective_grid","perspective_ellipse")) {
+            return ArtAssistantGeometry.Quad.valid(p)
+        }
         return true
     }
-    fun path(a: JSONObject): Path {
-        val p=points(a);return Path().apply {
-            if(p.size==3) {
-                val e=ellipse(a);for(i in 0..128) {
-                    val t=2*PI*i/128.0;val v=e.center+e.axis*(e.a*cos(t))+e.normal*(e.b*sin(t))
-                    if(i==0)moveTo(v.x.toFloat(),v.y.toFloat()) else lineTo(v.x.toFloat(),v.y.toFloat())
-                };close()
-            } else if(p.size==2) {
-                moveTo(p[0].x.toFloat(),p[0].y.toFloat());lineTo(p[1].x.toFloat(),p[1].y.toFloat())
+    fun localCorners(a:JSONObject):List<AssistantPoint> {
+        if(!a.optBoolean("localEnabled",false))return emptyList()
+        val b=a.getJSONObject("localBounds");val x=b.getDouble("x");val y=b.getDouble("y")
+        return listOf(AssistantPoint(x,y),AssistantPoint(x+b.getDouble("width"),y+b.getDouble("height")))
+    }
+    fun guides(a:JSONObject):List<ArtAssistantGeometry.Guide> {
+        if(a.getString("type") in ArtAssistantGeometry.advanced)return ArtAssistantGeometry.guides(a)
+        val h=points(a)
+        return when(a.getString("type")) {
+            "ellipse","concentric_ellipse"->{val e=ellipse(a)
+                listOf(ArtAssistantGeometry.Guide((0..128).map {i->val t=2*PI*i/128.0
+                    e.center+e.axis*(e.a*cos(t))+e.normal*(e.b*sin(t))}))}
+            "vanishing_point"->(0 until a.getInt("rays")).map {i->val t=PI*i/a.getInt("rays")
+                ArtAssistantGeometry.Guide(listOf(h[0],h[0]+AssistantPoint(cos(t),sin(t))),true)}
+            else->listOf(ArtAssistantGeometry.Guide(h,a.getString("type")!="ruler"))
+        }
+    }
+    fun hitDistance(a:JSONObject,point:AssistantPoint,m:Matrix):Double {
+        if(!geometryValid(a))return Double.POSITIVE_INFINITY
+        if(!ArtAssistantGeometry.localEligible(a,point))return Double.POSITIVE_INFINITY
+        val target=screen(point,m)
+        return guides(a).minOf {guide->val p=guide.points.map {screen(it,m)}
+            (0 until p.lastIndex).minOf {i->
+                val d=p[i+1]-p[i];val squared=d.dot(d)
+                if(squared<1e-12)(target-p[i]).length() else {
+                    val t=(target-p[i]).dot(d)/squared
+                    val projection=p[i]+d*(if(guide.infinite)t else t.coerceIn(0.0,1.0))
+                    (projection-target).length()
+                }
             }
         }
+    }
+    fun path(a: JSONObject): Path {
+        return Path().apply {for(guide in guides(a).filterNot {it.infinite}) {
+            guide.points.forEachIndexed {i,v->if(i==0)moveTo(v.x.toFloat(),v.y.toFloat()) else lineTo(v.x.toFloat(),v.y.toFloat())}
+        }}
     }
     fun draw(canvas: Canvas,state: JSONObject,m: Matrix,editing: Boolean=false,preview: JSONObject?=null,density: Float=1f) {
         val showGuides=settings(state).getBoolean("visible")
@@ -230,23 +305,40 @@ internal object ArtAssistants {
             paint.alpha=if(a.getString("id")==selected(state)) 230 else 150
             val p=points(a);val h=p.map { screen(it,m) };val type=a.getString("type")
             if(showGuides) {
-                if(type=="infinite_ruler" || type=="parallel_ruler") infinite(h[0],h[1]-h[0])
-                else if(type=="vanishing_point") {
-                    for(i in 0 until a.getInt("rays")) {
-                        val t=PI*i/a.getInt("rays");val end=screen(p[0]+AssistantPoint(cos(t),sin(t)),m)
-                        infinite(h[0],end-h[0])
+                if(geometryValid(a)) {
+                    canvas.save()
+                    val corners=localCorners(a).map {screen(it,m)}
+                    if(corners.isNotEmpty()) {
+                        val b=a.getJSONObject("localBounds");val rect=Path().apply {
+                            addRect(b.getDouble("x").toFloat(),b.getDouble("y").toFloat(),
+                                (b.getDouble("x")+b.getDouble("width")).toFloat(),(b.getDouble("y")+b.getDouble("height")).toFloat(),Path.Direction.CW)
+                            transform(m)
+                        };canvas.clipPath(rect)
                     }
-                } else if(geometryValid(a)) { val path=path(a);path.transform(m);canvas.drawPath(path,paint) }
-                if(type=="ruler" && a.getInt("subdivisions")>0 && geometryValid(a)) {
-                    val d=h[1]-h[0];val length=d.length()
-                    val n=AssistantPoint(-d.y,d.x)*(5*density/length);val count=a.getInt("subdivisions")
-                    if(length/count>=4*density) for(i in 0..count) {
-                        val c=h[0]+d*(i.toDouble()/count);val u=c-n;val v=c+n
-                        canvas.drawLine(u.x.toFloat(),u.y.toFloat(),v.x.toFloat(),v.y.toFloat(),paint)
+                    for(guide in guides(a)) {
+                        val vertices=guide.points.map {screen(it,m)}
+                        if(guide.infinite)infinite(vertices[0],vertices[1]-vertices[0])
+                        else {val path=Path();vertices.forEachIndexed {i,v->if(i==0)path.moveTo(v.x.toFloat(),v.y.toFloat()) else path.lineTo(v.x.toFloat(),v.y.toFloat())};canvas.drawPath(path,paint)}
                     }
+                    if(type=="ruler" && a.getInt("subdivisions")>0) {
+                        val d=h[1]-h[0];val length=d.length()
+                        val n=AssistantPoint(-d.y,d.x)*(5*density/length);val count=a.getInt("subdivisions")
+                        if(length/count>=4*density) for(i in 0..count) {
+                            val c=h[0]+d*(i.toDouble()/count);val u=c-n;val v=c+n
+                            canvas.drawLine(u.x.toFloat(),u.y.toFloat(),v.x.toFloat(),v.y.toFloat(),paint)
+                        }
+                    }
+                    canvas.restore()
                 }
             }
-            if(editing) for(v in h) {
+            val local=localCorners(a)
+            if(local.isNotEmpty() && (showGuides||editing)) {
+                val b=a.getJSONObject("localBounds");val boundary=Path().apply {
+                    addRect(b.getDouble("x").toFloat(),b.getDouble("y").toFloat(),
+                        (b.getDouble("x")+b.getDouble("width")).toFloat(),(b.getDouble("y")+b.getDouble("height")).toFloat(),Path.Direction.CW);transform(m)
+                };canvas.drawPath(boundary,paint)
+            }
+            if(editing) for(v in h+local.map {screen(it,m)}) {
                 paint.alpha=255;canvas.drawCircle(v.x.toFloat(),v.y.toFloat(),7*density,paint)
                 // Geometry-only handles also work in the resident renderer without native font dependencies.
             }
