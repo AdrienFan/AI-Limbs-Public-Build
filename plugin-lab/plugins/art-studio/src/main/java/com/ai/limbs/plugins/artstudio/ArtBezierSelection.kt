@@ -11,8 +11,8 @@ internal object ArtBezierSelection {
     const val MAX_NODES=2048
     const val MAX_PARTS=32
     const val MAX_TOTAL_NODES=8192
-    val modes=linkedMapOf("replace" to "替换","add" to "添加","subtract" to "减去","intersect" to "相交")
-    val pending=listOf("抗锯齿／羽化统一像素选区蒙版","角度吸附","任意旋转选区","独立选区蒙版图层")
+    val modes=ArtSoftSelection.modes
+    val pending=listOf("角度吸附","任意旋转选区","独立选区蒙版图层")
     fun info()=JSONObject().put("modes",JSONObject(modes)).put("maxNodes",MAX_NODES)
         .put("maxParts",MAX_PARTS).put("maxTotalNodes",MAX_TOTAL_NODES)
         .put("coordinateSpace","document").put("closed",true).put("pending",JSONArray(pending))
@@ -59,7 +59,7 @@ internal object ArtBezierSelection {
         }.toMutableList()
     }
     fun operation(mode: String)=when(mode) {
-        "add"->Path.Op.UNION;"subtract"->Path.Op.DIFFERENCE;"intersect"->Path.Op.INTERSECT
+        "add"->Path.Op.UNION;"subtract"->Path.Op.DIFFERENCE;"intersect"->Path.Op.INTERSECT;"xor"->Path.Op.XOR
         else->error("复合选区模式无效")
     }
     fun compoundPath(parts: List<JSONObject>): Path {
@@ -90,11 +90,12 @@ internal object ArtBezierSelection {
         return frameJson(bounds).put("shape","compound").put("basis",frameJson(bounds))
             .put("parts",JSONArray(parts))
     }
-    fun combine(current: JSONObject?,created: JSONObject,mode: String): JSONObject {
+    fun combine(current: JSONObject?,created: JSONObject,mode: String,width:Int,height:Int): JSONObject {
+        if(current?.has("coverage")==true || created.has("coverage"))return ArtSoftSelection.combine(current,created,mode,width,height)
         require(mode in modes) {"选区模式无效"}
         if(mode=="replace")return created
         val noSelection=current==null || current.getDouble("width")==0.0 || current.getDouble("height")==0.0
-        if(noSelection)return if(mode=="add")created else empty()
+        if(noSelection)return if(mode in setOf("add","xor"))created else empty()
         return build(parts(requireNotNull(current)).apply {
             add(JSONObject().put("mode",mode).put("selection",created))
         })

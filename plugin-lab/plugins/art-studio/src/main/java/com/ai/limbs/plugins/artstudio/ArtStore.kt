@@ -509,8 +509,8 @@ internal class ArtStore(private val root: File) {
                 if (action in setOf("growselection","shrinkselection")) {
                     val amount = p.getDouble("pixels") * if (action == "shrinkselection") -1 else 1
                     require(p.getDouble("pixels") >= 0 && amount.isFinite())
-                    selection.put("x",selection.getDouble("x")-amount).put("y",selection.getDouble("y")-amount)
-                        .put("width",selection.getDouble("width")+amount*2).put("height",selection.getDouble("height")+amount*2)
+                    val processed=ArtSoftSelection.process(selection,JSONObject().put("expand",amount),requireNotNull(state).getInt("width"),state.getInt("height"))
+                    return@locked edit("SELECTION_CREATE",processed).put("selectionFeedback",true)
                 } else {
                     selection.put("width",p.getDouble("width")).put("height",p.getDouble("height"))
                     if (action == "edit_selection") selection.put("x",p.getDouble("x")).put("y",p.getDouble("y"))
@@ -823,13 +823,40 @@ internal class ArtStore(private val root: File) {
         require(p.getString("documentId")==snap.getString("id") && p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已切换或更新，请重新建立选区"}
         return snap
     }
+    fun basicSelection(actor:String,p:JSONObject):JSONObject = locked {
+        val snap=current();val state=snap.getJSONObject("state")
+        if(p.has("documentId"))require(p.getString("documentId")==snap.getString("id")) {"工程已切换，请重新建立选区"}
+        if(p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision")) {"工程已更新，请重新建立选区"}
+        val shape=p.optString("shape","rect");require(shape in setOf("rect","ellipse","polygon","freehand"))
+        val geometry=if(shape in setOf("polygon","freehand"))ArtSelection.fromVertices(p.getJSONArray("points")) else
+            JSONObject().put("shape",shape).put("x",p.getDouble("x")).put("y",p.getDouble("y")).put("width",p.getDouble("width")).put("height",p.getDouble("height"))
+        val options=ArtSoftSelection.options(p)
+        val created=ArtSoftSelection.process(geometry,options,state.getInt("width"),state.getInt("height"))
+        val selection=ArtSoftSelection.combine(state.optJSONObject("selection"),created,options.getString("mode"),state.getInt("width"),state.getInt("height"))
+        apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+            .put("selection",selection).put("tool",shape)).put("selectionFeedback",true)
+    }
+    fun adjustSelection(actor:String,p:JSONObject):JSONObject = locked {
+        val snap=selectionToolRequest(p);val state=snap.getJSONObject("state")
+        require(!p.has("antialias") && !p.has("mode")) {"调整已有蒙版仅支持expand和feather；抗锯齿请在创建时设置"}
+        val selected=state.optJSONObject("selection") ?: error("当前没有选区")
+        val selection=ArtSoftSelection.process(selected,p,state.getInt("width"),state.getInt("height"))
+        apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+            .put("selection",selection).put("tool","adjust")).put("selectionFeedback",true)
+    }
+    fun selectionCoverage(p:JSONObject):JSONObject = locked {
+        val snap=selectionToolRequest(p);val s=snap.getJSONObject("state").optJSONObject("selection") ?: error("当前没有选区")
+        val x=p.getDouble("x");val y=p.getDouble("y");require(x.isFinite()&&y.isFinite())
+        JSONObject().put("documentId",snap.getString("id")).put("revision",snap.getInt("revision"))
+            .put("coverage",ArtSoftSelection.Sampler(s).at(x,y)).put("range","0..255")
+    }
     fun colorSelection(actor: String,p: JSONObject,connected: Boolean): JSONObject = locked {
         val snap=selectionToolRequest(p);val state=snap.getJSONObject("state");val o=ArtColorSelection.options(p)
         val request=JSONObject(p.toString());o.keys().forEach {request.put(it,o.get(it))}
         val bounds=ArtColorSelection.bounds(state,request)
         val bitmap=selectionReference(snap,request,bounds.width().toLong()*bounds.height()*24)
         val result=try {ArtColorSelection.solve(state,bitmap,request,connected)} finally {bitmap.recycle()}
-        val selection=ArtBezierSelection.combine(state.optJSONObject("selection"),result.selection,o.getString("mode"))
+        val selection=ArtBezierSelection.combine(state.optJSONObject("selection"),result.selection,o.getString("mode"),snap.getJSONObject("state").getInt("width"),snap.getJSONObject("state").getInt("height"))
         apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
             .put("selection",selection).put("tool",if(connected)"contiguous" else "similar"))
             .put("selectedPixels",result.pixels).put("sampledColor",result.sampledColor).put("selectionFeedback",true)
@@ -857,7 +884,7 @@ internal class ArtStore(private val root: File) {
         val path=ArtSelection.path(created);val canonical=android.graphics.Path()
         check(canonical.op(path,path,android.graphics.Path.Op.UNION))
         require(!canonical.isEmpty) {"磁性路径没有围出有效面积"}
-        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,o.getString("mode"))
+        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,o.getString("mode"),snap.getJSONObject("state").getInt("width"),snap.getJSONObject("state").getInt("height"))
         apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
             .put("selection",selection).put("tool","magnetic")).put("selectionFeedback",true).put("algorithm","rgba-sobel-live-wire")
     }
@@ -896,7 +923,7 @@ internal class ArtStore(private val root: File) {
     fun bezierSelectionCreate(actor: String,p: JSONObject): JSONObject = locked {
         val snap=selectionRequest(p);require(p.has("expectedRevision"))
         val created=ArtBezierSelection.fromNodes(p.getJSONArray("nodes"))
-        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,p.optString("mode","replace"))
+        val selection=ArtBezierSelection.combine(snap.getJSONObject("state").optJSONObject("selection"),created,p.optString("mode","replace"),snap.getJSONObject("state").getInt("width"),snap.getJSONObject("state").getInt("height"))
         apply(actor,"SELECTION_BEZIER",JSONObject().put("documentId",snap.getString("id"))
             .put("expectedRevision",snap.getInt("revision")).put("selection",selection))
     }
@@ -1247,6 +1274,15 @@ internal class ArtStore(private val root: File) {
                 if(tool in ArtRasterPath.tools)normalized.put("points",ArtRasterPath.outlinePoints(normalized))
                 normalized=ArtBrush.prepare(normalized,config,normalized.optInt("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE)))
             } else require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"该工具不使用栅格笔刷引擎"}
+        }
+        if(type=="STROKE_ADD") {
+            val state=snapshot(doc).getJSONObject("state")
+            normalized.remove("selection");normalized.remove("selectionToLayer");normalized.remove("selectionCoveragePass")
+            state.optJSONObject("selection")?.let {s ->
+                val layer=ArtMenuOperations.layers(state).first {it.getString("id")==normalized.getString("layerId")}
+                val inverse=android.graphics.Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse))
+                normalized.put("selection",JSONObject(s.toString())).put("selectionToLayer",ArtShapes.encode(inverse))
+            }
         }
         if (type == "SELECTION_EDIT" && normalized.optString("action") == "COPY") {
             normalized.put("copyId", operationId)
@@ -1849,7 +1885,7 @@ internal class ArtStore(private val root: File) {
                     "ENCLOSE_FILL" -> "围合填充";"ENCLOSE_ERASE" -> "围合擦除";else -> "粘贴像素"
                 }
                 "LAYER_COPY" -> "复制图层"
-                "SELECTION_TOOL" -> when(operation.getJSONObject("parameters").getString("tool")) {"contiguous"->"连续区域选区";"similar"->"相似色选区";else->"磁性套索选区"}
+                "SELECTION_TOOL" -> when(operation.getJSONObject("parameters").getString("tool")) {"contiguous"->"连续区域选区";"similar"->"相似色选区";"magnetic"->"磁性套索选区";"adjust"->"调整软选区";else->"创建基本选区"}
                 "SELECTION_BEZIER" -> "贝塞尔曲线选区"
                 "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
                 "DOCUMENT_RENAME" -> "重命名工程"
@@ -2179,6 +2215,7 @@ internal class ArtStore(private val root: File) {
                     require(point.getDouble(0).isFinite() && point.getDouble(1).isFinite())
                     if (point.length() >= 3) require(point.getDouble(2) in 0.0..1.0)
                 }
+                p.optJSONObject("selection")?.let {ArtSelection.validate(it);ArtShapes.matrix(p.getJSONArray("selectionToLayer"))}
                 if(p.has("brush"))ArtBrush.validateStored(p)
                 if(p.has("figureVersion"))ArtFigure.validateStored(p)
                 if(p.has("pathVersion"))ArtRasterPath.validateStored(p)
@@ -2554,8 +2591,11 @@ internal class ArtStore(private val root: File) {
             val clipped = Bitmap.createBitmap(area[2], area[3], Bitmap.Config.ARGB_8888)
             try {
                 Canvas(clipped).drawBitmap(bitmap, -area[0].toFloat(), -area[1].toFloat(), Paint())
+                state.optJSONObject("selection")?.takeIf {it.has("coverage")}?.let {
+                    ArtSoftSelection.maskBitmap(clipped,it,area[0],area[1])
+                }
                 state.optJSONObject("selection")?.takeIf {
-                    it.optString("shape", "rect") != "rect"
+                    !it.has("coverage") && it.optString("shape", "rect") != "rect"
                 }?.let { selected ->
                     // A small reusable strip avoids allocating a second full 4K bitmap.
                     val mask = Bitmap.createBitmap(area[2], minOf(area[3], 128),
@@ -2691,7 +2731,7 @@ internal class ArtStore(private val root: File) {
         ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,viewState,state.getInt("width"),state.getInt("height"))+
             mask.width.toLong()*mask.height*64,"智能修补")
         val source=ArtRenderer.render(this,view)
-        val result=try { ArtSmartPatch.repair(source,mask) } finally { source.recycle() }
+        val result=try { ArtSmartPatch.repair(source,mask,state.optJSONObject("selection")) } finally { source.recycle() }
         val patchBytes: ByteArray;val eraseBytes: ByteArray
         try {
             patchBytes=ArtImagePolicy.encodePng(result.patch,MAX_ASSET_BYTES)
@@ -2833,6 +2873,7 @@ internal class ArtStore(private val root: File) {
                                 if (erase) Color.WHITE else fill)
                     }
                 }
+                state.optJSONObject("selection")?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.maskBitmap(clipped,it,minX,minY)}
                 ByteArrayOutputStream().use { stream ->
                     require(clipped.compress(Bitmap.CompressFormat.PNG, 100, stream))
                     stream.toByteArray()

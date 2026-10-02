@@ -11,7 +11,7 @@ internal object ArtFigureRenderer {
         val path=if(p.has("pathVersion"))ArtRasterPath.path(p) else ArtFigure.path(p);val fill=p.getJSONObject("figureFill")
         var tile:Bitmap?=null
         val composite=Paint().apply {alpha=(255*p.optDouble("opacity",1.0)).roundToInt().coerceIn(0,255)
-            if(p.getString("brushTool")=="eraser")xfermode=PorterDuffXfermode(PorterDuff.Mode.DST_OUT)}
+            if(p.getString("brushTool")=="eraser" && !p.optBoolean("selectionCoveragePass"))xfermode=PorterDuffXfermode(PorterDuff.Mode.DST_OUT)}
         val saved=canvas.saveLayer(null,composite)
         try {
             if(fill.getString("mode")!="none") {

@@ -828,3 +828,18 @@ node=2仅适用于目标子路径有3点且该点为开放端点，请读path.no
 保存返回档ID；读取/删除用calligraphy.profile.get/delete({id:"PROFILE_ID"})，更新在save请求加id。调用shape.calligraphy可加profileId:"PROFILE_ID"，显式width等覆盖；followPath档仍须请求提供路径引用。
 
 版本 `0.2.51` / versionCode `54` / applicationId `com.ai.limbs.payload.artstudio.v0251`。仅静态检查和仓库提交，未编译、未运行测试、未推送云端；硬件倾斜、交互预览、配置档跨升级读取与历史重放待统一部署验证。
+
+
+### 0.2.52：四种基本软选区（尚未编译）
+
+矩形、椭圆、多边形、自由套索创建统一支持 replace/add/subtract/intersect/xor、抗锯齿强度0..1、羽化半径0..32 px、扩展／收缩-64..64 px。参数以文档像素计，先栅格化、扩展／收缩，再羽化，最后组合。矩形和椭圆拖动；套索松手闭合；多边形逐点点击，点击首点、双击末点、Enter或完成按钮闭合，退格撤回顶点，Esc／右键／双指取消。首点捕获工程、修订、视图和参数，工程或视图变化拒绝提交，超预算明确报错。
+
+新增8位coverage（deflate-alpha-v1）随已有二值扫描轮廓保存，保留孔洞与不相连区域；扫描轮廓供命中／范围限制，真实像素效果使用0..255覆盖率。添加min(255,a+b)，减去max(0,a-b)，相交min(a,b)，异或abs(a-b)。没有已有选区时add/xor创建，subtract/intersect为空；显式空选区与取消选区不同，不会变成全画布操作。处理范围裁到画布，最多4194304像素／32768非零扫描段。旧几何选区和旧历史保持原语义；新操作直接存最终蒙版，撤销重放不重新羽化。
+
+新笔画保存当时的选区和文档到图层的矩阵；自由笔刷、动态／多重笔刷、直线、栅格形状与路径使用共享软边描绘和擦除，预览与保存走同一渲染入口。像素填充、清除、复制／剪切、连续／围合填充、滤镜、修补输出按覆盖率处理。菜单扩展／收缩改为形态运算，不再缩放外框。矢量对象编辑、中心线命中及上色蒙版的颜色标签求解仍按几何／非零范围，不把这些离散标签解释成像素透明度。选区反馈显示覆盖率浅蓝蒙版，导出不含选区显示。
+
+AI 原四入口 selection.create/ellipse/polygon/freehand 现有坐标参数保留，新增可选documentId、expectedRevision、mode、antialias、feather、expand。selection.basic_info读默认值和范围；selection.adjust对当前选区应用expand/feather（累积羽化，不接受mode/antialias）；selection.coverage只读返回坐标的覆盖率。三者及四个创建入口都有精简参数说明与可直接替换id/revision的示例。示例：读取document.info后，selection.create({documentId:ID,expectedRevision:REV,x:20,y:20,width:120,height:80,mode:"add",antialias:1,feather:4,expand:2})。下一次写操作先更新revision。
+
+参考 Krita 6.0.4 的 kis_tool_select_rectangular/elliptical/polygonal/outline、kis_pixel_selection.cpp 与 kis_selection_filters.cpp，独立实现覆盖率组合规则。形态处理采用方形邻域最大／最小值，羽化采用三次滚动盒滤波近似高斯、画布外视为0；与Krita的圆盘形态及高斯滤波不逐像素等同。此前章节延后的软选区能力，本轮在四种基本创建工具及共享像素使用链路补齐；颜色／磁性／贝塞尔创建工具的独立抗锯齿和羽化参数仍另行迭代，可用selection.adjust统一处理现有选区。
+
+版本0.2.52 / versionCode55 / applicationId com.ai.limbs.payload.artstudio.v0252。仅源码静态检查与仓库提交，未编译、未运行测试、未推云端；抗锯齿软边、擦除、组合、交互及保存重放待统一部署后实测。

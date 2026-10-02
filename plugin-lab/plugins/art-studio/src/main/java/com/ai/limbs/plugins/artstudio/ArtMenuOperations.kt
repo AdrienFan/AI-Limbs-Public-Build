@@ -177,12 +177,14 @@ internal object ArtMenuOperations {
         val mode = p.optString("mode", "lightness")
         require(threshold in 0..255 && steps in 2..128)
         require(mode in setOf("luminosity", "luminosity601", "average", "lightness", "min", "max"))
-        val region = selection?.let { Region().apply { setPath(ArtSelection.path(it), Region(0, 0, bitmap.width, bitmap.height)) } }
+        val coverage=selection?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.Sampler(it)}
+        val region = selection?.takeIf {!it.has("coverage")}?.let { Region().apply { setPath(ArtSelection.path(it), Region(0, 0, bitmap.width, bitmap.height)) } }
         val row = IntArray(bitmap.width)
         for (y in 0 until bitmap.height) {
             bitmap.getPixels(row, 0, row.size, 0, y, row.size, 1)
             for (x in row.indices) {
                 if (region != null && !region.contains(x, y)) continue
+                val amount=coverage?.at(x+0.5,y+0.5) ?: 255;if(amount==0)continue
                 val c = row[x]; val a = Color.alpha(c)
                 if (a == 0) { if (action == "filter.resettransparent") row[x] = 0; continue }
                 val r = Color.red(c); val g = Color.green(c); val b = Color.blue(c)
@@ -205,6 +207,7 @@ internal object ArtMenuOperations {
                     "filter.resettransparent" -> c
                     else -> error("尚未实现的滤镜")
                 }
+                row[x]=ArtSoftSelection.blend(c,row[x],amount)
             }
             bitmap.setPixels(row, 0, row.size, 0, y, row.size, 1)
         }

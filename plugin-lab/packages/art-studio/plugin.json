@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.51",
+  "version": "0.2.52",
   "api": {
     "target": 1,
     "min": 1
@@ -228,7 +228,10 @@
       "plugin.art.studio.calligraphy.profiles",
       "plugin.art.studio.calligraphy.profile.get",
       "plugin.art.studio.calligraphy.profile.save",
-      "plugin.art.studio.calligraphy.profile.delete"
+      "plugin.art.studio.calligraphy.profile.delete",
+      "plugin.art.studio.selection.basic_info",
+      "plugin.art.studio.selection.adjust",
+      "plugin.art.studio.selection.coverage"
     ],
     "services": [],
     "providers": [

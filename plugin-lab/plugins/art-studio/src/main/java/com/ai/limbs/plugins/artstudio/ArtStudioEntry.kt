@@ -400,26 +400,19 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("layer.group", "创建画室图层组", write) { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "GROUP_CREATE", p)
         }
-        capability("selection.freehand", "创建自由套索选区", write) { p ->
-            val params = ArtSelection.fromVertices(p.getJSONArray("points"))
-            if (p.has("expectedRevision")) params.put("expectedRevision", p.getInt("expectedRevision"))
-            store.apply("LANER", "SELECTION_CREATE", params)
-        }
-        capability("selection.polygon", "创建多边形选区", write) { p ->
-            val params = ArtSelection.fromVertices(p.getJSONArray("points"))
-            if (p.has("expectedRevision")) params.put("expectedRevision", p.getInt("expectedRevision"))
-            store.apply("LANER", "SELECTION_CREATE", params)
-        }
-        capability("selection.ellipse", "创建椭圆形选区", write) { p ->
-            p.put("shape", "ellipse")
-            store.apply("LANER", "SELECTION_CREATE", p)
-        }
+        capability("selection.basic_info","读取基本软选区参数",read) {ArtSoftSelection.info()}
+        capability("selection.adjust","羽化或扩展收缩当前选区",write) {p->store.adjustSelection("LANER",p)}
+        capability("selection.coverage","读取选区坐标的覆盖率",read) {p->store.selectionCoverage(p)}
+        capability("selection.create","创建矩形软选区",write) {p->store.basicSelection("LANER",p.put("shape","rect"))}
+        capability("selection.freehand","创建自由套索软选区",write) {p->store.basicSelection("LANER",p.put("shape","freehand"))}
+        capability("selection.polygon","创建多边形软选区",write) {p->store.basicSelection("LANER",p.put("shape","polygon"))}
+        capability("selection.ellipse","创建椭圆软选区",write) {p->store.basicSelection("LANER",p.put("shape","ellipse"))}
         mapOf("layer.select" to "LAYER_SELECT", "layer.rename" to "LAYER_RENAME",
             "layer.move" to "LAYER_MOVE", "layer.delete" to "LAYER_DELETE",
             "layer.set_visibility" to "LAYER_VISIBLE", "layer.set_opacity" to "LAYER_OPACITY",
             "layer.set_lock" to "LAYER_LOCK", "layer.set_blend" to "LAYER_BLEND",
             "layer.properties" to "LAYER_PROPERTIES",
-            "selection.create" to "SELECTION_CREATE", "selection.clear" to "SELECTION_CLEAR",
+            "selection.clear" to "SELECTION_CLEAR",
             "selection.edit" to "SELECTION_EDIT",
             "canvas.crop" to "CROP").forEach { (name, type) ->
             val label = when (name) {
@@ -553,6 +546,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         return InProcessCapabilityParameterSpec(key, type, ArtCapabilityHelp.parameterDescription(name, key), !optional)
     }
     val id = p("id")
+    fun basicSelectionFields()=listOf(p("documentId",optional=true),p("expectedRevision","integer",true),p("mode",optional=true),p("antialias","number",true),p("feather","integer",true),p("expand","integer",true))
     fun figureFields()=listOf(p("fixedWidth","number",true),p("fixedHeight","number",true),p("fixedRatio","number",true),
         p("drawFromCenter","boolean",true),p("cornerRadius","number",true),p("outline",optional=true),p("figureFill","object",true))
     fun lineFields()=listOf(p("useSensors","boolean",true),p("angleStep","number",true),p("lineOffset","array",true))
@@ -664,7 +658,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("color"),p("action"),p("transparent","boolean",true))
         "colorize.settings" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"),p("settings","object"))
         "colorize.clear","colorize.update","colorize.convert" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maskId"))
-        "selection.bezier_info" -> emptyList()
+        "selection.basic_info", "selection.bezier_info" -> emptyList()
+        "selection.adjust" -> listOf(p("documentId"),p("expectedRevision","integer"),p("expand","integer",true),p("feather","integer",true))
+        "selection.coverage" -> listOf(p("documentId"),p("expectedRevision","integer"),p("x","number"),p("y","number"))
         "selection.bezier_create" -> listOf(p("documentId"),p("expectedRevision","integer"),p("nodes","array"),p("mode",optional=true))
         "selection.bezier_nodes" -> listOf(p("documentId"),p("expectedRevision","integer",true),p("componentIndex","integer",true))
         "selection.bezier_edit" -> listOf(p("documentId"),p("expectedRevision","integer"),p("edits","array"),p("componentIndex","integer",true))
@@ -742,8 +738,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("drag", "number", true), p("nibAngle", "number", true),p("assistantId",optional=true))+mirrorFields()+dynaFields()+lineFields()+figureFields()
         "stroke.erase" -> listOf(p("layerId"), p("strokeId"))
         "selection.create", "selection.ellipse" -> listOf(p("x", "number"), p("y", "number"),
-            p("width", "number"), p("height", "number"))
-        "selection.polygon", "selection.freehand" -> listOf(p("points", "array"))
+            p("width", "number"), p("height", "number"))+basicSelectionFields()
+        "selection.polygon", "selection.freehand" -> listOf(p("points", "array"))+basicSelectionFields()
         "selection.edit" -> listOf(p("layerId"), p("action"), p("dx", "number", true),
             p("dy", "number", true), p("factor", "number", true), p("degrees", "number", true),
             p("copyId", optional = true))

@@ -217,6 +217,9 @@ internal object ArtEncloseFill {
             if(alpha>0) {filled++;output[i]=Color.argb(alpha,if(erase)255 else Color.red(color),
                 if(erase)255 else Color.green(color),if(erase)255 else Color.blue(color))}
         }
-        return Result(Bitmap.createBitmap(output,w,h,Bitmap.Config.ARGB_8888),filled,regions)
+        val bitmap=Bitmap.createBitmap(output,w,h,Bitmap.Config.ARGB_8888)
+        try {state.optJSONObject("selection")?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.maskBitmap(bitmap,it,rect.left,rect.top)}
+            return Result(bitmap,filled,regions)
+        } catch(error:Throwable) {bitmap.recycle();throw error}
     }
 }

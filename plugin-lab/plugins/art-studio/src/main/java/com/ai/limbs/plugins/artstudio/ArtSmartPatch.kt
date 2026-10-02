@@ -102,7 +102,8 @@ internal object ArtSmartPatch {
         } finally {bitmap.recycle()}
         return Mask(left,top,w,h,selected,options)
     }
-    fun repair(source: Bitmap,mask: Mask): Result {
+    fun repair(source: Bitmap,mask: Mask,selection:JSONObject?=null): Result {
+        val coverage=selection?.takeIf {it.has("coverage")}?.let {ArtSoftSelection.Sampler(it)}
         val w=mask.width;val h=mask.height;val size=w*h;val hole=mask.selected;val o=mask.options
         val original=IntArray(size);source.getPixels(original,0,w,mask.left,mask.top,w,h)
         val target=original.copyOf();val field=IntArray(size) { -1 }
@@ -244,13 +245,18 @@ internal object ArtSmartPatch {
             output[i]=Color.argb((alpha*255).roundToInt().coerceIn(0,255),
                 channel(sums[1][i],Color.red(original[i])),channel(sums[2][i],Color.green(original[i])),
                 channel(sums[3][i],Color.blue(original[i])))
-            erasure[i]=Color.WHITE
+            val amount=coverage?.at(mask.left+i%w+0.5,mask.top+i/w+0.5) ?: 255
+            if(amount==0)output[i]=0 else {
+                output[i]=ArtSoftSelection.blend(original[i],output[i],amount)
+                erasure[i]=Color.WHITE
+            }
         }
         val patch=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)
         try {
             patch.setPixels(output,0,w,0,0,w,h)
             val erase=Bitmap.createBitmap(w,h,Bitmap.Config.ARGB_8888)
-            try {erase.setPixels(erasure,0,w,0,0,w,h);return Result(patch,erase,holes.size,work)}
+            try {erase.setPixels(erasure,0,w,0,0,w,h)
+                return Result(patch,erase,holes.size,work)}
             catch(error:Throwable) {erase.recycle();throw error}
         } catch(error:Throwable) {patch.recycle();throw error}
     }

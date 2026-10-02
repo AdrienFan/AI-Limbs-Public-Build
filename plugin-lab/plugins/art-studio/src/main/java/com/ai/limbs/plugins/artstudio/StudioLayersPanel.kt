@@ -473,15 +473,15 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                             "stroke" -> byId[event.getString("id")]?.let { ArtRenderer.drawStroke(canvas,it) }
                             "paste","erase" -> drawAsset(canvas,event.getString("asset"),event.getInt("x"),event.getInt("y"),event.getString("kind")=="erase")
                             "clear","fill" -> {
-                                canvas.save()
-                                event.optJSONObject("selection")?.let { canvas.clipPath(ArtSelection.path(it)) }
-                                val p=Paint().apply {
-                                    if(event.getString("kind")=="clear") xfermode=android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)
-                                    else color=Color.parseColor(event.getString("color"))
+                                val clip=event.optJSONObject("selection");val erase=event.getString("kind")=="clear"
+                                ArtSoftSelection.draw(canvas,clip,erase=erase) {
+                                    val paint=Paint().apply {
+                                        if(erase) {color=Color.WHITE;if(clip?.has("coverage")!=true)xfermode=android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)}
+                                        else color=Color.parseColor(event.getString("color"))
+                                    }
+                                    val x=event.getInt("x").toFloat();val y=event.getInt("y").toFloat()
+                                    canvas.drawRect(x,y,x+event.getInt("width"),y+event.getInt("height"),paint)
                                 }
-                                val x=event.getInt("x").toFloat();val y=event.getInt("y").toFloat()
-                                canvas.drawRect(x,y,x+event.getInt("width"),y+event.getInt("height"),p)
-                                canvas.restore()
                             }
                         }
                     }

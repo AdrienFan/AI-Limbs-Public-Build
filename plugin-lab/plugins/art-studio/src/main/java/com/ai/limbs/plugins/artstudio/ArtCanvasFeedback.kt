@@ -24,7 +24,7 @@ internal object ArtCanvasFeedback {
         name in setOf("text.create", "text.update", "mirror.stroke", "dyna.stroke", "line.draw", "path.draw", "figure.draw") -> true
         name.startsWith("path.") -> name !in setOf("path.nodes","path.info","path.geometry","path.topology_info")
         name.startsWith("shape.") -> name !in setOf("shape.list", "shape.hit", "shape.box", "shape.style_info", "shape.freehand_info","shape.layout_info")
-        name.startsWith("selection.") -> name !in setOf("selection.bezier_info","selection.bezier_nodes","selection.preview","selection.color_info","selection.magnetic_info","selection.magnetic_trace")
+        name.startsWith("selection.") -> name !in setOf("selection.basic_info","selection.coverage","selection.bezier_info","selection.bezier_nodes","selection.preview","selection.color_info","selection.magnetic_info","selection.magnetic_trace")
         name.startsWith("stroke.") || name.startsWith("transform.") -> true
         name.startsWith("layer.") -> name !in setOf("layer.list", "layer.search")
         name.startsWith("history.") -> name !in setOf("history.list", "history.timeline")
@@ -77,7 +77,8 @@ internal object ArtCanvasFeedback {
                     Paint(Paint.FILTER_BITMAP_FLAG))
                 if(selectionOutline)state.optJSONObject("selection")?.let {selection ->
                     val outline=ArtSelection.path(selection)
-                    canvas.drawPath(outline,Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.argb(35,50,170,255);style=Paint.Style.FILL})
+                    if(selection.has("coverage"))ArtSoftSelection.apply(canvas,selection,tint=true)
+                    else canvas.drawPath(outline,Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.argb(35,50,170,255);style=Paint.Style.FILL})
                     canvas.drawPath(outline,Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.rgb(40,150,255);style=Paint.Style.STROKE
                         strokeWidth=(1.5/scale).toFloat();pathEffect=android.graphics.DashPathEffect(floatArrayOf((5/scale).toFloat(),(3/scale).toFloat()),0f)})
                 }

@@ -120,6 +120,7 @@ internal class StudioAssistedBrushInteraction(private val view:View?=null) {
             val input=parameters()
             val raw=if(input.getString("tool")=="dyna")ArtDyna.normalize(input,requireNotNull(sourceState)) else input
             val stroke=if(raw.has("brush"))ArtBrush.prepare(raw,raw.getJSONObject("brush"),raw.getInt("brushSeed"),false) else raw
+            ArtSoftSelection.bindStroke(stroke,requireNotNull(sourceState).optJSONObject("selection"),inverseLayer)
             ArtRenderer.drawStroke(canvas,stroke,resources=resources)
         } finally {canvas.restore()}
     }

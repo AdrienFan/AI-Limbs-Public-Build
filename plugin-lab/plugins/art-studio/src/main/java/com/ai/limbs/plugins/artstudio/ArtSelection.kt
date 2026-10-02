@@ -7,6 +7,7 @@ import org.json.JSONObject
 /** Shared geometry for the visible selection and its raster editing operations. */
 internal object ArtSelection {
     fun validate(selection: JSONObject) {
+        require(!selection.has("coverage") || selection.optString("shape")=="raster") {"软覆盖率需要栅格选区"}
         for(key in listOf("x","y","width","height"))require(selection.getDouble(key).isFinite()) {"选区坐标无效"}
         require(selection.getDouble("width")>=0 && selection.getDouble("height")>=0)
         if(selection.optString("shape","rect") in setOf("bezier","compound","raster")) {
@@ -23,7 +24,17 @@ internal object ArtSelection {
                     val q=points.getJSONArray(i);require(q.length()==2 && q.getDouble(0) in 0.0..1.0 && q.getDouble(1) in 0.0..1.0)
                 }
             }
-            "raster" -> {require(selection.getDouble("width")>0 && selection.getDouble("height")>0);ArtRasterSelection.decode(selection)}
+            "raster" -> {require(selection.getDouble("width")>0 && selection.getDouble("height")>0);val runs=ArtRasterSelection.decode(selection)
+                if(selection.has("coverage")) {
+                    val alpha=ArtSoftSelection.decode(selection);val w=selection.getInt("maskWidth");var cursor=0
+                    for(run in runs) {
+                        val start=run.y*w+run.left;val end=run.y*w+run.right
+                        while(cursor<start)require(alpha[cursor++].toInt()==0) {"软选区覆盖率与轮廓不一致"}
+                        while(cursor<end)require(alpha[cursor++].toInt()!=0) {"软选区覆盖率与轮廓不一致"}
+                    }
+                    while(cursor<alpha.size)require(alpha[cursor++].toInt()==0) {"软选区覆盖率与轮廓不一致"}
+                }
+            }
             "bezier" -> {
                 require(selection.getDouble("width")>0 && selection.getDouble("height")>0)
                 val nodes=ArtBezierSelection.nodes(selection)
@@ -39,8 +50,9 @@ internal object ArtSelection {
                 var count=0
                 for(i in 0 until parts.length()) {
                     val part=parts.getJSONObject(i);val child=part.getJSONObject("selection")
+                    require(!child.has("coverage")) {"软覆盖率组合必须先合并为统一蒙版"}
                     require(child.optString("shape","rect") in setOf("rect","ellipse","polygon","bezier","raster")) {"复合选区分量必须为基本轮廓"}
-                    require(part.getString("mode") in if(i==0)setOf("replace") else setOf("add","subtract","intersect"))
+                    require(part.getString("mode") in if(i==0)setOf("replace") else setOf("add","subtract","intersect","xor"))
                     validate(child)
                     count+=when(child.optString("shape","rect")) {"bezier"->child.getJSONArray("nodes").length();"polygon"->child.getJSONArray("vertices").length();else->4}
                 }

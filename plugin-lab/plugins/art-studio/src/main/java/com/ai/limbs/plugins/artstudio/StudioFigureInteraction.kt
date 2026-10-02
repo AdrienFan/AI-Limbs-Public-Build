@@ -13,6 +13,7 @@ import kotlin.math.abs
 internal class StudioFigureInteraction {
     private var capture:JSONObject?=null
     private var style:JSONObject?=null
+    private var selectedArea:JSONObject?=null
     private var geometryOptions:JSONObject?=null
     private var viewMatrix=Matrix()
     private var layerMatrix=Matrix()
@@ -40,6 +41,7 @@ internal class StudioFigureInteraction {
                 require(normalized.getJSONObject("figureFill").getString("mode")!="pattern") {"图案填充请使用绘画图层"}
                 normalized.remove("brush")
             } else if(normalized.getString("outline")!="brush")normalized.remove("brush")
+            selectedArea=state.optJSONObject("selection")?.let {JSONObject(it.toString())}
             viewMatrix=Matrix(toScreen);layerMatrix=ArtShapes.layerMatrix(state,layer)
             val combined=Matrix(toScreen).apply {preConcat(layerMatrix)};require(combined.invert(inverse))
             val point=floatArrayOf(event.x,event.y);inverse.mapPoints(point);start=point;end=point.copyOf()
@@ -75,7 +77,8 @@ internal class StudioFigureInteraction {
             canvas.concat(viewMatrix);canvas.concat(layerMatrix)
             if(requireNotNull(capture).getString("kind")=="paint") {
                 val stroke=if(geometry.getString("outline")=="brush")ArtBrush.prepare(geometry.put("points",ArtFigure.outlinePoints(geometry)),geometry.getJSONObject("brush"),geometry.getInt("brushSeed")) else geometry
-                ArtFigureRenderer.draw(canvas,stroke,resources)
+                val inverseLayer=Matrix();require(layerMatrix.invert(inverseLayer))
+                ArtRenderer.drawStroke(canvas,ArtSoftSelection.bindStroke(stroke,selectedArea,inverseLayer),resources=resources)
             } else {
                 val shape=JSONObject().put("id","00000000-0000-0000-0000-000000000000").put("kind",geometry.getString("tool"))
                     .put("points",geometry.getJSONArray("figureCorners")).put("cornerRadius",geometry.getDouble("effectiveRadius"))

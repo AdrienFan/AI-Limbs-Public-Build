@@ -129,7 +129,8 @@ internal class StudioLineInteraction {
             canvas.concat(viewMatrix);canvas.concat(layerMatrix)
             if(requireNotNull(capture).getString("kind")=="paint") {
                 val brush=ArtBrush.settings(line.getString("brushTool"),line.getJSONObject("brush"))
-                ArtRenderer.drawStroke(canvas,ArtBrush.prepare(line,brush,line.getInt("brushSeed")),resources=resources)
+                ArtRenderer.drawStroke(canvas,ArtSoftSelection.bindStroke(ArtBrush.prepare(line,brush,line.getInt("brushSeed")),
+                    requireNotNull(state).optJSONObject("selection"),inverseLayer),resources=resources)
             } else {
                 val vector=JSONObject(line.toString()).put("points",line.getJSONArray("lineEndpoints"))
                 vector.remove("brush");ArtRenderer.drawStroke(canvas,vector)

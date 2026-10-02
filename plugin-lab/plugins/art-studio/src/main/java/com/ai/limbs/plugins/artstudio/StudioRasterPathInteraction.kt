@@ -9,6 +9,7 @@ import kotlin.math.*
 /** A multi-tap draft owns its original document, layer transform, style and random seed. */
 internal class StudioRasterPathInteraction {
     private var style:JSONObject?=null
+    private var selectedArea:JSONObject?=null
     private var vertices=JSONArray()
     private var view=Matrix();private var layer=Matrix();private var inverse=Matrix()
     private var hover:FloatArray?=null
@@ -33,6 +34,7 @@ internal class StudioRasterPathInteraction {
         if(event.actionMasked==MotionEvent.ACTION_DOWN&&style==null) {
             val active=ArtMenuOperations.layers(state).first {it.getString("id")==id}
             require(active.getString("kind")=="paint"&&!ArtMenuOperations.isLocked(state,active)&&ArtShapes.visible(state,active)) {"请选择可见且未锁定的绘画图层"}
+            selectedArea=state.optJSONObject("selection")?.let {JSONObject(it.toString())}
             view=Matrix(toScreen);layer=ArtShapes.layerMatrix(state,active);require(Matrix(toScreen).apply {preConcat(layer)}.invert(inverse))
             val p=ArtRasterPath.settings(options);if(p.getString("outline")!="brush")p.remove("brush")
             style=p.put("documentId",doc).put("expectedRevision",rev).put("layerId",id).put("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE))
@@ -68,7 +70,8 @@ internal class StudioRasterPathInteraction {
                 if(PathMeasure(ArtRasterPath.path(tool,raw),tool=="polygon").length>0) {
                     val geometry=ArtRasterPath.normalize(input)
                     val prepared=if(geometry.getString("outline")=="brush")ArtBrush.prepare(geometry.put("points",ArtRasterPath.outlinePoints(geometry)),geometry.getJSONObject("brush"),geometry.getInt("brushSeed")) else geometry
-                    ArtFigureRenderer.draw(canvas,prepared,resources)
+                    val inverseLayer=Matrix();require(layer.invert(inverseLayer))
+                    ArtRenderer.drawStroke(canvas,ArtSoftSelection.bindStroke(prepared,selectedArea,inverseLayer),resources=resources)
                 }
             }
             if(tool=="bezier"||count<minimum) {

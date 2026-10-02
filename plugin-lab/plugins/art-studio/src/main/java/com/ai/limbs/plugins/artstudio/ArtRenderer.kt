@@ -116,19 +116,15 @@ internal object ArtRenderer {
                                 when (event.getString("kind")) {
                                     "stroke" -> byId[event.getString("id")]?.let { drawStroke(local, it, width, height, brushReader) }
                                     "clear", "fill" -> {
-                                        val editPaint = Paint(Paint.ANTI_ALIAS_FLAG)
-                                        if (event.getString("kind") == "clear") {
-                                            editPaint.xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
-                                        } else editPaint.color = Color.parseColor(event.getString("color"))
-                                        val clip = event.optJSONObject("selection")
-                                        if (clip != null) {
-                                            local.save()
-                                            local.clipPath(ArtSelection.path(clip))
+                                        val clip=event.optJSONObject("selection");val erase=event.getString("kind")=="clear"
+                                        ArtSoftSelection.draw(local,clip,erase=erase) {
+                                            val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {
+                                                if(erase) {color=Color.WHITE;if(clip?.has("coverage")!=true)xfermode=PorterDuffXfermode(PorterDuff.Mode.CLEAR)}
+                                                else color=Color.parseColor(event.getString("color"))
+                                            }
+                                            local.drawRect(event.getInt("x").toFloat(),event.getInt("y").toFloat(),
+                                                (event.getInt("x")+event.getInt("width")).toFloat(),(event.getInt("y")+event.getInt("height")).toFloat(),paint)
                                         }
-                                        local.drawRect(event.getInt("x").toFloat(), event.getInt("y").toFloat(),
-                                            (event.getInt("x") + event.getInt("width")).toFloat(),
-                                            (event.getInt("y") + event.getInt("height")).toFloat(), editPaint)
-                                        if (clip != null) local.restore()
                                     }
                                     "paste", "erase" -> {
                                         val inserted = ArtImagePolicy.decodeAsset(store.assetFile(event.getString("asset")))
@@ -166,6 +162,14 @@ internal object ArtRenderer {
     fun drawStroke(canvas: Canvas, stroke: JSONObject,
         logicalWidth: Int = canvas.width, logicalHeight: Int = canvas.height,
         resources: ((String) -> Bitmap)? = null) {
+        stroke.optJSONObject("selection")?.let {s ->
+            val regular=JSONObject(stroke.toString());regular.remove("selection");regular.remove("selectionToLayer")
+            if(s.has("coverage"))regular.put("selectionCoveragePass",true)
+            val erase=stroke.optString("tool")=="eraser" || stroke.optString("brushTool")=="eraser"
+            ArtSoftSelection.draw(canvas,s,ArtShapes.matrix(stroke.getJSONArray("selectionToLayer")),erase) {
+                drawStroke(canvas,regular,logicalWidth,logicalHeight,resources)
+            };return
+        }
         if(stroke.has("figureVersion") || stroke.has("pathVersion")) {ArtFigureRenderer.draw(canvas,stroke,resources);return}
         if (stroke.has("brush")) {
             if(stroke.getString("tool")=="mirror") {
@@ -195,7 +199,7 @@ internal object ArtRenderer {
             style = Paint.Style.STROKE
             strokeJoin = Paint.Join.ROUND
             strokeCap = Paint.Cap.ROUND
-            if (stroke.optString("tool") == "eraser") {
+            if (stroke.optString("tool") == "eraser" && !stroke.optBoolean("selectionCoveragePass")) {
                 xfermode = PorterDuffXfermode(PorterDuff.Mode.CLEAR)
             }
         }

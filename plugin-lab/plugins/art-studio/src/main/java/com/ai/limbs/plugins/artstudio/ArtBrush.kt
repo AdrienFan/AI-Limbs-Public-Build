@@ -252,20 +252,23 @@ internal object ArtBrush {
         val p=brush.getJSONObject(key);if(p.has("asset"))p.getString("asset") else null
     }.toSet()
     fun renderOverhead(state:JSONObject,width:Int,height:Int):Long {
-        val layers=state.getJSONArray("layers");var enabled=false;var figure=false;val assets=mutableSetOf<String>()
+        val layers=state.getJSONArray("layers");var enabled=false;var figure=false;var softBytes=0L;val assets=mutableSetOf<String>()
+        state.optJSONObject("selection")?.takeIf {it.has("coverage")}?.let {s->softBytes=(s.getInt("maskWidth")+2L)*(s.getInt("maskHeight")+2)*4}
         for(i in 0 until layers.length()) {
             val layer=layers.getJSONObject(i)
             if(layer.getString("kind")=="vector" && ArtShapes.items(layer).any {it.has("objectStyle")})enabled=true
+            fun reserve(s:JSONObject?) {if(s?.has("coverage")==true)softBytes=maxOf(softBytes,width.toLong()*height*4+(s.getInt("maskWidth")+2L)*(s.getInt("maskHeight")+2)*4)}
+            layer.optJSONArray("contentOrder")?.let {order->for(n in 0 until order.length())reserve(order.getJSONObject(n).optJSONObject("selection"))}
             val strokes=layers.getJSONObject(i).getJSONArray("strokes")
             for(n in 0 until strokes.length()) {
-                val stroke=strokes.getJSONObject(n)
+                val stroke=strokes.getJSONObject(n);reserve(stroke.optJSONObject("selection"))
                 stroke.optJSONObject("brush")?.let {enabled=true;assets.addAll(assetIds(it))}
                 if(stroke.has("figureVersion") || stroke.has("pathVersion")) {enabled=true;figure=true;assets.addAll(ArtFigure.assetIds(stroke))}
             }
         }
-        if(!enabled)return 0
+        if(!enabled)return softBytes
         // One opacity/erase layer plus bounded decoded-image cache and temporary masks/arrays.
-        return width.toLong()*height*(if(figure)8 else 4)+if(assets.isEmpty())128L*128*16 else (min(8,assets.size)+7L)*512*512*4
+        return softBytes+width.toLong()*height*(if(figure)8 else 4)+if(assets.isEmpty())128L*128*16 else (min(8,assets.size)+7L)*512*512*4
     }
     fun info(tool:String)=JSONObject().put("tool",tool).put("engine","dab-v1").put("defaults",defaults(tool))
         .put("modes",JSONObject(modes)).put("sensors",JSONObject(sensors)).put("channels",JSONObject(channels))

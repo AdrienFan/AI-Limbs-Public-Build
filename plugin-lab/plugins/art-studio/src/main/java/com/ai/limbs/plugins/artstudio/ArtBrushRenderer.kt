@@ -32,7 +32,7 @@ internal object ArtBrushRenderer {
         val composite=Paint().apply {
             val c=Color.parseColor(stroke.optString("color","#FF000000"))
             alpha=(Color.alpha(c)*stroke.optDouble("opacity",1.0)).roundToInt().coerceIn(0,255)
-            if(stroke.getString("tool")=="eraser")xfermode=PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
+            if(stroke.getString("tool")=="eraser" && !stroke.optBoolean("selectionCoveragePass"))xfermode=PorterDuffXfermode(PorterDuff.Mode.DST_OUT)
         }
         try {
             val tipShader=BitmapShader(tipBitmap,Shader.TileMode.CLAMP,Shader.TileMode.CLAMP)
