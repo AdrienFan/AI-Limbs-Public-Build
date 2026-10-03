@@ -1,3 +1,9 @@
+# 画室 0.2.73
+
+修复0.2.72云端构建（Actions run 37105551225，提交3df03901）的三处Kotlin编译错误：重连提示补齐Compose Alignment导入，SVG路径错误提示用显式插值边界避免中文被识别为变量名。继承0.2.72全部四批功能修改。版本0.2.73 / versionCode76 / 独立applicationId `com.ai.limbs.payload.artstudio.v0273`。
+
+本地只做静态核对，未编译或执行测试。0.2.72在主源码编译阶段失败，JUnit和APK打包尚未开始；0.2.73测试、编译及打包交由云端，结果与实机验收仍待确认。
+
 # 画室 0.2.72
 
 统一发布绘图体验优化、SVG长代码视口裁剪、所有工具足迹和原生动画时间轴/GIF四批改动。版本0.2.72 / versionCode75 / 独立applicationId `com.ai.limbs.payload.artstudio.v0272`；253项能力说明。仅改画室插件与其静态检查/文档，不修改基座。
