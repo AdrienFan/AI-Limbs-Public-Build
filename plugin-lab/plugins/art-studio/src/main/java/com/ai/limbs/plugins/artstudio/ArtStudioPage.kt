@@ -398,6 +398,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
+    // Settings callbacks below share this state; Kotlin local declarations must precede use.
+    var busy by remember { mutableStateOf(false) }
     val mutex = remember { Mutex() }
     val viewOptions by ArtStudioViewControl.state.collectAsState()
     val canvasZoom by ArtStudioViewControl.canvasZoom.collectAsState()
@@ -668,7 +670,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val rightPaneHaptics = LocalHapticFeedback.current
     var exportPath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
-    var busy by remember { mutableStateOf(false) }
     var pendingOperations by remember { mutableIntStateOf(0) }
     var renderSerial by remember { mutableIntStateOf(0) }
     var revision by remember { mutableStateOf("") }
