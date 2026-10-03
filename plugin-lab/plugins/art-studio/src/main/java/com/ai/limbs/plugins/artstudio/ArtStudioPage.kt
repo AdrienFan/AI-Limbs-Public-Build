@@ -87,7 +87,14 @@ import kotlin.math.hypot
 import kotlin.math.pow
 import kotlin.math.roundToInt
 
-internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider {
+internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider, AutoCloseable {
+    private val frames = StudioFrameCache<StudioRenderFrame> { frame ->
+        frame.second.recycle()
+        frame.fourth.values.forEach { it.recycle() }
+    }
+
+    override fun close() = frames.close()
+
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View {
         val pluginContext = host.createPluginContext(context)
         val bridge = StudioMenuBridge()
@@ -105,7 +112,7 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                         }
                     }
                     CompositionLocalProvider(LocalViewConfiguration provides panelConfiguration) {
-                        Studio(host, bridge)
+                        Studio(host, bridge, frames)
                     }
                 }
             }
@@ -394,13 +401,18 @@ private class StudioMenuBridge {
 private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS, ANIMATION }
 @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
-private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
+private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
+    frames: StudioFrameCache<StudioRenderFrame>) {
 
     val context = LocalContext.current
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
     // Settings callbacks below share this state; Kotlin local declarations must precede use.
-    var busy by remember { mutableStateOf(false) }
+    // A retained picture is immediately visible, but edits wait for the active revision check.
+    var busy by remember { mutableStateOf(true) }
+    var restoring by remember { mutableStateOf(true) }
+    var restoreError by remember { mutableStateOf<String?>(null) }
+    var displayedFrame by remember(frames) { mutableStateOf(frames.acquire()) }
     var animationPlaying by remember {mutableStateOf(false)}
     var viewConnectionError by remember { mutableStateOf<String?>(null) }
     var viewConnectionRestart by remember { mutableIntStateOf(0) }
@@ -417,15 +429,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var remainingGroupExports by remember { mutableStateOf(JSONArray()) }
     var remainingImportContext by remember { mutableStateOf<JSONObject?>(null) }
     var remainingImportItem by remember { mutableStateOf<JSONObject?>(null) }
-    var snapshot by remember { mutableStateOf<JSONObject?>(null) }
+    var snapshot by remember { mutableStateOf(displayedFrame?.frame?.first) }
     var svgEnabled by rememberSaveable {mutableStateOf(false)}
     var svgRatio by rememberSaveable {mutableFloatStateOf(.5f)}
     var svgWorkspaceHeight by remember {mutableIntStateOf(1)}
     val svgEditor=remember(store){StudioSvgEditorModel(store)}
     DisposableEffect(svgEditor){onDispose{svgEditor.close()}}
     LaunchedEffect(svgEditor.source){if(svgEditor.ready)svgEditor.index()}
-    var image by remember { mutableStateOf<Bitmap?>(null) }
-    var referenceBitmaps by remember { mutableStateOf<Map<String,Bitmap>>(emptyMap()) }
+    var image by remember { mutableStateOf(displayedFrame?.frame?.second) }
+    var referenceBitmaps by remember { mutableStateOf(displayedFrame?.frame?.fourth ?: emptyMap()) }
     var referenceMultiple by remember { mutableStateOf(false) }
     var colorizeWidth by remember { mutableFloatStateOf(16f) }
     var colorizeErase by remember { mutableStateOf(false) }
@@ -676,7 +688,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var awaitingExport by remember { mutableStateOf(false) }
     var pendingOperations by remember { mutableIntStateOf(0) }
     val renderRequests = remember { StudioRenderRequests() }
-    var revision by remember { mutableStateOf("") }
+    var revision by remember { mutableStateOf(displayedFrame?.frame?.third ?: "") }
     var documents by remember { mutableStateOf(JSONArray()) }
     val canvasRef = remember { arrayOfNulls<StudioCanvas>(1) }
     val selected = snapshot?.optJSONObject("state")?.optString("selectedLayerId") ?: ""
@@ -707,33 +719,53 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
 
+    fun acceptFrame(frame: StudioRenderFrame?) {
+        val replacement = frames.replace(frame)
+        val previous = displayedFrame
+        snapshot = frame?.first
+        image = frame?.second
+        referenceBitmaps = frame?.fourth ?: emptyMap()
+        revision = frame?.third ?: ""
+        displayedFrame = replacement
+        // The native View must stop borrowing old pixels before their final lease is released.
+        canvasRef[0]?.let { canvas ->
+            canvas.image = image
+            canvas.referenceBitmaps = referenceBitmaps
+        }
+        previous?.close()
+    }
+
     fun refresh() {
         // Slow frames must finish once. Polling every 400ms used to supersede and queue them forever.
         val serial = renderRequests.beginRefresh() ?: return
+        val retainedRevision = displayedFrame?.frame?.third
         scope.launch {
             var rendered:StudioRenderFrame?=null
+            var unchanged = false
             try {
                 withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        rendered = StudioRenderFrame.current(store)
+                        unchanged = retainedRevision != null && store.revision() == retainedRevision
+                        if (!unchanged) rendered = StudioRenderFrame.current(store)
                     }
                 }
                 if (renderRequests.isCurrent(serial)) {
-                    val pair=rendered
-                    snapshot = pair?.first
-                    image?.recycle()
-                    image = pair?.second
-                    referenceBitmaps.values.forEach { it.recycle() }
-                    referenceBitmaps = pair?.fourth ?: emptyMap()
-                    revision = pair?.third ?: ""
-                    rendered=null // The page now owns the accepted bitmaps.
+                    if (!unchanged) {
+                        acceptFrame(rendered)
+                        rendered=null // Provider and page leases now own the accepted bitmaps.
+                    }
+                    restoring = false
+                    restoreError = null
+                    busy = restoring || pendingOperations > 0 || awaitingExport
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Canvas refresh failed", error)
-                if (renderRequests.isCurrent(serial))
+                if (renderRequests.isCurrent(serial)) {
+                    if (restoring) restoreError = error.message ?: "恢复画布失败"
                     Toast.makeText(context, error.message ?: "读取画布失败", Toast.LENGTH_LONG).show()
+                }
             } finally {
                 // withContext can be cancelled after rendering but before handing a bitmap to Main.
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
@@ -769,12 +801,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 if(operationResult.has("animationExport"))Toast.makeText(context,"GIF已保存："+operationResult.getString("animationExport"),Toast.LENGTH_LONG).show()
                 val pair = requireNotNull(rendered)
                 if (renderRequests.isCurrent(serial)) {
-                    snapshot = pair.first
-                    image?.recycle()
-                    image = pair.second
-                    referenceBitmaps.values.forEach { it.recycle() }
-                    referenceBitmaps = pair.fourth
-                    revision = pair.third
+                    acceptFrame(pair)
                     rendered=null
                 }
                 showImageImportNotice(operationResult)
@@ -797,7 +824,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 Toast.makeText(context, error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
             } finally {
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
-                pendingOperations--; busy = pendingOperations > 0 || awaitingExport
+                pendingOperations--; busy = restoring || pendingOperations > 0 || awaitingExport
             }
         }
     }
@@ -1039,7 +1066,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
     val saveAsFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri == null) { awaitingExport = false; busy = pendingOperations > 0 }
+        if (uri == null) { awaitingExport = false; busy = restoring || pendingOperations > 0 }
         else scope.launch {
             try {
                 val name = pendingSaveAsName
@@ -1061,14 +1088,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 host.logger.e("ArtStudio", "Save As failed", error)
                 refresh()
                 Toast.makeText(context, error.message ?: "另存为失败", Toast.LENGTH_LONG).show()
-            } finally { awaitingExport = false; busy = pendingOperations > 0 }
+            } finally { awaitingExport = false; busy = restoring || pendingOperations > 0 }
         }
     }
     val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
         if (uri == null) {
             if(exportPath.isNotEmpty()) java.io.File(exportPath).delete()
             exportPath=""
-            awaitingExport = false; busy = pendingOperations > 0
+            awaitingExport = false; busy = restoring || pendingOperations > 0
         }
         else {
             val source = exportPath
@@ -1085,7 +1112,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
                 } finally {
                     java.io.File(source).delete()
-                    awaitingExport = false; busy = pendingOperations > 0
+                    awaitingExport = false; busy = restoring || pendingOperations > 0
                 }
             }
         }
@@ -1094,7 +1121,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         if (uri == null) {
             if(exportPath.isNotEmpty()) java.io.File(exportPath).delete()
             exportPath=""
-            awaitingExport = false; busy = pendingOperations > 0
+            awaitingExport = false; busy = restoring || pendingOperations > 0
         }
         else {
             val source = exportPath
@@ -1111,7 +1138,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
                 } finally {
                     java.io.File(source).delete()
-                    awaitingExport = false; busy = pendingOperations > 0
+                    awaitingExport = false; busy = restoring || pendingOperations > 0
                 }
             }
         }
@@ -1311,7 +1338,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 exportPath = ""
                 awaitingExport = false
                 Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
-            } finally { busy = pendingOperations > 0 || awaitingExport }
+            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
         }
     }
     fun saveProject() {
@@ -1336,7 +1363,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 Toast.makeText(context, "工程已保存", Toast.LENGTH_LONG).show()
             } catch (error: Exception) {
                 Toast.makeText(context, error.message ?: "保存工程失败", Toast.LENGTH_LONG).show()
-            } finally { busy = pendingOperations > 0 || awaitingExport }
+            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
         }
     }
     fun leaveScreen() {
@@ -1374,16 +1401,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         if (discard) store.discardCurrent() else store.close()
                     }
                 }
-                snapshot = null
-                image?.recycle()
-                image = null
-                revision = ""
+                acceptFrame(null)
                 recentDocs = withContext(Dispatchers.IO) { store.recent() }
                 if (exit) leaveScreen()
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Close failed", error)
                 Toast.makeText(context, error.message ?: "无法关闭画室工程", Toast.LENGTH_LONG).show()
-            } finally { busy = pendingOperations > 0 || awaitingExport }
+            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
         }
     }
     fun requestClose(exit: Boolean) {
@@ -1590,7 +1614,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
     SideEffect {
-        ArtStudioViewControl.canvasAttached = current != null && canvasRef[0] != null
+        ArtStudioViewControl.canvasAttached = !restoring && current != null && canvasRef[0] != null
     }
     DisposableEffect(Unit) {
         onDispose {
@@ -1599,9 +1623,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             menuBridge.busy=false;menuBridge.hasDocument=false
             ArtStudioViewControl.canvasAttached = false
             ArtStudioViewControl.canvasZoom.value = null
-            canvasRef[0]?.image=null
-            image?.recycle();image=null
-            referenceBitmaps.values.forEach { it.recycle() }
+            renderRequests.invalidate()
+            canvasRef[0]?.let { canvas ->
+                canvas.image=null
+                canvas.referenceBitmaps=emptyMap()
+            }
+            displayedFrame?.close();displayedFrame=null
+            image=null
             referenceBitmaps=emptyMap()
         }
     }
@@ -1643,7 +1671,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             val canvas = canvasRef[0]
             val visible = pageView.isAttachedToWindow && pageView.isShown &&
                 pageView.windowVisibility == View.VISIBLE
-            val attached = visible && canvas != null && canvas.isAttachedToWindow &&
+            val attached = !restoring && visible && canvas != null && canvas.isAttachedToWindow &&
                 canvas.image != null && canvas.documentId.isNotBlank()
             ArtStudioViewControl.canvasAttached = attached
             ArtStudioViewControl.describe().apply {
@@ -1704,8 +1732,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }) { Text("重新连接") }
             }
         }
+        restoreError?.let { error ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("画布恢复失败：$error", Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { restoreError = null; refresh() }) { Text("重试") }
+            }
+        }
         if (current == null) {
-            Text("尚未创建画布。", Modifier.padding(top = 72.dp, start = 12.dp))
+            if (restoring) Text("正在恢复画布…", Modifier.padding(top = 72.dp, start = 12.dp))
+            else Text("尚未创建画布。", Modifier.padding(top = 72.dp, start = 12.dp))
         } else {
             val state = current.getJSONObject("state")
             val layers = state.getJSONArray("layers")

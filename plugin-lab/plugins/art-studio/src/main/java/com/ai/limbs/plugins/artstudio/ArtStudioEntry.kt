@@ -22,7 +22,8 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         host.registerProvider(ART_VIEW_CONTROL, viewChannel,
             mapOf("kind" to "ui_state"))
-        host.registerProvider(ART_PAGE, ArtStudioPage(host),
+        val page = ArtStudioPage(host)
+        host.registerProvider(ART_PAGE, page,
             mapOf("kind" to "plugin_page", "screen_id" to ART_SCREEN))
         host.registerScreen(InProcessScreen(ART_SCREEN, "画室", "阿伟和兰儿共同编辑的画布",
             "ai_limbs.plugin_center.ui.v1",
@@ -582,16 +583,22 @@ class ArtStudioEntry : InProcessPluginEntry {
             ArtRenderer.export(store, store.current(), "jpeg", p.optString("name", ""), p)
         }
         host.logger.i("ArtStudio", "Art Studio mounted")
-        return InProcessPluginHandle { viewChannel.close(); host.logger.i("ArtStudio", "Art Studio stopped") }
+        return InProcessPluginHandle {
+            try { viewChannel.close() } finally { page.close() }
+            host.logger.i("ArtStudio", "Art Studio stopped")
+        }
     }
 }
 
 class ArtStudioPresentationEntry : InProcessPluginPresentationEntry {
     override suspend fun mount(host: InProcessPluginPresentationHost): InProcessPluginPresentationHandle {
         require(host.pluginId == ART_ID)
-        val registration = host.registerPageProvider(ART_PAGE, ArtStudioPage(host),
+        val page = ArtStudioPage(host)
+        val registration = host.registerPageProvider(ART_PAGE, page,
             mapOf("kind" to "plugin_page", "screen_id" to ART_SCREEN))
-        return InProcessPluginPresentationHandle { registration.close() }
+        return InProcessPluginPresentationHandle {
+            try { registration.close() } finally { page.close() }
+        }
     }
 }
 
