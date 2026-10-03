@@ -43,6 +43,21 @@ class ArtCapabilityReplyTest {
         rejected { ArtCapabilityReply.mode(JSONObject().put("responseMode", "tiny")) }
     }
 
+    @Test fun summaryDoesNotRequireMaterializedHistoryAndRetainsMetadataContract() {
+        val full=snapshot().put("dirty",true).put("canUndo",true).put("undoLabel","编辑")
+            .put("historyStats",JSONObject().put("eventCount",7))
+        val expected=ArtCapabilityReply.summary(full)
+        val compact=JSONObject(full.toString())
+        for(key in listOf("operations","timeline","otherBranches"))compact.remove(key)
+        val summary=ArtCapabilityReply.summary(compact)
+        assertEquals(expected.keys().asSequence().toSet(),summary.keys().asSequence().toSet())
+        expected.keys().forEach {key->assertEquals(expected.get(key).toString(),summary.get(key).toString())}
+        for(key in listOf("state","operations","timeline","otherBranches"))assertFalse(summary.has(key))
+        assertEquals(7,summary.getInt("revision"));assertTrue(summary.getBoolean("dirty"))
+        assertEquals("编辑",summary.getString("undoLabel"));assertTrue(summary.getBoolean("snapshotOmitted"))
+        assertFalse(summary.getBoolean("historyWritten"))
+    }
+
     @Test fun pagesReconstructExactJsonAndRespectUnicodeBoundariesAndIdentity() {
         val snapshot = snapshot().apply { getJSONObject("state").put("content", "夜🌧️".repeat(500)) }
         val expected = snapshot.toString()

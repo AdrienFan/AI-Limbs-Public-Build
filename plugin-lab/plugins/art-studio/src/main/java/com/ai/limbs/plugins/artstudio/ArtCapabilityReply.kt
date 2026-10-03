@@ -2,7 +2,6 @@ package com.ai.limbs.plugins.artstudio
 
 import org.json.JSONArray
 import org.json.JSONObject
-import java.security.MessageDigest
 import java.util.UUID
 
 /** Response controls never enter replay parameters. Existing callers still receive full results. */
@@ -18,6 +17,10 @@ internal object ArtCapabilityReply {
     fun format(result: JSONObject, mode: String): JSONObject {
         require(mode in setOf("full", "receipt")) { "responseMode必须为full或receipt" }
         if (mode == "full" || !result.has("state") || !result.has("operations")) return result
+        return receipt(result)
+    }
+
+    private fun receipt(result: JSONObject): JSONObject {
         val receipt = JSONObject()
         // Geometry, historical parameters and branch records can each exceed a Wire frame.
         result.keys().forEach { key ->
@@ -32,7 +35,7 @@ internal object ArtCapabilityReply {
 
     fun summary(snapshot: JSONObject): JSONObject {
         val state = snapshot.getJSONObject("state")
-        val result = format(snapshot, "receipt")
+        val result = receipt(snapshot)
         for (key in listOf("name", "width", "height", "selectedLayerId"))
             if (state.has(key)) result.put(key, state.get(key))
         // Counts stay small even when a layer contains hundreds of cels or vector objects.
@@ -56,8 +59,7 @@ internal object ArtCapabilityReply {
         }
         var end = minOf(source.length, offset + limit)
         if (end < source.length && source[end - 1].isHighSurrogate()) end--
-        val digest = MessageDigest.getInstance("SHA-256").digest(source.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        val digest = ArtDocumentDigest.of(source)
         return JSONObject().put("documentId", documentId).put("revision", revision)
             .put("offset", offset).put("nextOffset", if (end < source.length) end else JSONObject.NULL)
             .put("totalChars", source.length).put("sha256", digest).put("complete", end == source.length)

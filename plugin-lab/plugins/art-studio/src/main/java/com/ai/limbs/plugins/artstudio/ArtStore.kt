@@ -55,6 +55,7 @@ internal class ArtStore(private val root: File) {
     // Nested business methods on this same thread reuse it instead of acquiring an overlapping file lock.
     private val lockDepth = ThreadLocal.withInitial { 0 }
     private val replayCache = ArtReplayCache()
+    private val summaryCache = ArtSummaryCache()
     private val editorSnapshot = ThreadLocal.withInitial { false }
 
     // The editor consumes state and history labels, never the serialized operation payloads.
@@ -64,12 +65,30 @@ internal class ArtStore(private val root: File) {
         editorSnapshot.set(true)
         try { block() } finally { editorSnapshot.set(previous) }
     }
-    private fun <T> locked(block: () -> T): T = synchronized(processLock) {
-        if (lockDepth.get() > 0) block()
-        else FileOutputStream(lockFile, true).channel.use { channel ->
-            val lock: FileLock = channel.lock()
-            lockDepth.set(1)
-            try { block() } finally { lockDepth.remove(); lock.release() }
+    private fun <T> locked(block: () -> T): T {
+        val requestedAt=System.nanoTime()
+        return synchronized(processLock) {
+            if (lockDepth.get() > 0) block()
+            else {
+                val processAcquiredAt=System.nanoTime()
+                FileOutputStream(lockFile, true).channel.use { channel ->
+                    val lock: FileLock = channel.lock()
+                    val fileAcquiredAt=System.nanoTime()
+                    lockDepth.set(1)
+                    try { block() } finally {
+                        lockDepth.remove();lock.release()
+                        val finishedAt=System.nanoTime()
+                        val processWait=(processAcquiredAt-requestedAt)/1_000_000
+                        val fileWait=(fileAcquiredAt-processAcquiredAt)/1_000_000
+                        val held=(finishedAt-fileAcquiredAt)/1_000_000
+                        // Distinguish contention from business work; an end-to-end timeout alone
+                        // cannot identify which process occupied the shared document lock.
+                        if(processWait>=1000 || fileWait>=1000 || held>=1500)
+                            android.util.Log.w("ArtStudioPerf", "thread=${Thread.currentThread().name} " +
+                                "processWaitMs=$processWait fileWaitMs=$fileWait heldMs=$held")
+                    }
+                }
+            }
         }
     }
 
@@ -149,7 +168,16 @@ internal class ArtStore(private val root: File) {
 
     fun current(): JSONObject = locked { snapshot(loadCurrent()) }
 
-    fun summary(): JSONObject = locked { ArtCapabilityReply.summary(snapshot(loadCurrent())) }
+    fun summary(): JSONObject = locked {
+        require(pointer.isFile) { "请先新建或打开工程" }
+        val id=pointer.readText().trim();validateId(id)
+        val summary=summaryCache.read(id,draft(id).readText()) {doc->
+            ArtCapabilityReply.summary(snapshot(doc, includeOperations=false, historyDetails=false))
+        }
+        // Save/export links and clipboard can change without adding an operation. Refresh these
+        // fields even when the compact document projection is reused.
+        putDocumentStatus(summary.value,id,summary.documentDigest)
+    }
 
     fun snapshotPage(documentId: String, revision: Int, offset: Int, limit: Int, expectedSha256: String): JSONObject = locked {
         val page = ArtCapabilityReply.page(snapshot(loadCurrent()), documentId, revision, offset, limit)
@@ -1837,8 +1865,11 @@ internal class ArtStore(private val root: File) {
                 requireRenderBudget(candidate)
             }
         }
-        require(doc.toString().toByteArray(Charsets.UTF_8).size<=32*1024*1024) {"工程数据超过32 MiB，请减少关键帧或拆分工程"}
-        atomic(draft(doc.getString("id")), doc.toString())
+        // Replay can normalize legacy tool defaults in parameters. Encode only after validation,
+        // then share these exact bytes between the budget check and durable write.
+        val encodedBytes=doc.toString().toByteArray(Charsets.UTF_8)
+        require(encodedBytes.size<=32*1024*1024) {"工程数据超过32 MiB，请减少关键帧或拆分工程"}
+        atomicBytes(draft(doc.getString("id")), encodedBytes)
         result.put("lastOperationId", operation.getString("id"))
     }
 
@@ -2173,9 +2204,7 @@ internal class ArtStore(private val root: File) {
         } finally { temp.delete() }
     }
 
-    private fun digest(data: String): String =
-        java.security.MessageDigest.getInstance("SHA-256").digest(data.toByteArray(Charsets.UTF_8))
-            .joinToString("") { "%02x".format(it) }
+    private fun digest(data: String): String = ArtDocumentDigest.of(data)
 
     fun open(id: String): JSONObject = locked {
         validateId(id)
@@ -2420,36 +2449,43 @@ internal class ArtStore(private val root: File) {
             ArtReferences.items(state).size*ArtReferences.PREVIEW_EDGE.toLong()*ArtReferences.PREVIEW_EDGE*8, "画布合成与参考预览")
     }
 
-    private fun snapshot(doc: JSONObject): JSONObject {
+    private fun snapshot(doc: JSONObject, includeOperations: Boolean = !editorSnapshot.get(),
+        historyDetails: Boolean = true): JSONObject {
         val state = replay(doc)
         val id = doc.getString("id")
-        val saved = archive(id)
-        val history = ArtHistory.describe(doc)
+        val history = ArtHistory.describe(doc, historyDetails)
         return JSONObject().put("id", doc.getString("id"))
             .put("state", state).put("revision", doc.getJSONArray("operations").length())
-            .put("timeline", history.getJSONArray("timeline")).put("timelinePosition", history.getInt("position"))
-            .put("historyStats",history.getJSONObject("historyStats")).put("otherBranches",history.getJSONArray("otherBranches"))
+            .put("timelinePosition", history.getInt("position"))
+            .put("historyStats",history.getJSONObject("historyStats"))
+            .apply { if(historyDetails) put("timeline",history.getJSONArray("timeline"))
+                .put("otherBranches",history.getJSONArray("otherBranches")) }
             .put("canUndo", history.getBoolean("canUndo")).put("canRedo", history.getBoolean("canRedo"))
             .put("undoLabel", history.getString("undoLabel"))
             .put("redoLabel", history.getString("redoLabel"))
-            .put("hasClipboard", editClipboard.isFile)
-            .put("dirty", externalLink(id)?.optBoolean("pending") == true ||
-                !saved.exists() || File(documents, id + ".sha256").let { marker ->
-                if (marker.isFile) marker.readText() != digest(doc.toString())
-                else draft(id).lastModified() > saved.lastModified()
-            })
-            .put("storagePath", if (saved.isFile) saved.absolutePath else "")
-            .put("externalUri", externalLink(id)?.optString("uri", "") ?: "")
-            .put("externalPending", externalLink(id)?.optBoolean("pending") ?: false)
-            .apply { if (!editorSnapshot.get())
+            .apply { putDocumentStatus(this,id,digest(doc.toString())) }
+            .apply { if (includeOperations)
                 put("operations", JSONArray(doc.getJSONArray("operations").toString())) }
     }
 
-    private fun replay(doc: JSONObject): JSONObject = replayCache.read(doc, ::replayComplete) { state, added ->
-        for (op in added) edit(state, op.getString("type"), op.getJSONObject("parameters"),
-            op.optInt("animationFrame",0), op.optJSONObject("animationFrameKeys"))
-        validateReplayedState(state)
+    private fun putDocumentStatus(result:JSONObject,id:String,documentDigest:String):JSONObject {
+        val saved=archive(id)
+        val link=externalLink(id)
+        val marker=File(documents,id+".sha256")
+        return result.put("hasClipboard",editClipboard.isFile)
+            .put("dirty",link?.optBoolean("pending")==true || !saved.exists() ||
+                (if(marker.isFile)marker.readText()!=documentDigest else draft(id).lastModified()>saved.lastModified()))
+            .put("storagePath",if(saved.isFile)saved.absolutePath else "")
+            .put("externalUri",link?.optString("uri","") ?: "")
+            .put("externalPending",link?.optBoolean("pending") ?: false)
     }
+
+    private fun replay(doc: JSONObject): JSONObject =
+        replayCache.read(doc, ::replayComplete) { state, added ->
+            for (op in added) edit(state, op.getString("type"), op.getJSONObject("parameters"),
+                op.optInt("animationFrame",0), op.optJSONObject("animationFrameKeys"))
+            validateReplayedState(state)
+        }
 
     private fun replayComplete(doc: JSONObject): JSONObject {
         val state = JSONObject(doc.getJSONObject("base").toString())

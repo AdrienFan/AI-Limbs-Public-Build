@@ -184,7 +184,7 @@ internal object ArtHistory {
         if(p.has("profileId"))facts.add("使用书法配置档")
         return facts.joinToString(" · ")
     }
-    fun describe(doc: JSONObject): JSONObject {
+    fun describe(doc: JSONObject, details: Boolean = true): JSONObject {
         val operations=doc.getJSONArray("operations")
         val (undoStack,redoStack)=stacks(operations)
         val operationById=(0 until operations.length()).map {operations.getJSONObject(it)}
@@ -193,6 +193,13 @@ internal object ArtHistory {
         // A state represents the first N currently reachable edits. Redone edits stay
         // visible as future states until a new edit starts a different branch.
         val reachableIds = undoStack + redoStack.asReversed()
+        val result=JSONObject().put("documentId",doc.getString("id")).put("revision",operations.length())
+            .put("position",undoStack.size).put("canUndo",undoStack.isNotEmpty()).put("canRedo",redoStack.isNotEmpty())
+            .put("undoLabel",operationLabel(undoStack.lastOrNull())).put("redoLabel",operationLabel(redoStack.lastOrNull()))
+            .put("historyStats",JSONObject().put("eventCount",operations.length()).put("editCount",operationById.size)
+                .put("reachableSteps",reachableIds.size).put("otherBranchSteps",operationById.size-reachableIds.size))
+        // A compact summary needs counts and labels, not thousands of discarded timeline entries.
+        if(!details)return result
         val originalOrder = operationById.keys.withIndex().associate { it.value to it.index }
         var newestOriginalIndex = -1
         val timeline = JSONArray().put(JSONObject().put("id", "")
@@ -226,12 +233,6 @@ internal object ArtHistory {
             .put("id",id).put("label",label(operation)).put("category",category(operation.getString("type")))
             .put("summary",summary(operation)).put("actor",operation.getString("actor"))
             .put("type",operation.getString("type")).put("timestamp",operation.optLong("timestamp",0L)))
-        return JSONObject().put("otherBranches",otherBranches)
-            .put("documentId",doc.getString("id")).put("revision",operations.length())
-            .put("timeline",timeline).put("position",undoStack.size)
-            .put("canUndo",undoStack.isNotEmpty()).put("canRedo",redoStack.isNotEmpty())
-            .put("undoLabel",operationLabel(undoStack.lastOrNull())).put("redoLabel",operationLabel(redoStack.lastOrNull()))
-            .put("historyStats",JSONObject().put("eventCount",operations.length()).put("editCount",operationById.size)
-                .put("reachableSteps",reachableIds.size).put("otherBranchSteps",operationById.size-reachableIds.size))
+        return result.put("otherBranches",otherBranches).put("timeline",timeline)
     }
 }

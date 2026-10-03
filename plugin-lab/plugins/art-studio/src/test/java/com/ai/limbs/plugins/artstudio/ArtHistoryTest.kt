@@ -14,6 +14,16 @@ class ArtHistoryTest {
     private fun ids(result:JSONObject,key:String="timeline")=result.getJSONArray(key).let {rows->
         (0 until rows.length()).map {rows.getJSONObject(it).getString("id")}
     }
+    @Test fun compactHistoryRetainsCountsAndUndoLabelsAcrossBranches() {
+        val source=doc(listOf(event("a","LAYER_CREATE"),event("b","LAYER_CREATE"),
+            change("undo","REVERT","b"),event("c","LAYER_CREATE"),change("undo2","REVERT","c")))
+        val full=ArtHistory.describe(source)
+        val compact=ArtHistory.describe(source,details=false)
+        for(key in listOf("documentId","revision","position","canUndo","canRedo","undoLabel","redoLabel","historyStats"))
+            assertEquals(full.get(key).toString(),compact.get(key).toString())
+        assertFalse(compact.has("timeline"));assertFalse(compact.has("otherBranches"))
+    }
+
     @Test fun selectiveUndoAndRestoreKeepReachableOrder() {
         val events=listOf(event("a","LAYER_CREATE"),event("b","LAYER_CREATE"),event("c","LAYER_CREATE"),
             change("u","REVERT","b"),change("r","RESTORE","b"))

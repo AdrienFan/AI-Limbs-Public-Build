@@ -794,7 +794,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
     }
     fun perform(confirmation: JSONObject? = null, onSuccess: (() -> Unit)? = null,
-        action: (JSONObject?) -> JSONObject) {
+        renderEditResult: Boolean = false, action: (JSONObject?) -> JSONObject) {
         scope.launch {
             // A menu may outlive its Compose scope. A cancelled launch must never set busy forever.
             animationPlaying=false
@@ -806,8 +806,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 lateinit var operationResult: JSONObject
                 withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        operationResult = store.forEditor { action(confirmation) }
-                        rendered = requireNotNull(StudioRenderFrame.current(store)) { "工程已关闭" }
+                        // Keep edit, render and revision marker under the same cross-process lock.
+                        // Direct apply() results already contain the validated committed snapshot;
+                        // rereading the draft here repeats JSON parsing, replay and history projection.
+                        store.forEditor {
+                            operationResult = action(confirmation)
+                            rendered = if(renderEditResult) StudioRenderFrame.create(store,operationResult)
+                                else requireNotNull(StudioRenderFrame.current(store)) { "工程已关闭" }
+                        }
                     }
                 }
                 if(operationResult.has("animationExport"))Toast.makeText(context,"GIF已保存："+operationResult.getString("animationExport"),Toast.LENGTH_LONG).show()
@@ -2455,10 +2461,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                                                                     if(play)animationPlaying=true else {
                                                                         val time=animationPreview?.time
                                                                         animationPlaying=false
-                                                                        if(time!=null)perform {store.animationSeek("AWEI",JSONObject()
+                                                                        if(time!=null)perform(renderEditResult=true) {store.animationSeek("AWEI",JSONObject()
                                                                             .put("documentId",current.getString("id")).put("expectedRevision",current.getInt("revision")).put("frame",time))}
                                                                     }
-                                                                },onChange={type,p->perform {store.apply("AWEI",type,p)}},
+                                                                },onChange={type,p->perform(renderEditResult=true) {store.apply("AWEI",type,p)}},
                                                                 onExport={edge->perform {
                                                                     val receipt=store.animationExport(JSONObject().put("documentId",current.getString("id"))
                                                                         .put("expectedRevision",current.getInt("revision")).put("maxEdge",edge))
