@@ -9,12 +9,35 @@ import kotlin.math.*
 
 /** SVG graphic primitives map back to the shared native geometry, never a parallel scene. */
 internal object ArtSceneSvgGeometry {
-    fun num(value:String):Double=value.trim().toDouble().also {require(it.isFinite()&&abs(it)<=1000000){"SVG 数字超出范围"}}
-    fun number(e:Element,k:String,default:Double=0.0)=if(e.hasAttribute(k))num(e.getAttribute(k)) else default
+    fun num(value:String):Double {
+        val number=value.trim().toDoubleOrNull()
+        require(number!=null) {"SVG 数字 '$value' 无效；坐标使用无单位数字，不支持 px 或百分比"}
+        require(number.isFinite()&&abs(number)<=1000000) {"SVG 数字 '$value' 须为有限值且绝对值不超过1000000"}
+        return number
+    }
+    // Percent syntax is supported only where its meaning is unambiguous: gradient stops.
+    fun stopOffset(value:String):Double {
+        val token=value.trim()
+        val offset=if(token.endsWith("%"))num(token.dropLast(1))/100.0 else num(token)
+        require(offset in 0.0..1.0) {"渐变 offset '$value' 须为0..1或0%..100%"}
+        return offset
+    }
+    fun <T> atElement(e:Element,block:()->T):T {
+        try {return block()}
+        catch(error:IllegalArgumentException) {
+            throw IllegalArgumentException("<${e.localName}${if(e.hasAttribute("id")) " id="+e.getAttribute("id") else ""}>：${error.message}",error)
+        } catch(error:IllegalStateException) {
+            throw IllegalArgumentException("<${e.localName}${if(e.hasAttribute("id")) " id="+e.getAttribute("id") else ""}>：${error.message}",error)
+        }
+    }
+    fun number(e:Element,k:String,default:Double=0.0)=if(e.hasAttribute(k)) {
+        try {num(e.getAttribute(k))}
+        catch(error:IllegalArgumentException){throw IllegalArgumentException("属性 $k：${error.message}",error)}
+    } else default
     fun numbers(value:String):List<Double> {
         val tokens=Regex("[-+]?(?:[0-9]+(?:\\.[0-9]*)?|\\.[0-9]+)(?:[eE][-+]?[0-9]+)?").findAll(value).toList();var end=0
-        val result=tokens.map {require(value.substring(end,it.range.first).all {c->c.isWhitespace()||c==','});end=it.range.last+1;num(it.value)}
-        require(value.substring(end).all {it.isWhitespace()||it==','});return result
+        val result=tokens.map {require(value.substring(end,it.range.first).all {c->c.isWhitespace()||c==','}){"SVG 数字列表包含无效字符；使用无单位数字，以空格或逗号分隔"};end=it.range.last+1;num(it.value)}
+        require(value.substring(end).all {it.isWhitespace()||it==','}){"SVG 数字列表包含无效字符；使用无单位数字，以空格或逗号分隔"};return result
     }
     fun transform(value:String):Matrix {
         val result=Matrix();var end=0
@@ -75,13 +98,15 @@ internal object ArtSceneSvgGeometry {
             };if(part.closed)append(" Z")
         }
     }
-    fun shape(e:Element,old:JSONObject?,paint:(String)->JSONObject):JSONObject {
+    fun shape(e:Element,old:JSONObject?,paint:(String)->JSONObject):JSONObject =
+        atElement(e) {shapeValue(e,old,paint)}
+    private fun shapeValue(e:Element,old:JSONObject?,paint:(String)->JSONObject):JSONObject {
         val out=old?.let {JSONObject(it.toString())} ?: JSONObject().put("id",UUID.randomUUID().toString())
         val geometry=when(e.localName) {
-            "rect"->{val x=number(e,"x");val y=number(e,"y");val w=number(e,"width");val h=number(e,"height");require(w>0&&h>0);require(!e.hasAttribute("ry")||number(e,"ry")==number(e,"rx"));JSONObject().put("kind","rectangle").put("points",JSONArray(listOf(listOf(x,y),listOf(x+w,y+h)))).put("cornerRadius",number(e,"rx"))}
-            "ellipse","circle"->{val x=number(e,"cx");val y=number(e,"cy");val a=number(e,if(e.localName=="circle")"r" else "rx");val b=number(e,if(e.localName=="circle")"r" else "ry");require(a>0&&b>0);JSONObject().put("kind","ellipse").put("points",JSONArray(listOf(listOf(x-a,y-b),listOf(x+a,y+b))))}
+            "rect"->{val x=number(e,"x");val y=number(e,"y");val w=number(e,"width");val h=number(e,"height");require(w>0&&h>0){"rect width/height 须大于零"};require(!e.hasAttribute("ry")||number(e,"ry")==number(e,"rx")){"rect rx/ry 须相同"};JSONObject().put("kind","rectangle").put("points",JSONArray(listOf(listOf(x,y),listOf(x+w,y+h)))).put("cornerRadius",number(e,"rx"))}
+            "ellipse","circle"->{val x=number(e,"cx");val y=number(e,"cy");val a=number(e,if(e.localName=="circle")"r" else "rx");val b=number(e,if(e.localName=="circle")"r" else "ry");require(a>0&&b>0){"circle r 或 ellipse rx/ry 须大于零"};JSONObject().put("kind","ellipse").put("points",JSONArray(listOf(listOf(x-a,y-b),listOf(x+a,y+b))))}
             "line"->JSONObject().put("kind","line").put("points",JSONArray(listOf(listOf(number(e,"x1"),number(e,"y1")),listOf(number(e,"x2"),number(e,"y2")))))
-            "polygon","polyline"->{val p=numbers(e.getAttribute("points"));require(p.size%2==0&&p.size>=4);val pts=JSONArray(p.chunked(2));if(e.localName=="polygon")JSONObject().put("kind","polygon").put("points",pts) else JSONObject().put("kind","path").put("points",pts).put("commands",JSONArray(List(pts.length()-1){"L"})).put("closed",false)}
+            "polygon","polyline"->{val p=numbers(e.getAttribute("points"));require(p.size%2==0&&p.size>=if(e.localName=="polygon")6 else 4){"polygon 至少3组、polyline至少2组 x,y 坐标"};val pts=JSONArray(p.chunked(2));if(e.localName=="polygon")JSONObject().put("kind","polygon").put("points",pts) else JSONObject().put("kind","path").put("points",pts).put("commands",JSONArray(List(pts.length()-1){"L"})).put("closed",false)}
             "path"->path(e.getAttribute("d")).put("kind","path")
             else->error("不支持的 SVG 图形")
         }
@@ -96,7 +121,7 @@ internal object ArtSceneSvgGeometry {
         style.put("fillRule",e.getAttribute("fill-rule").ifBlank {"nonzero"}).put("strokeCap",e.getAttribute("stroke-linecap").ifBlank {"butt"})
             .put("strokeJoin",e.getAttribute("stroke-linejoin").ifBlank {"miter"}).put("miterLimit",number(e,"stroke-miterlimit",4.0)).put("dashOffset",number(e,"stroke-dashoffset"))
         val dash=e.getAttribute("stroke-dasharray");style.put("dashArray",JSONArray(if(dash.isBlank()||dash=="none")emptyList<Double>() else numbers(dash)))
-        out.put("objectStyle",style).put("strokeWidth",number(e,"stroke-width",1.0).also {require(it in .1..512.0)})
+        out.put("objectStyle",style).put("strokeWidth",number(e,"stroke-width",1.0).also {require(it in .1..512.0){"stroke-width 须为0.1..512"}})
             .put("opacity",number(e,"opacity",1.0)).put("visible",e.getAttribute("display")!="none").put("matrix",ArtShapes.encode(transform(e.getAttribute("transform"))))
         return ArtShapes.normalize(out)
     }

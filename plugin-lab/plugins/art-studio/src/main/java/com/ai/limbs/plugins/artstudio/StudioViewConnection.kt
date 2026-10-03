@@ -26,7 +26,10 @@ import java.util.UUID
 internal fun StudioViewConnection(
     host: InProcessPluginUiHost,
     physicalState: () -> JSONObject,
-    execute: (String, JSONObject) -> JSONObject
+    execute: (String, JSONObject) -> JSONObject,
+    restartKey: Int,
+    onConnected: () -> Unit,
+    onConnectionError: (String) -> Unit
 ) {
     val directory = remember(host) { host.providers.observe(ART_VIEW_CONTROL) }
     val binding by directory.collectAsState()
@@ -36,9 +39,12 @@ internal fun StudioViewConnection(
     }
     val readState by rememberUpdatedState(physicalState)
     val dispatch by rememberUpdatedState(execute)
-    LaunchedEffect(provider) {
+    val connected by rememberUpdatedState(onConnected)
+    val failed by rememberUpdatedState(onConnectionError)
+    LaunchedEffect(provider, restartKey) {
         if (provider == null) return@LaunchedEffect
         val session = UUID.randomUUID().toString()
+        var attachedSession = false
         suspend fun perform(event: String, payload: JSONObject): JSONObject =
             withContext(Dispatchers.IO) {
                 JSONObject(provider.perform(event, payload.put("session", session).toString()))
@@ -54,8 +60,10 @@ internal fun StudioViewConnection(
         try {
             coroutineScope {
                 val attached = perform("attach", JSONObject().put("state", readState()))
+                attachedSession = true
                 applyPreferences(attached.getJSONObject("applyPreferences"))
                 perform("update", JSONObject().put("state", readState()))
+                connected()
                 launch {
                     provider.stateJson.collect { json ->
                         if (json == null) return@collect
@@ -103,8 +111,9 @@ internal fun StudioViewConnection(
             throw error
         } catch (error: Exception) {
             host.logger.e("ArtStudio", "画室视图连接失败", error)
+            failed(error.message ?: error.javaClass.simpleName)
         } finally {
-            withContext(NonCancellable) {
+            if (attachedSession) withContext(NonCancellable) {
                 try { perform("detach", JSONObject()) }
                 catch (error: Exception) { host.logger.e("ArtStudio", "画室视图断开失败", error) }
             }

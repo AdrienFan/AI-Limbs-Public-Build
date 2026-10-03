@@ -52,6 +52,11 @@ internal class ArtStudioViewChannel(
         val result = JSONObject(snapshot.toString())
         val attached = liveCanvas()
         result.put("canvasAttached", attached).put("pageVisible", livePage())
+        result.put("viewConnection", JSONObject().put("status",
+            if (closed) "closed" else if (session == null) "disconnected"
+            else if (clock() - heartbeat !in 0..LEASE_MS) "unresponsive" else "connected")
+            .put("leaseMs", LEASE_MS)
+            .put("heartbeatAgeMs", if (session == null) JSONObject.NULL else (clock() - heartbeat).coerceAtLeast(0)))
         if (!attached) result.remove("canvasZoom")
         result.getJSONObject("toolOptionsWindow").put("visible",
             attached && result.getJSONObject("toolOptionsWindow").getBoolean("open"))
@@ -134,6 +139,9 @@ internal class ArtStudioViewChannel(
                 null
             } else {
                 val needsCanvas = operation in setOf("zoom", "command", "tool_options", "tool_select")
+                check(session == null || clock() - heartbeat in 0..LEASE_MS) {
+                    "画室页面连接已中断；请在画室点击重新连接，再读取 view.state(target=phone)"
+                }
                 check(if (needsCanvas) liveCanvas() else livePage()) { "请先打开画室画布，再操作视图" }
                 val zoom = snapshot.optJSONObject("canvasZoom")
                 val documentId = if (needsCanvas) requireNotNull(zoom).getString("documentId") else null

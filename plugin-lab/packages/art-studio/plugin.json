@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.71",
+  "version": "0.2.72",
   "api": {
     "target": 1,
     "min": 1
@@ -281,7 +281,14 @@
       "plugin.art.studio.svg.hit",
       "plugin.art.studio.quick_tools.state",
       "plugin.art.studio.quick_tools.configure",
-      "plugin.art.studio.quick_tools.use"
+      "plugin.art.studio.quick_tools.use",
+      "plugin.art.studio.animation.info",
+      "plugin.art.studio.animation.timeline",
+      "plugin.art.studio.animation.configure",
+      "plugin.art.studio.animation.keyframe",
+      "plugin.art.studio.animation.seek",
+      "plugin.art.studio.animation.preview",
+      "plugin.art.studio.animation.export"
     ],
     "services": [],
     "providers": [

@@ -15,12 +15,14 @@ internal object ArtObjectStyle {
     fun settings(shape:JSONObject):JSONObject {
         val out=defaults()
         if(shape.has("objectStyle")) {val patch=shape.getJSONObject("objectStyle");require(patch.keys().asSequence().all {it in keys});patch.keys().forEach {out.put(it,patch.get(it))}}
-        require(out.getString("fillRule") in setOf("nonzero","evenodd"));require(out.getString("strokeCap") in caps&&out.getString("strokeJoin") in joins)
-        val m=out.getDouble("miterLimit");require(m.isFinite()&&m in 1.0..100.0)
-        val d=out.getJSONArray("dashArray");require(d.length()==0||d.length() in 2..16&&d.length()%2==0)
-        for(i in 0 until d.length())require(d.getDouble(i).isFinite()&&d.getDouble(i) in 0.1..4096.0)
+        require(out.getString("fillRule") in setOf("nonzero","evenodd")){"fill-rule 只支持nonzero/evenodd"}
+        require(out.getString("strokeCap") in caps){"stroke-linecap 只支持butt/round/square"}
+        require(out.getString("strokeJoin") in joins){"stroke-linejoin 只支持miter/round/bevel"}
+        val m=out.getDouble("miterLimit");require(m.isFinite()&&m in 1.0..100.0){"stroke-miterlimit 须为1..100"}
+        val d=out.getJSONArray("dashArray");require(d.length()==0||d.length() in 2..16&&d.length()%2==0){"stroke-dasharray 须为空或2..16个数字，数量为偶数"}
+        for(i in 0 until d.length())require(d.getDouble(i).isFinite()&&d.getDouble(i) in 0.1..4096.0){"stroke-dasharray 第${i+1}项须为0.1..4096"}
         val offset=out.getDouble("dashOffset");require(offset.isFinite()&&abs(offset)<=1000000)
-        for(k in listOf("fillOpacity","strokeOpacity"))require(out.getDouble(k).isFinite()&&out.getDouble(k) in 0.0..1.0)
+        for(k in listOf("fillOpacity","strokeOpacity"))require(out.getDouble(k).isFinite()&&out.getDouble(k) in 0.0..1.0){"$k 须为0..1"}
         for(k in listOf("fillGradient","strokeGradient"))if(out.has(k)&&!out.isNull(k))gradient(out.getJSONObject(k))
         return out
     }

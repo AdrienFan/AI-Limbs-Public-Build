@@ -92,7 +92,7 @@ internal object ArtRenderer {
                         // Rasterize into the output viewport using the complete document transform.
                         // Cropping shifts layers: a local [0,newWidth] buffer would discard retained source.
                         local.setMatrix(target.matrix)
-                        if (layer.getString("kind") in setOf("image", "text")) {
+                        if (layer.getString("kind")=="text" || (layer.getString("kind")=="image" && layer.getString("asset").isNotBlank())) {
                             ArtImagePolicy.decodeAsset(store.assetFile(layer.getString("asset"))).let { image ->
                                 try { local.drawBitmap(image, 0f, 0f, Paint(Paint.FILTER_BITMAP_FLAG)) }
                                 finally { image.recycle() }

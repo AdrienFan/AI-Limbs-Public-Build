@@ -159,9 +159,9 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                                 add(3, 7, "导入 - 打开为无标题图像(I)…")
                                 add(3, 8, "导出(X)…", doc)
                                 add(3, 9, "导出 - 更多选项…", doc)
-                                // Animation needs a timeline and frame data; no fictitious import/export.
+                                // Native timeline supports GIF output; external frame-sequence import remains separate.
                                 add(4, 10, "导入动画 - 逐帧…", false)
-                                add(4, 11, "导出动画(R)…", false)
+                                add(4, 11, "导出动画(GIF)…", doc)
                                 add(5, 12, "保存增量版本(V)", doc)
                                 add(5, 13, "保存增量备份(B)", doc)
                                 add(6, 14, "新建模板 - 基于当前图像(C)…", doc)
@@ -390,7 +390,7 @@ private class StudioMenuBridge {
     var onImageCommand: ((Int) -> Unit)? = null
 }
 
-private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS }
+private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS, ANIMATION }
 @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
@@ -400,6 +400,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     val scope = rememberCoroutineScope()
     // Settings callbacks below share this state; Kotlin local declarations must precede use.
     var busy by remember { mutableStateOf(false) }
+    var animationPlaying by remember {mutableStateOf(false)}
+    var viewConnectionError by remember { mutableStateOf<String?>(null) }
+    var viewConnectionRestart by remember { mutableIntStateOf(0) }
     val mutex = remember { Mutex() }
     val viewOptions by ArtStudioViewControl.state.collectAsState()
     val canvasZoom by ArtStudioViewControl.canvasZoom.collectAsState()
@@ -749,6 +752,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         action: (JSONObject?) -> JSONObject) {
         scope.launch {
             // A menu may outlive its Compose scope. A cancelled launch must never set busy forever.
+            animationPlaying=false
             val serial = renderRequests.invalidate()
             pendingOperations++
             busy = true
@@ -761,6 +765,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         rendered = requireNotNull(StudioRenderFrame.current(store)) { "工程已关闭" }
                     }
                 }
+                if(operationResult.has("animationExport"))Toast.makeText(context,"GIF已保存："+operationResult.getString("animationExport"),Toast.LENGTH_LONG).show()
                 val pair = requireNotNull(rendered)
                 if (renderRequests.isCurrent(serial)) {
                     snapshot = pair.first
@@ -1190,6 +1195,20 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
 
     val current = snapshot
+    val animationPreview=StudioAnimationPlayback(store,current,animationPlaying,
+        onStop={time->
+            animationPlaying=false
+            current?.let {captured->perform {store.animationSeek("AWEI",JSONObject()
+                .put("documentId",captured.getString("id")).put("expectedRevision",captured.getInt("revision")).put("frame",time))}}
+        },onError={error->
+            animationPlaying=false
+            host.logger.e("ArtStudio","Animation playback failed",error)
+            Toast.makeText(context,error.message ?: "动画播放失败",Toast.LENGTH_LONG).show()
+        })
+    LaunchedEffect(current?.optString("id"),current?.optInt("revision")) {
+        // External edits stop preview instead of silently restarting it on a different document state.
+        animationPlaying=false
+    }
     LaunchedEffect(svgEnabled,current?.optString("id"),current?.optInt("revision")) {
         if(svgEnabled&&current!=null)try {svgEditor.bind(current)}
         catch(e:kotlinx.coroutines.CancellationException){throw e}
@@ -1509,6 +1528,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     exportChooseLocation=false
                     advancedExportDialog = true
                 }
+                11 -> changeDock("set_visible",RightPane.ANIMATION,true)
                 12 -> perform { store.saveIncrementalVersion() }
                 13 -> perform {
                     val result = store.saveIncrementalBackup()
@@ -1615,6 +1635,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
     val pageView = LocalView.current
     StudioViewConnection(host,
+        restartKey = viewConnectionRestart,
+        onConnected = { viewConnectionError = null },
+        onConnectionError = { viewConnectionError = it },
         physicalState = {
             val canvas = canvasRef[0]
             val visible = pageView.isAttachedToWindow && pageView.isShown &&
@@ -1670,6 +1693,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
     BoxWithConstraints(Modifier.fillMaxSize()) {
     Column(Modifier.fillMaxSize().padding(horizontal = 4.dp, vertical = 2.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        viewConnectionError?.let { error ->
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("兰儿的画室连接已中断：$error", Modifier.weight(1f), maxLines = 2,
+                    color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = {
+                    viewConnectionError = null
+                    viewConnectionRestart++
+                }) { Text("重新连接") }
+            }
+        }
         if (current == null) {
             Text("尚未创建画布。", Modifier.padding(top = 72.dp, start = 12.dp))
         } else {
@@ -1743,7 +1776,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.onRasterPath={p -> if(!busy)perform {store.rasterPathDraw("AWEI",p)}}
                     view.brushSettings = JSONObject(rasterBrushes.getJSONObject(if(tool=="mirror")mirrorBrushTool else if(tool=="dyna")dynaBrushTool else if(tool=="line")lineBrushTool else if(tool in ArtFigure.tools || tool in ArtRasterPath.tools)figureBrushTool else if(tool in ArtBrush.tools)tool else "ink").toString())
                     view.brushAssetFile = store::assetFile
-                    view.referenceBitmaps = referenceBitmaps
+                    view.referenceBitmaps = if(animationPlaying)emptyMap() else referenceBitmaps
                     view.referenceMultiple = referenceMultiple
                     view.onReferenceEdit = { type,p -> if(!busy) perform { store.apply("AWEI",type,p) } }
                     view.calligraphyOptions = JSONObject(vectorCalligraphySettings.toString()).put("width",width.toDouble())
@@ -1758,7 +1791,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.bezierNodeSelection=bezierNodeSelection;view.bezierMultiple=bezierMultiple;view.bezierBox=bezierBox
                     view.onBezierSelection={bezierNodeSelection=it}
                     view.onBezierCreate = { p -> if (!busy) perform { store.pathCreate("AWEI", p) } }
-                    view.image = image
+                    view.image = animationPreview?.bitmap ?: image
+                    view.animationPlaying=animationPlaying
                     view.gridVisible = viewOptions.gridVisible
                     view.pixelGridVisible = viewOptions.pixelGridVisible
                     view.horizontalFitBias = when {
@@ -1767,10 +1801,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                         else -> 0f
                     }
                     view.layers = layers
-                    view.selectedId = selected
-                    view.selection = state.optJSONObject("selection")
+                    view.selectedId = if(animationPlaying)"" else selected
+                    view.selection = if(animationPlaying)null else state.optJSONObject("selection")
                     view.selectionVisible=remainingSettings.optBoolean("selectionVisible",true)
-                    view.tool = tool; view.color = color; view.brushWidth = width
+                    view.tool = if(animationPlaying)"pan" else tool; view.color = color; view.brushWidth = width
                     view.opacity = opacity; view.mirrorDirection = mirrorDirection
                     view.mirrorAngle = mirrorAngle;view.mirrorBrushTool=mirrorBrushTool
                     view.mirrorCount = mirrorCount; view.mirrorRadius = mirrorRadius
@@ -2139,6 +2173,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                             RightPane.LAYERS -> "图层"
                                             RightPane.BRUSHES -> "笔刷预设"
                                             RightPane.FOOTPRINTS -> "足迹"
+                                            RightPane.ANIMATION -> "动画时间轴"
                                         }
 
                                         val header: @Composable () -> Unit = {
@@ -2363,101 +2398,28 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                                                         .bodySmall)
                                                         }
                                                     }
+                                                    RightPane.ANIMATION -> {
+                                                        Box(Modifier.fillMaxWidth().height(activePaneBodyHeight).clipToBounds()) {
+                                                            StudioAnimationTimeline(current,busy,animationPlaying,animationPreview?.time,
+                                                                onPlay={play->
+                                                                    if(play)animationPlaying=true else {
+                                                                        val time=animationPreview?.time
+                                                                        animationPlaying=false
+                                                                        if(time!=null)perform {store.animationSeek("AWEI",JSONObject()
+                                                                            .put("documentId",current.getString("id")).put("expectedRevision",current.getInt("revision")).put("frame",time))}
+                                                                    }
+                                                                },onChange={type,p->perform {store.apply("AWEI",type,p)}},
+                                                                onExport={edge->perform {
+                                                                    val receipt=store.animationExport(JSONObject().put("documentId",current.getString("id"))
+                                                                        .put("expectedRevision",current.getInt("revision")).put("maxEdge",edge))
+                                                                    receipt.put("animationExport",receipt.getString("path"))
+                                                                }})
+                                                        }
+                                                    }
                                                     RightPane.FOOTPRINTS -> {
-                                                        val timeline = current.getJSONArray("timeline")
-                                                        val position = current.getInt("timelinePosition")
-                                                        val observedRevision = current.getInt("revision")
-                                                        val historyScroll = rememberLazyListState()
-                                                        val timeFormat = remember {
-                                                            java.text.SimpleDateFormat("HH:mm:ss",
-                                                                java.util.Locale.getDefault())
-                                                        }
-                                                        LaunchedEffect(current.getString("id"),
-                                                            observedRevision, activeRightPane) {
-                                                            historyScroll.scrollToItem(position)
-                                                        }
-                                                        LazyColumn(Modifier.fillMaxWidth()
-                                                            .height(activePaneBodyHeight),
-                                                            state = historyScroll) {
-                                                            items(timeline.length(),
-                                                                key = { index ->
-                                                                    "footprint_" + timeline
-                                                                        .getJSONObject(index)
-                                                                        .getString("id")
-                                                                }) { index ->
-                                                                val step = timeline.getJSONObject(index)
-                                                                val currentStep = index == position
-                                                                val future = index > position
-                                                                val label = step.getString("label")
-                                                                val actor = when (step.getString("actor")) {
-                                                                    "AWEI" -> "阿伟"
-                                                                    "LANER" -> "兰儿"
-                                                                    else -> "工程"
-                                                                }
-                                                                val time = step.optLong("timestamp")
-                                                                Row(Modifier.fillMaxWidth()
-                                                                    .background(if (currentStep)
-                                                                        MaterialTheme.colorScheme
-                                                                            .surfaceVariant
-                                                                    else MaterialTheme.colorScheme
-                                                                        .surface)
-                                                                    .clickable(
-                                                                        enabled = !busy && !currentStep,
-                                                                        onClickLabel = "查看第${index}步：$label") {
-                                                                        perform {
-                                                                            store.historyJump(
-                                                                                "AWEI",
-                                                                                step.getString("id"),
-                                                                                observedRevision)
-                                                                        }
-                                                                    }
-                                                                    .padding(horizontal = 12.dp,
-                                                                        vertical = 9.dp),
-                                                                    verticalAlignment =
-                                                                        androidx.compose.ui.Alignment
-                                                                            .CenterVertically) {
-                                                                    Text(if (currentStep) "●" else "○",
-                                                                        color = if (currentStep)
-                                                                            MaterialTheme.colorScheme
-                                                                                .primary
-                                                                        else MaterialTheme.colorScheme
-                                                                            .onSurfaceVariant,
-                                                                        modifier = Modifier
-                                                                            .padding(end = 8.dp))
-                                                                    if (step.has("color")) {
-                                                                        Box(Modifier.padding(end = 8.dp)
-                                                                            .size(12.dp)
-                                                                            .background(
-                                                                                androidx.compose.ui.graphics
-                                                                                    .Color(Color.parseColor(
-                                                                                        step.getString("color"))),
-                                                                                androidx.compose.foundation
-                                                                                    .shape.CircleShape))
-                                                                    }
-                                                                    Column(Modifier.weight(1f)) {
-                                                                        Text("$index · $label",
-                                                                            maxLines = 1,
-                                                                            overflow = TextOverflow
-                                                                                .Ellipsis,
-                                                                            color = MaterialTheme
-                                                                                .colorScheme.onSurface
-                                                                                .copy(alpha =
-                                                                                    if (future)
-                                                                                        0.55f
-                                                                                    else 1f))
-                                                                        Text(if (time > 0L)
-                                                                            "$actor · " +
-                                                                                timeFormat.format(
-                                                                                    java.util.Date(time))
-                                                                        else actor,
-                                                                            style = MaterialTheme
-                                                                                .typography.bodySmall,
-                                                                            color = MaterialTheme
-                                                                                .colorScheme
-                                                                                .onSurfaceVariant)
-                                                                    }
-                                                                }
-                                                                HorizontalDivider()
+                                                        Box(Modifier.fillMaxWidth().height(activePaneBodyHeight).clipToBounds()) {
+                                                            StudioFootprints(current,busy) { id,revision ->
+                                                                perform {store.historyJump("AWEI",id,revision)}
                                                             }
                                                         }
                                                     }
@@ -2510,7 +2472,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     .semantics{contentDescription="调整SVG分屏高度"}.pointerInput(Unit){detectDragGestures {change,drag->
                         change.consume();svgRatio=(svgRatio+drag.y/svgWorkspaceHeight).coerceIn(.25f,.75f)
                     }})
-                Box(Modifier.fillMaxWidth().weight(1f-svgRatio)) {
+                Box(Modifier.fillMaxWidth().weight(1f-svgRatio).clipToBounds()) {
                     StudioSvgEditor(svgEditor,busy,onApply={p->perform(onSuccess={scope.launch {
                         try {svgEditor.applied(requireNotNull(snapshot))}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){svgEditor.message=e.message ?: "SVG读取失败"}
                     }}){store.svgApply("AWEI",p)}},onSelect={p->perform{store.svgSelect("AWEI",p)}})
@@ -3417,6 +3379,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             RightPane.LAYERS -> "图层"
             RightPane.BRUSHES -> "笔刷预设"
             RightPane.FOOTPRINTS -> "足迹"
+                                            RightPane.ANIMATION -> "动画时间轴"
         }
         AlertDialog(onDismissRequest = { panelCloseDialog = null },
             title = { Text("是否关闭“$label”面板？") },
@@ -3678,6 +3641,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 invalidate()
             }
         }
+    var animationPlaying:Boolean=false
     var onSampleCoordinate: (Int, Int) -> Unit = { _, _ -> }
     var color: String = "#FF161616"
     var brushWidth: Float = 6f
@@ -4318,7 +4282,7 @@ private class StudioCanvas(context: Context) : View(context) {
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        if (image == null) return true
+        if (animationPlaying || image == null) return true
         if (event.pointerCount >= 2) {
             multitouch = true
             basicSelectionInteraction.cancel();fillInteraction.cancel()

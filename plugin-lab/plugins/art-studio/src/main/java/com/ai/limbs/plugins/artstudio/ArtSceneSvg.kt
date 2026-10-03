@@ -27,6 +27,12 @@ internal object ArtSceneSvg {
         .put("nativePixels","image href=ail-layer:<uuid>, native fingerprint and dimensions are read-only; source brushes/assets retained, no Base64 in code; this profile needs the studio resource resolver, not a standalone portable SVG")
         .put("unsupported","scripts, external resources, DTD/entities, use, filters, animation, CSS stylesheets, arbitrary clip masks, SVG arc A, document resize or layer reparent/delete through source; use existing tools for these")
         .put("limits","1MiB UTF-8, 8192 XML nodes, depth32, native vector limits; API offsets/index use UTF-16; append creates one native vector layer; text source changes use the existing text engine")
+        .put("numericLimits",JSONObject().put("maxSourceBytes",MAX_BYTES).put("maxXmlElements",8192).put("maxXmlDepth",32)
+            .put("maxPathChars",65536).put("maxPathCommands",2048).put("maxSubpathsPerPath",64)
+            .put("maxSegmentsPerPath",ArtFreehand.MAX_SEGMENTS).put("maxGeometryPointsPerPath",ArtFreehand.MAX_GEOMETRY_POINTS)
+            .put("maxShapesPerLayer",512).put("maxGeometryPointsPerLayer",32768).put("coordinateAbsMax",1000000).put("strokeWidth",JSONArray(listOf(0.1,512.0))))
+        .put("gradients","显式 gradientUnits=userSpaceOnUse；坐标为对象局部无单位像素；2..16个stop，offset为0..1或0%..100%，严格递增，首尾为0/1。线性起终点距离>0.001，径向r>0.001。")
+        .put("appendExample","<svg xmlns=\"http://www.w3.org/2000/svg\"><defs><linearGradient id=\"light\" gradientUnits=\"userSpaceOnUse\" x1=\"0\" y1=\"0\" x2=\"160\" y2=\"0\"><stop offset=\"0%\" stop-color=\"#203c58\"/><stop offset=\"100%\" stop-color=\"#ffd780\"/></linearGradient></defs><rect width=\"160\" height=\"80\" fill=\"url(#light)\" stroke=\"none\"/></svg>")
         .put("nativeSemantics","Open paths are stroke-only; rect rx/ry must match; SVG2 #RRGGBBAA colors; only referenced gradients persist; editable text is native JSON metadata, not arbitrary SVG text markup")
         .put("flow","svg.read -> edit -> svg.validate/preview -> svg.apply; all writes bind documentId/expectedRevision; svg.select/hit connects code and canvas without requiring phone SVG panel")
     fun esc(s:String)=s.replace("&","&amp;").replace("\"","&quot;").replace("<","&lt;").replace(">","&gt;")
@@ -115,7 +121,7 @@ internal object ArtSceneSvg {
         val root=document.documentElement;require(root.localName=="svg") {"根元素必须为svg"}
         var nodes=0;val ids=mutableSetOf<String>()
         fun inspect(e:Element,depth:Int) {
-            require(++nodes<=8192&&depth<=32);require(e.namespaceURI=="http://www.w3.org/2000/svg"){"SVG 必须使用标准命名空间"}
+            require(++nodes<=8192){"SVG 最多8192个元素；请分批追加或读取局部"};require(depth<=32){"SVG 嵌套深度最多32；请减少分组嵌套"};require(e.namespaceURI=="http://www.w3.org/2000/svg"){"SVG 必须使用标准命名空间"}
             require(e.localName in graphic+setOf("svg","g","defs","linearGradient","radialGradient","stop","clipPath","image","metadata")){"尚未支持SVG元素：${e.localName}"}
             if(e.hasAttribute("id")){val id=e.getAttribute("id");require(id.matches(Regex("[A-Za-z_][A-Za-z0-9_.-]{0,127}"))&&ids.add(id)){"SVG id 无效或重复"}}
             val allowed=setOf("id")+(if(e.localName in graphic+setOf("g","svg"))paintKeys+setOf("transform","opacity","display","data-locked") else emptySet())+when(e.localName){
@@ -163,13 +169,27 @@ internal object ArtSceneSvg {
         val attrs=(0 until e.attributes.length).map {e.attributes.item(it)}.sortedBy {it.nodeName}.joinToString {it.nodeName+"="+it.nodeValue}
         return e.localName+"["+attrs+"]"+children(e).joinToString {signature(it)}+if(children(e).isEmpty())e.textContent.trim() else ""
     }
-    private fun gradient(e:Element):JSONObject {
-        require(e.localName in setOf("linearGradient","radialGradient")&&e.getAttribute("gradientUnits")=="userSpaceOnUse"){"渐变仅支持对象局部 userSpaceOnUse 线性/径向渐变"}
+    private fun gradient(e:Element):JSONObject = ArtSceneSvgGeometry.atElement(e) { gradientValue(e) }
+    private fun gradientValue(e:Element):JSONObject {
+        require(e.localName in setOf("linearGradient","radialGradient")&&e.getAttribute("gradientUnits")=="userSpaceOnUse"){"渐变须显式设置 gradientUnits=\"userSpaceOnUse\"；坐标为对象局部像素，不支持 objectBoundingBox"}
         fun n(k:String,d:Double=0.0)=ArtSceneSvgGeometry.number(e,k,d)
         val linear=e.localName=="linearGradient";val x=n(if(linear)"x1" else "cx");val y=n(if(linear)"y1" else "cy")
-        val stops=JSONArray();for(stop in children(e)){require(stop.localName=="stop");val a=ArtSceneSvgGeometry.number(stop,"stop-opacity",1.0);require(a in 0.0..1.0)
-            val color=ArtSceneSvgGeometry.color(stop.getAttribute("stop-color"));val alpha=(color.substring(1,3).toInt(16)*a).toInt();stops.put(JSONArray(listOf(ArtSceneSvgGeometry.number(stop,"offset"),"#%02x".format(alpha)+color.substring(3))))}
-        return JSONObject().put("type",if(linear)"linear" else "radial").put("start",JSONArray(listOf(x,y))).put("end",JSONArray(if(linear)listOf(n("x2"),n("y2"))else listOf(x+n("r").also {require(it>0){"径向渐变半径须大于零"}},y))).put("stops",stops)
+        val entries=children(e);require(entries.size in 2..16){"渐变需要2..16个stop，当前${entries.size}个"}
+        val stops=JSONArray();var previous=-1.0
+        for((index,stop) in entries.withIndex()) {
+            require(stop.localName=="stop")
+            ArtSceneSvgGeometry.atElement(stop) {
+                val a=ArtSceneSvgGeometry.number(stop,"stop-opacity",1.0);require(a in 0.0..1.0){"stop-opacity 须为0..1"}
+                val offset=if(stop.hasAttribute("offset"))ArtSceneSvgGeometry.stopOffset(stop.getAttribute("offset")) else 0.0
+                require(offset>previous){"第${index+1}个stop offset 须严格递增，当前$offset，前一个$previous"}
+                previous=offset
+                val color=ArtSceneSvgGeometry.color(stop.getAttribute("stop-color"));val alpha=(color.substring(1,3).toInt(16)*a).toInt()
+                stops.put(JSONArray(listOf(offset,"#%02x".format(alpha)+color.substring(3))))
+            }
+        }
+        require(stops.getJSONArray(0).getDouble(0)==0.0&&stops.getJSONArray(stops.length()-1).getDouble(0)==1.0){"渐变首尾 offset 须为0/1或0%/100%"}
+        if(linear)require(kotlin.math.hypot(n("x2")-x,n("y2")-y)>0.001){"线性渐变起终点距离须大于0.001像素"}
+        return JSONObject().put("type",if(linear)"linear" else "radial").put("start",JSONArray(listOf(x,y))).put("end",JSONArray(if(linear)listOf(n("x2"),n("y2"))else listOf(x+n("r").also {require(it>0.001){"径向渐变 r 须大于0.001像素"}},y))).put("stops",stops)
     }
     fun plan(snapshot:JSONObject,source:String,scope:String,objectIds:List<String> = emptyList(),newLayerName:String="SVG 绘画"):Plan {
         require(scope in setOf("document","objects","append"));require(scope=="objects"||objectIds.isEmpty()){ "objectIds只用于局部范围" }

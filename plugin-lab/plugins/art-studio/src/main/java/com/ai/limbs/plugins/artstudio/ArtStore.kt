@@ -554,7 +554,10 @@ internal class ArtStore(private val root: File) {
     private val dockPanelsFile = File(root, "dock-panels.json")
 
     private fun readDockPanels(): JSONObject =
-        if (dockPanelsFile.isFile) JSONObject(dockPanelsFile.readText()) else ArtDockPanels.initial()
+        if (dockPanelsFile.isFile) JSONObject(dockPanelsFile.readText()).apply {
+            val visible=getJSONObject("visible")
+            if(!visible.has("animation"))visible.put("animation",true)
+        } else ArtDockPanels.initial()
 
     fun dockPanelState(): JSONObject = locked { readDockPanels() }
 
@@ -911,7 +914,7 @@ internal class ArtStore(private val root: File) {
                 atomic(menuSettings,settings.toString())
                 settings
             }
-            "docker.color", "docker.layers", "docker.brushes", "docker.footprints" -> {
+            "docker.color", "docker.layers", "docker.brushes", "docker.footprints", "docker.animation" -> {
                 val state = changeDockPanels("set_visible", action.removePrefix("docker."), p.getBoolean("enabled"))
                 JSONObject().put("accepted", true).put("dockPanels", state).apply {
                     if (p.getBoolean("enabled")) put("requestId", JSONObject(menuUiRequest.readText()).getString("id"))
@@ -1174,7 +1177,7 @@ internal class ArtStore(private val root: File) {
 
     fun pathCreate(actor:String,p:JSONObject):JSONObject = apply(actor,"SHAPE_CREATE",JSONObject()
         .put("documentId",p.getString("documentId")).put("expectedRevision",p.getInt("expectedRevision"))
-        .put("layerId",p.getString("layerId")).put("shape",ArtPathGeometry.create(p)))
+        .put("layerId",p.getString("layerId")).put("historyTool","vector_bezier").put("shape",ArtPathGeometry.create(p)))
 
     fun pathNodes(p:JSONObject):JSONObject = locked {
         val snapshot=snapshot(loadCurrent());require(p.getString("documentId")==snapshot.getString("id")) { "工程已切换" }
@@ -1202,7 +1205,7 @@ internal class ArtStore(private val root: File) {
         val guide=ArtCalligraphy.guide(snap.getJSONObject("state"),p.getString("layerId"),options)
         val shape=ArtCalligraphy.create(options,guide)
         apply(actor,"SHAPE_CREATE",JSONObject().put("documentId",p.getString("documentId"))
-            .put("expectedRevision",p.getInt("expectedRevision")).put("layerId",p.getString("layerId")).put("shape",shape))
+            .put("expectedRevision",p.getInt("expectedRevision")).put("layerId",p.getString("layerId")).put("historyTool","vector_calligraphy").put("shape",shape))
     }
 
     private fun calligraphyProfileFile()=File(root,"calligraphy-profiles.json")
@@ -1722,8 +1725,10 @@ internal class ArtStore(private val root: File) {
         if (params.has("expectedRevision")) {
             require(params.getInt("expectedRevision") == doc.getJSONArray("operations").length()) { "工程已被另一端修改，请刷新后重试" }
         }
+        if(params.has("documentId"))require(params.getString("documentId")==doc.getString("id")) {"工程已切换"}
         val operationId = UUID.randomUUID().toString()
         var normalized = JSONObject(params.toString())
+        if(type=="ANIMATION_KEY")normalized=ArtAnimation.prepareKey(snapshot(doc).getJSONObject("state"),normalized)
         if(type=="STROKE_ADD") {
             val tool=normalized.optString("tool","pencil")
             if(tool in ArtFigure.tools || tool in ArtRasterPath.tools) {
@@ -1776,10 +1781,12 @@ internal class ArtStore(private val root: File) {
         val operation = JSONObject().put("id", operationId)
             .put("actor", actor).put("type", type).put("parameters", normalized)
             .put("timestamp", System.currentTimeMillis())
+        stampAnimation(doc,operation)
         doc.getJSONArray("operations").put(operation)
         // A failed replay or budget check must never overwrite the draft or its history.
         val result = snapshot(doc)
         requireRenderBudget(result)
+        require(doc.toString().toByteArray(Charsets.UTF_8).size<=32*1024*1024) {"工程数据超过32 MiB，请减少关键帧或拆分工程"}
         atomic(draft(doc.getString("id")), doc.toString())
         result.put("lastOperationId", operation.getString("id"))
     }
@@ -2266,11 +2273,13 @@ internal class ArtStore(private val root: File) {
         val op = JSONObject().put("id", UUID.randomUUID().toString()).put("actor", actor)
             .put("type", "IMAGE_IMPORT").put("timestamp", System.currentTimeMillis())
             .put("parameters", JSONObject().put("asset", id).put("width", width).put("height", height))
+        stampAnimation(doc,op)
         doc.getJSONArray("operations").put(op)
         try {
             val result = snapshot(doc)
             requireRenderBudget(result)
-            atomic(draft(doc.getString("id")), doc.toString())
+            require(doc.toString().toByteArray(Charsets.UTF_8).size<=32*1024*1024) {"工程数据超过32 MiB，请减少关键帧或拆分工程"}
+        atomic(draft(doc.getString("id")), doc.toString())
             result.put("imageImport", metadata)
         } catch (error: Throwable) {
             assetFile(id).delete()
@@ -2364,145 +2373,14 @@ internal class ArtStore(private val root: File) {
         val state = replay(doc)
         val id = doc.getString("id")
         val saved = archive(id)
-        val operations = doc.getJSONArray("operations")
-        val (undoStack, redoStack) = historyStacks(operations)
-        val operationById = (0 until operations.length())
-            .map { operations.getJSONObject(it) }
-            .filter { it.getString("type") !in setOf("REVERT", "RESTORE") }
-            .associateBy { it.getString("id") }
-        fun operationLabel(id: String?): String {
-            if (id == null) return ""
-            val operation = operationById[id] ?: return ""
-            return when (operation.getString("type")) {
-                "MENU_LAYER_CHANGE" -> operation.getJSONObject("parameters").getString("label")
-                "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
-                "ASSISTANT_CREATE" -> "添加辅助尺规"
-                "ASSISTANT_SELECT" -> "选择辅助尺规"
-                "ASSISTANT_UPDATE" -> "编辑辅助尺规"
-                "ASSISTANT_DELETE" -> "删除辅助尺规"
-                "ASSISTANT_SETTINGS" -> "辅助尺规设置"
-                "REFERENCE_SHOW" -> "参考图像整体显隐"
-                "REFERENCE_ADD" -> "添加参考图像"
-                "REFERENCE_BATCH_ADD" -> "导入参考集合"
-                "REFERENCE_REPLACE" -> "刷新外部参考"
-                "REFERENCE_EMBED" -> "参考图转为内嵌"
-                "REFERENCE_SELECT" -> "选择参考图像"
-                "REFERENCE_TRANSFORM" -> "变换参考图像"
-                "REFERENCE_STYLE" -> "参考图像样式"
-                "REFERENCE_DELETE" -> "删除参考图像"
-                "VECTOR_LAYER_CREATE" -> "添加矢量图层"
-                "SHAPE_COMIC_CUT" -> "漫画分格切分"
-                "SHAPE_COMIC_MERGE" -> "漫画分格合并"
-                "SHAPE_FREEHAND" -> "绘制或接续矢量徒手路径"
-                "SHAPE_CREATE" -> "添加矢量形状"
-                "SHAPE_SELECT" -> "选择形状"
-                "SHAPE_ALIGN" -> "对齐形状"
-                "SHAPE_DISTRIBUTE" -> "分布形状"
-                "SHAPE_SHEAR" -> "剪切形状"
-                "SHAPE_TRANSFORM" -> "变换形状"
-                "SHAPE_PATH_EDIT" -> "编辑路径节点"
-                "SHAPE_PATH_TOPOLOGY" -> "断开或连接子路径"
-                "SHAPE_PATH_CONVERT" -> "形状转路径"
-                "SHAPE_PATH_COMBINE" -> "合成子路径对象"
-                "SHAPE_DELETE" -> "删除形状"
-                "SHAPE_STYLE" -> "形状样式"
-                "TEXT_CREATE" -> "添加文字"
-                "TEXT_UPDATE" -> "编辑文字"
-                "GROUP_CREATE" -> "新建图层组"
-                "LAYER_DELETE" -> "删除图层"
-                "STROKE_ADD" -> when (operation.getJSONObject("parameters").optString("tool")) {
-                    "gradient" -> ArtGradient.modes.getValue(operation.getJSONObject("parameters").optString("gradientMode","linear"))+"渐变"
-                    "mirror" -> "多重画笔"
-                    "dyna" -> "动态画笔"
-                    "calligraphy" -> "斜头书法笔"
-                    "line" -> "直线"
-                    "rectangle" -> "矩形"
-                    "ellipse" -> "椭圆"
-                    "polygon" -> "多边形"
-                    "polyline" -> "折线"
-                    "bezier" -> "贝塞尔曲线"
-                    "ink" -> "自由画笔"
-                    "pencil" -> "铅笔"
-                    "soft" -> "软笔"
-                    "spray" -> "喷枪"
-                    "eraser" -> "橡皮擦"
-                    else -> "绘制笔画"
-                }
-                "STROKE_ERASE" -> "删除笔画"
-                "SVG_APPLY" -> "应用SVG代码"
-                "SVG_SELECT" -> "选择SVG对象"
-                "TRANSFORM_AFFINE" -> "自由变换图层"
-                "TRANSFORM_PIXELS" -> "变形图层或选区像素"
-                "MOVE_LAYER" -> "移动图层"
-                "MOVE_PIXELS" -> "移动选区像素"
-                "TRANSFORM" -> "变换图层"
-                "CROP" -> "裁剪画布"
-                "LAYER_CROP" -> "裁剪图层边界"
-                "CANVAS_RESIZE" -> "更改画布大小"
-                "IMAGE_BACKGROUND" -> "更改图像背景色与透明度"
-                "LAYER_RENAME" -> "重命名图层"
-                "LAYER_SELECT" -> "选择图层"
-                "LAYER_VISIBLE" -> "显示或隐藏图层"
-                "LAYER_LOCK" -> "锁定或解锁图层"
-                "LAYER_OPACITY" -> "调整图层不透明度"
-                "LAYER_BLEND" -> "调整图层混合模式"
-                "LAYER_PROPERTIES" -> "修改图层属性"
-                "LAYER_MOVE", "LAYER_MOVE_STEP" -> "调整图层顺序"
-                "COLORIZE_CREATE" -> "新建上色蒙版"
-                "COLORIZE_STROKE" -> "颜色线索"
-                "COLORIZE_REMOVE_STROKE","COLORIZE_CLEAR" -> "清理颜色线索"
-                "COLORIZE_PALETTE" -> "颜色线索调色板"
-                "COLORIZE_SETTINGS" -> "上色蒙版参数"
-                "COLORIZE_OUTPUT" -> "更新填色结果"
-                "COLORIZE_CONVERT" -> "蒙版转为绘画图层"
-                "PIXEL_REPAIR" -> "智能修补"
-                "PIXEL_EDIT" -> if (operation.getJSONObject("parameters").optString("mode") == "CLEAR")
-                    "清除像素" else "填充像素"
-                "PIXEL_PASTE" -> if (operation.getJSONObject("parameters")
-                    .optString("action") == "FILL_CONTIGUOUS") "填充相连区域" else if (operation.getJSONObject("parameters")
-                    .optString("action") == "FILL_CONTIGUOUS_ERASE") "擦除相连区域" else when(operation.getJSONObject("parameters").optString("action")) {
-                    "ENCLOSE_FILL" -> "围合填充";"ENCLOSE_ERASE" -> "围合擦除";else -> "粘贴像素"
-                }
-                "LAYER_COPY" -> "复制图层"
-                "SELECTION_TOOL" -> when(operation.getJSONObject("parameters").getString("tool")) {"contiguous"->"连续区域选区";"similar"->"相似色选区";"magnetic"->"磁性套索选区";"adjust"->"调整软选区";else->"创建基本选区"}
-                "SELECTION_BEZIER" -> "贝塞尔曲线选区"
-                "SELECTION_CREATE", "SELECTION_CLEAR", "SELECTION_EDIT" -> "修改选区"
-                "DOCUMENT_RENAME" -> "重命名工程"
-                else -> "画室操作"
-            }
-        }
-        // A state represents the first N currently reachable edits. Redone edits stay
-        // visible as future states until a new edit starts a different branch.
-        val reachableIds = undoStack + redoStack.asReversed()
-        val originalOrder = operationById.keys.withIndex().associate { it.value to it.index }
-        var newestOriginalIndex = -1
-        val timeline = JSONArray().put(JSONObject().put("id", "")
-            .put("label", "初始画布").put("actor", doc.getString("createdBy"))
-            .put("timestamp", 0L))
-        for (operationId in reachableIds) {
-            val operation = operationById.getValue(operationId)
-            val originalIndex = originalOrder.getValue(operationId)
-            val reappliedOutOfOrder = originalIndex < newestOriginalIndex
-            newestOriginalIndex = maxOf(newestOriginalIndex, originalIndex)
-            val entry = JSONObject().put("id", operationId)
-                .put("label", if (reappliedOutOfOrder)
-                    "重新应用 · " + operationLabel(operationId) else operationLabel(operationId))
-                .put("actor", operation.getString("actor"))
-                .put("type", operation.getString("type"))
-                .put("timestamp", operation.optLong("timestamp", 0L))
-            if (operation.getString("type") == "STROKE_ADD") {
-                val stroke = operation.getJSONObject("parameters")
-                entry.put("tool", stroke.optString("tool", "ink"))
-                    .put("color", stroke.getString("color"))
-            }
-            timeline.put(entry)
-        }
+        val history = ArtHistory.describe(doc)
         return JSONObject().put("id", doc.getString("id"))
             .put("state", state).put("revision", doc.getJSONArray("operations").length())
-            .put("timeline", timeline).put("timelinePosition", undoStack.size)
-            .put("canUndo", undoStack.isNotEmpty()).put("canRedo", redoStack.isNotEmpty())
-            .put("undoLabel", operationLabel(undoStack.lastOrNull()))
-            .put("redoLabel", operationLabel(redoStack.lastOrNull()))
+            .put("timeline", history.getJSONArray("timeline")).put("timelinePosition", history.getInt("position"))
+            .put("historyStats",history.getJSONObject("historyStats")).put("otherBranches",history.getJSONArray("otherBranches"))
+            .put("canUndo", history.getBoolean("canUndo")).put("canRedo", history.getBoolean("canRedo"))
+            .put("undoLabel", history.getString("undoLabel"))
+            .put("redoLabel", history.getString("redoLabel"))
             .put("hasClipboard", editClipboard.isFile)
             .put("dirty", externalLink(id)?.optBoolean("pending") == true ||
                 !saved.exists() || File(documents, id + ".sha256").let { marker ->
@@ -2538,9 +2416,11 @@ internal class ArtStore(private val root: File) {
         for (i in 0 until operations.length()) {
             val op = operations.getJSONObject(i)
             if (op.getString("id") !in disabled && op.getString("type") !in setOf("REVERT", "RESTORE")) {
-                edit(state, op.getString("type"), op.getJSONObject("parameters"))
+                edit(state, op.getString("type"), op.getJSONObject("parameters"), op.optInt("animationFrame",0),op.optJSONObject("animationFrameKeys"))
             }
         }
+        ArtAnimation.resolve(state,ArtAnimation.settings(state).getInt("current"))
+        ArtAnimation.validate(state)
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
         ArtShapes.validateDocument(state)
         ArtReferences.validate(state)
@@ -2551,7 +2431,41 @@ internal class ArtStore(private val root: File) {
         return state
     }
 
-    private fun edit(state: JSONObject, type: String, p: JSONObject) {
+    private fun edit(state: JSONObject, type: String, p: JSONObject, frame:Int=0,expectedKeys:JSONObject?=null) {
+        ArtAnimation.resolve(state,frame)
+        if(type.startsWith("ANIMATION_")) {
+            ArtAnimation.edit(state,type,p)
+            return
+        }
+        val animated=ArtAnimation.layers(state).filter {ArtAnimation.keys(it)!=null}
+        if(animated.isNotEmpty())require(type !in setOf("CROP","CANVAS_RESIZE")) {
+            "动画工程暂不支持跨全部帧裁剪/调整画布；请先明确停用动画轨道"
+        }
+        if(type=="MENU_LAYER_CHANGE" && animated.isNotEmpty()) {
+            val removed=p.optJSONArray("removeIds")
+            val inserted=p.optJSONArray("layers")
+            val replacements=if(inserted==null)emptySet() else (0 until inserted.length()).map {inserted.getJSONObject(it).getString("id")}.toSet()
+            if(removed!=null)for(i in 0 until removed.length()) {
+                val id=removed.getString(i)
+                require(animated.none {it.getString("id")==id} || id in replacements) {
+                    "合并/扁平化不能隐式丢弃动画轨道；请先明确停用相关轨道"
+                }
+            }
+        }
+        val tracks=animated.associate {it.getString("id") to Pair(it.getString("kind"),JSONArray(ArtAnimation.keys(it).toString()))}
+        val before=ArtAnimation.before(state)
+        editNative(state,type,p)
+        // A filter may replace the active layer object; its committed track remains the same track.
+        ArtAnimation.layers(state).forEach {layer->
+            tracks[layer.getString("id")]?.let {(kind,keys)->
+                require(layer.getString("kind")==kind) {"转换图层类型前须明确停用动画轨道"}
+                layer.put("animationKeys",keys)
+            }
+        }
+        ArtAnimation.capture(state,frame,before,expectedKeys)
+    }
+
+    private fun editNative(state: JSONObject, type: String, p: JSONObject) {
         val layers = state.getJSONArray("layers")
         fun find(id: String): Pair<Int, JSONObject> {
             for (i in 0 until layers.length()) {
@@ -2785,6 +2699,7 @@ internal class ArtStore(private val root: File) {
                             }
                         }
                     }
+                    ArtAnimation.remapKeys(copy,source)
                     layers.put(copy)
                 }
                 if (p.optBoolean("select", false)) state.put("selectedLayerId", p.getString("newId"))
@@ -3118,20 +3033,87 @@ internal class ArtStore(private val root: File) {
         }
     }
 
-    private fun historyStacks(operations: JSONArray): Pair<List<String>, List<String>> {
-        val undoStack = mutableListOf<String>()
-        val redoStack = mutableListOf<String>()
-        for (i in 0 until operations.length()) {
-            val op = operations.getJSONObject(i)
-            val id = op.getString("id")
-            val target = op.optJSONObject("parameters")?.optString("targetId") ?: ""
-            when (op.getString("type")) {
-                "REVERT" -> { undoStack.remove(target); redoStack.add(target) }
-                "RESTORE" -> { redoStack.remove(target); undoStack.add(target) }
-                else -> { undoStack.add(id); redoStack.clear() }
+    private fun historyStacks(operations: JSONArray): Pair<List<String>, List<String>> = ArtHistory.stacks(operations)
+
+    private fun stampAnimation(doc:JSONObject,op:JSONObject) {
+        val events=doc.getJSONArray("operations")
+        var animated=doc.getJSONObject("base").has("animation") || op.getString("type").startsWith("ANIMATION_")
+        var time=doc.getJSONObject("base").optJSONObject("animation")?.getInt("current") ?: 0
+        for(i in events.length()-1 downTo 0) {
+            val event=events.getJSONObject(i)
+            if(event.getString("type").startsWith("ANIMATION_"))animated=true
+            if(event.getString("type")=="ANIMATION_TIME") {time=event.getJSONObject("parameters").getInt("frame");break}
+        }
+        if(animated) {
+            op.put("animationFrame",time)
+            if(!op.getString("type").startsWith("ANIMATION_") && op.getString("type") !in setOf("REVERT","RESTORE")) {
+                val state=replay(doc)
+                val keys=JSONObject()
+                ArtAnimation.layers(state).filter {ArtAnimation.keys(it)!=null}.forEach {layer->
+                    keys.put(layer.getString("id"),requireNotNull(ArtAnimation.active(layer,time)).getInt("time"))
+                }
+                op.put("animationFrameKeys",keys)
             }
         }
-        return undoStack to redoStack
+    }
+    fun animationSnapshot(p:JSONObject):JSONObject=locked {
+        val snapshot=snapshot(loadCurrent())
+        require(p.getString("documentId")==snapshot.getString("id")&&p.getInt("expectedRevision")==snapshot.getInt("revision")) {"工程已改变，请刷新"}
+        ArtAnimation.frame(snapshot,p.getInt("frame"))
+    }
+    fun animationExport(p:JSONObject):JSONObject {
+        // Snapshot assets are immutable UUID files. Release the project lock before rendering a long sequence.
+        val snapshot=locked {
+            snapshot(loadCurrent()).also {
+                require(p.getString("documentId")==it.getString("id")&&p.getInt("expectedRevision")==it.getInt("revision")) {"工程已改变，请刷新"}
+            }
+        }
+        val cfg=ArtAnimation.settings(snapshot.getJSONObject("state"))
+        val start=cfg.getInt("start");val end=cfg.getInt("end");val count=end-start+1
+        val edge=p.optInt("maxEdge",512);require(edge in 64..1024) {"GIF最大边须为64–1024"}
+        val state=snapshot.getJSONObject("state")
+        val factor=minOf(1.0,edge.toDouble()/maxOf(state.getInt("width"),state.getInt("height")))
+        val width=kotlin.math.round(state.getInt("width")*factor).toInt().coerceAtLeast(1)
+        val height=kotlin.math.round(state.getInt("height")*factor).toInt().coerceAtLeast(1)
+        require(width.toLong()*height*count<=32L*1024*1024) {"GIF帧像素总量超过32 Mi，缩小maxEdge或播放范围"}
+        val destination=locked {
+            val directory=exportDirectory();saveDirectories.prepare(directory)
+            File(directory,"animation-"+snapshot.getString("id")+"-"+UUID.randomUUID()+".gif")
+        }
+        val temp=File(destination.parentFile,"."+UUID.randomUUID()+".tmp")
+        try {
+            FileOutputStream(temp).buffered().use {output->
+                val writer=ArtGifWriter(output,width,height,cfg.getBoolean("loop"))
+                for(index in 0 until count) {
+                    val image=ArtRenderer.render(this,ArtAnimation.frame(snapshot,start+index),maxEdge=edge)
+                    try {writer.frame(image,ArtGifWriter.delay(index,cfg.getInt("fps")))} finally {image.recycle()}
+                }
+                writer.finish()
+            }
+            require(temp.renameTo(destination)) {"保存GIF失败"}
+        } finally {temp.delete()}
+        return JSONObject().put("path",destination.absolutePath).put("mimeType","image/gif").put("bytes",destination.length())
+            .put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
+            .put("width",width).put("height",height).put("fps",cfg.getInt("fps")).put("start",start).put("end",end).put("frames",count)
+            .put("palette","fixed-255-rgb332").put("alphaThreshold",128).put("loop",cfg.getBoolean("loop"))
+    }
+
+    fun animationTimeline():JSONObject=locked {ArtAnimation.describe(snapshot(loadCurrent()))}
+    fun animationConfigure(actor:String,p:JSONObject):JSONObject=animationChange(actor,"ANIMATION_SETTINGS",p)
+    fun animationKey(actor:String,p:JSONObject):JSONObject=animationChange(actor,"ANIMATION_KEY",p)
+    fun animationSeek(actor:String,p:JSONObject):JSONObject=animationChange(actor,"ANIMATION_TIME",p)
+    private fun animationChange(actor:String,type:String,p:JSONObject):JSONObject=locked {
+        val doc=loadCurrent()
+        require(p.getString("documentId")==doc.getString("id")) {"工程已切换"}
+        require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) {"工程已改变，请刷新"}
+        apply(actor,type,p)
+    }
+
+    fun historyTimeline(): JSONObject = locked { ArtHistory.describe(loadCurrent()) }
+    fun historyOperations(): JSONObject = locked {
+        val doc=loadCurrent()
+        JSONObject().put("operations",doc.getJSONArray("operations")).put("documentId",doc.getString("id"))
+            .put("revision",doc.getJSONArray("operations").length())
     }
 
     fun history(actor: String, redo: Boolean): JSONObject = locked {
@@ -3170,6 +3152,7 @@ internal class ArtStore(private val root: File) {
         }
         // Replay validates every dependency before the draft is written.
         val result = snapshot(doc)
+        require(doc.toString().toByteArray(Charsets.UTF_8).size<=32*1024*1024) {"工程数据超过32 MiB，请减少关键帧或拆分工程"}
         atomic(draft(doc.getString("id")), doc.toString())
         result.put("lastOperationId", operations.getJSONObject(operations.length() - 1).getString("id"))
     }
@@ -3493,9 +3476,11 @@ internal class ArtStore(private val root: File) {
         val doc = loadCurrent()
         val op = JSONObject().put("id", UUID.randomUUID().toString()).put("actor", actor)
             .put("type", type).put("parameters", params).put("timestamp", System.currentTimeMillis())
+        stampAnimation(doc,op)
         doc.getJSONArray("operations").put(op)
         val result = snapshot(doc)
         requireRenderBudget(result)
+        require(doc.toString().toByteArray(Charsets.UTF_8).size<=32*1024*1024) {"工程数据超过32 MiB，请减少关键帧或拆分工程"}
         atomic(draft(doc.getString("id")), doc.toString())
         return result.put("lastOperationId", op.getString("id"))
     }

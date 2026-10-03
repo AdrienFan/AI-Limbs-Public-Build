@@ -85,6 +85,7 @@ internal object ArtMenuOperations {
                         if (event.getString("kind") == "stroke") event.put("id", strokeIds.getValue(event.getString("id")))
                     }
                 }
+                ArtAnimation.remapKeys(this,original)
             }
         }
     }

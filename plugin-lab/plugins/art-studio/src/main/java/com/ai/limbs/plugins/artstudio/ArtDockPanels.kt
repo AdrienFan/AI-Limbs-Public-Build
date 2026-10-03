@@ -4,7 +4,7 @@ import org.json.JSONObject
 
 /** Plugin-owned persistent state; callers serialize transitions with ArtStore's process/file lock. */
 internal object ArtDockPanels {
-    val ids = listOf("color", "layers", "brushes", "footprints")
+    val ids = listOf("color", "layers", "brushes", "footprints", "animation")
     fun initial(): JSONObject = JSONObject().put("revision", 0L)
         .put("visible", JSONObject().apply { ids.forEach { put(it, true) } })
         .put("activePane", "color").put("restorePane", JSONObject.NULL)

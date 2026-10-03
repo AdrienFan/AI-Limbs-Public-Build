@@ -153,3 +153,20 @@ if 'suggestedParamsJson = ArtCapabilityHelp.example(name).toString()' not in sou
 if 'ArtCapabilityHelp.property(name, field)' not in source:
     raise SystemExit('Art Studio parameter enums are not published in inputSchema')
 print(f'Art Studio compact help OK: {len(examples)} examples; {len(parameter_names)} documented parameter names; Runtime API wiring present.')
+
+
+# Every replayable edit needs a footprint label, across all tool families.
+history_source = ENTRY.with_name("ArtHistory.kt").read_text(encoding="utf-8")
+replay_source = store_source[store_source.index("private fun edit(state"):store_source.index("private fun historyStacks")]
+label_source = history_source[history_source.index("fun label("):history_source.index("private fun category")]
+case_pattern = r'^\s*((?:"[A-Z_]+"\s*,?\s*)+)\s*->'
+def event_cases(block):
+    return {event for case in re.findall(case_pattern, block, re.M)
+            for event in re.findall(r'"([A-Z_]+)"', case)}
+replay_events = event_cases(replay_source) - {"DELETE", "COPY", "MOVE", "SCALE", "ROTATE"}
+animation_source=ENTRY.with_name("ArtAnimation.kt").read_text(encoding="utf-8")
+replay_events |= {event for event in event_cases(animation_source) if event.startswith("ANIMATION_")}
+missing_history = sorted(replay_events - event_cases(label_source))
+if missing_history:
+    raise SystemExit(f"Replay events lack footprint labels: {missing_history}")
+print(f"Art Studio footprint coverage OK: {len(replay_events)} replay event types.")

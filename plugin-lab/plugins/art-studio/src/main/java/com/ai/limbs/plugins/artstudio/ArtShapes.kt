@@ -65,7 +65,7 @@ internal object ArtShapes {
                 shape.put("closed",shape.optBoolean("closed",false))
                 ArtPathTopology.parts(shape)
             }
-            "polygon" -> require(points.length() in 3..2048)
+            "polygon" -> require(points.length() in 3..2048){"polygon 需要3..2048个顶点；请拆分过长多边形"}
             else -> require(points.length() == 2)
         }
         for (n in 0 until points.length()) {
@@ -106,7 +106,8 @@ internal object ArtShapes {
     fun validateDocument(state:JSONObject) {
         for(layer in ArtMenuOperations.layers(state).filter { it.getString("kind")=="vector" }) {
             val all=items(layer)
-            require(all.size<=512 && all.sumOf { it.getJSONArray("points").length() }<=32768)
+            require(all.size<=512){"矢量图层 '${layer.getString("name")}' 最多512个形状，当前${all.size}个；请分层绘制"}
+            require(all.sumOf { it.getJSONArray("points").length() }<=32768){"矢量图层 '${layer.getString("name")}' 最多32768个几何坐标；请分层绘制"}
             require(all.map { it.getString("id") }.distinct().size==all.size)
             require(layer.getJSONArray("strokes").length()==0)
             val lm=layerMatrix(state,layer)

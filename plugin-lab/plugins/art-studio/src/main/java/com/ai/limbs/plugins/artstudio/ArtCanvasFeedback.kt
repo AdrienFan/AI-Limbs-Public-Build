@@ -15,6 +15,7 @@ internal object ArtCanvasFeedback {
     const val THUMBNAIL_EDGE = 256
 
     fun affectsCanvas(name: String, parameters: JSONObject): Boolean = when {
+        name in setOf("animation.configure","animation.keyframe","animation.seek") -> true
         name == "menu.execute" ->
             ArtStudioMenuCatalog.find(parameters.getString("action"))?.optBoolean("documentWrite") == true
         name.startsWith("comic.") -> name!="comic.info"

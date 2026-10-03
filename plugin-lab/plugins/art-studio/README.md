@@ -1,3 +1,48 @@
+# 画室 0.2.72
+
+统一发布绘图体验优化、SVG长代码视口裁剪、所有工具足迹和原生动画时间轴/GIF四批改动。版本0.2.72 / versionCode75 / 独立applicationId `com.ai.limbs.payload.artstudio.v0272`；253项能力说明。仅改画室插件与其静态检查/文档，不修改基座。
+
+2026-10-03阿伟授权提交、推送并启动云编译。构建流程继续运行云端JUnit回归、APK编译、签名和.ailp打包；本地仅静态检查，未进行编译或测试。安装后仍须验收此前复杂作品/SVG滚动、足迹阅读和逐帧编辑/播放/GIF输出。连接异常已可见并提供重连，但底层端点拒绝连接根因尚未证实。
+
+## 0.2.72：原生动画时间轴与GIF（云端构建待验收）
+
+参照手机Krita 6.0.4的时间轴/关键帧与独立GIF渲染编码流程，自行实现画室事件与Compose面板。窗口→动画时间轴（文件→导出动画GIF也打开此入口）；图层行与帧格可滚动，支持帧号、前后帧/关键帧、空白/复制/移动/删除帧、FPS、含两端的播放范围、循环与编辑洋葱皮。播放慢时丢预览帧而不排队，暂停落在最后显示帧；播放时禁止画布编辑，外部修订/换工程停止。
+
+动画支持paint/image/vector的可编辑原生内容；其他图层/参考图/尺规保持静态或全局。首次建立轨道保留第0帧锚点，保持区绘画修改其来源关键帧，先建新帧才得到独立画面。停用明确保留当前cel为静态层并移除整轨关键帧，可撤销。复制帧提交内容快照，复制图层重映射各帧对象ID；保存/重开、旧足迹与资源收集复用现有工程链路。帧导航增加revision防旧手势写错帧，但不成为撤销步，不清空重做。
+
+GIF基础导出：255色固定RGB332加透明，alpha<128透明，按1/100秒分配时长；不含参考图、尺规和洋葱皮。默认最大边512，可64–1024且不放大，全部帧像素总量<=32Mi。逐帧流式写临时文件成功后改名，不积存全段位图；预览图和导出帧只复制当前cel，不复制整段日志。音轨、动画曲线/插值、视频/逐帧导入、自适应调色和克隆共享帧尚未实现；动画轨道存在时，未支持的整工程裁剪/调尺寸、丢轨道的合并/扁平化或层类型转换明确拒绝。
+
+兰儿入口：animation.info/timeline/configure/keyframe/seek/preview/export。frame是0–9999帧号，与revision/足迹步号不同；FPS 1–60，范围最多600帧，每层128/工程512关键帧，原生工程32MiB上限。先timeline取documentId/revision及tracks[].id，每次写入后更新revision。
+示例：animation.seek {"documentId":"DOCUMENT_ID","expectedRevision":0,"frame":6}；animation.keyframe {"documentId":"DOCUMENT_ID","expectedRevision":1,"layerId":"LAYER_ID","frame":6,"action":"duplicate"}，然后用既有工具绘制；animation.export {"documentId":"DOCUMENT_ID","expectedRevision":2,"maxEdge":512}。替换身份、图层和连续返回的revision；configure设置fps/start/end/loop/onion，preview指定帧只读，move另传targetFrame，duplicate可传sourceFrame。详细交接见docs/TODO/art-studio-animation-timeline/index.md。
+
+静态能力/菜单/帮助核对通过：253项能力说明、270个参数名，81类事件名称覆盖。新增11项动画数据与2项GIF独立解码/时长回归源码，未执行。所有四批修改统一发布为0.2.72/75/v0272，测试与编译只在云端执行；安装后需验收真实逐帧工具、长动画性能、撤销/保存重开、滚动对齐、内存/取消与GIF查看器播放。
+
+## 0.2.72：所有工具的足迹阅读与读取优化（云端构建待验收）
+
+核对现有78类作品事件及复杂作品日志，未发现容量截断；绘画、矢量、文字、选区、移动/变形、裁剪、图层/滤镜、参考图、尺规和上色蒙版等均进入原有工程事件。一次批量SVG应用仍是一条可撤销操作，不按内部形状数虚增步数。
+
+足迹新增操作分类、摘要、日期和独立详情；新矢量书法/贝塞尔操作保留工具身份，旧记录按真实形状显示，不猜测来源。当前可达历史和其他分支记录分开查看，其他分支只读；阅读旧记录时不再每次刷新强拉回当前步，提供“定位”按钮。继续支持当前分支点击跳转与修订号保护。
+
+兰儿入口：history.timeline {} 返回timeline、position、documentId/revision、historyStats和otherBranches；history.list {} 返回全部原始operations及身份/修订号。两者直接读事件，不为读取历史重放或渲染整幅画布。跳转只取timeline中的id，调用history.goto {"id":"HISTORY_STATE_ID","expectedRevision":0}，revision替换为同次读取值；初始状态id为空字符串，otherBranches不可跳转。摘要不复制几何、原始采样、整层或图片数据。
+
+静态能力/菜单/帮助检查和78类足迹名称覆盖检查通过；新增选择性撤销、分支、工具身份及3000步混合历史回归用例，尚未运行。与其他三批源码一起发布为0.2.72；回归和编译交由云端执行。安装后需验收真实长历史性能、滚动阅读、详情/分支查看、跳转/撤销/重做与保存重开。
+
+## 0.2.72：SVG长代码分屏越界（云端构建待验收）
+
+复杂作品的SVG文本曾越过下方代码区，盖住上方画布与代码操作条。已有双向滚动容器保留；为分屏容器、编辑器和AndroidView显式裁剪，原生ScrollView按分配尺寸使用BOUNDS outline裁剪，内容自身延展为可滚动区域。横/纵滚动条保持显示；编辑操作条固定，状态提示最多两行。继续支持对象高亮/自动定位、原有分隔条与25%–75%比例，作品和代码不截断。与其他修改一同发布为0.2.72；云端编译与实机验收结果待确认。
+
+## 0.2.72：兰儿绘图体验优化（云端构建待验收）
+
+- SVG渐变色标offset同时接受0..1和0%..100%，继续映射到同一原生渐变；坐标仍为无单位局部像素，gradientUnits必须显式userSpaceOnUse。渐变数量、顺序、首尾、半径与线性长度错误直接说明要求。
+- 错误补充元素/ID、属性和实际输入；路径参数不足、超过64条子路径、原生段/坐标预算、图层512形状/32768坐标预算给出拆路径或分层建议。不会自动拆分、排序、丢弃或改写用户图形。
+- svg.info返回numericLimits、渐变规则和可复制appendExample；svg.validate/preview/apply的source说明同步关键限制。先validate，再preview/apply；XML语法错误继续带真实行列，语义错误带元素/属性，不伪造行列。
+- svg.apply新增可选responseMode=receipt：省略state/operations/timeline，保留id/revision、svgApplied、改动层、撤销状态和真实预览或预览失败证据。默认full继续返回原有完整结果。使用receipt能减少跨端响应分页，不改变绘图、撤销或内部渲染预算。
+- 页面连接异常显示原因与“重新连接”按钮；点击后创建新会话，不自动重放旧命令。view.state(target=phone)新增viewConnection.status（connected/disconnected/unresponsive/closed）、leaseMs、heartbeatAgeMs，区分心跳失联与真实未打开画布。底层端点拒绝连接的根因仍待查，不能据此宣称全部通信故障修复。
+
+简洁用法：svg.info {}读取规则/appendExample；document.info {}取id和revision；svg.validate提交source和相同身份；svg.apply携responseMode=receipt、scope=append与newLayerName。每次用返回revision继续绘画；若只需检查画面，canvas.region读取局部或缩略图，不必拉取全部历史。
+
+本批基于0.2.71，与SVG视口、足迹和动画合并发布0.2.72 / versionCode75 / applicationId com.ai.limbs.payload.artstudio.v0272。静态检查已通过；新增回归用例与编译在云端执行，实机效果待验收。
+
 ## 0.2.71：复杂作品的页面刷新
 
 页面轮询合并为单个进行中的刷新，慢于400ms的帧不再被后续轮询无限作废、排队。

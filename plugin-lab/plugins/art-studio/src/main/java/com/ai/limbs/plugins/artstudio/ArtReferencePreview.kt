@@ -17,7 +17,7 @@ internal data class StudioRenderFrame(val first:JSONObject,val second:Bitmap,val
             val refs=store.referenceBitmaps(snapshot)
             var image:Bitmap?=null
             try {
-                image=ArtRenderer.render(store,snapshot,colorizeKeys=true)
+                image=ArtAnimationPreview.render(store,snapshot)
                 return StudioRenderFrame(snapshot,image,store.revision(),refs)
             } catch(error:Throwable) { image?.recycle();refs.values.forEach { it.recycle() };throw error }
         }

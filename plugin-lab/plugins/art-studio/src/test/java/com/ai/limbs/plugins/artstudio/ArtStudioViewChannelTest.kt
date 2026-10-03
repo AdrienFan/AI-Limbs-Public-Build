@@ -201,4 +201,32 @@ class ArtStudioViewChannelTest {
             assertFalse(channel.describe().getBoolean("canvasAttached"))
         }
     }
+    @Test fun expiredConnectionHasExplicitStatusAndNewSessionRestoresCommands() = runBlocking {
+        supervisorScope {
+            var now = 1000L
+            val channel = ArtStudioViewChannel { now }
+            assertEquals("disconnected", channel.describe().getJSONObject("viewConnection").getString("status"))
+            attach(channel)
+            assertEquals("connected", channel.describe().getJSONObject("viewConnection").getString("status"))
+            now += ArtStudioViewChannel.LEASE_MS + 1
+            val stale = channel.describe()
+            assertEquals("unresponsive", stale.getJSONObject("viewConnection").getString("status"))
+            assertEquals(5001L, stale.getJSONObject("viewConnection").getLong("heartbeatAgeMs"))
+            assertFalse(stale.getBoolean("canvasAttached"))
+            attach(channel, "page-b")
+            assertEquals("connected", channel.describe().getJSONObject("viewConnection").getString("status"))
+            val call = async(start = CoroutineStart.UNDISPATCHED) {
+                channel.execute("command", JSONObject().put("command", "fit"))
+            }
+            val id = request(channel).getString("id")
+            assertFalse(event(channel, "claim", "page-a", JSONObject().put("id", id)).getBoolean("accepted"))
+            assertTrue(event(channel, "claim", "page-b", JSONObject().put("id", id)).getBoolean("accepted"))
+            event(channel, "complete", "page-b", JSONObject().put("id", id).put("success", true)
+                .put("state", physical()).put("result", JSONObject().put("accepted", true)))
+            assertTrue(call.await().getBoolean("accepted"))
+            channel.close()
+            assertEquals("closed", channel.describe().getJSONObject("viewConnection").getString("status"))
+        }
+    }
+
 }

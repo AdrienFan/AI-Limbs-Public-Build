@@ -10,6 +10,9 @@ import android.text.Editable
 import android.text.Spannable
 import android.text.TextWatcher
 import android.text.method.TextKeyListener
+import android.view.View
+import android.view.ViewGroup
+import android.view.ViewOutlineProvider
 import android.text.style.BackgroundColorSpan
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
@@ -22,6 +25,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -143,7 +148,27 @@ private class StudioSvgCodeView(context:Context):ScrollView(context) {
     var changed:(String)->Unit={}
     var picked:(Int)->Unit={}
     init {
-        isFillViewport=true;horizontal.isFillViewport=true
+        // AndroidView does not clip by default. Bound the native viewport itself so
+        // scrolled source and selection highlights cannot paint over the canvas/toolbar.
+        layoutParams=ViewGroup.LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT)
+        outlineProvider=ViewOutlineProvider.BOUNDS
+        clipToOutline=true
+        clipChildren=true
+        clipToPadding=true
+        isFillViewport=true
+        isVerticalScrollBarEnabled=true
+        isHorizontalScrollBarEnabled=false
+        isScrollbarFadingEnabled=false
+        scrollBarStyle=View.SCROLLBARS_INSIDE_INSET
+        horizontal.apply {
+            isFillViewport=true
+            clipChildren=true
+            clipToPadding=true
+            isHorizontalScrollBarEnabled=true
+            isVerticalScrollBarEnabled=false
+            isScrollbarFadingEnabled=false
+            scrollBarStyle=View.SCROLLBARS_INSIDE_INSET
+        }
         editor.apply {
             typeface=Typeface.MONOSPACE;textSize=12f;setTextColor(android.graphics.Color.rgb(230,230,235));setBackgroundColor(android.graphics.Color.rgb(22,24,28))
             gravity=android.view.Gravity.TOP;setPadding(12,8,12,24);setHorizontallyScrolling(true)
@@ -159,8 +184,9 @@ private class StudioSvgCodeView(context:Context):ScrollView(context) {
             })
             setOnClickListener {if(keyListener==null)picked(selectionStart.coerceAtLeast(0))}
         }
-        horizontal.addView(editor,android.widget.FrameLayout.LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.WRAP_CONTENT))
-        addView(horizontal,LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.MATCH_PARENT))
+        horizontal.addView(editor,android.widget.FrameLayout.LayoutParams(LayoutParams.WRAP_CONTENT,LayoutParams.WRAP_CONTENT))
+        // Only this child grows with the code; the root stays at the allocated pane height.
+        addView(horizontal,LayoutParams(LayoutParams.MATCH_PARENT,LayoutParams.WRAP_CONTENT))
     }
     fun sync(source:String,editing:Boolean,selected:List<ArtSvgCodeIndex.Range>) {
         syncing=true
@@ -183,7 +209,7 @@ private class StudioSvgCodeView(context:Context):ScrollView(context) {
     fun action(block:suspend ()->Unit){model.working=true;coroutine.launch {try {block()}catch(e:CancellationException){throw e}catch(e:Exception){model.message=e.message ?: "SVG操作失败"}finally{model.working=false}}}
     val enabled=model.ready&&!busy&&!model.working&&model.loading==0
     val canRead=model.documentId.isNotEmpty()&&!busy&&!model.working&&model.loading==0
-    Column(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().clipToBounds()) {
         Row(Modifier.fillMaxWidth().horizontalScroll(rememberScrollState())) {
             TextButton({model.picking=!model.picking},enabled=!busy){Text(if(model.picking)"选对象" else "绘画")}
             TextButton({model.editing=!model.editing},enabled=enabled){Text(if(model.editing)"结束编辑" else "编辑")}
@@ -194,8 +220,9 @@ private class StudioSvgCodeView(context:Context):ScrollView(context) {
             TextButton({onApply(model.request())},enabled=enabled&&model.dirty&&!model.stale){Text("应用")}
             TextButton({if(model.dirty){requestedScope=null;reloadPrompt=true}else action {model.reload()}},enabled=enabled){Text("重新读取")}
         }
-        Text("${if(model.scope=="document")"全图" else "局部"} · ${if(model.dirty)"未应用草稿" else "已同步"} · ${model.message}",style=MaterialTheme.typography.labelSmall,modifier=Modifier.padding(horizontal=6.dp))
-        AndroidView(factory={StudioSvgCodeView(it)},modifier=Modifier.fillMaxWidth().weight(1f),update={view->
+        Text("${if(model.scope=="document")"全图" else "局部"} · ${if(model.dirty)"未应用草稿" else "已同步"} · ${model.message}",style=MaterialTheme.typography.labelSmall,
+            modifier=Modifier.fillMaxWidth().padding(horizontal=6.dp),maxLines=2,overflow=TextOverflow.Ellipsis)
+        AndroidView(factory={StudioSvgCodeView(it)},modifier=Modifier.fillMaxWidth().weight(1f).clipToBounds(),update={view->
             view.changed={model.edit(it)}
             view.picked={offset->if(enabled&&!model.dirty&&!model.stale)ArtSvgCodeIndex.at(model.ranges.filter {it.id in model.known},offset)?.let {onSelect(model.selectionRequest(listOf(it.id)))}}
             view.sync(model.source,model.editing&&enabled,model.ranges.filter {it.id in model.selected})

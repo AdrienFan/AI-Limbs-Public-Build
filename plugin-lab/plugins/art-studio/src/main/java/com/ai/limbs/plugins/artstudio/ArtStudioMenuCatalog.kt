@@ -1747,11 +1747,12 @@ internal object ArtStudioMenuCatalog {
           "documentWrite": false
         },
         {
-          "id": "docker.pending.animation",
+          "id": "docker.animation",
           "title": "动画时间轴",
-          "implemented": false,
+          "implemented": true,
           "source": "krita/krita5.xmlgui",
-          "reason": "尚缺对应工程数据或独立功能实现"
+          "parameters": [{"name":"enabled","type":"boolean","description":"显示此停靠面板","default":true}],
+          "documentWrite": false
         },
         {
           "id": "docker.pending.onion",

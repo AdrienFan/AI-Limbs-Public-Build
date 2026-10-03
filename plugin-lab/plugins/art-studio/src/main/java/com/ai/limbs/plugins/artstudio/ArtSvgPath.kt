@@ -18,8 +18,13 @@ internal object ArtSvgPath {
         while (i < tokens.size) {
             if (tokens[i].value.singleOrNull()?.isLetter() == true) name = tokens[i++].value[0]
             val count = when (name.uppercaseChar()) { 'M', 'L', 'T' -> 2; 'H', 'V' -> 1; 'C' -> 6; 'S', 'Q' -> 4; 'A' -> 7; 'Z' -> 0; else -> error("无效路径命令") }
-            require(i + count <= tokens.size)
-            val values = (0 until count).map { tokens[i++].value.toDouble().also { require(it.isFinite() && abs(it) <= 1000000) } }
+            require(i + count <= tokens.size){"SVG 路径命令 $name 需要$count个数字，剩余不足"}
+            val values = (0 until count).map {
+                val text=tokens[i++].value
+                val number=text.toDoubleOrNull()
+                require(number!=null&&number.isFinite()&&abs(number)<=1000000){"SVG 路径命令 $name 需要$count个有限数字，遇到 '$text'"}
+                number
+            }
             if (name.uppercaseChar() == 'A') require(values[0] >= 0 && values[1] >= 0 && values[3] in listOf(0.0, 1.0) && values[4] in listOf(0.0, 1.0))
             result.add(Command(name, values)); require(result.size <= 2048) { "SVG 路径最多 2048 个命令" }
             if (name == 'M') name = 'L' else if (name == 'm') name = 'l'

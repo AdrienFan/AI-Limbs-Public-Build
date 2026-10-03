@@ -19,7 +19,7 @@ internal object ArtPathTopology {
             if(current.closed&&current.nodes.size>1&&(current.nodes.first().point-current.nodes.last().point).length()<=0.000001) {
                 current.nodes.first().incoming=current.nodes.last().incoming;current.nodes.removeAt(current.nodes.lastIndex)
             }
-            require(current.nodes.size in 1..2049 && (current.closed||current.nodes.size>=2)) {"子路径至少两个节点；闭合曲线可为单节点"}
+            require(current.nodes.size in 1..2049 && (current.closed||current.nodes.size>=2)) {"子路径最多2049节点；开放路径至少两个节点，闭合曲线可为单节点"}
             result.add(current)
         }
         for(i in 0 until commands.length())when(commands.getString(i)) {
@@ -30,9 +30,9 @@ internal object ArtPathTopology {
             else->error("路径命令仅支持M/L/C/Z")
         }
         if(shape.getBoolean("closed")) {require(result.isEmpty()&&!current.closed);current.closed=true}
-        finish();require(cursor==points.length()&&result.size<=64)
+        finish();require(cursor==points.length()){"路径坐标数量与命令不匹配"};require(result.size<=64){"单个 path 最多64条子路径，当前${result.size}条；请拆成多个 path 元素"}
         // Count stored drawing commands, retaining the existing limit for legacy implicit closing edges.
-        require((0 until commands.length()).count {commands.getString(it) in setOf("L","C")} in 1..ArtFreehand.MAX_SEGMENTS)
+        require((0 until commands.length()).count {commands.getString(it) in setOf("L","C")} in 1..ArtFreehand.MAX_SEGMENTS){"单个 path 需1..${ArtFreehand.MAX_SEGMENTS}个绘图段；请将长路径拆分"}
         val flat=result.flatMap {it.nodes}
         if(shape.has("nodeModes")) {val modes=shape.getJSONArray("nodeModes");require(modes.length()==flat.size);flat.forEachIndexed {i,n->n.type=modes.getString(i);require(n.type in ArtPathGeometry.types)}}
         return result
@@ -44,7 +44,7 @@ internal object ArtPathTopology {
     }
     fun flatIndex(parts:List<Part>,r:Ref)=parts.take(r.part).sumOf {it.nodes.size}+r.node
     fun geometry(parts:List<Part>):JSONObject {
-        require(parts.isNotEmpty()&&parts.size<=64)
+        require(parts.isNotEmpty()){"path 至少需要一条子路径"};require(parts.size<=64){"单个 path 最多64条子路径，当前${parts.size}条；请拆成多个 path 元素"}
         if(parts.size==1)return ArtPathGeometry.geometry(parts[0].nodes,parts[0].closed)
         val points=JSONArray();val commands=JSONArray();val modes=JSONArray()
         parts.forEachIndexed {i,p->
@@ -55,7 +55,7 @@ internal object ArtPathTopology {
             if(p.closed)commands.put("Z")
             p.nodes.forEach {modes.put(it.type)}
         }
-        require(points.length()<=ArtFreehand.MAX_GEOMETRY_POINTS)
+        require(points.length()<=ArtFreehand.MAX_GEOMETRY_POINTS){"单个 path 最多${ArtFreehand.MAX_GEOMETRY_POINTS}个几何坐标；请拆成多个 path 元素"}
         return JSONObject().put("points",points).put("commands",commands).put("closed",false).put("nodeModes",modes)
     }
     fun write(shape:JSONObject,parts:List<Part>):JSONObject {

@@ -47,8 +47,8 @@ internal object ArtPathGeometry {
         closed || if(side=="in") index>0 else index<nodes.lastIndex
 
     fun geometry(nodes:List<Node>,closed:Boolean):JSONObject {
-        require(nodes.size in 1..2049 && (closed||nodes.size>=2))
-        val count=segmentCount(nodes,closed);require(count in 1..ArtFreehand.MAX_SEGMENTS)
+        require(nodes.size in 1..2049 && (closed||nodes.size>=2)){"子路径最多2049个节点；开放子路径至少两个节点"}
+        val count=segmentCount(nodes,closed);require(count in 1..ArtFreehand.MAX_SEGMENTS){"单条子路径需1..${ArtFreehand.MAX_SEGMENTS}段；请拆分路径"}
         val points=JSONArray().put(nodes.first().point.json());val commands=JSONArray()
         for(i in 0 until count) {
             val start=nodes[i];val end=nodes[(i+1)%nodes.size]

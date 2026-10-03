@@ -54,8 +54,10 @@ class ArtStudioEntry : InProcessPluginEntry {
         fun capability(name: String, title: String, effect: InProcessCapabilityEffect,
                        block: (JSONObject) -> JSONObject) {
             registerCapability(name, title, effect) { parameters ->
+                // Validate response policy before applying an edit; format only after feedback.
+                val responseMode = if(name=="svg.apply") ArtSvgReceipt.mode(parameters) else "full"
                 try {
-                    if (ArtCanvasFeedback.affectsCanvas(name, parameters))
+                    val result = if (ArtCanvasFeedback.affectsCanvas(name, parameters))
                         store.withCanvasFeedback {
                             val result=block(parameters)
                             if(name.startsWith("reference.")) result.put("referenceFeedback",true)
@@ -68,6 +70,7 @@ class ArtStudioEntry : InProcessPluginEntry {
                             result
                         }
                     else block(parameters)
+                    if(name=="svg.apply") ArtSvgReceipt.format(result,responseMode) else result
                 } catch (request: ArtImageResizeRequired) {
                     // Consent is a no-op result, not a successful edit or an image receipt.
                     request.response()
@@ -351,14 +354,34 @@ class ArtStudioEntry : InProcessPluginEntry {
                 .put("selectedLayerId", state.getString("selectedLayerId"))
                 .put("revision", snapshot.getInt("revision"))
         }
+        capability("animation.info","读取动画时间轴说明",read) {
+            JSONObject().put("frameMin",0).put("frameMax",ArtAnimation.MAX_TIME).put("fpsMin",1).put("fpsMax",60)
+                .put("maxPlaybackFrames",600).put("maxKeysPerLayer",128).put("maxKeysPerDocument",ArtAnimation.MAX_KEYS)
+                .put("supportedLayers",JSONArray(listOf("paint","image","vector"))).put("holdEditsSourceKey",true)
+                .put("gifMaxEdge",1024).put("gifPixelBudget",32L*1024*1024).put("gifPalette","fixed-255-rgb332")
+                .put("gifAlphaThreshold",128).put("unimplemented",JSONArray(listOf("audio","curves","video","frame-sequence-import")))
+        }
+        capability("animation.timeline","读取动画时间轴",read) {store.animationTimeline()}
+        capability("animation.configure","设置动画播放范围与帧率",write) {p->store.animationConfigure("LANER",p)}
+        capability("animation.keyframe","编辑动画关键帧",write) {p->store.animationKey("LANER",p)}
+        capability("animation.seek","定位当前动画帧",write) {p->store.animationSeek("LANER",p)}
+        capability("animation.preview","预览指定动画帧",read) {p->
+            val frame=store.animationSnapshot(p)
+            val image=ArtRenderer.render(store,frame,maxEdge=p.optInt("maxEdge",512))
+            try {
+                val bytes=ArtImagePolicy.encodePng(image,8*1024*1024)
+                JSONObject().put("documentId",frame.getString("id")).put("revision",frame.getInt("revision"))
+                    .put("frame",p.getInt("frame")).put("width",image.width).put("height",image.height)
+                    .put("mcp_content",JSONArray().put(JSONObject().put("type","image").put("mimeType","image/png")
+                        .put("data",Base64.encodeToString(bytes,Base64.NO_WRAP))))
+            } finally {image.recycle()}
+        }
+        capability("animation.export","导出GIF动画",write) {p->store.animationExport(p)}
         capability("history.list", "列出画室操作历史", read) {
-            JSONObject().put("operations", store.current().getJSONArray("operations"))
+            store.historyOperations()
         }
         capability("history.timeline", "读取足迹状态列表", read) {
-            val snapshot = store.current()
-            JSONObject().put("timeline", snapshot.getJSONArray("timeline"))
-                .put("position", snapshot.getInt("timelinePosition"))
-                .put("revision", snapshot.getInt("revision"))
+            store.historyTimeline()
         }
         capability("history.goto", "切换到指定足迹状态", write) { p ->
             store.historyJump("LANER", p.getString("id"), p.getInt("expectedRevision"))
@@ -510,7 +533,7 @@ class ArtStudioEntry : InProcessPluginEntry {
             require((0 until ops.length()).any {
                 val op = ops.getJSONObject(it)
                 op.getString("id") == id && op.getString("actor") == "LANER" &&
-                    op.getString("type") !in setOf("REVERT", "RESTORE")
+                    op.getString("type") !in setOf("REVERT", "RESTORE", "ANIMATION_TIME")
             }) { "只能撤销已存在的兰儿操作" }
             store.apply("LANER", "REVERT", JSONObject().put("targetId", id))
         }
@@ -829,7 +852,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("copyId", optional = true))
         "svg.info" -> emptyList()
         "svg.read" -> listOf(p("scope",optional=true),p("objectIds","array",true),p("documentId",optional=true),p("expectedRevision","integer",true),p("offset","integer",true),p("limit","integer",true),p("includeIndex","boolean",true))
-        "svg.validate","svg.preview","svg.apply" -> listOf(p("source"),p("documentId"),p("expectedRevision","integer"),p("scope",optional=true),p("objectIds","array",true),p("newLayerName",optional=true))
+        "svg.validate","svg.preview","svg.apply" -> listOf(p("source"),p("documentId"),p("expectedRevision","integer"),p("scope",optional=true),p("objectIds","array",true),p("newLayerName",optional=true))+if(name=="svg.apply")listOf(p("responseMode",optional=true)) else emptyList()
         "svg.select" -> listOf(p("documentId"),p("expectedRevision","integer"),p("objectIds","array"))
         "svg.hit" -> listOf(p("x","integer"),p("y","integer"),p("documentId",optional=true),p("expectedRevision","integer",true))
         "transform.info","measure.info","measure.settings" -> emptyList()
@@ -855,6 +878,14 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "transform.move" -> listOf(id, p("x", "number"), p("y", "number"))
         "transform.scale" -> listOf(id, p("scale", "number"))
         "transform.rotate" -> listOf(id, p("rotation", "number"))
+        "animation.info", "animation.timeline" -> emptyList()
+        "animation.configure" -> listOf(p("documentId"),p("expectedRevision","integer"),
+            p("fps","integer",true),p("start","integer",true),p("end","integer",true),p("loop","boolean",true),p("onion","boolean",true))
+        "animation.keyframe" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("frame","integer"),p("action"),
+            p("sourceFrame","integer",true),p("targetFrame","integer",true))
+        "animation.seek" -> listOf(p("documentId"),p("expectedRevision","integer"),p("frame","integer"))
+        "animation.preview" -> listOf(p("documentId"),p("expectedRevision","integer"),p("frame","integer"),p("maxEdge","integer",true))
+        "animation.export" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maxEdge","integer",true))
         "history.goto" -> listOf(id, p("expectedRevision", "integer"))
         "history.revert_actor_operations" -> listOf(id)
         "storage.set_directory" -> listOf(p("directory"))
