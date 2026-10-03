@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.68",
+  "version": "0.2.69",
   "api": {
     "target": 1,
     "min": 1
@@ -278,7 +278,10 @@
       "plugin.art.studio.svg.preview",
       "plugin.art.studio.svg.apply",
       "plugin.art.studio.svg.select",
-      "plugin.art.studio.svg.hit"
+      "plugin.art.studio.svg.hit",
+      "plugin.art.studio.quick_tools.state",
+      "plugin.art.studio.quick_tools.configure",
+      "plugin.art.studio.quick_tools.use"
     ],
     "services": [],
     "providers": [

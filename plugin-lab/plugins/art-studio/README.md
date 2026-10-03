@@ -1,3 +1,26 @@
+## 0.2.69：左侧固定快捷面板
+
+左侧折叠工具栏下方增加固定快捷区，上方完整工具列表继续滚动，原来的单击选择、双击参数浮窗保留。默认只有一排两个“＋”空位，每排两位，每次添加一位，最多八位四排；只占实际行数，使用分隔线区分。奇数数量最后一排右侧没有按钮，不算一个空位。
+
+空位单击选择工具；已配置按钮单击使用当前参数并显示选中状态，双击打开快捷配置，不打开参数浮窗。配置提供更换工具、清空此位、添加快捷位、移除快捷位。清空保留位置和其他绑定，移除只删除指定位置；不按空位数量自动缩减或排序。允许明确移除所有位置，零位时显示“＋添加快捷位”入口，不自动补位。
+
+配置位于插件共享数据目录的 quick-tools.json，使用现有文件锁和原子写入，独立revision保护手机与兰儿的并发修改。稳定位置ID不依赖工具ID，重复配置同一工具允许。配置不进入作品撤销历史，也不保存额外的工具参数。页面轮询既有menuUiState同步配置，不修改基座。工具不可用时保留原绑定并明确显示，允许更换。
+
+兰儿入口：plugin.art.studio.quick_tools.state / configure / use。先state获取slots[].id和revision，set更换需slotId/toolId，clear和remove需slotId，add不传位置或工具；所有修改携expectedConfigRevision。use需已配置可用位置和可见手机画布，通过既有页面Provider通道选择工具，Host/Resident共用，返回手机选中状态。当前缩放工具再次使用仍切换放大/缩小。
+
+简洁示例，替换SLOT_ID和示例0：
+
+- 读取：quick_tools.state {}
+- 更换：quick_tools.configure {"action":"set","slotId":"SLOT_ID","toolId":"ink","expectedConfigRevision":0}
+- 清空：quick_tools.configure {"action":"clear","slotId":"SLOT_ID","expectedConfigRevision":0}
+- 添加：quick_tools.configure {"action":"add","expectedConfigRevision":0}
+- 移除：quick_tools.configure {"action":"remove","slotId":"SLOT_ID","expectedConfigRevision":0}
+- 使用：quick_tools.use {"slotId":"SLOT_ID","expectedConfigRevision":0}
+
+版本0.2.69 / versionCode72 / applicationId v0269。本轮包含此前0.2.64–0.2.68累积源码，静态检查后统一推送到云端执行测试、编译和签名；不在手机本地编译。新增位置行为与并发修订号云端测试。能力帮助覆盖数量也同步到实际246项，避免沿用早期228项断言。
+
+实机验收需检查：一排到四排高度、滚动时底部固定、单击/双击分流、清空保持位置、奇数行右侧无假位置、逐个移除与重新添加、退出重开持久化、手机/兰儿同时配置拒绝旧revision，以及Host/Resident选择和缩放参数复用。此前SVG与变形等功能也需在本次云端产物上验收。
+
 ## 0.2.68：SVG 开关与共享代码通道（开发源码，尚未编译）
 
 - 底部快捷栏在撤销、重做右侧新增 SVG 开关，默认关闭；红色“SVG关”、绿色“SVG开”，有明确无障碍说明。开启后工作区上画布、下源码，初始各半，拖动中间分隔条调到25%–75%；切换分屏保留视口中心对应的文档点与物理缩放，缩放仍受现有10%–1600%限制。

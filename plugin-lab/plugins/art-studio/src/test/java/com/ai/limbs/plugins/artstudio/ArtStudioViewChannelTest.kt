@@ -30,6 +30,31 @@ class ArtStudioViewChannelTest {
         catch (error: IllegalStateException) { assertTrue(error.message!!.isNotBlank()) }
     }
 
+    @Test fun selectingAToolUsesTheVisiblePageAndKeepsParameterWindowClosed() = runBlocking {
+        supervisorScope {
+            val channel = ArtStudioViewChannel { 1000L }
+            expectFailure { channel.execute("tool_select", JSONObject().put("toolId", "ink")) }
+            attach(channel)
+            val call = async(start = CoroutineStart.UNDISPATCHED) {
+                channel.execute("tool_select", JSONObject().put("toolId", "eraser"))
+            }
+            val pending = request(channel)
+            assertEquals("tool_select", pending.getString("operation"))
+            assertEquals("doc-a", pending.getString("documentId"))
+            assertFalse(call.isCompleted)
+            val id = pending.getString("id")
+            event(channel, "claim", payload = JSONObject().put("id", id))
+            val selected = StudioToolWindowState(activeTool = "eraser").describe()
+            event(channel, "complete", payload = JSONObject().put("id", id).put("success", true)
+                .put("state", physical().put("toolOptionsWindow", selected))
+                .put("result", selected.put("accepted", true)))
+            val result = call.await()
+            assertEquals("eraser", result.getString("activeTool"))
+            assertFalse(result.getBoolean("open"))
+            channel.close()
+        }
+    }
+
     @Test fun aDifferentProcessCanPublishTheActualCanvas() = runBlocking {
         val channel = ArtStudioViewChannel { 1000L }
         ArtStudioViewControl.canvasAttached = false

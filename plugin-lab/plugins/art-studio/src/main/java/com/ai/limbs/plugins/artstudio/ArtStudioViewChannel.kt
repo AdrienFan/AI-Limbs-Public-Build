@@ -85,6 +85,7 @@ internal class ArtStudioViewChannel(
                 require(p.getString("option") in optionNames)
                 p.getBoolean("enabled")
             }
+            "tool_select" -> require(ArtToolCatalog.implemented.any { it.first == p.getString("toolId") })
             "zoom_tool" -> require(p.getString("mode") in setOf("in", "out", "toggle"))
             "presentation" -> require(p.getString("mode") in presentationNames)
             "tool_options" -> {
@@ -132,7 +133,7 @@ internal class ArtStudioViewChannel(
                 deferred = deferPreference(operation, parameters)
                 null
             } else {
-                val needsCanvas = operation in setOf("zoom", "command", "tool_options")
+                val needsCanvas = operation in setOf("zoom", "command", "tool_options", "tool_select")
                 check(if (needsCanvas) liveCanvas() else livePage()) { "请先打开画室画布，再操作视图" }
                 val zoom = snapshot.optJSONObject("canvasZoom")
                 val documentId = if (needsCanvas) requireNotNull(zoom).getString("documentId") else null

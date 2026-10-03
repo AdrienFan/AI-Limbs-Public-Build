@@ -43,6 +43,9 @@ internal object ArtCapabilityHelp {
     // Numeric revision 0 is a template value; its parameter says to substitute the latest revision.
     private const val EXAMPLES_1 = """
 {
+  "quick_tools.state":{"args":{},"note":"","summary":"读取插件持久快捷位id/toolId、独立revision与行数；默认两空位，最多八位，不自动排序或缩减。"},
+  "quick_tools.configure":{"args":{"action":"set","slotId":"SLOT_ID","toolId":"ink","expectedConfigRevision":0},"note":"slotId/revision取quick_tools.state；toolId取toolbox.catalog已实现工具。set更换，clear保留位置，add追加一空位，remove仅移除此位；不改作品历史。","summary":"保存手机与兰儿共享快捷配置；每次add只加一位，上限八位。"},
+  "quick_tools.use":{"args":{"slotId":"SLOT_ID","expectedConfigRevision":0},"note":"须手机画布已挂载可见，快捷位已配置；复用当前工具参数，不打开参数窗口，当前缩放工具再次使用切换大小。","summary":"经现有页面通道选择快捷工具并返回手机选中状态。"},
   "toolbox.catalog":{"args":{},"note":"","summary":"返回工具栏ID、implemented状态与尺规types/typeInfos（顺序及最小示例）；无需打开工程，绘画用对应接口。"},
   "menu.catalog":{"args":{},"note":"","summary":"返回菜单树，每个叶子含真实action、parameters、documentWrite、可用状态和拒绝原因。"},
   "image.formats":{"args":{},"note":"","summary":"读取画室图片格式支持"},
@@ -275,6 +278,8 @@ internal object ArtCapabilityHelp {
 """
     private const val FIELDS = """
 {
+  "slotId":{"description":"quick_tools.state.slots[].id，快捷位置的稳定ID。"},
+  "expectedConfigRevision":{"description":"quick_tools.state.revision，替换示例0；仅保护快捷配置，不是作品修订号。"},
   "documentId":{"description":"当前工程ID，取document.info.id；示例DOCUMENT_ID须替换。"},
   "expectedRevision":{"description":"最新document.info.revision整数；替换示例0。每次写入后刷新，过期时先重读状态。"},
   "id":{"description":"真实对象ID，取本能力说明指定清单；示例*_ID须替换。"},
@@ -579,6 +584,12 @@ internal object ArtCapabilityHelp {
 """
     private const val SCOPED_1 = """
 {
+  "quick_tools.configure.action":{"description":"set需slotId/toolId；clear和remove需slotId；add不传slotId/toolId，只追加一个空位。","enum":["set","clear","add","remove"]},
+  "quick_tools.configure.slotId":{"description":"quick_tools.state.slots[].id，稳定位置ID；仅add不传。"},
+  "quick_tools.use.slotId":{"description":"quick_tools.state.slots[].id；该位须已配置可用工具。"},
+  "quick_tools.configure.toolId":{"description":"仅set需要，取toolbox.catalog.tools中implemented=true的id；不另存工具参数。"},
+  "quick_tools.configure.expectedConfigRevision":{"description":"取quick_tools.state.revision，替换示例0；独立配置修订号，旧版请求拒绝，不覆盖另一端改动。"},
+  "quick_tools.use.expectedConfigRevision":{"description":"取quick_tools.state.revision，替换示例0；旧版请求或空位拒绝。"},
   "document.list.width":{"description":"尺寸整数1–16384像素；还须通过image.limits当前内存预算。"},
   "document.list.height":{"description":"尺寸整数1–16384像素；还须通过image.limits当前内存预算。"},
   "document.recent.width":{"description":"尺寸整数1–16384像素；还须通过image.limits当前内存预算。"},

@@ -513,7 +513,7 @@ internal class ArtStore(private val root: File) {
     }
 
     fun menuUiState(): JSONObject = locked {
-        JSONObject().put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
+        JSONObject().put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("quickTools", quickToolsState()).put("storage", saveDirectories.describe())
             .put("moveSettings",moveSettings()).put("measureSettings",measureSettings()).put("layerClipboard",layerClipboard.isFile)
             .put("request", if (menuUiRequest.isFile) JSONObject(menuUiRequest.readText()) else JSONObject.NULL)
     }
@@ -525,6 +525,26 @@ internal class ArtStore(private val root: File) {
             atomic(menuUiRequest,request.toString())
         }
         JSONObject().put("requestId",id).put("applied",request.getString("id")==id)
+    }
+
+    private val quickToolsFile = File(root, "quick-tools.json")
+
+    private fun readQuickTools(): JSONObject =
+        if (quickToolsFile.isFile) JSONObject(quickToolsFile.readText()) else ArtQuickTools.initial()
+
+    fun quickToolsState(): JSONObject = locked { ArtQuickTools.describe(readQuickTools()) }
+
+    fun configureQuickTools(p: JSONObject): JSONObject = locked {
+        val next = ArtQuickTools.change(readQuickTools(), p,
+            ArtToolCatalog.implemented.map { it.first }.toSet())
+        atomic(quickToolsFile, next.toString())
+        ArtQuickTools.describe(next)
+    }
+
+    fun quickToolTarget(p: JSONObject): String = locked {
+        val tool = ArtQuickTools.tool(readQuickTools(), p.getString("slotId"), p.getLong("expectedConfigRevision"))
+        require(ArtToolCatalog.implemented.any { it.first == tool }) { "快捷工具在当前设备不可用" }
+        tool
     }
 
     private val dockPanelsFile = File(root, "dock-panels.json")

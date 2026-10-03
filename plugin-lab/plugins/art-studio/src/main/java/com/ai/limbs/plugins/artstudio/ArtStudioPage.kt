@@ -645,6 +645,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var leftDrawerPinned by rememberSaveable { mutableStateOf(false) }
     var rightDrawerPinned by rememberSaveable { mutableStateOf(false) }
     var dockPanelState by remember { mutableStateOf(ArtDockPanels.initial()) }
+    var quickToolsState by remember { mutableStateOf<JSONObject?>(null) }
+    var quickToolsBusy by remember { mutableStateOf(false) }
     val activeRightPane = RightPane.values().firstOrNull {
         it.name.lowercase(java.util.Locale.ROOT) == dockPanelState.optString("activePane")
     }
@@ -813,6 +815,36 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 host.logger.e("ArtStudio","Group image export failed",error)
                 remainingResult=JSONObject().put("title","导出未完成").put("text",error.message ?: "图层组导出失败")
             }
+        }
+    }
+    fun acceptQuickTools(next: JSONObject) {
+        if (quickToolsState == null || next.getLong("revision") > requireNotNull(quickToolsState).getLong("revision"))
+            quickToolsState = next
+    }
+    fun configureQuickTools(p: JSONObject) {
+        if (quickToolsBusy) return
+        quickToolsBusy = true
+        scope.launch {
+            try {
+                acceptQuickTools(withContext(Dispatchers.IO) { store.configureQuickTools(p) })
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Quick tool configuration failed", error)
+                Toast.makeText(context, error.message ?: "快捷配置保存失败", Toast.LENGTH_LONG).show()
+            } finally { quickToolsBusy = false }
+        }
+    }
+    fun useQuickTool(id: String, configRevision: Long) {
+        if (busy || quickToolsBusy) return
+        quickToolsBusy = true
+        scope.launch {
+            try {
+                val target = withContext(Dispatchers.IO) { store.quickToolTarget(JSONObject()
+                    .put("slotId", id).put("expectedConfigRevision", configRevision)) }
+                ArtStudioToolOptionsControl.activate(target)
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Quick tool selection failed", error)
+                Toast.makeText(context, error.message ?: "快捷工具选择失败", Toast.LENGTH_LONG).show()
+            } finally { quickToolsBusy = false }
         }
     }
     fun acceptDockState(next: JSONObject) {
@@ -1092,6 +1124,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 moveSettingsReady=true
             }
             acceptDockState(menuData.getJSONObject("dockPanels"))
+            acceptQuickTools(menuData.getJSONObject("quickTools"))
             val settings=menuData.getJSONObject("settings")
             if(settings.toString()!=remainingSettings.toString()) {
                 val previous=remainingSettings
@@ -1591,6 +1624,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 "set" -> ArtStudioViewControl.setOption(parameters.getString("option"), parameters.getBoolean("enabled"))
                 "zoom_tool" -> ArtStudioViewControl.setZoomToolMode(parameters.getString("mode"))
+                "tool_select" -> {
+                    ArtStudioToolOptionsControl.activate(parameters.getString("toolId"))
+                    ArtStudioToolOptionsControl.state.value.describe().put("accepted", true)
+                }
                 "tool_options" -> ArtStudioToolOptionsControl.command(parameters)
                 "presentation" -> {
                     ArtStudioViewControl.setPresentationMode(parameters.getString("mode"))
@@ -1896,61 +1933,106 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 }
                             }
 
-                            Column(Modifier.fillMaxSize().padding(top = 48.dp)
-                                .verticalScroll(rememberScrollState()),
-                                verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                availableTools.chunked(2).forEach { pair ->
-                                    Row(Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        pair.forEach { (id, label, glyph) ->
-                                            val toolLabel = if (id == "zoom")
-                                                label + if (viewOptions.zoomToolMode == "in")
-                                                    "：放大；再次点击切换缩小" else "：缩小；再次点击切换放大"
-                                            else label
-                                            TooltipBox(
-                                                positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                                                tooltip = {
-                                                    PlainTooltip {
-                                                        Text(toolLabel + "；双击打开参数")
+                            Column(Modifier.fillMaxSize().padding(top = 48.dp)) {
+                                Column(Modifier.fillMaxWidth().weight(1f)
+                                    .verticalScroll(rememberScrollState()),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    availableTools.chunked(2).forEach { pair ->
+                                        Row(Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceEvenly) {
+                                            pair.forEach { (id, label, glyph) ->
+                                                val toolLabel = if (id == "zoom")
+                                                    label + if (viewOptions.zoomToolMode == "in")
+                                                        "：放大；再次点击切换缩小" else "：缩小；再次点击切换放大"
+                                                else label
+                                                TooltipBox(
+                                                    positionProvider = TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                                                    tooltip = {
+                                                        PlainTooltip {
+                                                            Text(toolLabel + "；双击打开参数")
+                                                        }
+                                                    },
+                                                    state = rememberTooltipState(),
+                                                    enableUserInput = true
+                                                ) {
+                                                    Surface(Modifier.size(40.dp)
+                                                        .semantics {
+                                                            contentDescription = toolLabel + "；双击打开参数"
+                                                            customActions = listOf(CustomAccessibilityAction("打开工具参数") {
+                                                                ArtStudioToolOptionsControl.show(id); true
+                                                            })
+                                                        }
+                                                        .combinedClickable(
+                                                            onClickLabel = toolLabel,
+                                                            onClick = {
+                                                                ArtStudioToolOptionsControl.activate(id)
+                                                            },
+                                                            onDoubleClick = { ArtStudioToolOptionsControl.show(id) }
+                                                        ),
+                                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                                                        color = if (tool == id)
+                                                            MaterialTheme.colorScheme.primaryContainer
+                                                        else MaterialTheme.colorScheme.surfaceVariant) {
+                                                        Box(Modifier.fillMaxSize(),
+                                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                            if (id == "zoom") {
+                                                                Icon(Icons.Default.Search, contentDescription = null,
+                                                                    modifier = Modifier.size(24.dp))
+                                                                Text(viewOptions.zoomToolBadge,
+                                                                    fontSize = 10.sp, lineHeight = 12.sp,
+                                                                    modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)
+                                                                        .padding(end = 3.dp, bottom = 2.dp))
+                                                            } else {
+                                                                Text(glyph, style = MaterialTheme.typography.titleMedium,
+                                                                    modifier = Modifier.semantics {
+                                                                        contentDescription = label
+                                                                    })
+                                                            }
+                                                        }
                                                     }
-                                                },
-                                                state = rememberTooltipState(),
-                                                enableUserInput = true
-                                            ) {
-                                                Surface(Modifier.size(40.dp)
-                                                    .semantics {
-                                                        contentDescription = toolLabel + "；双击打开参数"
-                                                        customActions = listOf(CustomAccessibilityAction("打开工具参数") {
-                                                            ArtStudioToolOptionsControl.show(id); true
+                                                }
+                                            }
+                                        }
+                                    }
+                                    plannedTools.chunked(2).forEach { pair ->
+                                        Row(Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceEvenly) {
+                                            pair.forEach { item ->
+                                                TooltipBox(
+                                                    positionProvider =
+                                                        TooltipDefaults.rememberPlainTooltipPositionProvider(),
+                                                    tooltip = {
+                                                        PlainTooltip {
+                                                            Text("${item.label} · 尚未实现；双击查看说明")
+                                                        }
+                                                    },
+                                                    state = rememberTooltipState(),
+                                                    enableUserInput = true
+                                                ) {
+                                                    Surface(Modifier.size(40.dp).semantics {
+                                                        contentDescription = "${item.label}，尚未实现，双击查看说明"
+                                                        customActions = listOf(CustomAccessibilityAction("查看工具说明") {
+                                                            ArtStudioToolOptionsControl.show(item.id); true
                                                         })
-                                                    }
-                                                    .combinedClickable(
-                                                        onClickLabel = toolLabel,
-                                                        onClick = {
-                                                            if (id == "zoom" && tool == "zoom")
-                                                                ArtStudioViewControl.setZoomToolMode("toggle")
-                                                            ArtStudioToolOptionsControl.select(id)
-                                                        },
-                                                        onDoubleClick = { ArtStudioToolOptionsControl.show(id) }
+                                                    }.combinedClickable(
+                                                        onClickLabel = "工具尚未实现",
+                                                        onClick = { },
+                                                        onDoubleClick = { ArtStudioToolOptionsControl.show(item.id) }
                                                     ),
-                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
-                                                    color = if (tool == id)
-                                                        MaterialTheme.colorScheme.primaryContainer
-                                                    else MaterialTheme.colorScheme.surfaceVariant) {
-                                                    Box(Modifier.fillMaxSize(),
-                                                        contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                        if (id == "zoom") {
-                                                            Icon(Icons.Default.Search, contentDescription = null,
-                                                                modifier = Modifier.size(24.dp))
-                                                            Text(viewOptions.zoomToolBadge,
-                                                                fontSize = 10.sp, lineHeight = 12.sp,
-                                                                modifier = Modifier.align(androidx.compose.ui.Alignment.BottomEnd)
-                                                                    .padding(end = 3.dp, bottom = 2.dp))
-                                                        } else {
-                                                            Text(glyph, style = MaterialTheme.typography.titleMedium,
-                                                                modifier = Modifier.semantics {
-                                                                    contentDescription = label
-                                                                })
+                                                        shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
+                                                        color = MaterialTheme.colorScheme.surfaceVariant
+                                                            .copy(alpha = 0.45f)) {
+                                                        Box(Modifier.fillMaxSize(),
+                                                            contentAlignment = androidx.compose.ui.Alignment.Center) {
+                                                            Text(item.glyph,
+                                                                color = MaterialTheme.colorScheme
+                                                                    .onSurfaceVariant.copy(alpha = 0.45f),
+                                                                style = MaterialTheme.typography.titleMedium)
+                                                            Text("未", Modifier.align(
+                                                                androidx.compose.ui.Alignment.BottomEnd),
+                                                                color = MaterialTheme.colorScheme
+                                                                    .onSurfaceVariant.copy(alpha = 0.7f),
+                                                                style = MaterialTheme.typography.labelSmall)
                                                         }
                                                     }
                                                 }
@@ -1958,53 +2040,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                         }
                                     }
                                 }
-                                plannedTools.chunked(2).forEach { pair ->
-                                    Row(Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceEvenly) {
-                                        pair.forEach { item ->
-                                            TooltipBox(
-                                                positionProvider =
-                                                    TooltipDefaults.rememberPlainTooltipPositionProvider(),
-                                                tooltip = {
-                                                    PlainTooltip {
-                                                        Text("${item.label} · 尚未实现；双击查看说明")
-                                                    }
-                                                },
-                                                state = rememberTooltipState(),
-                                                enableUserInput = true
-                                            ) {
-                                                Surface(Modifier.size(40.dp).semantics {
-                                                    contentDescription = "${item.label}，尚未实现，双击查看说明"
-                                                    customActions = listOf(CustomAccessibilityAction("查看工具说明") {
-                                                        ArtStudioToolOptionsControl.show(item.id); true
-                                                    })
-                                                }.combinedClickable(
-                                                    onClickLabel = "工具尚未实现",
-                                                    onClick = { },
-                                                    onDoubleClick = { ArtStudioToolOptionsControl.show(item.id) }
-                                                ),
-                                                    shape = androidx.compose.foundation.shape.RoundedCornerShape(6.dp),
-                                                    color = MaterialTheme.colorScheme.surfaceVariant
-                                                        .copy(alpha = 0.45f)) {
-                                                    Box(Modifier.fillMaxSize(),
-                                                        contentAlignment = androidx.compose.ui.Alignment.Center) {
-                                                        Text(item.glyph,
-                                                            color = MaterialTheme.colorScheme
-                                                                .onSurfaceVariant.copy(alpha = 0.45f),
-                                                            style = MaterialTheme.typography.titleMedium)
-                                                        Text("未", Modifier.align(
-                                                            androidx.compose.ui.Alignment.BottomEnd),
-                                                            color = MaterialTheme.colorScheme
-                                                                .onSurfaceVariant.copy(alpha = 0.7f),
-                                                            style = MaterialTheme.typography.labelSmall)
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
+                            StudioQuickToolsPanel(quickToolsState, tool, viewOptions.zoomToolMode,
+                                busy || quickToolsBusy, ::configureQuickTools, ::useQuickTool)
                             }
-
                     }
                 }
                 }

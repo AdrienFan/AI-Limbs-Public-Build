@@ -28,6 +28,14 @@ internal object ArtStudioToolOptionsControl {
         state.update { it.copy(activeTool = id, toolId = if (it.open) id else it.toolId) }
     }
 
+    /** Both toolbar surfaces use the current parameters and the same zoom toggle. */
+    fun activate(id: String) {
+        require(ArtToolCatalog.implemented.any { it.first == id }) { "工具尚未实现：$id" }
+        if (id == "zoom" && state.value.activeTool == "zoom")
+            ArtStudioViewControl.setZoomToolMode("toggle")
+        select(id)
+    }
+
     fun show(id: String) {
         val implemented = ArtToolCatalog.implemented.any { it.first == id }
         require(implemented || ArtToolCatalog.pending.any { it.id == id }) { "未知工具：$id" }

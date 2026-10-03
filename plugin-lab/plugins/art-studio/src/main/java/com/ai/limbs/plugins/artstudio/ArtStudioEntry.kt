@@ -174,7 +174,14 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("assistant.stroke","沿尺规绘画",write) { p -> store.assistantStroke("LANER",p) }
         capability("assistant.preview","检查尺规与画布",read) { p -> store.assistantPreview(p) }
         capability("toolbox.catalog", "读取画室工具清单", read) {
-            ArtToolCatalog.describe(viewChannel.describe())
+            ArtToolCatalog.describe(viewChannel.describe()).put("quickTools", store.quickToolsState())
+        }
+        capability("quick_tools.state", "读取快捷工具配置", read) { store.quickToolsState() }
+        capability("quick_tools.configure", "配置快捷工具位置", write) { p -> store.configureQuickTools(p) }
+        registerCapability("quick_tools.use", "使用已配置快捷工具", InProcessCapabilityEffect.UI_INTERACTION) { p ->
+            val tool = store.quickToolTarget(p)
+            viewChannel.execute("tool_select", JSONObject().put("toolId", tool))
+                .put("slotId", p.getString("slotId")).put("configRevision", p.getLong("expectedConfigRevision"))
         }
         capability("document.create", "新建画室工程", write) { p ->
             store.create(p.getInt("width"), p.getInt("height"),
@@ -699,6 +706,10 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "image.set_background" -> listOf(p("color"))
         "image.resize_canvas" -> listOf(p("width", "integer"), p("height", "integer"),
             p("offsetX", "integer", true), p("offsetY", "integer", true))
+        "quick_tools.state" -> emptyList()
+        "quick_tools.configure" -> listOf(p("action"), p("expectedConfigRevision", "integer"),
+            p("slotId", optional = true), p("toolId", optional = true))
+        "quick_tools.use" -> listOf(p("slotId"), p("expectedConfigRevision", "integer"))
         "dock.command" -> listOf(p("command"), p("panel", optional = true), p("enabled", "boolean", true))
         "view.set" -> listOf(p("option"), p("enabled", "boolean"))
         "view.state" -> listOf(p("target", optional = true))
