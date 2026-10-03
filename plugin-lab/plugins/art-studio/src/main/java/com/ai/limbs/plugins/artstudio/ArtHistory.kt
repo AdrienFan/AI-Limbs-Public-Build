@@ -34,6 +34,7 @@ internal object ArtHistory {
                     "move"->"移动动画关键帧";"disable"->"停用动画轨道";else->error("未知关键帧操作")
                 }
                 "ANIMATION_TIME" -> "定位动画帧"
+                "ANIMATION_POSES" -> "批量动画姿态"
                 "MENU_LAYER_CHANGE" -> operation.getJSONObject("parameters").getString("label")
                 "LAYER_CREATE", "IMAGE_IMPORT", "PASTE_IMAGE" -> "添加图层"
                 "ASSISTANT_CREATE" -> "添加辅助尺规"
@@ -157,6 +158,7 @@ internal object ArtHistory {
         val facts = mutableListOf<String>()
         if(operation.has("animationFrame"))facts.add("动画帧："+operation.getInt("animationFrame"))
         if(operation.getString("type")=="ANIMATION_KEY")facts.add("关键帧："+p.getInt("frame"))
+        if(operation.getString("type")=="ANIMATION_POSES")facts.add("姿态帧数："+p.getJSONArray("poses").length())
         if(p.has("name")) facts.add("名称："+p.getString("name"))
         if(operation.getString("type") in setOf("SHAPE_CREATE","SHAPE_FREEHAND")) {
             val shape=p.getJSONObject("shape")

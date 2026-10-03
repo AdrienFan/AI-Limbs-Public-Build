@@ -1365,3 +1365,19 @@ requestId 为每次逻辑编辑生成的小写标准 UUID，仅 animation.config
 分页 source 是完整 JSON 的字符串片段。使用返回 nextOffset 续读，并携第一页 sha256 为 expectedSha256；limit 为 2–16384 个 UTF-16 字符，默认 8000，页尾不拆代理对。每页核对工程号、修订号、散列，最终拼接 source、核验 UTF-8 SHA-256 并解析。身份、版本或同版本快照元数据改变时从第一页重新读取。摘要不包含图形和历史；专用 layer/animation/history 阅读入口继续可用。
 
 本轮仅完成源码与静态检查；新增云端回归用例源码尚未执行。未本地编译、未推送、未启动云编译，部署后仍需大工程 Host/Resident 验收。动画批量制作和 GIF 色彩/压缩另轮处理。
+
+
+## 0.2.78：原生动画姿态序列
+
+第二条根因：每个动作帧必须分别复制关键帧、定位播放头和编辑图形；每步重放工程/写历史，AI 还要读取时间轴衔接，常用 SVG 重复传整套几何。新增两个插件能力，258项能力，versionCode81/applicationId v0278，基座无改动。
+
+```text
+plugin.art.studio.animation.pose.read {"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","sourceFrame":0}
+plugin.art.studio.animation.poses.apply {"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","sourceFrame":0,"poses":[{"frame":2,"layer":{"x":10,"y":0}},{"frame":4,"layer":{"x":20,"y":0}}],"responseMode":"receipt","requestId":"REQUEST_UUID"}
+```
+
+ID/版本从animation.timeline或document.summary取得；对象ID和来源变换从pose.read取得。poses每项均基于同一个来源原生帧，不累积。支持绘画/图像/矢量图层的x/y/scale/rotation/opacity/affine及矢量对象matrix/opacity/visible绝对值；矩阵六元组按现有合成顺序与其他图层变换共同生效。此入口编排已有内容的姿态，不创建新几何、笔画或像素；这些仍使用现有绘画工具。来源内容仅在新历史事件中捕获一次。单次1–32帧、1024对象修改、192KiB输入；超过时分段提交，用每次回执的新revision继续。
+
+所有帧和预算验证通过后一次原子写入，一个修订/历史事件，保留播放头与其他帧；一次撤销整段，停靠足迹显示“批量动画姿态”及帧数。默认拒绝覆盖已有帧，overwrite:true明确覆盖指定帧。图层/父组/对象锁定与非法矩阵明确拒绝。每个新增姿态帧均走现有几何和渲染预算检查，错误不改草稿。支持上轮requestId提交确认，完成后附一次缩略图。旧关键帧、定位及绘画入口不变。
+
+只完成源码与静态核对；新增云端回归用例未执行。未推送、未编译；部署后需大工程、多工具继续编辑、撤销/重做、父组锁定、Host/Resident并发与32帧事务验收。第三条GIF编码尚未动工。

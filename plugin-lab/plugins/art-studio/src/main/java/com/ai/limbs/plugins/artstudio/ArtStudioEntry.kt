@@ -385,6 +385,8 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("animation.configure","设置动画播放范围与帧率",write) {p->store.animationConfigure("LANER",p)}
         capability("animation.keyframe","编辑动画关键帧",write) {p->store.animationKey("LANER",p)}
         capability("animation.seek","定位当前动画帧",write) {p->store.animationSeek("LANER",p)}
+        capability("animation.pose.read", "读取来源帧的紧凑姿态", read) { p -> store.animationPose(p) }
+        capability("animation.poses.apply", "原子提交动画姿态序列", write) { p -> store.animationPoses("LANER", p) }
         capability("animation.preview","预览指定动画帧",read) {p->
             val frame=store.animationSnapshot(p)
             val image=ArtRenderer.render(store,frame,maxEdge=p.optInt("maxEdge",512))
@@ -913,6 +915,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "animation.keyframe" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("frame","integer"),p("action"),
             p("sourceFrame","integer",true),p("targetFrame","integer",true))
         "animation.seek" -> listOf(p("documentId"),p("expectedRevision","integer"),p("frame","integer"))
+        "animation.pose.read" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("sourceFrame", "integer"))
+        "animation.poses.apply" -> listOf(p("documentId"), p("expectedRevision", "integer"), p("layerId"), p("sourceFrame", "integer"), p("poses", "array"), p("overwrite", "boolean", true))
         "animation.preview" -> listOf(p("documentId"),p("expectedRevision","integer"),p("frame","integer"),p("maxEdge","integer",true))
         "animation.export" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maxEdge","integer",true))
         "history.goto" -> listOf(id, p("expectedRevision", "integer"))

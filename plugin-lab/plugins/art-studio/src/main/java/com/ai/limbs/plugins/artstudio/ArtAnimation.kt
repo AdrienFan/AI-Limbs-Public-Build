@@ -52,7 +52,7 @@ internal object ArtAnimation {
         }
         validate(state)
     }
-    private fun editable(state:JSONObject,id:String):JSONObject {
+    fun editable(state:JSONObject,id:String):JSONObject {
         val layer=layers(state).firstOrNull {it.getString("id")==id} ?: error("动画图层不存在")
         require(layer.getString("kind") in kinds) {"目前动画轨道支持绘画、图像与矢量图层"}
         var target=layer
@@ -89,6 +89,12 @@ internal object ArtAnimation {
     fun edit(state:JSONObject,type:String,p:JSONObject) {
         val cfg=settings(state)
         when(type) {
+            "ANIMATION_POSES" -> {
+                ArtAnimationPoses.install(editable(state, p.getString("layerId")), p)
+                state.put("animation", cfg)
+                validate(state)
+                resolve(state, cfg.getInt("current"))
+            }
             "ANIMATION_SETTINGS" -> {
                 val next=JSONObject(cfg.toString())
                 for(name in listOf("fps","start","end","loop","onion"))if(p.has(name))next.put(name,p.get(name))

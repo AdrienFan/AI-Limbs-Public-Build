@@ -1758,6 +1758,10 @@ internal class ArtStore(private val root: File) {
         val operationId = UUID.randomUUID().toString()
         var normalized = JSONObject(params.toString())
         if(type=="ANIMATION_KEY")normalized=ArtAnimation.prepareKey(snapshot(doc).getJSONObject("state"),normalized)
+        if(type=="ANIMATION_POSES") {
+            val state = snapshot(doc).getJSONObject("state")
+            normalized = ArtAnimationPoses.prepare(ArtAnimation.editable(state, normalized.getString("layerId")), normalized)
+        }
         if(type=="STROKE_ADD") {
             val tool=normalized.optString("tool","pencil")
             if(tool in ArtFigure.tools || tool in ArtRasterPath.tools) {
@@ -1815,6 +1819,14 @@ internal class ArtStore(private val root: File) {
         // A failed replay or budget check must never overwrite the draft or its history.
         val result = snapshot(doc)
         requireRenderBudget(result)
+        if (type == "ANIMATION_POSES") {
+            val poses = normalized.getJSONArray("poses")
+            for (index in 0 until poses.length()) {
+                val candidate = ArtAnimation.frame(result, poses.getJSONObject(index).getInt("frame"))
+                ArtShapes.validateDocument(candidate.getJSONObject("state"))
+                requireRenderBudget(candidate)
+            }
+        }
         require(doc.toString().toByteArray(Charsets.UTF_8).size<=32*1024*1024) {"工程数据超过32 MiB，请减少关键帧或拆分工程"}
         atomic(draft(doc.getString("id")), doc.toString())
         result.put("lastOperationId", operation.getString("id"))
@@ -3129,6 +3141,15 @@ internal class ArtStore(private val root: File) {
     }
 
     fun animationTimeline():JSONObject=locked {ArtAnimation.describe(snapshot(loadCurrent()))}
+    fun animationPose(p: JSONObject): JSONObject = locked {
+        val snapshot = snapshot(loadCurrent())
+        require(p.getString("documentId") == snapshot.getString("id") && p.getInt("expectedRevision") == snapshot.getInt("revision")) { "工程已改变，请刷新" }
+        val layer = ArtAnimation.layers(snapshot.getJSONObject("state")).firstOrNull { it.getString("id") == p.getString("layerId") }
+            ?: error("动画图层不存在")
+        require(layer.getString("kind") in ArtAnimation.kinds) { "该图层不支持动画姿态" }
+        ArtAnimationPoses.describe(snapshot, layer, p.getInt("sourceFrame"))
+    }
+    fun animationPoses(actor: String, p: JSONObject): JSONObject = animationChange(actor, "ANIMATION_POSES", p)
     fun animationConfigure(actor:String,p:JSONObject):JSONObject=animationChange(actor,"ANIMATION_SETTINGS",p)
     fun animationKey(actor:String,p:JSONObject):JSONObject=animationChange(actor,"ANIMATION_KEY",p)
     fun animationSeek(actor:String,p:JSONObject):JSONObject=animationChange(actor,"ANIMATION_TIME",p)

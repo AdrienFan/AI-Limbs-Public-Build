@@ -32,6 +32,9 @@ internal object ArtCapabilityHelp {
     }
 
     private fun rule(name: String, key: String): JSONObject {
+        if (name.startsWith("animation.pose") && key == "sourceFrame") return JSONObject().put("description", "来源时间0–9999；复用该时间保持的原生帧，静态层直接用当前内容。所有姿态独立基于同一来源，不累积变换。")
+        if (name == "animation.poses.apply" && key == "poses") return JSONObject().put("description", "1–32项[{frame,layer?:{x,y,scale,rotation,opacity,affine},shapes?:[{id,matrix?,opacity?,visible?}]}]；帧号唯一，属性为绝对值，矩阵六元组。shapes只适用矢量，单次最多1024对象修改/192KiB。一次原子保存与撤销，保留播放头；ID取animation.pose.read。不传属性保留来源值，既有矩阵与x/y/scale/rotation共同合成。")
+        if (name == "animation.poses.apply" && key == "overwrite") return JSONObject().put("description", "默认false拒绝覆盖已有关键帧；true明确替换指定目标帧。其他帧不动，第0帧锚点保留；锁定层/父组/对象拒绝。")
         if (key == "responseMode") return JSONObject().put("description", "full原结果（默认）；receipt仅将完整工程快照投影为紧凑回执，保留修订号/操作号/预览；其他业务结果保持原样。完整结构使用document.snapshot.read。").put("enum", JSONArray(listOf("full", "receipt")))
         if (key == "requestId") return JSONObject().put("description", "每次逻辑编辑生成小写标准UUID，替换REQUEST_UUID；已提交的同一请求号拒绝再次执行。状态查询要求documentId；not_found仅指没有持久历史记录，不代表运行中的请求失败，SVG无改动也不会写历史。")
         if (name == "document.snapshot.read" && key == "offset") return JSONObject().put("description", "快照字符串UTF-16偏移，默认0；续页用返回nextOffset，不拆代理对。")
@@ -52,6 +55,8 @@ internal object ArtCapabilityHelp {
 
     private const val RECEIPT_EXAMPLES = """
     {
+      "animation.pose.read":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","sourceFrame":0},"note":"从animation.timeline获取工程/版本/图层。只返回来源帧的图层变换、对象ID与姿态属性，不返回SVG/路径/历史。","summary":"读取可复用的原生动画姿态"},
+      "animation.poses.apply":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","sourceFrame":0,"poses":[{"frame":2,"layer":{"x":10,"y":0}},{"frame":4,"layer":{"x":20,"y":0}}]},"note":"替换工程、版本与图层，先读pose.read。每项均基于同一来源，保持当前播放头；只写一次历史与修订，一次撤销整段。默认不覆盖；回执给下一修订。","summary":"一次原子提交多帧原生姿态，减少逐帧复制/定位/编辑往返"},
       "document.summary":{"args":{},"note":"先打开工程；返回工程号/版本、层数、画布尺寸、动画设置与撤销状态，不返回图形/帧内容/历史。","summary":"读取紧凑工程摘要"},
       "document.snapshot.read":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"offset":0,"limit":8000},"note":"ID/版本取document.summary。拼接source，续页传nextOffset和第一页sha256作为expectedSha256，最终核对SHA-256并解析JSON。版本或快照变化时从头读取。","summary":"分页读取完整工程JSON快照"},
       "document.operation.status":{"args":{"documentId":"DOCUMENT_ID","requestId":"REQUEST_UUID"},"note":"使用原编辑请求的UUID。committed包含operationId、提交revision和当前documentRevision；not_found仅说明尚无持久历史记录，不能作为自动重试依据。工程草稿不存在明确报错。","summary":"按请求号确认持久历史中的提交结果"}

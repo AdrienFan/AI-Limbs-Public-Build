@@ -11,7 +11,7 @@ internal object ArtCapabilityReply {
         "view.command", "view.presentation", "quick_tools.use")
     fun supports(name: String) = name !in ui && name !in setOf(
         "document.summary", "document.snapshot.read", "document.operation.status")
-    fun tracksRequest(name: String) = name in setOf("animation.configure", "animation.keyframe", "animation.seek", "svg.apply")
+    fun tracksRequest(name: String) = name in setOf("animation.configure", "animation.keyframe", "animation.seek", "animation.poses.apply", "svg.apply")
 
     fun mode(parameters: JSONObject): String = ArtSvgReceipt.mode(parameters)
 
