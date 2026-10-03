@@ -1,3 +1,9 @@
+# 画室 0.2.74
+
+修复0.2.73云端构建（Actions run 37106028105，提交541ebcb0）的GIF测试编译错误：Android测试编译类路径不提供java.desktop，测试改为在云端JDK运行时显式解析ImageIO，保留独立GIF解码、透明度、颜色及LZW重置验证；解码器缺失仍使测试失败。仅测试源码依赖桌面解码器，插件载荷不引入桌面类。
+
+版本0.2.74 / versionCode77 / 独立applicationId `com.ai.limbs.payload.artstudio.v0274`。继承此前全部功能和编译修正。本地只静态检查，测试/编译/签名打包全部交由云端；0.2.73主源码已编译通过，测试源码编译失败，尚无测试或插件打包成功结论。
+
 # 画室 0.2.73
 
 修复0.2.72云端构建（Actions run 37105551225，提交3df03901）的三处Kotlin编译错误：重连提示补齐Compose Alignment导入，SVG路径错误提示用显式插值边界避免中文被识别为变量名。继承0.2.72全部四批功能修改。版本0.2.73 / versionCode76 / 独立applicationId `com.ai.limbs.payload.artstudio.v0273`。
