@@ -2,10 +2,7 @@ package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
 import android.graphics.fonts.Font
-import android.graphics.fonts.FontVariationAxis
 import android.os.Build
-import android.util.Xml
-import org.xmlpull.v1.XmlPullParser
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -36,57 +33,26 @@ internal object ArtText {
             { kotlin.math.abs(it.weight - 400) }, { it.slant },
             { if (it.languages.split(',').any { language -> language.startsWith("zh-Hans") }) 0 else 1 }, { it.id }))
     }
-    private fun configuredFonts(): List<Face> {
-        val configuration = File("/system/etc/fonts.xml")
-        require(configuration.isFile && configuration.canRead()) { "系统字体配置不可读取：/system/etc/fonts.xml" }
-        val result = mutableListOf<Face>()
-        configuration.inputStream().use { input ->
-            val parser = Xml.newPullParser(); parser.setInput(input, "UTF-8")
-            var languages = ""; var family = ""; var familyNumber = 0
-            var event = parser.eventType
-            while (event != XmlPullParser.END_DOCUMENT) {
-                if (event == XmlPullParser.START_TAG && parser.name == "family") {
-                    languages = parser.getAttributeValue(null, "lang").orEmpty()
-                    family = parser.getAttributeValue(null, "name").orEmpty()
-                    familyNumber++
-                }
-                if (event == XmlPullParser.START_TAG && parser.name == "font") {
-                    val fontDepth = parser.depth
-                    val weight = parser.getAttributeValue(null, "weight")?.toInt() ?: 400
-                    val index = parser.getAttributeValue(null, "index")?.toInt() ?: 0
-                    val slant = if (parser.getAttributeValue(null, "style") == "italic") 1 else 0
-                    val axes = mutableListOf<FontVariationAxis>(); val filename = StringBuilder()
-                    var child = parser.next()
-                    while (!(child == XmlPullParser.END_TAG && parser.depth == fontDepth)) {
-                        require(child != XmlPullParser.END_DOCUMENT) { "系统字体配置未闭合" }
-                        if (child == XmlPullParser.TEXT && parser.depth == fontDepth) filename.append(parser.text)
-                        if (child == XmlPullParser.START_TAG && parser.name == "axis") {
-                            val tag = requireNotNull(parser.getAttributeValue(null, "tag"))
-                            val value = requireNotNull(parser.getAttributeValue(null, "stylevalue")).toFloat()
-                            require(tag.length == 4 && value.isFinite()); axes.add(FontVariationAxis(tag, value))
-                        }
-                        child = parser.next()
-                    }
-                    val name = filename.toString().trim(); require(name.isNotEmpty())
-                    val file = File("/system/fonts", name).canonicalFile
-                    require(file.parentFile == File("/system/fonts").canonicalFile && file.isFile && file.canRead()) { "系统声明字体不可读取：$name" }
-                    val settings = axes.joinToString { "'" + it.tag + "' " + it.styleValue }
-                    val key = file.absolutePath + "#" + index + "#" + weight + "#" + slant + "#" + settings
-                    result.add(Face(key, file, index, weight, slant, settings,
-                        family.ifBlank { "family-$familyNumber" }, languages))
-                }
-                if (event == XmlPullParser.END_TAG && parser.name == "family") { languages = ""; family = "" }
-                event = parser.next()
-            }
-        }
-        return result
+    private val catalog by lazy {
+        requireAvailable()
+        ArtSystemFontCatalog.read(File("/system/etc/fonts.xml"), File("/system/fonts"))
     }
+    private fun configuredFonts(): List<Face> = catalog.available.map { source ->
+        Face(source.id, source.file, source.index, source.weight, source.slant,
+            source.settings, source.family, source.languages)
+    }
+    private fun unavailableFonts(): JSONArray = JSONArray(catalog.unavailable.map { entry ->
+        JSONObject().put("name", entry.name).put("reason", entry.reason)
+    })
     fun fonts(): JSONObject {
         if (!available) return JSONObject().put("available", false).put("reason", "文字需要 Android 12 或以上").put("fonts", JSONArray())
-        return JSONObject().put("available", faces.isNotEmpty()).put("defaultFontId", defaultFontId())
+        if (faces.isEmpty()) return JSONObject().put("available", false)
+            .put("reason", "系统没有可读取的已安装字体").put("fonts", JSONArray())
+            .put("unavailableFonts", unavailableFonts()).put("automaticFontSubstitution", false)
+        return JSONObject().put("available", true).put("defaultFontId", defaultFontId())
             .put("fonts", JSONArray(faces.map { it.describe() })).put("notice", NOTICE)
             .put("renderMode", "raster_cache").put("editable", true).put("layout", "harfbuzz_bidi_svg_text_profile")
-            .put("automaticFontSubstitution", false)
+            .put("automaticFontSubstitution", false).put("unavailableFonts", unavailableFonts())
     }
     fun defaultFontId(): String {
         requireAvailable()
