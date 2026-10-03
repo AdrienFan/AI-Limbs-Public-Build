@@ -378,7 +378,8 @@ class ArtStudioEntry : InProcessPluginEntry {
             JSONObject().put("frameMin",0).put("frameMax",ArtAnimation.MAX_TIME).put("fpsMin",1).put("fpsMax",60)
                 .put("maxPlaybackFrames",600).put("maxKeysPerLayer",128).put("maxKeysPerDocument",ArtAnimation.MAX_KEYS)
                 .put("supportedLayers",JSONArray(listOf("paint","image","vector"))).put("holdEditsSourceKey",true)
-                .put("gifMaxEdge",1024).put("gifPixelBudget",32L*1024*1024).put("gifPalette","fixed-255-rgb332")
+                .put("gifMaxEdge",1024).put("gifPixelBudget",32L*1024*1024).put("gifPalette","adaptive-global-255")
+                .put("gifCompression", "dictionary-lzw").put("gifCoalesceHolds", true).put("gifOpaqueDeltaRectangles", true)
                 .put("gifAlphaThreshold",128).put("unimplemented",JSONArray(listOf("audio","curves","video","frame-sequence-import")))
         }
         capability("animation.timeline","读取动画时间轴",read) {store.animationTimeline()}

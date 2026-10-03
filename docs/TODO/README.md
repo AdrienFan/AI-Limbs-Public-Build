@@ -51,3 +51,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [画室能力回执与提交确认](art-studio-capability-receipts/README.md)：只修复大工程返回与提交确认问题；其他动画问题另轮处理。
 
 - [原生动画姿态序列](art-studio-animation-poses/index.md)：第二条问题，源码与静态核对完成。
+
+- [GIF编码优化](art-studio-gif-encoding/index.md)：第三条问题，在姿态序列提交后完成源码和静态核对。

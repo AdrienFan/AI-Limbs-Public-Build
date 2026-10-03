@@ -14,7 +14,7 @@ class ArtAnimationPosesTest {
             .put("locked", false).put("opacity", 1.0).put("visible", true).put("matrix", JSONArray(listOf(1,0,0,1,0,0)))))
     private fun parameters() = JSONObject().put("layerId", "layer").put("sourceFrame", 0)
         .put("poses", JSONArray().put(JSONObject().put("frame", 2).put("layer", JSONObject().put("x", 10)))
-            .put(JSONObject().put("frame", 4).put("layer", JSONObject().put("x", 20)))
+            .put(JSONObject().put("frame", 4).put("layer", JSONObject().put("x", 20))))
     private fun rejects(block: () -> Unit) {
         try { block(); fail("Expected rejection") } catch (error: IllegalArgumentException) { assertTrue(error.message.orEmpty().isNotBlank()) }
     }

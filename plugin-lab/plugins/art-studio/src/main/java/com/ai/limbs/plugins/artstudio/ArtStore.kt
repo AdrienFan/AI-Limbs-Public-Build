@@ -3123,21 +3123,55 @@ internal class ArtStore(private val root: File) {
             File(directory,"animation-"+snapshot.getString("id")+"-"+UUID.randomUUID()+".gif")
         }
         val temp=File(destination.parentFile,"."+UUID.randomUUID()+".tmp")
+        val spool = File(destination.parentFile, "." + UUID.randomUUID() + ".argb")
+        val runs = ArtGifSchedule.runs(snapshot)
+        val spoolBytes = width.toLong() * height * runs.size * 4
+        require(destination.parentFile.usableSpace >= spoolBytes + 1024 * 1024) { "临时帧存储空间不足，请缩小GIF尺寸或范围" }
+        val paletteBuilder = ArtGifPalette.Builder()
+        var encodedFrames = 0
         try {
+            // Render each held cel interval once. Disk rows let the global palette see every run without keeping all bitmaps.
+            FileOutputStream(spool).buffered().use { raw ->
+                val row = IntArray(width)
+                val packed = java.nio.ByteBuffer.allocate(width * 4)
+                for (run in runs) {
+                    val image = ArtRenderer.render(this, ArtAnimation.frame(snapshot, run.frame), maxEdge = edge)
+                    try {
+                        require(image.width == width && image.height == height) { "GIF渲染尺寸与计划不一致" }
+                        for (y in 0 until height) {
+                            image.getPixels(row, 0, width, 0, y, width, 1)
+                            paletteBuilder.addRow(row, run.frames)
+                            packed.clear()
+                            for (pixel in row) packed.putInt(pixel)
+                            raw.write(packed.array())
+                        }
+                    } finally { image.recycle() }
+                }
+            }
+            require(spool.length() == spoolBytes) { "临时帧数据不完整" }
+            val palette = paletteBuilder.build()
             FileOutputStream(temp).buffered().use {output->
-                val writer=ArtGifWriter(output,width,height,cfg.getBoolean("loop"))
-                for(index in 0 until count) {
-                    val image=ArtRenderer.render(this,ArtAnimation.frame(snapshot,start+index),maxEdge=edge)
-                    try {writer.frame(image,ArtGifWriter.delay(index,cfg.getInt("fps")))} finally {image.recycle()}
+                val writer=ArtGifWriter(output,width,height,cfg.getBoolean("loop"), palette, paletteBuilder.hasTransparency)
+                java.io.DataInputStream(spool.inputStream().buffered()).use { raw ->
+                    val packed = java.nio.ByteBuffer.allocate(width * 4)
+                    for (run in runs) writer.pixels(run.delay) { _, row ->
+                        raw.readFully(packed.array())
+                        packed.rewind()
+                        for (index in row.indices) row[index] = packed.int
+                    }
+                    require(raw.read() == -1) { "临时帧数据有多余字节" }
                 }
                 writer.finish()
+                encodedFrames = writer.encodedFrames
             }
             require(temp.renameTo(destination)) {"保存GIF失败"}
-        } finally {temp.delete()}
+        } finally {temp.delete();spool.delete()}
         return JSONObject().put("path",destination.absolutePath).put("mimeType","image/gif").put("bytes",destination.length())
             .put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
             .put("width",width).put("height",height).put("fps",cfg.getInt("fps")).put("start",start).put("end",end).put("frames",count)
-            .put("palette","fixed-255-rgb332").put("alphaThreshold",128).put("loop",cfg.getBoolean("loop"))
+            .put("palette","adaptive-global-255").put("alphaThreshold",128).put("loop",cfg.getBoolean("loop"))
+            .put("encodedFrames", encodedFrames).put("renderedFrames", runs.size).put("compression", "dictionary-lzw")
+            .put("durationCentiseconds", runs.sumOf { it.delay })
     }
 
     fun animationTimeline():JSONObject=locked {ArtAnimation.describe(snapshot(loadCurrent()))}
