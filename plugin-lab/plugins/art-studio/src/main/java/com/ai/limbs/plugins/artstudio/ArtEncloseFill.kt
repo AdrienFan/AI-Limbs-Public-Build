@@ -56,7 +56,7 @@ internal object ArtEncloseFill {
         require(layer.getString("kind") in setOf("paint","image") && layer.getBoolean("visible") &&
             !layer.getBoolean("locked")) {"请选择未锁定的可见绘画或图像图层"}
         require(layer.optString("parentId").isBlank() && layer.getDouble("x")==0.0 && layer.getDouble("y")==0.0 &&
-            layer.getDouble("scale")==1.0 && layer.getDouble("rotation")==0.0) {"基础围合填充需要未变换的根图层"}
+            layer.getDouble("scale")==1.0 && !layer.has("affine") && layer.getDouble("rotation")==0.0) {"基础围合填充需要未变换的根图层"}
     }
     fun points(input: JSONArray): List<Pair<Float,Float>> {
         require(input.length() in 1..MAX_POINTS) {"围合路径需要1–2048点"}

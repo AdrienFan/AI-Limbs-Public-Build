@@ -40,13 +40,13 @@ internal object ArtMenuOperations {
         it.getString("kind") in setOf("paint", "image") && it.optString("parentId").isBlank() &&
             it.getBoolean("visible") && !isLocked(state, it) &&
             it.getDouble("x") == 0.0 && it.getDouble("y") == 0.0 &&
-            it.getDouble("rotation") == 0.0 && it.getDouble("scale") == 1.0
+            it.getDouble("rotation") == 0.0 && it.getDouble("scale") == 1.0 && !it.has("affine")
     } == true
     fun canUngroup(state: JSONObject): Boolean = active(state)?.let {
         it.getString("kind") == "group" && !isLocked(state, it) &&
             it.getBoolean("visible") && it.getDouble("opacity") == 1.0 &&
             it.getString("blend") == "normal" && it.getDouble("x") == 0.0 &&
-            it.getDouble("y") == 0.0 && it.getDouble("rotation") == 0.0 && it.getDouble("scale") == 1.0
+            it.getDouble("y") == 0.0 && it.getDouble("rotation") == 0.0 && it.getDouble("scale") == 1.0 && !it.has("affine")
     } == true
     fun mergePair(state: JSONObject): List<JSONObject> {
         val top = active(state) ?: error("请先选择图层")

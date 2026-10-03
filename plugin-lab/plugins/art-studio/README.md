@@ -1,3 +1,17 @@
+## 0.2.67：图层变换与测量距离
+
+- `transform.affine`：独立水平/垂直缩放（可翻转）、剪切、旋转、枢轴和文档坐标平移；任意图层及组保留原始对象。中央图层矩阵供画布渲染、触摸、拾取、选区、文字锚点和缩略图使用。旧 `transform.move/scale/rotate` 和历史事件兼容。
+- `transform.apply`：affine/perspective/distort/warp/cage/liquify/mesh 的实际像素重采样；nearest/bilinear/bicubic，预乘 alpha 和透明边界。`scope=selection` 仅处理绘画/图像层的真实软覆盖像素，源区用覆盖擦除、目的区粘贴，同时变换选区覆盖；不删整笔。恒等映射不生成切贴记录。
+- `scope=layer` 是明确确认的栅格化：必须 `bake=true` 并声明文档坐标 `sourceBounds={x,y,width,height}`。选中层/组投影成 8 位绘画层，组的可见子层合并，框外源内容丢弃；原始对象和资产由旧历史保留，撤销恢复。父组的裁剪与合成仍生效。不会自动缩小输出或改插值方式。
+- 与 Krita 功能边界不同：warp 为仿射 MLS；cage 为凸包均值坐标；distort 为双线性四角；mesh 为规则源网格的双线性细分，**没有贝塞尔切线柄**；liquify 为有序 push/expand/contract/twirl 径向作用。液化半径必须覆盖源网格单元对角线，否则明确拒绝并要求提高精度或缩小源框；不会把细小液化作用悄悄当作无变化。网格折叠、交叉及透视无穷远拒绝。源/输出各最多 4194304 像素，边长 16384，8192 三角形，有内存与运算量预算。
+- 手机参数页：选择模式/插值，拖动目标控制点，自由变换拖动平移，液化拖动添加作用点；数值及高级 JSON 参数草稿、确认/取消。显示控制点和源框，**尚无完整图像的实时变形预览**。每次确认绑定工程 ID/revision；失败不改历史。
+- `measure.line`：px/mm/cm/in/pt、工具 PPI、绝对角、带符号相对角及基线锐角、角度约束（保持长度）、整线平移。文档没有印刷分辨率，物理换算使用工具 PPI，默认 72。`measure.settings/configure` 的资源 revision 独立于文档历史；手机和 AI 共享。旧 `canvas.measure` 保持原接口。
+- 手机测量：拖端点/线身自动编辑；提供新线、整线平移和基线模式，Shift 约束（默认 15°）、Alt 平移、Ctrl 设置基线。工具参数保存后即时重绘；测量线为临时视图，不写工程。
+- AI：新增 8 个入口，每个有 schema 与紧凑示例。先 `document.info` 替换工程/图层/revision，占位值；`transform.info` 另返回每种模式的可改参数模板。共享测量配置先取 `measure.settings.revision`。
+- 对照本地 Krita 6.0.4：`plugins/tools/tool_transform2/tool_transform_args.h`、各模式 strategy、`libs/image/kis_warptransform_worker.h`、`kis_cage_transform_worker.h`、`kis_liquify_transform_worker.cpp`、`plugins/tools/basictools/kis_tool_measure.cc`。实现为独立 Kotlin 数学与 Android 渲染，未复制 Krita 源码。
+- 验证：增加 17 个纯数学云端 JUnit 用例（未执行）。本轮仅做源码/能力声明/示例覆盖与来源静态检查，不编译、不运行测试、不推送。
+- 升级后需设备回归：带变换父组的非等比缩放与重复剪切、软选区部分笔画像素、透视四角、笼形边界、网格折叠拒绝、液化各模式、透明边缘插值、组栅格化/撤销/保存导入、换单位与 PPI、任意基线约束、旋转镜像视图下端点/整线拖动，以及另一端写入时拒绝旧 revision。
+
 ## 0.2.44 动态画笔（开发源码，尚未编译）
 
 参照用户提供的Krita 6.0.4 `plugins/tools/tool_dyna/kis_tool_dyna.cpp`（Dyna过滤后调用Freehand）以及 `libs/ui/tool/kis_painting_information_builder.cpp` / `kis_tool_freehand_helper.cpp`（位置调整再进入共享平滑/笔刷），由本插件实现采样惯性阶段。现有Mass/Drag及默认值保持：质量 `1+159×Mass`，阻尼 `0.5×Drag²`，范围0–1。不是移植Krita引擎源码，也不新增该文件中未启用的固定笔角/动态笔宽控制。

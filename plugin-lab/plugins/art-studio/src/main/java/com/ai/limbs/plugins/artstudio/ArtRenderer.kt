@@ -63,10 +63,7 @@ internal object ArtRenderer {
                 val layer = layers.getJSONObject(i)
                 if (layer.optString("parentId") != parentId || !layer.getBoolean("visible")) continue
                 target.save()
-                target.translate(layer.getDouble("x").toFloat(), layer.getDouble("y").toFloat())
-                target.rotate(layer.getDouble("rotation").toFloat())
-                val scale = layer.getDouble("scale").toFloat()
-                target.scale(scale, scale)
+                target.concat(ArtShapes.localMatrix(layer))
                 val paint = compositePaint(layer)
                 layer.optJSONArray("cropClip")?.let { clip ->
                     require(clip.length()==0 || clip.length() in 3..128)
@@ -143,7 +140,8 @@ internal object ArtRenderer {
                                                 (event.getInt("x")+event.getInt("width")).toFloat(),(event.getInt("y")+event.getInt("height")).toFloat(),paint)
                                         }
                                     }
-                                    "move_pixels" -> ArtMovePixels.draw(local,event,store)
+                                    "transform_pixels" -> ArtTransformPixels.draw(local,event,store)
+                    "move_pixels" -> ArtMovePixels.draw(local,event,store)
                                     "paste", "erase" -> {
                                         val inserted = ArtImagePolicy.decodeAsset(store.assetFile(event.getString("asset")))
                                         try {

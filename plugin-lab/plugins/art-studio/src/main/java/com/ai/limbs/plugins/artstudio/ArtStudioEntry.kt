@@ -259,6 +259,14 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("move.hit", "按可见像素拾取图层或所属组", read) { p -> store.moveHit(p) }
         capability("move.apply", "移动图层或真正搬移选区像素", write) { p -> store.move("LANER",p) }
         capability("move.nudge", "按移动工具键盘步进平移", write) { p -> store.moveNudge("LANER",p) }
+        capability("transform.info","读取图层和像素变形范围",read){ArtTransform.info()}
+        capability("transform.geometry","解析变形输出框和网格",read){p->store.transformGeometry(p)}
+        capability("transform.affine","无损非等比缩放、剪切及自由变换",write){p->store.transformAffine("LANER",p)}
+        capability("transform.apply","确认透视、扭曲、笼形、液化、网格或选区像素变换",write){p->store.transformPixels("LANER",p)}
+        capability("measure.info","读取测量单位、基线与交互说明",read){ArtMeasure.info()}
+        capability("measure.settings","读取共享测量设置",read){store.measureSettings()}
+        capability("measure.configure","保存测量单位与角度约束",write){p->store.configureMeasure(p)}
+        capability("measure.line","换算、约束和整线平移测量线",read){p->ArtMeasure.evaluate(p,store.measureSettings())}
         capability("canvas.measure", "测量画布两点", read) { p ->
             val x0 = p.getDouble("x0"); val y0 = p.getDouble("y0")
             val x1 = p.getDouble("x1"); val y1 = p.getDouble("y1")
@@ -554,6 +562,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
     fun p(key: String, type: String = "string", optional: Boolean = false): InProcessCapabilityParameterSpec {
         return InProcessCapabilityParameterSpec(key, type, ArtCapabilityHelp.parameterDescription(name, key), !optional)
     }
+    fun transformAffineFields()=listOf(p("scaleX","number",true),p("scaleY","number",true),p("shearX","number",true),p("shearY","number",true),p("rotation","number",true),p("pivotX","number",true),p("pivotY","number",true),p("dx","number",true),p("dy","number",true))
+    fun measureFields()=listOf(p("unit",optional=true),p("ppi","number",true),p("baseline","number",true),p("angleStep","number",true),p("dragMode",optional=true))
     fun moveSettingsFields()=listOf(
         p("layerMode",optional=true),p("moveScope",optional=true),p("unit",optional=true),p("ppi","number",true),
         p("step","number",true),p("largeMultiplier","number",true),p("alphaThreshold","integer",true),p("ignoreLocked","boolean",true))
@@ -799,6 +809,13 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.edit" -> listOf(p("layerId"), p("action"), p("dx", "number", true),
             p("dy", "number", true), p("factor", "number", true), p("degrees", "number", true),
             p("copyId", optional = true))
+        "transform.info","measure.info","measure.settings" -> emptyList()
+        "transform.affine" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"))+transformAffineFields()
+        "transform.geometry","transform.apply" -> listOf(p("mode"),p("scope"),p("sourceBounds","object",true),p("points","array",true),p("sourcePoints","array",true),p("dabs","array",true),
+            p("columns","integer",true),p("rows","integer",true),p("subdivisions","integer",true),p("gridResolution","integer",true),p("alpha","number",true),p("interpolation",optional=true))+transformAffineFields()+
+            if(name=="transform.apply")listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),p("bake","boolean",true)) else listOf(p("documentId",optional=true),p("expectedRevision","integer",true))
+        "measure.configure" -> measureFields()+p("expectedSettingsRevision","integer")
+        "measure.line" -> listOf(p("x0","number"),p("y0","number"),p("x1","number"),p("y1","number"),p("dx","number",true),p("dy","number",true))+measureFields()
         "move.info", "move.settings" -> emptyList()
         "move.configure" -> moveSettingsFields()+p("expectedSettingsRevision","integer")
         "move.hit" -> listOf(p("x","integer"),p("y","integer"),p("layerMode",optional=true),p("alphaThreshold","integer",true),p("ignoreLocked","boolean",true),p("documentId",optional=true),p("expectedRevision","integer",true))

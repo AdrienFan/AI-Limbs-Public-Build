@@ -37,7 +37,7 @@ internal object ArtColorize {
         .firstOrNull {it.getString("id")==id && it.getString("kind")=="colorize"} ?: error("上色蒙版不存在")
     fun rooted(layer: JSONObject): Boolean = layer.optString("parentId").isBlank() &&
         layer.getDouble("x")==0.0 && layer.getDouble("y")==0.0 &&
-        layer.getDouble("rotation")==0.0 && layer.getDouble("scale")==1.0
+        layer.getDouble("rotation")==0.0 && layer.getDouble("scale")==1.0 && !layer.has("affine")
     fun canUpdate(state: JSONObject,mask: JSONObject): Boolean {
         val source=ArtMenuOperations.layers(state).firstOrNull {
             it.getString("id")==mask.getJSONObject("colorize").getString("sourceLayerId")
@@ -47,7 +47,7 @@ internal object ArtColorize {
     }
     fun root(layer: JSONObject) {
         require(layer.optString("parentId").isBlank() && layer.getDouble("x")==0.0 && layer.getDouble("y")==0.0 &&
-            layer.getDouble("rotation")==0.0 && layer.getDouble("scale")==1.0) { "请使用未变换的根图层" }
+            layer.getDouble("rotation")==0.0 && layer.getDouble("scale")==1.0 && !layer.has("affine")) { "请使用未变换的根图层" }
     }
     fun source(state: JSONObject,id: String): JSONObject {
         val source=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==id} ?: error("关联线稿源已删除")

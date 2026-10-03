@@ -7,12 +7,11 @@ import org.json.JSONObject
 /** Compact help is plugin-owned metadata, transported through the existing Runtime API.
  * One capability gets one example; documentation never executes or opens a phone page. */
 internal object ArtCapabilityHelp {
-    private val examples by lazy { JSONObject(EXAMPLES) }
+    private val examples by lazy { JSONObject(EXAMPLES_1).apply {val extra=JSONObject(EXAMPLES_2);extra.keys().forEach {key->put(key,extra.getJSONObject(key))}} }
     private val fields by lazy { JSONObject(FIELDS) }
     private val scoped by lazy {
         JSONObject(SCOPED_1).apply {
-            val extra = JSONObject(SCOPED_2)
-            extra.keys().forEach { key -> put(key, extra.getJSONObject(key)) }
+            for(part in listOf(SCOPED_2,SCOPED_3)) {val extra=JSONObject(part);extra.keys().forEach {key->put(key,extra.getJSONObject(key))}}
         }
     }
 
@@ -42,7 +41,7 @@ internal object ArtCapabilityHelp {
 
     // Examples contain explicit identity placeholders, never fixed IDs of the users artwork.
     // Numeric revision 0 is a template value; its parameter says to substitute the latest revision.
-    private const val EXAMPLES = """
+    private const val EXAMPLES_1 = """
 {
   "toolbox.catalog":{"args":{},"note":"","summary":"返回工具栏ID、implemented状态与尺规types/typeInfos（顺序及最小示例）；无需打开工程，绘画用对应接口。"},
   "menu.catalog":{"args":{},"note":"","summary":"返回菜单树，每个叶子含真实action、parameters、documentWrite、可用状态和拒绝原因。"},
@@ -516,7 +515,61 @@ internal object ArtCapabilityHelp {
   "expectedSettingsRevision":{"description":"move.configure必填资源revision，先move.settings.revision替换示例0；与作品expectedRevision不同，过期拒绝。"},
   "pickX":{"description":"layerMode=content/group且整层时必填拾取起点X，文档整数像素且在画布内；不是移动后位置。选区模式不拾取其它层。"},
   "pickY":{"description":"layerMode=content/group且整层时必填拾取起点Y，文档整数像素且在画布内；与pickX一起用于实际像素命中。"},
-  "large":{"description":"默认false；true基础step×largeMultiplier，等同Shift＋方向键。"}
+  "large":{"description":"默认false；true基础step×largeMultiplier，等同Shift＋方向键。"},
+"sourceBounds": {
+    "description": "整层像素变换必填 {x,y,width,height}，文档像素；正宽高，源框<=4194304像素。框外内容会丢弃；选区模式取当前软选区。"
+  },
+  "sourcePoints": {
+    "description": "warp/cage 原控制点 [[x,y],...]；与points等长，3..32，warp非共线；cage须凸且包围源框。"
+  },
+  "dabs": {
+    "description": "liquify 有序作用1..128个：[{kind:\"push|expand|contract|twirl\",x,y,radius:64,strength:0.2,dx:5,dy:0,angle:30}]；push长度<=radius，radius>=1，strength 0..1。"
+  },
+  "bake": {
+    "description": "整层像素变换必须true，明确确认8位栅格化、组展平和源框外像素丢弃。选区模式不需要。"
+  },
+  "gridResolution": {
+    "description": "warp/cage/distort/liquify 正整数2..64，默认16（液化32），控制前向网格精度；液化radius须>=源网格单元对角线，否则增加精度或缩小源框；折叠网格拒绝。"
+  },
+  "baseline": {
+    "description": "测角基线，文档坐标+X为0°、顺时针为正，有限值±36000°。"
+  },
+"alpha": {
+    "description": "warp MLS权重指数0.25..4，默认1。"
+  },
+  "columns": {
+    "description": "mesh 源规则网格列数2..9，points按行优先。"
+  },
+  "interpolation": {
+    "description": "透明边界，预乘alpha插值：nearest最近邻、bilinear双线性、bicubic三次Catmull-Rom。",
+    "enum": [
+      "nearest",
+      "bilinear",
+      "bicubic"
+    ]
+  },
+  "pivotX": {
+    "description": "文档像素枢轴X，默认0。"
+  },
+  "pivotY": {
+    "description": "文档像素枢轴Y，默认0。"
+  },
+  "rows": {
+    "description": "mesh 源规则网格行数2..9。"
+  },
+  "scaleX": {
+    "description": "水平缩放-100..100，绝对值>=0.01，默认1；负值翻转。"
+  },
+  "scaleY": {
+    "description": "垂直缩放-100..100，绝对值>=0.01，默认1。"
+  },
+  "scope": {
+    "description": "selection当前软选区，layer显式源框；apply的layer须bake=true。",
+    "enum": [
+      "selection",
+      "layer"
+    ]
+  }
 }
 """
     private const val SCOPED_1 = """
@@ -1174,5 +1227,11 @@ internal object ArtCapabilityHelp {
   "color.palette.delete.id":{"description":"已有调色板ID，取color.palette.list.palettes[].id；save省略则新建，显式未知ID拒绝。"},
   "color.palette.save.name":{"description":"调色板名称1–64字，去首尾空白；允许同名，身份由id区分。"}
 }
+"""
+    private const val EXAMPLES_2 = """
+{"transform.info":{"args":{},"note":"","summary":"模式、控制点、插值与栅格化边界；返回各变形的限制。"},"transform.geometry":{"args":{"mode":"perspective","scope":"layer","sourceBounds":{"x":0,"y":0,"width":100,"height":80},"points":[[0,0],[120,10],[100,100],[10,80]]},"note":"","summary":"只算输出框和三角网格，不写历史、不生成图片；selection读取当前选区。"},"transform.affine":{"args":{"documentId":"<documentId>","expectedRevision":0,"layerId":"<layerId>","scaleX":1.5,"scaleY":0.8,"shearX":0.2,"pivotX":128,"pivotY":128},"note":"先document.info替换工程、图层和revision占位值。","summary":"整层/组无损自由变换；文档坐标增量，独立scaleX/Y和shearX/Y，原始对象保留。"},"transform.apply":{"args":{"documentId":"<documentId>","expectedRevision":0,"layerId":"<layerId>","mode":"affine","scope":"selection","scaleX":1.2,"scaleY":0.8,"pivotX":128,"pivotY":128,"interpolation":"bicubic"},"note":"先document.info替换工程、图层和revision占位值。","summary":"像素重采样并变换软选区，单次历史记录。选区仅paint/image；整层须bake=true及sourceBounds，栅格化并丢弃框外像素；撤销恢复。"},"measure.info":{"args":{},"note":"","summary":"物理单位以工具PPI换算；角度方向和手机交互。"},"measure.settings":{"args":{},"note":"","summary":"共享设置及其revision，与工程历史分开。"},"measure.configure":{"args":{"expectedSettingsRevision":0,"unit":"mm","ppi":300,"baseline":30,"angleStep":15},"note":"","summary":"保存单位/PPI/基线/角度约束/拖动模式；expectedSettingsRevision取measure.settings.revision。"},"measure.line":{"args":{"x0":0,"y0":0,"x1":300,"y1":0,"unit":"mm","ppi":300,"baseline":30,"angleStep":0,"dx":10,"dy":20},"note":"","summary":"约束端点后整线平移，返回distancePx/distance/unit、绝对/相对/锐角；不写工程。"}}
+"""
+    private const val SCOPED_3 = """
+{"transform.geometry.mode":{"description":"变形模式；affine独立缩放/剪切；perspective投影四角；distort双线性四角；warp仿射MLS；cage均值坐标；mesh规则源网格；liquify径向作用。","enum":["affine","perspective","distort","warp","cage","liquify","mesh"]},"transform.geometry.scope":{"description":"selection当前软选区，layer显式源框；apply的layer须bake=true。","enum":["selection","layer"]},"transform.geometry.points":{"description":"目标控制点文档坐标[[x,y],...]：透视/四角4点按左上右上右下左下；warp/cage与sourcePoints等长；mesh行优先columns*rows。拒绝折叠、交叉、透视穿越无穷远。"},"transform.geometry.columns":{"description":"mesh 源规则网格列数2..9，points按行优先。"},"transform.geometry.rows":{"description":"mesh 源规则网格行数2..9。"},"transform.geometry.alpha":{"description":"warp MLS权重指数0.25..4，默认1。"},"transform.geometry.interpolation":{"description":"透明边界，预乘alpha插值：nearest最近邻、bilinear双线性、bicubic三次Catmull-Rom。","enum":["nearest","bilinear","bicubic"]},"transform.apply.mode":{"description":"变形模式；affine独立缩放/剪切；perspective投影四角；distort双线性四角；warp仿射MLS；cage均值坐标；mesh规则源网格；liquify径向作用。","enum":["affine","perspective","distort","warp","cage","liquify","mesh"]},"transform.apply.scope":{"description":"selection当前软选区，layer显式源框；apply的layer须bake=true。","enum":["selection","layer"]},"transform.apply.points":{"description":"目标控制点文档坐标[[x,y],...]：透视/四角4点按左上右上右下左下；warp/cage与sourcePoints等长；mesh行优先columns*rows。拒绝折叠、交叉、透视穿越无穷远。"},"transform.apply.columns":{"description":"mesh 源规则网格列数2..9，points按行优先。"},"transform.apply.rows":{"description":"mesh 源规则网格行数2..9。"},"transform.apply.alpha":{"description":"warp MLS权重指数0.25..4，默认1。"},"transform.apply.interpolation":{"description":"透明边界，预乘alpha插值：nearest最近邻、bilinear双线性、bicubic三次Catmull-Rom。","enum":["nearest","bilinear","bicubic"]},"transform.affine.scaleX":{"description":"水平缩放-100..100，绝对值>=0.01，默认1；负值翻转。"},"transform.affine.scaleY":{"description":"垂直缩放-100..100，绝对值>=0.01，默认1。"},"transform.affine.shearX":{"description":"水平剪切系数-10..10，默认0，1-shearX*shearY须非零。"},"transform.affine.shearY":{"description":"垂直剪切系数-10..10，默认0。"},"transform.affine.rotation":{"description":"顺时针旋转角度±36000°，默认0。"},"transform.affine.pivotX":{"description":"文档像素枢轴X，默认0。"},"transform.affine.pivotY":{"description":"文档像素枢轴Y，默认0。"},"transform.affine.dx":{"description":"文档水平位移像素，默认0，±1000000。"},"transform.affine.dy":{"description":"文档垂直位移像素，默认0，±1000000。"},"transform.geometry.scaleX":{"description":"水平缩放-100..100，绝对值>=0.01，默认1；负值翻转。"},"transform.geometry.scaleY":{"description":"垂直缩放-100..100，绝对值>=0.01，默认1。"},"transform.geometry.shearX":{"description":"水平剪切系数-10..10，默认0，1-shearX*shearY须非零。"},"transform.geometry.shearY":{"description":"垂直剪切系数-10..10，默认0。"},"transform.geometry.rotation":{"description":"顺时针旋转角度±36000°，默认0。"},"transform.geometry.pivotX":{"description":"文档像素枢轴X，默认0。"},"transform.geometry.pivotY":{"description":"文档像素枢轴Y，默认0。"},"transform.geometry.dx":{"description":"文档水平位移像素，默认0，±1000000。"},"transform.geometry.dy":{"description":"文档垂直位移像素，默认0，±1000000。"},"transform.apply.scaleX":{"description":"水平缩放-100..100，绝对值>=0.01，默认1；负值翻转。"},"transform.apply.scaleY":{"description":"垂直缩放-100..100，绝对值>=0.01，默认1。"},"transform.apply.shearX":{"description":"水平剪切系数-10..10，默认0，1-shearX*shearY须非零。"},"transform.apply.shearY":{"description":"垂直剪切系数-10..10，默认0。"},"transform.apply.rotation":{"description":"顺时针旋转角度±36000°，默认0。"},"transform.apply.pivotX":{"description":"文档像素枢轴X，默认0。"},"transform.apply.pivotY":{"description":"文档像素枢轴Y，默认0。"},"transform.apply.dx":{"description":"文档水平位移像素，默认0，±1000000。"},"transform.apply.dy":{"description":"文档垂直位移像素，默认0，±1000000。"},"measure.configure.unit":{"description":"输出单位，默认共享测量设置。","enum":["px","mm","cm","in","pt"]},"measure.configure.ppi":{"description":"工具PPI 1..2400，初值72；文档没有印刷分辨率元数据，不是读取文档DPI。"},"measure.configure.angleStep":{"description":"0关闭约束，正数<=180°，相对baseline吸附角度，保持长度。"},"measure.configure.baseline":{"description":"测角基线，文档坐标+X为0°、顺时针为正，有限值±36000°。"},"measure.configure.dragMode":{"description":"测量手机交互：auto端点/线身拾取，new新线，translate整线移动，baseline设置测角基线。","enum":["auto","new","translate","baseline"]},"measure.line.unit":{"description":"输出单位，默认共享测量设置。","enum":["px","mm","cm","in","pt"]},"measure.line.ppi":{"description":"工具PPI 1..2400，初值72；文档没有印刷分辨率元数据，不是读取文档DPI。"},"measure.line.angleStep":{"description":"0关闭约束，正数<=180°，相对baseline吸附角度，保持长度。"},"measure.line.baseline":{"description":"测角基线，文档坐标+X为0°、顺时针为正，有限值±36000°。"},"measure.line.dragMode":{"description":"测量手机交互：auto端点/线身拾取，new新线，translate整线移动，baseline设置测角基线。","enum":["auto","new","translate","baseline"]},"measure.line.dx":{"description":"文档像素平移增量，约束后整条线一起移动，不改变长度。默认0，有限±1000000。"},"measure.line.dy":{"description":"文档像素平移增量，约束后整条线一起移动，不改变长度。默认0，有限±1000000。"},"measure.line.x0":{"description":"测量线端点文档像素，有限±1000000；允许测量画布外。"},"measure.line.y0":{"description":"测量线端点文档像素，有限±1000000；允许测量画布外。"},"measure.line.x1":{"description":"测量线端点文档像素，有限±1000000；允许测量画布外。"},"measure.line.y1":{"description":"测量线端点文档像素，有限±1000000；允许测量画布外。"},"transform.geometry.subdivisions":{"description":"mesh 每单元细分1..8，默认4，双线性单元，非贝塞尔网格；总三角形<=8192。"},"transform.apply.subdivisions":{"description":"mesh 每单元细分1..8，默认4，双线性单元，非贝塞尔网格；总三角形<=8192。"}}
 """
 }

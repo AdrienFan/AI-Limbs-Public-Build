@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.66",
+  "version": "0.2.67",
   "api": {
     "target": 1,
     "min": 1
@@ -263,7 +263,15 @@
       "plugin.art.studio.color.palette.list",
       "plugin.art.studio.color.palette.save",
       "plugin.art.studio.color.palette.delete",
-      "plugin.art.studio.color.pick"
+      "plugin.art.studio.color.pick",
+      "plugin.art.studio.transform.info",
+      "plugin.art.studio.transform.geometry",
+      "plugin.art.studio.transform.affine",
+      "plugin.art.studio.transform.apply",
+      "plugin.art.studio.measure.info",
+      "plugin.art.studio.measure.settings",
+      "plugin.art.studio.measure.configure",
+      "plugin.art.studio.measure.line"
     ],
     "services": [],
     "providers": [

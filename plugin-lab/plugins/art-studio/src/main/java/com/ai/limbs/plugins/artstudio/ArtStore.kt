@@ -218,6 +218,67 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+    fun measureSettings():JSONObject=locked {
+        val file=File(root,"measure-settings.json")
+        if(file.isFile)ArtMeasure.settings(JSONObject(file.readText()),JSONObject()) else ArtMeasure.defaults()
+    }
+    fun configureMeasure(p:JSONObject):JSONObject=locked {
+        val old=measureSettings();require(p.getLong("expectedSettingsRevision")==old.getLong("revision")) {"测量设置已更新"}
+        val next=ArtMeasure.settings(old,p)
+        if(next.toString()==old.toString())return@locked old
+        require(old.getLong("revision")<Long.MAX_VALUE);next.put("revision",old.getLong("revision")+1)
+        atomic(File(root,"measure-settings.json"),next.toString());next
+    }
+    fun transformGeometry(p:JSONObject):JSONObject=locked {
+        val snap=moveSnapshot(p,false);val state=snap.getJSONObject("state")
+        val scope=p.getString("scope");require(scope in setOf("selection","layer"))
+        val source=if(scope=="selection") {require(ArtMove.hasSelection(state));state.getJSONObject("selection")} else
+            JSONObject(p.getJSONObject("sourceBounds").toString()).put("shape","rect")
+        ArtTransform.geometry(ArtMove.bounds(source),p).put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+    }
+    fun transformAffine(actor:String,p:JSONObject):JSONObject=locked {
+        val snap=moveSnapshot(p,true);val state=snap.getJSONObject("state")
+        val layer=ArtMenuOperations.layers(state).first {it.getString("id")==p.getString("layerId")}
+        require(!ArtMenuOperations.isLocked(state,layer))
+        val current=ArtShapes.layerMatrix(state,layer);val inverse=Matrix();require(current.invert(inverse))
+        // A local correction conjugates a document-space delta without disturbing parent transforms or old x/y/scale/rotation APIs.
+        val correction=Matrix(current).apply {postConcat(ArtTransform.affine(p));postConcat(inverse)}
+        val result=layer.optJSONArray("affine")?.let {ArtShapes.matrix(it)} ?: Matrix()
+        result.preConcat(correction)
+        val encoded=ArtShapes.encode(result);ArtShapes.matrix(encoded)
+        if(correction.isIdentity)return@locked snap.put("transformApplied",false)
+        appendToCurrent(actor,"TRANSFORM_AFFINE",JSONObject().put("layerId",layer.getString("id")).put("affine",encoded)).put("transformApplied",true)
+    }
+    fun transformPixels(actor:String,p:JSONObject):JSONObject=locked {
+        val snap=moveSnapshot(p,true);val state=snap.getJSONObject("state")
+        val layer=ArtMenuOperations.layers(state).first {it.getString("id")==p.getString("layerId")}
+        require(!ArtMenuOperations.isLocked(state,layer) && ArtMove.visibility(state,layer)>0)
+        val scope=p.getString("scope");require(scope in setOf("selection","layer"))
+        val selection=if(scope=="selection") {
+            require(layer.getString("kind") in setOf("paint","image")) {"选区像素变换仅支持绘画层和图像层"}
+            require(ArtMove.hasSelection(state));state.getJSONObject("selection")
+        } else {
+            require(p.getBoolean("bake")) {"整层像素变换须显式bake=true，确认栅格化和取样框外像素丢弃"}
+            require(ArtMenuOperations.subtree(state,layer.getString("id")).none {it.getBoolean("locked")}) {"整层栅格化不能删除锁定的子图层"}
+            JSONObject(p.getJSONObject("sourceBounds").toString()).put("shape","rect")
+        }
+        val plan=ArtTransform.plan(ArtMove.bounds(selection),p)
+        if(plan.identity)return@locked snap.put("transformApplied",false)
+        val inverse=Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse))
+        val sourcePixels=ArtMove.bounds(selection).let {it.width().toLong()*it.height()}
+        val outputPixels=plan.bounds.width().toLong()*plan.bounds.height()
+        ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(this,state,ArtMove.bounds(selection).width(),ArtMove.bounds(selection).height())+ArtBrush.renderOverhead(state,state.getInt("width"),state.getInt("height"))+sourcePixels*32+outputPixels*32,"像素变换事务")
+        val capture=ArtMovePixels.capture(this,snap,layer.getString("id"),selection)
+        val warped=ArtTransformPixels.render(capture,plan,p);val asset=UUID.randomUUID().toString()
+        val event=JSONObject().put("layerId",layer.getString("id")).put("scope",scope).put("asset",asset)
+            .put("sourceSelection",capture.mask).put("selection",warped.mask).put("selectionToLayer",ArtShapes.encode(inverse))
+            .put("outputX",warped.bounds.left).put("outputY",warped.bounds.top).put("outputWidth",warped.bounds.width()).put("outputHeight",warped.bounds.height())
+            .put("interpolation",p.optString("interpolation","bilinear")).put("mode",p.getString("mode"))
+        ArtTransformPixels.validate(event);atomicBytes(assetFile(asset),warped.bytes)
+        try {appendToCurrent(actor,"TRANSFORM_PIXELS",event).put("transformApplied",true).put("transformGeometry",ArtTransform.geometry(capture.bounds,p))}
+        catch(error:Throwable) {assetFile(asset).delete();throw error}
+    }
+
     private fun colorWorkspaceFile() = File(root, "color-workspace.json")
     fun colorState(): JSONObject = locked {
         val file = colorWorkspaceFile()
@@ -336,13 +397,13 @@ internal class ArtStore(private val root: File) {
 
     fun menuContext(): JSONObject = locked {
         JSONObject().put("document", if (pointer.isFile) snapshot(loadCurrent()) else JSONObject.NULL)
-            .put("layerClipboard", layerClipboard.isFile).put("moveSettings",moveSettings())
+            .put("layerClipboard", layerClipboard.isFile).put("moveSettings",moveSettings()).put("measureSettings",measureSettings())
             .put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
     }
 
     fun menuUiState(): JSONObject = locked {
         JSONObject().put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("storage", saveDirectories.describe())
-            .put("moveSettings",moveSettings()).put("layerClipboard",layerClipboard.isFile)
+            .put("moveSettings",moveSettings()).put("measureSettings",measureSettings()).put("layerClipboard",layerClipboard.isFile)
             .put("request", if (menuUiRequest.isFile) JSONObject(menuUiRequest.readText()) else JSONObject.NULL)
     }
 
@@ -2148,10 +2209,9 @@ internal class ArtStore(private val root: File) {
         try {
             val result = appendToCurrent(actor, if (update) "TEXT_UPDATE" else "TEXT_CREATE",
                 JSONObject().put("id", id).put("asset", asset).put("text", text).also { parameters ->
-                    val angle=Math.toRadians(previous?.getDouble("rotation") ?: 0.0);val scale=previous?.getDouble("scale") ?: 1.0
-                    val ox=text.getDouble("cacheOriginX");val oy=text.getDouble("cacheOriginY")
-                    parameters.put("x",x+scale*(cos(angle)*ox-sin(angle)*oy))
-                        .put("y",y+scale*(sin(angle)*ox+cos(angle)*oy))
+                    val offset=floatArrayOf(text.getDouble("cacheOriginX").toFloat(),text.getDouble("cacheOriginY").toFloat())
+                    if(previous!=null)ArtShapes.localMatrix(previous).mapVectors(offset)
+                    parameters.put("x",x+offset[0]).put("y",y+offset[1])
                 })
             result.put("textLayerId", id).put("textNotice", ArtText.NOTICE)
         } catch (error: Throwable) { assetFile(asset).delete(); throw error }
@@ -2234,6 +2294,8 @@ internal class ArtStore(private val root: File) {
                     else -> "绘制笔画"
                 }
                 "STROKE_ERASE" -> "删除笔画"
+                "TRANSFORM_AFFINE" -> "自由变换图层"
+                "TRANSFORM_PIXELS" -> "变形图层或选区像素"
                 "MOVE_LAYER" -> "移动图层"
                 "MOVE_PIXELS" -> "移动选区像素"
                 "TRANSFORM" -> "变换图层"
@@ -2425,7 +2487,7 @@ internal class ArtStore(private val root: File) {
                 require(layer.getString("kind") in setOf("paint","image") && !lockedByParent(layer,layers))
                 require(layer.optString("parentId").isBlank() &&
                     layer.getDouble("x")==0.0 && layer.getDouble("y")==0.0 &&
-                    layer.getDouble("scale")==1.0 && layer.getDouble("rotation")==0.0)
+                    layer.getDouble("scale")==1.0 && layer.getDouble("rotation")==0.0 && !layer.has("affine"))
                 val x=p.getInt("x");val y=p.getInt("y");val w=p.getInt("width");val h=p.getInt("height")
                 require(x>=0 && y>=0 && w>0 && h>0 && x.toLong()+w<=state.getInt("width") &&
                     y.toLong()+h<=state.getInt("height") && w.toLong()*h<=ArtSmartPatch.MAX_REGION_PIXELS)
@@ -2441,7 +2503,7 @@ internal class ArtStore(private val root: File) {
                 require(layer.getString("kind") in setOf("paint", "image") && !lockedByParent(layer, layers))
                 require(layer.optString("parentId").isBlank() &&
                     layer.getDouble("x") == 0.0 && layer.getDouble("y") == 0.0 &&
-                    layer.getDouble("scale") == 1.0 && layer.getDouble("rotation") == 0.0) {
+                    layer.getDouble("scale") == 1.0 && layer.getDouble("rotation") == 0.0 && !layer.has("affine")) {
                     "请先取消图层变换和分组，再编辑选区像素"
                 }
                 val order = contentOrder(layer)
@@ -2712,6 +2774,29 @@ internal class ArtStore(private val root: File) {
                     ?: error("笔画不存在")
                 strokes.remove(index)
             }
+            "TRANSFORM_AFFINE" -> {
+                val layer=find(p.getString("layerId")).second;require(!lockedByParent(layer,layers))
+                val affine=ArtShapes.matrix(p.getJSONArray("affine"));if(affine.isIdentity)layer.remove("affine") else layer.put("affine",JSONArray(p.getJSONArray("affine").toString()))
+            }
+            "TRANSFORM_PIXELS" -> {
+                val layer=find(p.getString("layerId")).second;require(!lockedByParent(layer,layers))
+                ArtTransformPixels.validate(p);validateId(p.getString("asset"))
+                if(p.getString("scope")=="layer") {
+                    // Rasterization is explicit; historical operations retain all original assets and editable objects for Undo.
+                    val deleted=mutableSetOf<String>();var frontier=setOf(layer.getString("id"))
+                    repeat(layers.length()) {
+                        frontier=(0 until layers.length()).map {layers.getJSONObject(it)}.filter {it.optString("parentId") in frontier}.map {it.getString("id")}.toSet()
+                        deleted.addAll(frontier)
+                    }
+                    for(i in layers.length()-1 downTo 0)if(layers.getJSONObject(i).getString("id") in deleted)layers.remove(i)
+                    for(key in listOf("asset","width","height","text","shapes","colorize","cropClip","contentOrder"))layer.remove(key)
+                    layer.put("kind","paint").put("strokes",JSONArray())
+                    state.remove("shapeSelection")
+                } else require(layer.getString("kind") in setOf("paint","image"))
+                contentOrder(layer).put(JSONObject(p.toString()).put("kind","transform_pixels"))
+                if(p.getString("scope")=="selection")state.put("selection",JSONObject(p.getJSONObject("selection").toString()))
+                state.put("selectedLayerId",layer.getString("id"))
+            }
             "MOVE_LAYER" -> {
                 val layer=find(p.getString("layerId")).second
                 require(!lockedByParent(layer,layers))
@@ -2971,7 +3056,7 @@ internal class ArtStore(private val root: File) {
         }
         require(layer.optString("parentId").isBlank() &&
             layer.getDouble("x") == 0.0 && layer.getDouble("y") == 0.0 &&
-            layer.getDouble("scale") == 1.0 && layer.getDouble("rotation") == 0.0) {
+            layer.getDouble("scale") == 1.0 && layer.getDouble("rotation") == 0.0 && !layer.has("affine")) {
             "请先取消图层变换和分组，再编辑选区像素"
         }
         return layer
@@ -3294,13 +3379,7 @@ internal class ArtStore(private val root: File) {
             }
         }
         require(parentId.isBlank()) { "图层组存在循环引用" }
-        return Matrix().also { matrix ->
-            for (item in chain) {
-                matrix.postScale(item.getDouble("scale").toFloat(), item.getDouble("scale").toFloat())
-                matrix.postRotate(item.getDouble("rotation").toFloat())
-                matrix.postTranslate(item.getDouble("x").toFloat(), item.getDouble("y").toFloat())
-            }
-        }
+        return Matrix().apply {for(item in chain)postConcat(ArtShapes.localMatrix(item))}
     }
 
     private fun intersects(points: JSONArray, selection: JSONObject, matrix: Matrix): Boolean {

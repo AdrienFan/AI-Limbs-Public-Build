@@ -443,10 +443,11 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                           docW: Int, docH: Int, depth: Int) {
         if (depth > siblings.size) return
         canvas.save()
-        canvas.translate(layer.optDouble("x").toFloat(), layer.optDouble("y").toFloat())
-        canvas.rotate(layer.optDouble("rotation").toFloat())
-        val scale = layer.optDouble("scale", 1.0).toFloat()
-        canvas.scale(scale, scale)
+        canvas.concat(ArtShapes.localMatrix(layer))
+        layer.optJSONArray("cropClip")?.let {clip->
+            if(clip.length()==0)canvas.clipRect(0f,0f,0f,0f)
+            else {val path=android.graphics.Path();for(i in 0 until clip.length()){val p=clip.getJSONArray(i);if(i==0)path.moveTo(p.getDouble(0).toFloat(),p.getDouble(1).toFloat())else path.lineTo(p.getDouble(0).toFloat(),p.getDouble(1).toFloat())};path.close();canvas.clipPath(path)}
+        }
         val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
             alpha = (layer.optDouble("opacity", 1.0) * 255).toInt().coerceIn(0, 255)
             if (Build.VERSION.SDK_INT >= 29) blendMode = when (layer.optString("blend")) {
@@ -456,7 +457,7 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                 else -> android.graphics.BlendMode.SRC_OVER
             }
         }
-        canvas.saveLayer(0f, 0f, docW.toFloat(), docH.toFloat(), paint)
+        canvas.saveLayer(null, paint)
         when (layer.optString("kind")) {
             "group" -> siblings.filter {
                 it.optString("parentId") == layer.optString("id") && it.optBoolean("visible", true)
@@ -480,6 +481,8 @@ private class StudioLayerThumbnailView(context: android.content.Context) : View(
                         val event=order.getJSONObject(n)
                         when(event.getString("kind")) {
                             "stroke" -> byId[event.getString("id")]?.let { if(it.has("gradientVersion"))ArtGradient.draw(canvas,it,128) else ArtRenderer.drawStroke(canvas,it) }
+                            "transform_pixels" -> ArtTransformPixels.draw(canvas,event,requireNotNull(store))
+                            "move_pixels" -> ArtMovePixels.draw(canvas,event,requireNotNull(store))
                             "paste","erase" -> drawAsset(canvas,event.getString("asset"),event.getInt("x"),event.getInt("y"),ArtPixelBlend.paint(event))
                             "clear","fill" -> {
                                 val clip=event.optJSONObject("selection");val erase=event.getString("kind")=="clear"

@@ -147,10 +147,9 @@ internal object ArtText {
         return "<svg xmlns=\"http://www.w3.org/2000/svg\"><!-- AI Limbs SVG text profile -->$defs<text ${attributes(normalized)} writing-mode=\"$writing\" direction=\"$direction\" text-orientation=\"${normalized.getString("textOrientation")}\" text-anchor=\"$anchor\" white-space=\"pre-wrap\" line-height=\"${normalized.getDouble("lineSpacing")}\" $inline>$body</text></svg>"
     }
     fun anchor(layer: JSONObject): Pair<Double,Double> {
-        val text=layer.getJSONObject("text");val angle=Math.toRadians(layer.getDouble("rotation"));val scale=layer.getDouble("scale")
-        val x=text.optDouble("cacheOriginX",0.0);val y=text.optDouble("cacheOriginY",0.0)
-        return (layer.getDouble("x")-scale*(kotlin.math.cos(angle)*x-kotlin.math.sin(angle)*y)) to
-            (layer.getDouble("y")-scale*(kotlin.math.sin(angle)*x+kotlin.math.cos(angle)*y))
+        val text=layer.getJSONObject("text")
+        val offset=floatArrayOf(-text.optDouble("cacheOriginX",0.0).toFloat(),-text.optDouble("cacheOriginY",0.0).toFloat())
+        ArtShapes.localMatrix(layer).mapPoints(offset);return offset[0].toDouble() to offset[1].toDouble()
     }
     fun render(text: JSONObject, extraBytes: Long): Bitmap {
         requireAvailable()

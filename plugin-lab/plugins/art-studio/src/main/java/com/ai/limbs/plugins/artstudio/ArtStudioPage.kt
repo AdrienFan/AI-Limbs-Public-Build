@@ -424,6 +424,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var selectionBezierSettings by remember {mutableStateOf(ArtSoftSelection.defaults())}
     var basicSelectionSettings by remember {mutableStateOf(ArtSoftSelection.defaults())}
     var basicSelectionDraft by remember {mutableStateOf(false)}
+    var transformRequest by remember {mutableStateOf<JSONObject?>(null)}
+    var measureSettings by remember {mutableStateOf(ArtMeasure.defaults())}
+    var measureSettingsReady by remember {mutableStateOf(false)}
+    var measureSettingsBusy by remember {mutableStateOf(false)}
     var moveSettings by remember {mutableStateOf(ArtMove.defaults())}
     var moveSettingsReady by remember {mutableStateOf(false)}
     var moveSettingsBusy by remember {mutableStateOf(false)}
@@ -498,6 +502,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         }
     }
     // Debounce pointer-driven color edits; take/render/write operations stay on the worker thread.
+    fun changeMeasureSettings(p:JSONObject) {
+        if(measureSettingsReady && !measureSettingsBusy && !busy)scope.launch {
+            measureSettingsBusy=true
+            val captured=JSONObject(p.toString()).put("expectedSettingsRevision",measureSettings.getLong("revision"))
+            try {measureSettings=withContext(Dispatchers.IO){mutex.withLock {store.configureMeasure(captured)}}}
+            catch(error:Exception){host.logger.e("ArtStudio","Measure settings failed",error);Toast.makeText(context,error.message,Toast.LENGTH_LONG).show()}
+            finally {measureSettingsBusy=false}
+        }
+    }
     fun changeMoveSettings(p:JSONObject) {
         if(moveSettingsReady && !moveSettingsBusy && !busy)scope.launch {
             moveSettingsBusy=true
@@ -619,10 +632,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var projectName by remember { mutableStateOf("") }
     var colorDialog by remember { mutableStateOf(false) }
     var colorText by remember { mutableStateOf(color) }
-    var transformX by remember { mutableStateOf("0") }
-    var transformY by remember { mutableStateOf("0") }
-    var transformScale by remember { mutableStateOf("1") }
-    var transformAngle by remember { mutableStateOf("0") }
     var leftDrawerOpen by rememberSaveable { mutableStateOf(false) }
     var rightDrawerOpen by rememberSaveable { mutableStateOf(false) }
     var leftDrawerPinned by rememberSaveable { mutableStateOf(false) }
@@ -1064,6 +1073,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
             val menuData=withContext(Dispatchers.IO) { store.menuUiState() }
             remainingContext=menuData
+            if(!measureSettingsBusy) {
+                val next=menuData.getJSONObject("measureSettings")
+                if(!measureSettingsReady||next.getLong("revision")>measureSettings.getLong("revision"))measureSettings=next
+                measureSettingsReady=true
+            }
             if(!moveSettingsBusy) {
                 val nextMove=menuData.getJSONObject("moveSettings")
                 if(!moveSettingsReady || nextMove.getLong("revision")>moveSettings.getLong("revision"))moveSettings=nextMove
@@ -1113,6 +1127,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
 
     val current = snapshot
+    LaunchedEffect(current?.optString("id"),current?.optInt("revision"),selected) {
+        transformRequest=current?.let {snap->
+            val st=snap.getJSONObject("state");val selectedPixels=ArtMove.hasSelection(st)
+            val box=if(selectedPixels)ArtMove.bounds(st.getJSONObject("selection")) else android.graphics.Rect(0,0,st.getInt("width"),st.getInt("height"))
+            JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision")).put("layerId",selected)
+                .put("mode","affine").put("scope",if(selectedPixels)"selection" else "layer").put("bake",false).put("interpolation","bilinear")
+                .put("sourceBounds",JSONObject().put("x",box.left).put("y",box.top).put("width",box.width()).put("height",box.height()))
+                .put("pivotX",(box.left+box.right)/2.0).put("pivotY",(box.top+box.bottom)/2.0)
+        }
+    }
     LaunchedEffect(tool,current?.optString("id"),revision,selected,
         magneticSettings.getString("reference"),magneticSettings.getInt("filterRadius"),magneticSettings.getBoolean("limitToSelection")) {
         magneticImage=null
@@ -1322,7 +1346,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         menuActive.optString("parentId").isBlank() && menuActive.optBoolean("visible") &&
         !menuActive.optBoolean("locked") &&
         menuActive.optDouble("x") == 0.0 && menuActive.optDouble("y") == 0.0 &&
-        menuActive.optDouble("scale") == 1.0 && menuActive.optDouble("rotation") == 0.0
+        !menuActive.has("affine") && menuActive.optDouble("scale") == 1.0 && menuActive.optDouble("rotation") == 0.0
     val menuClipboardCanNew = ArtImagePolicy.dimensionsValid(clipboardSize.first, clipboardSize.second)
 
     SideEffect {
@@ -1780,6 +1804,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     view.fillSettings=fillSettings
                     view.onFillDraft={fillDraft=it}
                     view.onFill={p->if(!busy)perform {store.fillContiguous("AWEI",p)}}
+                    view.transformRequest=transformRequest;view.onTransformDraft={if(it.getString("documentId")==current.getString("id")&&it.getInt("expectedRevision")==current.getInt("revision"))transformRequest=it}
+                    view.measureSettings=measureSettings;view.measureBusy=busy||measureSettingsBusy||!measureSettingsReady
+                    view.onMeasureBaseline={angle->changeMeasureSettings(JSONObject().put("baseline",angle))}
                     view.moveSettings=moveSettings;view.moveBusy=busy || moveSettingsBusy || !moveSettingsReady
                     view.onMoveTool={p->if(!busy && !moveSettingsBusy && moveSettingsReady)perform {store.move("AWEI",p)}}
                     view.onMoveNudge={direction,large->if(!busy && !moveSettingsBusy && moveSettingsReady) {
@@ -2846,31 +2873,14 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 if(tool=="gradient")StudioGradientOptions(gradientSettings,color,busy,gradientDraft,
                     {gradientSettings=it},{canvasRef[0]?.cancelGradient()})
-                if (tool == "transform") {
-                    if (selectedLayer == null) {
-                        Text("请先选择要变换的图层。")
-                    } else {
-                        LaunchedEffect(current.getString("id"), selected, current.getInt("revision")) {
-                            transformX = selectedLayer.getDouble("x").toString()
-                            transformY = selectedLayer.getDouble("y").toString()
-                            transformScale = selectedLayer.getDouble("scale").toString()
-                            transformAngle = selectedLayer.getDouble("rotation").toString()
-                        }
-                        OutlinedTextField(transformX, { transformX = it }, label = { Text("X 位置") })
-                        OutlinedTextField(transformY, { transformY = it }, label = { Text("Y 位置") })
-                        OutlinedTextField(transformScale, { transformScale = it }, label = { Text("缩放（0.01–100）") })
-                        OutlinedTextField(transformAngle, { transformAngle = it }, label = { Text("旋转角度") })
-                        TextButton(enabled = !busy, onClick = {
-                            val x = transformX.toDoubleOrNull(); val y = transformY.toDoubleOrNull()
-                            val scale = transformScale.toDoubleOrNull(); val angle = transformAngle.toDoubleOrNull()
-                            if (x != null && y != null && scale != null && angle != null &&
-                                x.isFinite() && y.isFinite() && scale in 0.01..100.0 && angle.isFinite()) {
-                                edit("TRANSFORM", JSONObject().put("id", selected).put("x", x).put("y", y)
-                                    .put("scale", scale).put("rotation", angle))
-                            } else Toast.makeText(context, "请输入有效的位置、缩放和角度", Toast.LENGTH_SHORT).show()
-                        }) { Text("应用变换") }
-                    }
+                if(tool=="transform")transformRequest?.let {request->
+                    StudioTransformOptions(request,busy,{transformRequest=it},{
+                        val p=JSONObject(request.toString())
+                        if(p.getString("mode")=="affine"&&p.getString("scope")=="layer")perform {store.transformAffine("AWEI",p)}
+                        else perform {store.transformPixels("AWEI",p)}
+                    },{canvasRef[0]?.pauseTransform();transformRequest=transformControls(JSONObject(request.toString()).put("dx",0).put("dy",0).put("scaleX",1).put("scaleY",1).put("shearX",0).put("shearY",0).put("rotation",0),request.getString("mode"))})
                 }
+                if(tool=="measure")StudioMeasureOptions(measureSettings,busy||measureSettingsBusy||!measureSettingsReady,::changeMeasureSettings,{canvasRef[0]?.clearMeasure()})
                 if (tool == "dyna") {
                     Text("惯性：${(dynaMass * 100).toInt()}%")
                     Slider(value = dynaMass, onValueChange = { dynaMass = it },
@@ -2889,7 +2899,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 }
                 if (!ArtBrush.supports(tool) && tool !in setOf("select_contiguous", "select_similar", "select_magnetic", "comic_panel", "select_bezier", "enclose_fill", "colorize_mask", "smart_patch", "assistant", "vector_bezier", "reference_images", "vector_calligraphy",
                     "vector_freehand", "shape_select", "svg_text", "sampler", "fill", "mirror",
-                    "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "calligraphy", "dyna", "zoom")) {
+                    "rectangle", "ellipse", "polygon", "bezier", "gradient", "transform", "measure", "calligraphy", "dyna", "zoom")) {
                     Text("此工具暂无独立参数。")
                     Text(ArtToolCatalog.usage(tool), style = MaterialTheme.typography.bodySmall)
                 }
@@ -3369,7 +3379,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var documentId: String = ""; set(value) {
         if (field != value) {
             field = value
-            moveInteraction.cancel();cropInteraction.cancel()
+            moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel()
             basicSelectionInteraction.cancel();fillInteraction.cancel()
             shapeInteraction.cancel(); freehandInteraction.cancel(); bezierInteraction.cancel(); calligraphyInteraction.cancel(); referenceInteraction.cancel();smartPatchInteraction.cancel();colorizeInteraction.cancel();gradientInteraction.cancel();encloseFillInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel();selectionBezierInteraction.cancel(); rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel(); assistantInteraction.cancel(); assistedBrushInteraction.cancel(); rasterBrushInteraction.cancel(); assistedStrokeRouting=false; shapeCreationContext = null
             points = JSONArray(); pathVertices = JSONArray()
@@ -3391,11 +3401,11 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     var scene: JSONObject? = null
     var sceneRevision: Int = 0
-        set(value) {if(field!=value){field=value;moveInteraction.cancel();cropInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var shapeMultiple: Boolean = false
     var shapeShear: Boolean = false
     var shapeBusy: Boolean = false
-        set(value) {field=value;if(value){moveInteraction.cancel();cropInteraction.pause();gradientInteraction.cancel();encloseFillInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {field=value;if(value){moveInteraction.cancel();cropInteraction.pause();transformInteraction.pause();measureInteraction.pause();gradientInteraction.cancel();encloseFillInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var onShapeEdit: (String, JSONObject) -> Unit = { _, _ -> }
     var shapeCreationContext: JSONObject? = null
         private set
@@ -3542,7 +3552,7 @@ private class StudioCanvas(context: Context) : View(context) {
     var onFreehand: (JSONObject) -> Unit = {}
     var layers: JSONArray? = null
     var selectedId: String = ""
-        set(value) {if(field!=value){field=value;moveInteraction.cancel();cropInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+        set(value) {if(field!=value){field=value;moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
     var selection: JSONObject? = null
     var selectionVisible = true
     var tool: String = "ink"
@@ -3560,8 +3570,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 shapeCreationContext = null
                 points = JSONArray()
                 pathVertices = JSONArray()
-                moveInteraction.cancel();cropInteraction.cancel()
-                measurement = null
+                moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel()
                 lastPathTap = 0L
                 invalidate()
             }
@@ -3617,6 +3626,19 @@ private class StudioCanvas(context: Context) : View(context) {
     var onText: (Double, Double, Boolean) -> Unit = { _, _, _ -> }
     var onStroke: (JSONArray) -> Unit = {}
     var onCrop: (JSONObject) -> Unit = {}
+    private val transformInteraction=StudioTransformInteraction().apply {density=context.resources.displayMetrics.density}
+    var transformRequest:JSONObject?=null
+        set(value) {field=value;transformInteraction.request=value?.let {JSONObject(it.toString())};invalidate()}
+    var onTransformDraft:(JSONObject)->Unit={}
+        set(value) {field=value;transformInteraction.onDraft=value}
+    fun pauseTransform(){transformInteraction.pause();invalidate()}
+    private val measureInteraction=StudioMeasureInteraction().apply {density=context.resources.displayMetrics.density}
+    var measureSettings=ArtMeasure.defaults()
+        set(value) {field=value;measureInteraction.settings=JSONObject(value.toString());invalidate()}
+    var measureBusy=false
+    var onMeasureBaseline:(Double)->Unit={}
+        set(value) {field=value;measureInteraction.onBaseline=value}
+    fun clearMeasure(){measureInteraction.cancel();invalidate()}
     private val fillInteraction=StudioContiguousFillInteraction(this)
     var fillSettings=ArtContiguousFill.defaults()
     var onFillDraft:(Boolean)->Unit={}
@@ -3671,11 +3693,10 @@ private class StudioCanvas(context: Context) : View(context) {
     }
     fun cropCommand(action:String) {
         if(shapeBusy)return
-        try {when(action) {"cancel"->{moveInteraction.cancel();cropInteraction.cancel()};"finish"->cropInteraction.finish(documentId,sceneRevision,selectedId,onCrop);else->error("未知裁剪操作")}}
+        try {when(action) {"cancel"->{moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel()};"finish"->cropInteraction.finish(documentId,sceneRevision,selectedId,onCrop);else->error("未知裁剪操作")}}
         catch(error:Exception) {android.util.Log.e("ArtStudio","Crop command failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show()}
         finally {invalidate()}
     }
-    private var measurement: FloatArray? = null
     private var lastPathTap = 0L
     private var lastPathTapX = 0f
     private var lastPathTapY = 0f
@@ -3842,13 +3863,7 @@ private class StudioCanvas(context: Context) : View(context) {
             chain.add(parent)
             parentId = parent.optString("parentId")
         }
-        val m = Matrix()
-        for (layer in chain) {
-            m.postScale(layer.getDouble("scale").toFloat(), layer.getDouble("scale").toFloat())
-            m.postRotate(layer.getDouble("rotation").toFloat())
-            m.postTranslate(layer.getDouble("x").toFloat(), layer.getDouble("y").toFloat())
-        }
-        return m
+        return Matrix().apply {for(layer in chain)postConcat(ArtShapes.localMatrix(layer))}
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -3971,28 +3986,8 @@ private class StudioCanvas(context: Context) : View(context) {
         }
         if(tool=="crop")cropInteraction.draw(canvas,matrix)
         if(tool=="move")moveInteraction.draw(canvas,matrix)
-        measurement?.let { mark ->
-            canvas.save(); canvas.concat(matrix)
-            val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.rgb(238, 238, 238)
-                style = Paint.Style.STROKE
-                strokeWidth = 2f / (fit * zoom)
-            }
-            canvas.drawLine(mark[0], mark[1], mark[2], mark[3], paint)
-            canvas.restore()
-            val endpoint = floatArrayOf(mark[2], mark[3])
-            matrix.mapPoints(endpoint)
-            val distance = hypot(mark[2] - mark[0], mark[3] - mark[1])
-            val degrees = Math.toDegrees(atan2(
-                (mark[3] - mark[1]).toDouble(), (mark[2] - mark[0]).toDouble()))
-            canvas.drawText("%.1f px  %.1f°".format(java.util.Locale.ROOT, distance, degrees),
-                endpoint[0] + 12f, endpoint[1] - 12f,
-                Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = Color.WHITE
-                    textSize = 14f * resources.displayMetrics.scaledDensity
-                    setShadowLayer(3f, 0f, 0f, Color.BLACK)
-                })
-        }
+        if(tool=="transform")transformInteraction.draw(canvas,matrix)
+        if(tool=="measure")measureInteraction.draw(canvas,matrix)
         if (tool == "shape_select") {
             val state = scene
             val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
@@ -4089,7 +4084,7 @@ private class StudioCanvas(context: Context) : View(context) {
         }
     }
     override fun onDetachedFromWindow() {
-        moveInteraction.cancel();cropInteraction.cancel()
+        moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel()
         basicSelectionInteraction.cancel();fillInteraction.cancel()
         rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();brushBitmapCache.values.forEach {it.recycle()};brushBitmapCache.clear()
         magneticSelectionInteraction.dispose();colorSelectionInteraction.cancel()
@@ -4220,7 +4215,7 @@ private class StudioCanvas(context: Context) : View(context) {
             }
             pinch = distance; pinchAngle = rotation
             points = JSONArray(); pathVertices = JSONArray(); lastPathTap = 0L
-            moveInteraction.cancel();cropInteraction.pause()
+            moveInteraction.cancel();cropInteraction.pause();transformInteraction.pause();measureInteraction.pause()
             invalidate(); return true
         }
         pinch = 0f
@@ -4229,7 +4224,7 @@ private class StudioCanvas(context: Context) : View(context) {
                 event.actionMasked == MotionEvent.ACTION_CANCEL) {
                 multitouch = false
                 points = JSONArray()
-                moveInteraction.cancel();cropInteraction.pause()
+                moveInteraction.cancel();cropInteraction.pause();transformInteraction.pause();measureInteraction.pause()
                 invalidate()
             }
             return true
@@ -4241,6 +4236,19 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(tool=="measure") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            if(measureBusy)return true
+            try{return measureInteraction.touch(event,matrix)}
+            catch(error:Exception){measureInteraction.pause();android.util.Log.e("ArtStudio","Measure gesture failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+            finally{invalidate()}
+        }
+        if(tool=="transform") {
+            if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
+            try{return transformInteraction.touch(event,matrix,shapeBusy)}
+            catch(error:Exception){transformInteraction.pause();android.util.Log.e("ArtStudio","Transform gesture failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+            finally{invalidate()}
+        }
         if(tool=="move") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
@@ -4252,7 +4260,7 @@ private class StudioCanvas(context: Context) : View(context) {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             val state=scene ?: return true
             try {return cropInteraction.touch(event,state,documentId,sceneRevision,selectedId,matrix,shapeBusy)}
-            catch(error:Exception) {moveInteraction.cancel();cropInteraction.pause();android.util.Log.e("ArtStudio","Crop gesture failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
+            catch(error:Exception) {moveInteraction.cancel();cropInteraction.pause();transformInteraction.pause();measureInteraction.pause();android.util.Log.e("ArtStudio","Crop gesture failed",error);Toast.makeText(context,error.message,Toast.LENGTH_SHORT).show();return true}
             finally {invalidate()}
         }
         if(tool in ArtSoftSelection.tools) {
@@ -4541,7 +4549,7 @@ private class StudioCanvas(context: Context) : View(context) {
                             .put("expectedRevision", sceneRevision).put("layerId", selectedId)
                     }
                 } else shapeCreationContext = null
-                moveInteraction.cancel();cropInteraction.cancel()
+                moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel()
                 if (tool !in listOf("pan", "move", "transform", "select", "select_ellipse", "select_polygon", "select_freehand", "sampler", "crop", "fill", "zoom", "measure", "polygon", "polyline", "bezier"))
                     points.put(JSONArray().put(local[0]).put(local[1])
                         .put(event.pressure.coerceIn(0.1f, 1f)))
@@ -4562,8 +4570,6 @@ private class StudioCanvas(context: Context) : View(context) {
                     points.put(JSONArray().put(local[0]).put(local[1])
                         .put(event.pressure.coerceIn(0.1f, 1f)))
                 }
-                else if (tool == "measure")
-                    measurement = floatArrayOf(startX, startY, xy[0], xy[1])
                 else if (tool in listOf("line", "rectangle", "ellipse"))
                     points = shapePoints(local[0], local[1])
                 else if (tool == "bezier")
@@ -4585,10 +4591,8 @@ private class StudioCanvas(context: Context) : View(context) {
                     onCursor(xy[0].toInt(), xy[1].toInt())
                 }
                 when (tool) {
-                    "transform" -> onMove(xy[0] - startX, xy[1] - startY)
                     "pan" -> Unit
                     "zoom" -> zoomAt(event.x, event.y)
-                    "measure" -> measurement = floatArrayOf(startX, startY, xy[0], xy[1])
                     "sampler" -> {
                         val sampled = image
                         if (sampled != null && xy[0] >= 0f && xy[1] >= 0f &&
@@ -4652,14 +4656,14 @@ private class StudioCanvas(context: Context) : View(context) {
                     else -> if (points.length() > 0) onStroke(JSONArray(points.toString()))
                 }
                 if (tool !in listOf("polygon", "polyline", "bezier")) points = JSONArray()
-                moveInteraction.cancel();cropInteraction.cancel()
+                moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel()
             }
             MotionEvent.ACTION_CANCEL -> {
                 shapeCreationContext = null
                 multitouch = false
                 points = JSONArray()
                 pathVertices = JSONArray()
-                moveInteraction.cancel();cropInteraction.cancel()
+                moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel()
             }
         }
         invalidate(); return true

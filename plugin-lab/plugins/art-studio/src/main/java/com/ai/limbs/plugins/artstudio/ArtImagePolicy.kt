@@ -207,7 +207,7 @@ internal object ArtImagePolicy {
         for(layer in byId.values)layer.optJSONArray("contentOrder")?.let {order->
             for(i in 0 until order.length()) {
                 val event=order.getJSONObject(i)
-                if(event.getString("kind")=="move_pixels") {
+                if(event.getString("kind") in setOf("move_pixels","transform_pixels")) {
                     val mask=event.getJSONObject("sourceSelection")
                     moveMaskWork=maxOf(moveMaskWork,mask.getInt("maskWidth").toLong()*mask.getInt("maskHeight")*6)
                 }

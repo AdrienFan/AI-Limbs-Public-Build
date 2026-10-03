@@ -102,12 +102,12 @@ help_source = HELP.read_text(encoding='utf-8')
 help_parts = {
     name: json.loads(body)
     for name, body in re.findall(
-        r'private const val (EXAMPLES|FIELDS|SCOPED(?:_\d+)?) = """\s*(\{.*?\})\s*"""',
+        r'private const val (EXAMPLES(?:_\d+)?|FIELDS|SCOPED(?:_\d+)?) = """\s*(\{.*?\})\s*"""',
         help_source,
         re.S,
     )
 }
-if 'EXAMPLES' not in help_parts or 'FIELDS' not in help_parts:
+if not any(n=='EXAMPLES' or n.startswith('EXAMPLES_') for n in help_parts) or 'FIELDS' not in help_parts:
     raise SystemExit('Art Studio help metadata blocks are missing or invalid')
 if 'SCOPED' in help_parts:
     scoped = help_parts['SCOPED']
@@ -123,7 +123,15 @@ else:
         if overlap:
             raise SystemExit(f'Duplicate scoped help keys: {sorted(overlap)}')
         scoped.update(help_parts[name])
-help_blocks = {'EXAMPLES': help_parts['EXAMPLES'], 'FIELDS': help_parts['FIELDS'], 'SCOPED': scoped}
+example_names = [n for n in help_parts if n == 'EXAMPLES' or n.startswith('EXAMPLES_')]
+if 'EXAMPLES' in example_names and len(example_names) != 1:
+    raise SystemExit('Art Studio examples mix legacy and segmented metadata')
+merged_examples = {}
+for name in sorted(example_names):
+    if set(merged_examples) & set(help_parts[name]):
+        raise SystemExit('Duplicate Art Studio example keys')
+    merged_examples.update(help_parts[name])
+help_blocks = {'EXAMPLES': merged_examples, 'FIELDS': help_parts['FIELDS'], 'SCOPED': scoped}
 expected_help = {identity.removeprefix(f'{plugin_id}.') for identity in declared}
 examples = help_blocks['EXAMPLES']
 if set(examples) != expected_help:

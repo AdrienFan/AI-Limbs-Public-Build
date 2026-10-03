@@ -241,13 +241,13 @@ internal object ArtShapes {
             }
         }
         require(parent.isBlank()) { "图层组循环引用" }
-        return Matrix().apply {
-            for(p in chain) {
-                postScale(p.getDouble("scale").toFloat(),p.getDouble("scale").toFloat())
-                postRotate(p.getDouble("rotation").toFloat())
-                postTranslate(p.getDouble("x").toFloat(),p.getDouble("y").toFloat())
-            }
-        }
+        return Matrix().apply {for(p in chain)postConcat(localMatrix(p))}
+    }
+    fun localMatrix(layer:JSONObject):Matrix=Matrix().apply {
+        layer.optJSONArray("affine")?.let {set(matrix(it))}
+        postScale(layer.getDouble("scale").toFloat(),layer.getDouble("scale").toFloat())
+        postRotate(layer.getDouble("rotation").toFloat())
+        postTranslate(layer.getDouble("x").toFloat(),layer.getDouble("y").toFloat())
     }
     fun transformIds(layer:JSONObject,ids:List<String>,delta:Matrix) {
         require(ids.isNotEmpty()&&ids.distinct().size==ids.size)
