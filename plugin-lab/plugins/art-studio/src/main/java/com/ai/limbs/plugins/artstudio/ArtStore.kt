@@ -218,6 +218,117 @@ internal class ArtStore(private val root: File) {
         }
     }
 
+    private fun svgSnapshot(p:JSONObject,write:Boolean):JSONObject {
+        val snap=current()
+        if(write||p.has("documentId"))require(p.getString("documentId")==snap.getString("id")){"工程已切换，请重新读取SVG"}
+        if(write||p.has("expectedRevision"))require(p.getInt("expectedRevision")==snap.getInt("revision")){"工程已更新，请重新读取SVG；草稿仍保留"}
+        return snap
+    }
+    fun svgDocument(p:JSONObject):JSONObject=locked {
+        val snap=svgSnapshot(p,false);val scope=p.optString("scope","document")
+        val ids=p.optJSONArray("objectIds")?.let {ArtShapes.ids(it)} ?: emptyList()
+        val doc=ArtSceneSvg.export(snap,scope,ids)
+        JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision")).put("scope",scope)
+            .put("objectIds",JSONArray(ids)).put("source",doc.source).put("index",doc.index).put("objects",doc.objects).put("selectedObjectIds",JSONArray(doc.selected))
+    }
+    fun svgRead(p:JSONObject):JSONObject=locked {
+        val full=svgDocument(p);val source=full.getString("source");val offset=p.optInt("offset",0);val limit=p.optInt("limit",8000)
+        require(offset in 0..source.length&&limit in 1..32768)
+        var end=minOf(source.length,offset+limit)
+        if(end<source.length&&end>offset&&source[end-1].isHighSurrogate()&&source[end].isLowSurrogate())end--
+        require(offset==0||offset==source.length||!source[offset].isLowSurrogate()){ "offset 不能切开代理字符" }
+        full.put("source",source.substring(offset,end)).put("offset",offset).put("nextOffset",end).put("totalChars",source.length).put("hasMore",end<source.length).put("complete",end==source.length).put("fullSource",offset==0&&end==source.length)
+        if(!p.optBoolean("includeIndex",false)){full.remove("index");full.remove("objects")}
+        full
+    }
+    fun svgValidate(p:JSONObject):JSONObject=locked {
+        val snap=svgSnapshot(p,true)
+        try {
+            require(!p.has("newLayerName")||p.optString("scope","document")=="append"){"newLayerName仅用于append"}
+            val plan=ArtSceneSvg.plan(snap,p.getString("source"),p.optString("scope","document"),p.optJSONArray("objectIds")?.let {ArtShapes.ids(it)} ?: emptyList(),p.optString("newLayerName","SVG 绘画"))
+            JSONObject().put("valid",true).put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+                .put("touchedLayerIds",JSONArray(plan.touched)).put("textCacheRebuilds",plan.textLayers.size).put("historyWritten",false)
+        } catch(error:org.xml.sax.SAXParseException) {JSONObject().put("valid",false).put("message",error.message).put("line",error.lineNumber).put("column",error.columnNumber)}
+        catch(error:IllegalArgumentException){JSONObject().put("valid",false).put("message",error.message).put("line",0).put("column",0)}
+        catch(error:IllegalStateException){JSONObject().put("valid",false).put("message",error.message).put("line",0).put("column",0)}
+        catch(error:org.json.JSONException){JSONObject().put("valid",false).put("message",error.message).put("line",0).put("column",0)}
+    }
+    private fun svgTextAssets(snap:JSONObject,plan:ArtSceneSvg.Plan,created:MutableList<String>) {
+        if(plan.textLayers.isEmpty())return
+        ArtTextShaper.load(root)
+        val state=snap.getJSONObject("state");val old=ArtMenuOperations.layers(state).associateBy {it.getString("id")}
+        for(id in plan.textLayers) {
+            val layer=(0 until plan.layers.length()).map {plan.layers.getJSONObject(it)}.first {it.getString("id")==id}
+            val text=layer.getJSONObject("text");val previous=old.getValue(id).getJSONObject("text")
+            val bitmap=ArtText.render(text,ArtImagePolicy.renderBytes(this,state,state.getInt("width"),state.getInt("height")))
+            val bytes=try {ArtImagePolicy.encodePng(bitmap,MAX_ASSET_BYTES)}finally{bitmap.recycle()}
+            val asset=UUID.randomUUID().toString();created.add(asset);atomicBytes(assetFile(asset),bytes)
+            val delta=floatArrayOf((text.getDouble("cacheOriginX")-previous.getDouble("cacheOriginX")).toFloat(),(text.getDouble("cacheOriginY")-previous.getDouble("cacheOriginY")).toFloat())
+            ArtShapes.localMatrix(layer).mapVectors(delta)
+            layer.put("asset",asset).put("x",layer.getDouble("x")+delta[0]).put("y",layer.getDouble("y")+delta[1])
+        }
+    }
+    fun svgApply(actor:String,p:JSONObject,preview:Boolean=false):JSONObject=locked {
+        val snap=svgSnapshot(p,true);val source=p.getString("source");val scope=p.optString("scope","document")
+        val objectIds=p.optJSONArray("objectIds")?.let {ArtShapes.ids(it)} ?: emptyList()
+        require(!p.has("newLayerName")||scope=="append"){"newLayerName仅用于append"}
+        if(!preview&&scope!="append"&&source==ArtSceneSvg.export(snap,scope,objectIds).source)return@locked snap.put("svgApplied",false)
+        val plan=ArtSceneSvg.plan(snap,source,scope,objectIds,p.optString("newLayerName","SVG 绘画"));val created=mutableListOf<String>()
+        try {
+            svgTextAssets(snap,plan,created)
+            val state=JSONObject(snap.getJSONObject("state").toString()).put("layers",plan.layers).put("background",plan.background)
+            val candidate=JSONObject(snap.toString()).put("state",state);requireRenderBudget(candidate)
+            if(preview)return@locked ArtCanvasFeedback.attach(this,JSONObject().put("svgPreview",true).put("historyWritten",false).put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision")),candidate)
+            val old=ArtMenuOperations.layers(snap.getJSONObject("state")).associateBy {it.getString("id")}
+            val changes=JSONArray((0 until plan.layers.length()).map {plan.layers.getJSONObject(it)}.filter {it.toString()!=old[it.getString("id")]?.toString()})
+            if(changes.length()==0&&plan.background==snap.getJSONObject("state").getString("background"))return@locked snap.put("svgApplied",false)
+            val event=JSONObject().put("layers",changes).put("background",plan.background)
+            if(scope=="append")event.put("selectedLayerId",plan.layers.getJSONObject(plan.layers.length()-1).getString("id"))
+            val result=appendToCurrent(actor,"SVG_APPLY",event).put("svgApplied",true).put("svgTouchedLayerIds",JSONArray(plan.touched))
+            created.clear();result
+        } finally {created.forEach {assetFile(it).delete()}}
+    }
+    fun svgSelect(actor:String,p:JSONObject):JSONObject=locked {
+        val snap=svgSnapshot(p,true);val state=snap.getJSONObject("state");val ids=ArtShapes.ids(p.getJSONArray("objectIds"))
+        require(ids.isNotEmpty()&&ids.size<=512&&ids.distinct().size==ids.size)
+        val descriptors=mutableMapOf<String,JSONObject>()
+        for(layer in ArtMenuOperations.layers(state)) {
+            val id=layer.getString("id");descriptors[ArtSceneSvg.layerId(id)]=JSONObject().put("layerId",id)
+            if(layer.getString("kind")=="vector")for(shape in ArtShapes.items(layer))descriptors[ArtSceneSvg.shapeId(shape.getString("id"))]=JSONObject().put("layerId",id).put("shapeId",shape.getString("id"))
+        }
+        val chosen=ids.map {descriptors[it] ?: error("SVG对象不存在")};require(chosen.map {it.getString("layerId")}.distinct().size==1){"画布交互选择一次只支持同一图层的多个对象"}
+        val layer=chosen[0].getString("layerId");val shapes=chosen.mapNotNull {it.optString("shapeId").takeIf {id->id.isNotBlank()}}
+        require(shapes.size==ids.size||ids.size==1)
+        if(state.getString("selectedLayerId")==layer&&((shapes.isEmpty()&&state.optJSONObject("shapeSelection")==null)||(shapes.isNotEmpty()&&ArtShapes.selected(state,layer)==shapes)))return@locked snap
+        appendToCurrent(actor,"SVG_SELECT",JSONObject().put("layerId",layer).put("ids",JSONArray(shapes)))
+    }
+    fun svgHit(p:JSONObject):JSONObject=locked {
+        val snap=svgSnapshot(p,false);val state=snap.getJSONObject("state")
+        val options=ArtMove.defaults().put("layerMode","content");val hit=ArtMove.hit(this,snap,p.getInt("x"),p.getInt("y"),options)
+        if(hit.getBoolean("hit")) {
+            val layer=ArtMenuOperations.layers(state).first {it.getString("id")==hit.getString("layerId")}
+            var objectId=ArtSceneSvg.layerId(layer.getString("id"))
+            if(layer.getString("kind")=="vector") {
+                val inverse=Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse));val xy=floatArrayOf(p.getInt("x").toFloat()+.5f,p.getInt("y").toFloat()+.5f);inverse.mapPoints(xy)
+                ArtShapes.hit(layer,xy[0],xy[1],0f)?.let {objectId=ArtSceneSvg.shapeId(it)}
+            };hit.put("objectId",objectId)
+        };hit.put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))
+    }
+    fun svgPick(actor:String,p:JSONObject):JSONObject=locked {
+        val snap=svgSnapshot(p,true);val hit=svgHit(p)
+        if(!hit.getBoolean("hit"))return@locked snap
+        svgSelect(actor,JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision")).put("objectIds",JSONArray().put(hit.getString("objectId"))))
+    }
+    fun svgDraft(documentId:String):JSONObject?=locked {
+        validateId(documentId);val f=File(root,"svg-drafts/$documentId.json")
+        if(f.isFile){require(f.length()<=ArtSceneSvg.MAX_BYTES*6L);JSONObject(f.readText())}else null
+    }
+    fun saveSvgDraft(p:JSONObject):JSONObject=locked {
+        val id=p.getString("documentId");validateId(id);require(p.getString("source").toByteArray().size<=ArtSceneSvg.MAX_BYTES&&p.getString("baseSource").toByteArray().size<=ArtSceneSvg.MAX_BYTES)
+        require(p.getInt("expectedRevision")>=0);require(p.getString("scope") in setOf("document","objects"));ArtShapes.ids(p.getJSONArray("objectIds"))
+        val path=File(root,"svg-drafts/$id.json");require(path.parentFile!!.isDirectory||path.parentFile!!.mkdirs()){ "无法建立SVG草稿目录" };val encoded=p.toString();require(encoded.toByteArray().size<=ArtSceneSvg.MAX_BYTES*6);atomic(path,encoded);JSONObject().put("saved",true).put("documentId",id)
+    }
+
     fun measureSettings():JSONObject=locked {
         val file=File(root,"measure-settings.json")
         if(file.isFile)ArtMeasure.settings(JSONObject(file.readText()),JSONObject()) else ArtMeasure.defaults()
@@ -2294,6 +2405,8 @@ internal class ArtStore(private val root: File) {
                     else -> "绘制笔画"
                 }
                 "STROKE_ERASE" -> "删除笔画"
+                "SVG_APPLY" -> "应用SVG代码"
+                "SVG_SELECT" -> "选择SVG对象"
                 "TRANSFORM_AFFINE" -> "自由变换图层"
                 "TRANSFORM_PIXELS" -> "变形图层或选区像素"
                 "MOVE_LAYER" -> "移动图层"
@@ -2773,6 +2886,31 @@ internal class ArtStore(private val root: File) {
                 val index = (0 until strokes.length()).firstOrNull { strokes.getJSONObject(it).getString("id") == p.getString("strokeId") }
                     ?: error("笔画不存在")
                 strokes.remove(index)
+            }
+            "SVG_SELECT" -> {
+                val layer=find(p.getString("layerId")).second;val ids=ArtShapes.ids(p.getJSONArray("ids"))
+                state.put("selectedLayerId",layer.getString("id"));state.remove("shapeSelection")
+                if(ids.isNotEmpty()){require(layer.getString("kind")=="vector"&&ids.all {id->ArtShapes.items(layer).any {it.getString("id")==id}});state.put("shapeSelection",JSONObject().put("layerId",layer.getString("id")).put("ids",JSONArray(ids)))}
+            }
+            "SVG_APPLY" -> {
+                val changes=p.getJSONArray("layers");val ids=mutableSetOf<String>()
+                for(i in 0 until changes.length()) {
+                    val next=JSONObject(changes.getJSONObject(i).toString());val id=next.getString("id");validateId(id);require(ids.add(id))
+                    require(next.getString("name").length in 1..64&&next.getDouble("opacity") in 0.0..1.0&&next.getString("blend") in setOf("normal","multiply","screen","add"))
+                    for(k in listOf("x","y","rotation","scale"))require(next.getDouble(k).isFinite())
+                    require(kotlin.math.abs(next.getDouble("x"))<=1000000&&kotlin.math.abs(next.getDouble("y"))<=1000000&&next.getDouble("scale")>0)
+                    next.optJSONArray("affine")?.let {ArtShapes.matrix(it)}
+                    next.optString("asset").takeIf {it.isNotBlank()}?.let {validateId(it)}
+                    val existing=(0 until layers.length()).firstOrNull {layers.getJSONObject(it).getString("id")==id}
+                    if(existing==null){require(next.getString("kind")=="vector"&&next.optString("parentId").isBlank());layers.put(next)}
+                    else {require(!lockedByParent(layers.getJSONObject(existing),layers));require(next.getString("kind")==layers.getJSONObject(existing).getString("kind")&&next.optString("parentId")==layers.getJSONObject(existing).optString("parentId"));layers.put(existing,next)}
+                }
+                state.optJSONObject("shapeSelection")?.let {selection->
+                    val selectedLayer=selection.getString("layerId");val retained=ArtShapes.selected(state,selectedLayer)
+                    if(retained.isEmpty())state.remove("shapeSelection")else selection.put("ids",JSONArray(retained))
+                }
+                ArtShapes.validateDocument(state);val background=p.getString("background");require(background.matches(Regex("#[A-Fa-f0-9]{8}")));state.put("background",background)
+                if(p.has("selectedLayerId")){find(p.getString("selectedLayerId"));state.put("selectedLayerId",p.getString("selectedLayerId"));state.remove("shapeSelection")}
             }
             "TRANSFORM_AFFINE" -> {
                 val layer=find(p.getString("layerId")).second;require(!lockedByParent(layer,layers))

@@ -1,3 +1,22 @@
+## 0.2.68：SVG 开关与共享代码通道（开发源码，尚未编译）
+
+- 底部快捷栏在撤销、重做右侧新增 SVG 开关，默认关闭；红色“SVG关”、绿色“SVG开”，有明确无障碍说明。开启后工作区上画布、下源码，初始各半，拖动中间分隔条调到25%–75%；切换分屏保留视口中心对应的文档点与物理缩放，缩放仍受现有10%–1600%限制。
+- 默认为“选对象”查看，点上屏真实画面内容定位稳定 `shape_<UUID>` / `layer_<UUID>`，下屏滚动并高亮整个对应节点。可以切回“绘画”继续使用工具。点“编辑”才允许代码输入；仅画布选中不弹键盘。未编辑的代码点击能反选画布对象；多选支持同层多个形状。矢量选择显示轮廓，非矢量使用现有图层选中状态。
+- 下屏提供全图／当前对象局部、校验、预览、应用、重新读取。草稿未确认前不改画布；预览用原生渲染器临时生成缩略图，不写历史。应用写一个 `SVG_APPLY` 记录，可撤销／重做；`SVG_SELECT` 与原有选择历史共用状态。只保存变动层，避免每次复制整幅工程的像素历史。
+- 每个工程的源码与读取基线保存在 `svg-drafts/<documentId>.json` 资源，编辑时延迟写入，关闭／切换工程／卸载页面时立即排队保存。不是画布操作，不污染撤销。只有原生内容代码完全一致的选择事件可以更新草稿绑定版本；真正内容变化时拒绝应用、保留草稿。重新读取或切换范围而丢弃脏草稿需明确点确认。
+- **这是 `AI_LIMBS_SCENE_SVG_1` 原生场景配置，并非完整 SVG 标准或独立便携 SVG 文件。** 矢量输出真实 rect/ellipse/line/polygon/path 和线性／径向渐变、虚线／端帽／接合、变换；层／组保留 ID、父子结构与顺序，可改可见性、透明度、名称和本插件混合模式。栅格以只读 `image href="ail-layer:<UUID>"` 和指纹引用原生笔触／资产，需画室资源解析，不塞入巨量 Base64，也不把栅格笔触伪装为矢量。文字源是 `metadata[type=application/vnd.ai-limbs.text+json]` 内可编辑 JSON，沿用现有复杂文字排版与缓存引擎；不是 arbitrary `<text>` 的完整 SVG 排版导入。
+- 已有作品代码须保留根属性、层 ID/层级/顺序、裁剪定义及像素来源节点；增加／删除／排序矢量层内形状可用全图或整个层局部，单形状局部须保留指定 ID。新增形状省略 id 或用临时 ID，提交赋予原生 UUID。跨层移动、删除／创建层使用现有层工具；新绘画用 `scope=append` 放入一个新矢量层。锁定层／对象拒绝修改。原来的工程格式、操作、工具和 AI 入口继续兼容。
+- 支持路径 M/L/H/V/C/S/Q/T/Z，Q/T 转为等价三次曲线；A、外链／外部图片、脚本、DTD／实体、use、过滤器、动画、CSS stylesheet、自定义剪裁拒绝，不静默扁平化。开放路径只描线；rect rx/ry须相同；颜色为 SVG2 #RRGGBBAA（原生工程仍为#AARRGGBB）；只保留被形状引用的渐变。SVG最多1MiB UTF-8、8192元素、32层嵌套，继续受原生矢量／图片／内存预算约束。超过整图源码预算时可明确选择局部读取。
+- 兰儿入口7项：`svg.info/read/validate/preview/apply/select/hit`，均有参数 schema 与紧凑示例；不依赖手机开关。read默认一页8000 UTF-16字符、最大32768；用 `nextOffset` 续读直到 `hasMore=false`，所有页绑定同一 `documentId/expectedRevision`。`includeIndex=true` 返回稳定对象和源码区间。apply/preview/validate/select必填工程与修订号；版本不同拒绝，避免写到新工程。
+
+简洁操作：先 `svg.info {}`，再 `svg.read {"includeIndex":true}`，用返回的工程 ID、修订号和对象 ID。只改一个对象用 `svg.read {"scope":"objects","objectIds":["shape_<UUID>"],"documentId":"<ID>","expectedRevision":<REV>}`；修改完整返回源码，带相同范围交给 `svg.validate/preview/apply`。read未返回完整页时必须按nextOffset取齐；选择或画图后修订号会变化。新代码绘画示例：
+
+```json
+{"documentId":"<document.info.id>","expectedRevision":0,"scope":"append","newLayerName":"SVG月亮","source":"<svg xmlns=\"http://www.w3.org/2000/svg\"><circle cx=\"80\" cy=\"80\" r=\"40\" fill=\"#ffd780\" stroke=\"none\"/></svg>"}
+```
+
+版本 `0.2.68 / versionCode71 / applicationId v0268`。新增18个纯索引／XML／颜色边界测试供以后云端运行，**本轮未运行测试、未编译、未推送**；只做静态源码、能力元数据与传输完整性检查。分屏触摸／键盘／草稿切换、真实渲染、文字缓存、应用与撤销需升级后实机验收。
+
 ## 0.2.67：图层变换与测量距离
 
 - `transform.affine`：独立水平/垂直缩放（可翻转）、剪切、旋转、枢轴和文档坐标平移；任意图层及组保留原始对象。中央图层矩阵供画布渲染、触摸、拾取、选区、文字锚点和缩略图使用。旧 `transform.move/scale/rotate` 和历史事件兼容。

@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.67",
+  "version": "0.2.68",
   "api": {
     "target": 1,
     "min": 1
@@ -271,7 +271,14 @@
       "plugin.art.studio.measure.info",
       "plugin.art.studio.measure.settings",
       "plugin.art.studio.measure.configure",
-      "plugin.art.studio.measure.line"
+      "plugin.art.studio.measure.line",
+      "plugin.art.studio.svg.info",
+      "plugin.art.studio.svg.read",
+      "plugin.art.studio.svg.validate",
+      "plugin.art.studio.svg.preview",
+      "plugin.art.studio.svg.apply",
+      "plugin.art.studio.svg.select",
+      "plugin.art.studio.svg.hit"
     ],
     "services": [],
     "providers": [

@@ -259,6 +259,13 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("move.hit", "按可见像素拾取图层或所属组", read) { p -> store.moveHit(p) }
         capability("move.apply", "移动图层或真正搬移选区像素", write) { p -> store.move("LANER",p) }
         capability("move.nudge", "按移动工具键盘步进平移", write) { p -> store.moveNudge("LANER",p) }
+        capability("svg.info","读取SVG场景格式与限制",read){ArtSceneSvg.info()}
+        capability("svg.read","读取全图或指定对象SVG代码",read){p->store.svgRead(p)}
+        capability("svg.validate","校验SVG代码与文档版本",read){p->store.svgValidate(p)}
+        capability("svg.preview","预览SVG草稿，不写历史",read){p->store.svgApply("LANER",p,true)}
+        capability("svg.apply","将SVG代码应用到原生画布",write){p->store.svgApply("LANER",p)}
+        capability("svg.select","按稳定SVG对象ID选择画布对象",write){p->store.svgSelect("LANER",p)}
+        capability("svg.hit","按画布像素定位SVG对象",read){p->store.svgHit(p)}
         capability("transform.info","读取图层和像素变形范围",read){ArtTransform.info()}
         capability("transform.geometry","解析变形输出框和网格",read){p->store.transformGeometry(p)}
         capability("transform.affine","无损非等比缩放、剪切及自由变换",write){p->store.transformAffine("LANER",p)}
@@ -809,6 +816,11 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "selection.edit" -> listOf(p("layerId"), p("action"), p("dx", "number", true),
             p("dy", "number", true), p("factor", "number", true), p("degrees", "number", true),
             p("copyId", optional = true))
+        "svg.info" -> emptyList()
+        "svg.read" -> listOf(p("scope",optional=true),p("objectIds","array",true),p("documentId",optional=true),p("expectedRevision","integer",true),p("offset","integer",true),p("limit","integer",true),p("includeIndex","boolean",true))
+        "svg.validate","svg.preview","svg.apply" -> listOf(p("source"),p("documentId"),p("expectedRevision","integer"),p("scope",optional=true),p("objectIds","array",true),p("newLayerName",optional=true))
+        "svg.select" -> listOf(p("documentId"),p("expectedRevision","integer"),p("objectIds","array"))
+        "svg.hit" -> listOf(p("x","integer"),p("y","integer"),p("documentId",optional=true),p("expectedRevision","integer",true))
         "transform.info","measure.info","measure.settings" -> emptyList()
         "transform.affine" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"))+transformAffineFields()
         "transform.geometry","transform.apply" -> listOf(p("mode"),p("scope"),p("sourceBounds","object",true),p("points","array",true),p("sourcePoints","array",true),p("dabs","array",true),

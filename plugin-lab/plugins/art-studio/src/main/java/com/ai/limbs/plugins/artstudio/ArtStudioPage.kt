@@ -24,6 +24,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectDragGesturesAfterLongPress
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -410,6 +412,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var remainingImportContext by remember { mutableStateOf<JSONObject?>(null) }
     var remainingImportItem by remember { mutableStateOf<JSONObject?>(null) }
     var snapshot by remember { mutableStateOf<JSONObject?>(null) }
+    var svgEnabled by rememberSaveable {mutableStateOf(false)}
+    var svgRatio by rememberSaveable {mutableFloatStateOf(.5f)}
+    var svgWorkspaceHeight by remember {mutableIntStateOf(1)}
+    val svgEditor=remember(store){StudioSvgEditorModel(store)}
+    DisposableEffect(svgEditor){onDispose{svgEditor.close()}}
+    LaunchedEffect(svgEditor.source){if(svgEditor.ready)svgEditor.index()}
     var image by remember { mutableStateOf<Bitmap?>(null) }
     var referenceBitmaps by remember { mutableStateOf<Map<String,Bitmap>>(emptyMap()) }
     var referenceMultiple by remember { mutableStateOf(false) }
@@ -1127,6 +1135,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
 
     val current = snapshot
+    LaunchedEffect(svgEnabled,current?.optString("id"),current?.optInt("revision")) {
+        if(svgEnabled&&current!=null)try {svgEditor.bind(current)}
+        catch(e:kotlinx.coroutines.CancellationException){throw e}
+        catch(e:Exception){svgEditor.message=e.message ?: "SVG读取失败";svgEditor.markStale()}
+    }
     LaunchedEffect(current?.optString("id"),current?.optInt("revision"),selected) {
         transformRequest=current?.let {snap->
             val st=snap.getJSONObject("state");val selectedPixels=ArtMove.hasSelection(st)
@@ -1600,7 +1613,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
         } else {
             val state = current.getJSONObject("state")
             val layers = state.getJSONArray("layers")
-            BoxWithConstraints(Modifier.fillMaxWidth().weight(1f)) {
+            Column(Modifier.fillMaxWidth().weight(1f).onSizeChanged {svgWorkspaceHeight=it.height.coerceAtLeast(1)}) {
+            BoxWithConstraints(Modifier.fillMaxWidth().weight(if(svgEnabled)svgRatio else 1f)) {
                 val railWidth = 20.dp
                 // Tool icons need only a narrow rail; color and layer controls keep a wider panel.
                 val leftDrawerWidth = (maxWidth * 0.25f).coerceIn(84.dp, 96.dp)
@@ -1622,6 +1636,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     modifier = Modifier.fillMaxSize(), update = { view ->
                     view.documentId = current.getString("id")
                     view.scene = state; view.sceneRevision = current.getInt("revision")
+                    view.svgPanel=svgEnabled;view.svgPicking=svgEnabled&&svgEditor.picking
+                    view.onSvgPick={x,y->if(!busy)perform {store.svgPick("AWEI",JSONObject().put("documentId",current.getString("id")).put("expectedRevision",current.getInt("revision")).put("x",x).put("y",y))}}
                     view.shapeMultiple = shapeMultiple; view.shapeShear = shapeShear; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
                     view.colorizeWidth=colorizeWidth;view.colorizeErase=colorizeErase
@@ -2426,6 +2442,18 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                     }
                 }
             }
+            if(svgEnabled) {
+                Box(Modifier.fillMaxWidth().height(8.dp).background(MaterialTheme.colorScheme.outline)
+                    .semantics{contentDescription="调整SVG分屏高度"}.pointerInput(Unit){detectDragGestures {change,drag->
+                        change.consume();svgRatio=(svgRatio+drag.y/svgWorkspaceHeight).coerceIn(.25f,.75f)
+                    }})
+                Box(Modifier.fillMaxWidth().weight(1f-svgRatio)) {
+                    StudioSvgEditor(svgEditor,busy,onApply={p->perform(onSuccess={scope.launch {
+                        try {svgEditor.applied(requireNotNull(snapshot))}catch(e:kotlinx.coroutines.CancellationException){throw e}catch(e:Exception){svgEditor.message=e.message ?: "SVG读取失败"}
+                    }}){store.svgApply("AWEI",p)}},onSelect={p->perform{store.svgSelect("AWEI",p)}})
+                }
+            }
+            }
             if (viewOptions.statusBarVisible && !viewOptions.panelsHidden)
             Surface(Modifier.fillMaxWidth().height(48.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant, tonalElevation = 1.dp) {
@@ -2445,6 +2473,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                                 .semantics { contentDescription = "重做" },
                             enabled = !busy && current.optBoolean("canRedo")
                         ) { Text("↪️") }
+                        TextButton(onClick={svgEditor.save(true);svgEnabled=!svgEnabled},modifier=Modifier.widthIn(min=56.dp)
+                            .semantics{contentDescription=if(svgEnabled)"关闭SVG代码面板" else "开启SVG代码面板"},
+                            colors=ButtonDefaults.textButtonColors(contentColor=if(svgEnabled)androidx.compose.ui.graphics.Color(0xFF4CAF50)else androidx.compose.ui.graphics.Color(0xFFFF5252))) {
+                            Text(if(svgEnabled)"SVG开" else "SVG关")
+                        }
                     }
                     Row(Modifier.weight(1f, fill = false).padding(start = 6.dp),
                         verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
@@ -3402,6 +3435,13 @@ private class StudioCanvas(context: Context) : View(context) {
     var scene: JSONObject? = null
     var sceneRevision: Int = 0
         set(value) {if(field!=value){field=value;moveInteraction.cancel();cropInteraction.cancel();transformInteraction.pause();measureInteraction.cancel();fillInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();comicPanelInteraction.cancel();colorSelectionInteraction.cancel();magneticSelectionInteraction.cancel()}}
+    private var svgResize=false
+    var svgPanel=false
+        set(value){if(field!=value){field=value;svgResize=true;invalidate()}}
+    var svgPicking=false
+        set(value){if(field!=value){field=value;svgTap=null;basicSelectionInteraction.cancel();fillInteraction.cancel();shapeInteraction.cancel();freehandInteraction.cancel();bezierInteraction.cancel();calligraphyInteraction.cancel();rasterPathInteraction.cancel();figureInteraction.cancel();lineInteraction.cancel();rasterBrushInteraction.cancel();assistedBrushInteraction.cancel();points=JSONArray();pathVertices=JSONArray();invalidate()}}
+    var onSvgPick:(Int,Int)->Unit={_,_->}
+    private var svgTap:android.graphics.PointF?=null
     var shapeMultiple: Boolean = false
     var shapeShear: Boolean = false
     var shapeBusy: Boolean = false
@@ -3728,6 +3768,14 @@ private class StudioCanvas(context: Context) : View(context) {
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
+        // Splitting the workspace keeps the document point at the viewport centre and the physical zoom.
+        image?.let {bitmap->if((svgPanel||svgResize)&&oldw>0&&oldh>0&&w>0&&h>0) {
+            val previousFit=minOf(oldw.toFloat()/bitmap.width,oldh.toFloat()/bitmap.height)*.98f
+            val newFit=fitScale();val previousCentre=when {horizontalFitBias<0f->bitmap.width*previousFit/2f;horizontalFitBias>0f->oldw-bitmap.width*previousFit/2f;else->oldw/2f}
+            zoom=(zoom*previousFit/newFit).coerceIn(.1f,16f)
+            panX+=previousCentre-oldw/2f+w/2f-fittedCenterX(bitmap,newFit)
+        }}
+        svgResize=false
         publishZoom()
     }
 
@@ -3988,7 +4036,19 @@ private class StudioCanvas(context: Context) : View(context) {
         if(tool=="move")moveInteraction.draw(canvas,matrix)
         if(tool=="transform")transformInteraction.draw(canvas,matrix)
         if(tool=="measure")measureInteraction.draw(canvas,matrix)
-        if (tool == "shape_select") {
+        if(svgPanel)scene?.let {state->
+            val active=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==selectedId}
+            if(active?.getString("kind")=="vector"&&ArtShapes.visible(state,active)) {
+                val ids=ArtShapes.selected(state,selectedId)
+                val toScreen=Matrix(matrix).apply {preConcat(ArtShapes.layerMatrix(state,active))}
+                canvas.save();canvas.concat(toScreen)
+                val highlight=Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.rgb(70,190,255);style=Paint.Style.STROKE;strokeWidth=2f/(fit*zoom)}
+                for(shape in ArtShapes.items(active).filter {it.getString("id") in ids}) {
+                    val outline=ArtShapes.path(shape);outline.transform(ArtShapes.matrix(shape.getJSONArray("matrix")));canvas.drawPath(outline,highlight)
+                };canvas.restore()
+            }
+        }
+        if (tool == "shape_select"&&!svgPicking) {
             val state = scene
             val active = state?.let { ArtMenuOperations.layers(it).firstOrNull { l -> l.getString("id") == selectedId } }
             if (state != null && active?.getString("kind") == "vector" && ArtShapes.visible(state, active)) {
@@ -4091,6 +4151,7 @@ private class StudioCanvas(context: Context) : View(context) {
         super.onDetachedFromWindow()
     }
     override fun onKeyDown(keyCode: Int, event: android.view.KeyEvent): Boolean {
+        if(svgPicking)return super.onKeyDown(keyCode,event)
         if(tool=="move") {
             if(keyCode==android.view.KeyEvent.KEYCODE_ESCAPE) {moveInteraction.cancel();invalidate();return true}
             if(!event.isCtrlPressed && !event.isMetaPressed) {
@@ -4236,6 +4297,15 @@ private class StudioCanvas(context: Context) : View(context) {
         val local = floatArrayOf(xy[0], xy[1])
         val inverseLayer = Matrix()
         if (layerMatrix().invert(inverseLayer)) inverseLayer.mapPoints(local)
+        if(svgPicking) {
+            if(shapeBusy)return true
+            when(event.actionMasked) {
+                MotionEvent.ACTION_DOWN->svgTap=android.graphics.PointF(event.x,event.y)
+                MotionEvent.ACTION_MOVE->svgTap?.let {if(hypot(event.x-it.x,event.y-it.y)>android.view.ViewConfiguration.get(context).scaledTouchSlop)svgTap=null}
+                MotionEvent.ACTION_UP->{if(svgTap!=null&&xy[0]>=0&&xy[1]>=0&&xy[0]<(scene?.optInt("width") ?: 0)&&xy[1]<(scene?.optInt("height") ?: 0))onSvgPick(xy[0].toInt(),xy[1].toInt());svgTap=null}
+                MotionEvent.ACTION_CANCEL->svgTap=null
+            };invalidate();return true
+        }
         if(tool=="measure") {
             if(event.actionMasked==MotionEvent.ACTION_DOWN)requestFocus()
             if(measureBusy)return true
