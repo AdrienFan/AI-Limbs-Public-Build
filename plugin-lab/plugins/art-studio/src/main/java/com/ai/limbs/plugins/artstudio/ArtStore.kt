@@ -54,6 +54,16 @@ internal class ArtStore(private val root: File) {
     // The capability wrapper holds one lock through the edit and its rendered receipt.
     // Nested business methods on this same thread reuse it instead of acquiring an overlapping file lock.
     private val lockDepth = ThreadLocal.withInitial { 0 }
+    private val replayCache = ArtReplayCache()
+    private val editorSnapshot = ThreadLocal.withInitial { false }
+
+    // The editor consumes state and history labels, never the serialized operation payloads.
+    // Capability snapshots retain their published full contract.
+    fun <T> forEditor(block: () -> T): T = locked {
+        val previous = editorSnapshot.get()
+        editorSnapshot.set(true)
+        try { block() } finally { editorSnapshot.set(previous) }
+    }
     private fun <T> locked(block: () -> T): T = synchronized(processLock) {
         if (lockDepth.get() > 0) block()
         else FileOutputStream(lockFile, true).channel.use { channel ->
@@ -2431,10 +2441,17 @@ internal class ArtStore(private val root: File) {
             .put("storagePath", if (saved.isFile) saved.absolutePath else "")
             .put("externalUri", externalLink(id)?.optString("uri", "") ?: "")
             .put("externalPending", externalLink(id)?.optBoolean("pending") ?: false)
-            .put("operations", JSONArray(doc.getJSONArray("operations").toString()))
+            .apply { if (!editorSnapshot.get())
+                put("operations", JSONArray(doc.getJSONArray("operations").toString())) }
     }
 
-    private fun replay(doc: JSONObject): JSONObject {
+    private fun replay(doc: JSONObject): JSONObject = replayCache.read(doc, ::replayComplete) { state, added ->
+        for (op in added) edit(state, op.getString("type"), op.getJSONObject("parameters"),
+            op.optInt("animationFrame",0), op.optJSONObject("animationFrameKeys"))
+        validateReplayedState(state)
+    }
+
+    private fun replayComplete(doc: JSONObject): JSONObject {
         val state = JSONObject(doc.getJSONObject("base").toString())
         val operations = doc.getJSONArray("operations")
         val disabled = mutableSetOf<String>()
@@ -2460,6 +2477,10 @@ internal class ArtStore(private val root: File) {
                 edit(state, op.getString("type"), op.getJSONObject("parameters"), op.optInt("animationFrame",0),op.optJSONObject("animationFrameKeys"))
             }
         }
+        return validateReplayedState(state)
+    }
+
+    private fun validateReplayedState(state: JSONObject): JSONObject {
         ArtAnimation.resolve(state,ArtAnimation.settings(state).getInt("current"))
         ArtAnimation.validate(state)
         ArtImagePolicy.requireDimensions(state.getInt("width"), state.getInt("height"))
@@ -2493,7 +2514,9 @@ internal class ArtStore(private val root: File) {
                 }
             }
         }
-        val tracks=animated.associate {it.getString("id") to Pair(it.getString("kind"),JSONArray(ArtAnimation.keys(it).toString()))}
+        // Native edits change displayed content; preserve the existing track by reference.
+        // capture() installs a deep-copied cel after the edit, so inactive cels stay independent.
+        val tracks=animated.associate {it.getString("id") to Pair(it.getString("kind"),requireNotNull(ArtAnimation.keys(it)))}
         val before=ArtAnimation.before(state)
         editNative(state,type,p)
         // A filter may replace the active layer object; its committed track remains the same track.

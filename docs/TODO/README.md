@@ -53,3 +53,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [原生动画姿态序列](art-studio-animation-poses/index.md)：第二条问题，源码与静态核对完成。
 
 - [GIF编码优化](art-studio-gif-encoding/index.md)：第三条问题，在姿态序列提交后完成源码和静态核对。
+
+- [画布恢复与时间轴响应](art-studio-recovery-timeline/index.md)：0.2.80源码完成，累积修复进入云端验证。

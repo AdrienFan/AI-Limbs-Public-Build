@@ -76,6 +76,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -727,6 +728,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         referenceBitmaps = frame?.fourth ?: emptyMap()
         revision = frame?.third ?: ""
         displayedFrame = replacement
+        // Every accepted authoritative frame (including an edit that superseded initial refresh)
+        // completes restoration. Only clearing this in refresh left the page permanently busy.
+        restoring = false
+        restoreError = null
+        busy = pendingOperations > 0 || awaitingExport
         // The native View must stop borrowing old pixels before their final lease is released.
         canvasRef[0]?.let { canvas ->
             canvas.image = image
@@ -763,13 +769,19 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Canvas refresh failed", error)
                 if (renderRequests.isCurrent(serial)) {
-                    if (restoring) restoreError = error.message ?: "恢复画布失败"
+                    if (restoring) {
+                        restoreError = error.message ?: "恢复画布失败"
+                        restoring = false
+                        busy = pendingOperations > 0 || awaitingExport
+                    }
                     Toast.makeText(context, error.message ?: "读取画布失败", Toast.LENGTH_LONG).show()
                 }
             } finally {
                 // withContext can be cancelled after rendering but before handing a bitmap to Main.
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
                 renderRequests.finishRefresh(serial)
+                if (isActive && restoring && pendingOperations == 0 && restoreError == null &&
+                    !renderRequests.isCurrent(serial)) refresh()
             }
         }
     }
@@ -794,7 +806,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 lateinit var operationResult: JSONObject
                 withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        operationResult = action(confirmation)
+                        operationResult = store.forEditor { action(confirmation) }
                         rendered = requireNotNull(StudioRenderFrame.current(store)) { "工程已关闭" }
                     }
                 }
@@ -825,6 +837,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             } finally {
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
                 pendingOperations--; busy = restoring || pendingOperations > 0 || awaitingExport
+                // A failed superseding operation still needs one authoritative initial frame.
+                if (isActive && restoring && pendingOperations == 0 && restoreError == null) refresh()
             }
         }
     }
@@ -1740,7 +1754,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
         if (current == null) {
             if (restoring) Text("正在恢复画布…", Modifier.padding(top = 72.dp, start = 12.dp))
-            else Text("尚未创建画布。", Modifier.padding(top = 72.dp, start = 12.dp))
+            else if (restoreError == null) Text("尚未创建画布。", Modifier.padding(top = 72.dp, start = 12.dp))
         } else {
             val state = current.getJSONObject("state")
             val layers = state.getJSONArray("layers")

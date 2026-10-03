@@ -102,7 +102,7 @@ help_source = HELP.read_text(encoding='utf-8')
 help_parts = {
     name: json.loads(body)
     for name, body in re.findall(
-        r'private const val (EXAMPLES(?:_\d+)?|FIELDS|SCOPED(?:_\d+)?) = """\s*(\{.*?\})\s*"""',
+        r'private const val (EXAMPLES(?:_\d+)?|RECEIPT_EXAMPLES|FIELDS|SCOPED(?:_\d+)?) = """\s*(\{.*?\})\s*"""',
         help_source,
         re.S,
     )
@@ -123,7 +123,7 @@ else:
         if overlap:
             raise SystemExit(f'Duplicate scoped help keys: {sorted(overlap)}')
         scoped.update(help_parts[name])
-example_names = [n for n in help_parts if n == 'EXAMPLES' or n.startswith('EXAMPLES_')]
+example_names = [n for n in help_parts if n == 'EXAMPLES' or n.startswith('EXAMPLES_') or n == 'RECEIPT_EXAMPLES']
 if 'EXAMPLES' in example_names and len(example_names) != 1:
     raise SystemExit('Art Studio examples mix legacy and segmented metadata')
 merged_examples = {}

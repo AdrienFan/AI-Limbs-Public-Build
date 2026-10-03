@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.76",
+  "version": "0.2.80",
   "api": {
     "target": 1,
     "min": 1
@@ -288,7 +288,12 @@
       "plugin.art.studio.animation.keyframe",
       "plugin.art.studio.animation.seek",
       "plugin.art.studio.animation.preview",
-      "plugin.art.studio.animation.export"
+      "plugin.art.studio.animation.export",
+      "plugin.art.studio.document.summary",
+      "plugin.art.studio.document.snapshot.read",
+      "plugin.art.studio.document.operation.status",
+      "plugin.art.studio.animation.pose.read",
+      "plugin.art.studio.animation.poses.apply"
     ],
     "services": [],
     "providers": [

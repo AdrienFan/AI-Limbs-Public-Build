@@ -302,6 +302,10 @@ internal object ArtCapabilityHelp {
 """
     private const val FIELDS = """
 {
+  "requestId":{"description":"每次逻辑编辑的小写标准UUID；状态查询使用原请求号与工程号，not_found不代表运行中的请求失败。"},
+  "expectedSha256":{"description":"第一页返回的快照sha256；续页必填，快照变化明确拒绝。"},
+  "poses":{"description":"1–32个目标帧的原生姿态列表；每项基于同一来源帧，单次原子保存与撤销。"},
+  "overwrite":{"description":"默认false拒绝覆盖已有目标关键帧；true明确替换指定目标。"},
   "responseMode":{"description":"SVG应用响应：full完整快照，receipt简洁回执；默认full。","enum":["full","receipt"]},
   "slotId":{"description":"quick_tools.state.slots[].id，快捷位置的稳定ID。"},
   "expectedConfigRevision":{"description":"quick_tools.state.revision，替换示例0；仅保护快捷配置，不是作品修订号。"},

@@ -13,8 +13,17 @@ internal object ArtAnimation {
         .put("fps",12).put("start",0).put("end",23).put("loop",true).put("onion",false).put("current",0)
     fun layers(state:JSONObject)=ArtMenuOperations.layers(state)
     fun keys(layer:JSONObject)=layer.optJSONArray("animationKeys")
-    fun content(layer:JSONObject):JSONObject=JSONObject(layer.toString()).apply {
-        shared.forEach {remove(it)}
+    fun content(layer:JSONObject):JSONObject=JSONObject().apply {
+        // Inactive cels are shared track metadata, never part of the current cel.
+        // Copying the whole layer first multiplied every history edit by every keyframe.
+        layer.keys().forEach { key -> if (key !in shared) {
+            val value=layer.get(key)
+            put(key,when(value) {
+                is JSONObject -> JSONObject(value.toString())
+                is JSONArray -> JSONArray(value.toString())
+                else -> value
+            })
+        }}
     }
     private fun install(layer:JSONObject,content:JSONObject) {
         layer.keys().asSequence().toList().filter {it !in shared}.forEach {layer.remove(it)}

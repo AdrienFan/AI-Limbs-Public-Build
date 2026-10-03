@@ -12,6 +12,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.platform.LocalDensity
+import kotlin.math.ceil
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
@@ -31,6 +33,7 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
         val offset=cfg.getInt("current").takeIf {it in start..end}?.minus(start) ?: 0
         val origin=SystemClock.elapsedRealtime()
         var last=-1
+        var lastExposure:List<Int>?=null
         try {
             while(isActive) {
                 val ticks=((SystemClock.elapsedRealtime()-origin)*cfg.getInt("fps")/1000).toInt()
@@ -38,6 +41,14 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
                 if(!cfg.getBoolean("loop")&&step>=count) {stop(end);break}
                 val time=start+step%count
                 if(time!=last) {
+                    val exposure=ArtAnimation.layers(snapshot.getJSONObject("state")).map {
+                        ArtAnimation.active(it,time)?.getInt("time") ?: -1
+                    }
+                    val held=shown
+                    if(held!=null && exposure==lastExposure) {
+                        shown=StudioAnimationFrame(held.bitmap,time)
+                        last=time
+                    } else {
                     val retained=if(shown==null)1L else 2L
                     withContext(Dispatchers.IO) {
                         val frame=ArtAnimation.frame(snapshot,time)
@@ -50,6 +61,8 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
                     val next=StudioAnimationFrame(requireNotNull(pending),time)
                     val old=shown;shown=next;pending=null;old?.bitmap?.recycle()
                     last=time
+                    lastExposure=exposure
+                    }
                 }
                 delay(maxOf(1L,1000L/cfg.getInt("fps")-((SystemClock.elapsedRealtime()-origin)%maxOf(1L,1000L/cfg.getInt("fps")))))
             }
@@ -63,7 +76,7 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
 @OptIn(ExperimentalFoundationApi::class)
 @Composable internal fun StudioAnimationTimeline(snapshot:JSONObject,busy:Boolean,playing:Boolean,previewFrame:Int?,
     onPlay:(Boolean)->Unit,onChange:(String,JSONObject)->Unit,onExport:(Int)->Unit) {
-    val data=ArtAnimation.describe(snapshot)
+    val data=remember(snapshot) { ArtAnimation.describe(snapshot) }
     val state=snapshot.getJSONObject("state")
     val time=data.getInt("current")
     val tracks=data.getJSONArray("tracks")
@@ -121,9 +134,8 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
         HorizontalDivider()
         Row {
             Text("图层 / 帧",Modifier.width(88.dp).padding(6.dp),style=MaterialTheme.typography.labelSmall)
-            Row(Modifier.weight(1f).horizontalScroll(horizontal)) {
-                for(frame in data.getInt("start")..data.getInt("end"))
-                    Text(frame.toString(),Modifier.width(40.dp).padding(5.dp),style=MaterialTheme.typography.labelSmall)
+            StudioTimelineStrip(horizontal,data.getInt("start"),data.getInt("end"),Modifier.weight(1f)) { frame ->
+                Text(frame.toString(),Modifier.width(40.dp).padding(5.dp),style=MaterialTheme.typography.labelSmall)
             }
         }
         LazyColumn(Modifier.fillMaxWidth().weight(1f).clipToBounds()) {
@@ -135,8 +147,8 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
                     Text(row.getString("name"),Modifier.width(88.dp).clickable(enabled=enabled) {
                         onChange("LAYER_SELECT",request().put("id",row.getString("id")))
                     }.padding(6.dp),maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.labelSmall)
-                    Row(Modifier.weight(1f).horizontalScroll(horizontal)) {
-                        for(frame in data.getInt("start")..data.getInt("end"))Box(
+                    StudioTimelineStrip(horizontal,data.getInt("start"),data.getInt("end"),Modifier.weight(1f)) { frame ->
+                        Box(
                             Modifier.width(40.dp).height(38.dp)
                                 .background(if(frame==(previewFrame ?: time))MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surface)
                                 .clickable(enabled=enabled) {seek(frame)},
@@ -190,5 +202,22 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
             }},confirmButton={TextButton(enabled=enabled&&value!=null&&value in 64..1024,
                 onClick={onExport(value!!);exportDialog=false}){Text("导出")}},
             dismissButton={TextButton(onClick={exportDialog=false}){Text("取消")}})
+    }
+}
+
+/** Compose visible columns only, while every track retains the same full scroll extent. */
+@Composable private fun StudioTimelineStrip(scroll:ScrollState,start:Int,end:Int,modifier:Modifier,
+    cell:@Composable (Int)->Unit) {
+    BoxWithConstraints(modifier) {
+        val density=LocalDensity.current
+        val widthPx=with(density) {40.dp.toPx()}
+        val viewportPx=with(density) {maxWidth.toPx()}
+        val first=(start+(scroll.value/widthPx).toInt()-1).coerceIn(start,end)
+        val last=(first+ceil(viewportPx/widthPx).toInt()+2).coerceAtMost(end)
+        Row(Modifier.fillMaxWidth().horizontalScroll(scroll)) {
+            Spacer(Modifier.width((40*(first-start)).dp))
+            for(frame in first..last) cell(frame)
+            Spacer(Modifier.width((40*(end-last)).dp))
+        }
     }
 }
