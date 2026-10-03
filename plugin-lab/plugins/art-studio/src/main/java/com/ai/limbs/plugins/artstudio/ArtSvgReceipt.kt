@@ -13,11 +13,12 @@ internal object ArtSvgReceipt {
         if (mode == "full") return result
         require(mode == "receipt")
         val receipt = JSONObject()
-        for (key in result.keys()) if (key !in setOf("state", "operations", "timeline"))
+        for (key in result.keys()) if (key !in setOf("state", "operations", "timeline", "otherBranches"))
             receipt.put(key, result.get(key))
         return receipt.put("responseMode", "receipt").put("snapshotOmitted", true)
             .put("documentId", result.getString("id"))
             .put("historyWritten", result.optBoolean("svgApplied", false))
-            .put("readStateWith", "plugin.art.studio.document.info")
+            .put("readStateWith", "plugin.art.studio.document.snapshot.read")
+            .put("readSummaryWith", "plugin.art.studio.document.summary")
     }
 }

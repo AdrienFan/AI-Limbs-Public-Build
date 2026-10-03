@@ -7,7 +7,7 @@ import org.json.JSONObject
 /** Compact help is plugin-owned metadata, transported through the existing Runtime API.
  * One capability gets one example; documentation never executes or opens a phone page. */
 internal object ArtCapabilityHelp {
-    private val examples by lazy { JSONObject(EXAMPLES_1).apply {val extra=JSONObject(EXAMPLES_2);extra.keys().forEach {key->put(key,extra.getJSONObject(key))}} }
+    private val examples by lazy { JSONObject(EXAMPLES_1).apply {for (part in listOf(EXAMPLES_2, RECEIPT_EXAMPLES)) {val extra=JSONObject(part);extra.keys().forEach {key->put(key,extra.getJSONObject(key))}}} }
     private val fields by lazy { JSONObject(FIELDS) }
     private val scoped by lazy {
         JSONObject(SCOPED_1).apply {
@@ -17,15 +17,26 @@ internal object ArtCapabilityHelp {
 
     fun names(): Set<String> = examples.keys().asSequence().toSet()
 
-    fun example(name: String): JSONObject = JSONObject(examples.getJSONObject(name).getJSONObject("args").toString())
+    fun example(name: String): JSONObject = JSONObject(examples.getJSONObject(name).getJSONObject("args").toString()).apply {
+        if (ArtCapabilityReply.supports(name))
+            put("responseMode", "receipt")
+        if (ArtCapabilityReply.tracksRequest(name)) put("requestId", "REQUEST_UUID")
+    }
 
     fun description(name: String): String {
         val help = examples.getJSONObject(name)
         val note = help.getString("note")
-        return help.getString("summary") + if (note.isBlank()) "" else " 前置/结果：" + note
+        return help.getString("summary") + (if (note.isBlank()) "" else " 前置/结果：" + note) +
+            (if (ArtCapabilityReply.supports(name)) " 快照结果支持responseMode:receipt以省略图形/全部帧/历史；默认full兼容旧调用。大工程使用document.summary与document.snapshot.read。" else "") +
+            (if (ArtCapabilityReply.tracksRequest(name)) " 每次逻辑编辑使用独立requestId；回复中断先用document.operation.status查询，不盲目重试。" else "")
     }
 
     private fun rule(name: String, key: String): JSONObject {
+        if (key == "responseMode") return JSONObject().put("description", "full原结果（默认）；receipt仅将完整工程快照投影为紧凑回执，保留修订号/操作号/预览；其他业务结果保持原样。完整结构使用document.snapshot.read。").put("enum", JSONArray(listOf("full", "receipt")))
+        if (key == "requestId") return JSONObject().put("description", "每次逻辑编辑生成小写标准UUID，替换REQUEST_UUID；已提交的同一请求号拒绝再次执行。状态查询要求documentId；not_found仅指没有持久历史记录，不代表运行中的请求失败，SVG无改动也不会写历史。")
+        if (name == "document.snapshot.read" && key == "offset") return JSONObject().put("description", "快照字符串UTF-16偏移，默认0；续页用返回nextOffset，不拆代理对。")
+        if (name == "document.snapshot.read" && key == "limit") return JSONObject().put("description", "每页2–16384个UTF-16字符，默认8000；不会返回整幅工程。")
+        if (key == "expectedSha256") return JSONObject().put("description", "第一页返回的sha256；offset>0时必填，工程号/版本/散列任一变化都明确拒绝，重新从第一页读取。")
         val contextual = name + "." + key
         return if (scoped.has(contextual)) scoped.getJSONObject(contextual) else fields.getJSONObject(key)
     }
@@ -38,6 +49,14 @@ internal object ArtCapabilityHelp {
         if (rule.has("enum")) result.put("enum", JSONArray(rule.getJSONArray("enum").toString()))
         return result
     }
+
+    private const val RECEIPT_EXAMPLES = """
+    {
+      "document.summary":{"args":{},"note":"先打开工程；返回工程号/版本、层数、画布尺寸、动画设置与撤销状态，不返回图形/帧内容/历史。","summary":"读取紧凑工程摘要"},
+      "document.snapshot.read":{"args":{"documentId":"DOCUMENT_ID","expectedRevision":0,"offset":0,"limit":8000},"note":"ID/版本取document.summary。拼接source，续页传nextOffset和第一页sha256作为expectedSha256，最终核对SHA-256并解析JSON。版本或快照变化时从头读取。","summary":"分页读取完整工程JSON快照"},
+      "document.operation.status":{"args":{"documentId":"DOCUMENT_ID","requestId":"REQUEST_UUID"},"note":"使用原编辑请求的UUID。committed包含operationId、提交revision和当前documentRevision；not_found仅说明尚无持久历史记录，不能作为自动重试依据。工程草稿不存在明确报错。","summary":"按请求号确认持久历史中的提交结果"}
+    }
+    """
 
     // Examples contain explicit identity placeholders, never fixed IDs of the users artwork.
     // Numeric revision 0 is a template value; its parameter says to substitute the latest revision.

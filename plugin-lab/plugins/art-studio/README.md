@@ -1342,3 +1342,26 @@ move.nudge {"documentId":"DOCUMENT_ID","expectedRevision":0,"direction":"right",
 版本0.2.66、versionCode69、applicationId `com.ai.limbs.payload.artstudio.v0266`，228项能力。补12项单位、步进、量化、选区框、父组可见性、绘制次序及覆盖alpha用例；只做静态源码/JSON/schema/版本/传输完整性核对，**未编译、未执行测试、未推云端**。
 
 部署后须实机验收：一笔跨越选区边界，仅框内像素移动而框外笔画留原位；硬/软/羽化/孔洞/贝塞尔/异或选区；半透明内容、重叠SRC_OVER及零位移；组内变换层、裁剪边界与画布外来回搬移；图片层和粘贴/填充/渐变等contentOrder内容；不透明/透明孔洞、隐藏父组、父组opacity、锁定及最近组拾取；单位转换、方向键/Shift倍数与屏幕旋转；撤销/重开/导出/取色一致；工程切换/版本变化拒绝、资源写入失败不留无主PNG，以及Host/Resident设置同步。实际像素与触控响应尚未验收。
+
+
+## 0.2.77：大工程回执与提交确认
+
+版本 0.2.77 / versionCode 80 / applicationId `com.ai.limbs.payload.artstudio.v0277`，256 项能力。
+只修复第一条问题：编辑已提交，但返回所有动画帧与历史超过 Worker 1 MiB 帧限制。
+同步能力新增可选 `responseMode:"receipt"`：完整工程结果省略 state/operations/timeline/otherBranches，保留 id/revision/lastOperationId、撤销状态和预览（包括预览错误）。其他业务结果保持原样。默认仍为 full，兼容已部署调用。每次编辑都从回执获取新的 revision，避免再次拉取整幅工程。
+
+兰儿入口（ID、修订号及请求号占位须替换）：
+
+```text
+plugin.art.studio.document.open {"id":"DOCUMENT_ID","responseMode":"receipt"}
+plugin.art.studio.document.summary {}
+plugin.art.studio.animation.seek {"documentId":"DOCUMENT_ID","expectedRevision":0,"frame":0,"responseMode":"receipt","requestId":"REQUEST_UUID"}
+plugin.art.studio.document.operation.status {"documentId":"DOCUMENT_ID","requestId":"REQUEST_UUID"}
+plugin.art.studio.document.snapshot.read {"documentId":"DOCUMENT_ID","expectedRevision":0,"offset":0,"limit":8000}
+```
+
+requestId 为每次逻辑编辑生成的小写标准 UUID，仅 animation.configure/keyframe/seek 和 svg.apply 支持。成功有历史事件时，请求号与该事件原子写入草稿；回复丢失可查询原工程。committed 返回 operationId、事件提交 revision 和当前 documentRevision；事件后来被撤销也仍属已提交历史。重复请求号明确拒绝，不自动再次执行。not_found 只说明没有匹配的持久历史事件，不能断言仍在运行的请求失败；SVG 无改动不写历史。查询草稿不存在或输入无效会明确报错。
+
+分页 source 是完整 JSON 的字符串片段。使用返回 nextOffset 续读，并携第一页 sha256 为 expectedSha256；limit 为 2–16384 个 UTF-16 字符，默认 8000，页尾不拆代理对。每页核对工程号、修订号、散列，最终拼接 source、核验 UTF-8 SHA-256 并解析。身份、版本或同版本快照元数据改变时从第一页重新读取。摘要不包含图形和历史；专用 layer/animation/history 阅读入口继续可用。
+
+本轮仅完成源码与静态检查；新增云端回归用例源码尚未执行。未本地编译、未推送、未启动云编译，部署后仍需大工程 Host/Resident 验收。动画批量制作和 GIF 色彩/压缩另轮处理。

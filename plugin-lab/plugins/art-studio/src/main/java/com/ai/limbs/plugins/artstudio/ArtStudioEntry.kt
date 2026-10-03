@@ -56,11 +56,20 @@ class ArtStudioEntry : InProcessPluginEntry {
                        block: (JSONObject) -> JSONObject) {
             registerCapability(name, title, effect) { parameters ->
                 // Validate response policy before applying an edit; format only after feedback.
-                val responseMode = if(name=="svg.apply") ArtSvgReceipt.mode(parameters) else "full"
+                val responseMode = if (ArtCapabilityReply.supports(name)) ArtCapabilityReply.mode(parameters) else "full"
+                val requestId = if (ArtCapabilityReply.tracksRequest(name) && parameters.has("requestId"))
+                    ArtOperationReceipt.validate(parameters.getString("requestId")) else null
+                val business = JSONObject(parameters.toString()).apply {
+                    if (ArtCapabilityReply.supports(name)) remove("responseMode")
+                    if (ArtCapabilityReply.tracksRequest(name)) remove("requestId")
+                }
+                fun execute(): JSONObject = if (requestId != null)
+                    store.withCapabilityRequest(business.getString("documentId"), requestId) { block(business) }
+                    else block(business)
                 try {
-                    val result = if (ArtCanvasFeedback.affectsCanvas(name, parameters))
+                    val result = if (ArtCanvasFeedback.affectsCanvas(name, business))
                         store.withCanvasFeedback {
-                            val result=block(parameters)
+                            val result=execute()
                             if(name.startsWith("reference.")) result.put("referenceFeedback",true)
                             if(name.startsWith("assistant.")) result.put("assistantFeedback",true)
                             if(name.startsWith("selection."))result.put("selectionFeedback",true)
@@ -70,8 +79,10 @@ class ArtStudioEntry : InProcessPluginEntry {
                             }
                             result
                         }
-                    else block(parameters)
-                    if(name=="svg.apply") ArtSvgReceipt.format(result,responseMode) else result
+                    else execute()
+                    if (requestId != null) result.put("requestId", requestId)
+                    if(name=="svg.apply") ArtSvgReceipt.format(result,responseMode)
+                    else ArtCapabilityReply.format(result,responseMode)
                 } catch (request: ArtImageResizeRequired) {
                     // Consent is a no-op result, not a successful edit or an image receipt.
                     request.response()
@@ -251,6 +262,14 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         capability("document.rename", "重命名画室工程", write) { p -> store.apply("LANER", "DOCUMENT_RENAME", p) }
         capability("document.info", "读取画室工程", read) { store.current() }
+        capability("document.summary", "读取工程紧凑摘要", read) { store.summary() }
+        capability("document.snapshot.read", "分页读取完整工程快照", read) { p ->
+            store.snapshotPage(p.getString("documentId"), p.getInt("expectedRevision"),
+                p.optInt("offset", 0), p.optInt("limit", 8000), p.optString("expectedSha256", ""))
+        }
+        capability("document.operation.status", "确认编辑请求是否已提交", read) { p ->
+            store.operationStatus(p.getString("documentId"), p.getString("requestId"))
+        }
         capability("document.list", "列出画室工程", read) { JSONObject().put("documents", store.list()) }
         capability("canvas.inspect", "查看画布结构", read) { store.current() }
         capability("canvas.region", "查看画布局部放大图", read) { p ->
@@ -885,6 +904,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "transform.move" -> listOf(id, p("x", "number"), p("y", "number"))
         "transform.scale" -> listOf(id, p("scale", "number"))
         "transform.rotate" -> listOf(id, p("rotation", "number"))
+        "document.snapshot.read" -> listOf(p("documentId"), p("expectedRevision", "integer"),
+            p("offset", "integer", true), p("limit", "integer", true), p("expectedSha256", optional = true))
+        "document.operation.status" -> listOf(p("documentId"), p("requestId"))
         "animation.info", "animation.timeline" -> emptyList()
         "animation.configure" -> listOf(p("documentId"),p("expectedRevision","integer"),
             p("fps","integer",true),p("start","integer",true),p("end","integer",true),p("loop","boolean",true),p("onion","boolean",true))
@@ -915,5 +937,8 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             name.startsWith("transform.") || name == "canvas.crop" || name == "document.rename") {
             fields + p("expectedRevision", "integer", true)
         } else fields
+    }.let { fields ->
+        fields + (if (ArtCapabilityReply.supports(name)) listOf(p("responseMode", optional = true)) else emptyList()) +
+            (if (ArtCapabilityReply.tracksRequest(name)) listOf(p("requestId", optional = true)) else emptyList())
     }.distinctBy { it.name }
 }

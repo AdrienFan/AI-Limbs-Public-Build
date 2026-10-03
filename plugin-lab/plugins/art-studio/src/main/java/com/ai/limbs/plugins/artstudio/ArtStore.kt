@@ -139,6 +139,35 @@ internal class ArtStore(private val root: File) {
 
     fun current(): JSONObject = locked { snapshot(loadCurrent()) }
 
+    fun summary(): JSONObject = locked { ArtCapabilityReply.summary(snapshot(loadCurrent())) }
+
+    fun snapshotPage(documentId: String, revision: Int, offset: Int, limit: Int, expectedSha256: String): JSONObject = locked {
+        val page = ArtCapabilityReply.page(snapshot(loadCurrent()), documentId, revision, offset, limit)
+        require(offset == 0 || expectedSha256.isNotBlank()) { "续页必须携带第一页sha256作为expectedSha256" }
+        require(expectedSha256.isEmpty() || expectedSha256 == page.getString("sha256")) { "快照已改变，请从第一页重新读取" }
+        page
+    }
+
+    private val capabilityRequest = ThreadLocal<String>()
+
+    fun withCapabilityRequest(documentId: String, requestId: String, block: () -> JSONObject): JSONObject = locked {
+        val doc = loadCurrent()
+        require(doc.getString("id") == documentId) { "工程已经切换，请刷新工程编号" }
+        ArtOperationReceipt.requireUnused(doc, requestId)
+        check(capabilityRequest.get() == null) { "不允许嵌套编辑请求" }
+        capabilityRequest.set(requestId)
+        try { block() } finally { capabilityRequest.remove() }
+    }
+
+    fun operationStatus(documentId: String, requestId: String): JSONObject = locked {
+        validateId(documentId)
+        val file = draft(documentId)
+        require(file.isFile) { "工程草稿不存在；不能确认该请求的提交状态" }
+        val doc = JSONObject(file.readText())
+        require(doc.getString("id") == documentId) { "草稿工程编号不匹配，无法确认提交状态" }
+        ArtOperationReceipt.status(doc, requestId)
+    }
+
     private fun moveSettingsFile()=File(root,"move-settings.json")
     fun moveSettings():JSONObject=locked {
         val file=moveSettingsFile()
@@ -3036,6 +3065,7 @@ internal class ArtStore(private val root: File) {
     private fun historyStacks(operations: JSONArray): Pair<List<String>, List<String>> = ArtHistory.stacks(operations)
 
     private fun stampAnimation(doc:JSONObject,op:JSONObject) {
+        capabilityRequest.get()?.let { op.put("requestId", it) }
         val events=doc.getJSONArray("operations")
         var animated=doc.getJSONObject("base").has("animation") || op.getString("type").startsWith("ANIMATION_")
         var time=doc.getJSONObject("base").optJSONObject("animation")?.getInt("current") ?: 0
