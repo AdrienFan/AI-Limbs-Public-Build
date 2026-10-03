@@ -5,7 +5,6 @@ import android.net.LocalSocketAddress
 import android.os.Process
 import java.io.DataInputStream
 import java.io.DataOutputStream
-import java.io.IOException
 import java.util.UUID
 import org.json.JSONObject
 
@@ -49,14 +48,10 @@ internal object PluginRuntimeWire {
     }
 
     fun request(operation: String, sessionId: String? = null, payload: JSONObject = JSONObject(), timeoutMs: Int = TIMEOUT_MS): JSONObject {
-        val names = if (sessionId == null) listOf(legacySocketName())
-            else listOf(socketName(sessionId), legacySocketName()).distinct()
-        var lastError: IOException? = null
-        for (name in names) {
-            try { return requestAt(name, operation, sessionId, payload, timeoutMs) }
-            catch (error: IOException) { lastError = error }
-        }
-        throw checkNotNull(lastError) { "No plugin runtime endpoint was attempted" }
+        // A known session has exactly one endpoint. Retrying the legacy socket after a timeout
+        // hid the original failure behind Connection refused and discarded the attested route.
+        val name = if (sessionId == null) legacySocketName() else socketName(sessionId)
+        return requestAt(name, operation, sessionId, payload, timeoutMs)
     }
 
     private fun requestAt(name: String, operation: String, sessionId: String? = null, payload: JSONObject = JSONObject(), timeoutMs: Int = TIMEOUT_MS): JSONObject {

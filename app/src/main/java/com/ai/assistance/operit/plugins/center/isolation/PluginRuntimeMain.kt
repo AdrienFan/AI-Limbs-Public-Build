@@ -13,6 +13,9 @@ import com.ai.assistance.operit.core.tools.system.resident.ResidentRuntimeLease
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import java.util.UUID
+import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.atomic.AtomicBoolean
 import kotlin.system.exitProcess
 import kotlinx.coroutines.runBlocking
 import org.json.JSONArray
@@ -122,9 +125,14 @@ object PluginRuntimeMain {
             }, "plugin-runtime-core-watchdog").apply { isDaemon = true; start() }
 
             println("AIL_PLUGIN_RUNTIME_RUNNING " + snapshot())
-            var stopping = false
-            while (!stopping) {
-                server.accept().use { socket ->
+            val stopping = AtomicBoolean(false)
+            val gate = PluginRuntimeRequestGate()
+            val clients = Executors.newCachedThreadPool { runnable ->
+                Thread(runnable, "plugin-runtime-client").apply { isDaemon = true }
+            }
+
+            fun handleClient(socket: android.net.LocalSocket) {
+                socket.use {
                     socket.soTimeout = PluginRuntimeWire.TIMEOUT_MS
                     var requestId = ""
                     var operationName = "unread"
@@ -135,8 +143,8 @@ object PluginRuntimeMain {
                         val request = PluginRuntimeWire.read(socket)
                         operationName = request.getString("operation")
                         requestId = request.getString("request_id")
-                        // Record request boundaries, never payloads: a slow request on this serial socket
-                        // can delay every later plugin mount and runtime health check.
+                        // Record boundaries without payloads; requests may wait on the business gate
+                        // while health queries and page continuations run on other client threads.
                         if (operationName == "mount") {
                             Log.i("AILPluginMount", "worker request begin operation=$operationName")
                         }
@@ -150,125 +158,127 @@ object PluginRuntimeMain {
                             }
                         }
                         val payload = request.optJSONObject("payload") ?: JSONObject()
-                        val operationResult = when (request.getString("operation")) {
-                            "status", "ping" -> JSONObject()
-                            "mount" -> runBlocking {
-                                worker.mount(payload.getString("plugin_id"), payload.getString("version"))
-                            }
-                            "stop_plugin" -> runBlocking {
-                                worker.stopPlugin(
-                                    payload.getString("plugin_id"),
-                                    ownerShutdown = payload.optBoolean("owner_shutdown", false)
-                                )
-                            }
-                            "snapshot_plugin" -> worker.snapshot(payload.getString("plugin_id"))
-                            "invoke_capability" -> runBlocking {
-                                worker.invokeCapability(
-                                    payload.getString("plugin_id"),
-                                    payload.getString("capability_id"),
-                                    payload.optJSONObject("parameters") ?: JSONObject()
-                                )
-                            }
-                            "service_invoke" -> runBlocking {
-                                worker.invokeService(
-                                    pluginId = payload.getString("plugin_id"),
-                                    serviceId = payload.getString("service_id"),
-                                    callerPluginId = payload.getString("caller_plugin_id"),
-                                    callerRoles = payload.optJSONArray("caller_roles").stringSet(),
-                                    callerScopes = payload.optJSONArray("caller_scopes").stringSet(),
-                                    operation = payload.getString("service_operation"),
-                                    parameters = payload.optJSONObject("parameters") ?: JSONObject()
-                                )
-                            }
-                            "provider_executor" -> JSONObject().put(
-                                "result_json",
-                                runBlocking {
-                                    worker.invokeProviderExecutor(
+                        val operationResult = gate.dispatch(operationName, stopping::get) {
+                            when (operationName) {
+                                "status", "ping" -> JSONObject()
+                                "mount" -> runBlocking {
+                                    worker.mount(payload.getString("plugin_id"), payload.getString("version"))
+                                }
+                                "stop_plugin" -> runBlocking {
+                                    worker.stopPlugin(
                                         payload.getString("plugin_id"),
-                                        payload.getString("provider_id"),
-                                        payload.optString("parameters_json", "{}")
+                                        ownerShutdown = payload.optBoolean("owner_shutdown", false)
                                     )
                                 }
-                            )
-                            "provider_ui_event" -> JSONObject().put(
-                                "result_json",
-                                runBlocking {
-                                    worker.performUiProvider(
+                                "snapshot_plugin" -> worker.snapshot(payload.getString("plugin_id"))
+                                "invoke_capability" -> runBlocking {
+                                    worker.invokeCapability(
                                         payload.getString("plugin_id"),
-                                        payload.getString("provider_id"),
-                                        payload.getString("event_id"),
-                                        payload.optString("payload_json", "{}")
+                                        payload.getString("capability_id"),
+                                        payload.optJSONObject("parameters") ?: JSONObject()
                                     )
                                 }
-                            )
-                            "notification_action" -> JSONObject().put(
-                                "accepted",
-                                runBlocking {
-                                    worker.performNotification(
-                                        payload.getString("plugin_id"),
-                                        payload.getString("action_id")
+                                "service_invoke" -> runBlocking {
+                                    worker.invokeService(
+                                        pluginId = payload.getString("plugin_id"),
+                                        serviceId = payload.getString("service_id"),
+                                        callerPluginId = payload.getString("caller_plugin_id"),
+                                        callerRoles = payload.optJSONArray("caller_roles").stringSet(),
+                                        callerScopes = payload.optJSONArray("caller_scopes").stringSet(),
+                                        operation = payload.getString("service_operation"),
+                                        parameters = payload.optJSONObject("parameters") ?: JSONObject()
                                     )
                                 }
-                            )
-                            "start_children" -> runBlocking { worker.startChildren() }
-                            "await_enabled_point_ready" -> runBlocking {
-                                worker.awaitEnabledPointReady(
-                                    payload.getString("point"),
-                                    payload.getLong("timeout_ms")
+                                "provider_executor" -> JSONObject().put(
+                                    "result_json",
+                                    runBlocking {
+                                        worker.invokeProviderExecutor(
+                                            payload.getString("plugin_id"),
+                                            payload.getString("provider_id"),
+                                            payload.optString("parameters_json", "{}")
+                                        )
+                                    }
                                 )
-                            }
-                            "await_business_children_ready" -> runBlocking {
-                                worker.awaitBusinessChildrenReady(payload.getLong("timeout_ms"))
-                            }
-                            "stop_children" -> runBlocking { worker.stopChildren() }
-                            "child_snapshot" -> worker.childSnapshot()
-                            "child_control" -> runBlocking {
-                                worker.childControl(payload.getString("child_operation"), payload)
-                            }
-                            "child_install" -> runBlocking {
-                                worker.installChild(
-                                    payload.getString("owner_plugin_id"),
-                                    payload.getString("package_path"),
-                                    payload.optString("expected_parent_plugin_id").trim().ifBlank { null },
-                                    payload.optString("expected_point").trim().ifBlank { null }
+                                "provider_ui_event" -> JSONObject().put(
+                                    "result_json",
+                                    runBlocking {
+                                        worker.performUiProvider(
+                                            payload.getString("plugin_id"),
+                                            payload.getString("provider_id"),
+                                            payload.getString("event_id"),
+                                            payload.optString("payload_json", "{}")
+                                        )
+                                    }
                                 )
-                            }
-                            "child_ui_event" -> JSONObject().put(
-                                "result_json",
-                                runBlocking {
-                                    worker.performChildUi(
+                                "notification_action" -> JSONObject().put(
+                                    "accepted",
+                                    runBlocking {
+                                        worker.performNotification(
+                                            payload.getString("plugin_id"),
+                                            payload.getString("action_id")
+                                        )
+                                    }
+                                )
+                                "start_children" -> runBlocking { worker.startChildren() }
+                                "await_enabled_point_ready" -> runBlocking {
+                                    worker.awaitEnabledPointReady(
+                                        payload.getString("point"),
+                                        payload.getLong("timeout_ms")
+                                    )
+                                }
+                                "await_business_children_ready" -> runBlocking {
+                                    worker.awaitBusinessChildrenReady(payload.getLong("timeout_ms"))
+                                }
+                                "stop_children" -> runBlocking { worker.stopChildren() }
+                                "child_snapshot" -> worker.childSnapshot()
+                                "child_control" -> runBlocking {
+                                    worker.childControl(payload.getString("child_operation"), payload)
+                                }
+                                "child_install" -> runBlocking {
+                                    worker.installChild(
+                                        payload.getString("owner_plugin_id"),
+                                        payload.getString("package_path"),
+                                        payload.optString("expected_parent_plugin_id").trim().ifBlank { null },
+                                        payload.optString("expected_point").trim().ifBlank { null }
+                                    )
+                                }
+                                "child_ui_event" -> JSONObject().put(
+                                    "result_json",
+                                    runBlocking {
+                                        worker.performChildUi(
+                                            payload.getString("extension_id"),
+                                            payload.getString("contribution_id"),
+                                            payload.getString("event_id"),
+                                            payload.optString("payload_json", "{}")
+                                        )
+                                    }
+                                )
+                                "child_presentation_command" -> runBlocking {
+                                    worker.invokeChildPresentation(
                                         payload.getString("extension_id"),
-                                        payload.getString("contribution_id"),
-                                        payload.getString("event_id"),
-                                        payload.optString("payload_json", "{}")
+                                        payload.getString("command"),
+                                        payload.optJSONObject("parameters") ?: JSONObject()
                                     )
                                 }
-                            )
-                            "child_presentation_command" -> runBlocking {
-                                worker.invokeChildPresentation(
-                                    payload.getString("extension_id"),
-                                    payload.getString("command"),
-                                    payload.optJSONObject("parameters") ?: JSONObject()
-                                )
-                            }
-                            "child_export_backups" -> runBlocking {
-                                val ids = buildList {
-                                    val array = payload.optJSONArray("extension_ids") ?: org.json.JSONArray()
-                                    for (index in 0 until array.length()) add(array.getString(index))
+                                "child_export_backups" -> runBlocking {
+                                    val ids = buildList {
+                                        val array = payload.optJSONArray("extension_ids") ?: org.json.JSONArray()
+                                        for (index in 0 until array.length()) add(array.getString(index))
+                                    }
+                                    JSONObject().put("exported", org.json.JSONArray(
+                                        worker.exportChildBackups(ids, payload.getString("tree_uri"))
+                                    ))
                                 }
-                                JSONObject().put("exported", org.json.JSONArray(
-                                    worker.exportChildBackups(ids, payload.getString("tree_uri"))
-                                ))
-                            }
-                            "stop" -> {
-                                check(request.getString("session_id") == sessionId) {
-                                    "Plugin runtime stop requires current session"
+                                "stop" -> {
+                                    check(request.getString("session_id") == sessionId) {
+                                        "Plugin runtime stop requires current session"
+                                    }
+                                    runBlocking { worker.stop() }
+                                    stopping.set(true)
+                                    JSONObject().put("stopped", true)
                                 }
-                                runBlocking { worker.stop() }
-                                stopping = true
-                                JSONObject().put("stopped", true)
+                                else -> error("Unsupported plugin runtime operation")
                             }
-                            else -> error("Unsupported plugin runtime operation")
                         }
                         PluginRuntimeWire.write(
                             socket,
@@ -298,14 +308,42 @@ object PluginRuntimeMain {
                         if (operationName == "mount" || elapsed > 2_000L) {
                             Log.i("AILPluginMount", "worker request end operation=$operationName elapsed_ms=$elapsed")
                         }
+                        // A completed stop must wake accept(), even when its response write failed.
+                        if (stopping.get()) runCatching { server.close() }
                     }
                 }
             }
-            runCatching { server.close() }
-            runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
-            runCatching {
-                val current = JSONObject(identityFile.readText())
-                if (current.optString("session_id") == sessionId) identityFile.delete()
+
+            try {
+                while (!stopping.get()) {
+                    val socket = try {
+                        server.accept()
+                    } catch (error: Exception) {
+                        if (stopping.get()) break
+                        throw error
+                    }
+                    try {
+                        clients.execute { handleClient(socket) }
+                    } catch (error: Throwable) {
+                        runCatching { socket.close() }
+                        throw error
+                    }
+                }
+            } finally {
+                stopping.set(true)
+                runCatching { server.close() }
+                clients.shutdown()
+                try {
+                    if (!clients.awaitTermination(PluginRuntimeWire.TIMEOUT_MS.toLong(), TimeUnit.MILLISECONDS)) {
+                        clients.shutdownNow()
+                    }
+                } finally {
+                    runCatching { Runtime.getRuntime().removeShutdownHook(shutdownHook) }
+                    runCatching {
+                        val current = JSONObject(identityFile.readText())
+                        if (current.optString("session_id") == sessionId) identityFile.delete()
+                    }
+                }
             }
         }
     }
