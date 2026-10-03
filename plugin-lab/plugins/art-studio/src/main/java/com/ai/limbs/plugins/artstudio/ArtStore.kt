@@ -1,6 +1,7 @@
 package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
+import android.os.ParcelFileDescriptor
 import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Paint
@@ -56,6 +57,7 @@ internal class ArtStore(private val root: File) {
     private val lockDepth = ThreadLocal.withInitial { 0 }
     private val replayCache = ArtReplayCache()
     private val summaryCache = ArtSummaryCache()
+    private val frozenRenderAssets = ThreadLocal<Map<String,File>>()
     private val editorSnapshot = ThreadLocal.withInitial { false }
 
     // The editor consumes state and history labels, never the serialized operation payloads.
@@ -98,6 +100,42 @@ internal class ArtStore(private val root: File) {
     }
 
     fun withViewSnapshot(block: (JSONObject?) -> JSONObject): JSONObject = readViewSnapshot(block)
+
+    /** Capture only document data and stable handles under the shared lock. Pixels are composed later. */
+    fun captureCurrentViewSource():StudioRenderSource = forEditor {
+        readViewSnapshot { snapshot -> captureViewSource(snapshot) }
+    }
+
+    // Direct apply() callers already own the validated committed snapshot and the editor lock.
+    fun captureEditViewSource(snapshot:JSONObject):StudioRenderSource {
+        check(lockDepth.get()>0 && editorSnapshot.get()) {"编辑快照必须在原编辑事务内捕获"}
+        require(snapshot.getString("id")==pointer.readText().trim()) {"工程已切换"}
+        return captureViewSource(snapshot)
+    }
+
+    private fun captureViewSource(snapshot:JSONObject?):StudioRenderSource {
+        val ids=linkedSetOf<String>()
+        snapshot?.getJSONObject("state")?.let {state ->
+            // renderBytes also inspects inactive cels. Pin every referenced asset once, without
+            // copying encoded PNGs or decoding bitmaps while holding the document lock.
+            ArtMenuOperations.assets(state) {node,key->ids.add(node.getString(key))}
+        }
+        val marker=revision()
+        val lease=StudioAssetLease.capture(ids) {id ->
+            val descriptor=ParcelFileDescriptor.open(assetFile(id),ParcelFileDescriptor.MODE_READ_ONLY)
+            object:StudioAssetHandle {
+                override val file=File("/proc/self/fd/${descriptor.fd}")
+                override fun close()=descriptor.close()
+            }
+        }
+        return StudioRenderSource(snapshot,marker,lease)
+    }
+
+    fun <T> withRenderAssets(lease:StudioAssetLease,block:()->T):T {
+        check(frozenRenderAssets.get()==null) {"绘制资源上下文不能嵌套"}
+        frozenRenderAssets.set(lease.files)
+        try {return block()} finally {frozenRenderAssets.remove()}
+    }
 
     fun withCanvasFeedback(block: () -> JSONObject): JSONObject = locked {
         fun referenceSignature(snapshot:JSONObject?):String {
@@ -1185,7 +1223,8 @@ internal class ArtStore(private val root: File) {
                 .put("referenceIds",JSONArray(prepared.map {it.first.getString("id")})).put("collectionImported",prepared.size)
         } catch(error:Throwable) {prepared.forEach {assetFile(it.first.getString("asset")).delete()};throw error}
     }
-    fun referenceBitmaps(snapshot:JSONObject):Map<String,Bitmap> = locked {
+    // Caller either owns the document lock (capability previews) or a captured asset lease (editor).
+    fun referenceBitmaps(snapshot:JSONObject):Map<String,Bitmap> {
         val map=mutableMapOf<String,Bitmap>()
         try {
             for(r in ArtReferences.items(snapshot.getJSONObject("state"))) {
@@ -1203,7 +1242,7 @@ internal class ArtStore(private val root: File) {
                     }) ?: error("参考图像资源无效")
                 map[asset]=bitmap
             }
-            map
+            return map
         } catch(error:Throwable) { map.values.forEach { it.recycle() };throw error }
     }
 
@@ -3705,7 +3744,11 @@ internal class ArtStore(private val root: File) {
 
     private fun draft(id: String): File { validateId(id); return File(drafts, "$id.json") }
     private fun archive(id: String): File { validateId(id); return saveDirectories.projectFile(id) }
-    fun assetFile(id: String): File { validateId(id); return File(assets, "$id.png") }
+    fun assetFile(id: String): File {
+        validateId(id)
+        val captured=frozenRenderAssets.get()
+        return if(captured==null)File(assets,"$id.png") else captured.getValue(id)
+    }
     private fun validateId(id: String) { require(id.matches(Regex("[a-f0-9-]{36}"))) { "工程标识无效" } }
     private fun requireColor(value: String) { require(value.matches(Regex("#[A-Fa-f0-9]{8}"))) { "颜色必须是 #AARRGGBB" } }
 

@@ -8,17 +8,24 @@ import org.json.JSONObject
 internal data class StudioRenderFrame(val first:JSONObject,val second:Bitmap,val third:String,
     val fourth:Map<String,Bitmap>) {
     companion object {
-        // Hold the document lock across snapshot, pixels and revision marker. Otherwise an external
-        // SVG edit can make an old bitmap look current and stop the page from refreshing it.
-        fun current(store:ArtStore):StudioRenderFrame? = store.forEditor {
-            store.readViewSnapshot { snapshot -> snapshot?.let { create(store,it) } }
+        fun render(store:ArtStore,source:StudioRenderSource):StudioRenderFrame? {
+            val snapshot=source.snapshot ?: return null
+            val started=System.nanoTime()
+            try {
+                return store.withRenderAssets(source.assets) {create(store,snapshot,source.revisionMarker)}
+            } finally {
+                val elapsed=(System.nanoTime()-started)/1_000_000
+                if(elapsed>=1000)android.util.Log.w("ArtStudioPerf","phase=editorPixels renderMs=$elapsed")
+            }
         }
-        fun create(store:ArtStore,snapshot:JSONObject):StudioRenderFrame {
+        // The default is used by capability previews while their transaction lock is held.
+        // Editor callers always supply the marker captured BEFORE composing pixels.
+        fun create(store:ArtStore,snapshot:JSONObject,revisionMarker:String=store.revision()):StudioRenderFrame {
             val refs=store.referenceBitmaps(snapshot)
             var image:Bitmap?=null
             try {
                 image=ArtAnimationPreview.render(store,snapshot)
-                return StudioRenderFrame(snapshot,image,store.revision(),refs)
+                return StudioRenderFrame(snapshot,image,revisionMarker,refs)
             } catch(error:Throwable) { image?.recycle();refs.values.forEach { it.recycle() };throw error }
         }
     }

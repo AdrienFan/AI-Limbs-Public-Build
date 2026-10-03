@@ -406,6 +406,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     frames: StudioFrameCache<StudioRenderFrame>) {
 
     val context = LocalContext.current
+    val pageView = LocalView.current
+    fun isPageVisible() = pageView.isAttachedToWindow && pageView.isShown &&
+        pageView.windowVisibility == View.VISIBLE
     val store = remember(host.dataDir) { ArtStore(host.dataDir) }
     val scope = rememberCoroutineScope()
     // Settings callbacks below share this state; Kotlin local declarations must precede use.
@@ -742,20 +745,37 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     }
 
     fun refresh() {
+        // Keep the retained picture while hidden. Returning to the page checks the active revision.
+        if(!isPageVisible())return
         // Slow frames must finish once. Polling every 400ms used to supersede and queue them forever.
         val serial = renderRequests.beginRefresh() ?: return
         val retainedRevision = displayedFrame?.frame?.third
         scope.launch {
             var rendered:StudioRenderFrame?=null
             var unchanged = false
+            var sourceMarker = ""
+            var currentMarker = ""
+            var refreshAgain = false
             try {
                 withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        unchanged = retainedRevision != null && store.revision() == retainedRevision
-                        if (!unchanged) rendered = StudioRenderFrame.current(store)
+                        currentMarker = store.revision()
+                        unchanged = retainedRevision != null && currentMarker == retainedRevision
+                        if(unchanged)sourceMarker=currentMarker
+                        else {
+                            val started=System.nanoTime()
+                            val source=store.captureCurrentViewSource()
+                            val captured=(System.nanoTime()-started)/1_000_000
+                            if(captured>=1000)android.util.Log.w("ArtStudioPerf","phase=editorCapture captureMs=$captured")
+                            source.use {
+                                sourceMarker=it.revisionMarker
+                                rendered=StudioRenderFrame.render(store,it)
+                            }
+                            currentMarker=store.revision()
+                        }
                     }
                 }
-                if (renderRequests.isCurrent(serial)) {
+                if (renderRequests.canAccept(serial,sourceMarker,currentMarker)) {
                     if (!unchanged) {
                         acceptFrame(rendered)
                         rendered=null // Provider and page leases now own the accepted bitmaps.
@@ -763,6 +783,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                     restoring = false
                     restoreError = null
                     busy = restoring || pendingOperations > 0 || awaitingExport
+                } else if(renderRequests.isCurrent(serial)) {
+                    // External edits can complete during unlocked rendering. Drop obsolete pixels;
+                    // never label them with a later revision or replay the original edit.
+                    refreshAgain=true
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
@@ -780,8 +804,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 // withContext can be cancelled after rendering but before handing a bitmap to Main.
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
                 renderRequests.finishRefresh(serial)
-                if (isActive && restoring && pendingOperations == 0 && restoreError == null &&
-                    !renderRequests.isCurrent(serial)) refresh()
+                if(isActive && pendingOperations==0 && (refreshAgain ||
+                    (restoring && restoreError==null && !renderRequests.isCurrent(serial)))) refresh()
             }
         }
     }
@@ -802,33 +826,41 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             pendingOperations++
             busy = true
             var rendered:StudioRenderFrame?=null
+            var sourceMarker=""
+            var currentMarker=""
+            var refreshAgain=false
             try {
                 lateinit var operationResult: JSONObject
                 withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        // Keep edit, render and revision marker under the same cross-process lock.
-                        // Direct apply() results already contain the validated committed snapshot;
-                        // rereading the draft here repeats JSON parsing, replay and history projection.
-                        store.forEditor {
-                            operationResult = action(confirmation)
-                            rendered = if(renderEditResult) StudioRenderFrame.create(store,operationResult)
-                                else requireNotNull(StudioRenderFrame.current(store)) { "工程已关闭" }
+                        // Keep edit, snapshot, revision and asset handles in one transaction;
+                        // compose pixels AFTER releasing the lock so Resident requests can proceed.
+                        val source=store.forEditor {
+                            operationResult=action(confirmation)
+                            if(renderEditResult)store.captureEditViewSource(operationResult)
+                            else store.captureCurrentViewSource()
                         }
+                        source.use {
+                            sourceMarker=it.revisionMarker
+                            rendered=requireNotNull(StudioRenderFrame.render(store,it)) {"工程已关闭"}
+                        }
+                        currentMarker=store.revision()
                     }
                 }
                 if(operationResult.has("animationExport"))Toast.makeText(context,"GIF已保存："+operationResult.getString("animationExport"),Toast.LENGTH_LONG).show()
                 val pair = requireNotNull(rendered)
-                if (renderRequests.isCurrent(serial)) {
+                if (renderRequests.canAccept(serial,sourceMarker,currentMarker)) {
                     acceptFrame(pair)
                     rendered=null
-                }
+                } else if(renderRequests.isCurrent(serial))refreshAgain=true
                 showImageImportNotice(operationResult)
                 operationResult.optJSONObject("encloseResult")?.let {result ->
                     if(!result.getBoolean("changed"))Toast.makeText(context,result.getString("message"),Toast.LENGTH_SHORT).show()
                 }
                 if(operationResult.optBoolean("comicPanelFeedback") && !operationResult.getBoolean("changed"))
                     Toast.makeText(context,operationResult.getString("message"),Toast.LENGTH_SHORT).show()
-                if((operationResult.has("referenceId")||operationResult.has("referenceIds")) && renderRequests.isCurrent(serial))
+                if((operationResult.has("referenceId")||operationResult.has("referenceIds")) &&
+                    renderRequests.canAccept(serial,sourceMarker,currentMarker))
                     canvasRef[0]?.fitReferences(snapshot?.getJSONObject("state"))
                 if(operationResult.has("collectionSaved"))Toast.makeText(context,"参考集合已保存",Toast.LENGTH_SHORT).show()
                 onSuccess?.invoke()
@@ -844,7 +876,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
                 pendingOperations--; busy = restoring || pendingOperations > 0 || awaitingExport
                 // A failed superseding operation still needs one authoritative initial frame.
-                if (isActive && restoring && pendingOperations == 0 && restoreError == null) refresh()
+                if(isActive && pendingOperations==0 && (refreshAgain ||
+                    (restoring && restoreError==null))) refresh()
             }
         }
     }
@@ -1164,15 +1197,28 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
     }
     LaunchedEffect(store) {
-        refresh()
-        try {
-            acceptColorWorkspace(withContext(Dispatchers.IO) { store.colorState() })
-            colorWorkspaceReady = true
-        } catch (error: Exception) {
-            host.logger.e("ArtStudio", "Color workspace load failed", error)
-            Toast.makeText(context, error.message ?: "读取颜色资源失败", Toast.LENGTH_LONG).show()
-        }
-        while (true) {
+        var initialized=false
+        while (isActive) {
+            // An Activity behind ChatGPT or an off-screen toolbox page can remain composed.
+            // Hidden pages must not read settings, consume menu requests or redraw every external seek.
+            if(!isPageVisible()) {
+                animationPlaying=false
+                delay(400)
+                continue
+            }
+            if(!initialized) {
+                refresh()
+                try {
+                    acceptColorWorkspace(withContext(Dispatchers.IO) { store.colorState() })
+                    colorWorkspaceReady=true
+                } catch(error:kotlinx.coroutines.CancellationException) {throw error}
+                catch(error:Exception) {
+                    host.logger.e("ArtStudio","Color workspace load failed",error)
+                    Toast.makeText(context,error.message ?: "读取颜色资源失败",Toast.LENGTH_LONG).show()
+                }
+                initialized=true
+            }
+            if(restoring && restoreError==null && pendingOperations==0)refresh()
             if (colorWorkspaceReady && !paletteBusy && color == colorWorkspace.getString("foreground") &&
                 backgroundColor == colorWorkspace.getString("background")) {
                 try {
@@ -1223,7 +1269,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 withContext(Dispatchers.IO) { store.ackMenuUiRequest(request.getString("id")) }
             }
             delay(400)
-            if (!busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
+            if (isPageVisible() && !busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
         }
     }
     LaunchedEffect(openDialog, recentOnly) {
@@ -1682,15 +1728,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     LaunchedEffect(Unit) {
         ArtStudioViewControl.commands.collect { command -> runViewCommand(command) }
     }
-    val pageView = LocalView.current
     StudioViewConnection(host,
         restartKey = viewConnectionRestart,
         onConnected = { viewConnectionError = null },
         onConnectionError = { viewConnectionError = it },
         physicalState = {
             val canvas = canvasRef[0]
-            val visible = pageView.isAttachedToWindow && pageView.isShown &&
-                pageView.windowVisibility == View.VISIBLE
+            val visible = isPageVisible()
             val attached = !restoring && visible && canvas != null && canvas.isAttachedToWindow &&
                 canvas.image != null && canvas.documentId.isNotBlank()
             ArtStudioViewControl.canvasAttached = attached

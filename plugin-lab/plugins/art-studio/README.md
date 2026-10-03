@@ -1420,3 +1420,18 @@ plugin.art.studio.animation.export {"documentId":"DOCUMENT_ID","expectedRevision
 手机时间轴的配置、关键帧、选层、定位及播放停止，直接以本次已验证编辑结果合成画面。编辑到渲染及revision标记在同一跨进程锁内完成；其他业务结果与预览仍走原有权威读取。定位仍持久记录ANIMATION_TIME，原关键帧和撤销语义保留。ArtStudioPerf日志仅在慢锁调用时区分processWaitMs、fileWaitMs、heldMs，不改变产品流程。
 
 入口和参数不变：兰儿调用plugin.art.studio.document.summary无需参数；手机从停靠板动画时间轴点击帧或上一/下一帧。修改后需部署验收同一复杂工程的连续定位、长历史首读/重复摘要、跨端编辑、保存状态变化与洋葱皮。本批为0.2.81/versionCode84/applicationId com.ai.limbs.payload.artstudio.v0281；仅静态核对与源码提交，未编译、未运行测试、未推送，尚无新版本提速实测结论。
+
+
+## 0.2.82：隐藏页面轮询与显示事务锁
+
+0.2.81部署验收记录在Ubuntu logs/art-studio-0281-runtime-acceptance-20261004。重复摘要远端桥命令约0.16–0.19秒，端到端约3.1秒；副本定位22、0、55帧端到端约4.5、14.3、7.5秒。慢定位日志显示Resident等文件锁约5.9/3.1秒，而持锁业务约0.65秒；同一时期Host展示进程持锁约10秒。接口时长包含桥与网络，不等同于手机点击时间轴计时。
+
+本批针对已证实的显示事务和后台轮询，不改变工程、历史或258项能力的接口。页面沿用view.state的可见性条件：attached、shown、windowVisibility=VISIBLE。隐藏时跳过颜色、菜单、版本读取及刷新，不消费停靠板请求，并暂停动画播放；返回时检查最新版本。已有Provider帧与Bitmap租约保持，模式切换、回工具箱、返回画室不清空已有画面。
+
+编辑器在共享锁内捕获独立快照、原版本标记与只读资源句柄；完整像素合成和参考图解码移到锁外。图片资源通过ParcelFileDescriptor只读打开，以本进程/proc/self/fd路径供原有解码器读取，持有至本帧合成结束；原路径即使被原子替换，合成仍读取捕获资源。资源按ID去重，捕获失败、绘制失败或取消时均释放。参考图片解码不再另取共享文档锁。能力预览继续按原事务运行。
+
+绘制完毕比较捕获版本与当前版本，并核对页面请求代次；旧图不能冠以新版本，也不能清掉后来新建的画布。失效结果释放，保留最后有效图，仅重新读取最新视图；已提交编辑不重放。最多保留一个页面刷新任务。ArtStudioPerf增加editorCapture/editorPixels阶段日志，以便部署后区分快照捕获与像素合成的耗时；这次未承诺画面合成本身已加速。
+
+实现参考：[Android ParcelFileDescriptor公开API](https://developer.android.com/reference/android/os/ParcelFileDescriptor)与[Linux proc_pid_fd](https://man7.org/linux/man-pages/man5/proc_pid_fd.5.html)。API自说明入口与参数不变。例：兰儿仍调用plugin.art.studio.animation.seek，携documentId、expectedRevision、frame和responseMode=receipt；手机继续点击停靠板动画时间轴。
+
+版本0.2.82/versionCode85/applicationId com.ai.limbs.payload.artstudio.v0282。新增资源释放与跨端过期帧的云端回归源码。本轮仅源码、静态核对与提交，未运行测试、未编译或推送。需部署验证：隐藏页面执行连续定位不触发重绘；可见时绘制阶段不阻塞Resident；图片/文字/笔刷/参考图/洋葱皮资源正确；全屏和返回画室保留画面；跨端切换/关闭/快速编辑不发布旧帧；句柄数量在反复操作后回到基线。

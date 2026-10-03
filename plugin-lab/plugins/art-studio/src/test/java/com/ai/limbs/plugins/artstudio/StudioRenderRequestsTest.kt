@@ -4,6 +4,28 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class StudioRenderRequestsTest {
+    @Test fun anExternalCommitDuringPixelCompositionRejectsOldPixelsAndAllowsOneFreshRender() {
+        val requests=StudioRenderRequests();val old=requireNotNull(requests.beginRefresh())
+        assertTrue(requests.canAccept(old,"document:before","document:before"))
+        // The Resident commits while the Host renders without owning the document lock.
+        assertFalse(requests.canAccept(old,"document:before","document:after"))
+        assertNull(requests.beginRefresh())
+        requests.finishRefresh(old)
+        val fresh=requireNotNull(requests.beginRefresh())
+        assertTrue(requests.canAccept(fresh,"document:after","document:after"))
+        assertFalse(requests.canAccept(old,"document:after","document:after"))
+    }
+
+    @Test fun aCapturedEmptyDocumentCannotClearACanvasOpenedLater() {
+        val requests=StudioRenderRequests();val empty=requireNotNull(requests.beginRefresh())
+        assertTrue(requests.canAccept(empty,"",""))
+        assertFalse(requests.canAccept(empty,"","new-document:revision"))
+        assertFalse(requests.canAccept(empty,"old-document:revision",""))
+        requests.invalidate()
+        assertFalse(requests.canAccept(empty,"",""))
+        requests.finishRefresh(empty)
+    }
+
     @Test fun aSlowFrameSurvivesRepeatedPollsAndOnlyOneRenderIsQueued() {
         val requests=StudioRenderRequests()
         val frame=requireNotNull(requests.beginRefresh())

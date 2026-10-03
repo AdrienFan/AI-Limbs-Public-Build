@@ -11,6 +11,8 @@ internal class StudioRenderRequests {
     }
     fun invalidate(): Long = ++generation
     fun isCurrent(ticket: Long): Boolean = ticket == generation
+    fun canAccept(ticket:Long,sourceMarker:String,currentMarker:String):Boolean =
+        isCurrent(ticket) && sourceMarker==currentMarker
     fun finishRefresh(ticket: Long) {
         check(refresh == ticket) { "Refresh ticket does not own the active render" }
         refresh = null

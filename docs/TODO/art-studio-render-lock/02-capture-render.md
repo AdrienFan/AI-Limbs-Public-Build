@@ -1,0 +1,9 @@
+# 捕获与绘制
+
+旧StudioRenderFrame.current及perform将完整像素合成放在store.forEditor跨进程锁内，展示进程可占锁约10秒。仅移出锁还会让原子资源替换影响正在绘制的画面，或将旧图标记成新版本。
+
+新StudioRenderSource持有独立快照、同次捕获版本和StudioAssetLease。ParcelFileDescriptor以只读方式打开各图片，/proc/self/fd路径在句柄租约内读取对应inode。renderBytes会扫描非活跃cel的资产，因此捕获同一state中的全部asset字段，但不读图片内容或解码、不复制PNG。失败或取消释放全部句柄，不隐式重新使用实时资源路径。
+
+ThreadLocal绘制资源上下文严格限定捕获集合。像素和参考图解码在锁外进行，完成后校验版本与请求代次，过期图释放而不发布，仅读最新视图。空文档也捕获版本，以免后续新建被旧空结果清掉；已提交编辑不重复执行。
+
+[DONE] 源码完成。真实Android图片/笔刷/文字/参考与洋葱皮解码、句柄释放和跨端改图待部署。

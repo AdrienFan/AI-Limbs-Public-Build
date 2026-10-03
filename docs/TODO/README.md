@@ -57,3 +57,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [画布恢复与时间轴响应](art-studio-recovery-timeline/index.md)：0.2.80源码完成，累积修复进入云端验证。
 
 - [摘要读取与时间轴重复工作](art-studio-summary-seek/index.md)：0.2.81源码与静态核对，部署性能待验收。
+
+- [隐藏轮询与显示事务锁](art-studio-render-lock/index.md)：0.2.82源码与静态核对，部署锁竞争与画面连续性待验收。
