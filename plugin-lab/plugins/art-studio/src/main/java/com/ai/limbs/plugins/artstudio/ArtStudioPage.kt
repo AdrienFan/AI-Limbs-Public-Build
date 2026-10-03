@@ -671,7 +671,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     var exportPath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
     var pendingOperations by remember { mutableIntStateOf(0) }
-    var renderSerial by remember { mutableIntStateOf(0) }
+    val renderRequests = remember { StudioRenderRequests() }
     var revision by remember { mutableStateOf("") }
     var documents by remember { mutableStateOf(JSONArray()) }
     val canvasRef = remember { arrayOfNulls<StudioCanvas>(1) }
@@ -704,25 +704,36 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
 
     fun refresh() {
-        val serial = ++renderSerial
+        // Slow frames must finish once. Polling every 400ms used to supersede and queue them forever.
+        val serial = renderRequests.beginRefresh() ?: return
         scope.launch {
+            var rendered:StudioRenderFrame?=null
             try {
-                val pair = withContext(Dispatchers.IO) {
+                withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        val state = store.current()
-                        StudioRenderFrame.create(store,state)
+                        rendered = StudioRenderFrame.current(store)
                     }
                 }
-                if (serial == renderSerial) {
-                    snapshot = pair.first
+                if (renderRequests.isCurrent(serial)) {
+                    val pair=rendered
+                    snapshot = pair?.first
                     image?.recycle()
-                    image = pair.second
+                    image = pair?.second
                     referenceBitmaps.values.forEach { it.recycle() }
-                    referenceBitmaps = pair.fourth
-                    revision = pair.third
-                } else { pair.second.recycle();pair.fourth.values.forEach { it.recycle() } }
+                    referenceBitmaps = pair?.fourth ?: emptyMap()
+                    revision = pair?.third ?: ""
+                    rendered=null // The page now owns the accepted bitmaps.
+                }
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
             } catch (error: Exception) {
-                if (serial == renderSerial) { snapshot = null; image = null }
+                host.logger.e("ArtStudio", "Canvas refresh failed", error)
+                if (renderRequests.isCurrent(serial))
+                    Toast.makeText(context, error.message ?: "读取画布失败", Toast.LENGTH_LONG).show()
+            } finally {
+                // withContext can be cancelled after rendering but before handing a bitmap to Main.
+                rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
+                renderRequests.finishRefresh(serial)
             }
         }
     }
@@ -736,44 +747,52 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
     fun perform(confirmation: JSONObject? = null, onSuccess: (() -> Unit)? = null,
         action: (JSONObject?) -> JSONObject) {
-        val serial = ++renderSerial
-        pendingOperations++
-        busy = true
         scope.launch {
+            // A menu may outlive its Compose scope. A cancelled launch must never set busy forever.
+            val serial = renderRequests.invalidate()
+            pendingOperations++
+            busy = true
+            var rendered:StudioRenderFrame?=null
             try {
                 lateinit var operationResult: JSONObject
-                val pair = withContext(Dispatchers.IO) {
+                withContext(Dispatchers.IO) {
                     mutex.withLock {
                         operationResult = action(confirmation)
-                        val state = store.current()
-                        StudioRenderFrame.create(store,state)
+                        rendered = requireNotNull(StudioRenderFrame.current(store)) { "工程已关闭" }
                     }
                 }
-                if (serial == renderSerial) {
+                val pair = requireNotNull(rendered)
+                if (renderRequests.isCurrent(serial)) {
                     snapshot = pair.first
                     image?.recycle()
                     image = pair.second
                     referenceBitmaps.values.forEach { it.recycle() }
                     referenceBitmaps = pair.fourth
                     revision = pair.third
-                } else { pair.second.recycle();pair.fourth.values.forEach { it.recycle() } }
+                    rendered=null
+                }
                 showImageImportNotice(operationResult)
                 operationResult.optJSONObject("encloseResult")?.let {result ->
                     if(!result.getBoolean("changed"))Toast.makeText(context,result.getString("message"),Toast.LENGTH_SHORT).show()
                 }
                 if(operationResult.optBoolean("comicPanelFeedback") && !operationResult.getBoolean("changed"))
                     Toast.makeText(context,operationResult.getString("message"),Toast.LENGTH_SHORT).show()
-                if((operationResult.has("referenceId")||operationResult.has("referenceIds")) && serial==renderSerial)
+                if((operationResult.has("referenceId")||operationResult.has("referenceIds")) && renderRequests.isCurrent(serial))
                     canvasRef[0]?.fitReferences(snapshot?.getJSONObject("state"))
                 if(operationResult.has("collectionSaved"))Toast.makeText(context,"参考集合已保存",Toast.LENGTH_SHORT).show()
                 onSuccess?.invoke()
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                throw error
             } catch (request: ArtImageResizeRequired) {
                 resizeRequest = request.plan
                 resizeAction = action
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Edit failed", error)
                 Toast.makeText(context, error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
-            } finally { pendingOperations--; busy = pendingOperations > 0 || awaitingExport }
+            } finally {
+                rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
+                pendingOperations--; busy = pendingOperations > 0 || awaitingExport
+            }
         }
     }
 
@@ -1106,6 +1125,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
                 try {
                     val colors = withContext(Dispatchers.IO) { store.colorState() }
                     if (colors.getLong("revision") != colorWorkspace.getLong("revision")) acceptColorWorkspace(colors)
+                } catch (error: kotlinx.coroutines.CancellationException) {
+                    throw error
                 } catch (error: Exception) {
                     colorWorkspaceReady = false
                     host.logger.e("ArtStudio", "Color workspace refresh failed", error)
@@ -1199,11 +1220,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
             }
         }
     }
-    val clipboardSize = remember(current?.optString("id"), current?.optBoolean("hasClipboard"),
-        revision) {
-        val clip = store.clipboardInfo()
-        clip.optInt("width") to clip.optInt("height")
-    }
+    // File-lock waits belong to the background menu poll, never to Compose or accordion clicks.
+    val clipboardSize = remainingContext.optInt("clipboardWidth") to remainingContext.optInt("clipboardHeight")
     val state = current?.getJSONObject("state")
     val layers = state?.getJSONArray("layers")
     val selectedLayer = (0 until (layers?.length() ?: 0)).map { layers!!.getJSONObject(it) }
@@ -1315,7 +1333,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
     fun finishCurrent(save: Boolean, discard: Boolean, exit: Boolean) {
         if (busy) return
-        ++renderSerial
+        renderRequests.invalidate()
         busy = true
         scope.launch {
             try {
@@ -1555,9 +1573,15 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge) {
     }
     DisposableEffect(Unit) {
         onDispose {
+            menuBridge.onFileCommand=null;menuBridge.onEditCommand=null
+            menuBridge.onViewCommand=null;menuBridge.onImageCommand=null;menuBridge.onRemainingCommand=null
+            menuBridge.busy=false;menuBridge.hasDocument=false
             ArtStudioViewControl.canvasAttached = false
             ArtStudioViewControl.canvasZoom.value = null
+            canvasRef[0]?.image=null
+            image?.recycle();image=null
             referenceBitmaps.values.forEach { it.recycle() }
+            referenceBitmaps=emptyMap()
         }
     }
     LaunchedEffect(Unit) {

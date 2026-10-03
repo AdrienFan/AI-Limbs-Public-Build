@@ -8,10 +8,18 @@ import org.json.JSONObject
 internal data class StudioRenderFrame(val first:JSONObject,val second:Bitmap,val third:String,
     val fourth:Map<String,Bitmap>) {
     companion object {
+        // Hold the document lock across snapshot, pixels and revision marker. Otherwise an external
+        // SVG edit can make an old bitmap look current and stop the page from refreshing it.
+        fun current(store:ArtStore):StudioRenderFrame? = store.readViewSnapshot { snapshot ->
+            snapshot?.let { create(store,it) }
+        }
         fun create(store:ArtStore,snapshot:JSONObject):StudioRenderFrame {
             val refs=store.referenceBitmaps(snapshot)
-            try { return StudioRenderFrame(snapshot,ArtRenderer.render(store,snapshot,colorizeKeys=true),store.revision(),refs) }
-            catch(error:Throwable) { refs.values.forEach { it.recycle() };throw error }
+            var image:Bitmap?=null
+            try {
+                image=ArtRenderer.render(store,snapshot,colorizeKeys=true)
+                return StudioRenderFrame(snapshot,image,store.revision(),refs)
+            } catch(error:Throwable) { image?.recycle();refs.values.forEach { it.recycle() };throw error }
         }
     }
 }

@@ -64,9 +64,11 @@ internal class ArtStore(private val root: File) {
     }
 
     /** Read the active document and render a view under one lock; no history or pointer mutation. */
-    fun withViewSnapshot(block: (JSONObject?) -> JSONObject): JSONObject = locked {
+    fun <T> readViewSnapshot(block: (JSONObject?) -> T): T = locked {
         block(if (pointer.isFile) snapshot(loadCurrent()) else null)
     }
+
+    fun withViewSnapshot(block: (JSONObject?) -> JSONObject): JSONObject = readViewSnapshot(block)
 
     fun withCanvasFeedback(block: () -> JSONObject): JSONObject = locked {
         fun referenceSignature(snapshot:JSONObject?):String {
@@ -513,7 +515,9 @@ internal class ArtStore(private val root: File) {
     }
 
     fun menuUiState(): JSONObject = locked {
-        JSONObject().put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("quickTools", quickToolsState()).put("storage", saveDirectories.describe())
+        val clipboard = clipboardInfo()
+        JSONObject().put("clipboardWidth", clipboard.optInt("width"))
+            .put("clipboardHeight", clipboard.optInt("height")).put("settings", readMenuSettings()).put("dockPanels", readDockPanels()).put("quickTools", quickToolsState()).put("storage", saveDirectories.describe())
             .put("moveSettings",moveSettings()).put("measureSettings",measureSettings()).put("layerClipboard",layerClipboard.isFile)
             .put("request", if (menuUiRequest.isFile) JSONObject(menuUiRequest.readText()) else JSONObject.NULL)
     }
