@@ -68,4 +68,4 @@ For_Agent: 对项目大规模动工前按本规范协作
 
 - [图片格式与动画导出](art-studio-export-formats/index.md)：0.2.87源码与静态核对；云端构建和设备编码验收待安排。
 
-- [足迹单笔删除](art-studio-footprint-delete/index.md)：0.2.88固定删除栏与兰儿入口，静态核对完成；云端和实机验收待安排。
+- [足迹单笔删除](art-studio-footprint-delete/index.md)：0.2.88固定删除栏与兰儿入口；0.2.89补云端发现的导出类型导入，重编译及实机验收待确认。

@@ -6,6 +6,7 @@ import androidx.heifwriter.AvifWriter
 import androidx.heifwriter.HeifWriter
 import java.io.File
 import java.io.FileOutputStream
+import java.io.OutputStream
 
 /** One requested format produces exactly that format; an encoder failure never changes it. */
 internal object ArtImageEncoder {
