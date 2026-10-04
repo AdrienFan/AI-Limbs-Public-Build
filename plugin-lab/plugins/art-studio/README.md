@@ -1,3 +1,11 @@
+# 画室 0.2.87
+
+文件菜单“导出”和“导出更多选项”接入 PNG、JPEG、无损 WebP、24位 BMP、单帧 GIF、HEIC/HEIF、AVIF。工程存在真实动画轨道时明确选择时间轴当前帧或完整 GIF；完整 GIF 复用时间轴范围/FPS/循环与尺寸限制，当前帧可裁切和缩放。文件选择器使用实际格式的 MIME/扩展名，保留默认目录与自选位置。
+
+HEIC/HEIF、AVIF 依赖设备编码器，缺失时禁用并显示原因；运行时编码失败明确报错。JPEG/BMP/HEIC/HEIF/AVIF 透明区域合成为白色，PNG/WebP保留透明度，GIF使用自适应255色和二值透明。新增 export.image，并在 image.formats 返回导出能力；已有 PNG/JPEG 与 animation.export 能力保留。
+
+版本0.2.87 / versionCode90 / 独立applicationId com.ai.limbs.payload.artstudio.v0287；259项能力说明。仅源码与静态核对，本地未编译或执行测试，云端构建/签名/打包和安装验收待安排。详情见 docs/TODO/art-studio-export-formats/index.md。
+
 # 画室 0.2.76
 
 修复系统字体声明中存在未安装文件时，整份文字工具目录被中断的问题。字体发现只注册可读取文件，未安装/不可读取条目进入 text.fonts.unavailableFonts 诊断；配置损坏、非法路径/轴设置仍明确报错。保留现有 fontId、TTC索引、字体族、语言和字重/斜体/变量轴；选定字体加载失败仍报告，不替换字体或字形。

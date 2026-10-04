@@ -13,6 +13,7 @@ internal object ArtAnimation {
         .put("fps",12).put("start",0).put("end",23).put("loop",true).put("onion",false).put("current",0)
     fun layers(state:JSONObject)=ArtMenuOperations.layers(state)
     fun keys(layer:JSONObject)=layer.optJSONArray("animationKeys")
+    fun hasTracks(state: JSONObject): Boolean = layers(state).any { (keys(it)?.length() ?: 0) > 0 }
     private fun contentView(layer:JSONObject):JSONObject=JSONObject().apply {
         // Read-only projection for equality checks; mutation/cel ownership always uses a deep copy.
         layer.keys().forEach {key -> if(key !in shared)put(key,layer.get(key))}

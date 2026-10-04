@@ -25,7 +25,7 @@ internal object ArtImageFormats {
                 .put("decoderAvailable", format.mimes.any { ImageDecoder.isMimeTypeSupported(it) })
                 .put("importMode", "static_bitmap"))
         }
-    }).put("detection", "encoded_content").put("animatedImport", "first_frame")
+    }).put("export", ArtExportFormats.describe()).put("detection", "encoded_content").put("animatedImport", "first_frame")
         .put("workingColorSpace", "sRGB").put("workingBitDepth", 8)
         .put("inputByteLimit", ArtStore.MAX_IMAGE_INPUT_BYTES)
         .put("assetByteLimit", ArtStore.MAX_ASSET_BYTES)

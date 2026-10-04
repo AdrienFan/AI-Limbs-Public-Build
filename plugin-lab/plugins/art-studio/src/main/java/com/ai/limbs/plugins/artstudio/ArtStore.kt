@@ -3273,7 +3273,24 @@ internal class ArtStore(private val root: File) {
         require(p.getString("documentId")==snapshot.getString("id")&&p.getInt("expectedRevision")==snapshot.getInt("revision")) {"工程已改变，请刷新"}
         ArtAnimation.frame(snapshot,p.getInt("frame"))
     }
-    fun animationExport(p:JSONObject):JSONObject {
+    fun exportImage(format: String, name: String, options: JSONObject = JSONObject(),
+        destinationDirectory: File = exportDirectory()): JSONObject {
+        // Keep assets leased while encoding, but release the document lock before expensive pixel work.
+        val source = captureCurrentViewSource()
+        source.use {
+            val captured = requireNotNull(it.snapshot) { "请先新建或打开工程" }
+            if (options.has("documentId")) require(options.getString("documentId") == captured.getString("id")) { "工程已切换，请重新打开导出选项" }
+            if (options.has("expectedRevision")) require(options.getInt("expectedRevision") == captured.getInt("revision")) { "工程已改变，请重新打开导出选项" }
+            val state = captured.getJSONObject("state")
+            val animated = ArtAnimation.hasTracks(state)
+            val frame = ArtAnimation.settings(state).getInt("current")
+            // Project the current cel here, before any caller-specific isolated-layer preparation.
+            val scene = if (animated) ArtAnimation.frame(captured, frame) else captured
+            return withRenderAssets(it.assets) { ArtRenderer.export(this, scene, format, name, options, destinationDirectory) }
+                .apply { if (animated) put("mode", "timeline_current_frame").put("frame", frame) }
+        }
+    }
+    fun animationExport(p:JSONObject, destinationDirectory: File = exportDirectory()):JSONObject {
         // Snapshot assets are immutable UUID files. Release the project lock before rendering a long sequence.
         val snapshot=locked {
             snapshot(loadCurrent()).also {
@@ -3289,7 +3306,7 @@ internal class ArtStore(private val root: File) {
         val height=kotlin.math.round(state.getInt("height")*factor).toInt().coerceAtLeast(1)
         require(width.toLong()*height*count<=32L*1024*1024) {"GIF帧像素总量超过32 Mi，缩小maxEdge或播放范围"}
         val destination=locked {
-            val directory=exportDirectory();saveDirectories.prepare(directory)
+            val directory=destinationDirectory;saveDirectories.prepare(directory)
             File(directory,"animation-"+snapshot.getString("id")+"-"+UUID.randomUUID()+".gif")
         }
         val temp=File(destination.parentFile,"."+UUID.randomUUID()+".tmp")
@@ -3336,7 +3353,8 @@ internal class ArtStore(private val root: File) {
             }
             require(temp.renameTo(destination)) {"保存GIF失败"}
         } finally {temp.delete();spool.delete()}
-        return JSONObject().put("path",destination.absolutePath).put("mimeType","image/gif").put("bytes",destination.length())
+        return JSONObject().put("path",destination.absolutePath).put("mimeType","image/gif").put("mime","image/gif")
+            .put("name", destination.name).put("mode", "full_animation").put("bytes",destination.length())
             .put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))
             .put("width",width).put("height",height).put("fps",cfg.getInt("fps")).put("start",start).put("end",end).put("frames",count)
             .put("palette","adaptive-global-255").put("alphaThreshold",128).put("loop",cfg.getBoolean("loop"))

@@ -23,6 +23,18 @@ class ArtAnimationTest {
     private fun rejects(block:()->Unit) {
         try {block();fail("Expected rejection")} catch(expected:IllegalArgumentException) {assertTrue(expected.message.orEmpty().isNotBlank())}
     }
+    @Test fun exportAnimationChoiceRequiresRealTracksRatherThanTimelineSettings() {
+        val state = state()
+        state.put("animation", ArtAnimation.settings(state))
+        assertFalse(ArtAnimation.hasTracks(state))
+        paint(state).put("animationKeys", JSONArray())
+        assertFalse(ArtAnimation.hasTracks(state))
+        paint(state).remove("animationKeys")
+        key(state, 5, "blank")
+        assertTrue(ArtAnimation.hasTracks(state))
+        key(state, 0, "disable")
+        assertFalse(ArtAnimation.hasTracks(state))
+    }
     @Test fun firstBlankFramePreservesOriginalAnchorAndNativeContents() {
         val state=state();key(state,5,"blank")
         assertEquals(listOf(0,5),(0..1).map {ArtAnimation.keys(paint(state))!!.getJSONObject(it).getInt("time")})

@@ -10,7 +10,6 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.os.Build
 import java.io.File
-import java.io.FileOutputStream
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.UUID
@@ -545,8 +544,12 @@ internal object ArtRenderer {
     fun export(store: ArtStore, snapshot: JSONObject, format: String, name: String,
                options: JSONObject = JSONObject(),
                destinationDirectory: File = store.exportDirectory()): JSONObject {
-        require(format == "png" || format == "jpeg")
-        val mime = if (format == "png") "image/png" else "image/jpeg"
+        val encoding = ArtExportFormats.requireAvailable(format)
+        val animated = ArtAnimation.hasTracks(snapshot.getJSONObject("state"))
+        val frame = ArtAnimation.settings(snapshot.getJSONObject("state")).getInt("current")
+        // Callers may deliberately isolate a layer/group; preserve their prepared scene.
+        val scene = snapshot
+        val mime = encoding.mime
         val filename = (name.ifBlank { "AI-Limbs-Art-${UUID.randomUUID()}" }
             .replace(Regex("[^A-Za-z0-9_-]"), "_").take(80)) + ".$format"
         val directory = destinationDirectory
@@ -554,13 +557,16 @@ internal object ArtRenderer {
         val destination = File(directory, filename)
         val temp = File(directory, ".${UUID.randomUUID()}.tmp")
         try {
-            val state = snapshot.getJSONObject("state")
+            val state = scene.getJSONObject("state")
             val targetWidth = options.optInt("width", options.optInt("cropWidth", state.getInt("width")))
             val targetHeight = options.optInt("height", options.optInt("cropHeight", state.getInt("height")))
             ArtImagePolicy.requireDimensions(targetWidth, targetHeight)
             ArtImagePolicy.requireBytes(ArtImagePolicy.renderBytes(store, state, state.getInt("width"),
-                state.getInt("height")) + targetWidth.toLong() * targetHeight * 8, "导出图片")
-            val bitmap = render(store, snapshot, opaque = format == "jpeg")
+                state.getInt("height")) + targetWidth.toLong() * targetHeight * 12 + 4L * 1024 * 1024, "导出图片")
+            if (format == "gif") require(targetWidth.toLong() * targetHeight <= 16L * 1024 * 1024) {
+                "单帧GIF超过16 Mi像素，请缩小输出尺寸"
+            }
+            val bitmap = render(store, scene, opaque = encoding.opaque)
             var output = bitmap
             try {
                 val x = options.optInt("x", 0)
@@ -582,11 +588,8 @@ internal object ArtRenderer {
                     if (output !== bitmap) output.recycle()
                     output = scaled
                 }
-                FileOutputStream(temp).use { stream ->
-                    require(output.compress(if (format == "png") Bitmap.CompressFormat.PNG
-                        else Bitmap.CompressFormat.JPEG, 95, stream))
-                    stream.fd.sync()
-                }
+                try { ArtImageEncoder.write(output, format, temp) }
+                catch (error: Exception) { throw IllegalStateException("${encoding.label}编码失败：${error.message}", error) }
             } finally {
                 if (output !== bitmap) output.recycle()
                 bitmap.recycle()
@@ -598,6 +601,9 @@ internal object ArtRenderer {
             temp.delete()
         }
         return JSONObject().put("path", destination.absolutePath).put("name", filename)
-            .put("mime", mime).put("bytes", destination.length())
+            .put("mime", mime).put("bytes", destination.length()).put("format", format)
+            .put("documentId", snapshot.getString("id")).put("revision", snapshot.getInt("revision"))
+            .put("mode", if (animated) "timeline_current_frame" else "static_image")
+            .apply { if (animated) put("frame", frame) }.put("notice", encoding.notice)
     }
 }

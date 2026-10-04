@@ -11,11 +11,11 @@ android {
     compileSdk = 36
     ndkVersion = "27.0.12077973"
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.artstudio.v0286"
+        applicationId = "com.ai.limbs.payload.artstudio.v0287"
         minSdk = 29
         targetSdk = 34
-        versionCode = 89
-        versionName = "0.2.86"
+        versionCode = 90
+        versionName = "0.2.87"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86") }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
     }
@@ -35,6 +35,7 @@ dependencies {
     implementation(libs.compose.ui)
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
+    implementation("androidx.heifwriter:heifwriter:1.1.0")
     implementation(libs.activity.compose)
     implementation(libs.coroutines.android)
     testImplementation(project(":plugin-inprocess-api"))

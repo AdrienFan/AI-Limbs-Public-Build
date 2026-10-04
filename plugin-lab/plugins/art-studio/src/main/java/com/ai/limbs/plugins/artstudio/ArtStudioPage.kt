@@ -658,6 +658,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     var advancedExportDialog by remember { mutableStateOf(false) }
     var exportFormat by remember { mutableStateOf("png") }
     var exportChooseLocation by remember { mutableStateOf(false) }
+    var exportFullAnimation by remember { mutableStateOf(false) }
+    var exportGifEdge by remember { mutableStateOf("512") }
+    var exportContext by remember { mutableStateOf<JSONObject?>(null) }
+    val exportSupports = remember(exportDialog, advancedExportDialog) {
+        if (exportDialog || advancedExportDialog) ArtExportFormats.support() else emptyList()
+    }
     var cropX by remember { mutableStateOf("0") }
     var cropY by remember { mutableStateOf("0") }
     var cropWidth by remember { mutableStateOf("") }
@@ -1164,55 +1170,28 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             } finally { awaitingExport = false; busy = restoring || pendingOperations > 0 }
         }
     }
-    val exportPng = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/png")) { uri ->
+    val exportImageFile = rememberLauncherForActivityResult(ArtExportDocumentContract()) { uri ->
+        val source = exportPath
+        exportPath = ""
         if (uri == null) {
-            if(exportPath.isNotEmpty()) java.io.File(exportPath).delete()
-            exportPath=""
+            if (source.isNotEmpty()) java.io.File(source).delete()
             awaitingExport = false; busy = restoring || pendingOperations > 0
-        }
-        else {
-            val source = exportPath
-            exportPath=""
-            scope.launch {
-                try {
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openOutputStream(uri)?.use { output ->
-                            java.io.File(source).inputStream().use { it.copyTo(output) }
-                        } ?: error("无法写入所选文件")
-                    }
-                    Toast.makeText(context, "PNG 图片已保存", Toast.LENGTH_SHORT).show()
-                } catch (error: Exception) {
-                    Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
-                } finally {
-                    java.io.File(source).delete()
-                    awaitingExport = false; busy = restoring || pendingOperations > 0
+        } else scope.launch {
+            try {
+                withContext(Dispatchers.IO) {
+                    require(source.isNotEmpty()) { "导出临时文件已失效，请重新导出" }
+                    context.contentResolver.openOutputStream(uri, "wt")?.use { output ->
+                        java.io.File(source).inputStream().use { it.copyTo(output) }
+                    } ?: error("无法写入所选文件")
                 }
-            }
-        }
-    }
-    val exportJpeg = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("image/jpeg")) { uri ->
-        if (uri == null) {
-            if(exportPath.isNotEmpty()) java.io.File(exportPath).delete()
-            exportPath=""
-            awaitingExport = false; busy = restoring || pendingOperations > 0
-        }
-        else {
-            val source = exportPath
-            exportPath=""
-            scope.launch {
-                try {
-                    withContext(Dispatchers.IO) {
-                        context.contentResolver.openOutputStream(uri)?.use { output ->
-                            java.io.File(source).inputStream().use { it.copyTo(output) }
-                        } ?: error("无法写入所选文件")
-                    }
-                    Toast.makeText(context, "JPEG 图片已保存", Toast.LENGTH_SHORT).show()
-                } catch (error: Exception) {
-                    Toast.makeText(context, error.message ?: "保存图片失败", Toast.LENGTH_LONG).show()
-                } finally {
-                    java.io.File(source).delete()
-                    awaitingExport = false; busy = restoring || pendingOperations > 0
-                }
+                Toast.makeText(context, "导出文件已保存", Toast.LENGTH_SHORT).show()
+            } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+            catch (error: Exception) {
+                host.logger.e("ArtStudio", "Export file save failed", error)
+                Toast.makeText(context, error.message ?: "保存导出文件失败", Toast.LENGTH_LONG).show()
+            } finally {
+                if (source.isNotEmpty()) java.io.File(source).delete()
+                awaitingExport = false; busy = restoring || pendingOperations > 0
             }
         }
     }
@@ -1576,37 +1555,74 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         catch (error: Exception) { textBackdropError = error.message.orEmpty(); textInputError = textBackdropError; host.logger.e("ArtStudio", "Text input backdrop failed", error) }
         finally { bitmap?.recycle() }
     }
-    fun publish(format: String, options: JSONObject = JSONObject(), chooseLocation: Boolean = false) {
+    fun publish(format: String, options: JSONObject = JSONObject(), chooseLocation: Boolean = false,
+        fullAnimation: Boolean = false) {
         if (awaitingExport || busy) return
+        val captured = requireNotNull(exportContext) { "请先打开导出选项" }
+        val request = ArtJsonCopy.objectValue(options).put("documentId", captured.getString("documentId"))
+            .put("expectedRevision", captured.getInt("expectedRevision"))
         awaitingExport = true
         busy = true
         scope.launch {
+            var staged: java.io.File? = null
             try {
                 val result = withContext(Dispatchers.IO) {
-                    mutex.withLock {
-                        val storage=store.saveDirectorySettings()
-                        val direct=storage.getBoolean("custom") && !chooseLocation
-                        val directory=if(direct) java.io.File(storage.getString("imagesDirectory"))
-                            else java.io.File(host.cacheDir,"art-export-staging")
-                        ArtRenderer.export(store,store.current(),format,"",options,directory)
-                            .put("directSave",direct)
-                    }
+                    val storage = store.saveDirectorySettings()
+                    val direct = storage.getBoolean("custom") && !chooseLocation
+                    val directory = if (direct) java.io.File(storage.getString("imagesDirectory"))
+                        else java.io.File(host.cacheDir, "art-export-staging")
+                    val result = if (fullAnimation) store.animationExport(request, directory)
+                        else store.exportImage(format, "", request, directory)
+                    if (!direct) staged = java.io.File(result.getString("path"))
+                    result.put("directSave", direct)
                 }
-                if(result.getBoolean("directSave")) {
-                    awaitingExport=false
-                    Toast.makeText(context,"图片已保存：" + result.getString("path"),Toast.LENGTH_LONG).show()
+                if (result.getBoolean("directSave")) {
+                    awaitingExport = false
+                    Toast.makeText(context, "导出文件已保存：" + result.getString("path"), Toast.LENGTH_LONG).show()
                 } else {
                     exportPath = result.getString("path")
-                    if (format == "png") exportPng.launch(result.getString("name"))
-                    else exportJpeg.launch(result.getString("name"))
+                    exportImageFile.launch(ArtExportDocument(result.getString("mime"), result.getString("name")))
+                    staged = null // The picker callback now owns the temporary file.
                 }
-            } catch (e: Exception) {
+            } catch (error: kotlinx.coroutines.CancellationException) {
+                awaitingExport = false
+                throw error
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Image export failed", error)
                 if (exportPath.isNotEmpty()) java.io.File(exportPath).delete()
                 exportPath = ""
                 awaitingExport = false
-                Toast.makeText(context, e.message, Toast.LENGTH_LONG).show()
-            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
+                Toast.makeText(context, error.message ?: "导出失败", Toast.LENGTH_LONG).show()
+            } finally {
+                staged?.delete()
+                busy = restoring || pendingOperations > 0 || awaitingExport
+            }
         }
+    }
+    fun openExportOptions(advanced: Boolean) {
+        fun showOptions() {
+            val captured = requireNotNull(snapshot) { "请先新建或打开工程" }
+            val scene = captured.getJSONObject("state")
+            val animation = ArtAnimation.settings(scene)
+            exportContext = JSONObject().put("documentId", captured.getString("id"))
+                .put("expectedRevision", captured.getInt("revision")).put("hasTracks", ArtAnimation.hasTracks(scene))
+                .put("frame", animation.getInt("current")).put("animation", ArtJsonCopy.objectValue(animation))
+                .put("width", scene.getInt("width")).put("height", scene.getInt("height"))
+            exportFullAnimation = false; exportGifEdge = "512"; exportChooseLocation = false
+            cropX = "0"; cropY = "0"; cropWidth = scene.getInt("width").toString(); cropHeight = scene.getInt("height").toString()
+            outputWidth = cropWidth; outputHeight = cropHeight
+            if (advanced) advancedExportDialog = true else exportDialog = true
+        }
+        if (animationPlaying && animationPreview != null) {
+            val captured = requireNotNull(current)
+            val frame = animationPreview.time
+            animationPlaying = false
+            // Commit the visible playback position before binding the dialog's revision/current frame.
+            perform(onSuccess = { showOptions() }, renderEditResult = true) {
+                store.animationSeek("AWEI", JSONObject().put("documentId", captured.getString("id"))
+                    .put("expectedRevision", captured.getInt("revision")).put("frame", frame))
+            }
+        } else { animationPlaying = false; showOptions() }
     }
     fun leaveScreen() {
         var wrapper: Context = context
@@ -1820,15 +1836,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 5 -> { saveAsName = state?.optString("name", "未命名工程") ?: "未命名工程"; saveAsChooseLocation=false; saveAsDialog = true }
                 6 -> sessionDialog = true
                 7 -> { importingUntitled = true; openExternal.launch(arrayOf("*/*")) }
-                8 -> { exportChooseLocation=false; exportDialog = true }
-                9 -> {
-                    cropX = "0"; cropY = "0"
-                    cropWidth = state?.optInt("width")?.toString() ?: ""
-                    cropHeight = state?.optInt("height")?.toString() ?: ""
-                    outputWidth = cropWidth; outputHeight = cropHeight
-                    exportChooseLocation=false
-                    advancedExportDialog = true
-                }
+                8 -> if (current != null) openExportOptions(false)
+                9 -> if (current != null) openExportOptions(true)
                 11 -> changeDock("set_visible",RightPane.ANIMATION,true)
                 12 -> perform { store.saveIncrementalVersion() }
                 13 -> perform {
@@ -3512,76 +3521,71 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 "另存到默认目录" else "选择保存位置")
         } },
         dismissButton = { TextButton(onClick = { saveAsDialog = false }) { Text("取消") } })
-    if (exportDialog) AlertDialog(onDismissRequest = { exportDialog = false },
-        title = { Text("导出图像") },
-        text = { Column {
-            Text("导出当前画布；原工程和图层保持不变。")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = exportFormat == "png", onClick = { exportFormat = "png" },
-                    label = { Text("PNG") })
-                FilterChip(selected = exportFormat == "jpeg", onClick = { exportFormat = "jpeg" },
-                    label = { Text("JPEG") })
-            }
-            StudioSaveLocationOptions(remainingContext.optJSONObject("storage"),"imagesDirectory",
-                exportChooseLocation) { exportChooseLocation=it }
-        } },
-        confirmButton = { TextButton(onClick = {
-            exportDialog = false; publish(exportFormat,chooseLocation=exportChooseLocation)
-        }) {
-            Text(if(remainingContext.optJSONObject("storage")?.optBoolean("custom")==true && !exportChooseLocation)
-                "保存到默认目录" else "选择保存位置")
-        } },
-        dismissButton = { TextButton(onClick = { exportDialog = false }) { Text("取消") } })
-    if (advancedExportDialog) AlertDialog(onDismissRequest = { advancedExportDialog = false },
-        title = { Text("导出 - 更多选项") },
-        text = { Column(Modifier.heightIn(max = 490.dp).verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(5.dp)) {
-            Text("裁切范围（以画布像素为单位）")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(cropX, { cropX = it }, Modifier.weight(1f), label = { Text("X") })
-                OutlinedTextField(cropY, { cropY = it }, Modifier.weight(1f), label = { Text("Y") })
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(cropWidth, { cropWidth = it }, Modifier.weight(1f), label = { Text("宽") })
-                OutlinedTextField(cropHeight, { cropHeight = it }, Modifier.weight(1f), label = { Text("高") })
-            }
-            Text("输出大小（像素）")
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                OutlinedTextField(outputWidth, { outputWidth = it }, Modifier.weight(1f),
-                    label = { Text("宽") })
-                OutlinedTextField(outputHeight, { outputHeight = it }, Modifier.weight(1f),
-                    label = { Text("高") })
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                FilterChip(selected = exportFormat == "png", onClick = { exportFormat = "png" },
-                    label = { Text("PNG") })
-                FilterChip(selected = exportFormat == "jpeg", onClick = { exportFormat = "jpeg" },
-                    label = { Text("JPEG") })
-            }
-            StudioSaveLocationOptions(remainingContext.optJSONObject("storage"),"imagesDirectory",
-                exportChooseLocation) { exportChooseLocation=it }
-        } },
-        confirmButton = { TextButton(onClick = {
-            val x = cropX.toIntOrNull(); val y = cropY.toIntOrNull()
-            val w = cropWidth.toIntOrNull(); val h = cropHeight.toIntOrNull()
-            val outW = outputWidth.toIntOrNull(); val outH = outputHeight.toIntOrNull()
-            val canvasW = state?.optInt("width") ?: 0
-            val canvasH = state?.optInt("height") ?: 0
-            if (x == null || y == null || w == null || h == null || outW == null || outH == null ||
-                x < 0 || y < 0 || w <= 0 || h <= 0 || x.toLong() + w > canvasW ||
-                y.toLong() + h > canvasH || !ArtImagePolicy.dimensionsValid(outW, outH)) {
-                Toast.makeText(context, "裁切范围或输出尺寸无效", Toast.LENGTH_LONG).show()
-            } else {
-                advancedExportDialog = false
-                publish(exportFormat, JSONObject().put("x", x).put("y", y)
-                    .put("cropWidth", w).put("cropHeight", h)
-                    .put("width", outW).put("height", outH),chooseLocation=exportChooseLocation)
-            }
-        }) {
-            Text(if(remainingContext.optJSONObject("storage")?.optBoolean("custom")==true && !exportChooseLocation)
-                "保存到默认目录" else "选择保存位置")
-        } },
-        dismissButton = { TextButton(onClick = { advancedExportDialog = false }) { Text("取消") } })
+    if (exportDialog || advancedExportDialog) {
+        val captured = requireNotNull(exportContext)
+        val advanced = advancedExportDialog
+        val selectedSupported = exportSupports.any { it.format.id == exportFormat && it.available }
+        val canExport = !busy && (exportFullAnimation || selectedSupported) &&
+            current != null && current.getString("id") == captured.getString("documentId") &&
+            current.getInt("revision") == captured.getInt("expectedRevision")
+        fun closeExportOptions() { exportDialog = false; advancedExportDialog = false }
+        AlertDialog(onDismissRequest = { closeExportOptions() },
+            title = { Text(if (advanced) "导出 - 更多选项" else "导出图像") },
+            text = { Column(Modifier.heightIn(max = 490.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                StudioImageExportOptions(captured, exportFullAnimation, { exportFullAnimation = it },
+                    exportFormat, { exportFormat = it }, exportSupports, exportGifEdge, { exportGifEdge = it })
+                if (advanced && !exportFullAnimation) {
+                    Text("裁切范围（画布像素）")
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(cropX, { cropX = it }, Modifier.weight(1f), label = { Text("X") })
+                        OutlinedTextField(cropY, { cropY = it }, Modifier.weight(1f), label = { Text("Y") })
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(cropWidth, { cropWidth = it }, Modifier.weight(1f), label = { Text("宽") })
+                        OutlinedTextField(cropHeight, { cropHeight = it }, Modifier.weight(1f), label = { Text("高") })
+                    }
+                    Text("输出大小（像素）")
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        OutlinedTextField(outputWidth, { outputWidth = it }, Modifier.weight(1f), label = { Text("宽") })
+                        OutlinedTextField(outputHeight, { outputHeight = it }, Modifier.weight(1f), label = { Text("高") })
+                    }
+                }
+                if (current == null || current.getString("id") != captured.getString("documentId") ||
+                    current.getInt("revision") != captured.getInt("expectedRevision"))
+                    Text("工程已改变，请关闭并重新打开导出选项。")
+                StudioSaveLocationOptions(remainingContext.optJSONObject("storage"), "imagesDirectory",
+                    exportChooseLocation) { exportChooseLocation = it }
+            } },
+            confirmButton = { TextButton(enabled = canExport, onClick = {
+                val options = JSONObject()
+                var valid = true
+                if (exportFullAnimation) {
+                    val edge = exportGifEdge.toIntOrNull()
+                    if (edge == null || edge !in 64..1024) {
+                        valid = false
+                        Toast.makeText(context, "GIF最大边须为64–1024像素", Toast.LENGTH_LONG).show()
+                    } else options.put("maxEdge", edge)
+                } else if (advanced) {
+                    val x = cropX.toIntOrNull(); val y = cropY.toIntOrNull()
+                    val w = cropWidth.toIntOrNull(); val h = cropHeight.toIntOrNull()
+                    val outW = outputWidth.toIntOrNull(); val outH = outputHeight.toIntOrNull()
+                    if (x == null || y == null || w == null || h == null || outW == null || outH == null ||
+                        x < 0 || y < 0 || w <= 0 || h <= 0 || x.toLong() + w > captured.getInt("width") ||
+                        y.toLong() + h > captured.getInt("height") || !ArtImagePolicy.dimensionsValid(outW, outH)) {
+                        valid = false
+                        Toast.makeText(context, "裁切范围或输出尺寸无效", Toast.LENGTH_LONG).show()
+                    } else options.put("x", x).put("y", y).put("cropWidth", w).put("cropHeight", h)
+                        .put("width", outW).put("height", outH)
+                }
+                if (valid) {
+                    closeExportOptions()
+                    publish(exportFormat, options, exportChooseLocation, exportFullAnimation)
+                }
+            }) { Text(if (remainingContext.optJSONObject("storage")?.optBoolean("custom") == true && !exportChooseLocation)
+                "保存到默认目录" else "选择保存位置") } },
+            dismissButton = { TextButton(onClick = { closeExportOptions() }) { Text("取消") } })
+    }
     if (duplicateDialog) AlertDialog(onDismissRequest = { duplicateDialog = false },
         title = { Text("复制当前图像") },
         text = { OutlinedTextField(duplicateName, { duplicateName = it.take(100) },

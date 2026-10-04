@@ -605,10 +605,14 @@ class ArtStudioEntry : InProcessPluginEntry {
             store.importImage("LANER", p.getString("base64"), p.optJSONObject("confirmResize"))
         }
         capability("export.png", "导出 PNG", write) { p ->
-            ArtRenderer.export(store, store.current(), "png", p.optString("name", ""), p)
+            store.exportImage("png", p.optString("name", ""), p)
         }
         capability("export.jpeg", "导出 JPEG", write) { p ->
-            ArtRenderer.export(store, store.current(), "jpeg", p.optString("name", ""), p)
+            store.exportImage("jpeg", p.optString("name", ""), p)
+        }
+        capability("export.image", "按格式导出当前帧", write) { p ->
+            p.getString("documentId"); p.getInt("expectedRevision")
+            store.exportImage(p.getString("format"), p.optString("name", ""), p)
         }
         host.logger.i("ArtStudio", "Art Studio mounted")
         return InProcessPluginHandle {
@@ -934,6 +938,9 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
             p("documentId", optional = true), p("expectedRevision", "integer", true))
         "edit.paste_new" -> listOf(p("confirmResize", "object", true))
         "image.import" -> listOf(p("base64"), p("confirmResize", "object", true))
+        "export.image" -> listOf(p("format"), p("documentId"), p("expectedRevision", "integer"), p("name", optional = true),
+            p("x", "integer", true), p("y", "integer", true), p("cropWidth", "integer", true),
+            p("cropHeight", "integer", true), p("width", "integer", true), p("height", "integer", true))
         "export.png", "export.jpeg" -> listOf(p("name", optional = true),
             p("x", "integer", true), p("y", "integer", true),
             p("cropWidth", "integer", true), p("cropHeight", "integer", true),

@@ -16,7 +16,7 @@ internal class ArtGifWriter(private val out: OutputStream, private val width: In
     private fun byte(n: Int) = out.write(n and 255)
     private fun word(n: Int) { byte(n); byte(n shr 8) }
     init {
-        require(width in 1..65535 && height in 1..65535 && width.toLong() * height <= 1024L * 1024)
+        require(width in 1..65535 && height in 1..65535 && width.toLong() * height <= 16L * 1024 * 1024)
         out.write("GIF89a".toByteArray(Charsets.US_ASCII))
         word(width); word(height); byte(0xF7); byte(0); byte(0)
         byte(0); byte(0); byte(0)
