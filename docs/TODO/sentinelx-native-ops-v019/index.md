@@ -38,3 +38,18 @@ status: ready-for-ci
 - [FIXED IN SOURCE] 仅非空、非 JSON null、非字符串 null 的 error 判失败。
 - [FIXED IN SOURCE] 新增空 error 回归测试；补丁版本升到 0.1.10。
 - [PENDING CI/DEPLOY] 编译并部署 0.1.10 后重跑 read/list/search/script_run/edit。
+
+
+## 0.1.10 -> 0.1.11 实机回归
+- [PASS] Linux read/list/search/script_run。
+- [PASS] Linux persistent-path edit；写后 read 验证 alpha/gamma。
+- [PASS] Android list。
+- [FOUND] JSON null 的 reason_code 被 optString 变成字符串 null，破坏错误码。
+- [FIXED] 统一 jsonTextOrNull；错误码回退恢复 not_found 等稳定语义。
+- [FOUND] 成功 script_run 的空 error 被上游呈现为字符串 null。
+- [FIXED] 成功时省略空 error 字段。
+- [FOUND] Hub background job + child internal background process 形成双重后台语义，旧 job 变 orphaned。
+- [FIXED] child 改回同步 System Environment command；Hub 独占 background/job/notifications 语义。
+- [FOUND] 当前 Ubuntu 非 systemd init，service/restart 无法忠实映射。
+- [FIXED] 0.1.11 不再 advertise service/restart。
+- [NEXT] 云端编译 0.1.11 后部署复测。

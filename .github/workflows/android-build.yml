@@ -89,8 +89,8 @@ jobs:
             dist/AI-Limbs-RDC-v1.2.11.ailx.sha256
             dist/AI-Limbs-TriggerCMD-v1.2.5.ailx
             dist/AI-Limbs-TriggerCMD-v1.2.5.ailx.sha256
-            dist/AI-Limbs-SentinelX-v0.1.10.ailx
-            dist/AI-Limbs-SentinelX-v0.1.10.ailx.sha256
+            dist/AI-Limbs-SentinelX-v0.1.11.ailx
+            dist/AI-Limbs-SentinelX-v0.1.11.ailx.sha256
           if-no-files-found: error
           retention-days: 14
   build:

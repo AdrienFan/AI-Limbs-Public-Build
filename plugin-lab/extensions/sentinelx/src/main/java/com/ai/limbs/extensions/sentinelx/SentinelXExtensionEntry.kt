@@ -18,7 +18,7 @@ class SentinelXExtensionEntry : ChildExtensionEntry {
             mapOf(
                 "provider_id" to SentinelXBridgeProvider.PROFILE_ID,
                 "provider_type" to SentinelXBridgeProvider.PROFILE_TYPE,
-                "source" to "AI-Limbs-SentinelX-v0.1.10"
+                "source" to "AI-Limbs-SentinelX-v0.1.11"
             )
         )
         return ChildExtensionHandle { SentinelXLogger.bind(null) }

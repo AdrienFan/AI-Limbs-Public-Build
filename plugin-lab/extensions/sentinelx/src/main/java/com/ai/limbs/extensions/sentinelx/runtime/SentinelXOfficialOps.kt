@@ -21,8 +21,6 @@ internal class SentinelXOfficialOps(
         "search" -> search(payload)
         "edit" -> edit(payload)
         "script_run" -> scriptRun(payload)
-        "service" -> service(payload)
-        "restart" -> restart(payload)
         else -> throw SentinelXOpException("unsupported_op", "Unsupported native SentinelX op: $op")
     }
 
@@ -305,84 +303,32 @@ internal class SentinelXOfficialOps(
                 append(' ').append(shellQuote(args.optString(index)))
             }
         }
-        val timeout = payload.optInt("timeout", 60).coerceIn(1, 600) * 1000
         val background = payload.optBoolean("background", false)
-        return if (background) {
-            val raw = executor.execute(
-                SYSTEM_ENVIRONMENT_PROCESS,
-                JSONObject()
-                    .put("operation", "start")
-                    .put("command", command)
-                    .put("timeout_ms", timeout)
-                    .put("work_context", true)
-            )
-            requireSuccess(raw, "script_run_failed")
-            JSONObject()
-                .put("ok", true)
-                .put("background", true)
-                .put("pid", raw.opt("pid") ?: JSONObject.NULL)
-                .put("session_id", raw.opt("session_id") ?: JSONObject.NULL)
-                .put("running", raw.optBoolean("running", true))
-                .put("output", raw.optString("text"))
-                .put("returncode", 0)
-        } else {
-            val raw = executor.execute(
-                SYSTEM_ENVIRONMENT_COMMAND,
-                JSONObject()
-                    .put("command", command)
-                    .put("timeout_ms", timeout)
-                    .put("work_context", true)
-            )
-            requireSuccess(raw, "script_run_failed")
-            val exit = raw.optInt("exit_code", 0)
-            JSONObject()
-                .put("ok", exit == 0)
-                .put("background", false)
-                .put("output", raw.optString("output"))
-                .put("error", raw.optString("error").takeIf { it.isNotBlank() } ?: JSONObject.NULL)
-                .put("returncode", exit)
-        }
-    }
-
-    suspend fun service(payload: JSONObject): JSONObject {
-        val service = requiredString(payload, "service")
-        val action = requiredString(payload, "action")
-        if (action !in SERVICE_ACTIONS) {
+        val maxTimeoutSeconds = if (background) BACKGROUND_TIMEOUT_SECONDS else FOREGROUND_TIMEOUT_SECONDS
+        val timeoutSeconds = payload.optInt("timeout", 60)
+        if (timeoutSeconds !in 1..maxTimeoutSeconds) {
             throw SentinelXOpException(
                 "invalid_payload",
-                "action must be one of: ${SERVICE_ACTIONS.joinToString(", ")}"
+                "timeout must be between 1 and $maxTimeoutSeconds seconds"
             )
-        }
-        if (!SERVICE_NAME.matches(service)) {
-            throw SentinelXOpException("invalid_payload", "service contains unsupported characters")
         }
         val raw = executor.execute(
             SYSTEM_ENVIRONMENT_COMMAND,
             JSONObject()
-                .put("command", "systemctl $action ${shellQuote(service)}")
-                .put("timeout_ms", 60_000)
+                .put("command", command)
+                .put("timeout_ms", timeoutSeconds * 1000)
                 .put("work_context", true)
         )
-        requireSuccess(raw, "service_failed")
+        requireSuccess(raw, "script_run_failed")
         val exit = raw.optInt("exit_code", 0)
-        if (exit != 0) {
-            throw SentinelXOpException(
-                "service_failed",
-                raw.optString("error").ifBlank {
-                    raw.optString("output").ifBlank { "systemctl exited with $exit" }
-                }
-            )
-        }
-        return JSONObject()
-            .put("ok", true)
-            .put("service", service)
-            .put("action", action)
+        val response = JSONObject()
+            .put("ok", exit == 0)
+            .put("background", background)
             .put("output", raw.optString("output"))
             .put("returncode", exit)
+        bridgeErrorText(raw)?.let { response.put("error", it) }
+        return response
     }
-
-    suspend fun restart(payload: JSONObject): JSONObject =
-        service(JSONObject(payload.toString()).put("action", "restart"))
 
     private suspend fun searchAndroid(
         path: String,
@@ -588,9 +534,10 @@ for raw in sys.stdin:
     private fun requireSuccess(result: JSONObject, defaultCode: String) {
         val success = !result.has("success") || result.optBoolean("success", false)
         if (success && bridgeErrorText(result) == null) return
-        val code = result.optString("error_code")
-            .ifBlank { result.optJSONObject("execution_policy")?.optString("reason_code").orEmpty() }
-            .ifBlank { inferErrorCode(errorMessage(result), defaultCode) }
+        val code =
+            jsonTextOrNull(result, "error_code")
+                ?: jsonTextOrNull(result.optJSONObject("execution_policy"), "reason_code")
+                ?: inferErrorCode(errorMessage(result), defaultCode)
         val details = JSONObject()
         result.optJSONObject("next_action")?.let { details.put("next_action", it) }
         result.optJSONObject("execution_policy")?.let { details.put("execution_policy", it) }
@@ -603,8 +550,8 @@ for raw in sys.stdin:
 
     private fun errorMessage(result: JSONObject): String =
         bridgeErrorText(result)
-            ?: result.optJSONObject("result")?.optString("value").takeIf { !it.isNullOrBlank() }
-            ?: result.optString("reason").takeIf { it.isNotBlank() && it != "null" }
+            ?: jsonTextOrNull(result.optJSONObject("result"), "value")
+            ?: jsonTextOrNull(result, "reason")
             ?: "AI Limbs capability returned an unsuccessful result"
 
     private fun inferErrorCode(message: String, defaultCode: String): String = when {
@@ -705,11 +652,10 @@ for raw in sys.stdin:
 
     companion object {
         val NATIVE_OPS: Set<String> = linkedSetOf(
-            "read", "list", "search", "edit", "script_run", "service", "restart"
+            "read", "list", "search", "edit", "script_run"
         )
         const val HOST_TOOL_EXECUTE = "ai_limbs.host_tool.execute"
         const val SYSTEM_ENVIRONMENT_COMMAND = "plugin.system_environment.command"
-        const val SYSTEM_ENVIRONMENT_PROCESS = "plugin.system_environment.process"
         const val DEFAULT_MAX_READ_BYTES = 128 * 1024
         const val MAX_READ_BYTES = 512 * 1024
         const val READ_PAGE_LINES = 1_000
@@ -718,6 +664,8 @@ for raw in sys.stdin:
         const val MAX_SEARCH_RESULTS = 1_000
         const val MAX_EDIT_BYTES = 4 * 1024 * 1024
         const val SEARCH_TIMEOUT_MS = 50_000
+        const val FOREGROUND_TIMEOUT_SECONDS = 600
+        const val BACKGROUND_TIMEOUT_SECONDS = 3_600
         private val ALWAYS_SKIP_DIRS = setOf(
             ".git", "__pycache__", "node_modules", ".venv", "venv",
             ".pytest_cache", ".mypy_cache", ".ruff_cache", "dist", "build", ".tox", ".eggs"
@@ -725,9 +673,6 @@ for raw in sys.stdin:
         private val MODES_REQUIRING_NEW_TEXT =
             setOf("replace", "regex", "replace-block", "append", "prepend", "write")
         private val SCRIPT_INTERPRETERS = setOf("bash", "python3", "powershell", "pwsh")
-        private val SERVICE_ACTIONS =
-            setOf("start", "stop", "restart", "reload", "status", "is-active", "is-enabled")
-        private val SERVICE_NAME = Regex("[A-Za-z0-9_.@:-]+")
         private val ENV_NAME = Regex("[A-Za-z_][A-Za-z0-9_]*")
     }
 }
@@ -774,13 +719,17 @@ internal object SentinelXEnvironmentResolver {
         )
 }
 
-internal fun bridgeErrorText(result: JSONObject): String? {
-    val raw = result.opt("error")
+internal fun jsonTextOrNull(json: JSONObject?, key: String): String? {
+    if (json == null || !json.has(key) || json.isNull(key)) return null
+    val raw = json.opt(key)
     if (raw == null || raw == JSONObject.NULL) return null
     return raw.toString()
         .trim()
         .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 }
+
+internal fun bridgeErrorText(result: JSONObject): String? =
+    jsonTextOrNull(result, "error")
 
 internal fun requiredString(payload: JSONObject, name: String, allowEmpty: Boolean = false): String {
     if (!payload.has(name) || payload.isNull(name)) {

@@ -70,3 +70,20 @@ edit 覆盖 replace、regex、replace-block、append、prepend、write，并保�
 ## v0.1.10 实机回归修正
 
 0.1.9 首次部署后，官方原生 op 已能进入 Linux/Ubuntu，但 AI Limbs Host/System Environment 成功响应会保留空字符串 error 字段。0.1.9 适配层把“存在 error 字段”误判成失败，导致 read/list/search/script_run 对实际成功结果返回 ok=false / error=null。0.1.10 改为只有非空、非 JSON null、非字符串 null 的 error 才视为失败，并新增回归测试。
+
+## 开发版 0.1.11：部署回归收口
+
+0.1.9 实机验证确认原生 read/list/edit 已真实进入 Android/Linux 文件系统，但 AI Limbs 成功结果中的 error=null 被旧判定误当失败；0.1.10 修复空 error 判定。继续回归时确认当前 Ubuntu 子环境没有 systemd（systemctl is-system-running=offline），因此 service/restart 无法忠实映射，0.1.11 不再向 SentinelX Hub 宣告这两个 op，避免“看起来支持、实际必失败”。
+
+script_run 的 background=true 也改为保持上游语义：后台调度由 SentinelX Hub 的 job/notifications 负责，接收端本身仍等待 System Environment 命令完成并返回最终 stdout/returncode，不再内部二次启动后台 process。前台 timeout 上限 600 秒，Hub 后台 job 上限 3600 秒。
+
+/tmp 等临时路径当前可以 read，但 AI Limbs Host 的持久写能力会拒绝把临时路径当 durable artifact；这属于现有 Host 写入策略，不在 SentinelX 里绕过。源码项目目录等持久路径的 edit 已在 0.1.9 实机验证实际写入成功。
+
+
+### 0.1.10 实机继续回归
+
+0.1.10 已确认 read/list/search/edit/script_run 在 Linux 与 Android 路径均可正常执行；源码目录的结构化 edit 已实际把 beta 改成 gamma。继续错误分支回归发现两处边界：AI Limbs execution_policy.reason_code=null 会被 JSONObject.optString 读成字符串 "null"，导致缺失文件错误码显示成 null；script_run 成功结果里的 JSON null 也会被上游呈现成字符串 "null"。0.1.11 改为统一 jsonTextOrNull，并在成功响应中直接省略空 error 字段。
+
+同时确认 SentinelX Hub 的 background=true 已经负责 job/notifications；0.1.10 接收端再内部启动后台 process 会造成双重后台语义，旧测试 job 最终变成 orphaned。0.1.11 只复用同步 System Environment command，让 Hub 自己负责后台调度和通知。
+
+当前 Ubuntu 子环境 systemctl 存在但 is-system-running=offline，并非 systemd init 环境，因此 service/restart 不能忠实工作。0.1.11 从 advertised native ops 中移除这两个能力，而不是继续宣告一个必失败的接口。

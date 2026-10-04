@@ -15,7 +15,7 @@ data class SentinelXBridgeRequest(
 
 internal object SentinelXProtocol {
     const val PROTOCOL_VERSION = "1.10.0"
-    const val AGENT_VERSION = "0.1.10"
+    const val AGENT_VERSION = "0.1.11"
     const val BRIDGE_PREFIX = "AIL_SENTINEL_BRIDGE_V1 "
 
     private val supportedOps =
@@ -93,7 +93,7 @@ internal object SentinelXProtocol {
             "native_adapter",
             JSONObject()
                 .put("policy_authority", "AI Limbs Dispatcher / Policy Engine")
-                .put("linux_process_provider", SentinelXOfficialOps.SYSTEM_ENVIRONMENT_COMMAND)
+                .put("linux_command_provider", SentinelXOfficialOps.SYSTEM_ENVIRONMENT_COMMAND)
                 .put("bridge_exec", "AIL_SENTINEL_BRIDGE_V1 <JSON>")
         )
         .put("media", mediaCapabilities())
@@ -124,7 +124,11 @@ internal object SentinelXProtocol {
         .put("authorization", "AI Limbs Dispatcher / Policy Engine")
         .put(
             "native_ops",
-            "read/list/search/edit route to Host file capabilities; script_run/service/restart route to the active Linux System Environment"
+            "read/list/search/edit route to Host file capabilities; script_run routes to the active Linux System Environment"
+        )
+        .put(
+            "unsupported_native_ops",
+            "service/restart are intentionally not advertised: the current AI Limbs Linux environment has no systemd/service-manager capability to map faithfully"
         )
         .put(
             "exec_semantics",

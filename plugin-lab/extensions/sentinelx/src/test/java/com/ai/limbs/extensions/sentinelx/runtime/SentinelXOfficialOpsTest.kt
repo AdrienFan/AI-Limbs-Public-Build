@@ -50,11 +50,28 @@ class SentinelXOfficialOpsTest {
     }
 
     @Test
-    fun emptyBridgeErrorFieldDoesNotMeanFailure() {
+    fun nullableBridgeTextDoesNotPromoteJsonNullToString() {
         assertEquals(null, bridgeErrorText(org.json.JSONObject().put("error", "")))
         assertEquals(null, bridgeErrorText(org.json.JSONObject().put("error", org.json.JSONObject.NULL)))
         assertEquals(null, bridgeErrorText(org.json.JSONObject().put("error", "null")))
         assertEquals("boom", bridgeErrorText(org.json.JSONObject().put("error", "boom")))
+
+        val policy = org.json.JSONObject().put("reason_code", org.json.JSONObject.NULL)
+        assertEquals(null, jsonTextOrNull(policy, "reason_code"))
+        assertEquals(null, jsonTextOrNull(org.json.JSONObject(), "reason_code"))
+        assertEquals(
+            "permission_denied",
+            jsonTextOrNull(
+                org.json.JSONObject().put("reason_code", "permission_denied"),
+                "reason_code"
+            )
+        )
+    }
+
+    @Test
+    fun unsupportedServiceOpsAreNotAdvertised() {
+        assertFalse(SentinelXOfficialOps.NATIVE_OPS.contains("service"))
+        assertFalse(SentinelXOfficialOps.NATIVE_OPS.contains("restart"))
     }
 
     @Test
