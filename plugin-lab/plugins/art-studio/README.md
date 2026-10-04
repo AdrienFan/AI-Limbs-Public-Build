@@ -1452,3 +1452,10 @@ responseMode=receipt的调用线程直接生成省略operations及详细足迹�
 例：先用animation.pose.read获取工程、修订、图层与来源帧，再调用plugin.art.studio.animation.poses.apply {"documentId":"DOCUMENT_ID","expectedRevision":REVISION,"layerId":"LAYER_ID","sourceFrame":0,"poses":[{"frame":2,"layer":{"x":10,"y":0}},{"frame":4,"layer":{"x":20,"y":0}}],"responseMode":"receipt","requestId":"NEW_REQUEST_UUID"}。成功读取新revision及animationFeedback.frames=[2,4]和图片；放大检查用animation.preview指定其中一帧。一段动作完成后用既有时间轴播放检查连贯性，仍由animation.export明确导出GIF，不在每次提交时自动导出。只在传输实际附带图片时把回执视为像素反馈。
 
 版本0.2.83/versionCode86/applicationId com.ai.limbs.payload.artstudio.v0283。新增深复制/检查点隔离、预投影紧凑回执、32帧全覆盖、帧号排序和两张图片保留的云端回归源码。本轮仅源码、静态核对与提交；不运行本地测试、不编译、不推送。后续云端与部署需验收：原长历史工程首读/重开、full/receipt一致、撤销重做、锁外跨端并发回执资源一致、完整32格的可见帧号、反馈失败的提交查询及无重复编辑、图片/文字/参考/笔刷/洋葱皮、描述符释放，以及尚未完成的可见时间轴与全屏/返回画室连续性。详见docs/TODO/art-studio-animation-feedback/。
+
+
+## 0.2.84：SVG开关动作提示
+
+底部SVG按钮文字表示点击动作：代码面板关闭时显示“SVG开”，开启时显示“SVG关”，与既有无障碍说明一致。颜色继续标记当前面板状态，绿色为开启、红色为关闭；点击仍保存草稿并切换面板，不改变SVG编辑和AI能力入口。
+
+版本0.2.84/versionCode87/applicationId com.ai.limbs.payload.artstudio.v0284，包含0.2.83的动画优化。源码条件与版本静态核对通过；本轮未运行本地测试、未编译或推送。部署后需核对初始关闭、打开和再次关闭三个显示状态。

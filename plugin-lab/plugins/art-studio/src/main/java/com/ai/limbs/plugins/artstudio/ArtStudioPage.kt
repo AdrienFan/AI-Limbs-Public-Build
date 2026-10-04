@@ -2601,7 +2601,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                         TextButton(onClick={svgEditor.save(true);svgEnabled=!svgEnabled},modifier=Modifier.widthIn(min=56.dp)
                             .semantics{contentDescription=if(svgEnabled)"关闭SVG代码面板" else "开启SVG代码面板"},
                             colors=ButtonDefaults.textButtonColors(contentColor=if(svgEnabled)androidx.compose.ui.graphics.Color(0xFF4CAF50)else androidx.compose.ui.graphics.Color(0xFFFF5252))) {
-                            Text(if(svgEnabled)"SVG开" else "SVG关")
+                            // Label the action, matching the accessibility description.
+                            Text(if(svgEnabled)"SVG关" else "SVG开")
                         }
                     }
                     Row(Modifier.weight(1f, fill = false).padding(start = 6.dp),
