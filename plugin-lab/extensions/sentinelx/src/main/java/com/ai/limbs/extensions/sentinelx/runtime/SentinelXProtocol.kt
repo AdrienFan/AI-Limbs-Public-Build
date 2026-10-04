@@ -2,10 +2,10 @@ package com.ai.limbs.extensions.sentinelx.runtime
 
 import android.os.Build
 import android.util.Base64
-import org.json.JSONArray
-import org.json.JSONObject
 import java.nio.charset.StandardCharsets
 import java.time.Instant
+import org.json.JSONArray
+import org.json.JSONObject
 
 data class SentinelXBridgeRequest(
     val requestId: String,
@@ -15,10 +15,20 @@ data class SentinelXBridgeRequest(
 
 internal object SentinelXProtocol {
     const val PROTOCOL_VERSION = "1.10.0"
-    const val AGENT_VERSION = "0.1.8"
+    const val AGENT_VERSION = "0.1.9"
     const val BRIDGE_PREFIX = "AIL_SENTINEL_BRIDGE_V1 "
-    private val supportedOps = listOf("ping", "capabilities", "state", "exec", "help",
-        "file_export_init", "file_export_chunk", "file_export_complete")
+
+    private val supportedOps =
+        listOf(
+            "ping",
+            "capabilities",
+            "state",
+            "exec",
+            "help",
+            "file_export_init",
+            "file_export_chunk",
+            "file_export_complete"
+        ) + SentinelXOfficialOps.NATIVE_OPS
 
     fun webSocketUrl(hubUrl: String): String {
         val base = hubUrl.trim().trimEnd('/')
@@ -58,17 +68,34 @@ internal object SentinelXProtocol {
         .put("ok", true)
         .put("result", result)
 
-    fun failure(id: String, code: String, message: String): JSONObject = JSONObject()
-        .put("type", "response")
-        .put("id", id)
-        .put("ok", false)
-        .put("error", JSONObject().put("code", code).put("message", message))
+    fun failure(
+        id: String,
+        code: String,
+        message: String,
+        details: JSONObject? = null
+    ): JSONObject {
+        val error = JSONObject().put("code", code).put("message", message)
+        if (details != null && details.length() > 0) error.put("details", details)
+        return JSONObject()
+            .put("type", "response")
+            .put("id", id)
+            .put("ok", false)
+            .put("error", error)
+    }
 
     fun capabilities(config: SentinelXBridgeConfig): JSONObject = JSONObject()
         .put("agent", "ai-limbs-sentinelx")
         .put("version", AGENT_VERSION)
         .put("host_label", config.deviceName)
         .put("supported_ops", JSONArray(supportedOps))
+        .put("execution_targets", SentinelXEnvironmentResolver.describe())
+        .put(
+            "native_adapter",
+            JSONObject()
+                .put("policy_authority", "AI Limbs Dispatcher / Policy Engine")
+                .put("linux_process_provider", SentinelXOfficialOps.SYSTEM_ENVIRONMENT_COMMAND)
+                .put("bridge_exec", "AIL_SENTINEL_BRIDGE_V1 <JSON>")
+        )
         .put("media", mediaCapabilities())
         .put(
             "bridge",
@@ -85,27 +112,47 @@ internal object SentinelXProtocol {
         .put("agent", "ai-limbs-sentinelx")
         .put("topic", topic)
         .put("supported_ops", JSONArray(supportedOps))
-        .put("scope", "Android bridge child; separate from the upstream Python agent")
+        .put("scope", "Android bridge child with AI Limbs Host/System Environment native-op adapters")
+        .put("execution_targets", SentinelXEnvironmentResolver.describe())
         .put("media", mediaCapabilities())
         .put("bridge_command", "AIL_SENTINEL_BRIDGE_V1 <JSON>")
         .put("bridge_payload", JSONObject().put("tool", "capability name").put("args", JSONObject()))
-        .put("result_paging", "For a paged exec result, call exec again with tool=ai_limbs.bridge.result_page and args={cursor,offset}; concatenate output pages and verify sha256")
+        .put(
+            "result_paging",
+            "For a paged exec result, call exec again with tool=ai_limbs.bridge.result_page and args={cursor,offset}; concatenate output pages and verify sha256"
+        )
         .put("authorization", "AI Limbs Dispatcher / Policy Engine")
-        .put("unsupported_ops", "Generic filesystem, service and script operations are not implemented; file_export is restricted to admitted result-media handles")
+        .put(
+            "native_ops",
+            "read/list/search/edit route to Host file capabilities; script_run/service/restart route to the active Linux System Environment"
+        )
+        .put(
+            "exec_semantics",
+            "exec remains the generic AI Limbs capability tunnel and requires AIL_SENTINEL_BRIDGE_V1 <JSON>"
+        )
+        .put("file_export_scope", "file_export is restricted to admitted result-media handles")
+
     private fun mediaCapabilities(): JSONObject = JSONObject()
         .put("native_tool", "sentinel_read_media")
         .put("virtual_read_prefix", SentinelXMediaStore.MEDIA_PREFIX)
         .put("source", "Images attached to previously authorized AI Limbs tool results")
         .put("formats", JSONArray().put("image/png").put("image/jpeg"))
-        .put("inline_limit_bytes", 96 * 1024).put("control_frame_budget_bytes", 120 * 1024)
-        .put("max_encoded_media_bytes", 2 * 1024 * 1024).put("max_image_edge", 8192)
+        .put("inline_limit_bytes", 96 * 1024)
+        .put("control_frame_budget_bytes", 120 * 1024)
+        .put("max_encoded_media_bytes", 2 * 1024 * 1024)
+        .put("max_image_edge", 8192)
         .put("max_image_pixels", 32 * 1024 * 1024)
-        .put("cache_limit_bytes", 4 * 1024 * 1024).put("max_attachments", 16)
-        .put("max_exports", 4).put("ttl_seconds", 600)
+        .put("cache_limit_bytes", 4 * 1024 * 1024)
+        .put("max_attachments", 16)
+        .put("max_exports", 4)
+        .put("ttl_seconds", 600)
         .put("chunk_bytes", SentinelXMediaStore.MAX_CHUNK_BYTES)
         .put("binary_header", "16-byte transfer_id + 4-byte big-endian chunk_index")
         .put("filesystem_access", false)
-        .put("usage", "exec results include media_attachments; sentinel_read_media(path) reads existing image bytes without replaying the source tool")
+        .put(
+            "usage",
+            "exec results include media_attachments; sentinel_read_media(path) reads existing image bytes without replaying the source tool"
+        )
 
     fun state(config: SentinelXBridgeConfig): JSONObject = JSONObject()
         .put("hostname", config.deviceName)
@@ -114,6 +161,7 @@ internal object SentinelXProtocol {
         .put("machine_type", Build.MODEL)
         .put("platform", "android")
         .put("host_id", config.hostId)
+        .put("execution_targets", SentinelXEnvironmentResolver.describe())
 
     fun decodeBridgeCommand(command: String): SentinelXBridgeRequest {
         require(command.startsWith(BRIDGE_PREFIX)) { "command 必须使用 $BRIDGE_PREFIX 协议头" }

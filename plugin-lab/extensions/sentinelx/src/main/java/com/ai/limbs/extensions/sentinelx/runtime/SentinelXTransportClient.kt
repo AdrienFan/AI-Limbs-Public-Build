@@ -35,6 +35,7 @@ internal class SentinelXTransportClient(
     @Volatile private var socket: WebSocket? = null
     private val resultPager = SentinelXResultPager()
     private val mediaStore = SentinelXMediaStore()
+    private val officialOps = SentinelXOfficialOps(executor)
     @Volatile var isRunning: Boolean = false
         private set
 
@@ -138,6 +139,8 @@ internal class SentinelXTransportClient(
                 "state" -> SentinelXProtocol.success(id, SentinelXProtocol.state(config))
                 "help" -> SentinelXProtocol.success(id, SentinelXProtocol.help(payload.optString("topic", "index")))
                 "exec" -> handleExec(id, payload)
+                in SentinelXOfficialOps.NATIVE_OPS ->
+                    SentinelXProtocol.success(id, officialOps.execute(op, payload))
                 "file_export_init" -> SentinelXProtocol.success(id, mediaStore.initialize(payload))
                 "file_export_chunk" -> {
                     val chunk = mediaStore.chunk(payload)
@@ -156,6 +159,14 @@ internal class SentinelXTransportClient(
         } catch (error: SentinelXMediaException) {
             SentinelXLogger.e(TAG, "SentinelX media request failed: $op", error)
             SentinelXProtocol.failure(id, error.code, error.message ?: error.code)
+        } catch (error: SentinelXOpException) {
+            SentinelXLogger.w(TAG, "SentinelX native op failed: $op (${error.code})", error)
+            SentinelXProtocol.failure(
+                id,
+                error.code,
+                error.message ?: error.code,
+                error.details
+            )
         } catch (error: Exception) {
             SentinelXLogger.e(TAG, "SentinelX request failed: $op", error)
             SentinelXProtocol.failure(

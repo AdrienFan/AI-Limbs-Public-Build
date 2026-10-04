@@ -1,0 +1,70 @@
+package com.ai.limbs.extensions.sentinelx.runtime
+
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
+import org.junit.Test
+
+class SentinelXOfficialOpsTest {
+    @Test
+    fun environmentResolverMatchesAiLimbsNamespaces() {
+        assertEquals("linux", SentinelXEnvironmentResolver.resolve("/root/laner/project"))
+        assertEquals("linux", SentinelXEnvironmentResolver.resolve("/home/user/file.txt"))
+        assertEquals("linux", SentinelXEnvironmentResolver.resolve("/etc/hosts"))
+        assertEquals("android", SentinelXEnvironmentResolver.resolve("/sdcard/Download/file.txt"))
+        assertEquals("android", SentinelXEnvironmentResolver.resolve("/data/user/0/app/file.txt"))
+        assertEquals(
+            "linux",
+            SentinelXEnvironmentResolver.resolve(
+                "/sdcard/Download/file.txt",
+                org.json.JSONObject().put("target", "ubuntu")
+            )
+        )
+    }
+
+    @Test
+    fun globMatchingUsesBasenameStyleWildcards() {
+        assertTrue(globMatches("main.py", "*.py"))
+        assertTrue(globMatches("config.toml", "config.*"))
+        assertFalse(globMatches("main.kt", "*.py"))
+        assertTrue(globMatches("a1.txt", "a?.txt"))
+    }
+
+    @Test
+    fun literalAndBlockReplacementRespectCount() {
+        assertEquals("x-b-a", replaceLiteral("a-b-a", "a", "x", 1))
+        assertEquals("x-b-x", replaceLiteral("a-b-a", "a", "x", 0))
+        assertEquals(
+            "before NEW after",
+            replaceBlocks("before <s>old</e> after", "<s>", "</e>", "NEW", 1)
+        )
+    }
+
+    @Test
+    fun linePrefixStrippingAndUtf8ClipStayTextSafe() {
+        assertEquals("alpha\nbeta", stripNumberPrefixes("  1| alpha\n2| beta"))
+        val text = "a".repeat(5) + "🥰" + "尾巴"
+        val clipped = clipUtf8(text, 9)
+        assertEquals("aaaaa🥰", clipped)
+        assertFalse(clipped.endsWith("\uFFFD"))
+    }
+
+    @Test
+    fun protocolPublishesNativeOpsAndTargets() {
+        val config = SentinelXBridgeConfig(
+            configured = true,
+            secureStorageAvailable = true,
+            hostId = "host_test",
+            hubUrl = "https://mcp.sentinelx.app",
+            deviceName = "test-device"
+        )
+        val capabilities = SentinelXProtocol.capabilities(config)
+        val ops = capabilities.getJSONArray("supported_ops")
+        for (op in SentinelXOfficialOps.NATIVE_OPS) {
+            assertTrue("missing $op", (0 until ops.length()).any { ops.getString(it) == op })
+        }
+        assertEquals("explicit-target-with-path-namespace-fallback", capabilities.getJSONObject("execution_targets").getString("strategy"))
+        assertEquals("AI Limbs Dispatcher / Policy Engine",
+            capabilities.getJSONObject("native_adapter").getString("policy_authority"))
+    }
+}

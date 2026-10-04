@@ -50,3 +50,18 @@ for (const attachment of data.media_attachments || []) {
 - [官方二进制帧](https://github.com/pensados/sentinelx-cloud-protocol/blob/main/python/sentinelx_protocol/binary.py)
 
 基座、Host 原语、权限、子插件 ID、签名和文字分页协议不变。本轮仍未推送编译或安装，原生媒体的云端端到端呈现待统一编译后验证。
+
+
+## 开发版 0.1.9：原生 SentinelX 操作适配
+
+0.1.9 不改变 AI Limbs Bridge 架构。SentinelX 仍只负责远程传输与协议翻译；所有文件、进程和服务动作都经 BridgeRemoteIngress 进入现有 Dispatcher / Policy Engine，子插件不维护第二套 capability allowlist，也不复制 Ubuntu 业务实现。
+
+新增官方可见的 read / list / search / edit / script_run / service / restart。read/list/search/edit 映射到 AI Limbs Host 文件能力；Linux 搜索、一次性脚本、后台任务和 systemd 服务动作映射到现有 System Environment 能力。通用 AIL_SENTINEL_BRIDGE_V1 exec 保留为扩展能力入口，继续用于画室、Chat、插件能力以及未来动态 capability。
+
+执行目标增加正式语义：接收端可识别扩展 payload 中的 target/environment（android、linux，ubuntu 作为 linux 别名）；标准 SentinelX MCP 工具当前没有 target 字段，因此绝对路径仍使用与 RDC 一致的命名空间回退，/root、/home、/etc、/usr、/var、/tmp 进入 Linux，其余默认 Android。这个回退是兼容层，不是把 Ubuntu 能力写死进 SentinelX。
+
+错误会尽量映射成 not_found、target_not_running、capability_not_found、permission_denied、timeout、unsupported_op 等稳定错误码，并保留 Host execution_policy / next_action 详情。script_run background 使用现有 System Environment process 能力返回 pid/session_id，不另造一套交互终端；RDC 的持续交互 session 仍是 RDC 自身优势。
+
+edit 覆盖 replace、regex、replace-block、append、prepend、write，并保留 count、multiline、dotall、interpret_escapes、dry_run、allow_no_change、create 的核心语义。sudo、validator、validator_preset、backup_dir、diff 目前明确返回 unsupported_option，禁止静默降级。script_run 同样对当前无法忠实映射的 sudo、cleanup=false、filename 和通知参数明确失败。
+
+新增回归测试覆盖 Android/Linux 路由、显式 ubuntu target、glob、文本替换、UTF-8 截断和 capability 声明。版本同步升到 0.1.9 / versionCode 10 / applicationId v019。最终编译与签名仍走 sentinelx 专用 GitHub Actions，避免在设备本地编译。
