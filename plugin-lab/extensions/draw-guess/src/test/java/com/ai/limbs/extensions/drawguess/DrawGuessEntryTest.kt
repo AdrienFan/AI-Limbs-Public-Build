@@ -54,6 +54,8 @@ class DrawGuessEntryTest {
             val events = setOf("view", "ready", "roll", "confirm_dice", "choose_order", "seal_word",
                 "seal_hints", "canvas", "preview", "paint", "finish", "picture", "guess", "exit")
             assertEquals(events.map { "plugin.draw_guess.$it" }.toSet(), capabilities.keys)
+            val paintExample = JSONObject(capabilities.getValue("plugin.draw_guess.paint").suggestedParamsJson)
+            assertTrue(paintExample.getJSONObject("params").getString("id").matches(Regex("[a-f0-9-]{36}")))
             val ingress = JSONObject(requireNotNull(discovery).payloadJson)
             assertEquals("plugin.draw_guess.ready", ingress.getString("start"))
             assertEquals("plugin.draw_guess.view", ingress.getString("view"))

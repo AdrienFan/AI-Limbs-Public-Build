@@ -63,3 +63,5 @@ class ExampleMenuExtension : ChildExtensionEntry {
 canvas事件：create(drawer AWEI或LANER)创建1000×700白底临时画布；snapshot读取所属画布；apply(type/params)仅接受LANER绘画操作，强制当前文档/版本；preview附图片；freeze冻结并生成PNG；release撤销并清理。目录由父插件生成，子插件不能指定保存地址。停用/卸载后endpoint撤销。所有事件属于子插件申请的业务绑定，不调用父级能力身份。
 
 [游戏实例与极简能力示例](../../extensions/draw-guess/README.md)。
+
+0.2.95会话生命周期：父方在create时一次建立临时目录、锁文件与活动标记；界面仅连接，不重建会话。release先撤下画布以及仅属于其冻结图片的显示关联，再撤销活动标记和删除文件。已撤销会话的读取使用StudioCanvasReleasedException（CancellationException）结束旧页面后台任务，不替换为普通画布读取。

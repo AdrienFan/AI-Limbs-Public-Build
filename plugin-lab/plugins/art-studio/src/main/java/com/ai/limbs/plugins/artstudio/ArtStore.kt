@@ -43,16 +43,23 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
     private val backups = File(root, "backups")
     private val saveDirectories = ArtSaveDirectories(root)
     private val lockFile = File(root, "art-studio.lock")
+    private val canvasSession = if (ephemeral) StudioCanvasSession(root) else null
 
     init {
-        check(!ephemeral || File(root, ".session-active").isFile) { "临时画布已释放" }
-        require(drafts.mkdirs() || drafts.isDirectory)
-        require(documents.mkdirs() || documents.isDirectory)
-        require(assets.mkdirs() || assets.isDirectory)
-        require(templates.mkdirs() || templates.isDirectory)
-        require(backups.mkdirs() || backups.isDirectory)
+        if (canvasSession != null) {
+            // The parent creates the entire session. A presentation reader must never recreate it.
+            canvasSession.requireActive()
+            val complete = listOf(drafts, documents, assets, templates, backups).all { it.isDirectory }
+            canvasSession.requireActive()
+            require(complete) { "临时画布目录不完整" }
+        } else {
+            require(drafts.mkdirs() || drafts.isDirectory)
+            require(documents.mkdirs() || documents.isDirectory)
+            require(assets.mkdirs() || assets.isDirectory)
+            require(templates.mkdirs() || templates.isDirectory)
+            require(backups.mkdirs() || backups.isDirectory)
+        }
     }
-
     // Capability edits and snapshot/resource capture share one lock; pixels are composed outside it.
     // Nested business methods on this same thread reuse it instead of acquiring an overlapping file lock.
     private val lockDepth = ThreadLocal.withInitial { 0 }
@@ -79,16 +86,18 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
     private fun <T> locked(block: () -> T): T {
         val requestedAt=System.nanoTime()
         return synchronized(processLock) {
-            check(!ephemeral || File(root, ".session-active").isFile) { "临时画布已释放" }
+            canvasSession?.requireActive()
             if (lockDepth.get() > 0) block()
             else {
                 val processAcquiredAt=System.nanoTime()
-                FileOutputStream(lockFile, true).channel.use { channel ->
+                val channel = if (canvasSession == null) FileOutputStream(lockFile, true).channel
+                    else canvasSession.openLockChannel()
+                channel.use { channel ->
                     val lock: FileLock = channel.lock()
                     val fileAcquiredAt=System.nanoTime()
                     lockDepth.set(1)
                     try {
-                        check(!ephemeral || File(root, ".session-active").isFile) { "临时画布已释放" }
+                        canvasSession?.requireActive()
                         block()
                     } finally {
                         lockDepth.remove();lock.release()
@@ -3958,7 +3967,8 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
     private fun atomic(file: File, value: String) = atomicBytes(file, value.toByteArray(Charsets.UTF_8))
     private fun atomicBytes(file: File, bytes: ByteArray) {
         if (ephemeral) {
-            check(File(root, ".session-active").isFile && !File(root, ".session-frozen").exists()) { "临时画布已冻结或释放" }
+            requireNotNull(canvasSession).requireActive()
+            check(!File(root, ".session-frozen").exists()) { "临时画布已冻结" }
             require(file.canonicalPath.startsWith(root.canonicalPath + File.separator)) { "临时画布不能写入外部位置" }
         }
         val temp = File(file.parentFile, ".${file.name}.${UUID.randomUUID()}.tmp")

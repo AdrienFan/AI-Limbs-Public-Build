@@ -46,6 +46,7 @@ class DrawGuessEntry : ChildExtensionEntry {
             "seal_hints" to JSONObject().put("revision", 7).put("hint1", "交通工具").put("hint2", "人力驱动"),
             "canvas" to JSONObject().put("revision", 8), "preview" to JSONObject().put("revision", 8),
             "paint" to JSONObject().put("revision", 8).put("type", "STROKE_ADD").put("params", JSONObject()
+                .put("id", "f91df829-61bc-48af-8866-000000000001")
                 .put("tool", "ink").put("color", "#FF245364").put("width", 6)
                 .put("points", JSONArray().put(JSONArray().put(40).put(50)).put(JSONArray().put(180).put(130)))),
             "finish" to JSONObject().put("revision", 9), "picture" to JSONObject(),
@@ -68,7 +69,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                 handles += host.registerCapability(InProcessCapabilitySpec(id = "$GAME_CAPABILITIES.$event",
                     displayName = requireNotNull(titles[event]),
                     description = "你画我猜：${titles[event]}。仅操作兰儿身份；先view，按allowed执行，修改时带当前revision。" +
-                        if (event == "ready") GAME_RULES else "猜题阶段用picture取图，不能读取对方题目或绘画记录。",
+                        if (event == "ready") GAME_RULES else if (event == "paint") "STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。" else "猜题阶段用picture取图，不能读取对方题目或绘画记录。",
                     keywords = listOf("你画我猜", "画室游戏", event), parameters = specs,
                     suggestedParamsJson = example.toString(),
                     inputSchema = JSONObject().put("type", "object").put("properties", properties)

@@ -423,7 +423,13 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     val pageView = LocalView.current
     fun isPageVisible() = pageView.isAttachedToWindow && pageView.isShown &&
         pageView.windowVisibility == View.VISIBLE
-    val store = remember(directory) { ArtStore(directory, ephemeral) }
+    val store = if (ephemeral) {
+        // Session teardown can race first composition; construct within a cancellable effect.
+        val prepared by produceState<ArtStore?>(null, directory) {
+            value = withContext(Dispatchers.IO) { ArtStore(directory, ephemeral = true) }
+        }
+        prepared ?: return
+    } else remember(directory) { ArtStore(directory) }
     val scope = rememberCoroutineScope()
     // Settings callbacks below share this state; Kotlin local declarations must precede use.
     // A retained picture is immediately visible, but edits wait for the active revision check.
@@ -1227,6 +1233,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     }
     LaunchedEffect(store) {
         var initialized=false
+        try {
         while (isActive) {
             // An Activity behind ChatGPT or an off-screen toolbox page can remain composed.
             // Hidden pages must not read settings, consume menu requests or redraw every external seek.
@@ -1299,6 +1306,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             }
             delay(400)
             if (isPageVisible() && !busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
+        }
+        } catch (released: StudioCanvasReleasedException) {
+            // A revoked session ends the old page jobs, including queued render/settings work.
+            scope.cancel(released)
+            throw released
         }
     }
     LaunchedEffect(openDialog, recentOnly) {

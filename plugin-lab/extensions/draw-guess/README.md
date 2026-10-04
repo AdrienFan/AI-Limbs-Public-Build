@@ -1,6 +1,6 @@
 # 你画我猜 0.1.0
 
-独立画室子插件，需要画室0.2.94或以上。先安装配套画室，再从“工具 → 扩展 → 添加扩展”选择签名游戏 `.ailx`；完成准入后，扩展菜单出现“你画我猜”。基座、Hub和插件中心业务没有改动。
+独立画室子插件，需要画室0.2.95或以上。先安装配套画室，再从“工具 → 扩展 → 添加扩展”选择签名游戏 `.ailx`；完成准入后，扩展菜单出现“你画我猜”。基座、Hub和插件中心业务没有改动。
 
 ## 第一版规则
 
@@ -24,7 +24,7 @@
 {"capability":"plugin.draw_guess.choose_order","args":{"revision":5,"drawFirst":true}}
 {"capability":"plugin.draw_guess.seal_word","args":{"revision":6,"word":"自行车"}}
 {"capability":"plugin.draw_guess.seal_hints","args":{"revision":7,"hint1":"交通工具","hint2":"人力驱动"}}
-{"capability":"plugin.draw_guess.paint","args":{"revision":8,"type":"STROKE_ADD","params":{"tool":"ink","color":"#FF245364","width":6,"points":[[40,50],[180,130]]}}}
+{"capability":"plugin.draw_guess.paint","args":{"revision":8,"type":"STROKE_ADD","params":{"id":"f91df829-61bc-48af-8866-000000000001","tool":"ink","color":"#FF245364","width":6,"points":[[40,50],[180,130]]}}}
 {"capability":"plugin.draw_guess.preview","args":{"revision":9}}
 {"capability":"plugin.draw_guess.finish","args":{"revision":9}}
 {"capability":"plugin.draw_guess.picture","args":{}}
@@ -43,3 +43,7 @@
 ## 0.1.1 启用修复
 
 修正能力命名空间：运行时要求 `plugin.${extensionId最后一段}.*`，不能直接把完整extension_id作为能力前缀。所有能力、首次进入发现文档和极简示例统一使用 `plugin.draw_guess.*`；安装身份和父插件目标保持不变。新增入口挂载回归测试，按实际运行时命名校验注册全部14个能力并验证双方准备入口。
+
+## 0.1.2 绘画示例修正
+
+STROKE_ADD要求params.id为唯一笔画UUID；极简示例现已携带此字段，调用时每笔换一个新的id。配套画室0.2.95修正临时画布释放时旧页面任务的取消语义和图片关联交接。

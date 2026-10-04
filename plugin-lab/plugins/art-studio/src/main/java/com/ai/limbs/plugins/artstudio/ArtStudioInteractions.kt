@@ -75,11 +75,12 @@ internal class ArtStudioInteractions(private val host: InProcessPluginHost) : In
         return p
     }
     @Synchronized private fun publish() {
+        val canvas = active?.describe()
         val panels = JSONArray()
         for (entry in entries.values) panels.put(JSONObject().put("extensionId", entry.id).put("binding", entry.token)
-            .put("document", JSONObject(entry.document.toString())))
+            .put("document", studioInteractiveDocument(entry.document, entry.id, canvas)))
         stateJson.value = JSONObject().put("schema", 1).put("panels", panels)
-            .put("canvas", active?.describe() ?: JSONObject.NULL).toString()
+            .put("canvas", canvas ?: JSONObject.NULL).toString()
     }
     override suspend fun perform(eventId: String, payloadJson: String): String {
         require(eventId == "phone")
@@ -119,8 +120,12 @@ internal class ArtStudioInteractions(private val host: InProcessPluginHost) : In
                             check(!revoked) { "临时画布通道已撤销" }
                             check(active == null) { "已有互动扩展占用画布" }
                             val directory = File(host.cacheDir, "interactive-canvases/${UUID.randomUUID()}")
-                            check(directory.mkdirs()); File(directory, ".session-active").writeText(token)
+                            check(directory.mkdirs())
                             try {
+                                for (name in listOf("drafts", "documents", "assets", "templates", "backups"))
+                                    check(File(directory, name).mkdir())
+                                File(directory, "art-studio.lock").writeBytes(byteArrayOf())
+                                File(directory, ".session-active").writeText(token)
                                 val canvas = ArtStore(directory, ephemeral = true)
                                 canvas.create(1000, 700, name = "互动临时画布", actor = actor)
                                 root = directory; store = canvas; drawer = actor; frozen = false
@@ -169,10 +174,12 @@ internal class ArtStudioInteractions(private val host: InProcessPluginHost) : In
             }
         }
         private fun release() = synchronized(this@ArtStudioInteractions) {
+            // Withdraw the canvas and its image association before revoking any file readers.
+            if (active === this) active = null
+            publish()
             store?.revokeEphemeral()
             root?.let { check(it.deleteRecursively()) { "临时画布清理失败" } }
             store = null; root = null; frozen = true
-            if (active === this) active = null
             publish()
         }
         override fun close() { revoked = true; release() }
