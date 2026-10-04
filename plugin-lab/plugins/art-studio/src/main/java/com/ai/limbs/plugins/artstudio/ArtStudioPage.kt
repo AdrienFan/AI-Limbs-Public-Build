@@ -73,6 +73,7 @@ import com.ai.limbs.plugin.runtime.InProcessPageProvider
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch

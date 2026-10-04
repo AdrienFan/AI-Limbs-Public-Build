@@ -64,4 +64,4 @@ canvas事件：create(drawer AWEI或LANER)创建1000×700白底临时画布；sn
 
 [游戏实例与极简能力示例](../../extensions/draw-guess/README.md)。
 
-0.2.95会话生命周期：父方在create时一次建立临时目录、锁文件与活动标记；界面仅连接，不重建会话。release先撤下画布以及仅属于其冻结图片的显示关联，再撤销活动标记和删除文件。已撤销会话的读取使用StudioCanvasReleasedException（CancellationException）结束旧页面后台任务，不替换为普通画布读取。
+0.2.96会话生命周期：父方在create时一次建立临时目录、锁文件与活动标记；界面仅连接，不重建会话。release先撤下画布以及仅属于其冻结图片的显示关联，再撤销活动标记和删除文件。已撤销会话的读取使用StudioCanvasReleasedException（CancellationException）结束旧页面后台任务，不替换为普通画布读取。
