@@ -75,3 +75,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [空画室重新进入](art-studio-empty-reentry/index.md)：0.2.91区分工程检查与恢复，文件入口独立于只读恢复，移除最近工程的整画重放；源码与静态核对，部署验收待安排。
 
 - [停靠面板与时间轴响应](art-studio-dock-response/index.md)：0.2.92后台预览与状态/像素分离；云端及实机验收待安排。
+
+- [画室工具扩展菜单](art-studio-extensions/index.md)：0.2.93，按当前Hub准入接入原生子菜单及安装对话框。

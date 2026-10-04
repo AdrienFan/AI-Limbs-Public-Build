@@ -19,7 +19,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal fun showStudioRemainingMenu(context: Context, anchor: View, title: String,
-    menuContext: JSONObject, busy: Boolean, onAction: (JSONObject, JSONObject) -> Unit) {
+    menuContext: JSONObject, busy: Boolean, decorateMenu: ((Menu) -> Unit)? = null,
+    onDismiss: (() -> Unit)? = null, onAction: (JSONObject, JSONObject) -> Unit) {
     val catalog = ArtStudioMenuCatalog.describe(menuContext).getJSONArray("menus")
     val definition = (0 until catalog.length()).map { catalog.getJSONObject(it) }
         .first { it.getString("title") == title }
@@ -62,6 +63,7 @@ internal fun showStudioRemainingMenu(context: Context, anchor: View, title: Stri
     }
     PopupMenu(context, anchor).apply {
         populate(menu, definition.getJSONArray("children"))
+        decorateMenu?.invoke(menu)
         setOnMenuItemClickListener { item ->
             lookup[item.itemId]?.let { onAction(it, captured) }
             true
@@ -70,6 +72,7 @@ internal fun showStudioRemainingMenu(context: Context, anchor: View, title: Stri
             anchor.isSelected = false
             anchor.setBackgroundColor(Color.TRANSPARENT)
             (anchor as? android.widget.TextView)?.setTextColor(Color.rgb(218,218,218))
+            onDismiss?.invoke()
         }
         show()
     }

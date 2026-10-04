@@ -16,6 +16,10 @@ class ArtStudioEntry : InProcessPluginEntry {
         val store = ArtStore(host.dataDir)
         val viewChannel = ArtStudioViewChannel()
         val assistantView = ArtStudioAssistantView()
+        val extensionMenus = ArtStudioExtensionMenus(host.scope,
+            reportError = { id, error -> host.logger.e("ArtStudio", "Invalid menu from extension $id", error) },
+            recordUse = { id -> host.childExtensions.recordUse(id) })
+        host.registerProvider(ART_EXTENSION_MENUS, extensionMenus, mapOf("kind" to "ui_state"))
 
         fun viewTarget(p: JSONObject): String = p.optString("target", "assistant").also {
             require(it in setOf("assistant", "phone")) { "target 必须是 assistant 或 phone" }
@@ -616,9 +620,16 @@ class ArtStudioEntry : InProcessPluginEntry {
             p.getString("documentId"); p.getInt("expectedRevision")
             store.exportImage(p.getString("format"), p.optString("name", ""), p)
         }
+        val extensionPoint = host.childExtensions.publishPoint(ART_EXTENSION_POINT, ART_EXTENSION_API,
+            "画室工具扩展", description = "提供画室工具菜单项及子插件自己的点击事件",
+            allowedHostCapabilities = emptySet(), binder = ChildExtensionBinder(extensionMenus::bind))
         host.logger.i("ArtStudio", "Art Studio mounted")
         return InProcessPluginHandle {
-            try { viewChannel.close() } finally { page.close() }
+            try { extensionPoint.close() } finally {
+                try { extensionMenus.close() } finally {
+                    try { viewChannel.close() } finally { page.close() }
+                }
+            }
             host.logger.i("ArtStudio", "Art Studio stopped")
         }
     }

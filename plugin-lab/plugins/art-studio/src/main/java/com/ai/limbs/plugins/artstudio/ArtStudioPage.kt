@@ -110,7 +110,7 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                         }
                     }
                     CompositionLocalProvider(LocalViewConfiguration provides panelConfiguration) {
-                        Studio(host, bridge, frames)
+                        Studio(host, bridge, frames, sharedUi)
                     }
                 }
             }
@@ -354,7 +354,10 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                             }
                         } else {
                             showStudioRemainingMenu(pluginContext, this, title.substringBefore('('),
-                                bridge.menuContext, bridge.busy) { command, captured ->
+                                bridge.menuContext, bridge.busy,
+                                decorateMenu = { menu ->
+                                    if (title == "工具(T)") appendStudioExtensionMenu(menu, bridge)
+                                }, onDismiss = { bridge.refreshExtensionMenu = null }) { command, captured ->
                                 bridge.onRemainingCommand?.invoke(command, captured)
                             }
                         }
@@ -373,10 +376,15 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
 // These commands replace the document and do not consume an unverified canvas snapshot.
 private val studioIndependentFileCommands = setOf(1, 2, 3, 7)
 
-private class StudioMenuBridge {
+internal class StudioMenuBridge {
     var menuContext = JSONObject().put("document", JSONObject.NULL).put("layerClipboard", false)
         .put("settings", JSONObject().put("selectionVisible",true).put("panelsHidden",false))
     var onRemainingCommand: ((JSONObject, JSONObject) -> Unit)? = null
+    var extensionRows: List<ArtExtensionRow> = emptyList()
+    var extensionBusy = false
+    var refreshExtensionMenu: (() -> Unit)? = null
+    var onAddExtension: (() -> Unit)? = null
+    var onExtensionAction: ((ArtExtensionRow) -> Unit)? = null
 
     var busy = false
     var fileBusy = false
@@ -405,7 +413,9 @@ private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS, ANIMATION }
 @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
-    frames: StudioFrameCache<StudioRenderFrame>) {
+    frames: StudioFrameCache<StudioRenderFrame>, sharedUi: InProcessSharedUiHost) {
+
+    StudioExtensionsUi(host, sharedUi, menuBridge)
 
     val context = LocalContext.current
     val pageView = LocalView.current
