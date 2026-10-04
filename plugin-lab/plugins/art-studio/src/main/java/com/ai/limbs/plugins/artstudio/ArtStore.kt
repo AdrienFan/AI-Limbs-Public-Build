@@ -1111,10 +1111,8 @@ internal class ArtStore(private val root: File) {
         JSONArray().also { out ->
             drafts.listFiles()?.filter { it.extension == "json" }?.sortedBy { it.name }?.forEach { file ->
                 val doc = JSONObject(file.readText())
-                val state = replay(doc)
-                out.put(JSONObject().put("id", doc.getString("id"))
-                    .put("name", state.optString("name", "未命名工程"))
-                    .put("width", state.getInt("width")).put("height", state.getInt("height"))
+                // Listing never replays brush/shape/cel content under the shared document lock.
+                out.put(ArtDocumentListing.read(doc)
                     .put("saved", archive(doc.getString("id")).exists())
                     .put("dirty", externalLink(doc.getString("id"))?.optBoolean("pending") == true ||
                         !archive(doc.getString("id")).exists() ||
@@ -2156,11 +2154,10 @@ internal class ArtStore(private val root: File) {
                 val file = draft(id)
                 if (!file.isFile) null
                 else {
-                    val state = replay(JSONObject(file.readText()))
-                    JSONObject().put("id", id)
-                        .put("name", state.optString("name", "未命名工程"))
-                        .put("width", state.getInt("width"))
-                        .put("height", state.getInt("height"))
+                    // Recent-menu startup must not rebuild every old canvas before checking current.txt.
+                    val doc = JSONObject(file.readText())
+                    require(doc.getString("id") == id) { "草稿工程编号不匹配" }
+                    ArtDocumentListing.read(doc)
                 }
             }.getOrNull()
             if (item != null) result.put(item)

@@ -71,3 +71,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [足迹单笔删除](art-studio-footprint-delete/index.md)：0.2.88固定删除栏与兰儿入口；0.2.89补云端发现的导出类型导入，重编译及实机验收待确认。
 
 - [实际绘画体验优化](art-studio-batch-budget-history/index.md)：0.2.90批量落笔、明确笔触预算和按需足迹；源码/静态核对，云端与实机性能待验收。
+
+- [空画室重新进入](art-studio-empty-reentry/index.md)：0.2.91区分工程检查与恢复，文件入口独立于只读恢复，移除最近工程的整画重放；源码与静态核对，部署验收待安排。

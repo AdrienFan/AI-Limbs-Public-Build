@@ -155,7 +155,7 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                             val anchor = this
                             PopupMenu(pluginContext, anchor).apply {
                                 fun add(group: Int, id: Int, label: String, enabled: Boolean = true) {
-                                    menu.add(group, id, id, label).isEnabled = enabled && !bridge.busy
+                                    menu.add(group, id, id, label).isEnabled = enabled && bridge.fileCommandEnabled(id)
                                 }
                                 val doc = bridge.hasDocument
                                 add(0, 1, "新建(N)…")
@@ -373,12 +373,17 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
     }
 }
 
+// These commands replace the document and do not consume an unverified canvas snapshot.
+private val studioIndependentFileCommands = setOf(1, 2, 3, 7)
+
 private class StudioMenuBridge {
     var menuContext = JSONObject().put("document", JSONObject.NULL).put("layerClipboard", false)
         .put("settings", JSONObject().put("selectionVisible",true).put("panelsHidden",false))
     var onRemainingCommand: ((JSONObject, JSONObject) -> Unit)? = null
 
     var busy = false
+    var fileBusy = false
+    fun fileCommandEnabled(command: Int) = !fileBusy && (!busy || command in studioIndependentFileCommands)
     var hasDocument = false
     var canSave = false
     var hasRecent = false
@@ -414,7 +419,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     // Settings callbacks below share this state; Kotlin local declarations must precede use.
     // A retained picture is immediately visible, but edits wait for the active revision check.
     var busy by remember { mutableStateOf(true) }
-    var restoring by remember { mutableStateOf(true) }
+    // Entering an empty studio is a pointer check, not canvas restoration.
+    var checkingCanvas by remember { mutableStateOf(true) }
+    var restoring by remember { mutableStateOf(false) }
     var restoreError by remember { mutableStateOf<String?>(null) }
     var displayedFrame by remember(frames) { mutableStateOf(frames.acquire()) }
     var animationPlaying by remember {mutableStateOf(false)}
@@ -713,6 +720,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     var exportPath by remember { mutableStateOf("") }
     var awaitingExport by remember { mutableStateOf(false) }
     var pendingOperations by remember { mutableIntStateOf(0) }
+    // Actual writes/export remain exclusive. A read-only initial check or render must not lock New/Open.
+    val fileBusy = pendingOperations > 0 || awaitingExport || (busy && !checkingCanvas && !restoring)
     val renderRequests = remember { StudioRenderRequests() }
     var revision by remember { mutableStateOf(displayedFrame?.frame?.third ?: "") }
     var documents by remember { mutableStateOf(JSONArray()) }
@@ -755,6 +764,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         displayedFrame = replacement
         // Every accepted authoritative frame (including an edit that superseded initial refresh)
         // completes restoration. Only clearing this in refresh left the page permanently busy.
+        checkingCanvas = false
         restoring = false
         restoreError = null
         busy = pendingOperations > 0 || awaitingExport
@@ -767,67 +777,68 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     }
 
     fun refresh() {
-        // Keep the retained picture while hidden. Returning to the page checks the active revision.
-        if(!isPageVisible())return
-        // Slow frames must finish once. Polling every 400ms used to supersede and queue them forever.
+        if (!isPageVisible()) return
         val serial = renderRequests.beginRefresh() ?: return
         val retainedRevision = displayedFrame?.frame?.third
         scope.launch {
-            var rendered:StudioRenderFrame?=null
-            var unchanged = false
+            var rendered: StudioRenderFrame? = null
             var sourceMarker = ""
-            var currentMarker = ""
             var refreshAgain = false
             try {
-                withContext(Dispatchers.IO) {
-                    mutex.withLock {
-                        currentMarker = store.revision()
-                        unchanged = retainedRevision != null && currentMarker == retainedRevision
-                        if(unchanged)sourceMarker=currentMarker
-                        else {
-                            val started=System.nanoTime()
-                            val source=store.captureCurrentViewSource()
-                            val captured=(System.nanoTime()-started)/1_000_000
-                            if(captured>=1000)android.util.Log.w("ArtStudioPerf","phase=editorCapture captureMs=$captured")
-                            source.use {
-                                sourceMarker=it.revisionMarker
-                                rendered=StudioRenderFrame.render(store,it)
-                            }
-                            currentMarker=store.revision()
+                // Check the active pointer before any snapshot/replay. Empty pages never restore pixels.
+                val initialMarker = withContext(Dispatchers.IO) {
+                    mutex.withLock { store.revision() }
+                }
+                if (!renderRequests.isCurrent(serial)) return@launch
+                val unchanged = retainedRevision != null && initialMarker == retainedRevision
+                checkingCanvas = false
+                restoring = initialMarker.isNotEmpty() && !unchanged
+                busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
+                sourceMarker = initialMarker
+                if (restoring) {
+                    withContext(Dispatchers.IO) {
+                        val started = System.nanoTime()
+                        val source = mutex.withLock { store.captureCurrentViewSource() }
+                        val captured = (System.nanoTime() - started) / 1_000_000
+                        if (captured >= 1000) android.util.Log.w("ArtStudioPerf", "phase=editorCapture captureMs=$captured")
+                        source.use {
+                            sourceMarker = it.revisionMarker
+                            // Captured snapshot/assets are independent. New/Open need not wait for old pixels.
+                            rendered = StudioRenderFrame.render(store, it)
                         }
                     }
                 }
-                if (renderRequests.canAccept(serial,sourceMarker,currentMarker)) {
+                val currentMarker = withContext(Dispatchers.IO) { store.revision() }
+                if (renderRequests.canAccept(serial, sourceMarker, currentMarker)) {
                     if (!unchanged) {
                         acceptFrame(rendered)
-                        rendered=null // Provider and page leases now own the accepted bitmaps.
+                        rendered = null
                     }
+                    checkingCanvas = false
                     restoring = false
                     restoreError = null
-                    busy = restoring || pendingOperations > 0 || awaitingExport
-                } else if(renderRequests.isCurrent(serial)) {
-                    // External edits can complete during unlocked rendering. Drop obsolete pixels;
-                    // never label them with a later revision or replay the original edit.
-                    refreshAgain=true
+                    busy = pendingOperations > 0 || awaitingExport
+                } else if (renderRequests.isCurrent(serial)) {
+                    refreshAgain = true
                 }
             } catch (error: kotlinx.coroutines.CancellationException) {
                 throw error
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Canvas refresh failed", error)
                 if (renderRequests.isCurrent(serial)) {
-                    if (restoring) {
-                        restoreError = error.message ?: "恢复画布失败"
+                    if (checkingCanvas || restoring) {
+                        restoreError = error.message ?: "读取画室失败"
+                        checkingCanvas = false
                         restoring = false
                         busy = pendingOperations > 0 || awaitingExport
                     }
                     Toast.makeText(context, error.message ?: "读取画布失败", Toast.LENGTH_LONG).show()
                 }
             } finally {
-                // withContext can be cancelled after rendering but before handing a bitmap to Main.
-                rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
+                rendered?.let { it.second.recycle(); it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
                 renderRequests.finishRefresh(serial)
-                if(isActive && pendingOperations==0 && (refreshAgain ||
-                    (restoring && restoreError==null && !renderRequests.isCurrent(serial)))) refresh()
+                if (isActive && pendingOperations == 0 && (refreshAgain ||
+                    ((checkingCanvas || restoring) && restoreError == null && !renderRequests.isCurrent(serial)))) refresh()
             }
         }
     }
@@ -898,12 +909,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 Toast.makeText(context, if (appliedResult != null && onApplied != null) "操作已提交，但画面更新失败：${error.message}" else error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
             } finally {
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
-                pendingOperations--; busy = restoring || pendingOperations > 0 || awaitingExport
+                pendingOperations--; busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
                 // Text completion is a commit acknowledgement, independent of display rendering.
                 appliedResult?.let { onApplied?.invoke(it) }
                 // A failed superseding operation still needs one authoritative initial frame.
                 if(isActive && pendingOperations==0 && (refreshAgain ||
-                    (restoring && restoreError==null))) refresh()
+                    ((checkingCanvas || restoring) && restoreError==null))) refresh()
             }
         }
     }
@@ -1145,7 +1156,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
     }
     val saveAsFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri == null) { awaitingExport = false; busy = restoring || pendingOperations > 0 }
+        if (uri == null) { awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0 }
         else scope.launch {
             try {
                 val name = pendingSaveAsName
@@ -1167,7 +1178,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 host.logger.e("ArtStudio", "Save As failed", error)
                 refresh()
                 Toast.makeText(context, error.message ?: "另存为失败", Toast.LENGTH_LONG).show()
-            } finally { awaitingExport = false; busy = restoring || pendingOperations > 0 }
+            } finally { awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0 }
         }
     }
     val exportImageFile = rememberLauncherForActivityResult(ArtExportDocumentContract()) { uri ->
@@ -1175,7 +1186,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         exportPath = ""
         if (uri == null) {
             if (source.isNotEmpty()) java.io.File(source).delete()
-            awaitingExport = false; busy = restoring || pendingOperations > 0
+            awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0
         } else scope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -1191,7 +1202,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 Toast.makeText(context, error.message ?: "保存导出文件失败", Toast.LENGTH_LONG).show()
             } finally {
                 if (source.isNotEmpty()) java.io.File(source).delete()
-                awaitingExport = false; busy = restoring || pendingOperations > 0
+                awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0
             }
         }
     }
@@ -1217,7 +1228,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 }
                 initialized=true
             }
-            if(restoring && restoreError==null && pendingOperations==0)refresh()
+            if((checkingCanvas || restoring) && restoreError==null && pendingOperations==0)refresh()
             if (colorWorkspaceReady && !paletteBusy && color == colorWorkspace.getString("foreground") &&
                 backgroundColor == colorWorkspace.getString("background")) {
                 try {
@@ -1595,7 +1606,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 Toast.makeText(context, error.message ?: "导出失败", Toast.LENGTH_LONG).show()
             } finally {
                 staged?.delete()
-                busy = restoring || pendingOperations > 0 || awaitingExport
+                busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
             }
         }
     }
@@ -1667,7 +1678,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 host.logger.e("ArtStudio", "Project save failed", error)
                 refresh()
                 Toast.makeText(context, error.message ?: "保存工程失败", Toast.LENGTH_LONG).show()
-            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
+            } finally { busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport }
         }
     }
     fun requestProjectSave(closeAfter: Boolean = false, exitAfter: Boolean = false) {
@@ -1699,7 +1710,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Close failed", error)
                 Toast.makeText(context, error.message ?: "无法关闭画室工程", Toast.LENGTH_LONG).show()
-            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
+            } finally { busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport }
         }
     }
     fun requestClose(exit: Boolean) {
@@ -1716,6 +1727,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     // not register snapshot reads, so states that change after the last document closes
     // must be read here to guarantee a follow-up recomposition and bridge refresh.
     val menuBusy = busy
+    val menuFileBusy = fileBusy
     val menuHasDocument = current != null
     val menuCanSave = current?.optBoolean("dirty") == true
     val menuHasRecent = recentDocs.length() > 0
@@ -1796,6 +1808,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             }
         }
         menuBridge.busy = menuBusy
+        menuBridge.fileBusy = menuFileBusy
         menuBridge.hasDocument = menuHasDocument
         menuBridge.canSave = menuCanSave
         menuBridge.hasRecent = menuHasRecent
@@ -1828,7 +1841,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             }
         }
         menuBridge.onFileCommand = { command ->
-            if (!busy) when (command) {
+            if (menuBridge.fileCommandEnabled(command)) when (command) {
                 1 -> { canvasTab = 0; newCanvas = true }
                 2 -> { recentOnly = false; openDialog = true }
                 3 -> { recentOnly = true; openDialog = true }
@@ -1905,7 +1918,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         onDispose {
             menuBridge.onFileCommand=null;menuBridge.onEditCommand=null
             menuBridge.onViewCommand=null;menuBridge.onImageCommand=null;menuBridge.onRemainingCommand=null
-            menuBridge.busy=false;menuBridge.hasDocument=false
+            menuBridge.busy=false;menuBridge.fileBusy=false;menuBridge.hasDocument=false
             ArtStudioViewControl.canvasAttached = false
             ArtStudioViewControl.canvasZoom.value = null
             renderRequests.invalidate()
@@ -2017,8 +2030,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
         restoreError?.let { error ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                Text("画布恢复失败：$error", Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = { restoreError = null; refresh() }) { Text("重试") }
+                Text("画室读取失败：$error", Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
+                TextButton(onClick = { restoreError = null; checkingCanvas = true; busy = true; refresh() }) { Text("重试") }
             }
         }
         if (current == null) {
@@ -3390,7 +3403,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         val chosenHeight = canvasHeight.toIntOrNull()
         val dimensionsValid = chosenWidth != null && chosenHeight != null &&
             ArtImagePolicy.dimensionsValid(chosenWidth, chosenHeight)
-        val canCreate = dimensionsValid && canvasProjectName.trim().isNotBlank() && !busy
+        val canCreate = dimensionsValid && canvasProjectName.trim().isNotBlank() && !fileBusy
         AlertDialog(onDismissRequest = { newCanvas = false },
             title = { Text("新建图像") },
             text = { Column(Modifier.heightIn(max = 510.dp).verticalScroll(rememberScrollState()),
@@ -3756,7 +3769,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             for (i in 0 until documents.length()) {
                 val id = documents.getJSONObject(i).getString("id")
                 val item = documents.getJSONObject(i)
-                TextButton(onClick = { openDialog = false; perform { store.open(id) } }) {
+                TextButton(enabled = !fileBusy, onClick = { openDialog = false; perform { store.open(id) } }) {
                     Text("${item.optString("name", "未命名工程")} · ${item.getInt("width")}×${item.getInt("height")}${if (item.optBoolean("saved")) " · 已保存" else " · 草稿"}")
                 }
             }
