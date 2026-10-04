@@ -1,22 +1,28 @@
 package com.ai.limbs.plugins.artstudio
 
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.input.TextFieldValue
+import androidx.compose.ui.text.TextRange
 import androidx.compose.ui.unit.dp
 import org.json.JSONArray
 import org.json.JSONObject
 
-/** Phone editor shares the same source contract and transactional Store writer as AI capabilities. */
+/** All text settings live in the shared double-click tool window; body input lives on canvas. */
 @Composable
-internal fun StudioTextEditor(captured: JSONObject, fonts: JSONArray, busy: Boolean,
-    onDismiss: () -> Unit, onSubmit: (JSONObject) -> Unit) {
+internal fun ColumnScope.StudioTextOptions(captured: JSONObject, fonts: JSONArray, busy: Boolean,
+    liveInput: JSONObject?, onSubmit: (JSONObject) -> Unit) {
     var content by remember(captured) { mutableStateOf(TextFieldValue(captured.getString("content"))) }
     var spans by remember(captured) { mutableStateOf(JSONArray(captured.optJSONArray("spans")?.toString() ?: "[]")) }
+    LaunchedEffect(liveInput?.optString("content"), liveInput?.optInt("selectionStart"), liveInput?.optInt("selectionEnd")) {
+        liveInput?.let { live ->
+            val next = live.getString("content")
+            spans = ArtRichText.edit(content.text, next, spans)
+            content = TextFieldValue(next, TextRange(live.optInt("selectionStart"), live.optInt("selectionEnd")))
+        }
+    }
     var mode by remember(captured) { mutableStateOf(captured.optString("sourceMode", "plain")) }
     var svg by remember(captured) { mutableStateOf(captured.optString("svgSource")) }
     var fontId by remember(captured) { mutableStateOf(captured.getString("fontId")) }
@@ -53,12 +59,14 @@ internal fun StudioTextEditor(captured: JSONObject, fonts: JSONArray, busy: Bool
     val availableGeometry=captured.optJSONArray("geometryChoices") ?: JSONArray()
     fun parameters():JSONObject {
         val p=JSONObject(captured.toString());p.remove("geometryChoices")
-        p.put("content",content.text).put("fontId",fontId).put("fontSize",fontSize.toDouble()).put("boxWidth",boxWidth.toInt())
+        val body = if(mode!="svg") liveInput?.optString("content") ?: content.text else content.text
+        val editedSpans = if(mode!="svg") ArtRichText.edit(content.text, body, spans) else spans
+        p.put("content",body).put("fontId",fontId).put("fontSize",fontSize.toDouble()).put("boxWidth",boxWidth.toInt())
             .put("lineSpacing",lineSpacing.toDouble()).put("color",color).put("align",align).put("writingMode",writing)
             .put("direction",direction).put("textOrientation",orientation).put("language",language).put("fontFeatures",features)
             .put("letterSpacing",letterSpacing.toDouble()).put("wordSpacing",wordSpacing.toDouble()).put("baselineShift",baselineShift.toDouble())
             .put("strokeColor",strokeColor).put("strokeWidth",strokeWidth.toDouble()).put("underline",underline).put("strike",strike)
-            .put("sourceMode",mode).put("clearGeometry",true).put("spans",spans).put("x",x.toDouble()).put("y",y.toDouble())
+            .put("sourceMode",mode).put("clearGeometry",true).put("spans",editedSpans).put("x",x.toDouble()).put("y",y.toDouble())
         p.remove("textPath");p.remove("shapeInside")
         if(mode=="svg")p.put("svgSource",svg)
         else {p.remove("svgSource");p.remove("svgChunks");p.remove("svgViewBox")
@@ -72,15 +80,13 @@ internal fun StudioTextEditor(captured: JSONObject, fonts: JSONArray, busy: Bool
         return p
     }
     fun guarded(block:()->Unit) {try {error="";block()}catch(problem:Exception){error=problem.message.orEmpty()}}
-    AlertDialog(onDismissRequest = { if (!busy) onDismiss() },
-        title = { Text(if (captured.has("id")) "编辑文字" else "添加文字") },
-        text = {
-            Column(Modifier.fillMaxWidth().heightIn(max=560.dp).verticalScroll(rememberScrollState()),verticalArrangement=Arrangement.spacedBy(8.dp)) {
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("正文在画布上直接输入；此处设置字体、排版及高级文字参数。", style=MaterialTheme.typography.bodySmall)
                 Row(horizontalArrangement=Arrangement.spacedBy(6.dp)) {
                     FilterChip(selected=mode!="svg",onClick={guarded {
                         if(mode=="svg") {val parsed=ArtText.prepare(parameters());content=TextFieldValue(parsed.getString("content"));spans=parsed.getJSONArray("spans")}
                         mode="rich"
-                    }},label={Text("正文／富文本")},enabled=!busy)
+                    }},label={Text(if(mode=="svg") "转换为正文／富文本" else "正文／富文本")},enabled=!busy)
                     FilterChip(selected=mode=="svg",onClick={guarded {if(mode!="svg"){svg=ArtText.svgSource(parameters());mode="svg"}}},label={Text("SVG 源码")},enabled=!busy)
                 }
                 if(mode=="svg") {
@@ -88,7 +94,8 @@ internal fun StudioTextEditor(captured: JSONObject, fonts: JSONArray, busy: Bool
                     TextButton(onClick={guarded {val parsed=ArtText.prepare(parameters());error="源码解析通过：${parsed.getString("content").length} 个 UTF-16 单元；尚未绘制"}},enabled=!busy){Text("检查源码")}
                     Text("支持 text/tspan/textPath 和本地 defs；完整支持范围可从 text.info 查看。源码是当前编辑来源，正文参数不覆盖源码内的显式属性。",style=MaterialTheme.typography.bodySmall)
                 } else {
-                    OutlinedTextField(content,{next->guarded {spans=ArtRichText.edit(content.text,next.text,spans);content=next;if(spans.length()>0)mode="rich"}},label={Text("正文（长按选择文字设置样式）")},minLines=3,maxLines=6,enabled=!busy,modifier=Modifier.fillMaxWidth())
+                    Text(if(content.text.isBlank()) "点击画布放置光标并输入文字。" else "正文：" + content.text.take(160), style=MaterialTheme.typography.bodySmall)
+                    Text("长按画布中的文字选择范围，再在这里应用字符样式。竖排、路径及形状内排版在完成输入后由画室排版器生成；输入区编辑正文。", style=MaterialTheme.typography.bodySmall)
                 }
                 Box {
                     OutlinedButton(onClick={fontMenu=true},enabled=!busy){Text(selectedFont?.getString("label") ?: "原字体不可用，请选择字体")}
@@ -164,8 +171,13 @@ internal fun StudioTextEditor(captured: JSONObject, fonts: JSONArray, busy: Bool
                 }
                 Text(ArtText.NOTICE,style=MaterialTheme.typography.bodySmall)
                 if(error.isNotBlank())Text(error,color=MaterialTheme.colorScheme.error)
-            }
-        },
-        confirmButton={TextButton(enabled=!busy&&selectedFont!=null&&(if(mode=="svg")svg.isNotBlank() else content.text.isNotBlank()),onClick={guarded {val p=parameters();ArtText.prepare(p);onSubmit(p)}}){Text(if(busy)"处理中…" else "保存文字")}},
-        dismissButton={TextButton(onClick=onDismiss,enabled=!busy){Text("取消")}})
+                TextButton(enabled=!busy&&selectedFont!=null&&(mode!="svg"||svg.isNotBlank()), onClick={guarded {
+                    val p=parameters()
+                    val probe=ArtJsonCopy.objectValue(p)
+                    if(mode!="svg"&&content.text.isBlank())probe.put("content","字").put("spans",JSONArray())
+                    val normalized = ArtText.prepare(probe)
+                    if(mode=="svg")p.put("content",normalized.getString("content"))
+                    onSubmit(p)
+                }}) {Text(if(busy)"处理中…" else "应用参数")}
+    }
 }

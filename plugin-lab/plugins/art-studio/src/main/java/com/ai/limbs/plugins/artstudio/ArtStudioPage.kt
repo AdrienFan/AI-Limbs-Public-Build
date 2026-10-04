@@ -477,8 +477,23 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     var referenceImportContext by remember { mutableStateOf<JSONObject?>(null) }
     var referenceCollectionContext by remember {mutableStateOf<JSONObject?>(null)}
     var referenceCollectionExportContext by remember {mutableStateOf<JSONObject?>(null)}
-    var textDialog by remember { mutableStateOf<JSONObject?>(null) }
+    val textDraftJson by StudioTextInputState.draft.collectAsState()
+    val textDraft = remember(textDraftJson) { textDraftJson?.let(::JSONObject) }
     var textFonts by remember { mutableStateOf(JSONArray()) }
+    var textDefaults by remember { mutableStateOf<JSONObject?>(null) }
+    var textOptions by remember { mutableStateOf<JSONObject?>(null) }
+    var textOptionsTarget by remember { mutableStateOf("defaults") }
+    var textTargetLayerId by rememberSaveable { mutableStateOf("") }
+    var textOptionsLoading by remember { mutableStateOf(false) }
+    var textInputError by remember { mutableStateOf("") }
+    var textBackdrop by remember { mutableStateOf<Bitmap?>(null) }
+    var textBackdropToken by remember { mutableStateOf("") }
+    var textBackdropError by remember { mutableStateOf("") }
+    var textBackdropRestart by remember { mutableIntStateOf(0) }
+    var textNextPlacement by remember { mutableStateOf<JSONObject?>(null) }
+    var textNextAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    val textInputRef = remember { arrayOfNulls<StudioCanvasTextInput>(1) }
+    val textPrefs = remember(context) { context.getSharedPreferences("art_studio_text_ui", Context.MODE_PRIVATE) }
     val toolWindow by ArtStudioToolOptionsControl.state.collectAsState()
     val tool = toolWindow.activeTool
     var shapeMultiple by remember { mutableStateOf(false) }
@@ -818,7 +833,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
     }
     fun perform(confirmation: JSONObject? = null, onSuccess: (() -> Unit)? = null,
-        renderEditResult: Boolean = false, action: (JSONObject?) -> JSONObject) {
+        renderEditResult: Boolean = false, onApplied: ((JSONObject) -> Unit)? = null, action: (JSONObject?) -> JSONObject) {
         scope.launch {
             // A menu may outlive its Compose scope. A cancelled launch must never set busy forever.
             animationPlaying=false
@@ -829,6 +844,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             var sourceMarker=""
             var currentMarker=""
             var refreshAgain=false
+            var appliedResult: JSONObject? = null
             try {
                 lateinit var operationResult: JSONObject
                 withContext(Dispatchers.IO) {
@@ -837,6 +853,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                         // compose pixels AFTER releasing the lock so Resident requests can proceed.
                         val source=store.forEditor {
                             operationResult=action(confirmation)
+                            appliedResult=operationResult
                             if(renderEditResult)store.captureEditViewSource(operationResult)
                             else store.captureCurrentViewSource()
                         }
@@ -871,10 +888,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 resizeAction = action
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Edit failed", error)
-                Toast.makeText(context, error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
+                Toast.makeText(context, if (appliedResult != null && onApplied != null) "操作已提交，但画面更新失败：${error.message}" else error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
             } finally {
                 rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
                 pendingOperations--; busy = restoring || pendingOperations > 0 || awaitingExport
+                // Text completion is a commit acknowledgement, independent of display rendering.
+                appliedResult?.let { onApplied?.invoke(it) }
                 // A failed superseding operation still needs one authoritative initial frame.
                 if(isActive && pendingOperations==0 && (refreshAgain ||
                     (restoring && restoreError==null))) refresh()
@@ -1347,33 +1366,214 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
         perform { store.apply("AWEI", type, params) }
     }
-    fun openTextEditor(layer: JSONObject? = null, atX: Double = 0.0, atY: Double = 0.0) {
-        if (busy || current == null) return
-        val capturedDocument = current.getString("id")
-        val capturedRevision = current.getInt("revision")
-        val capturedLayer = layer?.let { JSONObject(it.toString()) }
-        scope.launch {
-            try {
-                val catalog = withContext(Dispatchers.IO) { ArtText.fonts() }
-                require(catalog.getBoolean("available")) { "当前设备没有可用的文字渲染接口或字体" }
-                val fields = capturedLayer?.getJSONObject("text")?.let { JSONObject(it.toString()) }
-                    ?: JSONObject().put("content", "").put("fontId", catalog.getString("defaultFontId"))
-                        .put("fontSize", 48.0).put("boxWidth", minOf(640, state!!.getInt("width")))
-                        .put("lineSpacing", 1.2).put("align", "left").put("color", color)
-                fields.put("documentId", capturedDocument).put("expectedRevision", capturedRevision)
-                    .put("x", capturedLayer?.let { ArtText.anchor(it).first } ?: atX)
-                    .put("y", capturedLayer?.let { ArtText.anchor(it).second } ?: atY)
-                capturedLayer?.let { fields.put("id", it.getString("id")) }
-                fields.put("geometryChoices",withContext(Dispatchers.IO) {
-                    store.textGeometry(JSONObject().put("documentId",capturedDocument)).getJSONArray("geometries")
-                })
-                textFonts = catalog.getJSONArray("fonts")
-                textDialog = fields
-            } catch (error: Exception) {
-                host.logger.e("ArtStudio", "Text editor font catalog failed", error)
-                Toast.makeText(context, error.message ?: "无法打开文字编辑器", Toast.LENGTH_LONG).show()
+    LaunchedEffect(selected, current?.optString("id")) {
+        textTargetLayerId = selectedLayer?.takeIf { it.optString("kind") == "text" }?.getString("id").orEmpty()
+    }
+    fun keepTextDraft(fields: JSONObject?) {
+        StudioTextInputState.draft.value = fields?.toString()
+    }
+    fun saveTextDefaults(fields: JSONObject) {
+        val defaults = StudioTextInputSpec.defaults(fields)
+        textPrefs.edit().putString("defaults", defaults.toString()).apply()
+        textDefaults = defaults
+    }
+    LaunchedEffect(store) {
+        try {
+            val loaded = withContext(Dispatchers.IO) {
+                val catalog = ArtText.fonts()
+                require(catalog.getBoolean("available")) { catalog.optString("reason", "当前设备没有可用字体") }
+                val saved = textPrefs.getString("defaults", null)
+                val defaults = if (saved != null) JSONObject(saved) else JSONObject()
+                    .put("content", "").put("fontId", catalog.getString("defaultFontId"))
+                    .put("fontSize", 48.0).put("boxWidth", 640).put("lineSpacing", 1.2)
+                    .put("align", "left").put("color", color)
+                // Empty tool settings are valid; an actual write still requires nonblank body text.
+                val probe = ArtJsonCopy.objectValue(defaults)
+                if (probe.optString("sourceMode") != "svg") probe.put("content", "字").put("spans", JSONArray())
+                val checked = ArtText.prepare(probe)
+                if (checked.getString("sourceMode") != "svg") checked.put("content", "")
+                catalog.getJSONArray("fonts") to StudioTextInputSpec.defaults(checked)
             }
+            textFonts = loaded.first; textDefaults = loaded.second
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: Exception) {
+            host.logger.e("ArtStudio", "Text tool settings failed", error)
+            textInputError = error.message.orEmpty()
         }
+    }
+    fun cancelTextInput() {
+        textInputRef[0]?.hideKeyboard()
+        keepTextDraft(null); textInputError = ""
+    }
+    fun finishTextInput(after: (() -> Unit)? = null) {
+        val draft = StudioTextInputState.draft.value?.let(::JSONObject) ?: return
+        if (busy) return
+        if (draft.getString("content").isBlank()) {
+            if (draft.has("id")) {
+                textInputError = "文字不能为空；取消可保留原文字，删除文字对象请使用图层删除。"
+                return
+            }
+            // An unused cursor must not create an invisible object or a history event.
+            cancelTextInput(); after?.invoke(); return
+        }
+        val fields = StudioTextInputSpec.writeParameters(draft)
+        val live = snapshot
+        if (live == null || live.optString("id") != fields.getString("documentId") ||
+            live.optInt("revision") != fields.getInt("expectedRevision")) {
+            textInputError = "画布已改变，草稿保留；请复制正文后重新定位，避免覆盖另一端的编辑。"
+            return
+        }
+        try {
+            if (draft.has("inputOriginal")) {
+                val original = draft.getJSONObject("inputOriginal")
+                if (ArtText.prepare(fields).toString() == ArtText.prepare(original).toString() &&
+                    fields.getDouble("x") == original.getDouble("x") && fields.getDouble("y") == original.getDouble("y")) {
+                    cancelTextInput(); after?.invoke(); return
+                }
+            }
+        } catch (error: Exception) {
+            textInputError = error.message.orEmpty(); host.logger.e("ArtStudio", "Text input validation failed", error)
+            return
+        }
+        textInputRef[0]?.hideKeyboard()
+        perform(renderEditResult = true, onApplied = { committed ->
+            if (StudioTextInputState.draft.value?.let(::JSONObject)?.optString("inputSession") == draft.getString("inputSession")) {
+                cancelTextInput()
+                if (after != null) {
+                    textNextPlacement = JSONObject().put("documentId", committed.getString("id")).put("revision", committed.getInt("revision"))
+                    textNextAction = after
+                }
+                if (snapshot?.optString("id") != committed.getString("id") || snapshot?.optInt("revision") != committed.getInt("revision")) refresh()
+            }
+        }) { store.writeText("AWEI", fields, fields.has("id")) }
+    }
+    fun beginTextInput(layerId: String?, atX: Double, atY: Double) {
+        if (busy) return
+        val latest = snapshot ?: return
+        val settings = textDefaults
+        if (settings == null) {
+            Toast.makeText(context, textInputError.ifBlank { "文字字体与设置正在读取" }, Toast.LENGTH_SHORT).show()
+            return
+        }
+        val scene = latest.getJSONObject("state")
+        val layer = layerId?.let { id -> ArtMenuOperations.layers(scene).firstOrNull { it.getString("id") == id } }
+        if (layerId != null && layer == null) {
+            Toast.makeText(context, "目标文字已被删除，请重新点击画布定位。", Toast.LENGTH_LONG).show()
+            return
+        }
+        try {
+            layer?.let {
+                require(it.getString("kind") == "text") { "请选择文字图层" }
+                require(!ArtMenuOperations.isLocked(scene, it)) { "文字图层或父组已锁定" }
+            }
+            textTargetLayerId = layer?.getString("id").orEmpty()
+            val fields = ArtJsonCopy.objectValue(layer?.getJSONObject("text") ?: settings)
+                .put("documentId", latest.getString("id")).put("expectedRevision", latest.getInt("revision"))
+            val anchor = layer?.let(ArtText::anchor) ?: (atX to atY)
+            fields.put("x", anchor.first).put("y", anchor.second)
+            if (layer != null) fields.put("id", layer.getString("id"))
+            if (layer != null) fields.put("inputOriginal", StudioTextInputSpec.writeParameters(fields))
+            if (fields.optString("sourceMode") == "svg") {
+                if (layer == null) perform(renderEditResult = true) { store.writeText("AWEI", fields, false) }
+                else Toast.makeText(context, "这是SVG源码文字：请双击文字工具编辑源码，或明确转换为正文后直接输入。", Toast.LENGTH_LONG).show()
+                return
+            }
+            val parentMatrix = Matrix()
+            val textMatrix = if (layer == null) Matrix().apply { setTranslate(atX.toFloat(), atY.toFloat()) }
+                else ArtShapes.layerMatrix(scene, layer).apply {
+                    preTranslate(-fields.optDouble("cacheOriginX", 0.0).toFloat(), -fields.optDouble("cacheOriginY", 0.0).toFloat())
+                }
+            layer?.optString("parentId")?.takeIf { it.isNotBlank() }?.let { id ->
+                val parent = ArtMenuOperations.layers(scene).first { it.getString("id") == id }
+                parentMatrix.set(ArtShapes.layerMatrix(scene, parent))
+            }
+            fields.put("inputSession", UUID.randomUUID().toString())
+                .put("inputMatrix", ArtShapes.encode(textMatrix)).put("inputParentMatrix", ArtShapes.encode(parentMatrix))
+                .put("selectionStart", fields.getString("content").length).put("selectionEnd", fields.getString("content").length)
+            keepTextDraft(fields); textInputError = ""
+        } catch (error: Exception) {
+            host.logger.e("ArtStudio", "Text input failed", error)
+            Toast.makeText(context, error.message, Toast.LENGTH_LONG).show()
+        }
+    }
+    fun placeTextCursor(layerId: String?, x: Double, y: Double) {
+        if (StudioTextInputState.draft.value != null) finishTextInput { beginTextInput(layerId, x, y) }
+        else beginTextInput(layerId, x, y)
+    }
+    LaunchedEffect(snapshot?.optString("id"), snapshot?.optInt("revision"), busy, textNextPlacement) {
+        val pending = textNextPlacement ?: return@LaunchedEffect
+        val live = snapshot ?: return@LaunchedEffect
+        if (live.getString("id") != pending.getString("documentId")) {
+            textNextPlacement = null; textNextAction = null
+        } else if (!busy && live.getInt("revision") >= pending.getInt("revision")) {
+            val action = textNextAction
+            textNextPlacement = null; textNextAction = null
+            action?.invoke()
+        }
+    }
+    // Parameters use one stable capture, so typing does not reset unsaved font/layout controls.
+    LaunchedEffect(toolWindow.open, toolWindow.toolId, textFonts, current?.optString("id"), selected, textTargetLayerId, textDraft?.optString("inputSession")) {
+        if (current == null || !toolWindow.open || toolWindow.toolId != "svg_text") { textOptions = null; return@LaunchedEffect }
+        if (textDefaults == null) return@LaunchedEffect
+        textInputRef[0]?.hideKeyboard()
+        textOptionsLoading = true
+        try {
+            val liveDraft = StudioTextInputState.draft.value?.let(::JSONObject)
+            val chosen = current.getJSONObject("state").let(ArtMenuOperations::layers)
+                .firstOrNull { it.getString("id") == textTargetLayerId && it.optString("kind") == "text" }
+                ?: selectedLayer?.takeIf { it.optString("kind") == "text" }
+            textOptionsTarget = if (liveDraft != null) "draft" else if (chosen != null) "layer" else "defaults"
+            val fields = liveDraft?.let(ArtJsonCopy::objectValue)
+                ?: chosen?.getJSONObject("text")?.let(ArtJsonCopy::objectValue)
+                ?: ArtJsonCopy.objectValue(requireNotNull(textDefaults))
+            if (liveDraft == null) {
+                fields.put("documentId", current!!.getString("id")).put("expectedRevision", current.getInt("revision"))
+                fields.put("x", chosen?.let(ArtText::anchor)?.first ?: 0.0)
+                    .put("y", chosen?.let(ArtText::anchor)?.second ?: 0.0)
+                chosen?.let { fields.put("id", it.getString("id")) }
+            }
+            fields.put("geometryChoices", withContext(Dispatchers.IO) {
+                store.textGeometry(JSONObject().put("documentId", fields.getString("documentId"))).getJSONArray("geometries")
+            })
+            textOptions = fields
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: Exception) { textInputError = error.message.orEmpty(); host.logger.e("ArtStudio", "Text parameters failed", error) }
+        finally { textOptionsLoading = false }
+    }
+    DisposableEffect(textBackdrop) {
+        val owned = textBackdrop
+        onDispose {
+            if (canvasRef[0]?.textBackdrop === owned) { canvasRef[0]?.textBackdrop = null; canvasRef[0]?.invalidate() }
+            owned?.recycle()
+        }
+    }
+    LaunchedEffect(textDraft?.optString("inputSession"), current?.optString("id"), current?.optInt("revision"), textBackdropRestart) {
+        textBackdrop = null; textBackdropToken = ""; textBackdropError = ""
+        val draft = textDraft ?: return@LaunchedEffect
+        if (current == null || !draft.has("id") || current.optString("id") != draft.getString("documentId") ||
+            current.optInt("revision") != draft.getInt("expectedRevision")) return@LaunchedEffect
+        var bitmap: Bitmap? = null
+        try {
+            // Hide the old text only in a captured display copy. The document is untouched.
+            withContext(Dispatchers.IO) {
+                val source = store.captureCurrentViewSource()
+                source.use {
+                    val captured = requireNotNull(it.snapshot)
+                    require(captured.getString("id") == draft.getString("documentId") && captured.getInt("revision") == draft.getInt("expectedRevision")) { "文字输入版本已失效" }
+                    val copy = ArtJsonCopy.objectValue(captured)
+                    ArtMenuOperations.layers(copy.getJSONObject("state")).first { it.getString("id") == draft.getString("id") }.put("visible", false)
+                    val scene = copy.getJSONObject("state")
+                    bitmap = store.withRenderAssets(it.assets) {
+                        ArtImagePolicy.requireBytes(scene.getInt("width").toLong() * scene.getInt("height") * 4 +
+                            ArtImagePolicy.renderBytes(store, scene, scene.getInt("width"), scene.getInt("height")), "文字输入背景与当前画面")
+                        ArtRenderer.render(store, copy)
+                    }
+                }
+            }
+            textBackdrop = bitmap; bitmap = null; textBackdropToken = draft.getString("inputSession")
+        } catch (error: kotlinx.coroutines.CancellationException) { throw error }
+        catch (error: Exception) { textBackdropError = error.message.orEmpty(); textInputError = textBackdropError; host.logger.e("ArtStudio", "Text input backdrop failed", error) }
+        finally { bitmap?.recycle() }
     }
     fun publish(format: String, options: JSONObject = JSONObject(), chooseLocation: Boolean = false) {
         if (awaitingExport || busy) return
@@ -1827,8 +2027,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                     end = if (viewOptions.panelsHidden) 0.dp else
                         railWidth + if (rightDrawerOpen && rightDrawerPinned) rightDrawerWidth else 0.dp
                 ).clipToBounds()) {
-                AndroidView(factory = { ctx -> StudioCanvas(ctx).also { canvasRef[0] = it } },
-                    modifier = Modifier.fillMaxSize(), update = { view ->
+                AndroidView(factory = { ctx ->
+                    val canvas = StudioCanvas(ctx).also { canvasRef[0] = it }
+                    StudioCanvasTextInput(ctx, canvas).also { workspace ->
+                        textInputRef[0] = workspace
+                        canvas.onViewportMatrix = workspace::viewport
+                    }
+                }, modifier = Modifier.fillMaxSize(), update = { workspace ->
+                    val view = workspace.canvas as StudioCanvas
+                    val activeDraft = textDraft?.takeIf { it.getString("documentId") == current.getString("id") }
+                    val inputStale = activeDraft != null && activeDraft.getInt("expectedRevision") != current.getInt("revision")
+                    val inputReady = activeDraft == null || !activeDraft.has("id") || textBackdropToken == activeDraft.getString("inputSession")
+                    view.textBackdrop = if (activeDraft != null && inputReady && !inputStale && tool == "svg_text") textBackdrop else null
+                    workspace.onChange = { token, body, start, end ->
+                        val draft = StudioTextInputState.draft.value?.let(::JSONObject)
+                        if (!busy && draft != null && draft.getString("inputSession") == token &&
+                            (draft.getString("content") != body || draft.optInt("selectionStart") != start || draft.optInt("selectionEnd") != end)) try { keepTextDraft(StudioTextInputSpec.edit(draft, body, start, end)) }
+                        catch (error: Exception) { textInputError = error.message.orEmpty(); host.logger.e("ArtStudio", "Text draft edit failed", error) }
+                    }
+                    workspace.onDone = { token -> if (StudioTextInputState.draft.value?.let(::JSONObject)?.optString("inputSession") == token) finishTextInput() }
+                    workspace.onError = { error -> textInputError = error.message.orEmpty(); host.logger.e("ArtStudio", "Native text input failed", error) }
+                    workspace.bind(activeDraft?.takeIf { inputReady && !inputStale && tool == "svg_text" && it.optString("sourceMode") != "svg" }, !busy)
                     view.documentId = current.getString("id")
                     view.scene = state; view.sceneRevision = current.getInt("revision")
                     view.svgPanel=svgEnabled;view.svgPicking=svgEnabled&&svgEditor.picking
@@ -2009,9 +2228,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                             edit("STROKE_ADD", stroke)
                         }
                     }
-                    view.onText = { x, y, hit ->
-                        openTextEditor(if (hit) selectedLayer else null, x, y)
-                    }
+                    view.onText = { x, y, layerId -> placeTextCursor(layerId, x, y) }
                     view.onCursor = { x, y -> canvasCursor = x to y }
                     view.fillSettings=fillSettings
                     view.onFillDraft={fillDraft=it}
@@ -2579,6 +2796,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 }
             }
             }
+                    textDraft?.let { draft ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            val stale = draft.getString("documentId") != current.getString("id") || draft.getInt("expectedRevision") != current.getInt("revision")
+                            Text(if (stale) "画布已改变 · 草稿保留" else if (textBackdropError.isNotBlank()) "文字输入准备失败" else if (draft.has("id") && textBackdropToken != draft.getString("inputSession")) "正在准备文字输入…" else "画布文字输入 · 未提交", Modifier.weight(1f), fontSize=11.sp)
+                            TextButton(onClick = {
+                                ArtStudioToolOptionsControl.select("svg_text")
+                                if (draft.has("id") && textBackdropToken != draft.getString("inputSession")) textBackdropRestart++
+                                else textInputRef[0]?.focusInput()
+                            }, enabled = !busy && !stale) { Text(if (textBackdropError.isNotBlank()) "重试" else "输入") }
+                            TextButton(onClick = { finishTextInput() }, enabled = !busy && !stale) { Text("完成") }
+                            TextButton(onClick = { cancelTextInput() }, enabled = !busy) { Text("取消") }
+                        }
+                        if (textInputError.isNotBlank()) Text(textInputError, fontSize=11.sp, color=MaterialTheme.colorScheme.error)
+                        if (draft.getString("documentId") != current.getString("id") || draft.getInt("expectedRevision") != current.getInt("revision")) {
+                            TextButton(onClick = {
+                                (context.getSystemService(Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager)
+                                    .setPrimaryClip(android.content.ClipData.newPlainText("画室文字草稿", draft.getString("content")))
+                                Toast.makeText(context, "草稿正文已复制", Toast.LENGTH_SHORT).show()
+                            }) { Text("复制草稿正文") }
+                        }
+                    }
             if (viewOptions.statusBarVisible && !viewOptions.panelsHidden)
             Surface(Modifier.fillMaxWidth().height(48.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant, tonalElevation = 1.dp) {
@@ -2833,16 +3071,36 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                         { bezierEditing = true; bezierNode = 0; ArtStudioToolOptionsControl.select("vector_bezier") })
                 }
                 if (tool == "svg_text") {
-                    Text("点击画布添加文字；点击选中文字编辑。", style = MaterialTheme.typography.labelSmall)
-                    TextButton(onClick = { openTextEditor(selectedLayer) },
-                        enabled = !busy && selectedLayer?.optString("kind") == "text") {
-                        Text("编辑选中文字")
+                    Text(when (textOptionsTarget) { "draft" -> "当前输入草稿参数"; "layer" -> "选中文字参数"; else -> "新建文字默认参数" })
+                    if (textOptionsLoading) Text("正在读取文字参数…")
+                    textOptions?.let { captured ->
+                        StudioTextOptions(captured, textFonts, busy,
+                            textDraft?.takeIf { textOptionsTarget == "draft" && it.optString("inputSession") == captured.optString("inputSession") }) { fields ->
+                            saveTextDefaults(fields)
+                            when (textOptionsTarget) {
+                                "draft" -> {
+                                    val live = StudioTextInputState.draft.value?.let(::JSONObject)
+                                    if (live != null && live.optString("inputSession") == captured.optString("inputSession")) {
+                                        val next = StudioTextInputSpec.applyOptions(live, fields)
+                                        val delta = floatArrayOf((next.getDouble("x") - live.getDouble("x")).toFloat(), (next.getDouble("y") - live.getDouble("y")).toFloat())
+                                        ArtShapes.matrix(live.getJSONArray("inputParentMatrix")).mapVectors(delta)
+                                        next.put("inputMatrix", ArtShapes.encode(ArtShapes.matrix(live.getJSONArray("inputMatrix")).apply { postTranslate(delta[0], delta[1]) }))
+                                        keepTextDraft(next); textOptions = ArtJsonCopy.objectValue(next)
+                                    }
+                                }
+                                "layer" -> perform(onSuccess = { textOptions = null; ArtStudioToolOptionsControl.close() }, renderEditResult = true) {
+                                    store.writeText("AWEI", fields, true)
+                                }
+                                else -> { textOptions = ArtJsonCopy.objectValue(fields); Toast.makeText(context, "文字参数已保存，点击画布直接输入", Toast.LENGTH_SHORT).show() }
+                            }
+                        }
                     }
-                    TextButton(onClick = { openTextEditor() }, enabled = !busy && current != null) {
-                        Text("新建文字")
-                    }
-                    Text("富文本、SVG 源码、双向／竖排、路径与形状内文字在同一编辑窗口设置。",style=MaterialTheme.typography.bodySmall)
-                    Text(ArtText.NOTICE,style=MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = {
+                        textOptionsTarget = "defaults"
+                        textOptions = ArtJsonCopy.objectValue(requireNotNull(textDefaults)).put("x", 0.0).put("y", 0.0)
+                            .put("geometryChoices", textOptions?.optJSONArray("geometryChoices") ?: JSONArray())
+                    }, enabled = !busy && textDefaults != null) { Text("设置新建文字默认参数") }
+                    if (textInputError.isNotBlank()) Text(textInputError, color=MaterialTheme.colorScheme.error)
                 }
                 if (tool == "sampler") {
                     if (!colorWorkspaceReady) Text("颜色资源尚不可用；若读取失败，请重新打开画室。")
@@ -3182,15 +3440,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 perform { store.create(widthPx, heightPx, background, name) }
             }, enabled = canCreate) { Text("创建") } },
             dismissButton = { TextButton(onClick = { newCanvas = false }) { Text("取消") } })
-    }
-    textDialog?.let { captured ->
-        StudioTextEditor(captured, textFonts, busy,
-            onDismiss = { textDialog = null },
-            onSubmit = { fields ->
-                perform(onSuccess = { textDialog = null }) {
-                    store.writeText("AWEI", fields, fields.has("id"))
-                }
-            })
     }
 
     if (backgroundFillDialog) AlertDialog(
@@ -3791,7 +4040,9 @@ private class StudioCanvas(context: Context) : View(context) {
                 invalidate()
             }
         }
-    var onText: (Double, Double, Boolean) -> Unit = { _, _, _ -> }
+    var onText: (Double, Double, String?) -> Unit = { _, _, _ -> }
+    var textBackdrop: Bitmap? = null
+    var onViewportMatrix: (Matrix) -> Unit = {}
     var onStroke: (JSONArray) -> Unit = {}
     var onCrop: (JSONObject) -> Unit = {}
     private val transformInteraction=StudioTransformInteraction().apply {density=context.resources.displayMetrics.density}
@@ -4057,7 +4308,8 @@ private class StudioCanvas(context: Context) : View(context) {
         canvas.save(); canvas.concat(matrix)
         canvas.drawRect(0f, 0f, bitmap.width.toFloat(), bitmap.height.toFloat(), checkerPaint)
         canvas.restore()
-        canvas.drawBitmap(bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
+        onViewportMatrix(Matrix(matrix))
+        canvas.drawBitmap(textBackdrop ?: bitmap, matrix, Paint(Paint.FILTER_BITMAP_FLAG))
         if (gridVisible || (pixelGridVisible && fit * zoom >= 8f)) {
             canvas.save()
             canvas.concat(matrix)
@@ -4719,14 +4971,23 @@ private class StudioCanvas(context: Context) : View(context) {
         if (tool == "svg_text") {
             if (event.actionMasked == MotionEvent.ACTION_UP && image != null &&
                 xy[0] >= 0 && xy[1] >= 0 && xy[0] <= image!!.width && xy[1] <= image!!.height) {
-                val all = layers
-                val active = all?.let { (0 until it.length()).map { n -> it.getJSONObject(n) }
-                    .firstOrNull { it.getString("id") == selectedId } }
-                val source = active?.optJSONObject("text")
-                val hit = active != null && active.optString("kind") == "text" && active.getBoolean("visible") &&
-                    source != null && local[0] >= 0 && local[1] >= 0 &&
-                    local[0] <= source.getInt("cacheWidth") && local[1] <= source.getInt("cacheHeight")
-                onText(xy[0].toDouble(), xy[1].toDouble(), hit)
+                val state = scene
+                val hit = state?.let { currentScene ->
+                    ArtMenuOperations.layers(currentScene).asReversed().firstOrNull { layer ->
+                        if (layer.optString("kind") != "text" || !ArtShapes.visible(currentScene, layer)) false
+                        else {
+                            val transform = ArtShapes.layerMatrix(currentScene, layer)
+                            val inverseText = Matrix()
+                            val point = floatArrayOf(xy[0], xy[1])
+                            val invertible = transform.invert(inverseText)
+                            inverseText.mapPoints(point)
+                            val source = layer.getJSONObject("text")
+                            invertible && point[0] >= 0 && point[1] >= 0 &&
+                                point[0] <= source.getInt("cacheWidth") && point[1] <= source.getInt("cacheHeight")
+                        }
+                    }
+                }
+                onText(xy[0].toDouble(), xy[1].toDouble(), hit?.getString("id"))
             }
             return true
         }
