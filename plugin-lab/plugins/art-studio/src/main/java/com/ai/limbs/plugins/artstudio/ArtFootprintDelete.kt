@@ -95,14 +95,16 @@ internal object ArtFootprintDelete {
     }
     fun project(doc: JSONObject, state: JSONObject, history: JSONObject): JSONObject {
         val context = Context(doc, state)
+        fun decorate(row:JSONObject) {
+            val status=context.status(row.getString("id"))
+            row.put("canDelete",status.getBoolean("allowed")).put("deleteReason",status.getString("reason"))
+        }
+        history.optJSONObject("entry")?.let {decorate(it)}
         for (key in listOf("timeline", "otherBranches")) {
-            val entries = history.getJSONArray(key)
+            val entries = history.optJSONArray(key) ?: continue
             for (i in 0 until entries.length()) {
-                val row = entries.getJSONObject(i)
-                val status = context.status(row.getString("id"))
-                // Keep projection small: object IDs and operation payloads stay in the store.
-                row.put("canDelete", status.getBoolean("allowed"))
-                    .put("deleteReason", status.getString("reason"))
+                // Only requested rows acquire layer/object indices and deletion eligibility.
+                decorate(entries.getJSONObject(i))
             }
         }
         return history

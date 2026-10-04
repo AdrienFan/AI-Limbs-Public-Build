@@ -88,4 +88,20 @@ class ArtFootprintDeleteTest {
         try {ArtFootprintDelete.resolve(doc,state,id);fail("Should reject $id")}
         catch(e:IllegalArgumentException) {assertTrue(e.message.orEmpty().contains(reason))}
     }
+    @Test fun directedAndPagedRowsRetainSameSingleStrokeDeletionEligibility() {
+        val (doc,state)=fixture()
+        val single=ArtFootprintDelete.project(doc,state,ArtHistory.describe(doc,query=JSONObject().put("id","event-two").put("compact",true)))
+        assertTrue(single.getJSONObject("entry").getBoolean("canDelete"))
+        assertEquals("",single.getJSONObject("entry").getString("deleteReason"))
+        assertFalse(single.has("timeline"))
+        val page=ArtFootprintDelete.project(doc,state,ArtHistory.describe(doc,query=JSONObject().put("offset",2).put("limit",1)))
+        assertEquals(1,page.getJSONArray("timeline").length())
+        assertEquals("event-two",page.getJSONArray("timeline").getJSONObject(0).getString("id"))
+        assertTrue(page.getJSONArray("timeline").getJSONObject(0).getBoolean("canDelete"))
+        state.getJSONArray("layers").getJSONObject(0).put("locked",true)
+        val locked=ArtFootprintDelete.project(doc,state,ArtHistory.describe(doc,query=JSONObject().put("id","event-two")))
+        assertFalse(locked.getJSONObject("entry").getBoolean("canDelete"))
+        assertTrue(locked.getJSONObject("entry").getString("deleteReason").contains("锁定"))
+    }
+
 }

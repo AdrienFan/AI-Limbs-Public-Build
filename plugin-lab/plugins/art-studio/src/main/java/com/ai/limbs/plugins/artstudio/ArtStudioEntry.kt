@@ -409,9 +409,8 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("history.list", "列出画室操作历史", read) {
             store.historyOperations()
         }
-        capability("history.timeline", "读取足迹状态列表", read) {
-            store.historyTimeline()
-        }
+        capability("history.timeline", "读取足迹状态列表", read) { p -> store.historyTimeline(p) }
+        capability("history.entry", "读取指定一笔足迹", read) { p -> store.historyTimeline(p) }
         capability("history.goto", "切换到指定足迹状态", write) { p ->
             store.historyJump("LANER", p.getString("id"), p.getInt("expectedRevision"))
         }
@@ -549,6 +548,8 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("stroke.add", "添加结构化笔画", write) { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "STROKE_ADD", p)
         }
+        capability("stroke.batch", "原子批量落笔", write) { p -> store.strokeBatch("LANER", p) }
+        capability("stroke.budget", "预检批量笔触数量", read) { p -> store.strokeBudget(p) }
         capability("stroke.erase", "删除指定笔画", write) { p -> store.apply("LANER", "STROKE_ERASE", p) }
         for ((name, field) in mapOf("move" to "x", "scale" to "scale", "rotate" to "rotation")) {
             capability("transform.$name", "画室变换 $name", write) { p ->
@@ -869,6 +870,11 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "layer.properties" -> listOf(id, p("name", optional = true),
             p("opacity", "number", true), p("blend", optional = true),
             p("visible", "boolean", true), p("locked", "boolean", true),p("colorLabel","integer",true))
+        "stroke.batch", "stroke.budget" -> listOf(p("documentId"),p("expectedRevision","integer"),p("layerId"),
+            p("strokes","array"),p("defaults","object",true))
+        "history.timeline" -> listOf(p("documentId",optional=true),p("expectedRevision","integer",true),
+            p("offset","integer",true),p("limit","integer",true),p("branch",optional=true),p("compact","boolean",true))
+        "history.entry" -> listOf(p("documentId"),p("expectedRevision","integer"),p("id"),p("compact","boolean",true))
         "stroke.add" -> listOf(p("layerId"), p("points", "array"), p("color"), p("width", "number"),
             p("opacity", "number", true), p("tool", optional = true),
             p("brush","object",true),p("brushPresetId",optional=true),p("brushSeed","integer",true),

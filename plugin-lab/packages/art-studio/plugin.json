@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.art.studio",
-  "version": "0.2.89",
+  "version": "0.2.90",
   "api": {
     "target": 1,
     "min": 1
@@ -123,6 +123,8 @@
       "plugin.art.studio.layer.set_blend",
       "plugin.art.studio.layer.properties",
       "plugin.art.studio.stroke.add",
+      "plugin.art.studio.stroke.batch",
+      "plugin.art.studio.stroke.budget",
       "plugin.art.studio.stroke.erase",
       "plugin.art.studio.selection.create",
       "plugin.art.studio.selection.ellipse",
@@ -135,6 +137,7 @@
       "plugin.art.studio.transform.rotate",
       "plugin.art.studio.history.list",
       "plugin.art.studio.history.timeline",
+      "plugin.art.studio.history.entry",
       "plugin.art.studio.history.goto",
       "plugin.art.studio.history.delete",
       "plugin.art.studio.history.undo",

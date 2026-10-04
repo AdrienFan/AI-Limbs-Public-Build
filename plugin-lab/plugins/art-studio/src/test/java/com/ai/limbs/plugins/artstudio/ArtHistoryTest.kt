@@ -86,4 +86,60 @@ class ArtHistoryTest {
         assertEquals("图层",rows.getJSONObject(13).getString("category"))
         assertEquals("e2999",rows.getJSONObject(3000).getString("id"))
     }
+
+    @Test fun pagesPreserveGlobalOrderIndexesAndSelectiveRestoreLabels() {
+        val source=doc(listOf(event("a","LAYER_CREATE"),event("b","LAYER_CREATE"),event("c","LAYER_CREATE"),
+            change("u","REVERT","b"),change("r","RESTORE","b")))
+        val full=ArtHistory.describe(source)
+        val assembled=mutableListOf<String>()
+        var offset=0
+        while(true) {
+            val page=ArtHistory.describe(source,query=JSONObject().put("offset",offset).put("limit",2))
+            val rows=page.getJSONArray("timeline")
+            assertEquals(4,page.getInt("total"))
+            for(i in 0 until rows.length()) {
+                val row=rows.getJSONObject(i)
+                assertEquals(offset+i,row.getInt("index"))
+                assertEquals(full.getJSONArray("timeline").getJSONObject(offset+i).getString("label"),row.getString("label"))
+                assembled.add(row.getString("id"))
+            }
+            if(page.getBoolean("complete")) {assertTrue(page.isNull("nextOffset"));break}
+            offset=page.getInt("nextOffset")
+        }
+        assertEquals(ids(full),assembled)
+        val empty=ArtHistory.describe(source,query=JSONObject().put("offset",4).put("limit",2))
+        assertEquals(0,empty.getJSONArray("timeline").length());assertTrue(empty.getBoolean("complete"))
+        try {ArtHistory.describe(source,query=JSONObject().put("offset",5));fail("Must reject out-of-range offset")}
+        catch(expected:IllegalArgumentException) { }
+        try {ArtHistory.describe(source,query=JSONObject().put("limit",101));fail("Must reject excessive page")}
+        catch(expected:IllegalArgumentException) { }
+    }
+
+    @Test fun individualReadsDistinguishFutureOtherBranchAndInitialState() {
+        val future=doc(listOf(event("a","LAYER_CREATE"),event("b","LAYER_CREATE"),change("u","REVERT","b")))
+        val row=ArtHistory.describe(future,query=JSONObject().put("id","b")).getJSONObject("entry")
+        assertTrue(row.getBoolean("canGoto"));assertFalse(row.getBoolean("applied"))
+        val source=doc(listOf(event("a","LAYER_CREATE"),event("b","LAYER_CREATE"),change("u","REVERT","b"),event("c","LAYER_CREATE")))
+        val other=ArtHistory.describe(source,query=JSONObject().put("id","b").put("compact",true))
+        assertEquals("otherBranches",other.getString("branch"))
+        assertFalse(other.getJSONObject("entry").getBoolean("canGoto"))
+        assertFalse(other.has("timeline"));assertFalse(other.has("otherBranches"))
+        assertFalse(other.getJSONObject("entry").has("summary"))
+        val page=ArtHistory.describe(source,query=JSONObject().put("branch","otherBranches").put("limit",1))
+        assertEquals(listOf("b"),ids(page,"otherBranches"));assertEquals(1,page.getInt("total"))
+        val initial=ArtHistory.describe(source,query=JSONObject().put("id",""))
+        assertEquals(0,initial.getJSONObject("entry").getInt("index"))
+        assertEquals("初始画布",initial.getJSONObject("entry").getString("label"))
+        try {ArtHistory.describe(source,query=JSONObject().put("id","missing"));fail("Must reject unknown ID")}
+        catch(expected:IllegalArgumentException) { }
+    }
+
+    @Test fun selectedProjectionDoesNotReadUnrequestedDrawingPayloads() {
+        // Deliberately omit another row's shape data. A directed read must not build that summary.
+        val source=doc(listOf(event("unrequested","SHAPE_CREATE"),event("wanted","LAYER_CREATE")))
+        val result=ArtHistory.describe(source,query=JSONObject().put("id","wanted").put("compact",true))
+        assertEquals("wanted",result.getJSONObject("entry").getString("id"))
+        assertFalse(result.has("timeline"));assertFalse(result.getJSONObject("entry").has("actor"))
+    }
+
 }

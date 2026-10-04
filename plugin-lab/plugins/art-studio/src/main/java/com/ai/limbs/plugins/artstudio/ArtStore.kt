@@ -1855,6 +1855,115 @@ internal class ArtStore(private val root: File) {
         list.put(item);atomic(brushResourceFile(),list.toString());item
     }
 
+    /** Both single and batch edits use the same normalization and immutable brush engine. */
+    private fun prepareStroke(params:JSONObject,state:JSONObject):JSONObject {
+        var normalized=JSONObject(params.toString())
+        run {
+            val tool=normalized.optString("tool","pencil")
+            if(tool in ArtFigure.tools || tool in ArtRasterPath.tools) {
+                normalized=if(tool in ArtFigure.tools)ArtFigure.geometry(normalized.put("tool",tool)) else ArtRasterPath.normalize(normalized.put("tool",tool))
+                ArtFigure.assetIds(normalized).forEach {id ->
+                    val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
+                    val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
+                    BitmapFactory.decodeFile(file.absolutePath,bounds)
+                    require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
+                }
+            }
+            if((tool in ArtFigure.tools || tool in ArtRasterPath.tools) && normalized.getString("outline")!="brush") {
+                require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"仅当前笔刷描边使用brush/brushPresetId"}
+            } else if(ArtBrush.supports(tool)) {
+                normalized.put("tool",tool)
+                if(tool=="mirror") {
+                    normalized=ArtMirror.normalize(normalized,state.getInt("width"),state.getInt("height"))
+                }
+                if(tool=="dyna")normalized=ArtDyna.normalize(normalized,state)
+                if(tool=="line")normalized=ArtLine.geometry(normalized,state)
+                val brushTool=ArtBrush.engineTool(normalized)
+                val preset=if(normalized.has("brushPresetId"))brushPreset(normalized.getString("brushPresetId")) else null
+                require(preset==null || preset.getString("tool")==brushTool) {"预设与当前工具不匹配"}
+                val patch=if(normalized.has("brush"))normalized.getJSONObject("brush") else JSONObject()
+                val config=ArtBrush.settings(brushTool,patch,preset?.getJSONObject("brush") ?: ArtBrush.defaults(brushTool))
+                if(brushTool=="calligraphy" && normalized.has("nibAngle") && !patch.has("tip") && preset==null)
+                    config.getJSONObject("tip").put("angle",normalized.getDouble("nibAngle"))
+                ArtBrush.assetIds(config).forEach { require(assetFile(it).isFile) {"笔刷资源不存在"} }
+                if(tool in ArtFigure.tools)normalized.put("points",ArtFigure.outlinePoints(normalized))
+                if(tool in ArtRasterPath.tools)normalized.put("points",ArtRasterPath.outlinePoints(normalized))
+                normalized=ArtBrush.prepare(normalized,config,normalized.optInt("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE)))
+            } else require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"该工具不使用栅格笔刷引擎"}
+        }
+        run {
+            normalized.remove("selection");normalized.remove("selectionToLayer");normalized.remove("selectionCoveragePass")
+            state.optJSONObject("selection")?.let {s ->
+                val layer=ArtMenuOperations.layers(state).first {it.getString("id")==normalized.getString("layerId")}
+                val inverse=android.graphics.Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse))
+                normalized.put("selection",JSONObject(s.toString())).put("selectionToLayer",ArtShapes.encode(inverse))
+            }
+        }
+        if(normalized.optString("tool")=="gradient") {
+            normalized=ArtGradient.prepare(normalized,state)
+        }
+        return normalized
+    }
+
+    private fun prepareBatch(doc:JSONObject,p:JSONObject):Pair<List<ArtStrokeBatch.Part>,List<JSONObject>> {
+        require(p.getString("documentId")==doc.getString("id")) {"工程已切换，请重新读取工程"}
+        require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) {"工程已改变，请刷新后重试"}
+        val parts=ArtStrokeBatch.expand(p)
+        val state=replay(doc)
+        val layer=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==p.getString("layerId")}
+            ?: error("图层不存在")
+        require(layer.getString("kind")=="paint" && !lockedByParent(layer,state.getJSONArray("layers"))) {"请选择未锁定的绘画图层"}
+        val prepared=parts.map {part->
+            try {prepareStroke(JSONObject(part.stroke.toString()).put("id",UUID.randomUUID().toString()),state)}
+            catch(error:ArtStrokeBudgetExceeded) {
+                // Keep the original budget evidence; no document or partial batch has been written.
+                throw ArtBatchPartBudgetExceeded(error,part.inputIndex,part.segmentIndex)
+            }
+        }
+        return parts to prepared
+    }
+
+    fun strokeBudget(p:JSONObject):JSONObject = locked {
+        val doc=loadCurrent()
+        try {
+            val (_,strokes)=prepareBatch(doc,p)
+            ArtStrokeBatch.budget(strokes).put("documentId",doc.getString("id"))
+                .put("revision",doc.getJSONArray("operations").length()).put("operationApplied",false)
+        } catch(error:ArtBatchPartBudgetExceeded) {
+            error.response().put("documentId",doc.getString("id")).put("revision",doc.getJSONArray("operations").length())
+        } catch(error:ArtStrokeBudgetExceeded) {
+            error.response().put("documentId",doc.getString("id")).put("revision",doc.getJSONArray("operations").length())
+        }
+    }
+
+    fun strokeBatch(actor:String,p:JSONObject):JSONObject = locked {
+        require(actor in setOf("AWEI","LANER"))
+        val doc=loadCurrent()
+        val firstRevision=doc.getJSONArray("operations").length()+1
+        val (parts,strokes)=prepareBatch(doc,p)
+        val budget=ArtStrokeBatch.budget(strokes).apply {remove("strokes")}
+        val batchId=UUID.randomUUID().toString()
+        val events=strokes.map {stroke->JSONObject().put("id",UUID.randomUUID().toString())
+            .put("actor",actor).put("type","STROKE_ADD").put("parameters",stroke)
+            .put("batchId",batchId).put("timestamp",System.currentTimeMillis())}
+        // Every part targets the same frame and original keys. Stamp once before appending any.
+        stampAnimation(doc,events.first())
+        events.drop(1).forEach {event->
+            for(key in listOf("requestId","animationFrame","animationFrameKeys"))
+                if(events.first().has(key))event.put(key,events.first().get(key))
+        }
+        // All validation precedes the sole durable write: a rejected part cannot leave earlier ink.
+        val result=ArtStrokeBatch.commit(doc,events,
+            {candidate->snapshot(candidate).also {requireRenderBudget(it)}},
+            {bytes->atomicBytes(draft(doc.getString("id")),bytes)})
+        val members=JSONArray()
+        for(i in events.indices)members.put(JSONObject().put("operationId",events[i].getString("id"))
+            .put("strokeId",strokes[i].getString("id")).put("inputIndex",parts[i].inputIndex)
+            .put("segmentIndex",parts[i].segmentIndex).put("revision",firstRevision+i))
+        result.put("batchId",batchId).put("strokeCount",events.size).put("firstRevision",firstRevision)
+            .put("strokeResults",members).put("budget",budget).put("lastOperationId",events.last().getString("id"))
+    }
+
     fun apply(actor: String, type: String, params: JSONObject): JSONObject = locked {
         require(actor == "AWEI" || actor == "LANER")
         val doc = loadCurrent()
@@ -1882,52 +1991,7 @@ internal class ArtStore(private val root: File) {
             val state = snapshot(doc).getJSONObject("state")
             normalized = ArtAnimationPoses.prepare(ArtAnimation.editable(state, normalized.getString("layerId")), normalized)
         }
-        if(type=="STROKE_ADD") {
-            val tool=normalized.optString("tool","pencil")
-            if(tool in ArtFigure.tools || tool in ArtRasterPath.tools) {
-                normalized=if(tool in ArtFigure.tools)ArtFigure.geometry(normalized.put("tool",tool)) else ArtRasterPath.normalize(normalized.put("tool",tool))
-                ArtFigure.assetIds(normalized).forEach {id ->
-                    val file=assetFile(id);require(file.isFile) {"图案图片资源不存在"}
-                    val bounds=BitmapFactory.Options().apply {inJustDecodeBounds=true}
-                    BitmapFactory.decodeFile(file.absolutePath,bounds)
-                    require(bounds.outWidth in 1..512 && bounds.outHeight in 1..512) {"图案图片边长须为1–512像素，请用brush.resource.import导入"}
-                }
-            }
-            if((tool in ArtFigure.tools || tool in ArtRasterPath.tools) && normalized.getString("outline")!="brush") {
-                require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"仅当前笔刷描边使用brush/brushPresetId"}
-            } else if(ArtBrush.supports(tool)) {
-                normalized.put("tool",tool)
-                if(tool=="mirror") {
-                    val state=snapshot(doc).getJSONObject("state")
-                    normalized=ArtMirror.normalize(normalized,state.getInt("width"),state.getInt("height"))
-                }
-                if(tool=="dyna")normalized=ArtDyna.normalize(normalized,snapshot(doc).getJSONObject("state"))
-                if(tool=="line")normalized=ArtLine.geometry(normalized,snapshot(doc).getJSONObject("state"))
-                val brushTool=ArtBrush.engineTool(normalized)
-                val preset=if(normalized.has("brushPresetId"))brushPreset(normalized.getString("brushPresetId")) else null
-                require(preset==null || preset.getString("tool")==brushTool) {"预设与当前工具不匹配"}
-                val patch=if(normalized.has("brush"))normalized.getJSONObject("brush") else JSONObject()
-                val config=ArtBrush.settings(brushTool,patch,preset?.getJSONObject("brush") ?: ArtBrush.defaults(brushTool))
-                if(brushTool=="calligraphy" && normalized.has("nibAngle") && !patch.has("tip") && preset==null)
-                    config.getJSONObject("tip").put("angle",normalized.getDouble("nibAngle"))
-                ArtBrush.assetIds(config).forEach { require(assetFile(it).isFile) {"笔刷资源不存在"} }
-                if(tool in ArtFigure.tools)normalized.put("points",ArtFigure.outlinePoints(normalized))
-                if(tool in ArtRasterPath.tools)normalized.put("points",ArtRasterPath.outlinePoints(normalized))
-                normalized=ArtBrush.prepare(normalized,config,normalized.optInt("brushSeed",java.util.Random().nextInt(Int.MAX_VALUE)))
-            } else require(!normalized.has("brush") && !normalized.has("brushPresetId")) {"该工具不使用栅格笔刷引擎"}
-        }
-        if(type=="STROKE_ADD") {
-            val state=snapshot(doc).getJSONObject("state")
-            normalized.remove("selection");normalized.remove("selectionToLayer");normalized.remove("selectionCoveragePass")
-            state.optJSONObject("selection")?.let {s ->
-                val layer=ArtMenuOperations.layers(state).first {it.getString("id")==normalized.getString("layerId")}
-                val inverse=android.graphics.Matrix();require(ArtShapes.layerMatrix(state,layer).invert(inverse))
-                normalized.put("selection",JSONObject(s.toString())).put("selectionToLayer",ArtShapes.encode(inverse))
-            }
-        }
-        if(type=="STROKE_ADD"&&normalized.optString("tool")=="gradient") {
-            normalized=ArtGradient.prepare(normalized,snapshot(doc).getJSONObject("state"))
-        }
+        if(type=="STROKE_ADD")normalized=prepareStroke(normalized,replay(doc))
         if (type == "SELECTION_EDIT" && normalized.optString("action") == "COPY") {
             normalized.put("copyId", operationId)
         }
@@ -3389,9 +3453,16 @@ internal class ArtStore(private val root: File) {
         apply(actor,type,p)
     }
 
-    fun historyTimeline(): JSONObject = locked {
+    fun historyTimeline(p:JSONObject=JSONObject()): JSONObject = locked {
         val doc=loadCurrent()
-        ArtFootprintDelete.project(doc,replay(doc),ArtHistory.describe(doc))
+        require(p.has("documentId")==p.has("expectedRevision")) {"documentId 和 expectedRevision 须一起提供"}
+        if(p.optInt("offset",0)>0 || p.has("id"))require(p.has("documentId")) {"续页或单条查询须绑定 documentId/expectedRevision"}
+        if(p.has("documentId")) {
+            require(p.getString("documentId")==doc.getString("id")) {"工程已切换，请从第一页重新读取"}
+            require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) {"工程已改变，请从第一页重新读取"}
+        }
+        val history=ArtHistory.describe(doc,query=p)
+        ArtFootprintDelete.project(doc,replay(doc),history)
     }
 
     fun historyDelete(actor:String,p:JSONObject):JSONObject = locked {

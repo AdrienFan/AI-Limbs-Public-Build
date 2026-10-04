@@ -184,7 +184,7 @@ internal object ArtHistory {
         if(p.has("profileId"))facts.add("使用书法配置档")
         return facts.joinToString(" · ")
     }
-    fun describe(doc: JSONObject, details: Boolean = true): JSONObject {
+    fun describe(doc: JSONObject, details: Boolean = true, query: JSONObject? = null): JSONObject {
         val operations=doc.getJSONArray("operations")
         val (undoStack,redoStack)=stacks(operations)
         val operationById=(0 until operations.length()).map {operations.getJSONObject(it)}
@@ -201,38 +201,73 @@ internal object ArtHistory {
         // A compact summary needs counts and labels, not thousands of discarded timeline entries.
         if(!details)return result
         val originalOrder = operationById.keys.withIndex().associate { it.value to it.index }
-        var newestOriginalIndex = -1
-        val timeline = JSONArray().put(JSONObject().put("id", "")
-            .put("label", "初始画布").put("category","画布").put("summary","工程初始状态").put("actor", doc.getString("createdBy"))
-            .put("timestamp", 0L))
-        for (operationId in reachableIds) {
-            val operation = operationById.getValue(operationId)
-            val originalIndex = originalOrder.getValue(operationId)
-            val reappliedOutOfOrder = originalIndex < newestOriginalIndex
-            newestOriginalIndex = maxOf(newestOriginalIndex, originalIndex)
-            val entry = JSONObject().put("id", operationId)
-                .put("label", if (reappliedOutOfOrder)
-                    "重新应用 · " + operationLabel(operationId) else operationLabel(operationId))
-                .put("actor", operation.getString("actor"))
-                 .put("type", operation.getString("type")).put("category",category(operation.getString("type")))
-                .put("summary",summary(operation)).put("timestamp", operation.optLong("timestamp", 0L))
-            if (operation.getString("type") == "STROKE_ADD") {
-                val stroke = operation.getJSONObject("parameters")
-                entry.put("tool", stroke.optString("tool", "pencil"))
-                    .put("color", stroke.getString("color"))
-            }
-            val parameters=operation.getJSONObject("parameters")
-            if(parameters.has("historyTool"))entry.put("tool",parameters.getString("historyTool"))
-            if(operation.getString("type")=="SHAPE_FREEHAND")entry.put("tool","vector_freehand")
-            timeline.put(entry)
-        }
-
         val reachableSet=reachableIds.toSet()
+        val timelineIds=listOf("")+reachableIds
+        val otherIds=operationById.keys.filter {it !in reachableSet}
+        val appliedIds=undoStack.toSet()
+        val compact=query?.optBoolean("compact",false) == true
+        val entryId=if(query?.has("id")==true)query.getString("id") else null
+        val paged=query!=null && listOf("offset","limit","branch").any {query.has(it)}
+        val branch=query?.optString("branch","timeline") ?: "timeline"
+        require(branch in setOf("timeline","otherBranches")) {"branch 必须为 timeline 或 otherBranches"}
+        require(entryId==null || !paged) {"单条足迹查询不能同时传分页参数"}
+        if(entryId!=null)require(entryId.isEmpty() || operationById.containsKey(entryId)) {"足迹不存在"}
+        val sourceIds=if(branch=="timeline")timelineIds else otherIds
+        val offset=query?.optInt("offset",0) ?: 0
+        val limit=query?.optInt("limit",20) ?: 20
+        if(paged) {
+            require(offset in 0..sourceIds.size) {"offset 超出本分支足迹范围"}
+            require(limit in 1..100) {"limit 须为 1–100 行"}
+        }
+        val selected=when {
+            entryId!=null->setOf(entryId)
+            paged->sourceIds.subList(offset,minOf(sourceIds.size,offset+limit)).toSet()
+            else->(timelineIds+otherIds).toSet()
+        }
+        fun row(id:String,labelText:String,index:Int,reachable:Boolean):JSONObject {
+            val entry=JSONObject().put("id",id).put("label",labelText).put("index",index)
+                .put("applied",id.isNotEmpty() && id in appliedIds)
+                .put("canGoto",reachable)
+            if(id.isEmpty()) {
+                if(!compact)entry.put("category","画布").put("summary","工程初始状态")
+                    .put("actor",doc.getString("createdBy")).put("timestamp",0L)
+                return entry
+            }
+            val operation=operationById.getValue(id)
+            val type=operation.getString("type")
+            entry.put("type",type)
+            if(!compact)entry.put("category",category(type)).put("summary",summary(operation))
+                .put("actor",operation.getString("actor")).put("timestamp",operation.optLong("timestamp",0L))
+            val parameters=operation.getJSONObject("parameters")
+            if(type=="STROKE_ADD")entry.put("tool",parameters.optString("tool","pencil")).put("color",parameters.getString("color"))
+            if(parameters.has("historyTool"))entry.put("tool",parameters.getString("historyTool"))
+            if(type=="SHAPE_FREEHAND")entry.put("tool","vector_freehand")
+            operation.optString("batchId").takeIf {it.isNotEmpty()}?.let {entry.put("batchId",it)}
+            return entry
+        }
+        val timeline=JSONArray()
         val otherBranches=JSONArray()
-        for((id,operation) in operationById)if(id !in reachableSet)otherBranches.put(JSONObject()
-            .put("id",id).put("label",label(operation)).put("category",category(operation.getString("type")))
-            .put("summary",summary(operation)).put("actor",operation.getString("actor"))
-            .put("type",operation.getString("type")).put("timestamp",operation.optLong("timestamp",0L)))
+        if("" in selected)timeline.put(row("","初始画布",0,true))
+        var newestOriginalIndex=-1
+        for((index,id) in reachableIds.withIndex()) {
+            val originalIndex=originalOrder.getValue(id)
+            val reappliedOutOfOrder=originalIndex<newestOriginalIndex
+            newestOriginalIndex=maxOf(newestOriginalIndex,originalIndex)
+            // Select before labels/summaries are built; a one-row query does not serialize all rows.
+            if(id in selected)timeline.put(row(id,if(reappliedOutOfOrder)"重新应用 · "+operationLabel(id) else operationLabel(id),index+1,true))
+        }
+        for((index,id) in otherIds.withIndex())if(id in selected)otherBranches.put(row(id,label(operationById.getValue(id)),index,false))
+        if(entryId!=null) {
+            val entryBranch=if(entryId in timelineIds)"timeline" else "otherBranches"
+            return result.put("branch",entryBranch).put("entry",if(entryBranch=="timeline")timeline.getJSONObject(0) else otherBranches.getJSONObject(0))
+        }
+        if(paged) {
+            val end=minOf(sourceIds.size,offset+limit)
+            return result.put(branch,if(branch=="timeline")timeline else otherBranches)
+                .put("branch",branch).put("offset",offset).put("limit",limit).put("total",sourceIds.size)
+                .put("nextOffset",if(end<sourceIds.size)end else JSONObject.NULL).put("complete",end==sourceIds.size)
+                .put("compact",compact)
+        }
         return result.put("otherBranches",otherBranches).put("timeline",timeline)
     }
 }

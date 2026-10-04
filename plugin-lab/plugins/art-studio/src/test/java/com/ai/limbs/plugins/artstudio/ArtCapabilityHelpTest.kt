@@ -7,7 +7,7 @@ import org.junit.Test
 
 class ArtCapabilityHelpTest {
     @Test fun everyExampleMatchesItsRegisteredParameterContract() {
-        assertEquals(260, ArtCapabilityHelp.names().size)
+        assertEquals(263, ArtCapabilityHelp.names().size)
         for (name in ArtCapabilityHelp.names()) {
             val fields = parametersFor(name)
             val example = ArtCapabilityHelp.example(name)
@@ -82,4 +82,18 @@ class ArtCapabilityHelpTest {
         assertTrue(ArtCapabilityHelp.parameterDescription("layer.select", "id").contains("layer.list.layers[].id"))
         assertTrue(ArtCapabilityHelp.parameterDescription("text.update", "id").contains("kind=text"))
     }
+    @Test fun drawingBatchAndDirectedHistoryExamplesAreMinimalExecutableContracts() {
+        val draw=ArtCapabilityHelp.example("stroke.batch")
+        assertEquals(2,ArtStrokeBatch.expand(draw).size)
+        assertEquals("receipt",draw.getString("responseMode"))
+        assertTrue(draw.has("requestId"))
+        val preview=ArtCapabilityHelp.example("stroke.budget")
+        assertEquals(2,ArtStrokeBatch.expand(preview).size)
+        assertFalse(preview.has("requestId"))
+        val entry=ArtCapabilityHelp.example("history.entry")
+        assertTrue(entry.has("documentId"));assertTrue(entry.has("expectedRevision"));assertTrue(entry.getBoolean("compact"))
+        val page=ArtCapabilityHelp.example("history.timeline")
+        assertEquals(12,page.getInt("limit"));assertTrue(page.getBoolean("compact"))
+    }
+
 }

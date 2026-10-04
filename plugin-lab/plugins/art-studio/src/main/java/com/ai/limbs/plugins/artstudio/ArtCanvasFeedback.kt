@@ -28,9 +28,9 @@ internal object ArtCanvasFeedback {
         name.startsWith("selection.") -> name !in setOf("selection.basic_info","selection.coverage","selection.bezier_info","selection.bezier_nodes","selection.preview","selection.color_info","selection.magnetic_info","selection.magnetic_trace")
         name in setOf("svg.apply", "svg.select", "transform.affine", "transform.apply", "move.apply","move.nudge") -> true
         name.startsWith("transform.") -> name !in setOf("transform.info","transform.geometry")
-        name.startsWith("stroke.") -> true
+        name.startsWith("stroke.") -> name!="stroke.budget"
         name.startsWith("layer.") -> name !in setOf("layer.list", "layer.search")
-        name.startsWith("history.") -> name !in setOf("history.list", "history.timeline")
+        name.startsWith("history.") -> name !in setOf("history.list", "history.timeline", "history.entry")
         name.startsWith("image.") || name == "fill.contiguous" || name == "patch.apply" || name == "enclose.apply" || name == "canvas.crop" || name == "crop.apply" -> true
         name.startsWith("edit.") -> name !in setOf("edit.clipboard_info", "edit.copy", "edit.copy_merged")
         else -> name in setOf("document.create", "document.open", "document.import",

@@ -208,13 +208,17 @@ internal object ArtBrush {
         x=(x xor (x ushr 16))*0x45d9f3bL;x=(x xor (x ushr 16))*0x45d9f3bL
         return ((x xor (x ushr 16)) and 0x7fffffffL).toDouble()/Int.MAX_VALUE
     }
-    fun dabs(stroke:JSONObject,emit:(Dab)->Unit) {
+    data class Budget(val dabs: Int, val particles: Long)
+    fun dabs(stroke:JSONObject,emit:(Dab)->Unit) { walk(stroke,emit) }
+    fun budget(stroke:JSONObject):Budget = walk(stroke) { }
+    private fun walk(stroke:JSONObject,emit:(Dab)->Unit):Budget {
         val brush=stroke.getJSONObject("brush");val input=samples(stroke.getJSONArray("points"))
         val width=stroke.getDouble("width");require(width.isFinite() && width in 0.1..512.0)
         val seed=stroke.getInt("brushSeed");val count=brush.getInt("count")
         var n=0;var direction=0.0;var last=input.first()
         fun stamp(p:Sample,previous:Sample):Double {
-            require(n<MAX_DABS && (n.toLong()+1)*count<=MAX_PARTICLES) { "笔触预算超限，请增加间距或分段" }
+            if(n>=MAX_DABS || (n.toLong()+1)*count>MAX_PARTICLES)
+                throw ArtStrokeBudgetExceeded("stroke",n.toLong()+1,(n.toLong()+1)*count,MAX_DABS,MAX_PARTICLES,true)
             val d=hypot(p.x-previous.x,p.y-previous.y)
             if(d>0.00001)direction=(atan2(p.y-previous.y,p.x-previous.x)/(2*PI)+1)%1
             val values=mapOf("pressure" to p.pressure,"speed" to (d/max(1.0,p.time-previous.time)).coerceIn(0.0,1.0),
@@ -247,6 +251,7 @@ internal object ArtBrush {
             }
         }
         if(!pixel && input.size>1 && hypot(input.last().x-last.x,input.last().y-last.y)>0.00001)stamp(input.last(),input[input.lastIndex-1])
+        return Budget(n,n.toLong()*count)
     }
     fun assetIds(brush:JSONObject)=listOf("tip","texture").mapNotNull { key->
         val p=brush.getJSONObject(key);if(p.has("asset"))p.getString("asset") else null

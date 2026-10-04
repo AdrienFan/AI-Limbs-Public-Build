@@ -1,3 +1,19 @@
+# 画室 0.2.90
+
+绘画体验优化：`stroke.batch` 原子提交多段独立笔画，整批只做一次缩略图反馈，各段仍保留独立足迹、撤销和单笔删除。`segments` 显式表示抬笔，不在段间产生插值或笔触。六种普通栅格笔可用；其他工具继续使用各自入口。
+
+`stroke.budget` 使用相同参数只读预检，返回预计数量与上限；首次超限的数量明确标作下界。每批最多128独立段、20000原始点、120000笔尖与480000粒子，建议每批16–32段。pressure=0的旧连续轨迹和既有画作保持原有渲染语义。
+
+`history.timeline` 可按行分页、选择分支和精简行，无参数维持完整列表。`history.entry` 直接读取指定足迹及删除资格，不构造整份足迹响应；可直接用批量回执中的operationId。续页或单条读取绑定工程号与版本。
+
+极简批量示例（ID/版本来自document.summary与layer.list）：
+```json
+{"documentId":"DOCUMENT_ID","expectedRevision":0,"layerId":"LAYER_ID","defaults":{"tool":"ink","color":"#FF245364","width":6},"strokes":[{"segments":[[[10,10],[50,10]],[[80,10],[120,10]]]}],"responseMode":"receipt","requestId":"REQUEST_UUID"}
+```
+相同参数可交给stroke.budget（不传requestId）；笔触/工程校验失败不写入半批内容。批量回执strokeResults[].operationId对应单笔足迹，requestId状态查询返回整批最终revision及operationIds。撤销按单筆进行，不能将一批误认为只有一条历史记录。
+
+版本0.2.90 / versionCode93 / applicationId com.ai.limbs.payload.artstudio.v0290。源码与静态核对完成；云端JUnit/编译及设备性能验收待安排。详见docs/TODO/art-studio-batch-budget-history/index.md。
+
 # 画室 0.2.89
 
 修复 0.2.88 首次云端构建（run37174764769、commitff93df89）的主源码编译错误：单帧 GIF 编码方法使用 OutputStream，却缺少 java.io.OutputStream 导入。补齐类型导入，保留 0.2.86 保存位置、0.2.87 图片/动画导出和 0.2.88 足迹单笔删除全部行为及入口示例。

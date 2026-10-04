@@ -114,4 +114,23 @@ class ArtCapabilityReplyTest {
         rejected { ArtOperationReceipt.validate("bad") }
         rejected { ArtOperationReceipt.validate(requestId.uppercase()) }
     }
+
+    @Test fun batchRequestStatusReportsFinalCommitAndAllIndependentFootprints() {
+        val requestId="b62fce44-508d-4a11-8ef8-6db01ad74cdc"
+        val events=JSONArray().put(JSONObject().put("id","unrelated").put("type","LAYER_CREATE"))
+        for(i in 0..2)events.put(JSONObject().put("id","stroke$i").put("type","STROKE_ADD")
+            .put("requestId",requestId).put("batchId","batch").put("actor","LANER").put("timestamp",123L))
+        val source=JSONObject().put("id","document").put("operations",events)
+        val result=ArtOperationReceipt.status(source,requestId)
+        assertEquals("committed",result.getString("status"));assertEquals(2,result.getInt("firstRevision"))
+        assertEquals(4,result.getInt("revision"));assertEquals("stroke2",result.getString("operationId"))
+        assertEquals(3,result.getInt("operationCount"));assertEquals("batch",result.getString("batchId"))
+        assertEquals(listOf("stroke0","stroke1","stroke2"),(0..2).map {result.getJSONArray("operationIds").getString(it)})
+        rejected {ArtOperationReceipt.requireUnused(source,requestId)}
+        assertTrue(ArtCapabilityReply.tracksRequest("stroke.batch"))
+        assertFalse(ArtCanvasFeedback.affectsCanvas("stroke.budget",JSONObject()))
+        assertFalse(ArtCanvasFeedback.affectsCanvas("history.entry",JSONObject()))
+        assertTrue(ArtCanvasFeedback.affectsCanvas("stroke.batch",JSONObject()))
+    }
+
 }

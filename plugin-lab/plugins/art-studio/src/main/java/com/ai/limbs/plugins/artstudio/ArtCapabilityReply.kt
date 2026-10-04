@@ -10,7 +10,7 @@ internal object ArtCapabilityReply {
         "view.command", "view.presentation", "quick_tools.use")
     fun supports(name: String) = name !in ui && name !in setOf(
         "document.summary", "document.snapshot.read", "document.operation.status")
-    fun tracksRequest(name: String) = name in setOf("animation.configure", "animation.keyframe", "animation.seek", "animation.poses.apply", "svg.apply", "history.delete")
+    fun tracksRequest(name: String) = name in setOf("animation.configure", "animation.keyframe", "animation.seek", "animation.poses.apply", "svg.apply", "history.delete", "stroke.batch")
 
     fun mode(parameters: JSONObject): String = ArtSvgReceipt.mode(parameters)
 
@@ -80,14 +80,14 @@ internal object ArtOperationReceipt {
         val operations = doc.getJSONArray("operations")
         val result = JSONObject().put("documentId", doc.getString("id")).put("requestId", requestId)
             .put("documentRevision", operations.length()).put("status", "not_found")
-        for (index in 0 until operations.length()) {
-            val operation = operations.getJSONObject(index)
-            if (operation.optString("requestId") == requestId) {
-                result.put("status", "committed").put("revision", index + 1)
-                    .put("operationId", operation.getString("id"))
-                for (key in listOf("actor", "type", "timestamp")) result.put(key, operation.get(key))
-                break
-            }
+        val matches=(0 until operations.length()).filter {operations.getJSONObject(it).optString("requestId")==requestId}
+        if(matches.isNotEmpty()) {
+            val index=matches.last()
+            val operation=operations.getJSONObject(index)
+            result.put("status","committed").put("revision",index+1).put("firstRevision",matches.first()+1)
+                .put("operationId",operation.getString("id")).put("operationCount",matches.size)
+                .put("operationIds",JSONArray(matches.map {operations.getJSONObject(it).getString("id")}))
+            for(key in listOf("actor","type","timestamp","batchId"))if(operation.has(key))result.put(key,operation.get(key))
         }
         return result
     }
