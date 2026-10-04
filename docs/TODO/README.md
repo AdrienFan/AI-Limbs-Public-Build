@@ -59,3 +59,4 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [摘要读取与时间轴重复工作](art-studio-summary-seek/index.md)：0.2.81源码与静态核对，部署性能待验收。
 
 - [隐藏轮询与显示事务锁](art-studio-render-lock/index.md)：0.2.82源码与静态核对，部署锁竞争与画面连续性待验收。
+- [动画复制与提交反馈](art-studio-animation-feedback/index.md)：0.2.83先减少重复复制/历史投影与反馈锁，再补全部批量目标帧总览；运行效果待部署验收。

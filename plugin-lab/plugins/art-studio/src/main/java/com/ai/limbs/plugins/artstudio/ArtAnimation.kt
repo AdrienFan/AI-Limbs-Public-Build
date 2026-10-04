@@ -13,18 +13,11 @@ internal object ArtAnimation {
         .put("fps",12).put("start",0).put("end",23).put("loop",true).put("onion",false).put("current",0)
     fun layers(state:JSONObject)=ArtMenuOperations.layers(state)
     fun keys(layer:JSONObject)=layer.optJSONArray("animationKeys")
-    fun content(layer:JSONObject):JSONObject=JSONObject().apply {
-        // Inactive cels are shared track metadata, never part of the current cel.
-        // Copying the whole layer first multiplied every history edit by every keyframe.
-        layer.keys().forEach { key -> if (key !in shared) {
-            val value=layer.get(key)
-            put(key,when(value) {
-                is JSONObject -> JSONObject(value.toString())
-                is JSONArray -> JSONArray(value.toString())
-                else -> value
-            })
-        }}
+    private fun contentView(layer:JSONObject):JSONObject=JSONObject().apply {
+        // Read-only projection for equality checks; mutation/cel ownership always uses a deep copy.
+        layer.keys().forEach {key -> if(key !in shared)put(key,layer.get(key))}
     }
+    fun content(layer:JSONObject):JSONObject=ArtJsonCopy.objectValue(contentView(layer))
     private fun install(layer:JSONObject,content:JSONObject) {
         layer.keys().asSequence().toList().filter {it !in shared}.forEach {layer.remove(it)}
         content.keys().forEach {layer.put(it,content.get(it))}
@@ -39,23 +32,23 @@ internal object ArtAnimation {
         layers(state).forEach {layer->if(keys(layer)!=null) {
             val key=active(layer,time)
             requireNotNull(key) {"动画轨道缺少第0帧"}
-            install(layer,JSONObject(key.getJSONObject("content").toString()))
+            install(layer,ArtJsonCopy.objectValue(key.getJSONObject("content")))
         }}
     }
     fun before(state:JSONObject)=layers(state).filter {keys(it)!=null}
-        .associate {it.getString("id") to content(it).toString()}
+        .associate {it.getString("id") to contentView(it).toString()}
     fun capture(state:JSONObject,time:Int,before:Map<String,String>,expectedKeys:JSONObject?=null) {
         layers(state).forEach {layer->
             val id=layer.getString("id")
             if(id in before) {
                 require(keys(layer)!=null) {"此操作会丢失动画轨道，请先明确停用该轨道"}
-                val now=content(layer)
+                val now=contentView(layer)
                 if(now.toString()!=before.getValue(id)) {
                     if(expectedKeys!=null)require(expectedKeys.has(id) && active(layer,time)?.getInt("time")==expectedKeys.getInt(id)) {
                         "动画编辑所依赖的关键帧已撤销或移动；该选择性撤销与后续操作冲突"
                     }
                     require(layer.getString("kind") in kinds) {"该图层类型不能保留动画轨道"}
-                    requireNotNull(active(layer,time)).put("content",now)
+                    requireNotNull(active(layer,time)).put("content",ArtJsonCopy.objectValue(now))
                 }
             }
         }
@@ -78,13 +71,13 @@ internal object ArtAnimation {
         layer.put("animationKeys",JSONArray((0 until list.length()).map {list.getJSONObject(it)}.sortedBy {it.getInt("time")}))
     }
     fun prepareKey(state:JSONObject,p:JSONObject):JSONObject {
-        val result=JSONObject(p.toString())
+        val result=ArtJsonCopy.objectValue(p)
         val action=p.getString("action")
         if(action in setOf("blank","duplicate")) {
             val layer=editable(state,p.getString("layerId"))
             val cel=if(action=="duplicate"&&p.has("sourceFrame")) {
                 val source=p.getInt("sourceFrame");require(source in 0..MAX_TIME)
-                JSONObject(requireNotNull(active(layer,source)) {"源关键帧不存在"}.getJSONObject("content").toString())
+                ArtJsonCopy.objectValue(requireNotNull(active(layer,source)) {"源关键帧不存在"}.getJSONObject("content"))
             } else content(layer)
             if(action=="blank") {
                 cel.put("asset","").put("strokes",JSONArray())
@@ -105,7 +98,7 @@ internal object ArtAnimation {
                 resolve(state, cfg.getInt("current"))
             }
             "ANIMATION_SETTINGS" -> {
-                val next=JSONObject(cfg.toString())
+                val next=ArtJsonCopy.objectValue(cfg)
                 for(name in listOf("fps","start","end","loop","onion"))if(p.has(name))next.put(name,p.get(name))
                 require(next.getInt("fps") in 1..60) {"帧率须为1–60"}
                 require(next.getInt("start") in 0..MAX_TIME&&next.getInt("end") in next.getInt("start")..MAX_TIME) {"播放范围无效"}
@@ -115,7 +108,7 @@ internal object ArtAnimation {
             }
             "ANIMATION_TIME" -> {
                 val time=p.getInt("frame");require(time in 0..MAX_TIME)
-                state.put("animation",JSONObject(cfg.toString()).put("current",time))
+                state.put("animation",ArtJsonCopy.objectValue(cfg).put("current",time))
                 resolve(state,time)
                 state.put("selection",JSONObject.NULL).put("shapeSelection",JSONObject.NULL)
             }
@@ -128,9 +121,9 @@ internal object ArtAnimation {
                     require(existing==null || (0 until existing.length()).none {existing.getJSONObject(it).getInt("time")==time}) {"目标已有关键帧，不能覆盖"}
                     val original=content(layer)
                     if(existing==null)layer.put("animationKeys",JSONArray().apply {
-                        if(time>0)put(JSONObject().put("time",0).put("content",JSONObject(original.toString())))
+                        if(time>0)put(JSONObject().put("time",0).put("content",ArtJsonCopy.objectValue(original)))
                     })
-                    val cel=JSONObject(p.getJSONObject("cel").toString())
+                    val cel=ArtJsonCopy.objectValue(p.getJSONObject("cel"))
                     keys(layer)!!.put(JSONObject().put("time",time).put("content",cel))
                     sort(layer)
                 } else if(action=="disable") {
@@ -205,7 +198,7 @@ internal object ArtAnimation {
     }
     fun describe(snapshot:JSONObject):JSONObject {
         val state=snapshot.getJSONObject("state")
-        val cfg=JSONObject(settings(state).toString())
+        val cfg=ArtJsonCopy.objectValue(settings(state))
         val rows=JSONArray()
         for(layer in layers(state))if(layer.getString("kind") in kinds) {
             val list=keys(layer)
@@ -224,23 +217,23 @@ internal object ArtAnimation {
         original.keys().forEach {key->if(key!="layers") {
             val value=original.get(key)
             state.put(key,when(value) {
-                is JSONObject->JSONObject(value.toString())
-                is JSONArray->JSONArray(value.toString())
+                is JSONObject->ArtJsonCopy.objectValue(value)
+                is JSONArray->ArtJsonCopy.arrayValue(value)
                 else->value
             })
         }}
         val rows=JSONArray()
         for(layer in layers(original)) {
             val active=active(layer,time)
-            val copy=if(active==null)JSONObject(layer.toString()) else JSONObject().apply {
+            val copy=if(active==null)ArtJsonCopy.objectValue(layer) else JSONObject().apply {
                 shared.filter {it!="animationKeys"}.forEach {key->if(layer.has(key))put(key,layer.get(key))}
-                val cel=JSONObject(active.getJSONObject("content").toString())
+                val cel=ArtJsonCopy.objectValue(active.getJSONObject("content"))
                 cel.keys().forEach {key->put(key,cel.get(key))}
             }
             copy.remove("animationKeys")
             rows.put(copy)
         }
-        state.put("layers",rows).put("animation",JSONObject(settings(original).toString()).put("current",time))
+        state.put("layers",rows).put("animation",ArtJsonCopy.objectValue(settings(original)).put("current",time))
             .put("selection",JSONObject.NULL).put("shapeSelection",JSONObject.NULL)
         return JSONObject().put("id",snapshot.getString("id")).put("revision",snapshot.getInt("revision")).put("state",state)
     }

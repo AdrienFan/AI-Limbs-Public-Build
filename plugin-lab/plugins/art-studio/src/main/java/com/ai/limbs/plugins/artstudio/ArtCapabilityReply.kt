@@ -16,7 +16,7 @@ internal object ArtCapabilityReply {
 
     fun format(result: JSONObject, mode: String): JSONObject {
         require(mode in setOf("full", "receipt")) { "responseMode必须为full或receipt" }
-        if (mode == "full" || !result.has("state") || !result.has("operations")) return result
+        if (mode == "full" || !result.has("state") || !result.has("id") || !result.has("revision")) return result
         return receipt(result)
     }
 

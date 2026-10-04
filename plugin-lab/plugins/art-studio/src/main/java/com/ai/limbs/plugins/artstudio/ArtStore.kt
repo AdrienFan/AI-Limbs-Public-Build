@@ -52,13 +52,21 @@ internal class ArtStore(private val root: File) {
         require(backups.mkdirs() || backups.isDirectory)
     }
 
-    // The capability wrapper holds one lock through the edit and its rendered receipt.
+    // Capability edits and snapshot/resource capture share one lock; pixels are composed outside it.
     // Nested business methods on this same thread reuse it instead of acquiring an overlapping file lock.
     private val lockDepth = ThreadLocal.withInitial { 0 }
     private val replayCache = ArtReplayCache()
     private val summaryCache = ArtSummaryCache()
     private val frozenRenderAssets = ThreadLocal<Map<String,File>>()
     private val editorSnapshot = ThreadLocal.withInitial { false }
+    private val compactSnapshot = ThreadLocal.withInitial { false }
+
+    // Receipt callers never consume full event payloads or detailed footprint rows. Scope this
+    // projection to the invocation thread; the default full API and editor footprint stay intact.
+    fun <T> withCompactSnapshots(block:()->T):T {
+        val previous=compactSnapshot.get();compactSnapshot.set(true)
+        try {return block()} finally {compactSnapshot.set(previous)}
+    }
 
     // The editor consumes state and history labels, never the serialized operation payloads.
     // Capability snapshots retain their published full contract.
@@ -137,41 +145,76 @@ internal class ArtStore(private val root: File) {
         try {return block()} finally {frozenRenderAssets.remove()}
     }
 
-    fun withCanvasFeedback(block: () -> JSONObject): JSONObject = locked {
-        fun referenceSignature(snapshot:JSONObject?):String {
-            if(snapshot==null) return ""
-            val state=snapshot.getJSONObject("state")
-            if(ArtReferences.items(state).isEmpty()) return ""
-            return JSONObject().put("references",JSONArray(ArtReferences.items(state)))
-                .put("visible",state.optBoolean("referencesVisible",true)).toString()
+    // Feedback needs state/revision, not a second copy of every history payload and label.
+    private fun feedbackSnapshot(doc:JSONObject):JSONObject = JSONObject().put("id",doc.getString("id"))
+        .put("revision",doc.getJSONArray("operations").length()).put("state",replay(doc))
+
+    fun withCanvasFeedback(animationFrames:List<Int> = emptyList(),block: () -> JSONObject): JSONObject {
+        lateinit var result:JSONObject
+        var after:JSONObject?=null
+        var captureError:Exception?=null
+        val captureStarted=System.nanoTime()
+        val source=locked {
+            fun referenceSignature(snapshot:JSONObject?):String {
+                if(snapshot==null)return ""
+                val state=snapshot.getJSONObject("state")
+                if(ArtReferences.items(state).isEmpty())return ""
+                return JSONObject().put("references",JSONArray(ArtReferences.items(state)))
+                    .put("visible",state.optBoolean("referencesVisible",true)).toString()
+            }
+            fun assistantSignature(snapshot:JSONObject?):String {
+                if(snapshot==null)return ""
+                val state=snapshot.getJSONObject("state")
+                if(ArtAssistants.items(state).isEmpty())return ""
+                return JSONObject().put("assistants",JSONArray(ArtAssistants.items(state)))
+                    .put("selected",ArtAssistants.selected(state)).put("settings",ArtAssistants.settings(state)).toString()
+            }
+            val beforeSnapshot=if(pointer.isFile)feedbackSnapshot(loadCurrent()) else null
+            val before=referenceSignature(beforeSnapshot)
+            val assistantBefore=assistantSignature(beforeSnapshot)
+            val selectionBefore=beforeSnapshot?.getJSONObject("state")?.optJSONObject("selection")?.toString()
+            result=block()
+            try {
+                after=if(pointer.isFile)feedbackSnapshot(loadCurrent()) else null
+                if(after!=null && referenceSignature(after)!=before)result.put("referenceFeedback",true)
+                if(after!=null && assistantSignature(after)!=assistantBefore)result.put("assistantFeedback",true)
+                if(after?.getJSONObject("state")?.optJSONObject("selection")?.toString()!=selectionBefore)
+                    result.put("selectionFeedback",true)
+                captureViewSource(after)
+            } catch(error:Exception) {captureError=error;null}
         }
-        fun assistantSignature(snapshot: JSONObject?): String {
-            if(snapshot==null)return ""
-            val state=snapshot.getJSONObject("state")
-            if(ArtAssistants.items(state).isEmpty())return ""
-            return JSONObject().put("assistants",JSONArray(ArtAssistants.items(state)))
-                .put("selected",ArtAssistants.selected(state)).put("settings",ArtAssistants.settings(state)).toString()
+        val captureMs=(System.nanoTime()-captureStarted)/1_000_000
+        if(captureMs>=1000)android.util.Log.w("ArtStudioPerf","phase=capabilityCapture captureMs=$captureMs")
+        fun reportFailure(error:Exception):JSONObject {
+            // The edit already committed. Do not turn failed acquisition/preview into a retryable edit.
+            android.util.Log.e("ArtStudio","Canvas changed but preview generation failed",error)
+            result.remove("mcp_content")
+            if(animationFrames.isNotEmpty())ArtAnimationFeedback.failure(result,after,animationFrames,error)
+            return result.put("thumbnail",JSONObject().put("status","error").put("operationApplied",true)
+                .put("documentId",after?.getString("id") ?: JSONObject.NULL)
+                .put("revision",after?.getInt("revision") ?: JSONObject.NULL)
+                .put("error",error.message ?: error.javaClass.simpleName))
         }
-        val beforeSnapshot=if(pointer.isFile) snapshot(loadCurrent()) else null
-        val before=referenceSignature(beforeSnapshot)
-        val assistantBefore=assistantSignature(beforeSnapshot)
-        val selectionBefore=beforeSnapshot?.getJSONObject("state")?.optJSONObject("selection")?.toString()
-        val result = block()
-        val after = if (pointer.isFile) snapshot(loadCurrent()) else null
-        if(after!=null && referenceSignature(after)!=before) result.put("referenceFeedback",true)
-        if(after!=null && assistantSignature(after)!=assistantBefore) result.put("assistantFeedback",true)
-        if(after?.getJSONObject("state")?.optJSONObject("selection")?.toString()!=selectionBefore)result.put("selectionFeedback",true)
+        captureError?.let {return reportFailure(it)}
+        val started=System.nanoTime()
         try {
-            ArtCanvasFeedback.attach(this, result, after)
-        } catch (error: Exception) {
-            // The edit has committed. Report a missing receipt explicitly and preserve its IDs;
-            // throwing an ordinary tool failure here would encourage retrying an already-applied stroke.
-            android.util.Log.e("ArtStudio", "Canvas changed but preview generation failed", error)
-            result.put("thumbnail", JSONObject().put("status", "error").put("operationApplied", true)
-                .put("documentId", after?.getString("id") ?: JSONObject.NULL)
-                .put("revision", after?.getInt("revision") ?: JSONObject.NULL)
-                .put("error", error.message ?: error.javaClass.simpleName))
+            requireNotNull(source).use {captured ->
+                withRenderAssets(captured.assets) {
+                    // Independent feedback failures must not discard another valid image or retry the edit.
+                    try {ArtCanvasFeedback.attach(this,result,captured.snapshot)}
+                    catch(error:Exception) {reportFailure(error)}
+                    if(animationFrames.isNotEmpty()) {
+                        try {ArtAnimationFeedback.attach(this,result,requireNotNull(captured.snapshot),animationFrames)}
+                        catch(error:Exception) {ArtAnimationFeedback.failure(result,captured.snapshot,animationFrames,error)}
+                    }
+                }
+            }
+        } catch(error:Exception) {return reportFailure(error)}
+        finally {
+            val elapsed=(System.nanoTime()-started)/1_000_000
+            if(elapsed>=1000)android.util.Log.w("ArtStudioPerf","phase=capabilityFeedback feedbackMs=$elapsed")
         }
+        return result
     }
 
     fun canvasRegion(x: Int, y: Int, width: Int, height: Int, maxEdge: Int,
@@ -2488,8 +2531,8 @@ internal class ArtStore(private val root: File) {
             ArtReferences.items(state).size*ArtReferences.PREVIEW_EDGE.toLong()*ArtReferences.PREVIEW_EDGE*8, "画布合成与参考预览")
     }
 
-    private fun snapshot(doc: JSONObject, includeOperations: Boolean = !editorSnapshot.get(),
-        historyDetails: Boolean = true): JSONObject {
+    private fun snapshot(doc: JSONObject, includeOperations: Boolean = !editorSnapshot.get() && !compactSnapshot.get(),
+        historyDetails: Boolean = !compactSnapshot.get()): JSONObject {
         val state = replay(doc)
         val id = doc.getString("id")
         val history = ArtHistory.describe(doc, historyDetails)
@@ -2504,7 +2547,7 @@ internal class ArtStore(private val root: File) {
             .put("redoLabel", history.getString("redoLabel"))
             .apply { putDocumentStatus(this,id,digest(doc.toString())) }
             .apply { if (includeOperations)
-                put("operations", JSONArray(doc.getJSONArray("operations").toString())) }
+                put("operations", ArtJsonCopy.arrayValue(doc.getJSONArray("operations"))) }
     }
 
     private fun putDocumentStatus(result:JSONObject,id:String,documentDigest:String):JSONObject {
@@ -2527,7 +2570,7 @@ internal class ArtStore(private val root: File) {
         }
 
     private fun replayComplete(doc: JSONObject): JSONObject {
-        val state = JSONObject(doc.getJSONObject("base").toString())
+        val state = ArtJsonCopy.objectValue(doc.getJSONObject("base"))
         val operations = doc.getJSONArray("operations")
         val disabled = mutableSetOf<String>()
         val seen = mutableSetOf<String>()

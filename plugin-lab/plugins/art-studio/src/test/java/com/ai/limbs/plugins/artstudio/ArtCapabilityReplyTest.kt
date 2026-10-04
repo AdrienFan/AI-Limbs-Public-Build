@@ -43,6 +43,22 @@ class ArtCapabilityReplyTest {
         rejected { ArtCapabilityReply.mode(JSONObject().put("responseMode", "tiny")) }
     }
 
+    @Test fun preprojectedSnapshotNeedsNoDiscardedHistoryAndKeepsCommitEvidenceAndImages() {
+        val full=snapshot().put("lastOperationId","committed").put("canUndo",true)
+            .put("historyStats",JSONObject().put("eventCount",7)).put("mcp_content",JSONArray()
+                .put(JSONObject().put("type","image").put("data","CURRENT"))
+                .put(JSONObject().put("type","image").put("data","FRAMES")))
+        val expected=ArtCapabilityReply.format(full,"receipt")
+        val projected=JSONObject(full.toString())
+        for(key in listOf("operations","timeline","otherBranches"))projected.remove(key)
+        val actual=ArtCapabilityReply.format(projected,"receipt")
+        assertEquals(expected.keys().asSequence().toSet(),actual.keys().asSequence().toSet())
+        expected.keys().forEach {key->assertEquals(expected.get(key).toString(),actual.get(key).toString())}
+        assertFalse(actual.has("state"));assertTrue(actual.getBoolean("historyWritten"))
+        assertEquals(2,actual.getJSONArray("mcp_content").length())
+        assertSame(projected,ArtCapabilityReply.format(projected,"full"))
+    }
+
     @Test fun summaryDoesNotRequireMaterializedHistoryAndRetainsMetadataContract() {
         val full=snapshot().put("dirty",true).put("canUndo",true).put("undoLabel","编辑")
             .put("historyStats",JSONObject().put("eventCount",7))

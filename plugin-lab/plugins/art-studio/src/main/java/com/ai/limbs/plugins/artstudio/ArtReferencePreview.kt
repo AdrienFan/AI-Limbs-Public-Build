@@ -18,9 +18,8 @@ internal data class StudioRenderFrame(val first:JSONObject,val second:Bitmap,val
                 if(elapsed>=1000)android.util.Log.w("ArtStudioPerf","phase=editorPixels renderMs=$elapsed")
             }
         }
-        // The default is used by capability previews while their transaction lock is held.
-        // Editor callers always supply the marker captured BEFORE composing pixels.
-        fun create(store:ArtStore,snapshot:JSONObject,revisionMarker:String=store.revision()):StudioRenderFrame {
+        // Editor callers supply the marker captured BEFORE composing pixels; receipt frames are transient.
+        fun create(store:ArtStore,snapshot:JSONObject,revisionMarker:String):StudioRenderFrame {
             val refs=store.referenceBitmaps(snapshot)
             var image:Bitmap?=null
             try {
@@ -55,7 +54,8 @@ internal object ArtReferencePreview {
         try {
             val canvas=Canvas(image);canvas.drawColor(Color.rgb(38,38,42))
             val matrix=Matrix().apply { setRectToRect(bounds,RectF(0f,0f,w.toFloat(),h.toFloat()),Matrix.ScaleToFit.CENTER) }
-            val frame=StudioRenderFrame.create(store,snapshot)
+            // A receipt is tied to snapshot id/revision and never publishes an editor frame.
+            val frame=StudioRenderFrame.create(store,snapshot,revisionMarker="")
             try {
                 canvas.drawBitmap(frame.second,matrix,Paint(Paint.FILTER_BITMAP_FLAG))
                 ArtReferences.draw(canvas,state,frame.fourth,matrix)

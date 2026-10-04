@@ -19,6 +19,9 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 internal object ArtRenderer {
+    // Serialize pixel allocations per process without holding the shared document lock.
+    // This compositor only reads captured data/assets; never acquire a document lock here.
+    @Synchronized
     fun render(store: ArtStore, snapshot: JSONObject, opaque: Boolean = false, maxEdge: Int? = null, colorizeKeys: Boolean = false, logicalSize: Pair<Int,Int>? = null): Bitmap {
         val state = snapshot.getJSONObject("state")
         val width = state.getInt("width")

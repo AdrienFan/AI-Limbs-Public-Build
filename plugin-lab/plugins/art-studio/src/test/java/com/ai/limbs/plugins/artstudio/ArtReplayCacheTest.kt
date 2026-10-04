@@ -61,6 +61,22 @@ class ArtReplayCacheTest {
         assertEquals(0,cache.read(document("two"),::complete,::apply).getInt("value"))
     }
 
+    @Test fun callersCannotMutateNestedCheckpointCelsOrTheRebuildResult() {
+        val cache=ArtReplayCache()
+        val doc=document().apply {getJSONObject("base").put("keys",JSONArray().put(JSONObject()
+            .put("time",0).put("content",JSONObject().put("coordinates",JSONArray().put(1).put(2)))))}
+        lateinit var built:JSONObject
+        fun read()=cache.read(doc,{built=JSONObject(it.getJSONObject("base").toString());built},
+            {_,_->error("No appended events")})
+        val initial=read()
+        initial.getJSONArray("keys").getJSONObject(0).getJSONObject("content").getJSONArray("coordinates").put(0,900)
+        assertEquals(1,read().getJSONArray("keys").getJSONObject(0).getJSONObject("content").getJSONArray("coordinates").getInt(0))
+        built.getJSONArray("keys").getJSONObject(0).put("time",40)
+        assertEquals(0,read().getJSONArray("keys").getJSONObject(0).getInt("time"))
+        assertEquals(1,doc.getJSONObject("base").getJSONArray("keys").getJSONObject(0)
+            .getJSONObject("content").getJSONArray("coordinates").getInt(0))
+    }
+
     @Test fun failedAdvanceCannotPoisonPreviousCheckpoint() {
         val cache=ArtReplayCache();val doc=add(document(),"a",3)
         cache.read(doc,::complete,::apply)

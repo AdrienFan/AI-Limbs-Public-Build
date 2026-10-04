@@ -45,7 +45,7 @@ internal object ArtCanvasFeedback {
             return result.put("thumbnail",receipt.getJSONObject("thumbnail"))
                 .put("mcp_content",receipt.getJSONArray("mcp_content"))
         }
-        val feedbackSnapshot=if(snapshot!=null && result.has("colorizeMaskId"))JSONObject(snapshot.toString()).apply {
+        val feedbackSnapshot=if(snapshot!=null && result.has("colorizeMaskId"))ArtJsonCopy.objectValue(snapshot).apply {
             getJSONObject("state").put("selectedLayerId",result.getString("colorizeMaskId"))
         } else snapshot
         val image = if (feedbackSnapshot == null) emptyCanvas() else preview(store, feedbackSnapshot,

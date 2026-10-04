@@ -39,7 +39,7 @@ internal object ArtAnimationPoses {
     }
 
     fun cel(base: JSONObject, pose: JSONObject): JSONObject {
-        val cel = JSONObject(base.toString())
+        val cel = ArtJsonCopy.objectValue(base)
         if (pose.has("layer")) patch(cel, pose.getJSONObject("layer"), layerFields)
         if (pose.has("shapes")) pose.getJSONArray("shapes").let { changes ->
             val shapes = cel.getJSONArray("shapes")
@@ -51,7 +51,7 @@ internal object ArtAnimationPoses {
                 require(seen.add(id)) { "同一姿态中形状编号重复" }
                 val shape = requireNotNull(byId[id]) { "来源帧中没有该形状" }
                 require(!shape.getBoolean("locked")) { "姿态不能编辑锁定的形状" }
-                val properties = JSONObject(change.toString()).apply { remove("id") }
+                val properties = ArtJsonCopy.objectValue(change).apply { remove("id") }
                 patch(shape, properties, shapeFields)
             }
         }
@@ -66,7 +66,7 @@ internal object ArtAnimationPoses {
         if (parameters.has("overwrite")) require(parameters.get("overwrite") is Boolean) { "overwrite须为布尔值" }
         require(sourceFrame in 0..ArtAnimation.MAX_TIME) { "来源帧号无效" }
         val source = if (ArtAnimation.keys(layer) == null) ArtAnimation.content(layer)
-            else JSONObject(requireNotNull(ArtAnimation.active(layer, sourceFrame)).getJSONObject("content").toString())
+            else ArtJsonCopy.objectValue(requireNotNull(ArtAnimation.active(layer, sourceFrame)).getJSONObject("content"))
         val poses = parameters.getJSONArray("poses")
         require(poses.length() in 1..32) { "单次提交1–32个姿态帧" }
         val seen = mutableSetOf<Int>()
@@ -81,7 +81,7 @@ internal object ArtAnimationPoses {
             require(changes <= 1024) { "单次最多1024个对象姿态修改" }
             cel(source, pose) // Reject every invalid recipe before any draft write.
         }
-        return JSONObject(parameters.toString()).put("baseCel", source)
+        return ArtJsonCopy.objectValue(parameters).put("baseCel", source)
     }
 
     fun install(layer: JSONObject, parameters: JSONObject) {
@@ -90,7 +90,7 @@ internal object ArtAnimationPoses {
         if (existing == null) rows[0] = JSONObject().put("time", 0).put("content", ArtAnimation.content(layer))
         else for (index in 0 until existing.length()) {
             val key = existing.getJSONObject(index)
-            rows[key.getInt("time")] = JSONObject(key.toString())
+            rows[key.getInt("time")] = ArtJsonCopy.objectValue(key)
         }
         val poses = parameters.getJSONArray("poses")
         for (index in 0 until poses.length()) {

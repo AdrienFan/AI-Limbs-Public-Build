@@ -1435,3 +1435,20 @@ plugin.art.studio.animation.export {"documentId":"DOCUMENT_ID","expectedRevision
 实现参考：[Android ParcelFileDescriptor公开API](https://developer.android.com/reference/android/os/ParcelFileDescriptor)与[Linux proc_pid_fd](https://man7.org/linux/man-pages/man5/proc_pid_fd.5.html)。API自说明入口与参数不变。例：兰儿仍调用plugin.art.studio.animation.seek，携documentId、expectedRevision、frame和responseMode=receipt；手机继续点击停靠板动画时间轴。
 
 版本0.2.82/versionCode85/applicationId com.ai.limbs.payload.artstudio.v0282。新增资源释放与跨端过期帧的云端回归源码。本轮仅源码、静态核对与提交，未运行测试、未编译或推送。需部署验证：隐藏页面执行连续定位不触发重绘；可见时绘制阶段不阻塞Resident；图片/文字/笔刷/参考图/洋葱皮资源正确；全屏和返回画室保留画面；跨端切换/关闭/快速编辑不发布旧帧；句柄数量在反复操作后回到基线。
+
+
+## 0.2.83：回放复制、锁外回执与批量帧反馈
+
+0.2.82实机后台验收中，副本连续定位22、0、55帧的远端桥命令约0.70–0.78秒；原105事件工程重新打开约9.3秒端到端、6.53秒桥命令。Host曾记录editorCapture约9.08秒。可见画室验收当时被手机锁屏阻挡，不能把后台API计时当作手机时间轴点击耗时。本轮采样追踪被Android文件访问限制阻挡，未得到新的方法级耗时；重复编码/解析与完整历史投影属于源码确认的工作，尚不能分摊全部冷读延迟。
+
+第一步减少动画帧和快照复制的JSON编码/解析循环。ArtJsonCopy直接深复制JSON树；帧之间与调用方仍各自拥有可写副本。重放缓存保留原有紧凑文本检查点，避免长期多留整棵可写树；失败的增量回放不能污染检查点。动画编辑先用只读内容投影比较，再为真正改变的cel建立独立副本。完整输入SHA-256和事件前缀检查保留；撤销、重做、工程切换和替换仍按原规则回放，历史、尺寸、资源和关键帧校验保留。
+
+responseMode=receipt的调用线程直接生成省略operations及详细足迹行的快照，然后做原有紧凑投影，保留revision、历史统计、撤销状态及提交证据；默认full与分页完整快照不变。图层读取使用snapshot.revision，按作者撤销直接读历史事件，避免业务内部依赖一个即将丢弃的完整快照。
+
+同进程ArtRenderer合成串行，控制同时分配像素的数量；这把像素锁不读取文档，不与共享文档锁相互等待。工具反馈在同一共享锁内执行编辑、捕获前后状态与只读资源句柄，像素合成、参考总览、JPEG编码移到锁外。反馈专用快照只有id/revision/state，无需再次复制历史和生成标签。资源通过0.2.82的只读句柄租约固定，回执绑定本次提交版本，不混入随后编辑；资源获取或预览失败明确operationApplied=true，不重复编辑。ArtStudioPerf补capabilityCapture和capabilityFeedback阶段日志；capture包含编辑、捕获及等锁，不是单独的解析计时。复杂历史首次回放仍需要工作，本轮未承诺消除全部冷读或网络延迟。
+
+第二步为animation.poses.apply增加反馈，不新增能力或参数。原当前帧thumbnail继续保留；animationFeedback为本次全部1–32个目标帧的缩图总览，按帧号排序、每行最多四格，格内F加数字标明帧号。每格最大128像素边，反馈图JPEG上限512KiB，逐帧渲染并释放像素，不同时留存全部帧位图。编号使用几何笔画，Resident无需初始化默认字体。mcp_content通常为当前帧图片加总览图片；实际总览位置读取animationFeedback.imageContentIndex。frames、columns、rows、order=row-major、documentId/revision给出准确映射，不默默抽样或漏掉目标帧。总览失败单独报告animationFeedback.status=error，不丢弃已生成的当前帧缩图，也不重放已提交操作。receipt保留这些信息和图片。反馈图片是瞬时回执，不作为导出或历史事件持久化。
+
+例：先用animation.pose.read获取工程、修订、图层与来源帧，再调用plugin.art.studio.animation.poses.apply {"documentId":"DOCUMENT_ID","expectedRevision":REVISION,"layerId":"LAYER_ID","sourceFrame":0,"poses":[{"frame":2,"layer":{"x":10,"y":0}},{"frame":4,"layer":{"x":20,"y":0}}],"responseMode":"receipt","requestId":"NEW_REQUEST_UUID"}。成功读取新revision及animationFeedback.frames=[2,4]和图片；放大检查用animation.preview指定其中一帧。一段动作完成后用既有时间轴播放检查连贯性，仍由animation.export明确导出GIF，不在每次提交时自动导出。只在传输实际附带图片时把回执视为像素反馈。
+
+版本0.2.83/versionCode86/applicationId com.ai.limbs.payload.artstudio.v0283。新增深复制/检查点隔离、预投影紧凑回执、32帧全覆盖、帧号排序和两张图片保留的云端回归源码。本轮仅源码、静态核对与提交；不运行本地测试、不编译、不推送。后续云端与部署需验收：原长历史工程首读/重开、full/receipt一致、撤销重做、锁外跨端并发回执资源一致、完整32格的可见帧号、反馈失败的提交查询及无重复编辑、图片/文字/参考/笔刷/洋葱皮、描述符释放，以及尚未完成的可见时间轴与全屏/返回画室连续性。详见docs/TODO/art-studio-animation-feedback/。

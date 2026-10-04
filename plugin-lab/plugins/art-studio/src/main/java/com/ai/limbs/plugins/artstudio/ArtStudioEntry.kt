@@ -67,8 +67,12 @@ class ArtStudioEntry : InProcessPluginEntry {
                     store.withCapabilityRequest(business.getString("documentId"), requestId) { block(business) }
                     else block(business)
                 try {
-                    val result = if (ArtCanvasFeedback.affectsCanvas(name, business))
-                        store.withCanvasFeedback {
+                    fun executeWithFeedback():JSONObject = if (ArtCanvasFeedback.affectsCanvas(name, business)) {
+                        val animationFrames=if(name=="animation.poses.apply") {
+                            val poses=business.getJSONArray("poses")
+                            (0 until poses.length()).map {poses.getJSONObject(it).getInt("frame")}
+                        } else emptyList()
+                        store.withCanvasFeedback(animationFrames) {
                             val result=execute()
                             if(name.startsWith("reference.")) result.put("referenceFeedback",true)
                             if(name.startsWith("assistant.")) result.put("assistantFeedback",true)
@@ -79,7 +83,9 @@ class ArtStudioEntry : InProcessPluginEntry {
                             }
                             result
                         }
-                    else execute()
+                    } else execute()
+                    val result=if(responseMode=="receipt")store.withCompactSnapshots {executeWithFeedback()}
+                        else executeWithFeedback()
                     if (requestId != null) result.put("requestId", requestId)
                     if(name=="svg.apply") ArtSvgReceipt.format(result,responseMode)
                     else ArtCapabilityReply.format(result,responseMode)
@@ -357,7 +363,7 @@ class ArtStudioEntry : InProcessPluginEntry {
 
         capability("layer.list", "列出画室图层", read) {
             val snapshot = store.current()
-            snapshot.getJSONObject("state").put("revision", snapshot.getJSONArray("operations").length())
+            snapshot.getJSONObject("state").put("revision", snapshot.getInt("revision"))
         }
         capability("layer.search", "按名称搜索画室图层", read) { p ->
             val query = p.getString("query").trim()
@@ -552,7 +558,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         }
         capability("history.revert_actor_operations", "撤销兰儿指定操作", write) { p ->
             val id = p.getString("id")
-            val ops = store.current().getJSONArray("operations")
+            val ops = store.historyOperations().getJSONArray("operations")
             require((0 until ops.length()).any {
                 val op = ops.getJSONObject(it)
                 op.getString("id") == id && op.getString("actor") == "LANER" &&
