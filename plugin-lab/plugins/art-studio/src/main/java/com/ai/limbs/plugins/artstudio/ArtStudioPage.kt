@@ -633,6 +633,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     var transparent by remember { mutableStateOf(false) }
     var openDialog by remember { mutableStateOf(false) }
     var recentOnly by remember { mutableStateOf(false) }
+    var saveDestinationRequest by remember { mutableStateOf<JSONObject?>(null) }
     var saveAsDialog by remember { mutableStateOf(false) }
     var saveAsName by remember { mutableStateOf("") }
     var saveAsChooseLocation by remember { mutableStateOf(false) }
@@ -1124,7 +1125,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                     } catch (error: SecurityException) {
                         host.logger.i("ArtStudio", "Opened read-only document as an independent draft")
                         scope.launch {
-                            Toast.makeText(context, "该文件只读；修改后请使用另存为", Toast.LENGTH_LONG).show()
+                            Toast.makeText(context, "该文件只读；保存将写入工程目录，原文件保持不变", Toast.LENGTH_LONG).show()
                         }
                     }
                     store.current()
@@ -1607,31 +1608,6 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
         }
     }
-    fun saveProject() {
-        if (current == null || busy) return
-        busy = true
-        scope.launch {
-            try {
-                withContext(Dispatchers.IO) {
-                    mutex.withLock {
-                        val result = store.save()
-                        val external = result.optString("externalUri")
-                        if (external.isNotBlank()) {
-                            context.contentResolver.openOutputStream(android.net.Uri.parse(external), "wt")
-                                ?.use { output ->
-                                    java.io.File(result.getString("path")).inputStream().use { it.copyTo(output) }
-                                } ?: error("无法写入外部工程文件")
-                            store.markExternalSynced(result.getString("id"))
-                        }
-                    }
-                }
-                refresh()
-                Toast.makeText(context, "工程已保存", Toast.LENGTH_LONG).show()
-            } catch (error: Exception) {
-                Toast.makeText(context, error.message ?: "保存工程失败", Toast.LENGTH_LONG).show()
-            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
-        }
-    }
     fun leaveScreen() {
         var wrapper: Context = context
         repeat(12) {
@@ -1644,26 +1620,60 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
         error("无法返回画室上级页面")
     }
+    fun executeProjectSave(request: JSONObject, defaultDirectory: Boolean) {
+        if (busy) return
+        val closeAfter = request.getBoolean("closeAfter")
+        busy = true
+        scope.launch {
+            try {
+                val result = withContext(Dispatchers.IO) {
+                    mutex.withLock {
+                        store.saveFromUi(request, defaultDirectory, closeAfter) { saved ->
+                            val uri = android.net.Uri.parse(saved.getString("externalUri"))
+                            val output = context.contentResolver.openOutputStream(uri, "wt")
+                                ?: error("无法写入原工程文件；请检查写入权限或选择默认目录")
+                            output.use { stream ->
+                                java.io.File(saved.getString("path")).inputStream().use { it.copyTo(stream) }
+                            }
+                        }
+                    }
+                }
+                val message = if (result.getString("externalUri").isNotEmpty())
+                    "已保存到原工程文件" else "工程已保存：" + result.getString("path")
+                Toast.makeText(context, message, Toast.LENGTH_LONG).show()
+                if (closeAfter) {
+                    renderRequests.invalidate()
+                    acceptFrame(null)
+                    recentDocs = withContext(Dispatchers.IO) { store.recent() }
+                    if (request.getBoolean("exitAfter")) leaveScreen()
+                } else refresh()
+            } catch (error: Exception) {
+                host.logger.e("ArtStudio", "Project save failed", error)
+                refresh()
+                Toast.makeText(context, error.message ?: "保存工程失败", Toast.LENGTH_LONG).show()
+            } finally { busy = restoring || pendingOperations > 0 || awaitingExport }
+        }
+    }
+    fun requestProjectSave(closeAfter: Boolean = false, exitAfter: Boolean = false) {
+        if (current == null || busy) return
+        val request = JSONObject().put("documentId", current.getString("id"))
+            .put("expectedRevision", current.getInt("revision"))
+            .put("externalUri", current.getString("externalUri"))
+            .put("name", current.getJSONObject("state").getString("name"))
+            .put("closeAfter", closeAfter).put("exitAfter", exitAfter)
+        if (request.getString("externalUri").isNotEmpty()) saveDestinationRequest = request
+        else executeProjectSave(request, defaultDirectory = false)
+    }
+    fun saveProject() = requestProjectSave()
     fun finishCurrent(save: Boolean, discard: Boolean, exit: Boolean) {
         if (busy) return
+        if (save) { requestProjectSave(closeAfter = true, exitAfter = exit); return }
         renderRequests.invalidate()
         busy = true
         scope.launch {
             try {
                 withContext(Dispatchers.IO) {
                     mutex.withLock {
-                        if (save) {
-                            val result = store.save()
-                            val external = result.optString("externalUri")
-                            if (external.isNotBlank()) {
-                                context.contentResolver.openOutputStream(android.net.Uri.parse(external), "wt")
-                                    ?.use { output ->
-                                        java.io.File(result.getString("path")).inputStream()
-                                            .use { it.copyTo(output) }
-                                    } ?: error("无法写入外部工程文件")
-                                store.markExternalSynced(result.getString("id"))
-                            }
-                        }
                         if (discard) store.discardCurrent() else store.close()
                     }
                 }
@@ -3455,6 +3465,27 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             perform { store.editPixels("AWEI", "FILL", fill) }
         }, enabled = backgroundFillColor.matches(Regex("#[0-9A-F]{8}"))) { Text("填充") } },
         dismissButton = { TextButton(onClick = { backgroundFillDialog = false }) { Text("取消") } })
+    saveDestinationRequest?.let { request ->
+        AlertDialog(onDismissRequest = { if (!busy) saveDestinationRequest = null },
+            title = { Text("是否覆盖原工程文件？") },
+            text = { Column(Modifier.heightIn(max = 320.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text("工程：" + request.getString("name"))
+                Text("覆盖会将修改写回打开时选择的原文件。")
+                Text("保存到默认目录会保留原文件，当前工程改用默认工程目录，后续保存也使用该位置。")
+                Text("保存格式为 .ailart，可保留图层、历史和动画。")
+            } },
+            confirmButton = { Column {
+                TextButton(enabled = !busy, onClick = {
+                    if (!busy) { saveDestinationRequest = null; executeProjectSave(request, false) }
+                }) { Text("覆盖原工程") }
+                TextButton(enabled = !busy, onClick = {
+                    if (!busy) { saveDestinationRequest = null; executeProjectSave(request, true) }
+                }) { Text("保存到默认目录") }
+            } },
+            dismissButton = { TextButton(enabled = !busy,
+                onClick = { saveDestinationRequest = null }) { Text("取消") } })
+    }
     if (saveAsDialog) AlertDialog(onDismissRequest = { saveAsDialog = false },
         title = { Text("另存为工程") },
         text = { Column {

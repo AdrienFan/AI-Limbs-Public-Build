@@ -207,7 +207,7 @@ GIF基础导出：255色固定RGB332加透明，alpha<128透明，按1/100秒分
 | --- | --- | --- |
 | 新建 | 设置像素尺寸、名称、透明背景并创建工程 | document.create |
 | 打开、打开最近图像 | 打开本画室工程，或选手机上的 .ailart / PNG / JPEG；最近图像按打开顺序列出 | document.open、document.import、document.open_image、document.recent、document.list |
-| 保存 | 将工程写入私有 .ailart；关联了手机文档时，同步覆盖该文档。同步失败时保留私有稿，标为待同步 | document.save；结果包含 externalUri |
+| 保存 | 菜单保存外部 .ailart 前选择覆盖原文件、保存到默认工程目录或取消；普通图片仅保存 .ailart 工程，结果提示路径。同步失败保留待同步状态 | document.save 契约保留，结果包含 externalUri；菜单 UI 负责确认和外部同步 |
 | 另存为 | 先选手机保存位置，建立新 ID 的工程并切换过去；取消选择则原工程不变 | document.save_as；返回私有 .ailart 路径 |
 | 会话管理 | 命名、查看、恢复或删除当前单工程会话 | session.save、session.list、session.open、session.delete |
 | 导入－打开为无标题图像 | 把外部图像或工程作为独立的未命名工程打开，原工程保留 | document.open_image、document.import、document.rename |
@@ -241,7 +241,7 @@ GIF基础导出：255色固定RGB332加透明，alpha<128透明，按1/100秒分
 
 ## 保存与工程数据
 
-草稿位于 drafts/<id>.json，显式保存位于 documents/<id>.ailart，内含 project.json 和图层引用的 PNG 资源；包括由“复制当前图像”生成并写进 base 的图片图层。保存摘要位于 documents/<id>.sha256，用于判断已有存档是否仍对应当前操作。外部文档 URI 存在 external-links.json；文件选择器返回可持久写入权限时才会关联。私有副本已写入但外部同步失败，会显示待同步状态，菜单“保存”可重试。“另存为”在用户选定位置且写入成功后才切换活动工程；新工程有独立 ID 和操作历史。
+草稿位于 drafts/<id>.json，显式保存位于 documents/<id>.ailart，内含 project.json 和图层引用的 PNG 资源；包括由“复制当前图像”生成并写进 base 的图片图层。保存摘要位于 documents/<id>.sha256，用于判断已有存档是否仍对应当前操作。外部文档 URI 存在 external-links.json；文件选择器返回可持久写入权限时才会关联。工程副本已写入但外部同步失败，会显示待同步状态，菜单“保存”可重新选择覆盖或默认目录。菜单选择默认目录成功后解除原文件关联，保留文档 ID、完整历史与动画，后续保存使用该工程位置。弹窗取消不写入；关闭前保存复用同一确认。普通图片打开后保存为 .ailart 工程，不会覆盖原 PNG、JPEG；图片输出使用导出入口。“另存为”在用户选定位置且写入成功后才切换活动工程；新工程有独立 ID 和操作历史。
 
 最近打开的工程 ID 按顺序写入 recent.json。关闭没有改动的工程仅取消当前指针；关闭时明确选择舍弃会恢复上次保存的私有存档，未曾保存的草稿则删除。外部保存待同步时，界面禁止“舍弃修改”，避免把私有唯一有效稿误当成已同步内容丢掉。增量备份和模板存放在插件私有目录；它们不会自动出现于系统相册或手机 Download。
 
@@ -1470,3 +1470,8 @@ responseMode=receipt的调用线程直接生成省略operations及详细足迹�
 输入区编辑横排正文；竖排、路径、形状内排版、描边等高级效果仍在完成后由原排版器生成。SVG来源在参数窗编辑，可明确转换为正文；配置好的SVG模板点击画布直接放置，不默默转换旧源码。AI继续使用既有text.fonts/create/update/source/geometry入口及参数；例：先text.fonts选fontId，再text.create携documentId、expectedRevision、content、fontId、fontSize、boxWidth、x、y；需要紧凑回执可携responseMode=receipt。
 
 版本0.2.85/versionCode88/applicationId com.ai.limbs.payload.artstudio.v0285，包含0.2.83动画优化和0.2.84 SVG按钮修正。源码及静态核对完成，新增输入身份隔离与字符样式回归源码；未执行本地测试、未推送、未编译。中文组字、光标、触摸变换、页面重建、撤销、保存及跨端冲突均待部署验收，详见docs/TODO/art-studio-inline-text/。
+
+
+## 0.2.86 保存位置确认
+
+外部工程的菜单保存和关闭前保存统一确认目标；事务检查工程 ID、revision 和外部关联，避免延迟弹窗保存或关闭其他工程。内部 document.save 能力契约保持不变。源码与静态核对完成；未推送、未进行本地或云端编译，部署验收见 docs/TODO/art-studio-save-destination/README.md。

@@ -2021,6 +2021,36 @@ internal class ArtStore(private val root: File) {
 
     fun save(): JSONObject = locked { saveDocument(loadCurrent()) }
 
+    /** The UI chooses the destination before any write. Keep validation, file sync and close
+     * under the document lock so a delayed prompt cannot save or close a different project. */
+    fun saveFromUi(request: JSONObject, defaultDirectory: Boolean, closeAfter: Boolean,
+                   writeExternal: (JSONObject) -> Unit): JSONObject = locked {
+        val doc = loadCurrent()
+        val id = doc.getString("id")
+        require(id == request.getString("documentId") &&
+            doc.getJSONArray("operations").length() == request.getInt("expectedRevision")) {
+            "工程已切换或更新，请重新选择保存位置"
+        }
+        val uri = externalLink(id)?.getString("uri").orEmpty()
+        require(uri == request.getString("externalUri")) { "原文件关联已改变，请重新保存" }
+        val destination = if (defaultDirectory)
+            File(saveDirectories.outputDirectory("documents"), "$id.ailart") else archive(id)
+        val result = saveDocument(doc, destination)
+        if (defaultDirectory && uri.isNotEmpty()) {
+            // Explicitly choosing a local project severs the origin link; subsequent saves
+            // must not unexpectedly overwrite a file the user chose to preserve.
+            val links = JSONObject(externalLinks.readText())
+            links.remove(id)
+            atomic(externalLinks, links.toString())
+            result.put("externalUri", "")
+        } else if (uri.isNotEmpty()) {
+            writeExternal(result)
+            markExternalSynced(id)
+        }
+        if (closeAfter) require(pointer.delete()) { "工程已保存，但无法关闭工程" }
+        result.put("closed", closeAfter).put("savedToDefault", defaultDirectory)
+    }
+
     // Save As changes the active document identity; the previous document stays available.
     fun saveAs(name: String, activate: Boolean = true, actor: String = "AWEI"): JSONObject = locked {
         val doc = copyCurrent(name, activate, actor)
@@ -2249,9 +2279,8 @@ internal class ArtStore(private val root: File) {
         atomic(recentIndex, entries.toString())
     }
 
-    private fun saveDocument(doc: JSONObject): JSONObject {
+    private fun saveDocument(doc: JSONObject, destination: File = archive(doc.getString("id"))): JSONObject {
         val id = doc.getString("id")
-        val destination = archive(id)
         saveDirectories.prepare(requireNotNull(destination.parentFile))
         writeArchive(doc, destination)
         saveDirectories.rememberProject(id, destination)

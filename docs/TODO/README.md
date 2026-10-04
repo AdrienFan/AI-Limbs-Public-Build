@@ -62,3 +62,6 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [动画复制与提交反馈](art-studio-animation-feedback/index.md)：0.2.83先减少重复复制/历史投影与反馈锁，再补全部批量目标帧总览；运行效果待部署验收。
 
 - [文字参数与画布输入](art-studio-inline-text/index.md)：0.2.85源码与静态核对完成，原生输入及参数浮窗的部署验收待进行。
+
+
+- [工程保存位置确认](art-studio-save-destination/README.md)：0.2.86 菜单与关闭前保存统一确认，静态核对完成，部署验收待进行。
