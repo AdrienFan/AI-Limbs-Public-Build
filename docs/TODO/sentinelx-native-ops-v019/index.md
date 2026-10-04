@@ -53,3 +53,12 @@ status: ready-for-ci
 - [FOUND] 当前 Ubuntu 非 systemd init，service/restart 无法忠实映射。
 - [FIXED] 0.1.11 不再 advertise service/restart。
 - [NEXT] 云端编译 0.1.11 后部署复测。
+
+
+## 0.1.12 background job 收口
+- [FOUND] 0.1.11 background=true 脚本实际执行但 Hub 等不到 job_completed，最终 orphaned。
+- [ROOT CAUSE] 上游 Agent 在 WebSocket transport 层拦截 background 请求，立即 ack running，异步执行后发 event(kind=job_completed)；Android receiver 之前没有这一协议层。
+- [FIXED] exec/script_run background 请求增加 running ack + job_completed event。
+- [FIXED] 完成事件在普通 WebSocket 重连期间以内存队列保留，并于 welcome/ping 重放。
+- [TEST] 新增成功/失败 job_completed schema 单测。
+- [NEXT] 云端构建 0.1.12，部署后只复测 background notifications。

@@ -1,5 +1,7 @@
 package com.ai.limbs.extensions.sentinelx.runtime
 
+import java.time.Instant
+
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -72,6 +74,55 @@ class SentinelXOfficialOpsTest {
     fun unsupportedServiceOpsAreNotAdvertised() {
         assertFalse(SentinelXOfficialOps.NATIVE_OPS.contains("service"))
         assertFalse(SentinelXOfficialOps.NATIVE_OPS.contains("restart"))
+    }
+
+    @Test
+    fun backgroundCompletionEventMatchesSentinelXJobSchema() {
+        val started = Instant.parse("2026-10-04T00:00:00Z")
+        val finished = Instant.parse("2026-10-04T00:00:01Z")
+        val response = SentinelXProtocol.success(
+            "req",
+            org.json.JSONObject()
+                .put("ok", true)
+                .put("output", "done")
+                .put("returncode", 0)
+        )
+        val event = buildSentinelXJobCompletedEvent(
+            jobId = "job_test",
+            op = "script_run",
+            hostId = "host_test",
+            response = response,
+            startedAt = started,
+            finishedAt = finished
+        )
+        assertEquals("event", event.getString("type"))
+        assertEquals("job_completed", event.getString("kind"))
+        val data = event.getJSONObject("data")
+        assertEquals("job_test", data.getString("job_id"))
+        assertEquals("script_run", data.getString("tool"))
+        assertEquals("host_test", data.getString("host"))
+        assertEquals("succeeded", data.getString("status"))
+        assertEquals(0, data.getInt("exit_code"))
+        assertEquals("done", data.getString("output"))
+        assertFalse(data.getBoolean("output_truncated"))
+        assertTrue(data.isNull("error"))
+    }
+
+    @Test
+    fun backgroundCompletionEventMapsFailure() {
+        val response = SentinelXProtocol.failure("req", "permission_denied", "blocked")
+        val event = buildSentinelXJobCompletedEvent(
+            jobId = "job_failed",
+            op = "script_run",
+            hostId = "host_test",
+            response = response,
+            startedAt = Instant.parse("2026-10-04T00:00:00Z"),
+            finishedAt = Instant.parse("2026-10-04T00:00:02Z")
+        )
+        val data = event.getJSONObject("data")
+        assertEquals("failed", data.getString("status"))
+        assertTrue(data.isNull("exit_code"))
+        assertEquals("blocked", data.getString("error"))
     }
 
     @Test

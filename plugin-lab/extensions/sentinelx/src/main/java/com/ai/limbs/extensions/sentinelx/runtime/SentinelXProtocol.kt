@@ -15,7 +15,7 @@ data class SentinelXBridgeRequest(
 
 internal object SentinelXProtocol {
     const val PROTOCOL_VERSION = "1.10.0"
-    const val AGENT_VERSION = "0.1.11"
+    const val AGENT_VERSION = "0.1.12"
     const val BRIDGE_PREFIX = "AIL_SENTINEL_BRIDGE_V1 "
 
     private val supportedOps =

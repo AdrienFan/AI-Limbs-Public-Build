@@ -87,3 +87,10 @@ script_run 的 background=true 也改为保持上游语义：后台调度由 Sen
 同时确认 SentinelX Hub 的 background=true 已经负责 job/notifications；0.1.10 接收端再内部启动后台 process 会造成双重后台语义，旧测试 job 最终变成 orphaned。0.1.11 只复用同步 System Environment command，让 Hub 自己负责后台调度和通知。
 
 当前 Ubuntu 子环境 systemctl 存在但 is-system-running=offline，并非 systemd init 环境，因此 service/restart 不能忠实工作。0.1.11 从 advertised native ops 中移除这两个能力，而不是继续宣告一个必失败的接口。
+
+
+### 0.1.12：补齐官方 background job 完成事件
+
+0.1.11 部署回归确认 read/list/search/edit/script_run、not_found 错误码和空 error 语义都已正常；service/restart 也已不再宣告。最后一个失败点是 SentinelX Hub 的 background=true：Hub 会等待 Agent 发送 kind=job_completed 的 event，而 Android 接收端 0.1.11 仍只发送普通 response，因此脚本虽已执行，Hub 最终仍把 job 标成 orphaned。
+
+0.1.12 在 TransportClient 层按上游 Agent 的 async-jobs 协议补齐：background exec/script_run 先立即 ack {status:running, job_id, tool, host}，随后在 IO coroutine 中执行原请求，完成后发出 job_completed event，携带 status/exit_code/output/error/started_at/finished_at/duration_s/output_truncated。未成功发送的完成事件保留在接收端内存并在 welcome/ping 时重放，避免普通 WebSocket 重连直接丢失结果。脚本本身仍由既有 System Environment command 执行，接收端不另造进程体系。
