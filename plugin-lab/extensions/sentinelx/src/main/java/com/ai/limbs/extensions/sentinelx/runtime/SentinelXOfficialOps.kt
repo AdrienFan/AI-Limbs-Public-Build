@@ -587,7 +587,7 @@ for raw in sys.stdin:
 
     private fun requireSuccess(result: JSONObject, defaultCode: String) {
         val success = !result.has("success") || result.optBoolean("success", false)
-        if (success && !result.has("error")) return
+        if (success && bridgeErrorText(result) == null) return
         val code = result.optString("error_code")
             .ifBlank { result.optJSONObject("execution_policy")?.optString("reason_code").orEmpty() }
             .ifBlank { inferErrorCode(errorMessage(result), defaultCode) }
@@ -602,9 +602,9 @@ for raw in sys.stdin:
     }
 
     private fun errorMessage(result: JSONObject): String =
-        result.optString("error").takeIf { it.isNotBlank() }
+        bridgeErrorText(result)
             ?: result.optJSONObject("result")?.optString("value").takeIf { !it.isNullOrBlank() }
-            ?: result.optString("reason").takeIf { it.isNotBlank() }
+            ?: result.optString("reason").takeIf { it.isNotBlank() && it != "null" }
             ?: "AI Limbs capability returned an unsuccessful result"
 
     private fun inferErrorCode(message: String, defaultCode: String): String = when {
@@ -772,6 +772,14 @@ internal object SentinelXEnvironmentResolver {
             "note",
             "Explicit target/environment wins. Standard SentinelX tools do not expose that field, so absolute Linux namespaces fall back to the same prefix mapping used by the AI Limbs RDC bridge."
         )
+}
+
+internal fun bridgeErrorText(result: JSONObject): String? {
+    val raw = result.opt("error")
+    if (raw == null || raw == JSONObject.NULL) return null
+    return raw.toString()
+        .trim()
+        .takeIf { it.isNotEmpty() && !it.equals("null", ignoreCase = true) }
 }
 
 internal fun requiredString(payload: JSONObject, name: String, allowEmpty: Boolean = false): String {

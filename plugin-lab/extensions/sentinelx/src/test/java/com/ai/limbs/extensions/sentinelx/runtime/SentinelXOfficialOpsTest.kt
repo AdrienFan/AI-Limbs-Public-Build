@@ -50,6 +50,14 @@ class SentinelXOfficialOpsTest {
     }
 
     @Test
+    fun emptyBridgeErrorFieldDoesNotMeanFailure() {
+        assertEquals(null, bridgeErrorText(org.json.JSONObject().put("error", "")))
+        assertEquals(null, bridgeErrorText(org.json.JSONObject().put("error", org.json.JSONObject.NULL)))
+        assertEquals(null, bridgeErrorText(org.json.JSONObject().put("error", "null")))
+        assertEquals("boom", bridgeErrorText(org.json.JSONObject().put("error", "boom")))
+    }
+
+    @Test
     fun protocolPublishesNativeOpsAndTargets() {
         val config = SentinelXBridgeConfig(
             configured = true,

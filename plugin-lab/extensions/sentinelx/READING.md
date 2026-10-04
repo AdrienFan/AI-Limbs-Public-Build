@@ -65,3 +65,8 @@ for (const attachment of data.media_attachments || []) {
 edit 覆盖 replace、regex、replace-block、append、prepend、write，并保留 count、multiline、dotall、interpret_escapes、dry_run、allow_no_change、create 的核心语义。sudo、validator、validator_preset、backup_dir、diff 目前明确返回 unsupported_option，禁止静默降级。script_run 同样对当前无法忠实映射的 sudo、cleanup=false、filename 和通知参数明确失败。
 
 新增回归测试覆盖 Android/Linux 路由、显式 ubuntu target、glob、文本替换、UTF-8 截断和 capability 声明。版本同步升到 0.1.9 / versionCode 10 / applicationId v019。最终编译与签名仍走 sentinelx 专用 GitHub Actions，避免在设备本地编译。
+
+
+## v0.1.10 实机回归修正
+
+0.1.9 首次部署后，官方原生 op 已能进入 Linux/Ubuntu，但 AI Limbs Host/System Environment 成功响应会保留空字符串 error 字段。0.1.9 适配层把“存在 error 字段”误判成失败，导致 read/list/search/script_run 对实际成功结果返回 ok=false / error=null。0.1.10 改为只有非空、非 JSON null、非字符串 null 的 error 才视为失败，并新增回归测试。

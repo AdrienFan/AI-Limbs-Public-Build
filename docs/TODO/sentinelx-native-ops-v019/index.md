@@ -30,3 +30,11 @@ status: ready-for-ci
 - 不添加 silent fallback；能力或参数无法忠实映射时返回明确错误。
 - RDC 的持续交互 terminal/session 不在本轮复制；SentinelX 只复用已有后台 process 能力。
 - 源码身份以 `ail-source dev "SentinelX"` 为准。
+
+
+## 0.1.9 实机部署回归
+- [FOUND] native op 已进入 Linux/Ubuntu；read/list/search/script_run 不再 unsupported。
+- [FOUND] AI Limbs 成功响应仍含空 error 字段，0.1.9 误把字段存在当成失败，外层表现为 ok=false / error=null。
+- [FIXED IN SOURCE] 仅非空、非 JSON null、非字符串 null 的 error 判失败。
+- [FIXED IN SOURCE] 新增空 error 回归测试；补丁版本升到 0.1.10。
+- [PENDING CI/DEPLOY] 编译并部署 0.1.10 后重跑 read/list/search/script_run/edit。
