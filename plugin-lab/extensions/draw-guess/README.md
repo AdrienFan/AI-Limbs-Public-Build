@@ -14,22 +14,22 @@
 
 ## 兰儿入口
 
-所有能力属于 `plugin.art.studio.draw_guess`。`ready` 与 `view` 都返回极简规则、当前阶段、revision、身份和allowed下一步；上下文中断后先view。修改动作使用本次view返回的revision，不猜参数或直接调用普通工程绘画接口。
+安装身份为 `plugin.art.studio.draw_guess`；能力按Child Runtime准入规则属于 `plugin.draw_guess.*`。`ready` 与 `view` 都返回极简规则、当前阶段、revision、身份和allowed下一步；上下文中断后先view。修改动作使用本次view返回的revision，不猜参数或直接调用普通工程绘画接口。
 
 ```json
-{"capability":"plugin.art.studio.draw_guess.ready","args":{}}
-{"capability":"plugin.art.studio.draw_guess.view","args":{}}
-{"capability":"plugin.art.studio.draw_guess.roll","args":{"revision":2}}
-{"capability":"plugin.art.studio.draw_guess.confirm_dice","args":{"revision":3}}
-{"capability":"plugin.art.studio.draw_guess.choose_order","args":{"revision":5,"drawFirst":true}}
-{"capability":"plugin.art.studio.draw_guess.seal_word","args":{"revision":6,"word":"自行车"}}
-{"capability":"plugin.art.studio.draw_guess.seal_hints","args":{"revision":7,"hint1":"交通工具","hint2":"人力驱动"}}
-{"capability":"plugin.art.studio.draw_guess.paint","args":{"revision":8,"type":"STROKE_ADD","params":{"tool":"ink","color":"#FF245364","width":6,"points":[[40,50],[180,130]]}}}
-{"capability":"plugin.art.studio.draw_guess.preview","args":{"revision":9}}
-{"capability":"plugin.art.studio.draw_guess.finish","args":{"revision":9}}
-{"capability":"plugin.art.studio.draw_guess.picture","args":{}}
-{"capability":"plugin.art.studio.draw_guess.guess","args":{"revision":10,"answer":"自行车"}}
-{"capability":"plugin.art.studio.draw_guess.exit","args":{"revision":11}}
+{"capability":"plugin.draw_guess.ready","args":{}}
+{"capability":"plugin.draw_guess.view","args":{}}
+{"capability":"plugin.draw_guess.roll","args":{"revision":2}}
+{"capability":"plugin.draw_guess.confirm_dice","args":{"revision":3}}
+{"capability":"plugin.draw_guess.choose_order","args":{"revision":5,"drawFirst":true}}
+{"capability":"plugin.draw_guess.seal_word","args":{"revision":6,"word":"自行车"}}
+{"capability":"plugin.draw_guess.seal_hints","args":{"revision":7,"hint1":"交通工具","hint2":"人力驱动"}}
+{"capability":"plugin.draw_guess.paint","args":{"revision":8,"type":"STROKE_ADD","params":{"tool":"ink","color":"#FF245364","width":6,"points":[[40,50],[180,130]]}}}
+{"capability":"plugin.draw_guess.preview","args":{"revision":9}}
+{"capability":"plugin.draw_guess.finish","args":{"revision":9}}
+{"capability":"plugin.draw_guess.picture","args":{}}
+{"capability":"plugin.draw_guess.guess","args":{"revision":10,"answer":"自行车"}}
+{"capability":"plugin.draw_guess.exit","args":{"revision":11}}
 ```
 
 以上revision只是占位示例，替换为当前值。`canvas`可在兰儿自己的绘画阶段读当前画布；`paint`接受STROKE_ADD、SHAPE_CREATE、SHAPE_DELETE、LAYER_CREATE、LAYER_SELECT，参数遵循画室相应操作。`preview`附实际图像；`picture`仅在兰儿猜题阶段附待猜图。猜题时不使用普通画室工程、足迹、私有输入框或外部日志取答案。
@@ -39,3 +39,7 @@
 游戏核心只有内存状态机，手机和兰儿各有固定身份入口。画室提供通用互动业务binding、私有临时画布endpoint与动态表单浮窗；子插件不借用父插件能力身份，也不申请宿主能力。老菜单扩展绑定保持兼容。
 
 云端工作流 `draw-guess-build.yml` 测试游戏、编译APK、使用现有Child Ed25519签名身份生成 `.ailx`，记录源码证明并上传。配套画室由原 `art-studio-build.yml` 测试和构建。
+
+## 0.1.1 启用修复
+
+修正能力命名空间：运行时要求 `plugin.${extensionId最后一段}.*`，不能直接把完整extension_id作为能力前缀。所有能力、首次进入发现文档和极简示例统一使用 `plugin.draw_guess.*`；安装身份和父插件目标保持不变。新增入口挂载回归测试，按实际运行时命名校验注册全部14个能力并验证双方准备入口。

@@ -8,6 +8,8 @@ import org.json.JSONObject
 import java.util.function.Consumer
 
 internal const val GAME_ID = "plugin.art.studio.draw_guess"
+// Child Runtime scopes capability names to the final extension-id segment.
+internal val GAME_CAPABILITIES = "plugin.${GAME_ID.substringAfterLast('.')}"
 
 class DrawGuessEntry : ChildExtensionEntry {
     override suspend fun mount(host: ChildExtensionHost): ChildExtensionHandle {
@@ -63,7 +65,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                         if (key == "revision") "先读取view，使用当前revision" else key))
                     required.put(key); specs += InProcessCapabilityParameterSpec(key, type, key, true)
                 }
-                handles += host.registerCapability(InProcessCapabilitySpec(id = "$GAME_ID.$event",
+                handles += host.registerCapability(InProcessCapabilitySpec(id = "$GAME_CAPABILITIES.$event",
                     displayName = requireNotNull(titles[event]),
                     description = "你画我猜：${titles[event]}。仅操作兰儿身份；先view，按allowed执行，修改时带当前revision。" +
                         if (event == "ready") GAME_RULES else "猜题阶段用picture取图，不能读取对方题目或绘画记录。",
@@ -87,7 +89,7 @@ class DrawGuessEntry : ChildExtensionEntry {
             }
             handles += host.publishAiIngressDiscovery(ChildAiIngressDiscovery("art_studio.draw_guess.v1",
                 JSONObject().put("name", "你画我猜").put("rules", GAME_RULES)
-                    .put("start", "$GAME_ID.ready").put("view", "$GAME_ID.view")
+                    .put("start", "$GAME_CAPABILITIES.ready").put("view", "$GAME_CAPABILITIES.view")
                     .put("instruction", "Use only LANER game capabilities. Read view after context changes; never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
                     .toString()))
             host.publish(mapOf("schema" to 1, "menu" to menu, "panel" to panel,
