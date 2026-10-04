@@ -2754,9 +2754,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                                                     }
                                                     RightPane.FOOTPRINTS -> {
                                                         Box(Modifier.fillMaxWidth().height(activePaneBodyHeight).clipToBounds()) {
-                                                            StudioFootprints(current,busy) { id,revision ->
-                                                                perform {store.historyJump("AWEI",id,revision)}
-                                                            }
+                                                            StudioFootprints(current,busy,
+                                                                onGoto={id,revision->perform {store.historyJump("AWEI",id,revision)}},
+                                                                onDelete={documentId,id,revision->perform(renderEditResult=true) {
+                                                                    store.historyDelete("AWEI",JSONObject().put("documentId",documentId)
+                                                                        .put("id",id).put("expectedRevision",revision))
+                                                                }})
                                                         }
                                                     }
                                                 }

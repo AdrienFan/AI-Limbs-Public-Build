@@ -2565,6 +2565,7 @@ internal class ArtStore(private val root: File) {
         val state = replay(doc)
         val id = doc.getString("id")
         val history = ArtHistory.describe(doc, historyDetails)
+        if(historyDetails)ArtFootprintDelete.project(doc,state,history)
         return JSONObject().put("id", doc.getString("id"))
             .put("state", state).put("revision", doc.getJSONArray("operations").length())
             .put("timelinePosition", history.getInt("position"))
@@ -3036,6 +3037,12 @@ internal class ArtStore(private val root: File) {
                 val index = (0 until strokes.length()).firstOrNull { strokes.getJSONObject(it).getString("id") == p.getString("strokeId") }
                     ?: error("笔画不存在")
                 strokes.remove(index)
+                layer.optJSONArray("contentOrder")?.let {order->
+                    for(i in order.length()-1 downTo 0) {
+                        val item=order.getJSONObject(i)
+                        if(item.getString("kind")=="stroke"&&item.getString("id")==p.getString("strokeId"))order.remove(i)
+                    }
+                }
             }
             "SVG_SELECT" -> {
                 val layer=find(p.getString("layerId")).second;val ids=ArtShapes.ids(p.getJSONArray("ids"))
@@ -3382,7 +3389,22 @@ internal class ArtStore(private val root: File) {
         apply(actor,type,p)
     }
 
-    fun historyTimeline(): JSONObject = locked { ArtHistory.describe(loadCurrent()) }
+    fun historyTimeline(): JSONObject = locked {
+        val doc=loadCurrent()
+        ArtFootprintDelete.project(doc,replay(doc),ArtHistory.describe(doc))
+    }
+
+    fun historyDelete(actor:String,p:JSONObject):JSONObject = locked {
+        val doc=loadCurrent()
+        require(p.getString("documentId")==doc.getString("id")) {"工程已切换，请重新读取足迹"}
+        require(p.getInt("expectedRevision")==doc.getJSONArray("operations").length()) {"工程已改变，请刷新足迹后重试"}
+        val target=ArtFootprintDelete.resolve(doc,replay(doc),p.getString("id"))
+        val parameters=target.getJSONObject("parameters")
+            .put("documentId",doc.getString("id")).put("expectedRevision",p.getInt("expectedRevision"))
+            .put("footprintId",p.getString("id"))
+        // Append a normal, undoable deletion. Later steps and their dependencies remain applied.
+        apply(actor,target.getString("type"),parameters).put("deletedFootprintId",p.getString("id"))
+    }
     fun historyOperations(): JSONObject = locked {
         val doc=loadCurrent()
         JSONObject().put("operations",doc.getJSONArray("operations")).put("documentId",doc.getString("id"))

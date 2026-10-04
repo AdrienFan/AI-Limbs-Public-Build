@@ -415,6 +415,7 @@ class ArtStudioEntry : InProcessPluginEntry {
         capability("history.goto", "切换到指定足迹状态", write) { p ->
             store.historyJump("LANER", p.getString("id"), p.getInt("expectedRevision"))
         }
+        capability("history.delete", "仅删除足迹对应的独立绘制对象", write) {p->store.historyDelete("LANER",p)}
         capability("layer.create", "创建画室绘画图层", write) { p ->
             p.put("id", UUID.randomUUID().toString()); store.apply("LANER", "LAYER_CREATE", p)
         }
@@ -931,6 +932,7 @@ internal fun parametersFor(name: String): List<InProcessCapabilityParameterSpec>
         "animation.preview" -> listOf(p("documentId"),p("expectedRevision","integer"),p("frame","integer"),p("maxEdge","integer",true))
         "animation.export" -> listOf(p("documentId"),p("expectedRevision","integer"),p("maxEdge","integer",true))
         "history.goto" -> listOf(id, p("expectedRevision", "integer"))
+        "history.delete" -> listOf(p("documentId"),id,p("expectedRevision","integer"))
         "history.revert_actor_operations" -> listOf(id)
         "storage.set_directory" -> listOf(p("directory"))
         "canvas.region" -> listOf(p("x", "integer"), p("y", "integer"), p("width", "integer"),

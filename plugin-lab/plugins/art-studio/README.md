@@ -1,3 +1,11 @@
+# 画室 0.2.88
+
+足迹列表增加独立勾选与底部固定操作条，右下角垃圾桶仅删除所选记录对应的独立笔画/矢量绘制对象。勾选不跳转历史；原行点击仍保留历史跳转。删除追加普通 STROKE_ERASE / SHAPE_DELETE 事件，后续构造保持，撤销可恢复，原足迹保留用于审计。
+
+兰儿入口 `plugin.art.studio.history.delete` 使用 `history.timeline` 同次返回的 documentId、revision 和 canDelete=true 行的 id，支持 receipt 与 requestId 提交查询。静态栅格、独立矢量/书法/徒手/几何绘制可删除；已删除、合并像素、像素移动/变形依赖、路径接续/合成、锁定、未应用记录和非当前动画关键帧显示拒绝原因。动画仅修改当前对应原关键帧，其他关键帧不动。
+
+版本 0.2.88 / versionCode 91 / 独立 applicationId com.ai.limbs.payload.artstudio.v0288。源码和静态核对完成；没有本地编译或执行测试。云端构建与实机验收待安排。详见 docs/TODO/art-studio-footprint-delete/index.md。
+
 # 画室 0.2.87
 
 文件菜单“导出”和“导出更多选项”接入 PNG、JPEG、无损 WebP、24位 BMP、单帧 GIF、HEIC/HEIF、AVIF。工程存在真实动画轨道时明确选择时间轴当前帧或完整 GIF；完整 GIF 复用时间轴范围/FPS/循环与尺寸限制，当前帧可裁切和缩放。文件选择器使用实际格式的 MIME/扩展名，保留默认目录与自选位置。

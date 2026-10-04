@@ -67,3 +67,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [工程保存位置确认](art-studio-save-destination/README.md)：0.2.86 菜单与关闭前保存统一确认，静态核对完成，部署验收待进行。
 
 - [图片格式与动画导出](art-studio-export-formats/index.md)：0.2.87源码与静态核对；云端构建和设备编码验收待安排。
+
+- [足迹单笔删除](art-studio-footprint-delete/index.md)：0.2.88固定删除栏与兰儿入口，静态核对完成；云端和实机验收待安排。

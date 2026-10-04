@@ -8,11 +8,15 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
@@ -23,7 +27,7 @@ import java.util.Locale
 
 /** Rows are lightweight projections, not copies of native geometry or operation payloads. */
 @Composable internal fun StudioFootprints(snapshot: JSONObject, busy: Boolean,
-    onGoto: (String, Int) -> Unit) {
+    onGoto: (String, Int) -> Unit, onDelete: (String, String, Int) -> Unit) {
     val documentId=snapshot.getString("id")
     val timeline=snapshot.getJSONArray("timeline")
     val position=snapshot.getInt("timelinePosition")
@@ -34,6 +38,11 @@ import java.util.Locale
     val timeFormat=remember {SimpleDateFormat("MM-dd HH:mm:ss",Locale.getDefault())}
     var detail by remember(documentId) {mutableStateOf<JSONObject?>(null)}
     var showBranches by remember(documentId) {mutableStateOf(false)}
+    var selectedId by remember(documentId) {mutableStateOf<String?>(null)}
+    val selectedIndex=(0 until timeline.length()).firstOrNull {
+        timeline.getJSONObject(it).getString("id")==selectedId
+    }
+    val selected=selectedIndex?.let {timeline.getJSONObject(it)}
     var initial by remember(documentId) {mutableStateOf(true)}
     var previousPosition by remember(documentId) {mutableIntStateOf(position)}
     LaunchedEffect(documentId,revision) {
@@ -42,6 +51,7 @@ import java.util.Locale
         if(following&&!scroll.isScrollInProgress)scroll.scrollToItem(position)
         previousPosition=position
         initial=false
+        if(selected==null)selectedId=null
     }
     fun actor(step: JSONObject)=when(val value=step.getString("actor")) {
         "AWEI"->"阿伟";"LANER"->"兰儿";else->value
@@ -66,11 +76,20 @@ import java.util.Locale
                 val current=index==position
                 val future=index>position
                 val label=step.getString("label")
+                val selectedForDelete=step.getString("id")==selectedId
                 Row(Modifier.fillMaxWidth()
-                    .background(if(current)MaterialTheme.colorScheme.surfaceVariant else MaterialTheme.colorScheme.surface)
+                    .background(when {
+                        selectedForDelete->MaterialTheme.colorScheme.secondaryContainer
+                        current->MaterialTheme.colorScheme.surfaceVariant
+                        else->MaterialTheme.colorScheme.surface
+                    })
                     .clickable(enabled=!busy&&!current,onClickLabel="切换到第$index 步：$label") {
                         onGoto(step.getString("id"),revision)
                     }.padding(horizontal=8.dp,vertical=6.dp),verticalAlignment=Alignment.CenterVertically) {
+                    // Checkbox consumes its own tap; selecting deletion must never invoke history.goto.
+                    Checkbox(checked=selectedForDelete,enabled=!busy&&index>0,
+                        onCheckedChange={checked->selectedId=if(checked)step.getString("id") else null},
+                        modifier=Modifier.size(40.dp).semantics {contentDescription="选中第$index 步供单笔删除：$label"})
                     Text(if(current)"●" else "○",
                         color=if(current)MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
                         modifier=Modifier.padding(end=6.dp))
@@ -90,6 +109,24 @@ import java.util.Locale
                 }
                 HorizontalDivider()
             }
+        }
+        HorizontalDivider()
+        Row(Modifier.fillMaxWidth().padding(start=8.dp,end=2.dp,top=2.dp,bottom=2.dp),
+            verticalAlignment=Alignment.CenterVertically) {
+            Column(Modifier.weight(1f)) {
+                Text(if(selected==null)"勾选一笔，仅删除该笔" else "选中第$selectedIndex 步 · ${selected.getString("label")}",
+                    maxLines=1,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.labelSmall)
+                Text(if(selected==null)"点击记录仍可回到历史步骤" else if(selected.getBoolean("canDelete"))
+                    "保留其他构造，可撤销" else selected.getString("deleteReason"),
+                    maxLines=2,overflow=TextOverflow.Ellipsis,style=MaterialTheme.typography.labelSmall)
+            }
+            IconButton(enabled=!busy&&selected?.getBoolean("canDelete")==true,onClick={
+                val id=requireNotNull(selectedId)
+                onDelete(documentId,id,revision)
+                selectedId=null
+            }) {Icon(Icons.Default.Delete,contentDescription="仅删除选中的一笔",
+                tint=if(!busy&&selected?.getBoolean("canDelete")==true)MaterialTheme.colorScheme.error
+                    else MaterialTheme.colorScheme.onSurface.copy(alpha=.38f))}
         }
     }
     if(showBranches)AlertDialog(onDismissRequest={showBranches=false},
