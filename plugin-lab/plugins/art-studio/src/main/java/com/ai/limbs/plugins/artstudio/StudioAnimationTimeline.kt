@@ -17,10 +17,13 @@ import kotlin.math.ceil
 import kotlinx.coroutines.*
 import org.json.JSONObject
 
-internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
+internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int,
+    val borrowed:StudioFrameCache.Lease<StudioRenderFrame>?=null) {
+    fun release() { if(borrowed!=null)borrowed.close() else bitmap.recycle() }
+}
 
 /** Render one frame at a time; slow devices drop preview frames, never queue an unbounded backlog. */
-@Composable internal fun StudioAnimationPlayback(store:ArtStore,snapshot:JSONObject?,playing:Boolean,
+@Composable internal fun StudioAnimationPlayback(store:ArtStore,frames:StudioFrameCache<StudioRenderFrame>,snapshot:JSONObject?,playing:Boolean,
     onStop:(Int)->Unit,onError:(Throwable)->Unit):StudioAnimationFrame? {
     var shown by remember {mutableStateOf<StudioAnimationFrame?>(null)}
     val stop by rememberUpdatedState(onStop)
@@ -34,7 +37,17 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
         val origin=SystemClock.elapsedRealtime()
         var last=-1
         var lastExposure:List<Int>?=null
+        var ready:StudioFrameCache.Lease<StudioRenderFrame>?=null
         try {
+            ready=frames.acquire()
+            val completed=ready?.frame
+            val usable=completed!=null && completed.first.getString("id")==snapshot.getString("id") &&
+                completed.first.getInt("revision")==snapshot.getInt("revision") &&
+                ArtEditorPixels.playbackCanBorrow(snapshot)
+            if(!usable) {ready?.close();ready=null}
+            val initialExposure=ArtAnimation.layers(snapshot.getJSONObject("state")).map {
+                ArtAnimation.active(it,cfg.getInt("current"))?.getInt("time") ?: -1
+            }
             while(isActive) {
                 val ticks=((SystemClock.elapsedRealtime()-origin)*cfg.getInt("fps")/1000).toInt()
                 val step=offset+ticks
@@ -46,10 +59,15 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
                     }
                     val held=shown
                     if(held!=null && exposure==lastExposure) {
-                        shown=StudioAnimationFrame(held.bitmap,time)
+                        shown=held.copy(time=time)
                         last=time
+                    } else if(held==null && ready!=null && exposure==initialExposure) {
+                        // Playback of a static/held cel starts from the already displayed pixels.
+                        shown=StudioAnimationFrame(requireNotNull(ready).frame.second,time,ready)
+                        ready=null;last=time;lastExposure=exposure
                     } else {
-                    val retained=if(shown==null)1L else 2L
+                    ready?.close();ready=null
+                    val retained=if(shown==null || shown?.borrowed!=null)1L else 2L
                     withContext(Dispatchers.IO) {
                         val frame=ArtAnimation.frame(snapshot,time)
                         val state=frame.getJSONObject("state");val w=state.getInt("width");val h=state.getInt("height")
@@ -59,7 +77,7 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
                     }
                     ensureActive()
                     val next=StudioAnimationFrame(requireNotNull(pending),time)
-                    val old=shown;shown=next;pending=null;old?.bitmap?.recycle()
+                    val old=shown;shown=next;pending=null;old?.release()
                     last=time
                     lastExposure=exposure
                     }
@@ -68,7 +86,7 @@ internal data class StudioAnimationFrame(val bitmap:Bitmap,val time:Int)
             }
         } catch(cancel:CancellationException) {throw cancel}
         catch(failure:Throwable) {error(failure)}
-        finally {pending?.recycle();shown?.bitmap?.recycle();shown=null}
+        finally {pending?.recycle();shown?.release();shown=null;ready?.close()}
     }
     return shown
 }

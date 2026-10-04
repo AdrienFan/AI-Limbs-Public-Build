@@ -121,6 +121,9 @@ internal class ArtStore(private val root: File) {
         return captureViewSource(snapshot)
     }
 
+    // Pin the supplied immutable preview snapshot, including assets that belong to its displayed revision.
+    fun capturePreviewSource(snapshot: JSONObject): StudioRenderSource = locked { captureViewSource(snapshot) }
+
     private fun captureViewSource(snapshot:JSONObject?):StudioRenderSource {
         val ids=linkedSetOf<String>()
         snapshot?.getJSONObject("state")?.let {state ->

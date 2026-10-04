@@ -5,27 +5,46 @@ import android.util.Base64
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class StudioRenderFrame(val first:JSONObject,val second:Bitmap,val third:String,
-    val fourth:Map<String,Bitmap>) {
+internal class StudioRenderFrame private constructor(val first: JSONObject, val third: String,
+    private val pixelKey: String,
+    private val pixels: StudioSharedResource<Pair<Bitmap, Map<String, Bitmap>>>) : AutoCloseable {
+    val second: Bitmap get() = pixels.value.first
+    val fourth: Map<String, Bitmap> get() = pixels.value.second
+    private val closed = java.util.concurrent.atomic.AtomicBoolean(false)
+    override fun close() {
+        if (closed.compareAndSet(false, true)) pixels.release()
+    }
     companion object {
-        fun render(store:ArtStore,source:StudioRenderSource):StudioRenderFrame? {
-            val snapshot=source.snapshot ?: return null
-            val started=System.nanoTime()
+        fun render(store: ArtStore, source: StudioRenderSource,
+            previous: StudioRenderFrame? = null): StudioRenderFrame? {
+            val snapshot = source.snapshot ?: return null
+            val started = System.nanoTime()
+            val key = ArtEditorPixels.key(snapshot)
+            if (previous != null && key == previous.pixelKey) {
+                // A new revision still publishes its new snapshot/marker. Only immutable pixels are shared.
+                val frame = StudioRenderFrame(snapshot, source.revisionMarker, key, previous.pixels.retain())
+                android.util.Log.d("ArtStudioPerf", "phase=editorPixels reused=true revision=${snapshot.getInt("revision")}")
+                return frame
+            }
             try {
-                return store.withRenderAssets(source.assets) {create(store,snapshot,source.revisionMarker)}
+                return store.withRenderAssets(source.assets) { create(store, snapshot, source.revisionMarker, key) }
             } finally {
-                val elapsed=(System.nanoTime()-started)/1_000_000
-                if(elapsed>=1000)android.util.Log.w("ArtStudioPerf","phase=editorPixels renderMs=$elapsed")
+                val elapsed = (System.nanoTime() - started) / 1_000_000
+                if (elapsed >= 1000) android.util.Log.w("ArtStudioPerf",
+                    "phase=editorPixels reused=false revision=${snapshot.getInt("revision")} renderMs=$elapsed")
             }
         }
-        // Editor callers supply the marker captured BEFORE composing pixels; receipt frames are transient.
-        fun create(store:ArtStore,snapshot:JSONObject,revisionMarker:String):StudioRenderFrame {
-            val refs=store.referenceBitmaps(snapshot)
-            var image:Bitmap?=null
+        fun create(store: ArtStore, snapshot: JSONObject, revisionMarker: String,
+            key: String = ArtEditorPixels.key(snapshot)): StudioRenderFrame {
+            val refs = store.referenceBitmaps(snapshot)
+            var image: Bitmap? = null
             try {
-                image=ArtAnimationPreview.render(store,snapshot)
-                return StudioRenderFrame(snapshot,image,revisionMarker,refs)
-            } catch(error:Throwable) { image?.recycle();refs.values.forEach { it.recycle() };throw error }
+                image = ArtAnimationPreview.render(store, snapshot)
+                val pixels = StudioSharedResource(requireNotNull(image) to refs) { (canvas, references) ->
+                    canvas.recycle(); references.values.forEach { it.recycle() }
+                }
+                return StudioRenderFrame(snapshot, revisionMarker, key, pixels)
+            } catch (error: Throwable) { image?.recycle(); refs.values.forEach { it.recycle() }; throw error }
         }
     }
 }
@@ -60,7 +79,7 @@ internal object ArtReferencePreview {
                 canvas.drawBitmap(frame.second,matrix,Paint(Paint.FILTER_BITMAP_FLAG))
                 ArtReferences.draw(canvas,state,frame.fourth,matrix)
                 if(includeAssistants) ArtAssistants.draw(canvas,state,matrix)
-            } finally { frame.second.recycle();frame.fourth.values.forEach { it.recycle() } }
+            } finally { frame.close() }
             val bytes=ArtImagePolicy.encodePng(image,1024*1024)
             val metadata=JSONObject().put("kind",if(includeAssistants) "assistant-view" else "reference-view").put("width",w).put("height",h)
                 .put("documentId",snapshot.getString("id")).put("revision",snapshot.getInt("revision"))

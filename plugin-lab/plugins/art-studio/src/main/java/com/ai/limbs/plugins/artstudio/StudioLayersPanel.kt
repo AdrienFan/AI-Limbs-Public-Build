@@ -1,13 +1,10 @@
 package com.ai.limbs.plugins.artstudio
 
 import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Rect
 import android.graphics.RectF
-import android.os.Build
 import android.view.View
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -42,6 +39,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.ensureActive
 import org.json.JSONObject
 import java.util.UUID
 import kotlin.math.min
@@ -56,6 +54,8 @@ private data class LayerEntry(val layer: JSONObject, val depth: Int)
 /** Krita's controls / stack / operations structure, backed by ArtStore operations. */
 @Composable
 internal fun StudioLayersPanel(
+    documentId: String,
+    previews: StudioLayerPreviews,
     state: JSONObject,
     selectedId: String,
     revision: String,
@@ -196,9 +196,8 @@ internal fun StudioLayersPanel(
                             openGroups[id] = openGroups[id] == false
                         }
                     } else Spacer(Modifier.width(22.dp))
-                    AndroidView(factory = { StudioLayerThumbnailView(it) },
-                        modifier = Modifier.size(thumbnailSize),
-                        update = { it.bind(store, state, layer) })
+                    StudioLayerThumbnail(documentId, state, layer, store, previews,
+                        Modifier.size(thumbnailSize))
                     Spacer(Modifier.width(5.dp))
                     Column(Modifier.weight(1f)) {
                         Text(layer.optString("name"), style = MaterialTheme.typography.bodySmall,
@@ -397,136 +396,75 @@ private fun StudioLayerProperties(
 }
 
 /** Each row previews only its own content; it never caches a full document bitmap. */
+@Composable
+private fun StudioLayerThumbnail(documentId: String, state: JSONObject, layer: JSONObject,
+    store: ArtStore, previews: StudioLayerPreviews, modifier: Modifier) {
+    val layerId = layer.getString("id")
+    var shown by remember(previews, documentId, layerId) {
+        mutableStateOf<StudioFrameCache.Lease<Bitmap>?>(null)
+    }
+    val view = remember(previews, documentId, layerId) { arrayOfNulls<StudioLayerThumbnailView>(1) }
+    LaunchedEffect(previews, documentId, state, layer) {
+        var pending: StudioFrameCache.Lease<Bitmap>? = null
+        try {
+            val snapshot = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+                ArtLayerPreview.snapshot(documentId, state, layer)
+            }
+            pending = previews.acquire(store, snapshot)
+            kotlinx.coroutines.currentCoroutineContext().ensureActive()
+            val old = shown
+            shown = pending
+            // Stop View borrowing the old pixels before releasing the final lease.
+            view[0]?.bind(shown?.frame)
+            pending = null
+            old?.close()
+        } catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (error: Exception) {
+            view[0]?.bind(null)
+            shown?.close(); shown = null
+            android.util.Log.e("ArtStudio", "Layer preview failed for $layerId", error)
+        } finally { pending?.close() }
+    }
+    DisposableEffect(previews, documentId, layerId) {
+        onDispose {
+            view[0]?.bind(null)
+            shown?.close(); shown = null
+        }
+    }
+    // Replacing a document/layer also replaces the View that borrows its pixels.
+    key(previews, documentId, layerId) {
+        AndroidView(factory = { StudioLayerThumbnailView(it).also { widget -> view[0] = widget } },
+            modifier = modifier, update = {
+                view[0] = it
+                it.contentDescription = layer.optString("name") + "预览"
+                it.bind(shown?.frame)
+            })
+    }
+}
+
+/** Drawing a docker must never replay brush geometry, decode files, or acquire document locks. */
 private class StudioLayerThumbnailView(context: android.content.Context) : View(context) {
-    private var store: ArtStore? = null
-    private var state: JSONObject? = null
-    private var layer: JSONObject? = null
-    private val decoded = mutableMapOf<String, Bitmap>()
-    private val assetBounds = mutableMapOf<String, Pair<Int, Int>>()
+    private var image: Bitmap? = null
     private val checkerA = Paint().apply { color = Color.rgb(219, 219, 219) }
     private val checkerB = Paint().apply { color = Color.WHITE }
-
-    fun bind(store: ArtStore, state: JSONObject, layer: JSONObject) {
-        if (this.store === store && this.state === state && this.layer === layer) return
-        this.store = store
-        this.state = state
-        this.layer = layer
-        contentDescription = layer.optString("name") + "预览"
+    private val imagePaint = Paint(Paint.FILTER_BITMAP_FLAG)
+    fun bind(next: Bitmap?) {
+        if (image === next) return
+        image = next
         invalidate()
     }
-
     override fun onDraw(canvas: Canvas) {
         super.onDraw(canvas)
-        val state = state ?: return
-        val layer = layer ?: return
-        val docW = state.optInt("width").coerceAtLeast(1)
-        val docH = state.optInt("height").coerceAtLeast(1)
         val square = 6f * resources.displayMetrics.density
-        for (row in 0..(height / square).toInt()) {
-            for (column in 0..(width / square).toInt()) {
-                canvas.drawRect(column * square, row * square,
-                    (column + 1) * square, (row + 1) * square,
-                    if ((row + column) % 2 == 0) checkerA else checkerB)
-            }
+        for (row in 0..(height / square).toInt()) for (column in 0..(width / square).toInt()) {
+            canvas.drawRect(column * square, row * square,
+                (column + 1) * square, (row + 1) * square,
+                if ((row + column) % 2 == 0) checkerA else checkerB)
         }
-        val scale = min(width.toFloat() / docW, height.toFloat() / docH)
-        canvas.save()
-        canvas.translate((width - docW * scale) / 2f, (height - docH * scale) / 2f)
-        canvas.scale(scale, scale)
-        val layers = state.getJSONArray("layers")
-        val siblings = (0 until layers.length()).map { layers.getJSONObject(it) }
-        drawLayer(canvas, layer, siblings, docW, docH, 0)
-        canvas.restore()
-    }
-
-    private fun drawLayer(canvas: Canvas, layer: JSONObject, siblings: List<JSONObject>,
-                          docW: Int, docH: Int, depth: Int) {
-        if (depth > siblings.size) return
-        canvas.save()
-        canvas.concat(ArtShapes.localMatrix(layer))
-        layer.optJSONArray("cropClip")?.let {clip->
-            if(clip.length()==0)canvas.clipRect(0f,0f,0f,0f)
-            else {val path=android.graphics.Path();for(i in 0 until clip.length()){val p=clip.getJSONArray(i);if(i==0)path.moveTo(p.getDouble(0).toFloat(),p.getDouble(1).toFloat())else path.lineTo(p.getDouble(0).toFloat(),p.getDouble(1).toFloat())};path.close();canvas.clipPath(path)}
-        }
-        val paint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply {
-            alpha = (layer.optDouble("opacity", 1.0) * 255).toInt().coerceIn(0, 255)
-            if (Build.VERSION.SDK_INT >= 29) blendMode = when (layer.optString("blend")) {
-                "multiply" -> android.graphics.BlendMode.MULTIPLY
-                "screen" -> android.graphics.BlendMode.SCREEN
-                "add" -> android.graphics.BlendMode.PLUS
-                else -> android.graphics.BlendMode.SRC_OVER
-            }
-        }
-        canvas.saveLayer(null, paint)
-        when (layer.optString("kind")) {
-            "group" -> siblings.filter {
-                it.optString("parentId") == layer.optString("id") && it.optBoolean("visible", true)
-            }.forEach { drawLayer(canvas, it, siblings, docW, docH, depth + 1) }
-            else -> {
-                if(layer.getString("kind") in setOf("image", "text")) drawAsset(canvas,layer.getString("asset"),0,0,Paint(Paint.FILTER_BITMAP_FLAG))
-                if(layer.getString("kind")=="colorize") {
-                    val data=layer.getJSONObject("colorize")
-                    if(data.getJSONObject("settings").getBoolean("showOutput") && layer.getString("asset").isNotBlank())
-                        drawAsset(canvas,layer.getString("asset"),data.getInt("outputX"),data.getInt("outputY"),Paint(Paint.FILTER_BITMAP_FLAG))
-                }
-                if(layer.getString("kind")=="vector") ArtShapes.draw(canvas,layer)
-                val strokes=layer.getJSONArray("strokes")
-                val order=layer.optJSONArray("contentOrder")
-                if(order==null) {
-                    for(n in 0 until strokes.length()) {val stroke=strokes.getJSONObject(n)
-                        if(stroke.has("gradientVersion"))ArtGradient.draw(canvas,stroke,128) else ArtRenderer.drawStroke(canvas,stroke)}
-                } else {
-                    val byId=(0 until strokes.length()).associate { strokes.getJSONObject(it).getString("id") to strokes.getJSONObject(it) }
-                    for(n in 0 until order.length()) {
-                        val event=order.getJSONObject(n)
-                        when(event.getString("kind")) {
-                            "stroke" -> byId[event.getString("id")]?.let { if(it.has("gradientVersion"))ArtGradient.draw(canvas,it,128) else ArtRenderer.drawStroke(canvas,it) }
-                            "transform_pixels" -> ArtTransformPixels.draw(canvas,event,requireNotNull(store))
-                            "move_pixels" -> ArtMovePixels.draw(canvas,event,requireNotNull(store))
-                            "paste","erase" -> drawAsset(canvas,event.getString("asset"),event.getInt("x"),event.getInt("y"),ArtPixelBlend.paint(event))
-                            "clear","fill" -> {
-                                val clip=event.optJSONObject("selection");val erase=event.getString("kind")=="clear"
-                                ArtSoftSelection.draw(canvas,clip,erase=erase) {
-                                    val paint=Paint().apply {
-                                        if(erase) {color=Color.WHITE;if(clip?.has("coverage")!=true)xfermode=android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.CLEAR)}
-                                        else color=Color.parseColor(event.getString("color"))
-                                    }
-                                    val x=event.getInt("x").toFloat();val y=event.getInt("y").toFloat()
-                                    canvas.drawRect(x,y,x+event.getInt("width"),y+event.getInt("height"),paint)
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        canvas.restore()
-        canvas.restore()
-    }
-
-    private fun drawAsset(canvas:Canvas,asset:String,x:Int,y:Int,paint:Paint) {
-        val source=requireNotNull(store)
-        val image=decoded[asset] ?: run {
-            val file=source.assetFile(asset)
-            val bounds=BitmapFactory.Options().apply { inJustDecodeBounds=true }
-            BitmapFactory.decodeFile(file.absolutePath,bounds)
-            require(bounds.outWidth>0 && bounds.outHeight>0) { "工程图片资源缺失" }
-            assetBounds[asset]=bounds.outWidth to bounds.outHeight
-            val sample=(maxOf(bounds.outWidth,bounds.outHeight)/128).coerceAtLeast(1)
-            val result=BitmapFactory.decodeFile(file.absolutePath,BitmapFactory.Options().apply { inSampleSize=sample })
-                ?: error("无法读取工程图片资源")
-            decoded[asset]=result
-            result
-        }
-        val bounds=assetBounds.getValue(asset)
-        canvas.drawBitmap(image,Rect(0,0,image.width,image.height),
-            RectF(x.toFloat(),y.toFloat(),(x+bounds.first).toFloat(),(y+bounds.second).toFloat()),paint)
-    }
-
-    override fun onDetachedFromWindow() {
-        decoded.values.forEach { it.recycle() }
-        decoded.clear()
-        assetBounds.clear()
-        super.onDetachedFromWindow()
+        val bitmap = image ?: return
+        val scale = min(width.toFloat() / bitmap.width, height.toFloat() / bitmap.height)
+        val w = bitmap.width * scale; val h = bitmap.height * scale
+        canvas.drawBitmap(bitmap, null,
+            RectF((width - w) / 2, (height - h) / 2, (width + w) / 2, (height + h) / 2), imagePaint)
     }
 }

@@ -11,11 +11,11 @@ android {
     compileSdk = 36
     ndkVersion = "27.0.12077973"
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.artstudio.v0291"
+        applicationId = "com.ai.limbs.payload.artstudio.v0292"
         minSdk = 29
         targetSdk = 34
-        versionCode = 94
-        versionName = "0.2.91"
+        versionCode = 95
+        versionName = "0.2.92"
         ndk { abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86") }
         externalNativeBuild { cmake { arguments += "-DANDROID_STL=c++_static" } }
     }

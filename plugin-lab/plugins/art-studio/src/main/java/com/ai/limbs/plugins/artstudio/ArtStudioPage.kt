@@ -89,10 +89,7 @@ import kotlin.math.pow
 import kotlin.math.roundToInt
 
 internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProcessPageProvider, AutoCloseable {
-    private val frames = StudioFrameCache<StudioRenderFrame> { frame ->
-        frame.second.recycle()
-        frame.fourth.values.forEach { it.recycle() }
-    }
+    private val frames = StudioFrameCache<StudioRenderFrame> { it.close() }
 
     override fun close() = frames.close()
 
@@ -723,6 +720,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     // Actual writes/export remain exclusive. A read-only initial check or render must not lock New/Open.
     val fileBusy = pendingOperations > 0 || awaitingExport || (busy && !checkingCanvas && !restoring)
     val renderRequests = remember { StudioRenderRequests() }
+    val layerPreviews = remember(store) { StudioLayerPreviews() }
     var revision by remember { mutableStateOf(displayedFrame?.frame?.third ?: "") }
     var documents by remember { mutableStateOf(JSONArray()) }
     val canvasRef = remember { arrayOfNulls<StudioCanvas>(1) }
@@ -779,8 +777,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     fun refresh() {
         if (!isPageVisible()) return
         val serial = renderRequests.beginRefresh() ?: return
-        val retainedRevision = displayedFrame?.frame?.third
         scope.launch {
+            val retained = frames.acquire()
+            val retainedRevision = displayedFrame?.frame?.third
             var rendered: StudioRenderFrame? = null
             var sourceMarker = ""
             var refreshAgain = false
@@ -804,7 +803,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                         source.use {
                             sourceMarker = it.revisionMarker
                             // Captured snapshot/assets are independent. New/Open need not wait for old pixels.
-                            rendered = StudioRenderFrame.render(store, it)
+                            rendered = StudioRenderFrame.render(store, it, retained?.frame)
                         }
                     }
                 }
@@ -835,7 +834,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                     Toast.makeText(context, error.message ?: "读取画布失败", Toast.LENGTH_LONG).show()
                 }
             } finally {
-                rendered?.let { it.second.recycle(); it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
+                rendered?.close()
+                retained?.close()
                 renderRequests.finishRefresh(serial)
                 if (isActive && pendingOperations == 0 && (refreshAgain ||
                     ((checkingCanvas || restoring) && restoreError == null && !renderRequests.isCurrent(serial)))) refresh()
@@ -851,13 +851,16 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
     }
     fun perform(confirmation: JSONObject? = null, onSuccess: (() -> Unit)? = null,
-        renderEditResult: Boolean = false, onApplied: ((JSONObject) -> Unit)? = null, action: (JSONObject?) -> JSONObject) {
+        renderEditResult: Boolean = false, onApplied: ((JSONObject) -> Unit)? = null,
+        operationName: String = "documentEdit", action: (JSONObject?) -> JSONObject) {
         scope.launch {
             // A menu may outlive its Compose scope. A cancelled launch must never set busy forever.
             animationPlaying=false
             val serial = renderRequests.invalidate()
             pendingOperations++
             busy = true
+            val retained = frames.acquire()
+            val started = System.nanoTime()
             var rendered:StudioRenderFrame?=null
             var sourceMarker=""
             var currentMarker=""
@@ -866,21 +869,20 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             try {
                 lateinit var operationResult: JSONObject
                 withContext(Dispatchers.IO) {
-                    mutex.withLock {
-                        // Keep edit, snapshot, revision and asset handles in one transaction;
-                        // compose pixels AFTER releasing the lock so Resident requests can proceed.
-                        val source=store.forEditor {
+                    // The page mutex protects the edit/capture transaction, never the expensive pixel pass.
+                    val source = mutex.withLock {
+                        store.forEditor {
                             operationResult=action(confirmation)
                             appliedResult=operationResult
                             if(renderEditResult)store.captureEditViewSource(operationResult)
                             else store.captureCurrentViewSource()
                         }
-                        source.use {
-                            sourceMarker=it.revisionMarker
-                            rendered=requireNotNull(StudioRenderFrame.render(store,it)) {"工程已关闭"}
-                        }
-                        currentMarker=store.revision()
                     }
+                    source.use {
+                        sourceMarker=it.revisionMarker
+                        rendered=requireNotNull(StudioRenderFrame.render(store,it,retained?.frame)) {"工程已关闭"}
+                    }
+                    currentMarker=store.revision()
                 }
                 if(operationResult.has("animationExport"))Toast.makeText(context,"GIF已保存："+operationResult.getString("animationExport"),Toast.LENGTH_LONG).show()
                 val pair = requireNotNull(rendered)
@@ -908,7 +910,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 host.logger.e("ArtStudio", "Edit failed", error)
                 Toast.makeText(context, if (appliedResult != null && onApplied != null) "操作已提交，但画面更新失败：${error.message}" else error.message ?: "画室操作失败", Toast.LENGTH_LONG).show()
             } finally {
-                rendered?.let { it.second.recycle();it.fourth.values.forEach { bitmap -> bitmap.recycle() } }
+                rendered?.close()
+                retained?.close()
+                val elapsed = (System.nanoTime() - started) / 1_000_000
+                if (elapsed >= 1000) android.util.Log.w("ArtStudioPerf", "phase=editorOperation operation=$operationName elapsedMs=$elapsed")
                 pendingOperations--; busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
                 // Text completion is a commit acknowledgement, independent of display rendering.
                 appliedResult?.let { onApplied?.invoke(it) }
@@ -997,10 +1002,11 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         suppressConfirmation: Boolean = false) {
         scope.launch {
             try {
-                val next = withContext(Dispatchers.IO) { mutex.withLock {
+                // Panel layout does not consume canvas pixels or mutate the document.
+                val next = withContext(Dispatchers.IO) {
                     store.changeDockPanels(command, pane?.name?.lowercase(java.util.Locale.ROOT),
                         enabled, suppressConfirmation)
-                } }
+                }
                 acceptDockState(next)
             } catch (error: Exception) {
                 remainingResult = JSONObject().put("title", "停靠面板操作未完成")
@@ -1299,7 +1305,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     }
 
     val current = snapshot
-    val animationPreview=StudioAnimationPlayback(store,current,animationPlaying,
+    val animationPreview=StudioAnimationPlayback(store,frames,current,animationPlaying,
         onStop={time->
             animationPlaying=false
             current?.let {captured->perform {store.animationSeek("AWEI",JSONObject()
@@ -1355,7 +1361,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             if (!params.has("documentId")) params.put("documentId", current.getString("id"))
             if (!params.has("expectedRevision")) params.put("expectedRevision", current.getInt("revision"))
         }
-        perform { store.apply("AWEI", type, params) }
+        perform(renderEditResult = true, operationName = type) { store.apply("AWEI", type, params) }
     }
     LaunchedEffect(selected, current?.optString("id")) {
         textTargetLayerId = selectedLayer?.takeIf { it.optString("kind") == "text" }?.getString("id").orEmpty()
@@ -1926,6 +1932,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 canvas.image=null
                 canvas.referenceBitmaps=emptyMap()
             }
+            layerPreviews.close()
             displayedFrame?.close();displayedFrame=null
             image=null
             referenceBitmaps=emptyMap()
@@ -2727,6 +2734,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                                                             .height(activePaneBodyHeight)
                                                             .clipToBounds()) {
                                                             StudioLayersPanel(
+                                                                documentId = current.getString("id"),
+                                                                previews = layerPreviews,
                                                                 state = state,
                                                                 selectedId = selected,
                                                                 revision = revision,
@@ -2757,7 +2766,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                                                                         if(time!=null)perform(renderEditResult=true) {store.animationSeek("AWEI",JSONObject()
                                                                             .put("documentId",current.getString("id")).put("expectedRevision",current.getInt("revision")).put("frame",time))}
                                                                     }
-                                                                },onChange={type,p->perform(renderEditResult=true) {store.apply("AWEI",type,p)}},
+                                                                },onChange={type,p->perform(renderEditResult=true, operationName=type) {store.apply("AWEI",type,p)}},
                                                                 onExport={edge->perform {
                                                                     val receipt=store.animationExport(JSONObject().put("documentId",current.getString("id"))
                                                                         .put("expectedRevision",current.getInt("revision")).put("maxEdge",edge))
