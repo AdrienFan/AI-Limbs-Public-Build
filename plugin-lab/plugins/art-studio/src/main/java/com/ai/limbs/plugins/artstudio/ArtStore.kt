@@ -27,7 +27,7 @@ import kotlin.math.cos
 import kotlin.math.sin
 
 /** Both the Host presentation and Resident business runtime use the same plugin data directory. */
-internal class ArtStore(private val root: File) {
+internal class ArtStore(private val root: File, private val ephemeral: Boolean = false) {
     private val drafts = File(root, "drafts")
     private val documents = File(root, "documents")
     private val assets = File(root, "assets")
@@ -45,6 +45,7 @@ internal class ArtStore(private val root: File) {
     private val lockFile = File(root, "art-studio.lock")
 
     init {
+        check(!ephemeral || File(root, ".session-active").isFile) { "临时画布已释放" }
         require(drafts.mkdirs() || drafts.isDirectory)
         require(documents.mkdirs() || documents.isDirectory)
         require(assets.mkdirs() || assets.isDirectory)
@@ -78,6 +79,7 @@ internal class ArtStore(private val root: File) {
     private fun <T> locked(block: () -> T): T {
         val requestedAt=System.nanoTime()
         return synchronized(processLock) {
+            check(!ephemeral || File(root, ".session-active").isFile) { "临时画布已释放" }
             if (lockDepth.get() > 0) block()
             else {
                 val processAcquiredAt=System.nanoTime()
@@ -85,7 +87,10 @@ internal class ArtStore(private val root: File) {
                     val lock: FileLock = channel.lock()
                     val fileAcquiredAt=System.nanoTime()
                     lockDepth.set(1)
-                    try { block() } finally {
+                    try {
+                        check(!ephemeral || File(root, ".session-active").isFile) { "临时画布已释放" }
+                        block()
+                    } finally {
                         lockDepth.remove();lock.release()
                         val finishedAt=System.nanoTime()
                         val processWait=(processAcquiredAt-requestedAt)/1_000_000
@@ -100,6 +105,21 @@ internal class ArtStore(private val root: File) {
                 }
             }
         }
+    }
+
+    /** Finalize only a cache-owned canvas; normal document pointers are never touched. */
+    fun freezeEphemeral(): StudioRenderSource = forEditor {
+        locked {
+            check(ephemeral)
+            val source = captureCurrentViewSource()
+            try { File(root, ".session-frozen").writeText("frozen") }
+            catch (error: Throwable) { source.close(); throw error }
+            source
+        }
+    }
+    fun revokeEphemeral() = locked {
+        check(ephemeral)
+        check(File(root, ".session-active").delete()) { "临时画布撤销失败" }
     }
 
     /** Read the active document and render a view under one lock; no history or pointer mutation. */
@@ -3937,6 +3957,10 @@ internal class ArtStore(private val root: File) {
 
     private fun atomic(file: File, value: String) = atomicBytes(file, value.toByteArray(Charsets.UTF_8))
     private fun atomicBytes(file: File, bytes: ByteArray) {
+        if (ephemeral) {
+            check(File(root, ".session-active").isFile && !File(root, ".session-frozen").exists()) { "临时画布已冻结或释放" }
+            require(file.canonicalPath.startsWith(root.canonicalPath + File.separator)) { "临时画布不能写入外部位置" }
+        }
         val temp = File(file.parentFile, ".${file.name}.${UUID.randomUUID()}.tmp")
         try {
             FileOutputStream(temp).use { it.write(bytes); it.fd.sync() }

@@ -16,9 +16,11 @@ class ArtStudioEntry : InProcessPluginEntry {
         val store = ArtStore(host.dataDir)
         val viewChannel = ArtStudioViewChannel()
         val assistantView = ArtStudioAssistantView()
+        val interactions = ArtStudioInteractions(host)
+        host.registerProvider(ART_INTERACTIONS, interactions, mapOf("kind" to "ui_state"))
         val extensionMenus = ArtStudioExtensionMenus(host.scope,
             reportError = { id, error -> host.logger.e("ArtStudio", "Invalid menu from extension $id", error) },
-            recordUse = { id -> host.childExtensions.recordUse(id) })
+            recordUse = { id -> host.childExtensions.recordUse(id) }, bindInteractive = interactions::bind)
         host.registerProvider(ART_EXTENSION_MENUS, extensionMenus, mapOf("kind" to "ui_state"))
 
         fun viewTarget(p: JSONObject): String = p.optString("target", "assistant").also {
@@ -627,7 +629,9 @@ class ArtStudioEntry : InProcessPluginEntry {
         return InProcessPluginHandle {
             try { extensionPoint.close() } finally {
                 try { extensionMenus.close() } finally {
-                    try { viewChannel.close() } finally { page.close() }
+                    try { interactions.close() } finally {
+                        try { viewChannel.close() } finally { page.close() }
+                    }
                 }
             }
             host.logger.i("ArtStudio", "Art Studio stopped")

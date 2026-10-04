@@ -91,3 +91,6 @@ project(":permission-service-plugin").projectDir = file("plugin-lab/plugins/perm
 
 include(":art-studio-plugin")
 project(":art-studio-plugin").projectDir = file("plugin-lab/plugins/art-studio")
+
+include(":draw-guess-extension")
+project(":draw-guess-extension").projectDir = file("plugin-lab/extensions/draw-guess")

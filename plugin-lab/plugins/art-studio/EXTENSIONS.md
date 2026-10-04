@@ -53,3 +53,13 @@ class ExampleMenuExtension : ChildExtensionEntry {
 将入口类填入完整子插件清单，按Hub规则构建和签名 `.ailx`，再从“工具 → 扩展 → 添加扩展”选择包。示例只记录日志；实际工具自行实现菜单事件、资源释放和必要的子插件能力入口。
 
 画室向Host演示侧发布 `plugin.art.studio.extension_menus` UI状态目录，以Host核定身份聚合菜单。目录activate事件仅用于父插件的菜单路由，令牌不是可转借给其他插件的授权。
+
+## 0.2.94互动业务绑定（兼容菜单API1）
+
+旧InProcessUiStateProvider绑定继续支持。需要互动面板和临时画布的子插件可发布Map业务binding：`schema=1`，`menu`为原菜单InProcessUiStateProvider，`panel`为手机InProcessUiStateProvider，`connect`为Java `Consumer<InProcessUiStateProvider>`。父级调用connect交给只属于该绑定的canvas endpoint；这些对象只在BUSINESS进程连接，不序列化View或另造游戏业务实例。此格式需要父插件0.2.94或以上。
+
+面板状态schema1含title、open、formKey、revision、messages、fields（id/label）、actions（event/title/style/parameters）。style为circle可显示准备圆按钮。事件回到panel.perform；调用身份固定为手机，LANER能力由子插件自己发布。`image=true`只显示该实例的已冻结final.png，不能指定任意手机路径。
+
+canvas事件：create(drawer AWEI或LANER)创建1000×700白底临时画布；snapshot读取所属画布；apply(type/params)仅接受LANER绘画操作，强制当前文档/版本；preview附图片；freeze冻结并生成PNG；release撤销并清理。目录由父插件生成，子插件不能指定保存地址。停用/卸载后endpoint撤销。所有事件属于子插件申请的业务绑定，不调用父级能力身份。
+
+[游戏实例与极简能力示例](../../extensions/draw-guess/README.md)。

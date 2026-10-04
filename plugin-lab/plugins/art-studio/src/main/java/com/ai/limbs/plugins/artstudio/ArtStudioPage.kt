@@ -110,7 +110,9 @@ internal class ArtStudioPage(private val host: InProcessPluginUiHost) : InProces
                         }
                     }
                     CompositionLocalProvider(LocalViewConfiguration provides panelConfiguration) {
-                        Studio(host, bridge, frames, sharedUi)
+                        StudioInteractiveSurface(host, bridge, frames, sharedUi) { shownFrames, directory, ephemeral, editable ->
+                            Studio(host, bridge, shownFrames, sharedUi, directory, ephemeral, editable)
+                        }
                     }
                 }
             }
@@ -382,6 +384,7 @@ internal class StudioMenuBridge {
     var onRemainingCommand: ((JSONObject, JSONObject) -> Unit)? = null
     var extensionRows: List<ArtExtensionRow> = emptyList()
     var extensionBusy = false
+    var canvasWorking by mutableStateOf(false)
     var refreshExtensionMenu: (() -> Unit)? = null
     var onAddExtension: (() -> Unit)? = null
     var onExtensionAction: ((ArtExtensionRow) -> Unit)? = null
@@ -413,19 +416,19 @@ private enum class RightPane { COLOR, LAYERS, BRUSHES, FOOTPRINTS, ANIMATION }
 @OptIn(ExperimentalFoundationApi::class, ExperimentalComposeUiApi::class, ExperimentalMaterial3Api::class)
 @Composable
 private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
-    frames: StudioFrameCache<StudioRenderFrame>, sharedUi: InProcessSharedUiHost) {
-
-    StudioExtensionsUi(host, sharedUi, menuBridge)
+    frames: StudioFrameCache<StudioRenderFrame>, sharedUi: InProcessSharedUiHost,
+    directory: java.io.File, ephemeral: Boolean, interactionAllowed: Boolean) {
 
     val context = LocalContext.current
     val pageView = LocalView.current
     fun isPageVisible() = pageView.isAttachedToWindow && pageView.isShown &&
         pageView.windowVisibility == View.VISIBLE
-    val store = remember(host.dataDir) { ArtStore(host.dataDir) }
+    val store = remember(directory) { ArtStore(directory, ephemeral) }
     val scope = rememberCoroutineScope()
     // Settings callbacks below share this state; Kotlin local declarations must precede use.
     // A retained picture is immediately visible, but edits wait for the active revision check.
-    var busy by remember { mutableStateOf(true) }
+    var processing by remember { mutableStateOf(true) }
+    val busy = processing || !interactionAllowed
     // Entering an empty studio is a pointer check, not canvas restoration.
     var checkingCanvas by remember { mutableStateOf(true) }
     var restoring by remember { mutableStateOf(false) }
@@ -775,7 +778,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         checkingCanvas = false
         restoring = false
         restoreError = null
-        busy = pendingOperations > 0 || awaitingExport
+        processing = pendingOperations > 0 || awaitingExport
         // The native View must stop borrowing old pixels before their final lease is released.
         canvasRef[0]?.let { canvas ->
             canvas.image = image
@@ -802,7 +805,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 val unchanged = retainedRevision != null && initialMarker == retainedRevision
                 checkingCanvas = false
                 restoring = initialMarker.isNotEmpty() && !unchanged
-                busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
+                processing = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
                 sourceMarker = initialMarker
                 if (restoring) {
                     withContext(Dispatchers.IO) {
@@ -826,7 +829,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                     checkingCanvas = false
                     restoring = false
                     restoreError = null
-                    busy = pendingOperations > 0 || awaitingExport
+                    processing = pendingOperations > 0 || awaitingExport
                 } else if (renderRequests.isCurrent(serial)) {
                     refreshAgain = true
                 }
@@ -839,7 +842,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                         restoreError = error.message ?: "读取画室失败"
                         checkingCanvas = false
                         restoring = false
-                        busy = pendingOperations > 0 || awaitingExport
+                        processing = pendingOperations > 0 || awaitingExport
                     }
                     Toast.makeText(context, error.message ?: "读取画布失败", Toast.LENGTH_LONG).show()
                 }
@@ -868,7 +871,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             animationPlaying=false
             val serial = renderRequests.invalidate()
             pendingOperations++
-            busy = true
+            processing = true
             val retained = frames.acquire()
             val started = System.nanoTime()
             var rendered:StudioRenderFrame?=null
@@ -924,7 +927,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 retained?.close()
                 val elapsed = (System.nanoTime() - started) / 1_000_000
                 if (elapsed >= 1000) android.util.Log.w("ArtStudioPerf", "phase=editorOperation operation=$operationName elapsedMs=$elapsed")
-                pendingOperations--; busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
+                pendingOperations--; processing = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
                 // Text completion is a commit acknowledgement, independent of display rendering.
                 appliedResult?.let { onApplied?.invoke(it) }
                 // A failed superseding operation still needs one authoritative initial frame.
@@ -1031,7 +1034,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             val doc=captured.getJSONObject("document")
             arguments.put("documentId",doc.getString("id")).put("expectedRevision",doc.getInt("revision"))
         }
-        pendingOperations++; busy=true
+        pendingOperations++; processing =true
         scope.launch {
             try {
                 val result=withContext(Dispatchers.IO) { mutex.withLock {
@@ -1071,7 +1074,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             } catch(error:Exception) {
                 host.logger.e("ArtStudio","Menu operation failed",error)
                 remainingResult=JSONObject().put("title","操作未完成").put("text",error.message ?: "菜单操作失败")
-            } finally { pendingOperations--; busy=pendingOperations>0 || awaitingExport }
+            } finally { pendingOperations--; processing =pendingOperations>0 || awaitingExport }
         }
     }
     val importRemainingLayer=rememberLauncherForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
@@ -1172,7 +1175,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         }
     }
     val saveAsFile = rememberLauncherForActivityResult(ActivityResultContracts.CreateDocument("application/octet-stream")) { uri ->
-        if (uri == null) { awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0 }
+        if (uri == null) { awaitingExport = false; processing = checkingCanvas || restoring || pendingOperations > 0 }
         else scope.launch {
             try {
                 val name = pendingSaveAsName
@@ -1194,7 +1197,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 host.logger.e("ArtStudio", "Save As failed", error)
                 refresh()
                 Toast.makeText(context, error.message ?: "另存为失败", Toast.LENGTH_LONG).show()
-            } finally { awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0 }
+            } finally { awaitingExport = false; processing = checkingCanvas || restoring || pendingOperations > 0 }
         }
     }
     val exportImageFile = rememberLauncherForActivityResult(ArtExportDocumentContract()) { uri ->
@@ -1202,7 +1205,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         exportPath = ""
         if (uri == null) {
             if (source.isNotEmpty()) java.io.File(source).delete()
-            awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0
+            awaitingExport = false; processing = checkingCanvas || restoring || pendingOperations > 0
         } else scope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -1218,7 +1221,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 Toast.makeText(context, error.message ?: "保存导出文件失败", Toast.LENGTH_LONG).show()
             } finally {
                 if (source.isNotEmpty()) java.io.File(source).delete()
-                awaitingExport = false; busy = checkingCanvas || restoring || pendingOperations > 0
+                awaitingExport = false; processing = checkingCanvas || restoring || pendingOperations > 0
             }
         }
     }
@@ -1589,7 +1592,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         val request = ArtJsonCopy.objectValue(options).put("documentId", captured.getString("documentId"))
             .put("expectedRevision", captured.getInt("expectedRevision"))
         awaitingExport = true
-        busy = true
+        processing = true
         scope.launch {
             var staged: java.io.File? = null
             try {
@@ -1622,7 +1625,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 Toast.makeText(context, error.message ?: "导出失败", Toast.LENGTH_LONG).show()
             } finally {
                 staged?.delete()
-                busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
+                processing = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport
             }
         }
     }
@@ -1666,7 +1669,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     fun executeProjectSave(request: JSONObject, defaultDirectory: Boolean) {
         if (busy) return
         val closeAfter = request.getBoolean("closeAfter")
-        busy = true
+        processing = true
         scope.launch {
             try {
                 val result = withContext(Dispatchers.IO) {
@@ -1694,7 +1697,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 host.logger.e("ArtStudio", "Project save failed", error)
                 refresh()
                 Toast.makeText(context, error.message ?: "保存工程失败", Toast.LENGTH_LONG).show()
-            } finally { busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport }
+            } finally { processing = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport }
         }
     }
     fun requestProjectSave(closeAfter: Boolean = false, exitAfter: Boolean = false) {
@@ -1712,7 +1715,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         if (busy) return
         if (save) { requestProjectSave(closeAfter = true, exitAfter = exit); return }
         renderRequests.invalidate()
-        busy = true
+        processing = true
         scope.launch {
             try {
                 withContext(Dispatchers.IO) {
@@ -1726,7 +1729,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             } catch (error: Exception) {
                 host.logger.e("ArtStudio", "Close failed", error)
                 Toast.makeText(context, error.message ?: "无法关闭画室工程", Toast.LENGTH_LONG).show()
-            } finally { busy = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport }
+            } finally { processing = checkingCanvas || restoring || pendingOperations > 0 || awaitingExport }
         }
     }
     fun requestClose(exit: Boolean) {
@@ -1786,7 +1789,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 ?.put("panelsHidden",viewOptions.panelsHidden) ?: JSONObject()
                 .put("selectionVisible",true).put("panelsHidden",false).put("brushWidth",6.0).put("brushOpacity",1.0))
         menuBridge.onRemainingCommand={ item,captured ->
-            if(!busy) {
+            if (ephemeral && item.getString("id") == "art.storage_directory") {
+                Toast.makeText(context, "游戏临时画布不能更改保存目录", Toast.LENGTH_SHORT).show()
+            } else if(!busy) {
                 val id=item.getString("id")
                 if(id in setOf("import_layer_from_file","import_layer_as_paint_layer")) {
                     remainingImportContext=captured; remainingImportItem=item
@@ -1824,7 +1829,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             }
         }
         menuBridge.busy = menuBusy
-        menuBridge.fileBusy = menuFileBusy
+        menuBridge.canvasWorking = processing || pendingOperations > 0
+        menuBridge.fileBusy = menuFileBusy || ephemeral || !interactionAllowed
         menuBridge.hasDocument = menuHasDocument
         menuBridge.canSave = menuCanSave
         menuBridge.hasRecent = menuHasRecent
@@ -1857,7 +1863,9 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             }
         }
         menuBridge.onFileCommand = { command ->
-            if (menuBridge.fileCommandEnabled(command)) when (command) {
+            if (ephemeral || !interactionAllowed) {
+                Toast.makeText(context, "游戏期间不能替换或保存普通工程", Toast.LENGTH_SHORT).show()
+            } else if (menuBridge.fileCommandEnabled(command)) when (command) {
                 1 -> { canvasTab = 0; newCanvas = true }
                 2 -> { recentOnly = false; openDialog = true }
                 3 -> { recentOnly = true; openDialog = true }
@@ -2048,7 +2056,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         restoreError?.let { error ->
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 Text("画室读取失败：$error", Modifier.weight(1f), color = MaterialTheme.colorScheme.error)
-                TextButton(onClick = { restoreError = null; checkingCanvas = true; busy = true; refresh() }) { Text("重试") }
+                TextButton(onClick = { restoreError = null; checkingCanvas = true; processing = true; refresh() }) { Text("重试") }
             }
         }
         if (current == null) {
@@ -3547,7 +3555,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 } else {
                     pendingSaveAsName = name
                     awaitingExport = true
-                    busy = true
+                    processing = true
                     saveAsFile.launch(name.replace(Regex("[\\\\/:*?\"<>|]"), "_") + ".ailart")
                 }
             }

@@ -1,0 +1,22 @@
+{
+  "format": "AIL_EXTENSION_V1",
+  "schema_version": 1,
+  "extension_id": "plugin.art.studio.draw_guess",
+  "version": "0.1.0",
+  "roles": [],
+  "display": {
+    "name": "你画我猜",
+    "description": "阿伟与兰儿轮流出题、画画和猜词的临时画布小游戏。需要画室0.2.94或以上。"
+  },
+  "target": {
+    "plugin_id": "plugin.art.studio",
+    "extension_point": "plugin.art.studio.extension_menu",
+    "api": 1
+  },
+  "runtime": {
+    "kind": "android_child",
+    "entry": "payload/extension.apk",
+    "config": { "entry_class": "com.ai.limbs.extensions.drawguess.DrawGuessEntry" }
+  },
+  "permissions": { "host_capabilities": [] }
+}

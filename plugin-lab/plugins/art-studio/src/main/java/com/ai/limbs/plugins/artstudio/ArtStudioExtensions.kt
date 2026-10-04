@@ -60,9 +60,10 @@ internal object ArtExtensionMenuSchema {
 /** Resident-owned routing retains Host-attested child identities; presentation sees only menu data. */
 internal class ArtStudioExtensionMenus(private val scope: CoroutineScope,
     private val reportError: (String, Exception) -> Unit,
-    private val recordUse: (String) -> Unit) : InProcessUiStateProvider, AutoCloseable {
+    private val recordUse: (String) -> Unit,
+    private val bindInteractive: ((ChildExtensionBinding) -> AutoCloseable)? = null) : InProcessUiStateProvider, AutoCloseable {
     private class Entry(val binding: ChildExtensionBinding, val token: String,
-        val provider: InProcessUiStateProvider, var items: List<ArtExtensionItem>) {
+        val provider: InProcessUiStateProvider, val interaction: AutoCloseable?, var items: List<ArtExtensionItem>) {
         lateinit var observer: Job
     }
     private val entries = linkedMapOf<String, Entry>()
@@ -75,12 +76,17 @@ internal class ArtStudioExtensionMenus(private val scope: CoroutineScope,
         require(binding.target.parentPluginId == ART_ID && binding.target.point == ART_EXTENSION_POINT &&
             binding.target.apiVersion == ART_EXTENSION_API) { "画室扩展目标或API不匹配" }
         require(binding.extensionId !in entries) { "画室扩展已绑定" }
-        val provider = binding.payload as? InProcessUiStateProvider
-            ?: error("画室菜单扩展必须publish InProcessUiStateProvider")
+        val payload = binding.payload
+        val menuPayload = if (payload is Map<*, *>) payload["menu"] else payload
+        val provider = menuPayload as? InProcessUiStateProvider
+            ?: error("画室菜单扩展必须提供InProcessUiStateProvider")
         val initial = ArtExtensionMenuSchema.items(requireNotNull(provider.stateJson.value) {
             "画室菜单扩展必须提供初始状态"
         })
-        val entry = Entry(binding, UUID.randomUUID().toString(), provider, initial)
+        val interaction = if (binding.payload is Map<*, *>) requireNotNull(bindInteractive) {
+            "画室未提供互动扩展接口"
+        }.invoke(binding) else null
+        val entry = Entry(binding, UUID.randomUUID().toString(), provider, interaction, initial)
         entry.observer = scope.launch(start = CoroutineStart.LAZY) {
             provider.stateJson.collect { raw ->
                 try {
@@ -112,7 +118,7 @@ internal class ArtStudioExtensionMenus(private val scope: CoroutineScope,
                 if (entries[binding.extensionId] === entry) {
                     entries.remove(binding.extensionId)
                     entry.observer.cancel()
-                    publish()
+                    try { entry.interaction?.close() } finally { publish() }
                 }
             }
         }
@@ -145,7 +151,7 @@ internal class ArtStudioExtensionMenus(private val scope: CoroutineScope,
     @Synchronized override fun close() {
         if (closed) return
         closed = true
-        entries.values.forEach { it.observer.cancel() }
+        entries.values.forEach { it.observer.cancel(); it.interaction?.close() }
         entries.clear()
         publish()
     }

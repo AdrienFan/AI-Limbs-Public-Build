@@ -77,3 +77,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [停靠面板与时间轴响应](art-studio-dock-response/index.md)：0.2.92后台预览与状态/像素分离；云端及实机验收待安排。
 
 - [画室工具扩展菜单](art-studio-extensions/index.md)：0.2.93，按当前Hub准入接入原生子菜单及安装对话框。
+
+- [你画我猜第一版](art-studio-draw-guess/index.md)：画室0.2.94与子插件0.1.0，用户授权完工后直接云编译。
