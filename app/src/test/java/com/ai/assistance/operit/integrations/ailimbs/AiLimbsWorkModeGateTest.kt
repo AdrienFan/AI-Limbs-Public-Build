@@ -12,27 +12,73 @@ import org.junit.Test
 
 class AiLimbsWorkModeGateTest {
     @Test
-    fun nonWorkGrantsExactlyOneNormalExecution() {
-        val gate = AiLimbsWorkModeGate()
+    fun nonWorkUsesSlidingIdleWindow() {
+        var now = 1_000L
+        val gate = AiLimbsWorkModeGate(
+            nonWorkIdleTimeoutMsProvider = { 30_000L },
+            clockMs = { now }
+        )
 
         assertEquals(AiLimbsWorkGateState.SELECTION_REQUIRED, gate.state())
         assertEquals(
-            AiLimbsWorkGateState.NON_WORK_ONCE,
+            AiLimbsWorkGateState.NON_WORK_ACTIVE,
             gate.select(AiLimbsWorkMode.NON_WORK)
         )
+
         assertTrue(gate.claimNormalExecution())
+        gate.onNormalExecutionFinished()
+
+        now += 29_999L
+        assertEquals(AiLimbsWorkGateState.NON_WORK_ACTIVE, gate.state())
+        assertTrue(gate.claimNormalExecution())
+        gate.onNormalExecutionFinished()
+
+        now += 30_000L
         assertEquals(AiLimbsWorkGateState.SELECTION_REQUIRED, gate.state())
         assertFalse(gate.claimNormalExecution())
     }
 
     @Test
-    fun repeatedNonWorkSelectionDoesNotAccumulatePermits() {
-        val gate = AiLimbsWorkModeGate()
+    fun repeatedNonWorkSelectionRefreshesIdleWindowWithoutStacking() {
+        var now = 2_000L
+        val gate = AiLimbsWorkModeGate(
+            nonWorkIdleTimeoutMsProvider = { 30_000L },
+            clockMs = { now }
+        )
 
         gate.select(AiLimbsWorkMode.NON_WORK)
+        now += 25_000L
+        assertEquals(
+            AiLimbsWorkGateState.NON_WORK_ACTIVE,
+            gate.select(AiLimbsWorkMode.NON_WORK)
+        )
+
+        now += 25_000L
+        assertEquals(AiLimbsWorkGateState.NON_WORK_ACTIVE, gate.state())
+
+        now += 5_000L
+        assertEquals(AiLimbsWorkGateState.SELECTION_REQUIRED, gate.state())
+    }
+
+    @Test
+    fun longRunningNonWorkExecutionDoesNotExpireMidAction() {
+        var now = 3_000L
+        val gate = AiLimbsWorkModeGate(
+            nonWorkIdleTimeoutMsProvider = { 30_000L },
+            clockMs = { now }
+        )
+
         gate.select(AiLimbsWorkMode.NON_WORK)
         assertTrue(gate.claimNormalExecution())
-        assertFalse(gate.claimNormalExecution())
+
+        now += 120_000L
+        assertEquals(AiLimbsWorkGateState.NON_WORK_ACTIVE, gate.state())
+
+        gate.onNormalExecutionFinished()
+        now += 29_999L
+        assertEquals(AiLimbsWorkGateState.NON_WORK_ACTIVE, gate.state())
+
+        now += 1L
         assertEquals(AiLimbsWorkGateState.SELECTION_REQUIRED, gate.state())
     }
 

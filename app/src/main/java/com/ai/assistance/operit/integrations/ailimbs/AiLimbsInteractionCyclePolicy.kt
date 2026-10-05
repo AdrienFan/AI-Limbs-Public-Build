@@ -14,19 +14,32 @@ class AiLimbsInteractionCyclePolicyStore(context: Context) {
 
     fun timeoutMs(): Long = snapshot().timeoutMs
 
+    fun nonWorkIdleTimeoutMs(): Long = snapshot().nonWorkIdleTimeoutMs
+
     fun snapshot(): AiLimbsInteractionCyclePolicySnapshot {
         val persisted = persistedTimeoutMsOrNull()
+        val persistedNonWorkIdle = persistedNonWorkIdleTimeoutMsOrNull()
         return AiLimbsInteractionCyclePolicySnapshot(
             timeoutMs = persisted ?: DEFAULT_TIMEOUT_MS,
             defaultTimeoutMs = DEFAULT_TIMEOUT_MS,
             configured = persisted != null,
-            source = if (persisted != null) "persisted" else "default"
+            source = if (persisted != null) "persisted" else "default",
+            nonWorkIdleTimeoutMs = persistedNonWorkIdle ?: DEFAULT_NON_WORK_IDLE_TIMEOUT_MS,
+            defaultNonWorkIdleTimeoutMs = DEFAULT_NON_WORK_IDLE_TIMEOUT_MS,
+            nonWorkIdleConfigured = persistedNonWorkIdle != null,
+            nonWorkIdleSource = if (persistedNonWorkIdle != null) "persisted" else "default"
         )
     }
 
     fun setTimeoutMs(value: Long): Boolean {
         if (!isValidTimeoutMs(value)) return false
         prefs.edit().putLong(KEY_TIMEOUT_MS, value).apply()
+        return true
+    }
+
+    fun setNonWorkIdleTimeoutMs(value: Long): Boolean {
+        if (!isValidNonWorkIdleTimeoutMs(value)) return false
+        prefs.edit().putLong(KEY_NON_WORK_IDLE_TIMEOUT_MS, value).apply()
         return true
     }
 
@@ -37,15 +50,29 @@ class AiLimbsInteractionCyclePolicyStore(context: Context) {
             ?.takeIf(::isValidTimeoutMs)
     }
 
+    private fun persistedNonWorkIdleTimeoutMsOrNull(): Long? {
+        if (!prefs.contains(KEY_NON_WORK_IDLE_TIMEOUT_MS)) return null
+        return runCatching { prefs.getLong(KEY_NON_WORK_IDLE_TIMEOUT_MS, -1L) }
+            .getOrNull()
+            ?.takeIf(::isValidNonWorkIdleTimeoutMs)
+    }
+
     companion object {
         const val DEFAULT_TIMEOUT_MS = 30L * 60L * 1000L
         const val MIN_TIMEOUT_MS = 60L * 1000L
         const val MAX_TIMEOUT_MS = 365L * 24L * 60L * 60L * 1000L
 
+        const val DEFAULT_NON_WORK_IDLE_TIMEOUT_MS = 30_000L
+        const val MIN_NON_WORK_IDLE_TIMEOUT_MS = 1_000L
+        const val MAX_NON_WORK_IDLE_TIMEOUT_MS = 30L * 60L * 1000L
+
         fun isValidTimeoutMs(value: Long): Boolean = value in MIN_TIMEOUT_MS..MAX_TIMEOUT_MS
+        fun isValidNonWorkIdleTimeoutMs(value: Long): Boolean =
+            value in MIN_NON_WORK_IDLE_TIMEOUT_MS..MAX_NON_WORK_IDLE_TIMEOUT_MS
 
         private const val PREFS = "ai_limbs_interaction_cycle_policy"
         private const val KEY_TIMEOUT_MS = "timeout_ms"
+        private const val KEY_NON_WORK_IDLE_TIMEOUT_MS = "non_work_idle_timeout_ms"
     }
 }
 
@@ -53,13 +80,21 @@ data class AiLimbsInteractionCyclePolicySnapshot(
     val timeoutMs: Long,
     val defaultTimeoutMs: Long,
     val configured: Boolean,
-    val source: String
+    val source: String,
+    val nonWorkIdleTimeoutMs: Long,
+    val defaultNonWorkIdleTimeoutMs: Long,
+    val nonWorkIdleConfigured: Boolean,
+    val nonWorkIdleSource: String
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("timeout_ms", timeoutMs)
         .put("default_timeout_ms", defaultTimeoutMs)
         .put("configured", configured)
         .put("source", source)
+        .put("non_work_idle_timeout_ms", nonWorkIdleTimeoutMs)
+        .put("default_non_work_idle_timeout_ms", defaultNonWorkIdleTimeoutMs)
+        .put("non_work_idle_configured", nonWorkIdleConfigured)
+        .put("non_work_idle_source", nonWorkIdleSource)
 }
 
 /** Policy facade used by the authoritative interaction-cycle runtime and its management primitive. */
@@ -67,6 +102,8 @@ class AiLimbsInteractionCyclePolicy(context: Context) {
     private val store = AiLimbsInteractionCyclePolicyStore(context)
 
     fun timeoutMs(): Long = store.timeoutMs()
+
+    fun nonWorkIdleTimeoutMs(): Long = store.nonWorkIdleTimeoutMs()
 
     fun snapshot(): AiLimbsInteractionCyclePolicySnapshot = store.snapshot()
 
@@ -76,9 +113,22 @@ class AiLimbsInteractionCyclePolicy(context: Context) {
         return store.snapshot()
     }
 
+    fun setNonWorkIdleTimeoutMs(value: Long): AiLimbsInteractionCyclePolicySnapshot {
+        require(isValidNonWorkIdleTimeout(value)) {
+            "Invalid AI Limbs NON_WORK idle timeout: $value"
+        }
+        check(store.setNonWorkIdleTimeoutMs(value)) {
+            "Could not persist AI Limbs NON_WORK idle timeout"
+        }
+        return store.snapshot()
+    }
+
     companion object {
         fun isValidTimeout(value: Long): Boolean =
             AiLimbsInteractionCyclePolicyStore.isValidTimeoutMs(value)
+
+        fun isValidNonWorkIdleTimeout(value: Long): Boolean =
+            AiLimbsInteractionCyclePolicyStore.isValidNonWorkIdleTimeoutMs(value)
     }
 }
 

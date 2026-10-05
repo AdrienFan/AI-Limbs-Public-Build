@@ -217,7 +217,7 @@ class AiLimbsExecutionPolicyEngine(
                         inspection = workModeSelectionInspection(inspection)
                     )
                 }
-                AiLimbsWorkGateState.NON_WORK_ONCE,
+                AiLimbsWorkGateState.NON_WORK_ACTIVE,
                 AiLimbsWorkGateState.WORK_UNLOCKED,
                 AiLimbsWorkGateState.CYCLE_RELEASED -> Unit
             }
@@ -292,19 +292,31 @@ class AiLimbsExecutionPolicyEngine(
                 .put("error_code", "INVALID_WORK_MODE")
                 .put("error", "mode must be WORK or NON_WORK")
 
+        val before = receipts.workGateState()
         val state = receipts.selectWorkMode(mode)
         val result = JSONObject()
             .put("success", true)
             .put("work_gate_state", state.name)
 
         return when (state) {
-            AiLimbsWorkGateState.NON_WORK_ONCE -> {
+            AiLimbsWorkGateState.NON_WORK_ACTIVE -> {
+                val repeated = mode == AiLimbsWorkMode.NON_WORK &&
+                    before == AiLimbsWorkGateState.NON_WORK_ACTIVE
                 result
                     .put("selected_mode", mode.name)
-                    .put("selection_applied", true)
-                    .put("one_shot", true)
+                    .put("selection_applied", !repeated)
+                    .put("non_work_active", true)
+                    .put("idle_timeout_ms", receipts.nonWorkIdleTimeoutMs())
+                    .put("idle_window_refreshed", true)
                     .put("work_gate_unlocked", false)
-                    .put("instruction", "Exactly one normal capability may execute; the work-mode gate returns afterward.")
+                    .put(
+                        "message",
+                        if (repeated) {
+                            "当前正处于非工作模式，无需重复选择；空闲计时已刷新。"
+                        } else {
+                            "已进入非工作模式；正常能力活动会自动刷新空闲窗口。"
+                        }
+                    )
                 result
             }
             AiLimbsWorkGateState.WORK_MANUAL_REQUIRED -> {
@@ -345,6 +357,15 @@ class AiLimbsExecutionPolicyEngine(
         result: JSONObject
     ) {
         receipts.recordSuccessfulRead(invocation, result)
+    }
+
+    internal fun recordExecutionFinished(invocation: AiLimbsNormalizedInvocation) {
+        val workGateApplies =
+            session.transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME &&
+                !bypassesWorkModeGate(invocation)
+        if (workGateApplies) {
+            receipts.recordNormalExecutionFinished()
+        }
     }
 
     fun resetInteractionCycle(): JSONObject {
@@ -641,7 +662,7 @@ class AiLimbsExecutionPolicyEngine(
                 .put("options", JSONArray()
                     .put(JSONObject()
                         .put("mode", AiLimbsWorkMode.NON_WORK.name)
-                        .put("semantics", "Allow exactly one normal capability, then require mode selection again.")
+                        .put("semantics", "Allow normal capabilities while activity continues; the configured idle timeout restores mode selection.")
                         .put("transport_invocation", transportInvocation(selectTool, nonWorkArgs)))
                     .put(JSONObject()
                         .put("mode", AiLimbsWorkMode.WORK.name)

@@ -293,7 +293,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.resident.runtime@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK, kernel("status"), kernel("set_enabled"), kernel("start"), kernel("stop"), kernel("core_status"), kernel("core_probe"), kernel("core_stop")),
         "host.ui.layout@1" to primitive(HostGatewayExecutionAffinity.HOST_UI, kernel("status"), kernel("start"), kernel("finish"), kernel("reset")),
         "host.ui.presentation@1" to primitive(HostGatewayExecutionAffinity.HOST_UI, kernel("set_mode"), kernel("get_mode")),
-        "host.interaction.cycle@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("status"), kernel("set_timeout"), kernel("reset"), kernel("release_gate"), kernel("close")),
+        "host.interaction.cycle@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, kernel("status"), kernel("set_timeout"), kernel("set_non_work_idle_timeout"), kernel("reset"), kernel("release_gate"), kernel("close")),
     )
 
     val all: Map<String, Map<String, HostGatewayOperationBinding>> =

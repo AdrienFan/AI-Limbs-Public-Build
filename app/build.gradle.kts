@@ -422,7 +422,7 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 194
+        versionCode = 195
 
         versionName = "0.8.0.15"
 
@@ -461,7 +461,7 @@ android {
         debug {
             // Stable Android package identity: keep this unchanged for in-place updates.
             applicationIdSuffix = ".ailimbs.stable"
-            versionNameSuffix = "-build99"
+            versionNameSuffix = "-build100"
 
             signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")

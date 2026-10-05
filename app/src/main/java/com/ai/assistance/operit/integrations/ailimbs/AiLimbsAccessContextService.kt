@@ -9,6 +9,7 @@ import org.json.JSONObject
  */
 class AiLimbsAccessContextService(context: Context) {
     private val documents = AiLimbsDocumentProvider(context.applicationContext)
+    private val interactionCyclePolicy = AiLimbsInteractionCyclePolicy(context.applicationContext)
 
     suspend fun readAccessContext(): String {
         val systemPrompt =
@@ -99,8 +100,18 @@ class AiLimbsAccessContextService(context: Context) {
                     .put(
                         "non_work",
                         JSONObject()
-                            .put("one_shot", true)
-                            .put("reselect_after_normal_execution", true)
+                            .put("sliding_idle_window", true)
+                            .put("idle_timeout_ms", interactionCyclePolicy.nonWorkIdleTimeoutMs())
+                            .put(
+                                "default_idle_timeout_ms",
+                                AiLimbsInteractionCyclePolicyStore.DEFAULT_NON_WORK_IDLE_TIMEOUT_MS
+                            )
+                            .put("normal_activity_refreshes_window", true)
+                            .put("reselect_refreshes_window", true)
+                            .put(
+                                "host_policy_primitive",
+                                "host.interaction.cycle@1/set_non_work_idle_timeout"
+                            )
                     )
                     .put(
                         "work",

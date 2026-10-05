@@ -716,6 +716,11 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 .put("generation", runtime.optLong("current_generation", runtime.optLong("generation", 0L)))
                 .put("cycle_started_at_ms", runtime.optLong("cycle_started_at_ms", 0L))
                 .put("expired_pending", runtime.optBoolean("expired_pending", false))
+                .put(
+                    "work_gate_state",
+                    accessGate?.optString("work_gate_state", "SELECTION_REQUIRED")
+                        ?: "SELECTION_REQUIRED"
+                )
                 .put("gate_released", accessGate?.optBoolean("released_for_current_cycle", false) == true)
         }
         return when (operation) {
@@ -731,6 +736,24 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 }
                 val before = policy.timeoutMs()
                 policy.setTimeoutMs(timeoutMs)
+                statusJson()
+                    .put("changed", before != timeoutMs)
+                    .put("authorized", true)
+            }
+            "set_non_work_idle_timeout" -> {
+                val password = required(parameters, "admin_password")
+                if (!PluginPlatformKernel.adminSecurity.verifyPassword(password)) {
+                    return JSONObject().put("changed", false).put("authorized", false)
+                }
+                val timeoutMs = parameters.optLong("timeout_ms", -1L)
+                if (!AiLimbsInteractionCyclePolicy.isValidNonWorkIdleTimeout(timeoutMs)) {
+                    throw PluginInstallException(
+                        "NON_WORK_IDLE_TIMEOUT_INVALID",
+                        "Invalid AI Limbs NON_WORK idle timeout"
+                    )
+                }
+                val before = policy.nonWorkIdleTimeoutMs()
+                policy.setNonWorkIdleTimeoutMs(timeoutMs)
                 statusJson()
                     .put("changed", before != timeoutMs)
                     .put("authorized", true)
@@ -940,6 +963,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.ui.presentation@1/get_mode",
             "host.interaction.cycle@1/status",
             "host.interaction.cycle@1/set_timeout",
+            "host.interaction.cycle@1/set_non_work_idle_timeout",
             "host.interaction.cycle@1/reset",
             "host.interaction.cycle@1/release_gate",
             "host.interaction.cycle@1/close",

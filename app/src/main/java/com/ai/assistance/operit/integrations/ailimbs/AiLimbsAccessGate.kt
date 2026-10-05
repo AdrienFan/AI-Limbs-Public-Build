@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
 import android.content.Context
+import android.os.SystemClock
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -17,7 +18,7 @@ internal enum class AiLimbsWorkMode {
 
 internal enum class AiLimbsWorkGateState {
     SELECTION_REQUIRED,
-    NON_WORK_ONCE,
+    NON_WORK_ACTIVE,
     WORK_MANUAL_REQUIRED,
     WORK_UNLOCKED,
     CYCLE_RELEASED
@@ -85,16 +86,23 @@ internal class AiLimbsSubsystemDiscoveryLedger {
     }
 }
 
-internal class AiLimbsWorkModeGate {
+internal class AiLimbsWorkModeGate(
+    private val nonWorkIdleTimeoutMsProvider: () -> Long = {
+        AiLimbsInteractionCyclePolicyStore.DEFAULT_NON_WORK_IDLE_TIMEOUT_MS
+    },
+    private val clockMs: () -> Long = SystemClock::elapsedRealtime
+) {
     private val stateLock = Any()
     private var workSelected = false
-    private var nonWorkPermit = false
+    private var nonWorkActive = false
+    private var nonWorkLastActivityElapsedMs: Long? = null
+    private var nonWorkActiveExecutions = 0
     private var workUnlocked = false
 
     fun reset() {
         synchronized(stateLock) {
             workSelected = false
-            nonWorkPermit = false
+            clearNonWorkLocked()
             workUnlocked = false
         }
     }
@@ -102,21 +110,46 @@ internal class AiLimbsWorkModeGate {
     fun state(): AiLimbsWorkGateState = synchronized(stateLock) { stateLocked() }
 
     fun exportHandoffState(): JSONObject = synchronized(stateLock) {
+        expireNonWorkIfIdleLocked()
+        check(nonWorkActiveExecutions == 0) {
+            "Work-mode handoff requires zero active NON_WORK executions"
+        }
         JSONObject()
             .put("work_selected", workSelected)
-            .put("non_work_permit", nonWorkPermit)
+            .put("non_work_active", nonWorkActive)
+            .put(
+                "non_work_last_activity_elapsed_ms",
+                nonWorkLastActivityElapsedMs ?: JSONObject.NULL
+            )
             .put("work_unlocked", workUnlocked)
     }
 
     fun restoreHandoffState(state: JSONObject) = synchronized(stateLock) {
         val selected = state.optBoolean("work_selected", false)
-        val nonWork = state.optBoolean("non_work_permit", false)
+        val nonWork = if (state.has("non_work_active")) {
+            state.optBoolean("non_work_active", false)
+        } else {
+            // Backward-compatible handoff from the former one-shot gate.
+            state.optBoolean("non_work_permit", false)
+        }
         val unlocked = state.optBoolean("work_unlocked", false)
         check(!(selected && nonWork)) { "Invalid work-mode handoff: WORK and NON_WORK both selected" }
         check(!unlocked || selected) { "Invalid work-mode handoff: unlocked without WORK selection" }
         workSelected = selected
-        nonWorkPermit = nonWork
+        nonWorkActive = nonWork
+        nonWorkLastActivityElapsedMs =
+            if (nonWork) {
+                state.opt("non_work_last_activity_elapsed_ms")
+                    .takeUnless { it == null || it == JSONObject.NULL }
+                    ?.toString()
+                    ?.toLongOrNull()
+                    ?: clockMs()
+            } else {
+                null
+            }
+        nonWorkActiveExecutions = 0
         workUnlocked = unlocked
+        expireNonWorkIfIdleLocked()
     }
 
     fun select(mode: AiLimbsWorkMode): AiLimbsWorkGateState =
@@ -125,10 +158,13 @@ internal class AiLimbsWorkModeGate {
             when (mode) {
                 AiLimbsWorkMode.WORK -> {
                     workSelected = true
-                    nonWorkPermit = false
+                    clearNonWorkLocked()
                 }
                 AiLimbsWorkMode.NON_WORK -> {
-                    if (!workSelected) nonWorkPermit = true
+                    if (!workSelected) {
+                        nonWorkActive = true
+                        nonWorkLastActivityElapsedMs = clockMs()
+                    }
                 }
             }
             stateLocked()
@@ -138,30 +174,60 @@ internal class AiLimbsWorkModeGate {
         synchronized(stateLock) {
             if (workSelected) {
                 workUnlocked = true
-                nonWorkPermit = false
+                clearNonWorkLocked()
             }
         }
     }
 
     fun claimNormalExecution(): Boolean = synchronized(stateLock) {
+        expireNonWorkIfIdleLocked()
         when {
             workUnlocked -> true
             workSelected -> false
-            nonWorkPermit -> {
-                nonWorkPermit = false
+            nonWorkActive -> {
+                nonWorkActiveExecutions += 1
+                nonWorkLastActivityElapsedMs = clockMs()
                 true
             }
             else -> false
         }
     }
 
-    private fun stateLocked(): AiLimbsWorkGateState =
-        when {
+    fun onNormalExecutionFinished() = synchronized(stateLock) {
+        if (nonWorkActiveExecutions <= 0) return@synchronized
+        nonWorkActiveExecutions -= 1
+        if (nonWorkActive) {
+            nonWorkLastActivityElapsedMs = clockMs()
+        }
+    }
+
+    private fun stateLocked(): AiLimbsWorkGateState {
+        expireNonWorkIfIdleLocked()
+        return when {
             workUnlocked -> AiLimbsWorkGateState.WORK_UNLOCKED
             workSelected -> AiLimbsWorkGateState.WORK_MANUAL_REQUIRED
-            nonWorkPermit -> AiLimbsWorkGateState.NON_WORK_ONCE
+            nonWorkActive -> AiLimbsWorkGateState.NON_WORK_ACTIVE
             else -> AiLimbsWorkGateState.SELECTION_REQUIRED
         }
+    }
+
+    private fun expireNonWorkIfIdleLocked() {
+        if (!nonWorkActive || nonWorkActiveExecutions > 0) return
+        val lastActivity = nonWorkLastActivityElapsedMs ?: run {
+            clearNonWorkLocked()
+            return
+        }
+        val timeoutMs = nonWorkIdleTimeoutMsProvider()
+        if (clockMs() - lastActivity >= timeoutMs) {
+            clearNonWorkLocked()
+        }
+    }
+
+    private fun clearNonWorkLocked() {
+        nonWorkActive = false
+        nonWorkLastActivityElapsedMs = null
+        nonWorkActiveExecutions = 0
+    }
 }
 
 /**
@@ -175,7 +241,10 @@ internal class AiLimbsWorkModeGate {
 class AiLimbsAccessGate(context: Context) {
     private val documents = AiLimbsDocumentProvider(context.applicationContext)
     private val stateLock = Any()
-    private val workModeGate = AiLimbsWorkModeGate()
+    private val interactionCyclePolicy = AiLimbsInteractionCyclePolicy(context.applicationContext)
+    private val workModeGate = AiLimbsWorkModeGate(
+        nonWorkIdleTimeoutMsProvider = interactionCyclePolicy::nonWorkIdleTimeoutMs
+    )
 
     private var customPromptReceiptVersion: String? = null
     private var workManualReceiptVersion: String? = null
@@ -309,6 +378,14 @@ class AiLimbsAccessGate(context: Context) {
         check(!residentHandoffFrozen) { "Access Gate is frozen for Resident policy handoff" }
         releasedForCurrentCycle || workModeGate.claimNormalExecution()
     }
+
+    internal fun recordNormalExecutionFinished() = synchronized(stateLock) {
+        if (!residentHandoffFrozen && !releasedForCurrentCycle) {
+            workModeGate.onNormalExecutionFinished()
+        }
+    }
+
+    internal fun nonWorkIdleTimeoutMs(): Long = interactionCyclePolicy.nonWorkIdleTimeoutMs()
 
     internal suspend fun missingWorkManual(): AiLimbsMissingReceipt? =
         firstMissing(setOf(AiLimbsRequiredReceipt.WORK_MANUAL))

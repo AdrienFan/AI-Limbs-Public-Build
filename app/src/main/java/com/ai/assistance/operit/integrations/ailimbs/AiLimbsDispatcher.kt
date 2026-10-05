@@ -64,7 +64,12 @@ class AiLimbsDispatcher(
         if (!decision.proceed) {
             return withAttention(policyEngine.rejectionJson(invocation, decision))
         }
-        val result = executeCapabilityRoute(invocation)
+        val result =
+            try {
+                executeCapabilityRoute(invocation)
+            } finally {
+                policyEngine.recordExecutionFinished(invocation)
+            }
         policyEngine.recordSuccessfulExecution(invocation, result)
         capabilityUsageStore.recordSuccessfulExecution(invocation, result)
         return withAttention(

@@ -115,7 +115,7 @@ object AiLimbsCoreCapabilityRegistry {
                 entry(
                     name = "ai_limbs.work_mode.select",
                     displayName = "选择 AI Limbs 工作模式",
-                    description = "Select WORK or NON_WORK at the Host-owned execution gate. NON_WORK grants exactly one normal capability; WORK requires the current Work Manual and unlocks the gate for the rest of the Interaction Cycle.",
+                    description = "Select WORK or NON_WORK at the Host-owned execution gate. NON_WORK stays active while normal capability activity continues and expires after the configured idle timeout (30 seconds by default); WORK requires the current Work Manual and unlocks the gate for the rest of the Interaction Cycle.",
                     parameters = listOf(
                         ToolParameterSchema(
                             "mode",

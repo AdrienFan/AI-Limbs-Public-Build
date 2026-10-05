@@ -123,7 +123,7 @@ internal data class AiLimbsPolicyDecision(
 
 object AiLimbsExecutionPolicyDescriptor {
     const val PROTOCOL_VERSION = 3
-    private const val POLICY_SCHEMA_REVISION = "execution-policy-v3.0"
+    private const val POLICY_SCHEMA_REVISION = "execution-policy-v3.1"
 
     private val readOnlyHostTools =
         setOf(
@@ -271,7 +271,7 @@ object AiLimbsExecutionPolicyDescriptor {
             appendLine("- Core、HostTool 与 Plugin Capability 进入同一 Policy Engine；插件不得绕过 ALLOW、ASK、FORBID。")
             appendLine("- 权限结果只有 ALLOW、ASK、FORBID，未知外层调用不会绕开 Dispatcher。")
             appendLine("- 工作/非工作由 AI 在 Host-owned 工作模式墙上显式选择；系统不根据能力名、命令内容、operation 或路径猜测。")
-            appendLine("- NON_WORK 只放行下一次正常能力，随后工作模式墙重新出现；NON_WORK 不会成为 Interaction Cycle 状态。")
+            appendLine("- NON_WORK 使用滑动空闲窗口：默认30秒；正常外部能力开始/结束都会刷新活动时间，连续空闲达到当前策略值后工作模式墙重新出现。")
             appendLine("- WORK 必须读取当前 Work Manual；读取成功后本 Interaction Cycle 的工作模式墙永久解锁，直到新周期开始。")
             appendLine("- 接入 Bootstrap/System Access Prompt 与 Custom Access Prompt 是周期级一次性接入链，不会因为重复选择 NON_WORK 而重新出现。")
             appendLine("- 普通长期保存不要求反复读取手册，但持久产物必须有确定归属、唯一地址与可恢复索引。")
@@ -390,7 +390,7 @@ object AiLimbsSystemAccessPrompt {
             appendLine("- Persistent artifacts need deterministic ownership, one canonical address, and a recoverable storage index.")
             appendLine("- User custom access prompt and Work Manual remain separate managed documents; satisfy the current custom access prompt before normal capability execution.")
             appendLine("- After the access chain, choose WORK or NON_WORK explicitly through $workModeSelectTool; AI Limbs never infers work mode from capability names, commands, operations, or paths.")
-            appendLine("- NON_WORK grants exactly one normal capability execution, then the work-mode gate appears again without replaying this bootstrap or the custom access prompt.")
+            appendLine("- NON_WORK uses a sliding idle window (30 seconds by default). Normal external capability activity refreshes the window; the work-mode gate returns only after the configured idle timeout.")
             appendLine("- WORK requires the current Work Manual through $workManualReadTool; after that successful read, the work-mode gate stays unlocked for the rest of this Interaction Cycle.")
         }.trimEnd()
     }
