@@ -57,7 +57,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-Native-Probe-v0.0.2",
+                    "source" to "AI-Limbs-ChatGPT-Native-Probe-v0.0.3",
                     "purpose" to "android_direct_exec_compatibility_probe"
                 )
             )

@@ -8,20 +8,37 @@ plugins {
 android {
     namespace = "com.ai.limbs.extensions.chatgptprobe"
     compileSdk = 36
+
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.chatgptprobe.v001"
+        applicationId = "com.ai.limbs.payload.chatgptprobe.v003"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "0.0.2"
+        versionCode = 3
+        versionName = "0.0.3"
     }
+
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    buildFeatures { buildConfig = false }
+
+    buildFeatures {
+        buildConfig = false
+    }
+
+    packaging {
+        jniLibs {
+            useLegacyPackaging = true
+            keepDebugSymbols += "**/libtunnel_client.so"
+        }
+    }
 }
-kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
+
+kotlin {
+    compilerOptions {
+        jvmTarget = JvmTarget.JVM_17
+    }
+}
 
 dependencies {
     compileOnly(project(":plugin-inprocess-api"))

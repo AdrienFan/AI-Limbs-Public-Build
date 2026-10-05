@@ -5,7 +5,6 @@ import com.ai.limbs.plugin.runtime.ChildExtensionHost
 import java.io.File
 import java.security.MessageDigest
 import java.util.concurrent.TimeUnit
-import java.util.zip.ZipFile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,28 +18,38 @@ internal data class NativeProbeResult(
     val success: Boolean,
     val phase: String,
     val detail: String,
+    val binaryPath: String? = null,
     val exitCode: Int? = null,
     val output: String = "",
     val binarySha256: String? = null,
-    val executable: Boolean = false,
+    val fileExists: Boolean = false,
+    val fileSize: Long = 0L,
+    val executableBefore: Boolean = false,
+    val chmodReturned: Boolean = false,
+    val executableAfter: Boolean = false,
+    val candidateCount: Int = 0,
     val durationMs: Long = 0L
 ) {
     fun toJson(host: ChildExtensionHost): JSONObject = JSONObject()
         .put("success", success)
         .put("phase", phase)
         .put("detail", detail)
+        .put("source_kind", "APK_NATIVE_LIBRARY_EXTRACTION")
+        .put("binary_path", binaryPath ?: JSONObject.NULL)
         .put("exit_code", exitCode ?: JSONObject.NULL)
         .put("output", output)
         .put("binary_sha256", binarySha256 ?: JSONObject.NULL)
-        .put("executable", executable)
+        .put("file_exists", fileExists)
+        .put("file_size", fileSize)
+        .put("executable_before", executableBefore)
+        .put("chmod_returned", chmodReturned)
+        .put("executable_after", executableAfter)
+        .put("candidate_count", candidateCount)
         .put("duration_ms", durationMs)
         .put("android_sdk", Build.VERSION.SDK_INT)
         .put("supported_abis", JSONArray(Build.SUPPORTED_ABIS.toList()))
         .put("host_native_runtime_api", host.nativeRuntime.apiVersion)
-        .put(
-            "host_native_executable_ids",
-            JSONArray(host.nativeRuntime.availableExecutableIds().sorted())
-        )
+        .put("host_native_executable_ids", JSONArray(host.nativeRuntime.availableExecutableIds().sorted()))
         .put("tunnel_client_release", ChatGptNativeProbeEngine.TUNNEL_CLIENT_RELEASE)
 }
 
@@ -54,19 +63,29 @@ internal class ChatGptNativeProbeEngine(
 
     suspend fun runProbe(): NativeProbeResult = mutex.withLock {
         val started = System.currentTimeMillis()
+        var binary: File? = null
+        var sha256: String? = null
+        var executableBefore = false
+        var chmodReturned = false
+        var executableAfter = false
+        var candidateCount = 0
+
         val result = withContext(Dispatchers.IO) {
-            runCatching {
+            try {
                 require(Build.SUPPORTED_ABIS.any { it == "arm64-v8a" }) {
                     "This probe bundles only the official Linux ARM64 tunnel-client; device ABIs=${Build.SUPPORTED_ABIS.joinToString()}"
                 }
-                val binary = prepareBinary()
-                val sha256 = sha256(binary)
-                val executable = binary.canExecute()
-                require(executable) {
-                    "Extracted tunnel-client is not executable: ${binary.absolutePath}"
-                }
 
-                val process = ProcessBuilder(binary.absolutePath, "--version")
+                val located = locateNativeBinary()
+                binary = located.file
+                candidateCount = located.candidateCount
+                val target = located.file
+                sha256 = sha256(target)
+                executableBefore = target.canExecute()
+                chmodReturned = target.setExecutable(true, false)
+                executableAfter = target.canExecute()
+
+                val process = ProcessBuilder(target.absolutePath, "--version")
                     .redirectErrorStream(true)
                     .start()
 
@@ -77,12 +96,18 @@ internal class ChatGptNativeProbeEngine(
                     NativeProbeResult(
                         success = false,
                         phase = "TIMEOUT",
-                        detail = "tunnel-client --version did not exit within ${PROBE_TIMEOUT_SECONDS}s",
+                        detail = "Native-extracted tunnel-client --version did not exit within ${PROBE_TIMEOUT_SECONDS}s",
+                        binaryPath = target.absolutePath,
                         output = runCatching {
                             process.inputStream.bufferedReader().readText().trim()
                         }.getOrDefault(""),
                         binarySha256 = sha256,
-                        executable = executable,
+                        fileExists = target.isFile,
+                        fileSize = target.length(),
+                        executableBefore = executableBefore,
+                        chmodReturned = chmodReturned,
+                        executableAfter = executableAfter,
+                        candidateCount = candidateCount,
                         durationMs = System.currentTimeMillis() - started
                     )
                 } else {
@@ -90,32 +115,46 @@ internal class ChatGptNativeProbeEngine(
                     val exitCode = process.exitValue()
                     NativeProbeResult(
                         success = exitCode == 0,
-                        phase = if (exitCode == 0) "EXEC_OK" else "EXEC_FAILED",
+                        phase = if (exitCode == 0) "NATIVE_EXEC_OK" else "NATIVE_EXEC_FAILED",
                         detail = if (exitCode == 0) {
-                            "Android Host executed tunnel-client directly without Ubuntu."
+                            "Android Host executed tunnel-client from Child Runtime native extraction without Ubuntu."
                         } else {
-                            "tunnel-client exited with code $exitCode"
+                            "Native-extracted tunnel-client exited with code $exitCode"
                         },
+                        binaryPath = target.absolutePath,
                         exitCode = exitCode,
                         output = output,
                         binarySha256 = sha256,
-                        executable = executable,
+                        fileExists = target.isFile,
+                        fileSize = target.length(),
+                        executableBefore = executableBefore,
+                        chmodReturned = chmodReturned,
+                        executableAfter = executableAfter,
+                        candidateCount = candidateCount,
                         durationMs = System.currentTimeMillis() - started
                     )
                 }
-            }.getOrElse { error ->
+            } catch (error: Throwable) {
+                val target = binary
                 NativeProbeResult(
                     success = false,
-                    phase = "EXCEPTION",
+                    phase = "NATIVE_EXEC_EXCEPTION",
                     detail = "${error::class.java.simpleName}: ${error.message ?: "unknown error"}",
-                    executable = false,
+                    binaryPath = target?.absolutePath,
+                    binarySha256 = sha256,
+                    fileExists = target?.isFile == true,
+                    fileSize = target?.takeIf { it.isFile }?.length() ?: 0L,
+                    executableBefore = executableBefore,
+                    chmodReturned = chmodReturned,
+                    executableAfter = executableAfter,
+                    candidateCount = candidateCount,
                     durationMs = System.currentTimeMillis() - started
                 )
             }
         }
 
         mutableLastResult.value = result
-        host.logger.i(TAG, "Native probe finished: ${result.phase} ${result.detail}")
+        host.logger.i(TAG, "Native payload probe finished: ${result.phase} ${result.detail}")
         result
     }
 
@@ -126,33 +165,40 @@ internal class ChatGptNativeProbeEngine(
             .put("result", current?.toJson(host) ?: JSONObject.NULL)
     }
 
-    private fun prepareBinary(): File {
-        val root = File(host.cacheDir, "chatgpt-native-probe/$TUNNEL_CLIENT_RELEASE")
-        require(root.exists() || root.mkdirs()) {
-            "Could not create probe cache directory: ${root.absolutePath}"
+    private data class LocatedNativeBinary(
+        val file: File,
+        val candidateCount: Int
+    )
+
+    private fun locateNativeBinary(): LocatedNativeBinary {
+        val runtimeRoot = File(host.cacheDir, "runtime").canonicalFile
+        require(runtimeRoot.isDirectory) {
+            "Child Runtime native root is missing: ${runtimeRoot.absolutePath}"
         }
 
-        val target = File(root, "tunnel-client")
-        if (!target.isFile || target.length() == 0L) {
-            val temp = File(root, ".tunnel-client.tmp")
-            ZipFile(host.runtimeEntryFile).use { apk ->
-                val entry = apk.getEntry(ASSET_ENTRY)
-                    ?: error("Bundled tunnel-client asset is missing: $ASSET_ENTRY")
-                apk.getInputStream(entry).use { input ->
-                    temp.outputStream().use(input::copyTo)
-                }
+        val prefix = runtimeRoot.path + File.separator
+        val candidates = runtimeRoot.walkTopDown()
+            .filter { candidate ->
+                candidate.isFile &&
+                    candidate.name == NATIVE_PAYLOAD_NAME &&
+                    runCatching {
+                        candidate.canonicalFile.path.startsWith(prefix)
+                    }.getOrDefault(false)
             }
+            .map { it.canonicalFile }
+            .toList()
 
-            if (!temp.renameTo(target)) {
-                temp.copyTo(target, overwrite = true)
-                temp.delete()
-            }
+        require(candidates.isNotEmpty()) {
+            "Child Runtime did not extract $NATIVE_PAYLOAD_NAME from lib/arm64-v8a"
         }
 
-        target.setReadable(true, true)
-        target.setWritable(true, true)
-        target.setExecutable(true, true)
-        return target
+        val selected = candidates.maxByOrNull { it.lastModified() }
+            ?: error("No native payload candidate available")
+
+        return LocatedNativeBinary(
+            file = selected,
+            candidateCount = candidates.size
+        )
     }
 
     private fun sha256(file: File): String {
@@ -170,7 +216,7 @@ internal class ChatGptNativeProbeEngine(
 
     companion object {
         const val TUNNEL_CLIENT_RELEASE = "v0.0.15"
-        private const val ASSET_ENTRY = "assets/tunnel-client-linux-arm64"
+        private const val NATIVE_PAYLOAD_NAME = "libtunnel_client.so"
         private const val PROBE_TIMEOUT_SECONDS = 10L
         private const val TAG = "ChatGptNativeProbe"
     }

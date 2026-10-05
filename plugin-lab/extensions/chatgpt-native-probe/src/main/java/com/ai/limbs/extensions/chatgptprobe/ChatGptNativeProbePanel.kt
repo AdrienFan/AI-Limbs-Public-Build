@@ -16,11 +16,11 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
         val state = control.state
         return BridgeProviderPanelState(
             title = "ChatGPT Native Probe",
-            description = "一次性兼容性测试：不使用 Ubuntu，不连接真实 Tunnel，只验证 Android Host 能否直接 exec 官方 tunnel-client v0.0.15 ARM64。",
+            description = "B 方案兼容性测试：把官方 tunnel-client 作为 APK lib/arm64-v8a native payload，由 Child Runtime 正规提取后直接 exec；不使用 Ubuntu、不连接真实 Tunnel。",
             statusLines = listOf(
                 "状态：${state.phase}",
                 state.detail,
-                "成功标准：tunnel-client --version exit=0",
+                "成功标准：Child Runtime native 提取后的 tunnel-client --version exit=0",
                 "此测试不读取 Runtime API Key，也不会建立 OpenAI 连接。"
             ),
             actions = control.availableActions.map { action ->

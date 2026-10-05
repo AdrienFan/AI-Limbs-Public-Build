@@ -570,7 +570,7 @@ jobs:
 
   chatgpt_native_probe:
     if: inputs.target == 'chatgpt-native-probe'
-    name: Build and sign ChatGPT Native Probe v0.0.2
+    name: Build and sign ChatGPT Native Probe v0.0.3
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -609,19 +609,19 @@ jobs:
       - name: Configure Android SDK
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
-      - name: Fetch verified OpenAI tunnel-client v0.0.15 ARM64 asset
+      - name: Fetch verified OpenAI tunnel-client v0.0.15 ARM64 native payload
         shell: bash
         run: |
           set -euo pipefail
-          asset_dir="plugin-lab/extensions/chatgpt-native-probe/src/main/assets"
-          mkdir -p "$asset_dir"
-          curl -fL --retry 3 \
-            -o /tmp/tunnel-client-v0.0.15-linux-arm64.zip \
-            "https://github.com/openai/tunnel-client/releases/download/v0.0.15/tunnel-client-v0.0.15-linux-arm64.zip"
+          native_dir="plugin-lab/extensions/chatgpt-native-probe/src/main/jniLibs/arm64-v8a"
+          rm -rf "plugin-lab/extensions/chatgpt-native-probe/src/main/assets"
+          mkdir -p "$native_dir"
+          curl -fL --retry 3 -o /tmp/tunnel-client-v0.0.15-linux-arm64.zip "https://github.com/openai/tunnel-client/releases/download/v0.0.15/tunnel-client-v0.0.15-linux-arm64.zip"
           echo "c51bfd883fc22e3445494a03c0179875176564bde470661b308fd83af5d01abb  /tmp/tunnel-client-v0.0.15-linux-arm64.zip" | sha256sum -c -
-          unzip -p /tmp/tunnel-client-v0.0.15-linux-arm64.zip tunnel-client > "$asset_dir/tunnel-client-linux-arm64"
-          test -s "$asset_dir/tunnel-client-linux-arm64"
-          chmod 0644 "$asset_dir/tunnel-client-linux-arm64"
+          unzip -p /tmp/tunnel-client-v0.0.15-linux-arm64.zip tunnel-client > "$native_dir/libtunnel_client.so"
+          test -s "$native_dir/libtunnel_client.so"
+          chmod 0644 "$native_dir/libtunnel_client.so"
+          readelf -h "$native_dir/libtunnel_client.so" | grep -E "Type:|Machine:"
       - name: Build ChatGPT Native Probe child extension payload
         shell: bash
         run: |

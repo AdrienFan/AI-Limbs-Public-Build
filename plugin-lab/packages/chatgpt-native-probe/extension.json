@@ -2,13 +2,13 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.chatgpt_native_probe",
-  "version": "0.0.2",
+  "version": "0.0.3",
   "roles": [
     "system_extension"
   ],
   "display": {
     "name": "AI Limbs ChatGPT Native Probe",
-    "description": "一次性测试子插件：验证 OpenAI tunnel-client 能否脱离 Ubuntu 直接在 AI Limbs Android Host 中运行。"
+    "description": "B 方案测试子插件：验证 OpenAI tunnel-client 作为 APK native payload 经 Child Runtime 正规提取后，能否脱离 Ubuntu 直接在 AI Limbs Android Host 中运行。"
   },
   "target": {
     "plugin_id": "plugin.system.bridge",
