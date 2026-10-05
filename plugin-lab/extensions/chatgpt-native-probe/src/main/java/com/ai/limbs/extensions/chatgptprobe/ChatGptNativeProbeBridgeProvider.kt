@@ -27,75 +27,74 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
 
     init {
         scope.launch {
-            engine.lastResult.collect { result ->
-                if (result != null) {
-                    val phase = when {
-                        result.phase == "MCP_LISTENER_STOPPED" -> AiLimbsBridgePhase.STOPPED
-                        !result.success -> AiLimbsBridgePhase.ERROR
-                        result.running && result.phase == "MCP_LISTENER_ONLINE" -> AiLimbsBridgePhase.ONLINE
-                        result.running -> AiLimbsBridgePhase.CONNECTING
-                        else -> AiLimbsBridgePhase.STOPPED
-                    }
-                    mutableState.value = stateFor(
-                        phase,
-                        "${result.phase}: ${result.detail} | polled=${result.polledCommandCount} handled=${result.handledCommandCount} posted=${result.postedResponseCount} last=${result.lastMethod ?: "-"}"
-                    )
-                }
+            engine.state.collect { probe ->
+                mutableState.value = AiLimbsBridgeState(
+                    providerId = PROFILE_ID,
+                    providerLabel = PROVIDER_LABEL,
+                    phase = when (probe.phase) {
+                        "ONLINE" -> AiLimbsBridgePhase.ONLINE
+                        "STARTING" -> AiLimbsBridgePhase.STARTING
+                        "RETRYING" -> AiLimbsBridgePhase.RECONNECTING
+                        else -> if (probe.running) AiLimbsBridgePhase.CONNECTING else AiLimbsBridgePhase.STOPPED
+                    },
+                    detail = buildString {
+                        append(probe.detail)
+                        append(" | polls=")
+                        append(probe.pollCount)
+                        append(", commands=")
+                        append(probe.commandCount)
+                        append(", responses=")
+                        append(probe.responseCount)
+                        probe.lastMethod?.let {
+                            append(", last=")
+                            append(it)
+                        }
+                        probe.lastError?.let {
+                            append(" | ")
+                            append(it)
+                        }
+                    },
+                    lastHeartbeatAtMs = if (probe.running) System.currentTimeMillis() else null
+                )
             }
         }
     }
 
     override val id: String get() = profile.id
     override val enabled: Boolean get() = profile.enabled
-    override val isRunning: Boolean get() = engine.isRunning()
+    override val isRunning: Boolean get() = engine.state.value.running
     override val state: StateFlow<AiLimbsBridgeState> get() = mutableState
     override val statusSummary: String get() = "${state.value.phase}: ${state.value.detail}"
     override val supportedActions: Set<BridgeAction> get() = SUPPORTED_ACTIONS
 
     override fun start() {
-        val config = storage.readConfig()
-        if (!config.secureStorageAvailable) {
-            mutableState.value = stateFor(AiLimbsBridgePhase.ERROR, "Android 安全凭据存储不可用")
-            return
-        }
-        if (!config.configured) {
-            mutableState.value = stateFor(AiLimbsBridgePhase.PAIRING, "请先配置 Tunnel ID 与 Runtime API Key")
-            return
-        }
-        if (engine.startLoop()) {
-            mutableState.value = stateFor(
-                AiLimbsBridgePhase.CONNECTING,
-                "正在启动 Android/Kotlin MCP long-poll listener"
-            )
-        }
+        runCatching { engine.start() }
+            .onFailure { error ->
+                mutableState.value = stateFor(
+                    AiLimbsBridgePhase.ERROR,
+                    "启动 MCP Echo Probe 失败：${error.message ?: "unknown error"}"
+                )
+            }
     }
 
     override fun stopByUser() = markStopped()
     override fun stopRuntime() = markStopped()
 
     override fun markStopped() {
-        engine.stopLoop()
+        engine.stop()
         mutableState.value = stateFor(
             AiLimbsBridgePhase.STOPPED,
-            "MCP Echo Probe listener 已停止"
+            "MCP Echo Probe 已停止"
         )
     }
 
     override fun reconnect() {
-        engine.stopLoop()
+        engine.stop()
         start()
     }
 
-    override fun recover() = reconnect()
-
-    override fun rePair() {
-        engine.stopLoop()
-        mutableState.value = stateFor(
-            AiLimbsBridgePhase.PAIRING,
-            "请清除并重新保存 Tunnel 配置"
-        )
-    }
-
+    override fun recover() = start()
+    override fun rePair() = markStopped()
     override suspend fun openAuthorizationPage(): Boolean = false
     override fun verifyLiveness() = start()
     override fun onHostSignal(signal: AiLimbsBridgeHostSignal) = Unit
@@ -106,7 +105,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             !config.secureStorageAvailable ->
                 stateFor(AiLimbsBridgePhase.ERROR, "Android 安全凭据存储不可用")
             config.configured ->
-                stateFor(AiLimbsBridgePhase.STOPPED, "已配置；MCP Echo listener 尚未启动")
+                stateFor(AiLimbsBridgePhase.STOPPED, "已配置；等待启动 MCP Echo listener")
             else ->
                 stateFor(AiLimbsBridgePhase.PAIRING, "尚未配置 Tunnel ID / Runtime API Key")
         }
@@ -119,12 +118,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
         providerId = PROFILE_ID,
         providerLabel = PROVIDER_LABEL,
         phase = phase,
-        detail = detail,
-        lastHeartbeatAtMs = if (phase == AiLimbsBridgePhase.ONLINE) {
-            System.currentTimeMillis()
-        } else {
-            null
-        }
+        detail = detail
     )
 
     internal class Factory(

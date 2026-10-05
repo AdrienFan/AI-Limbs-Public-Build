@@ -18,25 +18,21 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
         val config = ChatGptNativeProbeStorage(context).readConfig()
         return BridgeProviderPanelState(
             title = "ChatGPT MCP Echo Probe",
-            description = "纯 Android/Kotlin MCP 测试：常驻 long-poll 接收 OpenAI Tunnel command，直接处理 JSON-RPC 并 POST /response；不依赖 Ubuntu。",
-            statusLines = buildList {
-                add("状态：${control.state.phase}")
-                add("方式：Android OkHttp MCP loop")
-                add("Tunnel ID：${if (config.tunnelId.isBlank()) "未配置" else config.tunnelId}")
-                add("Runtime Key：${if (config.configured) "已安全配置" else "未配置"}")
-                add("Control Plane：${config.baseUrl}")
-                control.state.detail.takeIf { it.isNotBlank() }?.let(::add)
-            },
+            description = "纯 Android/Kotlin MCP 双向测试：常驻 long-poll，直接处理 initialize / tools/list / tools/call，并通过 OpenAI Tunnel 回包。",
+            statusLines = listOf(
+                "状态：${control.state.phase}",
+                "方式：Android OkHttp MCP Tunnel",
+                "Tunnel ID：${if (config.tunnelId.isBlank()) "未配置" else config.tunnelId}",
+                "Runtime Key：${if (config.configured) "已安全配置" else "未配置"}",
+                "Control Plane：${config.baseUrl}",
+                control.state.detail
+            ),
             fields = listOf(
                 BridgeProviderPanelField(
                     id = FIELD_API_KEY,
                     label = "Runtime API Key",
                     kind = BridgeProviderPanelFieldKind.SECRET,
-                    placeholder = if (config.configured) {
-                        "已加密保存；如需更换请先清除配置"
-                    } else {
-                        "在本机粘贴 sk-…"
-                    },
+                    placeholder = if (config.configured) "已加密保存；如需更换请先清除配置" else "在本机粘贴 sk-…",
                     enabled = config.secureStorageAvailable && !config.configured
                 ),
                 BridgeProviderPanelField(
@@ -58,8 +54,8 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                 if (!config.configured) {
                     add(
                         BridgeProviderPanelAction(
-                            id = ACTION_SAVE_CONNECT,
-                            label = "保存并启动 MCP Listener",
+                            id = ACTION_SAVE_START,
+                            label = "保存并启动",
                             enabled = config.secureStorageAvailable,
                             requiredFieldIds = setOf(FIELD_API_KEY, FIELD_TUNNEL_ID)
                         )
@@ -87,7 +83,7 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
     ): BridgeProviderPanelResult {
         val storage = ChatGptNativeProbeStorage(context)
         return when (actionId) {
-            ACTION_SAVE_CONNECT -> {
+            ACTION_SAVE_START -> {
                 storage.saveBinding(
                     apiKey = fieldValues[FIELD_API_KEY].orEmpty(),
                     tunnelId = fieldValues[FIELD_TUNNEL_ID].orEmpty(),
@@ -96,11 +92,7 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                 val accepted = control.perform(BridgeAction.CONNECT)
                 val config = storage.readConfig()
                 BridgeProviderPanelResult(
-                    message = if (accepted) {
-                        "配置已安全保存，正在启动 MCP Listener"
-                    } else {
-                        "配置已保存；当前状态暂不接受连接"
-                    },
+                    message = if (accepted) "配置已安全保存，MCP Echo listener 正在启动" else "配置已保存；当前状态暂不接受启动",
                     fieldValues = mapOf(
                         FIELD_API_KEY to "",
                         FIELD_TUNNEL_ID to config.tunnelId,
@@ -108,7 +100,6 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                     )
                 )
             }
-
             ACTION_CLEAR -> {
                 control.perform(BridgeAction.STOP)
                 storage.clearBinding()
@@ -121,7 +112,6 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                     )
                 )
             }
-
             else -> performBridgeAction(actionId, control)
         }
     }
@@ -133,7 +123,7 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
         val action = runCatching {
             BridgeAction.valueOf(actionId.removePrefix("bridge:"))
         }.getOrElse {
-            error("未知 ChatGPT MCP Echo Probe 动作：$actionId")
+            error("未知 ChatGPT Probe 动作：$actionId")
         }
         val accepted = control.perform(action)
         return BridgeProviderPanelResult(
@@ -142,10 +132,10 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
     }
 
     private fun actionLabel(action: BridgeAction): String = when (action) {
-        BridgeAction.CONNECT -> "启动 Listener"
-        BridgeAction.STOP -> "停止 Listener"
-        BridgeAction.RECONNECT -> "重启 Listener"
-        BridgeAction.RECOVER -> "恢复 Listener"
+        BridgeAction.CONNECT -> "启动 MCP listener"
+        BridgeAction.STOP -> "停止"
+        BridgeAction.RECONNECT -> "重新连接"
+        BridgeAction.RECOVER -> "恢复"
         BridgeAction.REFRESH -> "检查 / 启动"
         BridgeAction.REPAIR -> "重新配置"
         BridgeAction.OPEN_AUTH -> "无授权页"
@@ -154,6 +144,6 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
     private const val FIELD_API_KEY = "runtime_api_key"
     private const val FIELD_TUNNEL_ID = "tunnel_id"
     private const val FIELD_BASE_URL = "base_url"
-    private const val ACTION_SAVE_CONNECT = "chatgpt_probe.save_connect"
+    private const val ACTION_SAVE_START = "chatgpt_probe.save_start"
     private const val ACTION_CLEAR = "chatgpt_probe.clear"
 }

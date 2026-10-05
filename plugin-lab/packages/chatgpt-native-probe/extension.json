@@ -8,7 +8,7 @@
   ],
   "display": {
     "name": "AI Limbs ChatGPT MCP Echo Probe",
-    "description": "纯 Android/Kotlin 双向 MCP 测试子插件：常驻 OpenAI Secure MCP Tunnel long-poll，处理 initialize、tools/list、tools/call，并通过 /response 回传。"
+    "description": "纯 Android/Kotlin 双向 MCP 测试子插件：常驻连接 OpenAI Secure MCP Tunnel，处理 initialize / tools/list / tools/call 并直接回包，不依赖 Ubuntu 或 native tunnel-client。"
   },
   "target": {
     "plugin_id": "plugin.system.bridge",
