@@ -10,11 +10,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.chatgptprobe.v003"
+        applicationId = "com.ai.limbs.payload.chatgptprobe.v004"
         minSdk = 26
         targetSdk = 34
-        versionCode = 3
-        versionName = "0.0.3"
+        versionCode = 4
+        versionName = "0.0.4"
     }
 
     compileOptions {
@@ -24,13 +24,6 @@ android {
 
     buildFeatures {
         buildConfig = false
-    }
-
-    packaging {
-        jniLibs {
-            useLegacyPackaging = true
-            keepDebugSymbols += "**/libtunnel_client.so"
-        }
     }
 }
 
@@ -44,4 +37,6 @@ dependencies {
     compileOnly(project(":plugin-inprocess-api"))
     compileOnly(project(":bridge-contract"))
     implementation(libs.coroutines.android)
+    implementation(libs.okhttp)
+    implementation("androidx.security:security-crypto:1.1.0-alpha06")
 }

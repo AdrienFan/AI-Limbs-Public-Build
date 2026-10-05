@@ -19,15 +19,15 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.run",
-                    displayName = "运行 ChatGPT Native Probe",
-                    description = "在 Android Host 中直接执行测试子插件内置的官方 tunnel-client --version；不使用 Ubuntu、不读取 Key、不建立 Tunnel。",
-                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "native probe", "兼容性测试"),
+                    displayName = "运行 ChatGPT Control Plane Probe",
+                    description = "直接从 Android 子插件通过 OkHttp long-poll 连接 OpenAI Tunnel Control Plane；不依赖 Ubuntu，不运行 native tunnel-client。",
+                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "Control Plane", "long poll"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
-                    effect = InProcessCapabilityEffect.PROCESS_EXECUTION,
+                    effect = InProcessCapabilityEffect.READ_ONLY,
                     domain = InProcessCapabilityDomain.PLUGIN,
                     executor = InProcessCapabilityExecutor {
-                        engine.runProbe().toJson(host).toString()
+                        engine.runProbe().toJson().toString()
                     }
                 )
             )
@@ -35,9 +35,9 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.status",
-                    displayName = "读取 ChatGPT Native Probe 结果",
-                    description = "读取最近一次 Android Host tunnel-client 直接执行测试结果；不触发新进程。",
-                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "native probe", "状态"),
+                    displayName = "读取 ChatGPT Control Plane Probe 状态",
+                    description = "读取本地配置状态与最近一次 OpenAI Tunnel Control Plane 测试结果；不会泄露 Runtime API Key。",
+                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "状态"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
                     effect = InProcessCapabilityEffect.READ_ONLY,
@@ -57,16 +57,18 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-Native-Probe-v0.0.3",
-                    "purpose" to "android_direct_exec_compatibility_probe"
+                    "source" to "AI-Limbs-ChatGPT-Control-Plane-Probe-v0.0.4",
+                    "purpose" to "android_okhttp_control_plane_probe"
                 )
             )
         } catch (error: Throwable) {
+            engine.close()
             handles.asReversed().forEach { runCatching { it.close() } }
             throw error
         }
 
         return ChildExtensionHandle {
+            engine.close()
             handles.asReversed().forEach { runCatching { it.close() } }
         }
     }

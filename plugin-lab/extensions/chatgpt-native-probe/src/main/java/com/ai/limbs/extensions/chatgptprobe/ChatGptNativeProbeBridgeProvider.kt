@@ -18,19 +18,14 @@ import kotlinx.coroutines.flow.collect
 import kotlinx.coroutines.launch
 
 internal class ChatGptNativeProbeBridgeProvider private constructor(
+    context: Context,
     private val scope: CoroutineScope,
     private val profile: NativeBridgeProfile,
     private val engine: ChatGptNativeProbeEngine
 ) : AiLimbsBridgeProvider {
+    private val storage = ChatGptNativeProbeStorage(context)
     private val running = AtomicBoolean(false)
-    private val mutableState = MutableStateFlow(
-        AiLimbsBridgeState(
-            providerId = PROFILE_ID,
-            providerLabel = PROVIDER_LABEL,
-            phase = AiLimbsBridgePhase.STOPPED,
-            detail = "尚未运行 Android Host native probe"
-        )
-    )
+    private val mutableState = MutableStateFlow(initialState())
 
     init {
         scope.launch {
@@ -39,20 +34,8 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
                     mutableState.value = AiLimbsBridgeState(
                         providerId = PROFILE_ID,
                         providerLabel = PROVIDER_LABEL,
-                        phase = if (result.success) {
-                            AiLimbsBridgePhase.ONLINE
-                        } else {
-                            AiLimbsBridgePhase.ERROR
-                        },
-                        detail = buildString {
-                            append(result.phase)
-                            append(": ")
-                            append(result.detail)
-                            if (result.output.isNotBlank()) {
-                                append(" | ")
-                                append(result.output.take(240))
-                            }
-                        },
+                        phase = if (result.success) AiLimbsBridgePhase.ONLINE else AiLimbsBridgePhase.ERROR,
+                        detail = "${result.phase}: ${result.detail}",
                         lastHeartbeatAtMs = System.currentTimeMillis()
                     )
                     running.set(false)
@@ -61,58 +44,77 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
         }
     }
 
-    override val id: String
-        get() = profile.id
-    override val enabled: Boolean
-        get() = profile.enabled
-    override val isRunning: Boolean
-        get() = running.get()
-    override val state: StateFlow<AiLimbsBridgeState>
-        get() = mutableState
-    override val statusSummary: String
-        get() = "${mutableState.value.phase}: ${mutableState.value.detail}"
-    override val supportedActions: Set<BridgeAction>
-        get() = SUPPORTED_ACTIONS
+    override val id: String get() = profile.id
+    override val enabled: Boolean get() = profile.enabled
+    override val isRunning: Boolean get() = running.get()
+    override val state: StateFlow<AiLimbsBridgeState> get() = mutableState
+    override val statusSummary: String get() = "${state.value.phase}: ${state.value.detail}"
+    override val supportedActions: Set<BridgeAction> get() = SUPPORTED_ACTIONS
 
-    override fun start() = launchProbe("CONNECT")
+    override fun start() {
+        val config = storage.readConfig()
+        if (!config.secureStorageAvailable) {
+            mutableState.value = stateFor(AiLimbsBridgePhase.ERROR, "Android 安全凭据存储不可用")
+            return
+        }
+        if (!config.configured) {
+            mutableState.value = stateFor(AiLimbsBridgePhase.PAIRING, "请先配置 Tunnel ID 与 Runtime API Key")
+            return
+        }
+        launchProbe("CONNECT")
+    }
+
     override fun stopByUser() = markStopped()
     override fun stopRuntime() = markStopped()
 
     override fun markStopped() {
         running.set(false)
-        mutableState.value = AiLimbsBridgeState(
-            providerId = PROFILE_ID,
-            providerLabel = PROVIDER_LABEL,
-            phase = AiLimbsBridgePhase.STOPPED,
-            detail = "Probe stopped"
-        )
+        mutableState.value = stateFor(AiLimbsBridgePhase.STOPPED, "Control Plane Probe 已停止")
     }
 
-    override fun reconnect() = launchProbe("RECONNECT")
-    override fun recover() = launchProbe("RECOVER")
-    override fun rePair() = launchProbe("REPAIR")
+    override fun reconnect() = start()
+    override fun recover() = start()
+    override fun rePair() = markStopped()
     override suspend fun openAuthorizationPage(): Boolean = false
-    override fun verifyLiveness() = launchProbe("REFRESH")
+    override fun verifyLiveness() = start()
     override fun onHostSignal(signal: AiLimbsBridgeHostSignal) = Unit
 
     private fun launchProbe(source: String) {
         if (!running.compareAndSet(false, true)) return
-        mutableState.value = AiLimbsBridgeState(
-            providerId = PROFILE_ID,
-            providerLabel = PROVIDER_LABEL,
-            phase = AiLimbsBridgePhase.STARTING,
-            detail = "$source: executing bundled tunnel-client --version directly in Android Host"
+        mutableState.value = stateFor(
+            AiLimbsBridgePhase.CONNECTING,
+            "$source: 正在通过 Android OkHttp 直连 OpenAI Tunnel Control Plane"
         )
         scope.launch {
             engine.runProbe()
         }
     }
 
+    private fun initialState(): AiLimbsBridgeState {
+        val config = storage.readConfig()
+        return when {
+            !config.secureStorageAvailable ->
+                stateFor(AiLimbsBridgePhase.ERROR, "Android 安全凭据存储不可用")
+            config.configured ->
+                stateFor(AiLimbsBridgePhase.STOPPED, "已配置；尚未执行 Control Plane Probe")
+            else ->
+                stateFor(AiLimbsBridgePhase.PAIRING, "尚未配置 Tunnel ID / Runtime API Key")
+        }
+    }
+
+    private fun stateFor(phase: AiLimbsBridgePhase, detail: String): AiLimbsBridgeState =
+        AiLimbsBridgeState(
+            providerId = PROFILE_ID,
+            providerLabel = PROVIDER_LABEL,
+            phase = phase,
+            detail = detail
+        )
+
     internal class Factory(
         private val engine: ChatGptNativeProbeEngine
     ) : BridgeProviderFactory {
         override val type: String = PROFILE_TYPE
-        override val transportId: String = "chatgpt-native-probe"
+        override val transportId: String = "chatgpt-control-plane-probe"
         override val profiles: List<BridgeProfile> = listOf(
             NativeBridgeProfile(
                 id = PROFILE_ID,
@@ -122,8 +124,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
                 isDefault = false
             )
         )
-        override val supportedActions: Set<BridgeAction>
-            get() = SUPPORTED_ACTIONS
+        override val supportedActions: Set<BridgeAction> get() = SUPPORTED_ACTIONS
 
         override fun create(
             context: Context,
@@ -132,26 +133,25 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             remoteIngress: BridgeRemoteIngress
         ): AiLimbsBridgeProvider {
             require(profile is NativeBridgeProfile) {
-                "ChatGPT Native Probe requires a NativeBridgeProfile"
+                "ChatGPT Control Plane Probe requires a NativeBridgeProfile"
             }
             require(profile.id == PROFILE_ID && profile.type == PROFILE_TYPE) {
-                "Unsupported ChatGPT Native Probe profile: ${profile.id} (${profile.type})"
+                "Unsupported ChatGPT Control Plane Probe profile: ${profile.id} (${profile.type})"
             }
-            return ChatGptNativeProbeBridgeProvider(scope, profile, engine)
+            return ChatGptNativeProbeBridgeProvider(context, scope, profile, engine)
         }
     }
 
     companion object {
         const val PROFILE_ID = "chatgpt_native_probe"
-        const val PROFILE_TYPE = "chatgpt_native_probe"
-        const val PROVIDER_LABEL = "ChatGPT Native Probe"
+        const val PROFILE_TYPE = "chatgpt_control_plane_probe"
+        const val PROVIDER_LABEL = "ChatGPT Control Plane Probe"
 
         private val SUPPORTED_ACTIONS = setOf(
             BridgeAction.CONNECT,
             BridgeAction.STOP,
             BridgeAction.RECONNECT,
             BridgeAction.RECOVER,
-            BridgeAction.REPAIR,
             BridgeAction.REFRESH
         )
     }
