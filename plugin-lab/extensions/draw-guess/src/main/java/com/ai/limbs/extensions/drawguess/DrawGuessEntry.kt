@@ -42,7 +42,8 @@ class DrawGuessEntry : ChildExtensionEntry {
             "open" to JSONObject(), "view" to JSONObject(), "ready" to JSONObject(),
             "roll" to JSONObject().put("revision", 2), "confirm_dice" to JSONObject().put("revision", 3),
             "choose_order" to JSONObject().put("revision", 5).put("drawFirst", true),
-            "seal_word" to JSONObject().put("revision", 6).put("word", "自行车"),
+            "choose_mode" to JSONObject().put("revision", 6).put("mode", "FREE"),
+            "seal_word" to JSONObject().put("revision", 7).put("word", "自行车"),
             "seal_hints" to JSONObject().put("revision", 7).put("hint1", "交通工具").put("hint2", "人力驱动"),
             "canvas" to JSONObject().put("revision", 8), "preview" to JSONObject().put("revision", 8),
             "paint" to JSONObject().put("revision", 8).put("type", "STROKE_ADD").put("params", JSONObject()
@@ -54,7 +55,7 @@ class DrawGuessEntry : ChildExtensionEntry {
             "exit" to JSONObject().put("revision", 10))
         val titles = mapOf("open" to "兰儿打开游戏", "view" to "读取游戏阶段和下一步", "ready" to "兰儿准备并读取极简规则",
             "roll" to "兰儿掷骰子", "confirm_dice" to "兰儿确认点数", "choose_order" to "赢家选择先画或先猜",
-            "seal_word" to "兰儿封存题目", "seal_hints" to "兰儿封存两条提示并开画",
+            "choose_mode" to "当轮画方确认游戏模式", "seal_word" to "兰儿封存题目", "seal_hints" to "兰儿封存两条提示并开画",
             "canvas" to "读取兰儿自己的临时画布", "paint" to "兰儿画一笔", "preview" to "预览兰儿自己的画",
             "finish" to "兰儿确认画完并交图", "picture" to "兰儿接收待猜图片", "guess" to "兰儿提交猜测", "exit" to "结束游戏并清理临时画布")
         try {
@@ -73,6 +74,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                             "open" -> "无需参数；打开后再调用ready。已结束的游戏恢复到准备阶段；重复打开不重置进行中的回合。"
                             "ready" -> "准备后若status为WAITING，按retry_after_ms等待后调用view查询，不重复准备或提前执行下一步。" + GAME_RULES
                             "view" -> "查询不改变游戏状态。若status为WAITING，按retry_after_ms等待后再次调用view；其他状态按allowed执行。"
+                            "choose_mode" -> "仅当兰儿为本轮出题／绘画方时选择模式。当前仅支持mode=FREE；SYSTEM暂未开放。修改时带当前revision。"
                             "paint" -> "修改时带当前revision；STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。"
                             else -> "修改时带当前revision；猜题阶段用picture取图，不能读取对方题目或绘画记录。"
                         },
@@ -98,7 +100,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                 JSONObject().put("name", "你画我猜").put("rules", GAME_RULES)
                     .put("start", "$GAME_CAPABILITIES.open").put("ready", "$GAME_CAPABILITIES.ready")
                     .put("view", "$GAME_CAPABILITIES.view")
-                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes. When status is WAITING, wait retry_after_ms then call view again; do not repeat ready or advance before allowed changes. Never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
+                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes. Dice and order are chosen once at the start. The current drawer chooses each round's mode using choose_mode with mode FREE; after roles swap, the new drawer chooses again. When status is WAITING, wait retry_after_ms then call view again; do not repeat ready or advance before allowed changes. Never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
                     .toString()))
             host.publish(mapOf("schema" to 1, "menu" to menu, "panel" to panel,
                 "connect" to Consumer<InProcessUiStateProvider>(game::connect)),

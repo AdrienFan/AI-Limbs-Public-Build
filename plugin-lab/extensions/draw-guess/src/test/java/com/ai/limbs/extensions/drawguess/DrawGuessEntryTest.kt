@@ -51,9 +51,12 @@ class DrawGuessEntryTest {
         } as ChildExtensionHost
         val handle = DrawGuessEntry().mount(host)
         try {
-            val events = setOf("open", "view", "ready", "roll", "confirm_dice", "choose_order", "seal_word",
+            val events = setOf("open", "view", "ready", "roll", "confirm_dice", "choose_order", "choose_mode", "seal_word",
                 "seal_hints", "canvas", "preview", "paint", "finish", "picture", "guess", "exit")
             assertEquals(events.map { "plugin.draw_guess.$it" }.toSet(), capabilities.keys)
+            val modeExample = JSONObject(capabilities.getValue("plugin.draw_guess.choose_mode").suggestedParamsJson)
+            assertEquals("FREE", modeExample.getString("mode"))
+            assertTrue(modeExample.has("revision"))
             val paintExample = JSONObject(capabilities.getValue("plugin.draw_guess.paint").suggestedParamsJson)
             assertTrue(paintExample.getJSONObject("params").getString("id").matches(Regex("[a-f0-9-]{36}")))
             val ingress = JSONObject(requireNotNull(discovery).payloadJson)
@@ -105,7 +108,7 @@ class DrawGuessEntryTest {
             assertEquals("READY", readyAgain.getString("phase"))
             assertEquals("LANER", readyAgain.getJSONArray("ready").getString(0))
         } finally { handle.stop() }
-        assertEquals(16, closed)
+        assertEquals(17, closed)
         assertNull((requireNotNull(published)["panel"] as InProcessUiStateProvider).stateJson.value)
     }
 }

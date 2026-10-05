@@ -23,7 +23,7 @@ class DrawGuessGameTest {
         catch (_: IllegalArgumentException) { }
         catch (_: IllegalStateException) { }
     }
-    private suspend fun started(drawFirst: Boolean = true): Pair<DrawGuessGame, Canvas> {
+    private suspend fun started(drawFirst: Boolean = true, selectMode: Boolean = true): Pair<DrawGuessGame, Canvas> {
         val values = ArrayDeque(listOf(6, 1)); val game = DrawGuessGame { values.removeFirst() }
         val canvas = Canvas(); game.connect(canvas)
         send(game, Player.AWEI, "open")
@@ -31,6 +31,8 @@ class DrawGuessGameTest {
         send(game, Player.AWEI, "roll"); send(game, Player.LANER, "roll")
         send(game, Player.AWEI, "confirm_dice"); send(game, Player.LANER, "confirm_dice")
         send(game, Player.AWEI, "choose_order", JSONObject().put("drawFirst", drawFirst))
+        if (selectMode) send(game, if (drawFirst) Player.AWEI else Player.LANER,
+            "choose_mode", JSONObject().put("mode", "FREE"))
         return game to canvas
     }
     private suspend fun pictureReady(g: DrawGuessGame, drawer: Player = Player.AWEI, word: String = "自行车") {
@@ -136,7 +138,7 @@ class DrawGuessGameTest {
         val second = send(game, Player.LANER, "guess", JSONObject().put("answer", "火车"))
         assertEquals(2, second.getJSONArray("hints").length())
         val third = send(game, Player.LANER, "guess", JSONObject().put("answer", "飞机"))
-        assertEquals("WORD", third.getString("phase")); assertEquals("LANER", third.getString("drawer"))
+        assertEquals("MODE", third.getString("phase")); assertEquals("LANER", third.getString("drawer"))
         assertEquals(2, third.getInt("round"))
         assertEquals("自行车", third.getJSONObject("lastResult").getString("answer"))
         assertFalse(third.getJSONObject("lastResult").getBoolean("success"))
@@ -148,7 +150,7 @@ class DrawGuessGameTest {
         assertEquals("**", game.event(Player.LANER, "view").getString("wordMask"))
         val v = send(game, Player.LANER, "guess", JSONObject().put("answer", " 猫🐈 "))
         assertTrue(v.getJSONObject("lastResult").getBoolean("success"))
-        assertEquals(Phase.WORD, game.phase)
+        assertEquals(Phase.MODE, game.phase)
         assertEquals("release", canvas.events.last())
     }
     @Test fun lanerWordIsHiddenFromPhoneAndStaleEventsCannotMutate() = runBlocking {
@@ -171,5 +173,134 @@ class DrawGuessGameTest {
         send(game, Player.AWEI, "open")
         assertEquals(Phase.READY, game.phase)
         assertEquals(0, game.event(Player.LANER, "view").getJSONArray("ready").length())
+    }
+
+    @Test fun modeFollowsInitialDiceAndOnlyCurrentDrawerCanChooseFreeMode() = runBlocking {
+        val game = DrawGuessGame { 4 }
+        send(game, Player.AWEI, "open")
+        send(game, Player.AWEI, "ready"); send(game, Player.LANER, "ready")
+        assertEquals(Phase.DICE, game.phase)
+        rejects { send(game, Player.AWEI, "choose_mode", JSONObject().put("mode", "FREE")) }
+        val (round, _) = started(selectMode = false)
+        assertEquals(Phase.MODE, round.phase)
+        val waiting = round.event(Player.LANER, "view")
+        assertEquals("AWEI", waiting.getString("mode_chooser"))
+        assertEquals("CHOOSING_MODE", waiting.getJSONObject("opponent_status").getString("state"))
+        assertEquals(3_000L, waiting.getLong("retry_after_ms"))
+        assertFalse(waiting.has("question_mode"))
+        val buttons = round.phonePanel().getJSONArray("actions")
+        assertEquals(2, buttons.length())
+        assertEquals("SYSTEM", buttons.getJSONObject(0).getJSONObject("parameters").getString("mode"))
+        assertFalse(buttons.getJSONObject(0).getBoolean("enabled"))
+        assertEquals("FREE", buttons.getJSONObject(1).getJSONObject("parameters").getString("mode"))
+        assertTrue(buttons.getJSONObject(1).getBoolean("enabled"))
+        val revision = round.revision
+        rejects { send(round, Player.LANER, "choose_mode", JSONObject().put("mode", "FREE")) }
+        rejects { send(round, Player.AWEI, "choose_mode", JSONObject().put("mode", "SYSTEM")) }
+        rejects { send(round, Player.AWEI, "seal_word", JSONObject().put("word", "猫")) }
+        assertEquals(revision, round.revision)
+        val selected = send(round, Player.AWEI, "choose_mode", JSONObject().put("mode", "FREE"))
+        assertEquals("FREE", selected.getString("question_mode"))
+        assertEquals(Phase.WORD, round.phase)
+        rejects { send(round, Player.AWEI, "choose_mode", JSONObject().put("mode", "FREE")) }
+    }
+    @Test fun modeSelectionRotatesWithDrawerAfterEveryRoundWithoutNewDice() = runBlocking {
+        val (game, _) = started()
+        pictureReady(game)
+        val next = send(game, Player.LANER, "guess", JSONObject().put("answer", "自行车"))
+        assertEquals("MODE", next.getString("phase"))
+        assertEquals("LANER", next.getString("mode_chooser"))
+        assertFalse(next.has("question_mode"))
+        assertEquals("choose_mode", next.getJSONArray("allowed").getString(0))
+        assertEquals("ACTION_REQUIRED", next.getString("status"))
+        assertFalse(next.has("retry_after_ms"))
+        assertEquals(0, game.phonePanel().getJSONArray("actions").length())
+        rejects { send(game, Player.AWEI, "choose_mode", JSONObject().put("mode", "FREE")) }
+        rejects { send(game, Player.LANER, "roll") }
+        send(game, Player.LANER, "choose_mode", JSONObject().put("mode", "FREE"))
+        pictureReady(game, drawer = Player.LANER, word = "猫")
+        send(game, Player.AWEI, "guess", JSONObject().put("answer", "猫"))
+        val third = game.event(Player.LANER, "view")
+        assertEquals(3, third.getInt("round"))
+        assertEquals("MODE", third.getString("phase"))
+        assertEquals("AWEI", third.getString("mode_chooser"))
+        assertEquals(3_000L, third.getLong("retry_after_ms"))
+        rejects { send(game, Player.LANER, "choose_mode", JSONObject().put("mode", "FREE")) }
+        send(game, Player.AWEI, "choose_mode", JSONObject().put("mode", "FREE"))
+        assertEquals(Phase.WORD, game.phase)
+    }
+    @Test fun diceWaitingDistinguishesRollConfirmationAndOrderWithoutBlockingOwnAction() = runBlocking {
+        val values = ArrayDeque(listOf(1, 6)); val game = DrawGuessGame { values.removeFirst() }
+        send(game, Player.LANER, "open")
+        send(game, Player.LANER, "ready"); send(game, Player.AWEI, "ready")
+        var v = game.event(Player.LANER, "view")
+        assertEquals("roll", v.getJSONArray("allowed").getString(0))
+        assertFalse(v.has("retry_after_ms"))
+        v = send(game, Player.LANER, "roll")
+        assertEquals("confirm_dice", v.getJSONArray("allowed").getString(0))
+        assertFalse(v.has("retry_after_ms"))
+        v = send(game, Player.LANER, "confirm_dice")
+        assertEquals("DICE_NOT_ROLLED", v.getJSONObject("opponent_status").getString("state"))
+        assertEquals(3_000L, v.getLong("retry_after_ms"))
+        send(game, Player.AWEI, "roll")
+        v = game.event(Player.LANER, "view")
+        assertEquals("DICE_UNCONFIRMED", v.getJSONObject("opponent_status").getString("state"))
+        assertEquals(3_000L, v.getLong("retry_after_ms"))
+        send(game, Player.AWEI, "confirm_dice")
+        v = game.event(Player.LANER, "view")
+        assertEquals("ORDER", v.getString("phase"))
+        assertEquals("CHOOSING_ORDER", v.getJSONObject("opponent_status").getString("state"))
+        assertEquals(3_000L, v.getLong("retry_after_ms"))
+        send(game, Player.AWEI, "choose_order", JSONObject().put("drawFirst", false))
+        v = game.event(Player.LANER, "view")
+        assertEquals("choose_mode", v.getJSONArray("allowed").getString(0))
+        assertFalse(v.has("retry_after_ms"))
+    }
+    @Test fun humanWordHintsAndDrawingUseFiveSecondsWhileGuessingUsesThree() = runBlocking {
+        val (game, _) = started()
+        var v = game.event(Player.LANER, "view")
+        assertEquals("ENTERING_WORD", v.getJSONObject("opponent_status").getString("state"))
+        assertEquals(5_000L, v.getLong("retry_after_ms"))
+        send(game, Player.AWEI, "seal_word", JSONObject().put("word", "猫"))
+        v = game.event(Player.LANER, "view")
+        assertEquals("ENTERING_HINTS", v.getJSONObject("opponent_status").getString("state"))
+        assertEquals(5_000L, v.getLong("retry_after_ms"))
+        send(game, Player.AWEI, "seal_hints", JSONObject().put("hint1", "动物").put("hint2", "喵"))
+        v = game.event(Player.LANER, "view")
+        assertEquals("DRAWING", v.getJSONObject("opponent_status").getString("state"))
+        assertEquals(5_000L, v.getLong("retry_after_ms"))
+        send(game, Player.AWEI, "finish")
+        v = game.event(Player.LANER, "view")
+        assertEquals("ACTION_REQUIRED", v.getString("status"))
+        assertFalse(v.has("retry_after_ms"))
+        val (other, _) = started(drawFirst = false)
+        pictureReady(other, drawer = Player.LANER)
+        v = other.event(Player.LANER, "view")
+        assertEquals("GUESSING", v.getJSONObject("opponent_status").getString("state"))
+        assertEquals(3_000L, v.getLong("retry_after_ms"))
+        send(other, Player.AWEI, "guess", JSONObject().put("answer", "飞机"))
+        v = other.event(Player.LANER, "view")
+        assertTrue(v.getString("message").contains("第1次猜测未命中"))
+        assertEquals(3_000L, v.getLong("retry_after_ms"))
+        assertFalse(v.getJSONObject("lastResult").has("answer"))
+    }
+    @Test fun longWaitingIntervalIsConfigurableAndTieRequiresImmediateReroll() = runBlocking {
+        val values = ArrayDeque(listOf(3, 3, 6, 1))
+        val game = DrawGuessGame(waitRetrySeconds = 6, longWaitRetrySeconds = 7) { values.removeFirst() }
+        send(game, Player.LANER, "open")
+        send(game, Player.AWEI, "ready"); send(game, Player.LANER, "ready")
+        send(game, Player.AWEI, "roll"); send(game, Player.LANER, "roll")
+        send(game, Player.AWEI, "confirm_dice")
+        val tie = send(game, Player.LANER, "confirm_dice")
+        assertEquals(2, tie.getInt("dice_attempt"))
+        assertEquals("roll", tie.getJSONArray("allowed").getString(0))
+        assertTrue(tie.getString("message").contains("同点"))
+        assertFalse(tie.has("retry_after_ms"))
+        send(game, Player.AWEI, "roll"); send(game, Player.LANER, "roll")
+        send(game, Player.AWEI, "confirm_dice"); send(game, Player.LANER, "confirm_dice")
+        send(game, Player.AWEI, "choose_order", JSONObject().put("drawFirst", true))
+        assertEquals(6_000L, game.event(Player.LANER, "view").getLong("retry_after_ms"))
+        send(game, Player.AWEI, "choose_mode", JSONObject().put("mode", "FREE"))
+        assertEquals(7_000L, game.event(Player.LANER, "view").getLong("retry_after_ms"))
     }
 }

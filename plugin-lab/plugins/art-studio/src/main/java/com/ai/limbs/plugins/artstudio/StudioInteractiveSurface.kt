@@ -123,7 +123,8 @@ import java.io.File
                         val parameters = JSONObject(action.getJSONObject("parameters").toString())
                         values.forEach { (key, value) -> parameters.put(key, value) }
                         send(event, parameters)
-                    }, enabled = !submitting && (event != "finish" || !bridge.canvasWorking),
+                    }, enabled = !submitting && (!action.has("enabled") || action.getBoolean("enabled")) &&
+                        (event != "finish" || !bridge.canvasWorking),
                         shape = if (circular) CircleShape else MaterialTheme.shapes.small,
                         modifier = if (circular) Modifier.size(116.dp) else Modifier.fillMaxWidth()) {
                         Text(action.getString("title"), style = if (circular) MaterialTheme.typography.titleLarge
