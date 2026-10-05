@@ -75,6 +75,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                             "ready" -> "准备后若status为WAITING，按retry_after_ms等待后调用view查询，不重复准备或提前执行下一步。" + GAME_RULES
                             "view" -> "查询不改变游戏状态。若status为WAITING，按retry_after_ms等待后再次调用view；其他状态按allowed执行。"
                             "choose_mode" -> "仅当兰儿为本轮出题／绘画方时选择模式。当前仅支持mode=FREE；SYSTEM暂未开放。修改时带当前revision。"
+                            "seal_word", "seal_hints" -> "修改时带当前revision。" + LANER_SECRECY_REMINDER
                             "paint" -> "修改时带当前revision；STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。"
                             else -> "修改时带当前revision；猜题阶段用picture取图，不能读取对方题目或绘画记录。"
                         },
@@ -98,9 +99,10 @@ class DrawGuessEntry : ChildExtensionEntry {
             }
             handles += host.publishAiIngressDiscovery(ChildAiIngressDiscovery("art_studio.draw_guess.v1",
                 JSONObject().put("name", "你画我猜").put("rules", GAME_RULES)
+                    .put("secrecy_rule", LANER_SECRECY_REMINDER)
                     .put("start", "$GAME_CAPABILITIES.open").put("ready", "$GAME_CAPABILITIES.ready")
                     .put("view", "$GAME_CAPABILITIES.view")
-                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes. Dice and order are chosen once at the start. The current drawer chooses each round's mode using choose_mode with mode FREE; after roles swap, the new drawer chooses again. When status is WAITING, wait retry_after_ms then call view again; do not repeat ready or advance before allowed changes. Never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
+                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes. Dice and order are chosen once at the start. The current drawer chooses each round's mode using choose_mode with mode FREE; after roles swap, the new drawer chooses again. When status is WAITING, wait retry_after_ms then call view again; do not repeat ready or advance before allowed changes. Keep your own hidden word and locked hints out of user-facing progress, reasoning explanations and chat. Submit them only through the sealing capabilities. Hints become public only when unlocked; the answer is revealed when the round ends. Never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
                     .toString()))
             host.publish(mapOf("schema" to 1, "menu" to menu, "panel" to panel,
                 "connect" to Consumer<InProcessUiStateProvider>(game::connect)),

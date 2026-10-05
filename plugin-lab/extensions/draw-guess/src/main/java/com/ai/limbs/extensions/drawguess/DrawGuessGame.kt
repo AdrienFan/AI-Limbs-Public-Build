@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.security.SecureRandom
 
 internal const val GAME_RULES = "双方准备后各掷一次骰子并确认；同点重掷，赢家选先画或先猜。每轮由当轮出题／绘画方选择游戏模式；当前只开放自由出题。画方封存词语、填两条提示后画画并交图。猜方先得字数星号，最多猜三次；错一、错二分别解锁一条提示，错三失败。结束公布答案、清理临时画布并交换角色，由新的画方选择下一轮模式，不重复开局掷骰。答案去首尾空格后精确匹配。"
+internal const val LANER_SECRECY_REMINDER = "请注意：勿在任务进度、对外可见的推理说明或聊天中暴露自己的考题及尚未解锁的提示。考题和提示只通过游戏封存接口提交；提示按规则解锁，答案在本轮结束后公开。"
 internal const val DEFAULT_WAIT_RETRY_SECONDS = 3
 internal const val DEFAULT_LONG_WAIT_RETRY_SECONDS = 5
 internal enum class Player { AWEI, LANER;
@@ -261,6 +262,9 @@ internal class DrawGuessGame(
                         .put("capability", JSONObject().put("name", "$GAME_CAPABILITIES.view")
                             .put("parameters", JSONObject())))
             } else v.put("message", lanerActionMessage(actions, opponent))
+            if (drawer == Player.LANER && phase in setOf(Phase.WORD, Phase.HINTS, Phase.DRAWING, Phase.GUESSING)) {
+                v.put("message", v.getString("message") + LANER_SECRECY_REMINDER)
+            }
         }
         rolls[actor]?.let { v.put("yourDice", it).put("diceConfirmed", actor in confirmed) }
         if (phase == Phase.ORDER) v.put("winner", winner!!.name)
