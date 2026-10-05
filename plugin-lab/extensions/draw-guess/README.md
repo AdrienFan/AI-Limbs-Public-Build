@@ -1,12 +1,12 @@
-# 你画我猜 0.1.7
+# 你画我猜 0.1.8
 
 独立画室子插件，需要画室0.2.98或以上。先安装配套画室，再从“工具 → 扩展 → 添加扩展”选择签名游戏 `.ailx`；完成准入后，扩展菜单出现“你画我猜”。基座、Hub和插件中心业务没有改动。
 
 ## 第一版规则
 
-准备页面有规则简介和大的准备圆按钮。双方准备后各掷一次骰子、各自确认；同点双方重掷，点数较大者选择先画或先猜。确定第一位画方后进入模式选择。每轮由当轮出题／绘画方选择本轮模式，选择权随角色交换。当前“系统出题”禁用，低／中／高难度仅预留；选择“自由出题”后由画方填写词语并确认封存，再填写两条非空提示，完成后创建1000×700白底临时画布。
+准备页面有规则简介和大的准备圆按钮。双方准备后各掷一次骰子、各自确认；同点双方重掷，点数较大者选择先画或先猜。确定第一位画方后进入模式选择。每轮由当轮出题／绘画方选择本轮模式，选择权随角色交换。选择“自由出题”后由画方填写词语并确认封存，再填写两条非空提示，完成后创建1000×700白底临时画布。选择“系统出题”后进入低／中／高／随机难度选择，系统从本局未用词库抽取一个词和两条提示，私下交给画方并直接创建画布开始作画。
 
-画方可使用画室工具编辑，另一方只读查看画面；角色交换时编辑权同步交换。画室主画布显示当前作品，猜题浮窗仅显示题目字数、已解锁提示和答案输入。只读不停止主画布刷新，仍可平移和缩放。点“确定完成”后冻结；猜方收到图和自动字数星号提示。第一次猜错解锁提示一，第二次猜错解锁提示二，第三次猜错判失败；任意一次猜中立即成功。成功或失败均公布答案、清理画布和图片，自动交换角色，由新的画方选择下一轮模式；后续轮次不重复开局掷骰。不做系统提词，不做计时和积分。
+画方可使用画室工具编辑，另一方只读查看画面；角色交换时编辑权同步交换。画室主画布显示当前作品，猜题浮窗仅显示题目字数、已解锁提示和答案输入。只读不停止主画布刷新，仍可平移和缩放。点“确定完成”后冻结；猜方收到图和自动字数星号提示。第一次猜错解锁提示一，第二次猜错解锁提示二，第三次猜错判失败；任意一次猜中立即成功。成功或失败均公布答案、清理画布和图片，自动交换角色，由新的画方选择下一轮模式；后续轮次不重复开局掷骰。系统题库各档30题，共90题；不做计时和积分。
 
 答案去首尾空格后精确匹配，字数按Unicode码点计数。封存词语与尚未解锁提示仅存在子插件内存；猜测接口不返回这些信息。兰儿的封存词语不进入手机对手面板；阿伟的封存词语不进入兰儿入口。外部截图、系统日志和聊天记录不属于游戏的隐藏答案边界，不应在猜题时旁查。
 
@@ -16,6 +16,8 @@
 
 安装身份为 `plugin.art.studio.draw_guess`；能力按Child Runtime准入规则属于 `plugin.draw_guess.*`。兰儿先调用 `open` 打开游戏，再调用 `ready` 准备；两个动作独立，不会替阿伟准备。`open`、`ready` 与 `view` 都返回极简规则、当前阶段、revision、身份和allowed下一步；上下文中断后先view。关闭时兰儿的allowed返回open，已退出游戏可重新打开，重复打开不会重置进行中的回合。open、ready、view和picture无需revision；其他修改动作使用本次view返回的revision，不猜参数或直接调用普通工程绘画接口。
 
+以下为互斥分支的地址示例，不应按整段顺序执行：FREE后封词、填写提示；SYSTEM后choose_difficulty成功直接开画，不调用seal_word或seal_hints。back_mode仅在未抽题的DIFFICULTY阶段可用。
+
 ```json
 {"capability":"plugin.draw_guess.open","args":{}}
 {"capability":"plugin.draw_guess.ready","args":{}}
@@ -24,6 +26,9 @@
 {"capability":"plugin.draw_guess.confirm_dice","args":{"revision":3}}
 {"capability":"plugin.draw_guess.choose_order","args":{"revision":5,"drawFirst":true}}
 {"capability":"plugin.draw_guess.choose_mode","args":{"revision":6,"mode":"FREE"}}
+{"capability":"plugin.draw_guess.choose_mode","args":{"revision":6,"mode":"SYSTEM"}}
+{"capability":"plugin.draw_guess.choose_difficulty","args":{"revision":7,"difficulty":"RANDOM"}}
+{"capability":"plugin.draw_guess.back_mode","args":{"revision":7}}
 {"capability":"plugin.draw_guess.seal_word","args":{"revision":7,"word":"自行车"}}
 {"capability":"plugin.draw_guess.seal_hints","args":{"revision":7,"hint1":"交通工具","hint2":"人力驱动"}}
 {"capability":"plugin.draw_guess.paint","args":{"revision":8,"type":"STROKE_ADD","params":{"id":"f91df829-61bc-48af-8866-000000000001","tool":"ink","color":"#FF245364","width":6,"points":[[40,50],[180,130]]}}}
@@ -34,11 +39,11 @@
 {"capability":"plugin.draw_guess.exit","args":{"revision":11}}
 ```
 
-兰儿的入口发现文档及封存能力说明包含保密提醒。兰儿作为画方时，从填写题目、填写提示到绘画、等待猜题的每次响应，均提醒不在任务进度、对外可见的推理说明或聊天中公开自己的考题及尚未解锁的提示。仅通过封存接口提交，按游戏规则解锁提示、回合结束公布答案；该提醒不替代状态机已有的对手视图隔离。
+兰儿的入口发现文档及封存能力说明包含保密提醒。兰儿作为画方时，从填写题目、填写提示到绘画、等待猜题的每次响应，均提醒不在任务进度、对外可见的推理说明或聊天中公开自己的考题及尚未解锁的提示。题目和提示仅在游戏私有出题接口中读取或封存，按游戏规则解锁提示、回合结束公布答案；该提醒不替代状态机已有的对手视图隔离。
 
 以上revision只是占位示例，替换为当前值。`canvas`可在兰儿自己的绘画阶段读当前画布；`paint`接受STROKE_ADD、SHAPE_CREATE、SHAPE_DELETE、LAYER_CREATE、LAYER_SELECT，参数遵循画室相应操作。`preview`附实际图像；`picture`在阿伟作画期间只读预览当前图片，交图后读取冻结图片，不返回编辑记录；仅交图后允许guess。`canvas_access`标记EDIT、READ_ONLY或NONE。阿伟作画时兰儿虽可选择picture预览，状态仍为WAITING，继续按5秒间隔查询view。猜题时不使用普通画室工程、足迹、私有输入框或外部日志取答案。
 
-当兰儿准备后正在等待阿伟，返回正常成功状态 `success=true`、`status=WAITING`、`waiting_for=AWEI`、`retry_after_ms=3000`，提示“兰儿已准备，阿伟正在准备中。请等待3秒后再次查询游戏状态。”。按返回的 `next_action.capability` 等待后调用view；仍未准备则继续返回同样的等待指引。查询不修改revision，不重复ready，也不强行执行下一步。阿伟准备后返回DICE和allowed中的roll，等待字段随之消失。每次兰儿接口响应都带 `opponent_status` 和明确的下一步提示。等待阿伟准备、选择模式、掷骰、确认点数、选择先后、提交猜测时查询间隔为3秒；等待阿伟封存题目、封存提示、绘画并确认完成时为5秒。掷骰与确认点数分开提示；猜错后提示已猜错次数；同点重掷直接返回roll。兰儿有自己的allowed动作时立即操作，不附等待时间；回合结束直接进入新画方选模式。关闭的游戏不要求继续轮询。默认间隔集中在 `DEFAULT_WAIT_RETRY_SECONDS` 和 `DEFAULT_LONG_WAIT_RETRY_SECONDS`，状态机可通过 `waitRetrySeconds`、`longWaitRetrySeconds` 调整。顶层success表示接口执行成功，猜测是否正确仍看lastResult.success。
+当兰儿准备后正在等待阿伟，返回正常成功状态 `success=true`、`status=WAITING`、`waiting_for=AWEI`、`retry_after_ms=3000`，提示“兰儿已准备，阿伟正在准备中。请等待3秒后再次查询游戏状态。”。按返回的 `next_action.capability` 等待后调用view；仍未准备则继续返回同样的等待指引。查询不修改revision，不重复ready，也不强行执行下一步。阿伟准备后返回DICE和allowed中的roll，等待字段随之消失。每次兰儿接口响应都带 `opponent_status` 和明确的下一步提示。等待阿伟准备、选择模式、选择出题难度、掷骰、确认点数、选择先后、提交猜测时查询间隔为3秒；等待阿伟封存题目、封存提示、绘画并确认完成时为5秒。掷骰与确认点数分开提示；猜错后提示已猜错次数；同点重掷直接返回roll。兰儿有推进流程的allowed动作时立即操作，不附等待时间；回合结束直接进入新画方选模式。关闭的游戏不要求继续轮询。默认间隔集中在 `DEFAULT_WAIT_RETRY_SECONDS` 和 `DEFAULT_LONG_WAIT_RETRY_SECONDS`，状态机可通过 `waitRetrySeconds`、`longWaitRetrySeconds` 调整。顶层success表示接口执行成功，猜测是否正确仍看lastResult.success。
 
 ## 架构与构建
 
@@ -73,3 +78,11 @@ STROKE_ADD要求params.id为唯一笔画UUID；极简示例现已携带此字段
 ## 0.1.7 主画布展示与轮流编辑权
 
 移除游戏浮窗的图片请求标记，作品由画室主画布展示。作画阶段仅画方可修改，另一方可以只读看图；交图后画布冻结、双方只读。picture允许猜方预览未交图的当前画面，但不能提前猜题，也不暴露封存信息或绘画记录。角色交换后权限同步切换。配套画室0.2.98修正只读状态阻止刷新，并把只读触摸限定为浏览手势。回归源码覆盖双向只读、预览不推进revision、交图前禁止猜测及换轮后的权限。
+
+## 0.1.8 第一版系统出题
+
+启用SYSTEM模式，低／中／高各30题，每题含类别、词语及两条人工提示。RANDOM直接对所有未用词合并均匀抽取；不是先随机选难度再抽词。本局所有已经封存的答案（包括自由出题）均排除，跨角色与难度共享；关闭后重新开局清空使用记录。某档耗尽明确提示，禁用对应按钮；全部耗尽时系统模式禁用，可手动选择自由模式，不自动重复或改档。
+
+流程为MODE选择SYSTEM、DIFFICULTY选择难度、私下分配词语和两条提示并创建临时画布、DRAWING。DIFFICULTY可back_mode返回，不消耗题目；分配成功后不可重抽、返回或重新seal。仅画方的your_system_question含word、difficulty、category与hints；猜方只获公开难度、图片和按规则解锁的提示，字数提示仍在交图后出现。query不改变revision或题目；选择难度等待3秒，作画等待5秒。保留主画布只读、三次猜测、精确匹配和回合角色交换。
+
+新增18项能力的挂载回归、90题库完整性、随机候选范围、耗尽、重开、双方隐私、固定题目、提示解锁及失败创建不耗题的回归源码。子插件版本0.1.8；画室继续配套0.2.98，不修改基座或父插件。

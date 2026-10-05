@@ -7,20 +7,21 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.SecureRandom
 
-internal const val GAME_RULES = "双方准备后各掷一次骰子并确认；同点重掷，赢家选先画或先猜。每轮由当轮出题／绘画方选择游戏模式；当前只开放自由出题。画方封存词语、填两条提示后画画并交图。作画期间另一方只读看图；交图后双方只读，猜方先得字数星号，最多猜三次；错一、错二分别解锁一条提示，错三失败。结束公布答案、清理临时画布并交换角色，由新的画方选择下一轮模式，不重复开局掷骰。答案去首尾空格后精确匹配。"
-internal const val LANER_SECRECY_REMINDER = "请注意：勿在任务进度、对外可见的推理说明或聊天中暴露自己的考题及尚未解锁的提示。考题和提示只通过游戏封存接口提交；提示按规则解锁，答案在本轮结束后公开。"
+internal const val GAME_RULES = "双方准备后各掷一次骰子并确认；同点重掷，赢家选先画或先猜。每轮由当轮出题／绘画方选择游戏模式；自由出题由画方封存词语并填写两条提示；系统出题由画方选择低、中、高或随机难度，系统从本局未用词库中随机分配题目和两条提示后开始作画。画完确认交图。作画期间另一方只读看图；交图后双方只读，猜方先得字数星号，最多猜三次；错一、错二分别解锁一条提示，错三失败。结束公布答案、清理临时画布并交换角色，由新的画方选择下一轮模式，不重复开局掷骰。答案去首尾空格后精确匹配。"
+internal const val LANER_SECRECY_REMINDER = "请注意：勿在任务进度、对外可见的推理说明或聊天中暴露自己的考题及尚未解锁的提示。考题和提示仅在游戏私有出题接口中读取或封存；提示按规则解锁，答案在本轮结束后公开。"
 internal const val DEFAULT_WAIT_RETRY_SECONDS = 3
 internal const val DEFAULT_LONG_WAIT_RETRY_SECONDS = 5
 internal enum class Player { AWEI, LANER;
     fun other() = if (this == AWEI) LANER else AWEI
     fun label() = if (this == AWEI) "阿伟" else "兰儿"
 }
-internal enum class Phase { READY, DICE, ORDER, MODE, WORD, HINTS, DRAWING, GUESSING, CLOSED }
+internal enum class Phase { READY, DICE, ORDER, MODE, DIFFICULTY, WORD, HINTS, DRAWING, GUESSING, CLOSED }
 
 /** One in-memory business state machine. Public views are generated for a specific player. */
 internal class DrawGuessGame(
     private val waitRetrySeconds: Int = DEFAULT_WAIT_RETRY_SECONDS,
     private val longWaitRetrySeconds: Int = DEFAULT_LONG_WAIT_RETRY_SECONDS,
+    private val questionBank: SystemQuestionBank = SystemQuestionBank(),
     private val dice: () -> Int = { SecureRandom().nextInt(6) + 1 }
 ) {
     init { require(waitRetrySeconds > 0 && longWaitRetrySeconds > 0) { "等待查询间隔必须大于0秒" } }
@@ -34,6 +35,9 @@ internal class DrawGuessGame(
     private val confirmed = mutableSetOf<Player>()
     private var winner: Player? = null
     private var questionMode: String? = null
+    private var difficultyChoice: QuestionDifficulty? = null
+    private var systemQuestion: SystemQuestion? = null
+    private val usedWords = mutableSetOf<String>()
     private var diceAttempt = 1
     private var drawer = Player.AWEI
     private var word = ""
@@ -43,7 +47,7 @@ internal class DrawGuessGame(
     private var lastResult: JSONObject? = null
     private var open = false
     fun connect(endpoint: InProcessUiStateProvider) { check(canvas == null); canvas = endpoint }
-    private fun endpoint() = requireNotNull(canvas) { "请先安装画室0.2.94或以上并激活子插件" }
+    private fun endpoint() = requireNotNull(canvas) { "请先安装画室0.2.98或以上并激活子插件" }
     private fun requireDrawer(actor: Player) { require(actor == drawer) { "当前不是你的绘画回合" } }
     private fun requirePhase(expected: Phase) { check(phase == expected) { "当前阶段为${phase.name}" } }
 
@@ -73,8 +77,27 @@ internal class DrawGuessGame(
                 "choose_mode" -> {
                     requirePhase(Phase.MODE)
                     requireDrawer(actor)
-                    require(p.getString("mode") == "FREE") { "系统出题模式暂未开放，当前仅支持自由出题" }
-                    questionMode = "FREE"; phase = Phase.WORD
+                    val mode = p.getString("mode")
+                    require(mode in setOf("FREE", "SYSTEM")) { "出题模式须为FREE或SYSTEM" }
+                    if (mode == "SYSTEM") require(questionBank.remaining(QuestionDifficulty.RANDOM, usedWords) > 0) {
+                        "系统词库本局已用完，请选择自由出题"
+                    }
+                    questionMode = mode
+                    phase = if (mode == "SYSTEM") Phase.DIFFICULTY else Phase.WORD
+                }
+                "back_mode" -> {
+                    requirePhase(Phase.DIFFICULTY); requireDrawer(actor)
+                    questionMode = null; phase = Phase.MODE
+                }
+                "choose_difficulty" -> {
+                    requirePhase(Phase.DIFFICULTY); requireDrawer(actor)
+                    val difficulty = QuestionDifficulty.valueOf(p.getString("difficulty"))
+                    val chosen = questionBank.pick(difficulty, usedWords)
+                    // Commit the selection only after the private canvas was created successfully.
+                    endpoint().perform("create", JSONObject().put("drawer", drawer.name).toString())
+                    difficultyChoice = difficulty; systemQuestion = chosen
+                    word = chosen.word; hints = listOf(chosen.hint1, chosen.hint2)
+                    usedWords += word; phase = Phase.DRAWING
                 }
                 "roll" -> {
                     requirePhase(Phase.DICE); require(actor !in rolls) { "本轮骰子已掷出，不能重选" }
@@ -103,7 +126,7 @@ internal class DrawGuessGame(
                     val sealed = p.getString("word").trim()
                     require(sealed.isNotEmpty() && sealed.codePointCount(0, sealed.length) <= 32 &&
                         sealed.none { it.isISOControl() }) { "题目须为1–32个字，不含控制字符" }
-                    word = sealed; phase = Phase.HINTS
+                    word = sealed; usedWords += word; phase = Phase.HINTS
                 }
                 "seal_hints" -> {
                     requirePhase(Phase.HINTS); requireDrawer(actor)
@@ -144,12 +167,14 @@ internal class DrawGuessGame(
                         endpoint().perform("release", "{}")
                         lastResult!!.put("answer", word)
                         image = null; word = ""; hints = emptyList(); misses = 0
-                        drawer = drawer.other(); questionMode = null; round++; phase = Phase.MODE
+                        drawer = drawer.other(); questionMode = null; difficultyChoice = null; systemQuestion = null
+                        round++; phase = Phase.MODE
                     }
                 }
                 "exit" -> {
                     endpoint().perform("release", "{}")
                     word = ""; hints = emptyList(); image = null
+                    questionMode = null; difficultyChoice = null; systemQuestion = null; usedWords.clear()
                     phase = Phase.CLOSED; open = false
                 }
                 else -> error("未知游戏操作：$event")
@@ -160,7 +185,7 @@ internal class DrawGuessGame(
     }
     private fun reset() {
         ready.clear(); rolls.clear(); confirmed.clear(); winner = null
-        questionMode = null; diceAttempt = 1
+        questionMode = null; difficultyChoice = null; systemQuestion = null; usedWords.clear(); diceAttempt = 1
         word = ""; hints = emptyList(); image = null; misses = 0; round = 0; lastResult = null
         phase = Phase.READY; revision++
     }
@@ -169,6 +194,7 @@ internal class DrawGuessGame(
         if (actor == Player.LANER && !open) listOf("open") else when (phase) {
         Phase.READY -> if (actor !in ready) listOf("ready") else emptyList()
         Phase.MODE -> if (actor == drawer) listOf("choose_mode") else emptyList()
+        Phase.DIFFICULTY -> if (actor == drawer) listOf("choose_difficulty", "back_mode") else emptyList()
         Phase.DICE -> if (actor !in rolls) listOf("roll") else if (actor !in confirmed) listOf("confirm_dice") else emptyList()
         Phase.ORDER -> if (actor == winner) listOf("choose_order") else emptyList()
         Phase.WORD -> if (actor == drawer) listOf("seal_word") else emptyList()
@@ -187,6 +213,8 @@ internal class DrawGuessGame(
                 else "PREPARING" to "阿伟正在准备中"
             Phase.MODE -> if (drawer == Player.AWEI) "CHOOSING_MODE" to "阿伟正在选择游戏模式"
                 else "WAITING_FOR_LANER" to "阿伟正在等待兰儿选择游戏模式"
+            Phase.DIFFICULTY -> if (drawer == Player.AWEI) "CHOOSING_DIFFICULTY" to "阿伟正在选择出题难度"
+                else "WAITING_FOR_LANER" to "阿伟正在等待兰儿选择出题难度"
             Phase.DICE -> if (Player.AWEI !in rolls) "DICE_NOT_ROLLED" to "阿伟尚未掷骰子"
                 else if (Player.AWEI !in confirmed) "DICE_UNCONFIRMED" to "阿伟已掷骰子，等待确认点数"
                 else "DICE_CONFIRMED" to "阿伟已确认点数"
@@ -214,8 +242,11 @@ internal class DrawGuessGame(
             Phase.DICE -> if (diceAttempt > 1) "上一轮骰子同点，双方重新掷骰。"
                 else "双方已准备，进入掷骰阶段。"
             Phase.ORDER -> "兰儿赢得选择权。"
-            Phase.MODE -> "第" + round + "轮，由兰儿选择本轮游戏模式。"
+            Phase.MODE -> "第" + round + "轮，由兰儿选择本轮游戏模式。" +
+                if (questionBank.remaining(QuestionDifficulty.RANDOM, usedWords) == 0) "系统题库本局已用完，请选择自由出题。" else ""
+            Phase.DIFFICULTY -> "由兰儿选择低、中、高或随机难度；按difficulty_remaining中的剩余题数选择，或返回选模式。"
             Phase.WORD -> "第" + round + "轮，由兰儿出题并绘画。"
+            Phase.DRAWING -> if (questionMode == "SYSTEM") "系统已分配本轮考题和两条提示；画方从your_system_question私下读取后作画。" else ""
             else -> ""
         }
         val labels = actions.map { action ->
@@ -225,6 +256,8 @@ internal class DrawGuessGame(
                 "confirm_dice" -> "确认点数"
                 "choose_order" -> "选择先画或先猜"
                 "choose_mode" -> "选择并确认本轮游戏模式"
+                "choose_difficulty" -> "选择难度并抽取本轮系统题目"
+                "back_mode" -> "返回选择游戏模式"
                 "seal_word" -> "填写并封存题目"
                 "seal_hints" -> "填写并封存两条提示"
                 "canvas" -> "读取自己的画布"
@@ -252,7 +285,14 @@ internal class DrawGuessGame(
                 else -> "NONE"
             })
         questionMode?.let { v.put("question_mode", it) }
-        if (phase in setOf(Phase.MODE, Phase.WORD, Phase.HINTS, Phase.DRAWING, Phase.GUESSING)) v.put("mode_chooser", drawer.name)
+        difficultyChoice?.let { v.put("difficulty_choice", it.name) }
+        systemQuestion?.let { v.put("question_difficulty", it.difficulty.name) }
+        if (phase in setOf(Phase.MODE, Phase.DIFFICULTY)) {
+            val counts = JSONObject()
+            QuestionDifficulty.values().forEach { counts.put(it.name, questionBank.remaining(it, usedWords)) }
+            v.put("difficulty_remaining", counts)
+        }
+        if (phase in setOf(Phase.MODE, Phase.DIFFICULTY, Phase.WORD, Phase.HINTS, Phase.DRAWING, Phase.GUESSING)) v.put("mode_chooser", drawer.name)
         if (phase in setOf(Phase.DICE, Phase.ORDER)) v.put("dice_attempt", diceAttempt)
         if (actor == Player.LANER) {
             val opponent = opponentStatus()
@@ -273,7 +313,7 @@ internal class DrawGuessGame(
                         .put("capability", JSONObject().put("name", "$GAME_CAPABILITIES.view")
                             .put("parameters", JSONObject())))
             } else v.put("message", lanerActionMessage(actions, opponent))
-            if (drawer == Player.LANER && phase in setOf(Phase.WORD, Phase.HINTS, Phase.DRAWING, Phase.GUESSING)) {
+            if (drawer == Player.LANER && phase in setOf(Phase.DIFFICULTY, Phase.WORD, Phase.HINTS, Phase.DRAWING, Phase.GUESSING)) {
                 v.put("message", v.getString("message") + LANER_SECRECY_REMINDER)
             }
         }
@@ -281,6 +321,10 @@ internal class DrawGuessGame(
         if (phase == Phase.ORDER) v.put("winner", winner!!.name)
             .put("dice", JSONObject().put("AWEI", rolls.getValue(Player.AWEI)).put("LANER", rolls.getValue(Player.LANER)))
         if (actor == drawer && phase in setOf(Phase.HINTS, Phase.DRAWING)) v.put("yourSealedWord", word)
+        if (actor == drawer && phase in setOf(Phase.DRAWING, Phase.GUESSING)) systemQuestion?.let { q ->
+            v.put("your_system_question", JSONObject().put("word", q.word).put("difficulty", q.difficulty.name)
+                .put("category", q.category).put("hints", JSONArray(listOf(q.hint1, q.hint2))))
+        }
         if (phase == Phase.GUESSING) {
             v.put("wordMask", "*".repeat(word.codePointCount(0, word.length)))
             v.put("hints", JSONArray(hints.take(misses)))
@@ -293,7 +337,8 @@ internal class DrawGuessGame(
         val messages = JSONArray()
         messages.put(when (phase) {
             Phase.READY -> GAME_RULES
-            Phase.MODE -> "第${round}轮，由${drawer.label()}选择出题模式。系统出题暂未开放，低／中／高难度预留；自由出题由画方自己出题并绘画。"
+            Phase.MODE -> "第${round}轮，由${drawer.label()}选择系统出题或自由出题。"
+            Phase.DIFFICULTY -> "${drawer.label()}选择低、中、高或随机难度。系统从未使用题目中抽取，并提供两条提示。"
             Phase.DICE -> "双方各掷一次并确认；同点时重新掷。你的点数：${v.opt("yourDice") ?: "尚未掷出"}"
             Phase.ORDER -> "${winner!!.label()}赢了：请选择先画或先猜。阿伟${rolls[Player.AWEI]}点，兰儿${rolls[Player.LANER]}点。"
             Phase.WORD -> "第${round}轮，${drawer.label()}填写并封存题目。"
@@ -303,6 +348,17 @@ internal class DrawGuessGame(
             Phase.GUESSING -> "${drawer.other().label()}猜题：${v.getString("wordMask")}，剩余${3 - misses}次。作品在主画布只读显示。"
             Phase.CLOSED -> "游戏已结束。"
         })
+        systemQuestion?.let { q -> messages.put("本轮出题难度：${q.difficulty.label}" +
+            if (difficultyChoice == QuestionDifficulty.RANDOM) "（随机抽取）" else "") }
+        if (v.has("your_system_question")) {
+            val q = v.getJSONObject("your_system_question")
+            messages.put("系统考题（仅画方可见）：${q.getString("word")}")
+            val ownHints = q.getJSONArray("hints")
+            messages.put("预设提示一（仅画方可见）：${ownHints.getString(0)}")
+            messages.put("预设提示二（仅画方可见）：${ownHints.getString(1)}")
+        }
+        if (phase in setOf(Phase.MODE, Phase.DIFFICULTY) && questionBank.remaining(QuestionDifficulty.RANDOM, usedWords) == 0)
+            messages.put("系统词库本局已用完，请选择自由出题。")
         lastResult?.let { r -> messages.put(if (r.getBoolean("finished"))
             "上一轮${if (r.getBoolean("success")) "猜中了" else "三次未猜中"}，答案：${r.getString("answer")}" else "刚才猜了：${r.getString("guess")}，未猜中。") }
         if (phase == Phase.GUESSING) hints.take(misses).forEachIndexed { index, hint -> messages.put("提示${index + 1}：$hint") }
@@ -315,9 +371,15 @@ internal class DrawGuessGame(
         for (action in allowed(Player.AWEI)) when (action) {
             "ready" -> button(action, "准备")
             "choose_mode" -> {
-                button(action, "系统出题（暂未开放）", JSONObject().put("mode", "SYSTEM"), enabled = false)
+                button(action, "系统出题", JSONObject().put("mode", "SYSTEM"),
+                    enabled = questionBank.remaining(QuestionDifficulty.RANDOM, usedWords) > 0)
                 button(action, "自由出题（确认）", JSONObject().put("mode", "FREE"))
             }
+            "choose_difficulty" -> QuestionDifficulty.values().forEach { difficulty ->
+                val count = questionBank.remaining(difficulty, usedWords)
+                button(action, "${difficulty.label}（剩余${count}题）", JSONObject().put("difficulty", difficulty.name), enabled = count > 0)
+            }
+            "back_mode" -> button(action, "返回选模式")
             "roll" -> button(action, "掷骰子")
             "confirm_dice" -> button(action, "确定点数")
             "choose_order" -> { button(action, "先画", JSONObject().put("drawFirst", true)); button(action, "先猜", JSONObject().put("drawFirst", false)) }
@@ -334,6 +396,7 @@ internal class DrawGuessGame(
         return@withLock p
     }
     suspend fun stop() = mutex.withLock {
-        word = ""; hints = emptyList(); image = null; open = false; phase = Phase.CLOSED
+        word = ""; hints = emptyList(); image = null; questionMode = null; difficultyChoice = null
+        systemQuestion = null; usedWords.clear(); open = false; phase = Phase.CLOSED
     }
 }

@@ -79,3 +79,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [画室工具扩展菜单](art-studio-extensions/index.md)：0.2.93，按当前Hub准入接入原生子菜单及安装对话框。
 
 - [你画我猜第一版](art-studio-draw-guess/index.md)：画室0.2.94与子插件0.1.0，用户授权完工后直接云编译。
+
+- [你画我猜系统出题](draw-guess-system-questions/index.md)：0.1.8，90题词库与四种难度、无重复抽题、画方私有题目和提示；使用画室0.2.98，云端与实机验收待进行。

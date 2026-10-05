@@ -230,7 +230,7 @@ class DrawGuessGameTest {
         assertEquals(0, game.event(Player.LANER, "view").getJSONArray("ready").length())
     }
 
-    @Test fun modeFollowsInitialDiceAndOnlyCurrentDrawerCanChooseFreeMode() = runBlocking {
+    @Test fun modeFollowsInitialDiceAndOnlyCurrentDrawerCanChooseMode() = runBlocking {
         val game = DrawGuessGame { 4 }
         send(game, Player.AWEI, "open")
         send(game, Player.AWEI, "ready"); send(game, Player.LANER, "ready")
@@ -246,12 +246,12 @@ class DrawGuessGameTest {
         val buttons = round.phonePanel().getJSONArray("actions")
         assertEquals(2, buttons.length())
         assertEquals("SYSTEM", buttons.getJSONObject(0).getJSONObject("parameters").getString("mode"))
-        assertFalse(buttons.getJSONObject(0).getBoolean("enabled"))
+        assertTrue(buttons.getJSONObject(0).getBoolean("enabled"))
         assertEquals("FREE", buttons.getJSONObject(1).getJSONObject("parameters").getString("mode"))
         assertTrue(buttons.getJSONObject(1).getBoolean("enabled"))
         val revision = round.revision
         rejects { send(round, Player.LANER, "choose_mode", JSONObject().put("mode", "FREE")) }
-        rejects { send(round, Player.AWEI, "choose_mode", JSONObject().put("mode", "SYSTEM")) }
+        rejects { send(round, Player.AWEI, "choose_mode", JSONObject().put("mode", "UNKNOWN")) }
         rejects { send(round, Player.AWEI, "seal_word", JSONObject().put("word", "猫")) }
         assertEquals(revision, round.revision)
         val selected = send(round, Player.AWEI, "choose_mode", JSONObject().put("mode", "FREE"))

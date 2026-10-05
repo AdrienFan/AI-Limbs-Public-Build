@@ -31,5 +31,5 @@ for capability in re.findall(r'"capability":"([^" ]+)"', readme):
     assert capability.startswith(namespace + "."), capability
 parent = json.loads((ROOT / "plugin-lab/packages/art-studio/plugin.json").read_text())
 assert "plugin.art.studio.interactions" in parent["provides"]["providers"]
-assert tuple(map(int, parent["version"].split("."))) >= (0, 2, 94)
+assert tuple(map(int, parent["version"].split("."))) >= (0, 2, 98)
 print("Draw Guess entry, parent contract, ownership and package declarations OK")

@@ -43,6 +43,8 @@ class DrawGuessEntry : ChildExtensionEntry {
             "roll" to JSONObject().put("revision", 2), "confirm_dice" to JSONObject().put("revision", 3),
             "choose_order" to JSONObject().put("revision", 5).put("drawFirst", true),
             "choose_mode" to JSONObject().put("revision", 6).put("mode", "FREE"),
+            "choose_difficulty" to JSONObject().put("revision", 7).put("difficulty", "RANDOM"),
+            "back_mode" to JSONObject().put("revision", 7),
             "seal_word" to JSONObject().put("revision", 7).put("word", "自行车"),
             "seal_hints" to JSONObject().put("revision", 7).put("hint1", "交通工具").put("hint2", "人力驱动"),
             "canvas" to JSONObject().put("revision", 8), "preview" to JSONObject().put("revision", 8),
@@ -55,7 +57,8 @@ class DrawGuessEntry : ChildExtensionEntry {
             "exit" to JSONObject().put("revision", 10))
         val titles = mapOf("open" to "兰儿打开游戏", "view" to "读取游戏阶段和下一步", "ready" to "兰儿准备并读取极简规则",
             "roll" to "兰儿掷骰子", "confirm_dice" to "兰儿确认点数", "choose_order" to "赢家选择先画或先猜",
-            "choose_mode" to "当轮画方确认游戏模式", "seal_word" to "兰儿封存题目", "seal_hints" to "兰儿封存两条提示并开画",
+            "choose_mode" to "当轮画方确认游戏模式", "choose_difficulty" to "当轮画方选难度并抽系统题",
+            "back_mode" to "返回选择本轮游戏模式", "seal_word" to "兰儿封存题目", "seal_hints" to "兰儿封存两条提示并开画",
             "canvas" to "读取兰儿自己的临时画布", "paint" to "兰儿画一笔", "preview" to "预览兰儿自己的画",
             "finish" to "兰儿确认画完并交图", "picture" to "兰儿只读查看对方画作", "guess" to "兰儿提交猜测", "exit" to "结束游戏并清理临时画布")
         try {
@@ -63,9 +66,17 @@ class DrawGuessEntry : ChildExtensionEntry {
                 val properties = JSONObject(); val required = JSONArray(); val specs = mutableListOf<InProcessCapabilityParameterSpec>()
                 for (key in example.keys()) {
                     val type = when (example.get(key)) { is JSONObject -> "object"; is Boolean -> "boolean"; is Number -> "integer"; else -> "string" }
-                    properties.put(key, JSONObject().put("type", type).put("description",
-                        if (key == "revision") "先读取view，使用当前revision" else key))
-                    required.put(key); specs += InProcessCapabilityParameterSpec(key, type, key, true)
+                    val description = when (key) {
+                        "revision" -> "先读取view，使用当前revision"
+                        "mode" -> "FREE自由出题或SYSTEM系统出题"
+                        "difficulty" -> "LOW低、MEDIUM中、HIGH高、RANDOM全部未用词库随机"
+                        else -> key
+                    }
+                    val property = JSONObject().put("type", type).put("description", description)
+                    if (key == "mode") property.put("enum", JSONArray(listOf("FREE", "SYSTEM")))
+                    if (key == "difficulty") property.put("enum", JSONArray(QuestionDifficulty.values().map { it.name }))
+                    properties.put(key, property)
+                    required.put(key); specs += InProcessCapabilityParameterSpec(key, type, description, true)
                 }
                 handles += host.registerCapability(InProcessCapabilitySpec(id = "$GAME_CAPABILITIES.$event",
                     displayName = requireNotNull(titles[event]),
@@ -74,7 +85,9 @@ class DrawGuessEntry : ChildExtensionEntry {
                             "open" -> "无需参数；打开后再调用ready。已结束的游戏恢复到准备阶段；重复打开不重置进行中的回合。"
                             "ready" -> "准备后若status为WAITING，按retry_after_ms等待后调用view查询，不重复准备或提前执行下一步。" + GAME_RULES
                             "view" -> "查询不改变游戏状态。若status为WAITING，按retry_after_ms等待后再次调用view；其他状态按allowed执行。"
-                            "choose_mode" -> "仅当兰儿为本轮出题／绘画方时选择模式。当前仅支持mode=FREE；SYSTEM暂未开放。修改时带当前revision。"
+                            "choose_mode" -> "仅当兰儿为本轮画方时选择FREE或SYSTEM。FREE填写题目和提示；SYSTEM下一步choose_difficulty。修改时带当前revision。"
+                            "choose_difficulty" -> "仅当兰儿为画方且处于DIFFICULTY时选择LOW、MEDIUM、HIGH或RANDOM。先看difficulty_remaining。RANDOM从全部未用词库均匀抽词；成功后题目固定并直接进入DRAWING，不再seal_word或seal_hints。仅兰儿自己的your_system_question含题目与两条提示。" + LANER_SECRECY_REMINDER
+                            "back_mode" -> "仅在DIFFICULTY且兰儿为画方时返回模式选择，不抽题也不消耗词库。携带当前revision；已抽题后不能返回或重抽。"
                             "seal_word", "seal_hints" -> "修改时带当前revision。" + LANER_SECRECY_REMINDER
                             "picture" -> "无需revision；阿伟作画期间可只读预览当前图片，交图后读取冻结图片。不返回对方的题目、未解锁提示或编辑记录；交图前不能猜测或修改画布。"
                             "paint" -> "修改时带当前revision；STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。"
@@ -103,7 +116,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                     .put("secrecy_rule", LANER_SECRECY_REMINDER)
                     .put("start", "$GAME_CAPABILITIES.open").put("ready", "$GAME_CAPABILITIES.ready")
                     .put("view", "$GAME_CAPABILITIES.view")
-                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes. Dice and order are chosen once at the start. The current drawer chooses each round's mode using choose_mode with mode FREE; after roles swap, the new drawer chooses again. When status is WAITING, wait retry_after_ms then call view again; do not repeat ready or advance before allowed changes. Keep your own hidden word and locked hints out of user-facing progress, reasoning explanations and chat. Submit them only through the sealing capabilities. Hints become public only when unlocked; the answer is revealed when the round ends. Never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
+                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes. Dice and order are chosen once at the start. The current drawer chooses each round's mode using choose_mode with mode FREE or SYSTEM; after roles swap, the new drawer chooses again. In SYSTEM mode choose_difficulty with LOW, MEDIUM, HIGH or RANDOM. Check difficulty_remaining first. RANDOM picks uniformly from all unused words. A successful draw goes directly to DRAWING with the secret word and hints in your_system_question for the drawer only; do not seal or replace them. back_mode is available only before a question is assigned. When status is WAITING, wait retry_after_ms then call view again; do not repeat ready or advance before allowed changes. Keep your own hidden word and locked hints out of user-facing progress, reasoning explanations and chat. Read or submit them only through the private game capabilities. Hints become public only when unlocked; the answer is revealed when the round ends. Never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
                     .toString()))
             host.publish(mapOf("schema" to 1, "menu" to menu, "panel" to panel,
                 "connect" to Consumer<InProcessUiStateProvider>(game::connect)),

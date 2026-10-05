@@ -7,11 +7,11 @@ android {
     namespace = "com.ai.limbs.extensions.drawguess"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.drawguess.v017"
+        applicationId = "com.ai.limbs.payload.drawguess.v018"
         minSdk = 29
         targetSdk = 34
-        versionCode = 8
-        versionName = "0.1.7"
+        versionCode = 9
+        versionName = "0.1.8"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
