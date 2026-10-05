@@ -17,8 +17,8 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
     ): BridgeProviderPanelState {
         val config = ChatGptNativeProbeStorage(context).readConfig()
         return BridgeProviderPanelState(
-            title = "ChatGPT MCP Echo Probe",
-            description = "纯 Android/Kotlin MCP 双向测试：常驻 long-poll，直接处理 initialize / tools/list / tools/call，并通过 OpenAI Tunnel 回包。",
+            title = "ChatGPT Dynamic Capability Gateway",
+            description = "纯 Android/Kotlin 动态能力桥：ChatGPT 通过稳定的 search / describe / invoke 入口访问 AI Limbs 当前 live capability catalog；最终权限完全由 AI Limbs Host Policy 决定。",
             statusLines = listOf(
                 "状态：${control.state.phase}",
                 "方式：Android OkHttp MCP Tunnel",
@@ -92,7 +92,7 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                 val accepted = control.perform(BridgeAction.CONNECT)
                 val config = storage.readConfig()
                 BridgeProviderPanelResult(
-                    message = if (accepted) "配置已安全保存，MCP Echo listener 正在启动" else "配置已保存；当前状态暂不接受启动",
+                    message = if (accepted) "配置已安全保存，Dynamic Capability Gateway 正在启动" else "配置已保存；当前状态暂不接受启动",
                     fieldValues = mapOf(
                         FIELD_API_KEY to "",
                         FIELD_TUNNEL_ID to config.tunnelId,

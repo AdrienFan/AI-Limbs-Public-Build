@@ -1,5 +1,6 @@
 package com.ai.limbs.extensions.chatgptprobe
 
+import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import com.ai.limbs.plugin.runtime.ChildExtensionHost
 import java.security.SecureRandom
 import java.util.concurrent.TimeUnit
@@ -22,10 +23,10 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal data class McpEchoProbeState(
+internal data class McpGatewayState(
     val running: Boolean = false,
     val phase: String = "STOPPED",
-    val detail: String = "MCP Echo Probe 已停止",
+    val detail: String = "Dynamic Capability Gateway 已停止",
     val pollCount: Long = 0,
     val commandCount: Long = 0,
     val responseCount: Long = 0,
@@ -52,7 +53,7 @@ internal data class McpEchoProbeState(
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.5"
+        const val PROBE_VERSION = "0.0.6"
     }
 }
 
@@ -61,12 +62,19 @@ internal class ChatGptNativeProbeEngine(
 ) {
     private val storage = ChatGptNativeProbeStorage(host.applicationContext)
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
-    private val mutableState = MutableStateFlow(McpEchoProbeState())
+    private val mutableState = MutableStateFlow(McpGatewayState())
     private val lifecycleLock = Any()
     private val instanceId = newInstanceId()
 
     @Volatile
     private var loopJob: Job? = null
+
+    @Volatile
+    private var remoteIngress: BridgeRemoteIngress? = null
+
+    fun bindRemoteIngress(value: BridgeRemoteIngress) {
+        remoteIngress = value
+    }
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -74,7 +82,7 @@ internal class ChatGptNativeProbeEngine(
         .callTimeout(35, TimeUnit.SECONDS)
         .build()
 
-    val state: StateFlow<McpEchoProbeState> = mutableState
+    val state: StateFlow<McpGatewayState> = mutableState
 
     fun start(): Boolean = synchronized(lifecycleLock) {
         if (loopJob?.isActive == true) return false
@@ -82,11 +90,12 @@ internal class ChatGptNativeProbeEngine(
         val config = storage.readConfig()
         require(config.secureStorageAvailable) { "Android secure storage is unavailable" }
         require(config.configured) { "Tunnel ID / Runtime API Key 尚未配置" }
+        require(remoteIngress != null) { "BridgeRemoteIngress 尚未绑定；Bridge Provider 尚未就绪" }
 
         mutableState.value = mutableState.value.copy(
             running = true,
             phase = "STARTING",
-            detail = "正在启动 Android/Kotlin MCP Tunnel listener",
+            detail = "正在启动 AI Limbs Dynamic Capability Gateway",
             lastError = null
         )
         loopJob = scope.launch { pollLoop() }
@@ -102,7 +111,7 @@ internal class ChatGptNativeProbeEngine(
         mutableState.value = mutableState.value.copy(
             running = false,
             phase = "STOPPED",
-            detail = "MCP Echo Probe 已停止"
+            detail = "Dynamic Capability Gateway 已停止"
         )
         wasRunning
     }
@@ -160,7 +169,7 @@ internal class ChatGptNativeProbeEngine(
         }
     }
 
-    private fun pollOnce(config: ChatGptProbeConfig, apiKey: String): String {
+    private suspend fun pollOnce(config: ChatGptProbeConfig, apiKey: String): String {
         val url = config.baseUrl.toHttpUrl().newBuilder()
             .addPathSegments("v1/tunnels")
             .addPathSegment(config.tunnelId)
@@ -218,7 +227,7 @@ internal class ChatGptNativeProbeEngine(
         }
     }
 
-    private fun processCommand(
+    private suspend fun processCommand(
         config: ChatGptProbeConfig,
         apiKey: String,
         command: JSONObject
@@ -259,7 +268,7 @@ internal class ChatGptNativeProbeEngine(
         }
     }
 
-    private fun processJsonRpcCommand(
+    private suspend fun processJsonRpcCommand(
         config: ChatGptProbeConfig,
         apiKey: String,
         requestId: String,
@@ -324,98 +333,192 @@ internal class ChatGptNativeProbeEngine(
             .put(
                 "serverInfo",
                 JSONObject()
-                    .put("name", "ai-limbs-chatgpt-probe")
-                    .put("title", "AI Limbs ChatGPT MCP Echo Probe")
-                    .put("version", McpEchoProbeState.PROBE_VERSION)
+                    .put("name", "ai-limbs-chatgpt-gateway")
+                    .put("title", "AI Limbs ChatGPT Dynamic Capability Gateway")
+                    .put("version", McpGatewayState.PROBE_VERSION)
             )
             .put(
                 "instructions",
-                "Test MCP server running directly inside AI Limbs Android child extension."
+                "Dynamic MCP gateway into the live AI Limbs capability resolver and policy engine."
             )
     }
 
     private fun toolDefinitions(): JSONArray = JSONArray()
-        .put(tool("ail_ping", "Return a fixed message proving ChatGPT reached AI Limbs Android.", emptyObjectSchema()))
-        .put(tool("server_info", "Return information about the AI Limbs MCP Echo Probe.", emptyObjectSchema()))
-        .put(tool("echo", "Echo an input string from AI Limbs.", stringInputSchema("input")))
-        .put(tool("uppercase", "Convert an input string to uppercase inside AI Limbs.", stringInputSchema("input")))
+        .put(
+            tool(
+                name = TOOL_SEARCH,
+                description = "Search the current live AI Limbs capability catalog without executing a capability. Use this whenever the exact capability ID is unknown.",
+                inputSchema = JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject()
+                            .put(
+                                "query",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "Capability intent or known tool/module name")
+                            )
+                            .put(
+                                "scope",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "Optional dynamic capability scope ID such as plugin:plugin.example")
+                            )
+                            .put(
+                                "limit",
+                                JSONObject()
+                                    .put("type", "integer")
+                                    .put("minimum", 1)
+                                    .put("maximum", 20)
+                                    .put("default", 8)
+                            )
+                    )
+                    .put("required", JSONArray().put("query"))
+                    .put("additionalProperties", false)
+            )
+        )
+        .put(
+            tool(
+                name = TOOL_DESCRIBE,
+                description = "Describe one live AI Limbs capability, including its exact invocation ID, schema, permissions, prerequisites, and availability.",
+                inputSchema = JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject().put(
+                            "capability_id",
+                            JSONObject()
+                                .put("type", "string")
+                                .put("description", "Capability ID returned by ai_limbs_capability_search")
+                        )
+                    )
+                    .put("required", JSONArray().put("capability_id"))
+                    .put("additionalProperties", false)
+            )
+        )
+        .put(
+            tool(
+                name = TOOL_INVOKE,
+                description = "Invoke any current AI Limbs capability by exact capability ID. The request is passed unchanged into AI Limbs; the Host execution policy remains authoritative and may ALLOW, ASK, FORBID, or require prerequisites.",
+                inputSchema = JSONObject()
+                    .put("type", "object")
+                    .put(
+                        "properties",
+                        JSONObject()
+                            .put(
+                                "capability_id",
+                                JSONObject()
+                                    .put("type", "string")
+                                    .put("description", "Exact capability invocation ID")
+                            )
+                            .put(
+                                "parameters",
+                                JSONObject()
+                                    .put("type", "object")
+                                    .put("description", "Parameters matching the capability schema")
+                                    .put("additionalProperties", true)
+                            )
+                    )
+                    .put("required", JSONArray().put("capability_id"))
+                    .put("additionalProperties", false)
+            )
+        )
 
-    private fun handleToolCall(id: Any, params: JSONObject?): JSONObject {
+    private suspend fun handleToolCall(id: Any, params: JSONObject?): JSONObject {
         val name = params?.optString("name")?.trim().orEmpty()
         val arguments = params?.optJSONObject("arguments") ?: JSONObject()
 
-        return when (name) {
-            "ail_ping" -> {
-                val structured = JSONObject()
-                    .put("message", "hello from AI Limbs")
-                    .put("runtime", "android-kotlin")
-                    .put("version", McpEchoProbeState.PROBE_VERSION)
-                rpcSuccess(id, toolResult("hello from AI Limbs", structured))
-            }
-            "server_info" -> {
-                val structured = JSONObject()
-                    .put("name", "ai-limbs-chatgpt-probe")
-                    .put("version", McpEchoProbeState.PROBE_VERSION)
-                    .put(
-                        "available_tools",
-                        JSONArray()
-                            .put("ail_ping")
-                            .put("server_info")
-                            .put("echo")
-                            .put("uppercase")
+        return try {
+            val result = when (name) {
+                TOOL_SEARCH -> {
+                    val query = arguments.optString("query").trim()
+                    require(query.isNotBlank()) { "query is required" }
+                    val request = JSONObject().put("query", query)
+                    val scope = arguments.optString("scope").trim()
+                    if (scope.isNotBlank()) request.put("scope", scope)
+                    if (arguments.has("limit")) {
+                        request.put("limit", arguments.optInt("limit", 8).coerceIn(1, 20))
+                    }
+                    invokeAiLimbs("capability.search", request)
+                }
+
+                TOOL_DESCRIBE -> {
+                    val capabilityId = arguments.optString("capability_id").trim()
+                    require(capabilityId.isNotBlank()) { "capability_id is required" }
+                    invokeAiLimbs(
+                        "capability.describe",
+                        JSONObject().put("capability_id", capabilityId)
                     )
-                rpcSuccess(id, toolResult(structured.toString(), structured))
+                }
+
+                TOOL_INVOKE -> {
+                    val capabilityId = arguments.optString("capability_id").trim()
+                    require(capabilityId.isNotBlank()) { "capability_id is required" }
+                    val parameters = arguments.optJSONObject("parameters") ?: JSONObject()
+                    invokeAiLimbs(capabilityId, JSONObject(parameters.toString()))
+                }
+
+                else -> return rpcError(id, -32602, "Unknown tool: $name")
             }
-            "echo" -> {
-                val input = arguments.optString("input")
-                rpcSuccess(
-                    id,
-                    toolResult(input, JSONObject().put("echoed", input))
+            rpcSuccess(id, toolResult(result))
+        } catch (error: Throwable) {
+            val safeMessage = "${error::class.java.simpleName}: ${error.message ?: "AI Limbs capability invocation failed"}"
+                .take(600)
+            rpcSuccess(
+                id,
+                toolError(
+                    message = safeMessage,
+                    structured = JSONObject()
+                        .put("success", false)
+                        .put("bridge_error", safeMessage)
                 )
-            }
-            "uppercase" -> {
-                val input = arguments.optString("input")
-                val upper = input.uppercase()
-                rpcSuccess(
-                    id,
-                    toolResult(upper, JSONObject().put("uppercase", upper))
-                )
-            }
-            else -> rpcError(id, -32602, "Unknown tool: $name")
+            )
         }
     }
 
-    private fun toolResult(text: String, structured: JSONObject): JSONObject =
+    private suspend fun invokeAiLimbs(
+        capabilityId: String,
+        parameters: JSONObject
+    ): JSONObject {
+        val ingress = remoteIngress
+            ?: error("BridgeRemoteIngress is unavailable")
+        return ingress.invoke(capabilityId, parameters)
+    }
+
+    private fun toolResult(structured: JSONObject): JSONObject =
         JSONObject()
             .put(
                 "content",
                 JSONArray().put(
                     JSONObject()
                         .put("type", "text")
-                        .put("text", text)
+                        .put("text", structured.toString())
+                )
+            )
+            .put("structuredContent", JSONObject(structured.toString()))
+
+    private fun toolError(message: String, structured: JSONObject): JSONObject =
+        JSONObject()
+            .put(
+                "content",
+                JSONArray().put(
+                    JSONObject()
+                        .put("type", "text")
+                        .put("text", message)
                 )
             )
             .put("structuredContent", structured)
+            .put("isError", true)
 
-    private fun tool(name: String, description: String, inputSchema: JSONObject): JSONObject =
-        JSONObject()
-            .put("name", name)
-            .put("description", description)
-            .put("inputSchema", inputSchema)
-
-    private fun emptyObjectSchema(): JSONObject = JSONObject()
-        .put("type", "object")
-        .put("properties", JSONObject())
-        .put("additionalProperties", false)
-
-    private fun stringInputSchema(field: String): JSONObject = JSONObject()
-        .put("type", "object")
-        .put(
-            "properties",
-            JSONObject().put(field, JSONObject().put("type", "string"))
-        )
-        .put("required", JSONArray().put(field))
-        .put("additionalProperties", false)
+    private fun tool(
+        name: String,
+        description: String,
+        inputSchema: JSONObject
+    ): JSONObject = JSONObject()
+        .put("name", name)
+        .put("description", description)
+        .put("inputSchema", inputSchema)
 
     private fun rpcSuccess(id: Any, result: JSONObject): JSONObject =
         JSONObject()
@@ -497,12 +600,12 @@ internal class ChatGptNativeProbeEngine(
         builder
             .header("Authorization", "Bearer $apiKey")
             .header("Accept", "application/json")
-            .header("User-Agent", "AI-Limbs-ChatGPT/${McpEchoProbeState.PROBE_VERSION}")
+            .header("User-Agent", "AI-Limbs-ChatGPT/${McpGatewayState.PROBE_VERSION}")
             .header("X-Tunnel-Client-Name", "ai-limbs-chatgpt")
-            .header("X-Tunnel-Client-Version", McpEchoProbeState.PROBE_VERSION)
+            .header("X-Tunnel-Client-Version", McpGatewayState.PROBE_VERSION)
             .header(
                 "X-Tunnel-Client-Wire-Protocol-Version",
-                McpEchoProbeState.WIRE_PROTOCOL_VERSION
+                McpGatewayState.WIRE_PROTOCOL_VERSION
             )
             .header("X-Tunnel-Client-Instance-Id", instanceId)
 
@@ -513,8 +616,11 @@ internal class ChatGptNativeProbeEngine(
     }
 
     companion object {
-        private const val TAG = "ChatGptMcpEchoProbe"
+        private const val TAG = "ChatGptDynamicCapabilityGateway"
         private const val DEFAULT_CHANNEL = "main"
+        private const val TOOL_SEARCH = "ai_limbs_capability_search"
+        private const val TOOL_DESCRIBE = "ai_limbs_capability_describe"
+        private const val TOOL_INVOKE = "ai_limbs_capability_invoke"
         private const val FALLBACK_MCP_PROTOCOL_VERSION = "2025-06-18"
         private const val POLL_LIMIT = 8
         private const val POLL_TIMEOUT_MS = 20_000L

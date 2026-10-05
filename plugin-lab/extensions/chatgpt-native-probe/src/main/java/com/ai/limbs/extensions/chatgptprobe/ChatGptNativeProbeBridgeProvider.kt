@@ -72,7 +72,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             .onFailure { error ->
                 mutableState.value = stateFor(
                     AiLimbsBridgePhase.ERROR,
-                    "启动 MCP Echo Probe 失败：${error.message ?: "unknown error"}"
+                    "启动 Dynamic Capability Gateway 失败：${error.message ?: "unknown error"}"
                 )
             }
     }
@@ -84,7 +84,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
         engine.stop()
         mutableState.value = stateFor(
             AiLimbsBridgePhase.STOPPED,
-            "MCP Echo Probe 已停止"
+            "Dynamic Capability Gateway 已停止"
         )
     }
 
@@ -125,7 +125,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
         private val engine: ChatGptNativeProbeEngine
     ) : BridgeProviderFactory {
         override val type: String = PROFILE_TYPE
-        override val transportId: String = "chatgpt-mcp-echo-probe"
+        override val transportId: String = "chatgpt-dynamic-capability-gateway"
         override val profiles: List<BridgeProfile> = listOf(
             NativeBridgeProfile(
                 id = PROFILE_ID,
@@ -144,11 +144,12 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             remoteIngress: BridgeRemoteIngress
         ): AiLimbsBridgeProvider {
             require(profile is NativeBridgeProfile) {
-                "ChatGPT MCP Echo Probe requires a NativeBridgeProfile"
+                "ChatGPT Dynamic Capability Gateway requires a NativeBridgeProfile"
             }
             require(profile.id == PROFILE_ID && profile.type == PROFILE_TYPE) {
-                "Unsupported ChatGPT MCP Echo Probe profile: ${profile.id} (${profile.type})"
+                "Unsupported ChatGPT Dynamic Capability Gateway profile: ${profile.id} (${profile.type})"
             }
+            engine.bindRemoteIngress(remoteIngress)
             return ChatGptNativeProbeBridgeProvider(
                 context = context,
                 scope = scope,
@@ -160,8 +161,8 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
 
     companion object {
         const val PROFILE_ID = "chatgpt_native_probe"
-        const val PROFILE_TYPE = "chatgpt_mcp_echo_probe"
-        const val PROVIDER_LABEL = "ChatGPT MCP Echo Probe"
+        const val PROFILE_TYPE = "chatgpt_dynamic_capability_gateway"
+        const val PROVIDER_LABEL = "ChatGPT Dynamic Capability Gateway"
 
         private val SUPPORTED_ACTIONS = setOf(
             BridgeAction.CONNECT,

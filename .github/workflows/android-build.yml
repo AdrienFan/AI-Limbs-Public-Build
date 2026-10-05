@@ -570,7 +570,7 @@ jobs:
 
   chatgpt_native_probe:
     if: inputs.target == 'chatgpt-native-probe'
-    name: Build and sign ChatGPT MCP Echo Probe v0.0.5
+    name: Build and sign ChatGPT Dynamic Capability Gateway v0.0.6
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -609,17 +609,17 @@ jobs:
       - name: Configure Android SDK
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
-      - name: Build ChatGPT MCP Echo Probe child extension payload
+      - name: Build ChatGPT Dynamic Capability Gateway child extension payload
         shell: bash
         run: |
           set -euo pipefail
           chmod +x ./gradlew
           ./gradlew :chatgpt-native-probe-extension:assembleDebug --stacktrace --no-daemon
-      - name: Sign installable ChatGPT MCP Echo Probe extension
+      - name: Sign installable ChatGPT Dynamic Capability Gateway extension
         env:
           AILIMBS_CHILD_EXTENSION_PRIVATE_PEM: ${{ secrets.AILIMBS_CHILD_EXTENSION_PRIVATE_PEM }}
         run: python3 tools/plugin_lab/package_resident_bridge.py --package chatgpt-native-probe
-      - name: Upload ChatGPT MCP Echo Probe child extension
+      - name: Upload ChatGPT Dynamic Capability Gateway child extension
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           name: chatgpt-native-probe-v${{ steps.probe_version.outputs.value }}-${{ github.run_number }}

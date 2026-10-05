@@ -2,13 +2,13 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.chatgpt_native_probe",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "roles": [
     "system_extension"
   ],
   "display": {
-    "name": "AI Limbs ChatGPT MCP Echo Probe",
-    "description": "纯 Android/Kotlin 双向 MCP 测试子插件：常驻连接 OpenAI Secure MCP Tunnel，处理 initialize / tools/list / tools/call 并直接回包，不依赖 Ubuntu 或 native tunnel-client。"
+    "name": "AI Limbs ChatGPT Dynamic Capability Gateway",
+    "description": "纯 Android/Kotlin 动态能力桥：通过 OpenAI Secure MCP Tunnel 将 ChatGPT 请求路由到 AI Limbs live capability resolver / dispatcher；不维护静态能力白名单，权限由 AI Limbs Host Policy 统一执行。"
   },
   "target": {
     "plugin_id": "plugin.system.bridge",

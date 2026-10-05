@@ -19,8 +19,8 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.run",
-                    displayName = "启动 ChatGPT MCP Echo Probe",
-                    description = "启动 Android/Kotlin 常驻 OpenAI Tunnel long-poll listener，处理 initialize / tools/list / tools/call 并通过 /response 回包。",
+                    displayName = "启动 ChatGPT Dynamic Capability Gateway",
+                    description = "启动 Android/Kotlin OpenAI Tunnel listener，并把 MCP tools/call 动态路由到 AI Limbs live capability resolver / dispatcher。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "listener", "echo"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
@@ -39,7 +39,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.status",
-                    displayName = "读取 ChatGPT MCP Echo Probe 状态",
+                    displayName = "读取 ChatGPT Dynamic Capability Gateway 状态",
                     description = "读取 Tunnel poll、MCP command 与 response 统计；不会泄露 Runtime API Key。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "状态", "statistics"),
                     suggestedParamsJson = "{}",
@@ -55,7 +55,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.stop",
-                    displayName = "停止 ChatGPT MCP Echo Probe",
+                    displayName = "停止 ChatGPT Dynamic Capability Gateway",
                     description = "停止 Android/Kotlin Tunnel listener 并取消当前 OkHttp long-poll。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "停止", "stop"),
                     suggestedParamsJson = "{}",
@@ -81,8 +81,8 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-MCP-Echo-Probe-v0.0.5",
-                    "purpose" to "android_okhttp_mcp_bidirectional_probe"
+                    "source" to "AI-Limbs-ChatGPT-Dynamic-Gateway-v0.0.6",
+                    "purpose" to "android_okhttp_dynamic_capability_gateway"
                 )
             )
         } catch (error: Throwable) {
