@@ -145,6 +145,15 @@ internal class GatewayReceipts(private val store: GatewayBlobStore, private val 
     @Synchronized fun counts(): JSONObject = JSONObject().apply {
         records.keys().forEach { val phase = records.getJSONObject(it).getString("phase"); put(phase, optInt(phase) + 1) }
     }
+    @Synchronized fun countsFor(binding: String): JSONObject = JSONObject().apply {
+        records.keys().forEach {
+            val record = records.getJSONObject(it)
+            if (record.getString("binding") == binding) {
+                val phase = record.getString("phase")
+                put(phase, optInt(phase) + 1)
+            }
+        }
+    }
     private fun commit(id: String, record: JSONObject) {
         val next = JSONObject(records.toString()).put(id, record)
         val text = next.toString()

@@ -19,7 +19,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.run",
-                    displayName = "启动 ChatGPT Dynamic Capability Gateway",
+                    displayName = "启动 AI Limbs-ChatGPT",
                     description = "启动 Android/Kotlin OpenAI Tunnel listener，并把 MCP tools/call 动态路由到 AI Limbs live capability resolver / dispatcher。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "listener", "gateway"),
                     suggestedParamsJson = "{}",
@@ -39,7 +39,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.status",
-                    displayName = "读取 ChatGPT Dynamic Capability Gateway 状态",
+                    displayName = "读取 AI Limbs-ChatGPT 状态",
                     description = "读取真实网络心跳、能力目录观察、执行凭据与结果交付状态；不会泄露 Runtime API Key。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "状态", "statistics"),
                     suggestedParamsJson = "{}",
@@ -55,7 +55,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.stop",
-                    displayName = "停止 ChatGPT Dynamic Capability Gateway",
+                    displayName = "停止 AI Limbs-ChatGPT",
                     description = "停止 Gateway，取消当前传输与执行协程，并保留加密执行凭据和待送结果；取消不撤销已发生的业务效果。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "停止", "stop"),
                     suggestedParamsJson = "{}",
@@ -75,13 +75,13 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             host.publish(
                 BridgeProviderContribution(
                     factory = ChatGptNativeProbeBridgeProvider.Factory(engine),
-                    panel = ChatGptNativeProbePanel,
+                    panel = ChatGptNativeProbePanel(host.applicationContext, engine),
                     notification = null
                 ),
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-Dynamic-Gateway-v0.0.7",
+                    "source" to "AI-Limbs-ChatGPT-Dynamic-Gateway-v0.0.8",
                     "purpose" to "android_okhttp_dynamic_capability_gateway"
                 )
             )

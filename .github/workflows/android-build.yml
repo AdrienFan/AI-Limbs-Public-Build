@@ -570,7 +570,7 @@ jobs:
 
   chatgpt_native_probe:
     if: inputs.target == 'chatgpt-native-probe'
-    name: Build, test and sign ChatGPT Dynamic Capability Gateway
+    name: Build, test and sign AI Limbs-ChatGPT
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:

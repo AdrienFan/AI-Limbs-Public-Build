@@ -44,7 +44,7 @@ import org.json.JSONObject
 internal data class McpGatewayState(
     val running: Boolean = false,
     val phase: String = "STOPPED",
-    val detail: String = "Dynamic Capability Gateway 已停止",
+    val detail: String = "AI Limbs-ChatGPT 已停止",
     val pollCount: Long = 0,
     val commandCount: Long = 0,
     val responseCount: Long = 0,
@@ -85,7 +85,7 @@ internal data class McpGatewayState(
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.7"
+        const val PROBE_VERSION = "0.0.8"
     }
 }
 
@@ -111,7 +111,8 @@ internal class ChatGptNativeProbeEngine(
     private val instanceId = newInstanceId()
     private val generation = AtomicLong()
     private val admissionLock = Any()
-    private val receipts by lazy { GatewayReceipts(encryptedStore) }
+    private val receiptJournal = lazy { GatewayReceipts(encryptedStore) }
+    private val receipts by receiptJournal
     private val resultAdapters = ConcurrentHashMap<String, GatewayResults>()
     private fun results(identity: String): GatewayResults = resultAdapters.computeIfAbsent(identity) {
         if (imageValidator == null) GatewayResults(encryptedStore, binding = identity)
@@ -134,6 +135,12 @@ internal class ChatGptNativeProbeEngine(
 
     val state: StateFlow<McpGatewayState> = mutableState
 
+    val activeRequestCount: Int get() = activeRequests.size
+
+    // Rendering an unopened configuration must not initialize Keystore or the receipt journal.
+    fun uiReceiptCounts(config: ChatGptProbeConfig): JSONObject? =
+        if (receiptJournal.isInitialized()) receipts.countsFor(binding(config)) else null
+
     fun start(): Boolean = synchronized(lifecycleLock) {
         if (loopJob?.isActive == true) return false
 
@@ -149,7 +156,7 @@ internal class ChatGptNativeProbeEngine(
         mutableState.value = mutableState.value.copy(
             running = true,
             phase = "STARTING",
-            detail = "正在启动 AI Limbs Dynamic Capability Gateway",
+            detail = "正在连接 AI Limbs-ChatGPT",
             lastError = null
         )
         val epoch = generation.incrementAndGet()
@@ -172,7 +179,7 @@ internal class ChatGptNativeProbeEngine(
         mutableState.value = mutableState.value.copy(
             running = false,
             phase = "STOPPED",
-            detail = "Dynamic Capability Gateway 已停止"
+            detail = "AI Limbs-ChatGPT 已停止"
         )
         wasRunning
     }
@@ -429,7 +436,7 @@ internal class ChatGptNativeProbeEngine(
         .put("protocolVersion", protocol)
         .put("capabilities", JSONObject().put("tools", JSONObject().put("listChanged", false)))
         .put("serverInfo", JSONObject().put("name", "ai-limbs-chatgpt-gateway")
-            .put("title", "AI Limbs ChatGPT Dynamic Capability Gateway").put("version", McpGatewayState.PROBE_VERSION))
+            .put("title", ChatGptNativeProbePanel.TITLE).put("version", McpGatewayState.PROBE_VERSION))
         .put("instructions", "Search capabilities, describe the exact ID, then invoke with its schema. Host policy and next_action are authoritative. Read paged results and cached images with result_read/media_read. Do not repeat actions to retry delivery. Check domain state when execution_state is UNKNOWN.")
 
     private fun toolDefinitions(): JSONArray = JSONArray()

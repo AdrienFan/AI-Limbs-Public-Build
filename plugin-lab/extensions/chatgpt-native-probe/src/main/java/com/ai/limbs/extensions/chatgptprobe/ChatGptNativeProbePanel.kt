@@ -1,6 +1,7 @@
 package com.ai.limbs.extensions.chatgptprobe
 
 import android.content.Context
+import com.ai.assistance.operit.integrations.ailimbs.AiLimbsBridgePhase
 import com.ai.assistance.operit.integrations.ailimbs.BridgeAction
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderControl
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanel
@@ -9,155 +10,217 @@ import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelField
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelFieldKind
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelResult
 import com.ai.assistance.operit.integrations.ailimbs.BridgeProviderPanelState
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 
-internal object ChatGptNativeProbePanel : BridgeProviderPanel {
-    override fun snapshot(
-        context: Context,
-        control: BridgeProviderControl
-    ): BridgeProviderPanelState {
-        val config = ChatGptNativeProbeStorage(context).readConfig()
-        return BridgeProviderPanelState(
-            title = "ChatGPT Dynamic Capability Gateway",
-            description = "纯 Android/Kotlin 动态能力桥：ChatGPT 通过稳定的 search / describe / invoke 入口访问 AI Limbs 当前 live capability catalog；最终权限完全由 AI Limbs Host Policy 决定。",
-            statusLines = listOf(
-                "状态：${control.state.phase}",
-                "方式：Android OkHttp MCP Tunnel",
-                "Tunnel ID：${if (config.tunnelId.isBlank()) "未配置" else config.tunnelId}",
-                "Runtime Key：${if (config.configured) "已安全配置" else "未配置"}",
-                "Control Plane：${config.baseUrl}",
-                control.state.detail
-            ),
-            fields = listOf(
-                BridgeProviderPanelField(
-                    id = FIELD_API_KEY,
-                    label = "Runtime API Key",
-                    kind = BridgeProviderPanelFieldKind.SECRET,
-                    placeholder = if (config.configured) "已加密保存；输入新 Key 可原地轮换" else "在本机粘贴 sk-…",
-                    enabled = config.secureStorageAvailable
-                ),
-                BridgeProviderPanelField(
-                    id = FIELD_TUNNEL_ID,
-                    label = "Tunnel ID",
-                    value = config.tunnelId,
-                    placeholder = "tunnel_…",
-                    enabled = !config.configured
-                ),
-                BridgeProviderPanelField(
-                    id = FIELD_BASE_URL,
-                    label = "Control Plane URL",
-                    value = config.baseUrl,
-                    placeholder = ChatGptNativeProbeStorage.DEFAULT_BASE_URL,
-                    enabled = !config.configured
-                )
-            ),
-            actions = buildList {
-                if (!config.configured) {
-                    add(
-                        BridgeProviderPanelAction(
-                            id = ACTION_SAVE_START,
-                            label = "保存并启动",
-                            enabled = config.secureStorageAvailable,
-                            requiredFieldIds = setOf(FIELD_API_KEY, FIELD_TUNNEL_ID)
-                        )
-                    )
-                } else {
-                    add(BridgeProviderPanelAction(ACTION_ROTATE, "轮换 Key 并重连", enabled = config.secureStorageAvailable, requiredFieldIds = setOf(FIELD_API_KEY)))
-                    add(BridgeProviderPanelAction(ACTION_CLEAR, "清除本地配置"))
-                }
-                control.availableActions.forEach { action ->
-                    add(
-                        BridgeProviderPanelAction(
-                            id = "bridge:${action.name}",
-                            label = actionLabel(action)
-                        )
-                    )
-                }
+/** Presentation stays in this child; the existing Bridge/Plugin Center owns rendering. */
+internal class ChatGptNativeProbePanel(
+    context: Context,
+    private val engine: ChatGptNativeProbeEngine
+) : BridgeProviderPanel {
+    private val storage = ChatGptNativeProbeStorage(context.applicationContext)
+    private val initialConfig = storage.readConfig()
+    private enum class View { OVERVIEW, SETTINGS, ROTATE_KEY, DIAGNOSTICS, CONFIRM_CLEAR }
+    @Volatile private var view = View.OVERVIEW
+    @Volatile private var showAdvancedSetup = initialConfig.baseUrl != ChatGptNativeProbeStorage.DEFAULT_BASE_URL
+    @Volatile private var setupBaseUrl = initialConfig.baseUrl
+
+    override fun snapshot(context: Context, control: BridgeProviderControl): BridgeProviderPanelState {
+        val config = storage.readConfig()
+        val probe = engine.state.value
+        val receipts = engine.uiReceiptCounts(config)
+        val phase = control.state.phase
+        val stateLine = phaseLabel(phase)
+        val heartbeat = listOfNotNull(probe.lastSuccessfulPollAtMs, probe.lastResponseAckAtMs).maxOrNull()
+        val summary = buildList {
+            add(stateLine)
+            if (!config.secureStorageAvailable) add("安全凭据存储不可用，暂时无法连接。")
+        }
+        fun action(id: String, label: String) = BridgeProviderPanelAction(id, label)
+        fun bridge(action: BridgeAction) = BridgeProviderPanelAction("bridge:${action.name}", actionLabel(action))
+        fun connectionActions(): List<BridgeProviderPanelAction> = buildList {
+            val active = phase in setOf(AiLimbsBridgePhase.ONLINE, AiLimbsBridgePhase.STARTING,
+                AiLimbsBridgePhase.CONNECTING, AiLimbsBridgePhase.RECONNECTING, AiLimbsBridgePhase.RECOVERING)
+            val main = when {
+                active -> BridgeAction.STOP
+                phase in setOf(AiLimbsBridgePhase.ERROR, AiLimbsBridgePhase.RECOVERY_FAILED) -> BridgeAction.RECOVER
+                else -> BridgeAction.CONNECT
             }
+            if (main in control.availableActions) add(bridge(main))
+            if (active && BridgeAction.RECONNECT in control.availableActions) add(bridge(BridgeAction.RECONNECT))
+        }
+        fun panel(description: String, lines: List<String> = summary,
+                  fields: List<BridgeProviderPanelField> = emptyList(),
+                  actions: List<BridgeProviderPanelAction> = emptyList()) = BridgeProviderPanelState(
+            title = TITLE, description = description, statusLines = lines, fields = fields, actions = actions
         )
+
+        // Setup is the only unconfigured form. A live-state refresh must not expose a secret editor.
+        if (!config.configured && view != View.DIAGNOSTICS) {
+            val fields = buildList {
+                add(BridgeProviderPanelField(FIELD_TUNNEL_ID, "隧道 ID", value = config.tunnelId, placeholder = "tunnel_…"))
+                add(BridgeProviderPanelField(FIELD_API_KEY, "Runtime Key", kind = BridgeProviderPanelFieldKind.SECRET,
+                    placeholder = "在本机粘贴 sk-…", enabled = config.secureStorageAvailable))
+                if (showAdvancedSetup) add(BridgeProviderPanelField(FIELD_BASE_URL, "服务地址", value = setupBaseUrl,
+                    placeholder = ChatGptNativeProbeStorage.DEFAULT_BASE_URL))
+            }
+            return panel("首次连接 · 填入隧道 ID 与密钥即可开始。", fields = fields, actions = listOf(
+                BridgeProviderPanelAction(ACTION_SAVE_START, "保存并连接", enabled = config.secureStorageAvailable,
+                    requiredFieldIds = setOf(FIELD_API_KEY, FIELD_TUNNEL_ID)),
+                action(ACTION_ADVANCED, if (showAdvancedSetup) "收起高级设置" else "高级设置"),
+                action(ACTION_DIAGNOSTICS, "连接诊断")
+            ))
+        }
+
+        return when (view) {
+            View.OVERVIEW -> panel("连接 ChatGPT，让 AI Limbs 执行你的任务。", lines = buildList {
+                addAll(summary)
+                if (phase in setOf(AiLimbsBridgePhase.ERROR, AiLimbsBridgePhase.RECOVERY_FAILED)) add("打开连接诊断，查看需要处理的问题。")
+                add("请求 ${probe.commandCount}  ·  已送达 ${probe.responseCount}")
+                if (receipts != null) {
+                    val pending = receipts.optInt("READY")
+                    val failed = receipts.optInt("DELIVERY_FAILED")
+                    if (pending > 0 || failed > 0) add("待送结果 $pending  ·  交付异常 $failed")
+                }
+                if (heartbeat != null) add("最近通信 ${time(heartbeat)}")
+            }, actions = connectionActions() + listOf(action(ACTION_SETTINGS, "连接设置"), action(ACTION_DIAGNOSTICS, "连接诊断")))
+
+            View.SETTINGS -> panel("连接设置 · 密钥已加密保存。", lines = summary + "当前隧道 ${shortTunnel(config.tunnelId)}",
+                fields = listOf(
+                    BridgeProviderPanelField(FIELD_TUNNEL_ID, "隧道 ID", value = config.tunnelId, enabled = false),
+                    BridgeProviderPanelField(FIELD_BASE_URL, "服务地址", value = config.baseUrl, enabled = false)
+                ), actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_EDIT_KEY, "更换密钥"), action(ACTION_SHOW_CLEAR, "清除配置…")))
+
+            View.ROTATE_KEY -> panel("更换密钥 · 保存后重新连接，隧道不变。", lines = summary + "当前隧道 ${shortTunnel(config.tunnelId)}",
+                fields = listOf(BridgeProviderPanelField(FIELD_API_KEY, "新的 Runtime Key", kind = BridgeProviderPanelFieldKind.SECRET,
+                    placeholder = "输入新的 sk-…", enabled = config.secureStorageAvailable)),
+                actions = listOf(
+                    BridgeProviderPanelAction(ACTION_ROTATE, "保存并重连", enabled = config.secureStorageAvailable, requiredFieldIds = setOf(FIELD_API_KEY)),
+                    action(ACTION_SETTINGS, "取消")
+                ))
+
+            View.CONFIRM_CLEAR -> panel("确认清除连接配置", lines = listOf(
+                "将断开连接，并删除本机的密钥与隧道 ID。",
+                "这不会撤销已经执行的操作。"
+            ), actions = listOf(action(ACTION_SETTINGS, "取消"), action(ACTION_CLEAR, "确认清除")))
+
+            View.DIAGNOSTICS -> panel("连接诊断 · 查看通信与结果交付情况。", lines = buildList {
+                addAll(summary)
+                add("版本 ${McpGatewayState.PROBE_VERSION}")
+                add("轮询 ${probe.pollCount}  ·  请求 ${probe.commandCount}  ·  已送达 ${probe.responseCount}")
+                add("正在处理 ${engine.activeRequestCount} 个请求")
+                if (receipts == null) add("交付记录尚未加载，连接时会读取。") else {
+                    add("待送 ${receipts.optInt("READY")}  ·  交付异常 ${receipts.optInt("DELIVERY_FAILED")}")
+                    add("处理中或待确认 ${receipts.optInt("EXECUTING")}")
+                }
+                add("最近通信 ${if (heartbeat == null) "尚无成功通信" else time(heartbeat)}")
+                add("工具目录请求 ${if (probe.lastToolsListAtMs == null) "尚未收到" else time(probe.lastToolsListAtMs)}")
+                add("结果交付 ${if (probe.lastResponseAckAtMs == null) "尚无成功交付" else time(probe.lastResponseAckAtMs)}")
+                probe.lastStatusCode?.let { add("最近 HTTP 状态 $it") }
+                probe.lastMethod?.let { add("最近请求 $it") }
+                probe.lastError?.let { add("连接问题：$it") }
+                probe.lastDeliveryError?.let { add("交付问题：$it") }
+                probe.lastCommandError?.let { add("请求问题：$it") }
+                if (phase in setOf(AiLimbsBridgePhase.ERROR, AiLimbsBridgePhase.RECOVERY_FAILED)) add(control.state.detail)
+                add("收到目录请求不代表 ChatGPT 已刷新工具列表。")
+            }, actions = listOf(action(ACTION_HOME, "返回概览")) + control.availableActions
+                .filter { it in setOf(BridgeAction.REFRESH, BridgeAction.RECONNECT, BridgeAction.RECOVER) }.map(::bridge))
+        }
     }
 
-    override suspend fun perform(
-        context: Context,
-        actionId: String,
-        fieldValues: Map<String, String>,
-        control: BridgeProviderControl
-    ): BridgeProviderPanelResult {
-        val storage = ChatGptNativeProbeStorage(context)
-        return when (actionId) {
+    override suspend fun perform(context: Context, actionId: String, fieldValues: Map<String, String>,
+                                 control: BridgeProviderControl): BridgeProviderPanelResult {
+        if (!storage.readConfig().configured && showAdvancedSetup && fieldValues.containsKey(FIELD_BASE_URL)) {
+            setupBaseUrl = fieldValues.getValue(FIELD_BASE_URL)
+        }
+        when (actionId) {
+            ACTION_HOME -> view = View.OVERVIEW
+            ACTION_SETTINGS -> view = View.SETTINGS
+            ACTION_EDIT_KEY -> { require(storage.readConfig().configured) { "请先完成连接配置" }; view = View.ROTATE_KEY }
+            ACTION_DIAGNOSTICS -> view = View.DIAGNOSTICS
+            ACTION_SHOW_CLEAR -> { require(storage.readConfig().configured) { "没有可清除的连接配置" }; view = View.CONFIRM_CLEAR }
+            ACTION_ADVANCED -> {
+                showAdvancedSetup = !showAdvancedSetup
+                // Preserve the unfinished form while only changing which fields are visible.
+                return BridgeProviderPanelResult()
+            }
             ACTION_SAVE_START -> {
-                storage.saveBinding(
-                    apiKey = fieldValues[FIELD_API_KEY].orEmpty(),
-                    tunnelId = fieldValues[FIELD_TUNNEL_ID].orEmpty(),
-                    baseUrl = fieldValues[FIELD_BASE_URL].orEmpty()
-                )
+                storage.saveBinding(fieldValues[FIELD_API_KEY].orEmpty(), fieldValues[FIELD_TUNNEL_ID].orEmpty(), setupBaseUrl)
                 val accepted = control.perform(BridgeAction.CONNECT)
-                val config = storage.readConfig()
-                BridgeProviderPanelResult(
-                    message = if (accepted) "配置已安全保存，Dynamic Capability Gateway 正在启动" else "配置已保存；当前状态暂不接受启动",
-                    fieldValues = mapOf(
-                        FIELD_API_KEY to "",
-                        FIELD_TUNNEL_ID to config.tunnelId,
-                        FIELD_BASE_URL to config.baseUrl
-                    )
-                )
+                view = View.OVERVIEW
+                return clearedSecret(if (accepted) "配置已保存，正在连接" else "配置已保存，请点击连接")
             }
             ACTION_ROTATE -> {
                 val config = storage.readConfig()
-                require(config.configured) { "尚未配置 Tunnel" }
-                storage.validateApiKey(fieldValues[FIELD_API_KEY].orEmpty())
+                require(config.configured) { "请先完成连接配置" }
+                val key = fieldValues[FIELD_API_KEY].orEmpty()
+                storage.validateApiKey(key)
                 control.perform(BridgeAction.STOP)
-                storage.saveBinding(fieldValues[FIELD_API_KEY].orEmpty(), config.tunnelId, config.baseUrl)
+                storage.saveBinding(key, config.tunnelId, config.baseUrl)
                 val accepted = control.perform(BridgeAction.CONNECT)
-                BridgeProviderPanelResult(
-                    message = if (accepted) "Key 已安全轮换；原 Tunnel 执行凭据和待送结果保留" else "Key 已安全轮换；请启动 Gateway",
-                    fieldValues = mapOf(FIELD_API_KEY to "")
-                )
+                view = View.OVERVIEW
+                return clearedSecret(if (accepted) "密钥已更新，正在重新连接" else "密钥已更新，请点击连接")
             }
             ACTION_CLEAR -> {
+                require(view == View.CONFIRM_CLEAR) { "请先打开清除配置确认界面" }
                 control.perform(BridgeAction.STOP)
                 storage.clearBinding()
-                BridgeProviderPanelResult(
-                    message = "本地凭据与 Tunnel ID 已清除；加密执行记录保留以防重复操作",
-                    fieldValues = mapOf(
-                        FIELD_API_KEY to "",
-                        FIELD_TUNNEL_ID to "",
-                        FIELD_BASE_URL to ChatGptNativeProbeStorage.DEFAULT_BASE_URL
-                    )
-                )
+                view = View.OVERVIEW
+                setupBaseUrl = storage.readConfig().baseUrl
+                showAdvancedSetup = setupBaseUrl != ChatGptNativeProbeStorage.DEFAULT_BASE_URL
+                return BridgeProviderPanelResult("连接配置已清除", mapOf(FIELD_API_KEY to "", FIELD_TUNNEL_ID to "", FIELD_BASE_URL to setupBaseUrl))
             }
-            else -> performBridgeAction(actionId, control)
+            else -> {
+                require(actionId.startsWith("bridge:")) { "未知面板操作" }
+                val action = BridgeAction.valueOf(actionId.removePrefix("bridge:"))
+                val accepted = control.perform(action)
+                return clearedSecret(if (accepted) "已执行：${actionLabel(action)}" else "当前状态不支持：${actionLabel(action)}")
+            }
         }
+        // Leaving any form clears the transient secret in the parent renderer's field cache.
+        return clearedSecret()
     }
 
-    private suspend fun performBridgeAction(
-        actionId: String,
-        control: BridgeProviderControl
-    ): BridgeProviderPanelResult {
-        val action = runCatching {
-            BridgeAction.valueOf(actionId.removePrefix("bridge:"))
-        }.getOrElse {
-            error("未知 ChatGPT Probe 动作：$actionId")
-        }
-        val accepted = control.perform(action)
-        return BridgeProviderPanelResult(
-            message = if (accepted) "已执行：${actionLabel(action)}" else "当前状态不支持：${actionLabel(action)}"
-        )
+    private fun clearedSecret(message: String = "") = BridgeProviderPanelResult(message, mapOf(FIELD_API_KEY to ""))
+    private fun time(value: Long): String = SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(Date(value))
+    private fun shortTunnel(value: String): String = if (value.length <= 24) value else value.take(14) + "…" + value.takeLast(6)
+
+    private fun phaseLabel(phase: AiLimbsBridgePhase): String = when (phase) {
+        AiLimbsBridgePhase.ONLINE -> "🟢 已连接"
+        AiLimbsBridgePhase.STOPPED -> "⚪ 已停止"
+        AiLimbsBridgePhase.PAIRING -> "⚪ 等待配置"
+        AiLimbsBridgePhase.STARTING -> "🟠 正在启动"
+        AiLimbsBridgePhase.CONNECTING -> "🟠 正在连接"
+        AiLimbsBridgePhase.RECONNECTING -> "🟠 正在重新连接"
+        AiLimbsBridgePhase.RECOVERING -> "🟠 正在恢复"
+        AiLimbsBridgePhase.RECOVERY_FAILED -> "🔴 恢复失败"
+        AiLimbsBridgePhase.ERROR -> "🔴 连接异常"
     }
 
     private fun actionLabel(action: BridgeAction): String = when (action) {
-        BridgeAction.CONNECT -> "启动 MCP listener"
-        BridgeAction.STOP -> "停止"
+        BridgeAction.CONNECT -> "连接"
+        BridgeAction.STOP -> "断开连接"
         BridgeAction.RECONNECT -> "重新连接"
-        BridgeAction.RECOVER -> "恢复"
-        BridgeAction.REFRESH -> "检查 / 启动"
+        BridgeAction.RECOVER -> "恢复连接"
+        BridgeAction.REFRESH -> "检查连接"
         BridgeAction.REPAIR -> "重新配置"
-        BridgeAction.OPEN_AUTH -> "无授权页"
+        BridgeAction.OPEN_AUTH -> "授权"
     }
 
-    private const val FIELD_API_KEY = "runtime_api_key"
-    private const val FIELD_TUNNEL_ID = "tunnel_id"
-    private const val FIELD_BASE_URL = "base_url"
-    private const val ACTION_SAVE_START = "chatgpt_probe.save_start"
-    private const val ACTION_ROTATE = "chatgpt_probe.rotate_key"
-    private const val ACTION_CLEAR = "chatgpt_probe.clear"
+    companion object {
+        const val TITLE = "AI Limbs-ChatGPT"
+        private const val FIELD_API_KEY = "runtime_api_key"
+        private const val FIELD_TUNNEL_ID = "tunnel_id"
+        private const val FIELD_BASE_URL = "base_url"
+        private const val ACTION_SAVE_START = "chatgpt_probe.save_start"
+        private const val ACTION_ROTATE = "chatgpt_probe.rotate_key"
+        private const val ACTION_CLEAR = "chatgpt_probe.clear"
+        private const val ACTION_HOME = "chatgpt_probe.view_home"
+        private const val ACTION_SETTINGS = "chatgpt_probe.view_settings"
+        private const val ACTION_EDIT_KEY = "chatgpt_probe.edit_key"
+        private const val ACTION_DIAGNOSTICS = "chatgpt_probe.view_diagnostics"
+        private const val ACTION_SHOW_CLEAR = "chatgpt_probe.confirm_clear"
+        private const val ACTION_ADVANCED = "chatgpt_probe.toggle_advanced"
+    }
 }

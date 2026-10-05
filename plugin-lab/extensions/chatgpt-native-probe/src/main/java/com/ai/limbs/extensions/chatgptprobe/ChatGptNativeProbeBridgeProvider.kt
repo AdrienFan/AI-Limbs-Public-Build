@@ -76,7 +76,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             .onFailure { error ->
                 mutableState.value = stateFor(
                     AiLimbsBridgePhase.ERROR,
-                    "启动 Dynamic Capability Gateway 失败：${error.message ?: "unknown error"}"
+                    "连接 AI Limbs-ChatGPT 失败：${error.message ?: "unknown error"}"
                 )
             }
     }
@@ -88,7 +88,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
         engine.stop()
         mutableState.value = stateFor(
             AiLimbsBridgePhase.STOPPED,
-            "Dynamic Capability Gateway 已停止"
+            "AI Limbs-ChatGPT 已停止"
         )
     }
 
@@ -102,7 +102,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
     override suspend fun openAuthorizationPage(): Boolean = false
     override fun verifyLiveness() {
         runCatching { engine.verifyLiveness() }.onFailure { error ->
-            mutableState.value = stateFor(AiLimbsBridgePhase.ERROR, "检查 Gateway 失败：${error.javaClass.simpleName}")
+            mutableState.value = stateFor(AiLimbsBridgePhase.ERROR, "检查连接失败：${error.javaClass.simpleName}")
         }
     }
     override fun onHostSignal(signal: AiLimbsBridgeHostSignal) = engine.onHostSignal(signal)
@@ -113,7 +113,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             !config.secureStorageAvailable ->
                 stateFor(AiLimbsBridgePhase.ERROR, "Android 安全凭据存储不可用")
             config.configured ->
-                stateFor(AiLimbsBridgePhase.STOPPED, "已配置；等待启动 Dynamic Capability Gateway")
+                stateFor(AiLimbsBridgePhase.STOPPED, "已配置；等待连接")
             else ->
                 stateFor(AiLimbsBridgePhase.PAIRING, "尚未配置 Tunnel ID / Runtime API Key")
         }
@@ -152,10 +152,10 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             remoteIngress: BridgeRemoteIngress
         ): AiLimbsBridgeProvider {
             require(profile is NativeBridgeProfile) {
-                "ChatGPT Dynamic Capability Gateway requires a NativeBridgeProfile"
+                "AI Limbs-ChatGPT requires a NativeBridgeProfile"
             }
             require(profile.id == PROFILE_ID && profile.type == PROFILE_TYPE) {
-                "Unsupported ChatGPT Dynamic Capability Gateway profile: ${profile.id} (${profile.type})"
+                "Unsupported AI Limbs-ChatGPT profile: ${profile.id} (${profile.type})"
             }
             engine.bindRemoteIngress(remoteIngress)
             return ChatGptNativeProbeBridgeProvider(
@@ -170,7 +170,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
     companion object {
         const val PROFILE_ID = "chatgpt_native_probe"
         const val PROFILE_TYPE = "chatgpt_dynamic_capability_gateway"
-        const val PROVIDER_LABEL = "ChatGPT Dynamic Capability Gateway"
+        const val PROVIDER_LABEL = ChatGptNativeProbePanel.TITLE
 
         private val SUPPORTED_ACTIONS = setOf(
             BridgeAction.CONNECT,

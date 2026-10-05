@@ -2,13 +2,13 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.chatgpt_native_probe",
-  "version": "0.0.7",
+  "version": "0.0.8",
   "roles": [
     "system_extension"
   ],
   "display": {
-    "name": "AI Limbs ChatGPT Dynamic Capability Gateway",
-    "description": "纯 Android/Kotlin 动态能力桥：通过 OpenAI Secure MCP Tunnel 将 ChatGPT 请求路由到 AI Limbs live capability resolver / dispatcher；不维护静态能力白名单，权限由 AI Limbs Host Policy 统一执行。"
+    "name": "AI Limbs-ChatGPT",
+    "description": "连接 ChatGPT 与 AI Limbs，支持动态能力调用、图片与长结果交付；权限由 AI Limbs Host 统一管理。"
   },
   "target": {
     "plugin_id": "plugin.system.bridge",

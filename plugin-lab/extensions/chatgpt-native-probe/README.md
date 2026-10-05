@@ -1,6 +1,14 @@
-# AI Limbs ChatGPT Gateway 0.0.7
+# AI Limbs-ChatGPT 0.0.8
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
+
+## Panel
+
+The child keeps all presentation in the existing Bridge API 5 panel contract. The installed extension name, provider selection label, panel heading and MCP server title are `AI Limbs-ChatGPT`. Protocol IDs, signing identity, field IDs and tool names stay unchanged.
+
+The overview shows a Chinese connection indicator, request/delivery counts, successful communication time and pending delivery warnings. Routine controls are chosen for the current phase. Settings, key replacement and diagnostics open on demand; the normal overview contains no secret input. First-time setup shows the tunnel ID and Runtime Key, with the control-plane URL behind Advanced Settings. Leaving forms clears the transient secret field. Clearing binding has its own confirmation view.
+
+Diagnostics show counters, actual communication timestamps and errors. Pending receipt counts are scoped to the current tunnel. An unopened receipt journal is shown as not loaded; drawing the panel does not initialize it or claim zero pending records. Existing Plugin Center components continue to render the child-provided presentation; no Host styling code or Bridge ABI change is required.
 
 ## Stable tools
 
