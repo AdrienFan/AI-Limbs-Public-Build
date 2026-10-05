@@ -7,7 +7,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.security.SecureRandom
 
-internal const val GAME_RULES = "双方准备后各掷一次骰子并确认；同点重掷，赢家选先画或先猜。每轮由当轮出题／绘画方选择游戏模式；当前只开放自由出题。画方封存词语、填两条提示后画画并交图。猜方先得字数星号，最多猜三次；错一、错二分别解锁一条提示，错三失败。结束公布答案、清理临时画布并交换角色，由新的画方选择下一轮模式，不重复开局掷骰。答案去首尾空格后精确匹配。"
+internal const val GAME_RULES = "双方准备后各掷一次骰子并确认；同点重掷，赢家选先画或先猜。每轮由当轮出题／绘画方选择游戏模式；当前只开放自由出题。画方封存词语、填两条提示后画画并交图。作画期间另一方只读看图；交图后双方只读，猜方先得字数星号，最多猜三次；错一、错二分别解锁一条提示，错三失败。结束公布答案、清理临时画布并交换角色，由新的画方选择下一轮模式，不重复开局掷骰。答案去首尾空格后精确匹配。"
 internal const val LANER_SECRECY_REMINDER = "请注意：勿在任务进度、对外可见的推理说明或聊天中暴露自己的考题及尚未解锁的提示。考题和提示只通过游戏封存接口提交；提示按规则解锁，答案在本轮结束后公开。"
 internal const val DEFAULT_WAIT_RETRY_SECONDS = 3
 internal const val DEFAULT_LONG_WAIT_RETRY_SECONDS = 5
@@ -50,9 +50,13 @@ internal class DrawGuessGame(
     suspend fun event(actor: Player, event: String, p: JSONObject = JSONObject()): JSONObject = mutex.withLock {
         if (event == "view") return@withLock view(actor)
         if (event == "picture") {
-            requirePhase(Phase.GUESSING); require(actor == drawer.other())
-            return@withLock view(actor).put("mcp_content", JSONArray().put(JSONObject()
-                .put("type", "image").put("mimeType", "image/png").put("data", requireNotNull(image))))
+            require(phase in setOf(Phase.DRAWING, Phase.GUESSING)) { "当前阶段为${phase.name}" }
+            require(actor == drawer.other()) { "只有猜题方能通过picture只读查看作品" }
+            val content = if (phase == Phase.DRAWING) {
+                JSONObject(endpoint().perform("preview", "{}")).getJSONArray("mcp_content")
+            } else JSONArray().put(JSONObject().put("type", "image").put("mimeType", "image/png")
+                .put("data", requireNotNull(image)))
+            return@withLock view(actor).put("mcp_content", content)
         }
         if (event == "open") {
             if (phase == Phase.CLOSED) reset()
@@ -169,7 +173,7 @@ internal class DrawGuessGame(
         Phase.ORDER -> if (actor == winner) listOf("choose_order") else emptyList()
         Phase.WORD -> if (actor == drawer) listOf("seal_word") else emptyList()
         Phase.HINTS -> if (actor == drawer) listOf("seal_hints") else emptyList()
-        Phase.DRAWING -> if (actor == drawer) listOf("canvas", "paint", "preview", "finish") else emptyList()
+        Phase.DRAWING -> if (actor == drawer) listOf("canvas", "paint", "preview", "finish") else listOf("picture")
         Phase.GUESSING -> if (actor != drawer) listOf("picture", "guess") else emptyList()
         Phase.CLOSED -> emptyList()
     }
@@ -242,12 +246,19 @@ internal class DrawGuessGame(
             .put("player", actor.name).put("drawer", drawer.name).put("guesser", drawer.other().name)
             .put("ready", JSONArray(ready.map { it.name })).put("allowed", JSONArray(actions))
             .put("rules", GAME_RULES).put("remaining", 3 - misses).put("open", open)
+            .put("canvas_access", when (phase) {
+                Phase.DRAWING -> if (actor == drawer) "EDIT" else "READ_ONLY"
+                Phase.GUESSING -> "READ_ONLY"
+                else -> "NONE"
+            })
         questionMode?.let { v.put("question_mode", it) }
         if (phase in setOf(Phase.MODE, Phase.WORD, Phase.HINTS, Phase.DRAWING, Phase.GUESSING)) v.put("mode_chooser", drawer.name)
         if (phase in setOf(Phase.DICE, Phase.ORDER)) v.put("dice_attempt", diceAttempt)
         if (actor == Player.LANER) {
             val opponent = opponentStatus()
-            val waiting = open && phase != Phase.CLOSED && actions.isEmpty()
+            // Viewing the unfinished picture is optional; the spectator still waits for handoff.
+            val waiting = open && phase != Phase.CLOSED &&
+                (actions.isEmpty() || (phase == Phase.DRAWING && actor != drawer))
             v.put("opponent_status", opponent)
                 .put("status", if (waiting) "WAITING" else if (phase == Phase.CLOSED) "CLOSED" else "ACTION_REQUIRED")
             if (waiting) {
@@ -287,8 +298,9 @@ internal class DrawGuessGame(
             Phase.ORDER -> "${winner!!.label()}赢了：请选择先画或先猜。阿伟${rolls[Player.AWEI]}点，兰儿${rolls[Player.LANER]}点。"
             Phase.WORD -> "第${round}轮，${drawer.label()}填写并封存题目。"
             Phase.HINTS -> "${drawer.label()}填写两条提示，完成后开始画画。"
-            Phase.DRAWING -> "第${round}轮，${drawer.label()}作画。画完请确认完成。"
-            Phase.GUESSING -> "${drawer.other().label()}猜题：${v.getString("wordMask")}，剩余${3 - misses}次。"
+            Phase.DRAWING -> "第${round}轮，${drawer.label()}作画。" +
+                if (drawer == Player.AWEI) "画完请确认完成。" else "阿伟可只读查看主画布。"
+            Phase.GUESSING -> "${drawer.other().label()}猜题：${v.getString("wordMask")}，剩余${3 - misses}次。作品在主画布只读显示。"
             Phase.CLOSED -> "游戏已结束。"
         })
         lastResult?.let { r -> messages.put(if (r.getBoolean("finished"))
@@ -319,7 +331,6 @@ internal class DrawGuessGame(
         val p = JSONObject().put("schema", 1).put("title", "你画我猜").put("open", open)
             .put("formKey", "$round:${phase.name}").put("revision", revision)
             .put("messages", messages).put("fields", fields).put("actions", actions)
-        if (phase == Phase.GUESSING && drawer.other() == Player.AWEI) p.put("image", true)
         return@withLock p
     }
     suspend fun stop() = mutex.withLock {

@@ -57,7 +57,7 @@ class DrawGuessEntry : ChildExtensionEntry {
             "roll" to "兰儿掷骰子", "confirm_dice" to "兰儿确认点数", "choose_order" to "赢家选择先画或先猜",
             "choose_mode" to "当轮画方确认游戏模式", "seal_word" to "兰儿封存题目", "seal_hints" to "兰儿封存两条提示并开画",
             "canvas" to "读取兰儿自己的临时画布", "paint" to "兰儿画一笔", "preview" to "预览兰儿自己的画",
-            "finish" to "兰儿确认画完并交图", "picture" to "兰儿接收待猜图片", "guess" to "兰儿提交猜测", "exit" to "结束游戏并清理临时画布")
+            "finish" to "兰儿确认画完并交图", "picture" to "兰儿只读查看对方画作", "guess" to "兰儿提交猜测", "exit" to "结束游戏并清理临时画布")
         try {
             for ((event, example) in examples) {
                 val properties = JSONObject(); val required = JSONArray(); val specs = mutableListOf<InProcessCapabilityParameterSpec>()
@@ -76,6 +76,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                             "view" -> "查询不改变游戏状态。若status为WAITING，按retry_after_ms等待后再次调用view；其他状态按allowed执行。"
                             "choose_mode" -> "仅当兰儿为本轮出题／绘画方时选择模式。当前仅支持mode=FREE；SYSTEM暂未开放。修改时带当前revision。"
                             "seal_word", "seal_hints" -> "修改时带当前revision。" + LANER_SECRECY_REMINDER
+                            "picture" -> "无需revision；阿伟作画期间可只读预览当前图片，交图后读取冻结图片。不返回对方的题目、未解锁提示或编辑记录；交图前不能猜测或修改画布。"
                             "paint" -> "修改时带当前revision；STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。"
                             else -> "修改时带当前revision；猜题阶段用picture取图，不能读取对方题目或绘画记录。"
                         },

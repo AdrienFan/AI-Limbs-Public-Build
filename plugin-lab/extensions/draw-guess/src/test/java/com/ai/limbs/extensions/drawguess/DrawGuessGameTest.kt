@@ -13,7 +13,11 @@ class DrawGuessGameTest {
         val events = mutableListOf<String>()
         override suspend fun perform(eventId: String, payloadJson: String): String {
             events += eventId
-            return if (eventId == "freeze") """{"base64":"YQ=="}""" else "{}"
+            return when (eventId) {
+                "freeze" -> """{"base64":"YQ=="}"""
+                "preview" -> """{"mcp_content":[{"type":"image","mimeType":"image/png","data":"YQ=="}]}"""
+                else -> "{}"
+            }
         }
     }
     private suspend fun send(g: DrawGuessGame, actor: Player, event: String, p: JSONObject = JSONObject()) =
@@ -40,6 +44,57 @@ class DrawGuessGameTest {
         send(g, drawer, "seal_hints", JSONObject().put("hint1", "交通工具").put("hint2", "人力驱动"))
         send(g, drawer, "finish")
     }
+
+    @Test fun spectatorsOnlyReadPicturesAndDrawingAccessSwapsWithRoles() = runBlocking {
+        val (game, canvas) = started()
+        send(game, Player.AWEI, "seal_word", JSONObject().put("word", "猫"))
+        send(game, Player.AWEI, "seal_hints", JSONObject().put("hint1", "动物").put("hint2", "喵"))
+        val revision = game.revision
+        assertEquals("EDIT", game.view(Player.AWEI).getString("canvas_access"))
+        val viewing = game.event(Player.LANER, "picture")
+        assertEquals("READ_ONLY", viewing.getString("canvas_access"))
+        assertEquals("WAITING", viewing.getString("status"))
+        assertEquals(5_000L, viewing.getLong("retry_after_ms"))
+        assertEquals("picture", viewing.getJSONArray("allowed").getString(0))
+        assertTrue(viewing.has("mcp_content"))
+        assertFalse(viewing.has("wordMask"))
+        assertFalse(viewing.toString().contains("动物"))
+        assertFalse(viewing.toString().contains("喵"))
+        assertFalse(viewing.has("yourSealedWord"))
+        assertFalse(viewing.has("canvas"))
+        assertEquals(revision, game.revision)
+        assertEquals(Phase.DRAWING, game.phase)
+        rejects { send(game, Player.LANER, "paint") }
+        rejects { send(game, Player.LANER, "finish") }
+        rejects { send(game, Player.LANER, "guess", JSONObject().put("answer", "猫")) }
+        rejects { send(game, Player.LANER, "canvas") }
+        assertEquals(revision, game.revision)
+        assertEquals(listOf("create", "preview"), canvas.events)
+        send(game, Player.AWEI, "finish")
+        assertEquals("READ_ONLY", game.view(Player.AWEI).getString("canvas_access"))
+        assertEquals("READ_ONLY", game.view(Player.LANER).getString("canvas_access"))
+        rejects { send(game, Player.AWEI, "paint") }
+        assertFalse(game.phonePanel().has("image"))
+        send(game, Player.LANER, "guess", JSONObject().put("answer", "猫"))
+        send(game, Player.LANER, "choose_mode", JSONObject().put("mode", "FREE"))
+        send(game, Player.LANER, "seal_word", JSONObject().put("word", "船"))
+        send(game, Player.LANER, "seal_hints", JSONObject().put("hint1", "水上").put("hint2", "交通"))
+        assertEquals("EDIT", game.view(Player.LANER).getString("canvas_access"))
+        val phoneView = game.event(Player.AWEI, "picture")
+        assertEquals("READ_ONLY", phoneView.getString("canvas_access"))
+        assertTrue(phoneView.has("mcp_content"))
+        assertFalse(phoneView.has("yourSealedWord"))
+        assertFalse(phoneView.has("canvas"))
+        assertFalse(game.phonePanel().has("image"))
+        assertEquals(0, game.phonePanel().getJSONArray("actions").length())
+        rejects { send(game, Player.AWEI, "paint") }
+        rejects { send(game, Player.AWEI, "finish") }
+        rejects { send(game, Player.AWEI, "canvas") }
+        send(game, Player.LANER, "finish")
+        assertFalse(game.phonePanel().has("image"))
+        assertEquals("guess", game.phonePanel().getJSONArray("actions").getJSONObject(0).getString("event"))
+    }
+
     @Test fun preparationReturnsRulesAndRequiresBothPlayers() = runBlocking {
         val game = DrawGuessGame { 4 }
         val v = send(game, Player.LANER, "ready")

@@ -873,6 +873,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
     fun perform(confirmation: JSONObject? = null, onSuccess: (() -> Unit)? = null,
         renderEditResult: Boolean = false, onApplied: ((JSONObject) -> Unit)? = null,
         operationName: String = "documentEdit", action: (JSONObject?) -> JSONObject) {
+        if (!interactionAllowed) return
         scope.launch {
             // A menu may outlive its Compose scope. A cancelled launch must never set busy forever.
             animationPlaying=false
@@ -1306,7 +1307,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 withContext(Dispatchers.IO) { store.ackMenuUiRequest(request.getString("id")) }
             }
             delay(400)
-            if (isPageVisible() && !busy && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
+            // Read-only spectators still need externally committed drawing updates.
+            if (isPageVisible() && !processing && withContext(Dispatchers.IO) { store.revision() } != revision) refresh()
         }
         } catch (released: StudioCanvasReleasedException) {
             // A revoked session ends the old page jobs, including queued render/settings work.
@@ -2017,7 +2019,8 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
             }
         },
         execute = { operation, parameters ->
-            check(!busy) { "画室正在处理绘画操作，请稍后再操作视图" }
+            check(!processing) { "画室正在处理绘画操作，请稍后再操作视图" }
+            if (operation in setOf("tool_select", "tool_options")) check(interactionAllowed) { "当前画布只读" }
             when (operation) {
                 "command" -> {
                     runViewCommand(parameters.getString("command"))
@@ -2120,7 +2123,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                     workspace.bind(activeDraft?.takeIf { inputReady && !inputStale && tool == "svg_text" && it.optString("sourceMode") != "svg" }, !busy)
                     view.documentId = current.getString("id")
                     view.scene = state; view.sceneRevision = current.getInt("revision")
-                    view.svgPanel=svgEnabled;view.svgPicking=svgEnabled&&svgEditor.picking
+                    view.svgPanel=svgEnabled;view.svgPicking=svgEnabled&&svgEditor.picking&&interactionAllowed
                     view.onSvgPick={x,y->if(!busy)perform {store.svgPick("AWEI",JSONObject().put("documentId",current.getString("id")).put("expectedRevision",current.getInt("revision")).put("x",x).put("y",y))}}
                     view.shapeMultiple = shapeMultiple; view.shapeShear = shapeShear; view.shapeBusy = busy
                     view.onShapeEdit = ::edit
@@ -2190,10 +2193,12 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                         else -> 0f
                     }
                     view.layers = layers
-                    view.selectedId = if(animationPlaying)"" else selected
-                    view.selection = if(animationPlaying)null else state.optJSONObject("selection")
+                    view.selectedId = if(animationPlaying || !interactionAllowed)"" else selected
+                    view.selection = if(animationPlaying || !interactionAllowed)null else state.optJSONObject("selection")
                     view.selectionVisible=remainingSettings.optBoolean("selectionVisible",true)
-                    view.tool = if(animationPlaying)"pan" else tool; view.color = color; view.brushWidth = width
+                    view.tool = if(animationPlaying || !interactionAllowed)"pan" else tool;
+                    view.contentDescription = if (interactionAllowed) "画室画布，可使用所选工具绘画" else "画室画布，只读，可缩放和平移"
+                    view.color = color; view.brushWidth = width
                     view.opacity = opacity; view.mirrorDirection = mirrorDirection
                     view.mirrorAngle = mirrorAngle;view.mirrorBrushTool=mirrorBrushTool
                     view.mirrorCount = mirrorCount; view.mirrorRadius = mirrorRadius

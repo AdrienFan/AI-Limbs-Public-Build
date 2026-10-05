@@ -1,16 +1,12 @@
 package com.ai.limbs.plugins.artstudio
 
-import android.graphics.Bitmap
-import android.graphics.BitmapFactory
 import android.widget.Toast
-import androidx.compose.foundation.Image
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.ai.limbs.plugin.runtime.*
@@ -56,17 +52,13 @@ import java.io.File
                 canvas.getString("drawer") == "AWEI" && !canvas.getBoolean("frozen"))
         }
         for (entry in open) key(entry.getString("extensionId"), entry.getString("binding")) {
-            val imageFile = if (entry.getJSONObject("document").optBoolean("image")) {
-                require(canvas != null && canvas.getString("owner") == entry.getString("extensionId"))
-                File(canvas.getString("root"), "final.png")
-            } else null
-            StudioInteractiveWindow(host, bridge, entry, imageFile)
+            StudioInteractiveWindow(host, bridge, entry)
         }
     }
 }
 
 @Composable private fun BoxWithConstraintsScope.StudioInteractiveWindow(host: InProcessPluginUiHost,
-    bridge: StudioMenuBridge, entry: JSONObject, imageFile: File?) {
+    bridge: StudioMenuBridge, entry: JSONObject) {
     var window by remember { mutableStateOf(StudioToolWindowState(open = true, yDp = 64f)) }
     val panel = entry.getJSONObject("document")
     val scope = rememberCoroutineScope()
@@ -103,7 +95,6 @@ import java.io.File
         { confirmExit = true }) {
         val messages = panel.getJSONArray("messages")
         for (index in 0 until messages.length()) Text(messages.getString(index))
-        if (imageFile != null) StudioInteractiveImage(imageFile)
         key(panel.getString("formKey")) {
             val fields = panel.getJSONArray("fields")
             val values = remember { mutableStateMapOf<String, String>() }
@@ -139,21 +130,4 @@ import java.io.File
         title = { Text("退出${panel.getString("title")}") }, text = { Text("本轮游戏画布和封存题目会清理。") },
         confirmButton = { TextButton(onClick = { confirmExit = false; send("exit", JSONObject()) }, enabled = !submitting) { Text("退出游戏") } },
         dismissButton = { TextButton(onClick = { confirmExit = false }) { Text("继续游戏") } })
-}
-
-@Composable private fun StudioInteractiveImage(file: File) {
-    var image by remember(file.absolutePath) { mutableStateOf<Bitmap?>(null) }
-    var failure by remember(file.absolutePath) { mutableStateOf<String?>(null) }
-    LaunchedEffect(file.absolutePath) {
-        var decoded: Bitmap? = null
-        try {
-            withContext(Dispatchers.IO) { decoded = BitmapFactory.decodeFile(file.absolutePath) }
-            image = requireNotNull(decoded) { "游戏图片读取失败" }; decoded = null
-        } catch (cancelled: CancellationException) { throw cancelled }
-        catch (error: Exception) { failure = error.message }
-        finally { decoded?.recycle() }
-    }
-    DisposableEffect(file.absolutePath) { onDispose { image?.recycle(); image = null } }
-    image?.let { Image(it.asImageBitmap(), contentDescription = "本轮待猜图片", modifier = Modifier.fillMaxWidth().heightIn(max = 240.dp)) }
-    failure?.let { Text(it, color = MaterialTheme.colorScheme.error) }
 }
