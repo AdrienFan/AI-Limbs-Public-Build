@@ -48,6 +48,52 @@ class DrawGuessGameTest {
         assertEquals(Phase.DICE, game.phase)
         assertTrue(game.phonePanel().getJSONArray("messages").length() > 0)
     }
+    @Test fun waitingQueriesKeepRevisionAndStopRetryingWhenOtherPlayerIsReady() = runBlocking {
+        val game = DrawGuessGame { 4 }
+        send(game, Player.LANER, "open")
+        val prepared = send(game, Player.LANER, "ready")
+        assertTrue(prepared.getBoolean("success"))
+        assertEquals("WAITING", prepared.getString("status"))
+        assertEquals("AWEI", prepared.getString("waiting_for"))
+        assertEquals(3_000L, prepared.getLong("retry_after_ms"))
+        assertEquals("兰儿已准备，阿伟正在准备中。请等待3秒后再次查询游戏状态。", prepared.getString("message"))
+        val revision = game.revision
+        repeat(3) {
+            val waiting = game.event(Player.LANER, "view")
+            assertTrue(waiting.getBoolean("success"))
+            assertEquals("WAITING", waiting.getString("status"))
+            assertEquals(revision, waiting.getInt("revision"))
+            assertEquals(1, waiting.getJSONArray("ready").length())
+            assertEquals(0, waiting.getJSONArray("allowed").length())
+            val next = waiting.getJSONObject("next_action")
+            assertEquals("WAIT_THEN_QUERY", next.getString("type"))
+            assertEquals("plugin.draw_guess.view", next.getJSONObject("capability").getString("name"))
+            assertEquals(0, next.getJSONObject("capability").getJSONObject("parameters").length())
+        }
+        rejects { send(game, Player.LANER, "roll") }
+        assertEquals(revision, game.revision)
+        send(game, Player.AWEI, "ready")
+        val next = game.event(Player.LANER, "view")
+        assertEquals("DICE", next.getString("phase"))
+        assertEquals("ACTION_REQUIRED", next.getString("status"))
+        assertEquals("roll", next.getJSONArray("allowed").getString(0))
+        assertFalse(next.has("retry_after_ms"))
+        assertFalse(next.has("next_action"))
+        assertFalse(next.has("waiting_for"))
+    }
+    @Test fun waitingIntervalIsConfigurableAndClosedGameDoesNotRequestPolling() = runBlocking {
+        val game = DrawGuessGame(waitRetrySeconds = 6) { 4 }
+        game.connect(Canvas())
+        send(game, Player.LANER, "open")
+        val waiting = send(game, Player.LANER, "ready")
+        assertEquals(6_000L, waiting.getLong("retry_after_ms"))
+        assertTrue(waiting.getString("message").contains("等待6秒"))
+        val closed = send(game, Player.LANER, "exit")
+        assertTrue(closed.getBoolean("success"))
+        assertEquals("CLOSED", closed.getString("status"))
+        assertFalse(closed.has("retry_after_ms"))
+        assertFalse(closed.has("next_action"))
+    }
     @Test fun diceIsSingleShotBothConfirmedAndTiesRestart() = runBlocking {
         val values = ArrayDeque(listOf(3, 3, 6, 1)); val game = DrawGuessGame { values.removeFirst() }
         send(game, Player.AWEI, "ready"); send(game, Player.LANER, "ready")
@@ -83,6 +129,8 @@ class DrawGuessGameTest {
     @Test fun missesUnlockExactlyTwoHintsThenReleaseAndSwapAutomatically() = runBlocking {
         val (game, canvas) = started(); pictureReady(game)
         val first = send(game, Player.LANER, "guess", JSONObject().put("answer", "汽车"))
+        assertTrue(first.getBoolean("success"))
+        assertFalse(first.getJSONObject("lastResult").getBoolean("success"))
         assertEquals("交通工具", first.getJSONArray("hints").getString(0))
         assertEquals(2, first.getInt("remaining"))
         val second = send(game, Player.LANER, "guess", JSONObject().put("answer", "火车"))

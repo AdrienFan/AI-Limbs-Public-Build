@@ -71,7 +71,8 @@ class DrawGuessEntry : ChildExtensionEntry {
                     description = "你画我猜：${titles[event]}。仅操作兰儿身份；先view，按allowed执行。" +
                         when (event) {
                             "open" -> "无需参数；打开后再调用ready。已结束的游戏恢复到准备阶段；重复打开不重置进行中的回合。"
-                            "ready" -> GAME_RULES
+                            "ready" -> "准备后若status为WAITING，按retry_after_ms等待后调用view查询，不重复准备或提前执行下一步。" + GAME_RULES
+                            "view" -> "查询不改变游戏状态。若status为WAITING，按retry_after_ms等待后再次调用view；其他状态按allowed执行。"
                             "paint" -> "修改时带当前revision；STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。"
                             else -> "修改时带当前revision；猜题阶段用picture取图，不能读取对方题目或绘画记录。"
                         },
@@ -97,7 +98,7 @@ class DrawGuessEntry : ChildExtensionEntry {
                 JSONObject().put("name", "你画我猜").put("rules", GAME_RULES)
                     .put("start", "$GAME_CAPABILITIES.open").put("ready", "$GAME_CAPABILITIES.ready")
                     .put("view", "$GAME_CAPABILITIES.view")
-                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes; never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
+                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes. When status is WAITING, wait retry_after_ms then call view again; do not repeat ready or advance before allowed changes. Never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
                     .toString()))
             host.publish(mapOf("schema" to 1, "menu" to menu, "panel" to panel,
                 "connect" to Consumer<InProcessUiStateProvider>(game::connect)),

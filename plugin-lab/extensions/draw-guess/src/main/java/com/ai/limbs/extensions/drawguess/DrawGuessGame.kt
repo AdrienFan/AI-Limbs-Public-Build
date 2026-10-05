@@ -8,6 +8,7 @@ import org.json.JSONObject
 import java.security.SecureRandom
 
 internal const val GAME_RULES = "双方准备后各掷一次骰子并确认；同点重掷，赢家选先画或先猜。画方封存词语、填两条提示后画画并交图。猜方先得字数星号，最多猜三次；错一、错二分别解锁一条提示，错三失败。结束公布答案、清理临时画布并交换角色。答案去首尾空格后精确匹配。"
+internal const val DEFAULT_WAIT_RETRY_SECONDS = 3
 internal enum class Player { AWEI, LANER;
     fun other() = if (this == AWEI) LANER else AWEI
     fun label() = if (this == AWEI) "阿伟" else "兰儿"
@@ -15,7 +16,11 @@ internal enum class Player { AWEI, LANER;
 internal enum class Phase { READY, DICE, ORDER, WORD, HINTS, DRAWING, GUESSING, CLOSED }
 
 /** One in-memory business state machine. Public views are generated for a specific player. */
-internal class DrawGuessGame(private val dice: () -> Int = { SecureRandom().nextInt(6) + 1 }) {
+internal class DrawGuessGame(
+    private val waitRetrySeconds: Int = DEFAULT_WAIT_RETRY_SECONDS,
+    private val dice: () -> Int = { SecureRandom().nextInt(6) + 1 }
+) {
+    init { require(waitRetrySeconds > 0) { "等待查询间隔必须大于0秒" } }
     private val mutex = Mutex()
     private var canvas: InProcessUiStateProvider? = null
     var phase = Phase.READY; private set
@@ -156,10 +161,36 @@ internal class DrawGuessGame(private val dice: () -> Int = { SecureRandom().next
         Phase.CLOSED -> emptyList()
     }
     fun view(actor: Player): JSONObject {
-        val v = JSONObject().put("revision", revision).put("round", round).put("phase", phase.name)
+        val actions = allowed(actor)
+        // Execution success is separate from whether a guess was correct in lastResult.
+        val v = JSONObject().put("success", true)
+            .put("revision", revision).put("round", round).put("phase", phase.name)
             .put("player", actor.name).put("drawer", drawer.name).put("guesser", drawer.other().name)
-            .put("ready", JSONArray(ready.map { it.name })).put("allowed", JSONArray(allowed(actor)))
+            .put("ready", JSONArray(ready.map { it.name })).put("allowed", JSONArray(actions))
             .put("rules", GAME_RULES).put("remaining", 3 - misses).put("open", open)
+        if (actor == Player.LANER) {
+            val waiting = open && phase != Phase.CLOSED && actions.isEmpty()
+            v.put("status", if (waiting) "WAITING" else if (phase == Phase.CLOSED) "CLOSED" else "ACTION_REQUIRED")
+            if (waiting) {
+                val pending = when (phase) {
+                    Phase.READY -> "兰儿已准备，阿伟正在准备中"
+                    Phase.DICE -> "等待阿伟掷骰子并确认点数"
+                    Phase.ORDER -> "等待阿伟选择先画或先猜"
+                    Phase.WORD -> "等待阿伟封存题目"
+                    Phase.HINTS -> "等待阿伟填写并封存两条提示"
+                    Phase.DRAWING -> "阿伟正在绘画中"
+                    Phase.GUESSING -> "等待阿伟猜题"
+                    Phase.CLOSED -> error("已关闭的游戏不能进入等待状态")
+                }
+                // Advertise a read-only retry; waiting never repeats ready or advances revision.
+                v.put("waiting_for", Player.AWEI.name)
+                    .put("message", "$pending。请等待${waitRetrySeconds}秒后再次查询游戏状态。")
+                    .put("retry_after_ms", waitRetrySeconds.toLong() * 1_000L)
+                    .put("next_action", JSONObject().put("type", "WAIT_THEN_QUERY")
+                        .put("capability", JSONObject().put("name", "$GAME_CAPABILITIES.view")
+                            .put("parameters", JSONObject())))
+            }
+        }
         rolls[actor]?.let { v.put("yourDice", it).put("diceConfirmed", actor in confirmed) }
         if (phase == Phase.ORDER) v.put("winner", winner!!.name)
             .put("dice", JSONObject().put("AWEI", rolls.getValue(Player.AWEI)).put("LANER", rolls.getValue(Player.LANER)))
