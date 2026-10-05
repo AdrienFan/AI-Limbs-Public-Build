@@ -14,7 +14,8 @@ internal class GatewayResults(
     private val validImage: (ByteArray, String) -> Boolean = { bytes, mime ->
         when (mime) {
             "image/png" -> bytes.size >= 24 && bytes.take(8).toByteArray().contentEquals(byteArrayOf(-119, 80, 78, 71, 13, 10, 26, 10))
-            "image/jpeg" -> bytes.size >= 4 && bytes[0] == -1.toByte() && bytes[1] == -40.toByte() && bytes[bytes.size - 2] == -1.toByte() && bytes.last() == -39.toByte()
+            // Convert signed bytes explicitly: unary minus on Byte produces Int in Kotlin.
+            "image/jpeg" -> bytes.size >= 4 && bytes[0].toInt() == -1 && bytes[1].toInt() == -40 && bytes[bytes.size - 2].toInt() == -1 && bytes.last().toInt() == -39
             else -> false
         }
     }

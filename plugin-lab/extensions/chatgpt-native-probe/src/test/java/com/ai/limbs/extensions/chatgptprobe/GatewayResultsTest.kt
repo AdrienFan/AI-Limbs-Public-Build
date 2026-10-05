@@ -56,6 +56,19 @@ class GatewayResultsTest {
         assertEquals(PNG, adapter.readMedia(handle).getJSONArray("content").getJSONObject(0).getString("data"))
     }
 
+    @Test fun jpegDeliveryKeepsTheImageAndRejectsAMissingEndMarker() {
+        val adapter = GatewayResults(MemoryGatewayStore())
+        fun result(data: String) = adapter.adapt(JSONObject().put("success", true)
+            .put("mcp_content", JSONArray().put(image(data).put("mimeType", "image/jpeg"))))
+        val delivered = result(JPEG)
+        assertEquals(JPEG, delivered.getJSONArray("content").getJSONObject(1).getString("data"))
+        val bytes = java.util.Base64.getDecoder().decode(JPEG)
+        val truncated = result(java.util.Base64.getEncoder().encodeToString(bytes.copyOf(bytes.size - 2)))
+        assertFalse(truncated.getBoolean("isError"))
+        assertEquals(1, truncated.getJSONArray("content").length())
+        assertTrue(truncated.getJSONObject("structuredContent").getJSONObject("media_delivery").getBoolean("partial"))
+    }
+
     @Test fun invalidMediaDoesNotTurnACompletedActionIntoBusinessFailure() {
         val adapter = GatewayResults(MemoryGatewayStore())
         val result = adapter.adapt(JSONObject().put("success", true).put("error", JSONObject.NULL)
@@ -92,5 +105,9 @@ class GatewayResultsTest {
     }
 
     private fun image(data: String) = JSONObject().put("type", "image").put("mimeType", "image/png").put("data", data)
-    companion object { const val PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6GAAAAABJRU5ErkJggg==" }
+    companion object {
+        const val PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6GAAAAABJRU5ErkJggg=="
+        // A generated black 1x1 JPEG fixture; Android decoding is validated separately at runtime.
+        const val JPEG = "/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAABAAEDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwD5/ooooA//2Q=="
+    }
 }

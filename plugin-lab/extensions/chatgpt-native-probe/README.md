@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.8
+# AI Limbs-ChatGPT 0.0.9
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -9,6 +9,14 @@ The child keeps all presentation in the existing Bridge API 5 panel contract. Th
 The overview shows a Chinese connection indicator, request/delivery counts, successful communication time and pending delivery warnings. Routine controls are chosen for the current phase. Settings, key replacement and diagnostics open on demand; the normal overview contains no secret input. First-time setup shows the tunnel ID and Runtime Key, with the control-plane URL behind Advanced Settings. Leaving forms clears the transient secret field. Clearing binding has its own confirmation view.
 
 Diagnostics show counters, actual communication timestamps and errors. Pending receipt counts are scoped to the current tunnel. An unopened receipt journal is shown as not loaded; drawing the panel does not initialize it or claim zero pending records. Existing Plugin Center components continue to render the child-provided presentation; no Host styling code or Bridge ABI change is required.
+
+## Notification shortcuts
+
+The child now publishes the same Bridge API 5 notification contribution used by SentinelX and RDC. Select AI Limbs-ChatGPT in the Bridge panel and connect to show its notification under the existing parent lifecycle. The parent presents the selected provider and removes its notification when no connection or pairing transaction needs to remain active; this child does not create a separate always-visible notification or quick-settings tile.
+
+The short title includes the Chinese connection phase. The notification shows request and acknowledged delivery counts, active request count when nonzero, and the last successful communication time. Authorization, connection and delivery problems use short guidance to the plugin settings or diagnostics. Credentials, tunnel IDs, raw request details and raw errors are never rendered in this contribution.
+
+At most two controls are contributed: disconnect and reconnect while online, disconnect and connection check during startup, recovery and disconnect during connection errors, or connect and connection check when stopped if the parent notification remains present. Each control is intersected with the parent-provided available actions and checked again at dispatch, including configuration availability. Editing credentials and clearing configuration stay in the plugin panel. Tapping the notification uses the Host's existing app launch behavior; it does not add a direct settings deep link.
 
 ## Stable tools
 

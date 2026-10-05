@@ -76,12 +76,12 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 BridgeProviderContribution(
                     factory = ChatGptNativeProbeBridgeProvider.Factory(engine),
                     panel = ChatGptNativeProbePanel(host.applicationContext, engine),
-                    notification = null
+                    notification = ChatGptNativeProbeNotification(host.applicationContext, engine)
                 ),
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-Dynamic-Gateway-v0.0.8",
+                    "source" to "AI-Limbs-ChatGPT-Dynamic-Gateway-v0.0.9",
                     "purpose" to "android_okhttp_dynamic_capability_gateway"
                 )
             )
