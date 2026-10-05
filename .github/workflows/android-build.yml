@@ -570,7 +570,7 @@ jobs:
 
   chatgpt_native_probe:
     if: inputs.target == 'chatgpt-native-probe'
-    name: Build and sign ChatGPT Dynamic Capability Gateway v0.0.6
+    name: Build, test and sign ChatGPT Dynamic Capability Gateway
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -614,7 +614,17 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew :chatgpt-native-probe-extension:assembleDebug --stacktrace --no-daemon
+          ./gradlew :chatgpt-native-probe-extension:testDebugUnitTest :chatgpt-native-probe-extension:assembleDebug --stacktrace --no-daemon
+      - name: Upload gateway regression test reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: chatgpt-gateway-tests-${{ github.run_number }}
+          path: |
+            plugin-lab/extensions/chatgpt-native-probe/build/reports/tests/testDebugUnitTest/**
+            plugin-lab/extensions/chatgpt-native-probe/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 14
       - name: Sign installable ChatGPT Dynamic Capability Gateway extension
         env:
           AILIMBS_CHILD_EXTENSION_PRIVATE_PEM: ${{ secrets.AILIMBS_CHILD_EXTENSION_PRIVATE_PEM }}

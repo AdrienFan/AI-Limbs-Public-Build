@@ -35,6 +35,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
                         "ONLINE" -> AiLimbsBridgePhase.ONLINE
                         "STARTING" -> AiLimbsBridgePhase.STARTING
                         "RETRYING" -> AiLimbsBridgePhase.RECONNECTING
+                        "AUTH_REQUIRED", "ERROR" -> AiLimbsBridgePhase.ERROR
                         else -> if (probe.running) AiLimbsBridgePhase.CONNECTING else AiLimbsBridgePhase.STOPPED
                     },
                     detail = buildString {
@@ -49,12 +50,14 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
                             append(", last=")
                             append(it)
                         }
+                        probe.lastCommandError?.let { append(" | command: "); append(it) }
+                        probe.lastDeliveryError?.let { append(" | delivery: "); append(it) }
                         probe.lastError?.let {
                             append(" | ")
                             append(it)
                         }
                     },
-                    lastHeartbeatAtMs = if (probe.running) System.currentTimeMillis() else null
+                    lastHeartbeatAtMs = listOfNotNull(probe.lastSuccessfulPollAtMs, probe.lastResponseAckAtMs).maxOrNull()
                 )
             }
         }
@@ -62,6 +65,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
 
     override val id: String get() = profile.id
     override val enabled: Boolean get() = profile.enabled
+    override val requiresScreenOffCpuKeepAlive: Boolean get() = true
     override val isRunning: Boolean get() = engine.state.value.running
     override val state: StateFlow<AiLimbsBridgeState> get() = mutableState
     override val statusSummary: String get() = "${state.value.phase}: ${state.value.detail}"
@@ -96,8 +100,12 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
     override fun recover() = start()
     override fun rePair() = markStopped()
     override suspend fun openAuthorizationPage(): Boolean = false
-    override fun verifyLiveness() = start()
-    override fun onHostSignal(signal: AiLimbsBridgeHostSignal) = Unit
+    override fun verifyLiveness() {
+        runCatching { engine.verifyLiveness() }.onFailure { error ->
+            mutableState.value = stateFor(AiLimbsBridgePhase.ERROR, "检查 Gateway 失败：${error.javaClass.simpleName}")
+        }
+    }
+    override fun onHostSignal(signal: AiLimbsBridgeHostSignal) = engine.onHostSignal(signal)
 
     private fun initialState(): AiLimbsBridgeState {
         val config = storage.readConfig()
@@ -105,7 +113,7 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
             !config.secureStorageAvailable ->
                 stateFor(AiLimbsBridgePhase.ERROR, "Android 安全凭据存储不可用")
             config.configured ->
-                stateFor(AiLimbsBridgePhase.STOPPED, "已配置；等待启动 MCP Echo listener")
+                stateFor(AiLimbsBridgePhase.STOPPED, "已配置；等待启动 Dynamic Capability Gateway")
             else ->
                 stateFor(AiLimbsBridgePhase.PAIRING, "尚未配置 Tunnel ID / Runtime API Key")
         }

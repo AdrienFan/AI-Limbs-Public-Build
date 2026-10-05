@@ -21,7 +21,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                     id = "$CAPABILITY_PREFIX.run",
                     displayName = "启动 ChatGPT Dynamic Capability Gateway",
                     description = "启动 Android/Kotlin OpenAI Tunnel listener，并把 MCP tools/call 动态路由到 AI Limbs live capability resolver / dispatcher。",
-                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "listener", "echo"),
+                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "listener", "gateway"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
                     effect = InProcessCapabilityEffect.EXTERNAL_COMMUNICATION,
@@ -40,7 +40,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.status",
                     displayName = "读取 ChatGPT Dynamic Capability Gateway 状态",
-                    description = "读取 Tunnel poll、MCP command 与 response 统计；不会泄露 Runtime API Key。",
+                    description = "读取真实网络心跳、能力目录观察、执行凭据与结果交付状态；不会泄露 Runtime API Key。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "状态", "statistics"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
@@ -56,7 +56,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.stop",
                     displayName = "停止 ChatGPT Dynamic Capability Gateway",
-                    description = "停止 Android/Kotlin Tunnel listener 并取消当前 OkHttp long-poll。",
+                    description = "停止 Gateway，取消当前传输与执行协程，并保留加密执行凭据和待送结果；取消不撤销已发生的业务效果。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "停止", "stop"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
@@ -81,7 +81,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-Dynamic-Gateway-v0.0.6",
+                    "source" to "AI-Limbs-ChatGPT-Dynamic-Gateway-v0.0.7",
                     "purpose" to "android_okhttp_dynamic_capability_gateway"
                 )
             )

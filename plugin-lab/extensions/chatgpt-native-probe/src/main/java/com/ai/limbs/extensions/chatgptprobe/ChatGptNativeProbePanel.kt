@@ -32,8 +32,8 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                     id = FIELD_API_KEY,
                     label = "Runtime API Key",
                     kind = BridgeProviderPanelFieldKind.SECRET,
-                    placeholder = if (config.configured) "已加密保存；如需更换请先清除配置" else "在本机粘贴 sk-…",
-                    enabled = config.secureStorageAvailable && !config.configured
+                    placeholder = if (config.configured) "已加密保存；输入新 Key 可原地轮换" else "在本机粘贴 sk-…",
+                    enabled = config.secureStorageAvailable
                 ),
                 BridgeProviderPanelField(
                     id = FIELD_TUNNEL_ID,
@@ -61,6 +61,7 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                         )
                     )
                 } else {
+                    add(BridgeProviderPanelAction(ACTION_ROTATE, "轮换 Key 并重连", enabled = config.secureStorageAvailable, requiredFieldIds = setOf(FIELD_API_KEY)))
                     add(BridgeProviderPanelAction(ACTION_CLEAR, "清除本地配置"))
                 }
                 control.availableActions.forEach { action ->
@@ -100,11 +101,23 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
                     )
                 )
             }
+            ACTION_ROTATE -> {
+                val config = storage.readConfig()
+                require(config.configured) { "尚未配置 Tunnel" }
+                storage.validateApiKey(fieldValues[FIELD_API_KEY].orEmpty())
+                control.perform(BridgeAction.STOP)
+                storage.saveBinding(fieldValues[FIELD_API_KEY].orEmpty(), config.tunnelId, config.baseUrl)
+                val accepted = control.perform(BridgeAction.CONNECT)
+                BridgeProviderPanelResult(
+                    message = if (accepted) "Key 已安全轮换；原 Tunnel 执行凭据和待送结果保留" else "Key 已安全轮换；请启动 Gateway",
+                    fieldValues = mapOf(FIELD_API_KEY to "")
+                )
+            }
             ACTION_CLEAR -> {
                 control.perform(BridgeAction.STOP)
                 storage.clearBinding()
                 BridgeProviderPanelResult(
-                    message = "ChatGPT Probe 本地凭据与 Tunnel ID 已清除",
+                    message = "本地凭据与 Tunnel ID 已清除；加密执行记录保留以防重复操作",
                     fieldValues = mapOf(
                         FIELD_API_KEY to "",
                         FIELD_TUNNEL_ID to "",
@@ -145,5 +158,6 @@ internal object ChatGptNativeProbePanel : BridgeProviderPanel {
     private const val FIELD_TUNNEL_ID = "tunnel_id"
     private const val FIELD_BASE_URL = "base_url"
     private const val ACTION_SAVE_START = "chatgpt_probe.save_start"
+    private const val ACTION_ROTATE = "chatgpt_probe.rotate_key"
     private const val ACTION_CLEAR = "chatgpt_probe.clear"
 }
