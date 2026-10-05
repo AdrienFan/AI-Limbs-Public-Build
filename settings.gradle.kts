@@ -61,6 +61,8 @@ include(":triggercmd-extension")
 project(":triggercmd-extension").projectDir = file("plugin-lab/extensions/triggercmd")
 include(":sentinelx-extension")
 project(":sentinelx-extension").projectDir = file("plugin-lab/extensions/sentinelx")
+include(":chatgpt-native-probe-extension")
+project(":chatgpt-native-probe-extension").projectDir = file("plugin-lab/extensions/chatgpt-native-probe")
 
 include(":laner-access-manager-plugin")
 project(":laner-access-manager-plugin").projectDir = file("plugin-lab/plugins/laner-access-manager")

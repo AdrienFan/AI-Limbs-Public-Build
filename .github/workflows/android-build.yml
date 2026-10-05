@@ -17,6 +17,7 @@ on:
           - rdc
           - triggercmd
           - sentinelx
+          - chatgpt-native-probe
           - ubuntu-system
           - system-environment
           - laner-access-manager
@@ -563,6 +564,82 @@ jobs:
             dist/AI-Limbs-SentinelX-v${{ steps.sentinelx_version.outputs.value }}.ailx.source.json
             plugin-lab/extensions/sentinelx/build/outputs/apk/debug/*.apk
             plugin-lab/packages/sentinelx/extension.json
+          if-no-files-found: error
+          retention-days: 14
+
+
+  chatgpt_native_probe:
+    if: inputs.target == 'chatgpt-native-probe'
+    name: Build and sign ChatGPT Native Probe v0.0.1
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+          submodules: false
+      - name: Resolve probe package version
+        id: probe_version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(python3 -c 'import json; print(json.load(open("plugin-lab/packages/chatgpt-native-probe/extension.json"))["version"])')"
+          echo "value=$version" >> "$GITHUB_OUTPUT"
+      - name: Set up JDK
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5
+        with:
+          distribution: temurin
+          java-version: ${{ env.JAVA_VERSION }}
+          cache: gradle
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@40fd30fb8d7440372e1316f5d1809ec01dcd3699 # v4
+      - name: Install Android SDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install \
+            "platform-tools" \
+            "platforms;android-34" \
+            "platforms;android-36" \
+            "build-tools;35.0.0"
+      - name: Configure Android SDK
+        shell: bash
+        run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Fetch verified OpenAI tunnel-client v0.0.15 ARM64 asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          asset_dir="plugin-lab/extensions/chatgpt-native-probe/src/main/assets"
+          mkdir -p "$asset_dir"
+          curl -fL --retry 3 \
+            -o /tmp/tunnel-client-v0.0.15-linux-arm64.zip \
+            "https://github.com/openai/tunnel-client/releases/download/v0.0.15/tunnel-client-v0.0.15-linux-arm64.zip"
+          echo "c51bfd883fc22e3445494a03c0179875176564bde470661b308fd83af5d01abb  /tmp/tunnel-client-v0.0.15-linux-arm64.zip" | sha256sum -c -
+          unzip -p /tmp/tunnel-client-v0.0.15-linux-arm64.zip tunnel-client > "$asset_dir/tunnel-client-linux-arm64"
+          test -s "$asset_dir/tunnel-client-linux-arm64"
+          chmod 0644 "$asset_dir/tunnel-client-linux-arm64"
+      - name: Build ChatGPT Native Probe child extension payload
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x ./gradlew
+          ./gradlew :chatgpt-native-probe-extension:assembleDebug --stacktrace --no-daemon
+      - name: Sign installable ChatGPT Native Probe extension
+        env:
+          AILIMBS_CHILD_EXTENSION_PRIVATE_PEM: ${{ secrets.AILIMBS_CHILD_EXTENSION_PRIVATE_PEM }}
+        run: python3 tools/plugin_lab/package_resident_bridge.py --package chatgpt-native-probe
+      - name: Upload ChatGPT Native Probe child extension
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: chatgpt-native-probe-v${{ steps.probe_version.outputs.value }}-${{ github.run_number }}
+          path: |
+            dist/AI-Limbs-ChatGPT-Native-Probe-v${{ steps.probe_version.outputs.value }}.ailx
+            dist/AI-Limbs-ChatGPT-Native-Probe-v${{ steps.probe_version.outputs.value }}.ailx.sha256
+            dist/AI-Limbs-ChatGPT-Native-Probe-v${{ steps.probe_version.outputs.value }}.ailx.source.json
+            plugin-lab/extensions/chatgpt-native-probe/build/outputs/apk/debug/*.apk
+            plugin-lab/packages/chatgpt-native-probe/extension.json
           if-no-files-found: error
           retention-days: 14
 
