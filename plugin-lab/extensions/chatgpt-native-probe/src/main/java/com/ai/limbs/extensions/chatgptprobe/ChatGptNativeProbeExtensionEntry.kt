@@ -19,15 +19,32 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.run",
-                    displayName = "运行 ChatGPT Control Plane Probe",
-                    description = "直接从 Android 子插件通过 OkHttp long-poll 连接 OpenAI Tunnel Control Plane；不依赖 Ubuntu，不运行 native tunnel-client。",
-                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "Control Plane", "long poll"),
+                    displayName = "启动 ChatGPT MCP Echo Probe",
+                    description = "启动 Android/Kotlin Secure MCP Tunnel responder，常驻 long-poll 并处理最小 MCP initialize/tools/list/tools/call 闭环。",
+                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "responder", "long poll"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
-                    effect = InProcessCapabilityEffect.READ_ONLY,
+                    effect = InProcessCapabilityEffect.EXTERNAL_COMMUNICATION,
                     domain = InProcessCapabilityDomain.PLUGIN,
                     executor = InProcessCapabilityExecutor {
-                        engine.runProbe().toJson().toString()
+                        engine.startAndAwaitReady().toJson().toString()
+                    }
+                )
+            )
+
+            handles += host.registerCapability(
+                InProcessCapabilitySpec(
+                    id = "$CAPABILITY_PREFIX.stop",
+                    displayName = "停止 ChatGPT MCP Echo Probe",
+                    description = "停止 Android/Kotlin Secure MCP Tunnel long-poll responder。",
+                    keywords = listOf("ChatGPT", "MCP", "Tunnel", "停止"),
+                    suggestedParamsJson = "{}",
+                    inputSchema = EMPTY_SCHEMA,
+                    effect = InProcessCapabilityEffect.STATE_CHANGE,
+                    domain = InProcessCapabilityDomain.PLUGIN,
+                    executor = InProcessCapabilityExecutor {
+                        engine.stopLoop()
+                        engine.statusJson().toString()
                     }
                 )
             )
@@ -35,8 +52,8 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
             handles += host.registerCapability(
                 InProcessCapabilitySpec(
                     id = "$CAPABILITY_PREFIX.status",
-                    displayName = "读取 ChatGPT Control Plane Probe 状态",
-                    description = "读取本地配置状态与最近一次 OpenAI Tunnel Control Plane 测试结果；不会泄露 Runtime API Key。",
+                    displayName = "读取 ChatGPT MCP Echo Probe 状态",
+                    description = "读取 responder 运行状态、poll/command/response 计数；不会泄露 Runtime API Key。",
                     keywords = listOf("ChatGPT", "MCP", "Tunnel", "OpenAI", "状态"),
                     suggestedParamsJson = "{}",
                     inputSchema = EMPTY_SCHEMA,
@@ -57,8 +74,8 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-Control-Plane-Probe-v0.0.4",
-                    "purpose" to "android_okhttp_control_plane_probe"
+                    "source" to "AI-Limbs-ChatGPT-MCP-Echo-Probe-v0.0.5",
+                    "purpose" to "android_kotlin_mcp_round_trip_probe"
                 )
             )
         } catch (error: Throwable) {
