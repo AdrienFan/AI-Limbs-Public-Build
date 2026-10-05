@@ -12,8 +12,8 @@ android {
         applicationId = "com.ai.limbs.payload.chatgptprobe.v001"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.0.1"
+        versionCode = 2
+        versionName = "0.0.2"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

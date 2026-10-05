@@ -57,7 +57,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 mapOf(
                     "provider_id" to ChatGptNativeProbeBridgeProvider.PROFILE_ID,
                     "provider_type" to ChatGptNativeProbeBridgeProvider.PROFILE_TYPE,
-                    "source" to "AI-Limbs-ChatGPT-Native-Probe-v0.0.1",
+                    "source" to "AI-Limbs-ChatGPT-Native-Probe-v0.0.2",
                     "purpose" to "android_direct_exec_compatibility_probe"
                 )
             )
@@ -72,7 +72,7 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
     }
 
     companion object {
-        private const val CAPABILITY_PREFIX = "plugin.bridge.chatgpt_native_probe"
+        private const val CAPABILITY_PREFIX = "plugin.chatgpt_native_probe"
         private val EMPTY_SCHEMA = JSONObject()
             .put("type", "object")
             .put("properties", JSONObject())
