@@ -1,4 +1,4 @@
-# 你画我猜 0.1.0
+# 你画我猜 0.1.3
 
 独立画室子插件，需要画室0.2.95或以上。先安装配套画室，再从“工具 → 扩展 → 添加扩展”选择签名游戏 `.ailx`；完成准入后，扩展菜单出现“你画我猜”。基座、Hub和插件中心业务没有改动。
 
@@ -14,9 +14,10 @@
 
 ## 兰儿入口
 
-安装身份为 `plugin.art.studio.draw_guess`；能力按Child Runtime准入规则属于 `plugin.draw_guess.*`。`ready` 与 `view` 都返回极简规则、当前阶段、revision、身份和allowed下一步；上下文中断后先view。修改动作使用本次view返回的revision，不猜参数或直接调用普通工程绘画接口。
+安装身份为 `plugin.art.studio.draw_guess`；能力按Child Runtime准入规则属于 `plugin.draw_guess.*`。兰儿先调用 `open` 打开游戏，再调用 `ready` 准备；两个动作独立，不会替阿伟准备。`open`、`ready` 与 `view` 都返回极简规则、当前阶段、revision、身份和allowed下一步；上下文中断后先view。关闭时兰儿的allowed返回open，已退出游戏可重新打开，重复打开不会重置进行中的回合。open、ready、view和picture无需revision；其他修改动作使用本次view返回的revision，不猜参数或直接调用普通工程绘画接口。
 
 ```json
+{"capability":"plugin.draw_guess.open","args":{}}
 {"capability":"plugin.draw_guess.ready","args":{}}
 {"capability":"plugin.draw_guess.view","args":{}}
 {"capability":"plugin.draw_guess.roll","args":{"revision":2}}
@@ -47,3 +48,7 @@
 ## 0.1.2 绘画示例修正
 
 STROKE_ADD要求params.id为唯一笔画UUID；极简示例现已携带此字段，调用时每笔换一个新的id。配套画室0.2.95修正临时画布释放时旧页面任务的取消语义和图片关联交接。
+
+## 0.1.3 兰儿打开入口
+
+新增无参数 `plugin.draw_guess.open`，复用子插件已有open状态机。AI发现文档的start指向open，并单独公开ready地址。入口回归用例覆盖首次打开、双方准备、重复打开保留当前状态，以及退出后通过兰儿接口重新打开和准备。子插件版本更新为0.1.3；基座和画室无需修改。

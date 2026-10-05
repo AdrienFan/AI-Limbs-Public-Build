@@ -143,7 +143,9 @@ internal class DrawGuessGame(private val dice: () -> Int = { SecureRandom().next
         word = ""; hints = emptyList(); image = null; misses = 0; round = 0; lastResult = null
         phase = Phase.READY; revision++
     }
-    private fun allowed(actor: Player): List<String> = when (phase) {
+    // The AI entrance must advertise open before readiness, including after an exit.
+    private fun allowed(actor: Player): List<String> =
+        if (actor == Player.LANER && !open) listOf("open") else when (phase) {
         Phase.READY -> if (actor !in ready) listOf("ready") else emptyList()
         Phase.DICE -> if (actor !in rolls) listOf("roll") else if (actor !in confirmed) listOf("confirm_dice") else emptyList()
         Phase.ORDER -> if (actor == winner) listOf("choose_order") else emptyList()

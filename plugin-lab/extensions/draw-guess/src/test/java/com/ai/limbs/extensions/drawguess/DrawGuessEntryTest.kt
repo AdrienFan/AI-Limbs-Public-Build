@@ -51,19 +51,28 @@ class DrawGuessEntryTest {
         } as ChildExtensionHost
         val handle = DrawGuessEntry().mount(host)
         try {
-            val events = setOf("view", "ready", "roll", "confirm_dice", "choose_order", "seal_word",
+            val events = setOf("open", "view", "ready", "roll", "confirm_dice", "choose_order", "seal_word",
                 "seal_hints", "canvas", "preview", "paint", "finish", "picture", "guess", "exit")
             assertEquals(events.map { "plugin.draw_guess.$it" }.toSet(), capabilities.keys)
             val paintExample = JSONObject(capabilities.getValue("plugin.draw_guess.paint").suggestedParamsJson)
             assertTrue(paintExample.getJSONObject("params").getString("id").matches(Regex("[a-f0-9-]{36}")))
             val ingress = JSONObject(requireNotNull(discovery).payloadJson)
-            assertEquals("plugin.draw_guess.ready", ingress.getString("start"))
+            assertEquals("plugin.draw_guess.open", ingress.getString("start"))
+            assertEquals("plugin.draw_guess.ready", ingress.getString("ready"))
             assertEquals("plugin.draw_guess.view", ingress.getString("view"))
             assertTrue(capabilities.containsKey(ingress.getString("start")))
             assertEquals(GAME_RULES, ingress.getString("rules"))
             val binding = requireNotNull(published)
             val menu = binding["menu"] as InProcessUiStateProvider
             val panel = binding["panel"] as InProcessUiStateProvider
+            val beforeOpen = JSONObject(capabilities.getValue("plugin.draw_guess.view").executor.invoke("{}"))
+            assertFalse(beforeOpen.getBoolean("open"))
+            assertEquals("open", beforeOpen.getJSONArray("allowed").getString(0))
+            val opened = JSONObject(capabilities.getValue("plugin.draw_guess.open").executor.invoke("{}"))
+            assertEquals("LANER", opened.getString("player"))
+            assertTrue(opened.getBoolean("open"))
+            assertEquals(0, opened.getJSONArray("ready").length())
+            assertEquals("ready", opened.getJSONArray("allowed").getString(0))
             menu.perform("open", "{}")
             val ready = JSONObject(capabilities.getValue("plugin.draw_guess.ready").executor.invoke("{}"))
             assertEquals("LANER", ready.getString("player"))
@@ -73,8 +82,27 @@ class DrawGuessEntryTest {
             assertEquals("AWEI", phone.getString("player"))
             assertEquals("DICE", phone.getString("phase"))
             assertTrue(JSONObject(requireNotNull(panel.stateJson.value)).getBoolean("open"))
+            // Reopening an active game must not erase either player's readiness or advance revision.
+            val repeated = JSONObject(capabilities.getValue("plugin.draw_guess.open").executor.invoke("{}"))
+            assertEquals("DICE", repeated.getString("phase"))
+            assertEquals(phone.getInt("revision"), repeated.getInt("revision"))
+            assertEquals(2, repeated.getJSONArray("ready").length())
+            val exited = JSONObject(capabilities.getValue("plugin.draw_guess.exit").executor.invoke(
+                JSONObject().put("revision", repeated.getInt("revision")).toString()))
+            assertEquals("CLOSED", exited.getString("phase"))
+            assertEquals("open", exited.getJSONArray("allowed").getString(0))
+            // The public LANER entrance must recover an exited game without touching AWEI's entrance.
+            val reopened = JSONObject(capabilities.getValue("plugin.draw_guess.open").executor.invoke("{}"))
+            assertEquals("READY", reopened.getString("phase"))
+            assertTrue(reopened.getBoolean("open"))
+            assertEquals(0, reopened.getJSONArray("ready").length())
+            assertTrue(reopened.getInt("revision") > exited.getInt("revision"))
+            assertTrue(JSONObject(requireNotNull(panel.stateJson.value)).getBoolean("open"))
+            val readyAgain = JSONObject(capabilities.getValue("plugin.draw_guess.ready").executor.invoke("{}"))
+            assertEquals("READY", readyAgain.getString("phase"))
+            assertEquals("LANER", readyAgain.getJSONArray("ready").getString(0))
         } finally { handle.stop() }
-        assertEquals(15, closed)
+        assertEquals(16, closed)
         assertNull((requireNotNull(published)["panel"] as InProcessUiStateProvider).stateJson.value)
     }
 }

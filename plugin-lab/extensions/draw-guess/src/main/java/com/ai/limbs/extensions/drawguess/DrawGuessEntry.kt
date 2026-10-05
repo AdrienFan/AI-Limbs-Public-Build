@@ -39,7 +39,7 @@ class DrawGuessEntry : ChildExtensionEntry {
         }
         val handles = mutableListOf<AutoCloseable>()
         val examples = mapOf(
-            "view" to JSONObject(), "ready" to JSONObject(),
+            "open" to JSONObject(), "view" to JSONObject(), "ready" to JSONObject(),
             "roll" to JSONObject().put("revision", 2), "confirm_dice" to JSONObject().put("revision", 3),
             "choose_order" to JSONObject().put("revision", 5).put("drawFirst", true),
             "seal_word" to JSONObject().put("revision", 6).put("word", "自行车"),
@@ -52,7 +52,7 @@ class DrawGuessEntry : ChildExtensionEntry {
             "finish" to JSONObject().put("revision", 9), "picture" to JSONObject(),
             "guess" to JSONObject().put("revision", 10).put("answer", "自行车"),
             "exit" to JSONObject().put("revision", 10))
-        val titles = mapOf("view" to "读取游戏阶段和下一步", "ready" to "兰儿准备并读取极简规则",
+        val titles = mapOf("open" to "兰儿打开游戏", "view" to "读取游戏阶段和下一步", "ready" to "兰儿准备并读取极简规则",
             "roll" to "兰儿掷骰子", "confirm_dice" to "兰儿确认点数", "choose_order" to "赢家选择先画或先猜",
             "seal_word" to "兰儿封存题目", "seal_hints" to "兰儿封存两条提示并开画",
             "canvas" to "读取兰儿自己的临时画布", "paint" to "兰儿画一笔", "preview" to "预览兰儿自己的画",
@@ -68,8 +68,13 @@ class DrawGuessEntry : ChildExtensionEntry {
                 }
                 handles += host.registerCapability(InProcessCapabilitySpec(id = "$GAME_CAPABILITIES.$event",
                     displayName = requireNotNull(titles[event]),
-                    description = "你画我猜：${titles[event]}。仅操作兰儿身份；先view，按allowed执行，修改时带当前revision。" +
-                        if (event == "ready") GAME_RULES else if (event == "paint") "STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。" else "猜题阶段用picture取图，不能读取对方题目或绘画记录。",
+                    description = "你画我猜：${titles[event]}。仅操作兰儿身份；先view，按allowed执行。" +
+                        when (event) {
+                            "open" -> "无需参数；打开后再调用ready。已结束的游戏恢复到准备阶段；重复打开不重置进行中的回合。"
+                            "ready" -> GAME_RULES
+                            "paint" -> "修改时带当前revision；STROKE_ADD的params必须含唯一UUID格式的id、points和width；每笔使用新的id。"
+                            else -> "修改时带当前revision；猜题阶段用picture取图，不能读取对方题目或绘画记录。"
+                        },
                     keywords = listOf("你画我猜", "画室游戏", event), parameters = specs,
                     suggestedParamsJson = example.toString(),
                     inputSchema = JSONObject().put("type", "object").put("properties", properties)
@@ -90,8 +95,9 @@ class DrawGuessEntry : ChildExtensionEntry {
             }
             handles += host.publishAiIngressDiscovery(ChildAiIngressDiscovery("art_studio.draw_guess.v1",
                 JSONObject().put("name", "你画我猜").put("rules", GAME_RULES)
-                    .put("start", "$GAME_CAPABILITIES.ready").put("view", "$GAME_CAPABILITIES.view")
-                    .put("instruction", "Use only LANER game capabilities. Read view after context changes; never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
+                    .put("start", "$GAME_CAPABILITIES.open").put("ready", "$GAME_CAPABILITIES.ready")
+                    .put("view", "$GAME_CAPABILITIES.view")
+                    .put("instruction", "Use only LANER game capabilities. Open the game before ready. Read view after context changes; never inspect the opponent's private form or ordinary project history. Gameplay is ephemeral.")
                     .toString()))
             host.publish(mapOf("schema" to 1, "menu" to menu, "panel" to panel,
                 "connect" to Consumer<InProcessUiStateProvider>(game::connect)),
