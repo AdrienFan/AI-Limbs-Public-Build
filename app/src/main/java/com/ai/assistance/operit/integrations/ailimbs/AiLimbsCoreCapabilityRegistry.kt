@@ -145,6 +145,15 @@ object AiLimbsCoreCapabilityRegistry {
                 )
         ),
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ),
+            catalogEntry = entry(
+                name = "ai_limbs.message_context.read",
+                displayName = "读取当前消息视觉上下文",
+                description = "Read a fresh frame from already active context Providers once at the start of a new user turn. Never starts sources or requests consent. Not a user-message attachment hook.",
+                keywords = listOf("消息", "视觉上下文", "message context", "camera")
+            )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ),
             catalogEntry =
             entry(

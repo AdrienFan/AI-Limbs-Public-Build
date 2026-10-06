@@ -64,3 +64,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 当前操作后视觉反馈
 
 - [共享屏操作反馈](screen-feedback-build109/index.md)：build109，含无障碍动作与显式 Shell 标记
+
+## 本轮相机视觉上下文
+
+- [新用户消息取相机新帧](camera-message-build110/index.md)：build110

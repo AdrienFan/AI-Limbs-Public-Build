@@ -117,6 +117,8 @@ class AiLimbsDispatcher(
         args: JSONObject
     ): JSONObject =
         when (operation) {
+            AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ ->
+                com.ai.assistance.operit.plugins.center.PluginMessageContext.read()
             AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ ->
                 ok()
                     .put("document", "access_bootstrap")

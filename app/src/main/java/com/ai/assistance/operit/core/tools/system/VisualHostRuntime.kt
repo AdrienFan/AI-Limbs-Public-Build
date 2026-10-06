@@ -97,7 +97,7 @@ object VisualHostRuntime {
             "list_sources" -> listCameraSources(context)
             "start" -> startCameraSession(context, ownerPluginId, parameters)
             "status" -> cameraStatus(ownerPluginId, parameters)
-            "frame" -> captureCameraFrame(context, requireOwnedCameraSession(ownerPluginId, parameters))
+            "frame" -> captureCameraFrame(context, requireOwnedCameraSession(ownerPluginId, parameters), parameters)
             "configure" -> configureCameraSession(ownerPluginId, parameters)
             "stop" -> stopCameraSession(ownerPluginId, parameters)
             else -> error("Unsupported camera visual operation: $operation")
@@ -433,19 +433,30 @@ object VisualHostRuntime {
 
     private suspend fun captureCameraFrame(
         context: Context,
-        session: CameraSession
+        session: CameraSession,
+        parameters: JSONObject = JSONObject()
     ): JSONObject = session.lock.withLock {
         check(!session.closed.get()) { "Camera visual session has stopped" }
+        val requestedElapsed = android.os.SystemClock.elapsedRealtime()
+        val deadline = if (parameters.has("deadline_elapsed_ms")) parameters.getLong("deadline_elapsed_ms")
+            else requestedElapsed + CAMERA_FRAME_TIMEOUT_MS
+        check(deadline > requestedElapsed) { "Camera frame deadline has expired" }
+        val matcher = CameraFrameMatcher()
         val deferred = CompletableDeferred<ByteArray>()
         session.pendingFrame.set(deferred)
         session.reader.setOnImageAvailableListener({ reader ->
             try {
-                val image = reader.acquireLatestImage()
-                if (image != null) image.use {
-                    val buffer = it.planes[0].buffer
-                    val bytes = ByteArray(buffer.remaining())
-                    buffer.get(bytes)
-                    deferred.complete(bytes)
+                // Drain every queued image: acquireLatestImage could skip our frame for a late older capture.
+                while (true) {
+                    val image = reader.acquireNextImage() ?: break
+                    image.use {
+                        if (session.pendingFrame.get() === deferred && !deferred.isCompleted) {
+                            val buffer = it.planes[0].buffer
+                            val bytes = ByteArray(buffer.remaining())
+                            buffer.get(bytes)
+                            matcher.offer(it.timestamp, bytes)?.let { matched -> deferred.complete(matched) }
+                        }
+                    }
                 }
             } catch (error: Throwable) {
                 deferred.completeExceptionally(error)
@@ -459,6 +470,13 @@ object VisualHostRuntime {
                 set(CaptureRequest.JPEG_ORIENTATION, session.jpegOrientation)
             }.build()
             session.captureSession.capture(request, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureStarted(
+                    captureSession: CameraCaptureSession, request: CaptureRequest, timestamp: Long, frameNumber: Long
+                ) {
+                    if (session.pendingFrame.get() !== deferred || deferred.isCompleted) return
+                    try { matcher.expect(timestamp)?.let { deferred.complete(it) } }
+                    catch (error: Exception) { deferred.completeExceptionally(error) }
+                }
                 override fun onCaptureFailed(
                     captureSession: CameraCaptureSession, request: CaptureRequest,
                     failure: android.hardware.camera2.CaptureFailure
@@ -469,7 +487,11 @@ object VisualHostRuntime {
                     deferred.completeExceptionally(IllegalStateException("Camera capture was aborted"))
                 }
             }, session.handler)
-            val bytes = withTimeout(CAMERA_FRAME_TIMEOUT_MS) { deferred.await() }
+            val remaining = deadline - android.os.SystemClock.elapsedRealtime()
+            check(remaining > 0L) { "Camera frame deadline has expired" }
+            val bytes = withTimeout(minOf(CAMERA_FRAME_TIMEOUT_MS, remaining)) { deferred.await() }
+            val capturedElapsed = android.os.SystemClock.elapsedRealtime()
+            check(capturedElapsed < deadline) { "Camera frame deadline has expired" }
             check(!session.closed.get()) { "Camera visual session has stopped" }
             val capturedAt = System.currentTimeMillis()
             val dir = File(context.cacheDir,
@@ -479,6 +501,9 @@ object VisualHostRuntime {
             JSONObject().put("session_id", session.id).put("source_id", session.sourceId)
                 .put("captured_at_ms", capturedAt).put("width", session.width).put("height", session.height)
                 .put("mime_type", "image/jpeg").put("file_path", file.absolutePath).put("bytes", bytes.size)
+                .put("freshness", JSONObject().put("method", "capture_request")
+                    .put("requested_elapsed_ms", requestedElapsed).put("captured_elapsed_ms", capturedElapsed)
+                    .put("frame_timestamp_ns", checkNotNull(matcher.timestampNs)))
         } finally {
             session.pendingFrame.compareAndSet(deferred, null)
             if (!session.closed.get()) session.reader.setOnImageAvailableListener(null, null)

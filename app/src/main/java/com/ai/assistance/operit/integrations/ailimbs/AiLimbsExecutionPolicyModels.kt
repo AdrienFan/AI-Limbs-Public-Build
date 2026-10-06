@@ -167,6 +167,7 @@ object AiLimbsExecutionPolicyDescriptor {
         when (route) {
             is AiLimbsCoreRoute.Local ->
                 when (route.operation) {
+                    AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ -> standardRead(AiLimbsDomain.CORE_PROTOCOL)
                     AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ,
                     AiLimbsCoreLocalOperation.CAPABILITY_SEARCH,
                     AiLimbsCoreLocalOperation.CAPABILITY_DESCRIBE,

@@ -239,6 +239,8 @@ jobs:
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsNamedScopePriorityTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilitySearchPlannerTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsSearchIndexCacheTest \
+            --tests com.ai.assistance.operit.core.tools.system.CameraFrameMatcherTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsMessageContextTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsOperationFeedbackTest \
             --tests com.ai.assistance.operit.plugins.center.OperationFeedbackProviderPolicyTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsSearchGuidanceTest \
