@@ -116,9 +116,9 @@ class GatewayResultsTest {
         val expected = JSONObject(original.toString()).put("ai_limbs_outcome", expectedOutcome)
         val reassembled = reconstructed.toString()
         val restored = JSONObject(reassembled)
-        assertTrue("Reassembled result must match the complete delivery contract", expected.similar(restored))
+        assertJsonEquals(expected, restored, "reassembled result")
         assertEquals(original.getString("text"), restored.getString("text"))
-        assertTrue(expectedOutcome.similar(first.getJSONObject("ai_limbs_outcome")))
+        assertJsonEquals(expectedOutcome, first.getJSONObject("ai_limbs_outcome"), "first-page outcome")
         assertFalse(restored.getJSONObject("ai_limbs_outcome").has("error_code"))
         assertFalse(original.has("ai_limbs_outcome"))
         assertEquals(gatewayHash(reassembled), first.getString("sha256"))
@@ -195,6 +195,31 @@ class GatewayResultsTest {
         assertThrows(java.io.IOException::class.java) { GatewayResults(store).adapt(source) }
         assertTrue(source.getBoolean("success"))
         assertTrue(store.names().isEmpty())
+    }
+
+    // Test compilation uses Android org.json, which does not expose JSONObject.similar().
+    // Compare complete structures with supported APIs so object key order is irrelevant.
+    private fun assertJsonEquals(expected: Any?, actual: Any?, path: String) {
+        when (expected) {
+            is JSONObject -> {
+                assertTrue("$path must be an object", actual is JSONObject)
+                val actualObject = actual as JSONObject
+                val expectedKeys = expected.keys().asSequence().toSet()
+                assertEquals("$path keys", expectedKeys, actualObject.keys().asSequence().toSet())
+                for (key in expectedKeys) {
+                    assertJsonEquals(expected.get(key), actualObject.get(key), "$path.$key")
+                }
+            }
+            is JSONArray -> {
+                assertTrue("$path must be an array", actual is JSONArray)
+                val actualArray = actual as JSONArray
+                assertEquals("$path length", expected.length(), actualArray.length())
+                for (index in 0 until expected.length()) {
+                    assertJsonEquals(expected.get(index), actualArray.get(index), "$path[$index]")
+                }
+            }
+            else -> assertEquals("$path value", expected, actual)
+        }
     }
 
     private fun image(data: String) = JSONObject().put("type", "image").put("mimeType", "image/png").put("data", data)
