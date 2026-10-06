@@ -263,7 +263,7 @@ class GatewayEngineTest {
             fixture.commands.add(toolCommand("invoke", 302))
             eventually { fixture.responses.size == 3 }
             val init = fixture.responses.first { it.optString("request_id") == "init" }.getJSONObject("resp_json").getJSONObject("result")
-            assertEquals("0.0.13", init.getJSONObject("serverInfo").getString("version"))
+            assertEquals(BuildConfig.VERSION_NAME, init.getJSONObject("serverInfo").getString("version"))
             assertFalse(init.getJSONObject("capabilities").getJSONObject("tools").getBoolean("listChanged"))
             assertTrue(init.getString("instructions").contains("new conversation"))
             val tools = fixture.responses.first { it.optString("request_id") == "catalog" }.getJSONObject("resp_json")

@@ -89,7 +89,8 @@ internal data class McpGatewayState(
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.14"
+        // Package metadata is authoritative; copied version literals drift on upgrade.
+        const val PROBE_VERSION = BuildConfig.VERSION_NAME
     }
 }
 

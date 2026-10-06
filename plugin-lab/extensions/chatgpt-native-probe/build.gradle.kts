@@ -10,11 +10,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.chatgptprobe.v014"
+        applicationId = "com.ai.limbs.payload.chatgptprobe.v015"
         minSdk = 26
         targetSdk = 34
-        versionCode = 14
-        versionName = "0.0.14"
+        versionCode = 15
+        versionName = "0.0.15"
     }
 
     compileOptions {
@@ -22,7 +22,7 @@ android {
         targetCompatibility = JavaVersion.VERSION_17
     }
 
-    buildFeatures { buildConfig = false }
+    buildFeatures { buildConfig = true }
 }
 
 kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
