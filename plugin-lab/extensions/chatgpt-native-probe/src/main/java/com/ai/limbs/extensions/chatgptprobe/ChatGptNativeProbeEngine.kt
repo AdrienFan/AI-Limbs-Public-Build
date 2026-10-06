@@ -58,7 +58,8 @@ internal data class McpGatewayState(
     val lastCapabilityResultAtMs: Long? = null,
     val lastDeliveryError: String? = null,
     val rejectedCommandCount: Long = 0,
-    val lastCommandError: String? = null
+    val lastCommandError: String? = null,
+    val access: GatewayAccessObservation = GatewayAccessObservation()
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("running", running)
@@ -79,13 +80,14 @@ internal data class McpGatewayState(
         .put("last_delivery_error", lastDeliveryError ?: JSONObject.NULL)
         .put("rejected_command_count", rejectedCommandCount)
         .put("last_command_error", lastCommandError ?: JSONObject.NULL)
+        .put("access_observations", access.toJson())
         .put("runtime_key_exposed", false)
         .put("wire_protocol_version", WIRE_PROTOCOL_VERSION)
         .put("probe_version", PROBE_VERSION)
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.9"
+        const val PROBE_VERSION = "0.0.10"
     }
 }
 
@@ -157,7 +159,10 @@ internal class ChatGptNativeProbeEngine(
             running = true,
             phase = "STARTING",
             detail = "正在连接 AI Limbs-ChatGPT",
-            lastError = null
+            lastError = null,
+            lastToolsListAtMs = null,
+            lastCapabilityResultAtMs = null,
+            access = GatewayAccessObservation(startedAtMs = System.currentTimeMillis())
         )
         val epoch = generation.incrementAndGet()
         loopJob = scope.launch {
@@ -187,6 +192,7 @@ internal class ChatGptNativeProbeEngine(
     fun statusJson(): JSONObject {
         val config = storage.readConfig()
         return JSONObject()
+            .put("success", true)
             .put("configured", config.configured)
             .put("secure_storage_available", config.secureStorageAvailable)
             .put("tunnel_id_present", config.tunnelId.isNotBlank())
@@ -201,7 +207,11 @@ internal class ChatGptNativeProbeEngine(
             .put("tool_catalog_sha256", gatewayHash(toolDefinitions().toString()))
             .put("tools_list_requested", mutableState.value.lastToolsListAtMs != null)
             .put("client_catalog_refresh_verified", false)
+            .put("access", accessStatus(config).toJson())
     }
+
+    fun accessStatus(config: ChatGptProbeConfig): GatewayAccessStatus =
+        GatewayAdmission.evaluate(mutableState.value, config, remoteIngress != null)
 
     fun close() {
         stop()
@@ -328,7 +338,9 @@ internal class ChatGptNativeProbeEngine(
         update(epoch) { it.copy(commandCount = it.commandCount + 1) }
         if (!fresh) return@synchronized
         if (!control && activeRequests.size >= 32) {
-            receipts.ready(receiptId, GatewayProtocol.delivery(command, GatewayProtocol.error(rpc?.opt("id"), -32001, "Gateway busy; this request was not executed")))
+            val answer = GatewayProtocol.delivery(command, GatewayProtocol.error(rpc?.opt("id"), -32001, "Gateway busy; this request was not executed"))
+            observeProtocolResponse(answer, epoch)
+            receipts.ready(receiptId, answer)
             return@synchronized
         }
         val rpcKey = canonicalJson(rpc?.opt("id"))
@@ -359,6 +371,26 @@ internal class ChatGptNativeProbeEngine(
     }
 
     private suspend fun processCommand(command: JSONObject, identity: String, epoch: Long): JSONObject {
+        val answer = processRpcCommand(command, identity, epoch)
+        observeProtocolResponse(answer, epoch)
+        return answer
+    }
+
+    private fun observeProtocolResponse(answer: JSONObject, epoch: Long) {
+        val error = answer.optJSONObject("resp_json")?.optJSONObject("error")
+        if (error != null) {
+            val unadvertised = error.optJSONObject("data")?.optString("gateway_error_code") == "TOOL_NOT_ADVERTISED"
+            update(epoch) { probe -> probe.copy(access = probe.access.copy(
+                protocolErrorCount = probe.access.protocolErrorCount + 1,
+                lastProtocolErrorCode = error.getInt("code"),
+                unadvertisedToolCount = probe.access.unadvertisedToolCount + if (unadvertised) 1 else 0,
+                lastUnadvertisedToolAtMs = if (unadvertised) System.currentTimeMillis() else probe.access.lastUnadvertisedToolAtMs,
+                catalogMismatchSuspected = unadvertised || probe.access.catalogMismatchSuspected
+            )) }
+        }
+    }
+
+    private suspend fun processRpcCommand(command: JSONObject, identity: String, epoch: Long): JSONObject {
         val channel = command.getString("channel")
         if (command.getString("command_type") == "session_termination") {
             activeRequests.values.filter { it.binding == identity && it.channel == channel && it.rpcKey != "null" }.forEach { it.job.cancel() }
@@ -382,7 +414,11 @@ internal class ChatGptNativeProbeEngine(
             "initialize" -> {
                 val version = rpc.optJSONObject("params")?.optString("protocolVersion").orEmpty()
                 if (version !in GatewayProtocol.supportedVersions) rpcError(id, -32602, "Unsupported protocolVersion; supported: ${GatewayProtocol.supportedVersions.joinToString()}")
-                else rpcSuccess(id, initializeResult(version))
+                else {
+                    update(epoch) { it.copy(access = it.access.copy(initializeCount = it.access.initializeCount + 1,
+                        lastInitializeAtMs = System.currentTimeMillis())) }
+                    rpcSuccess(id, initializeResult(version))
+                }
             }
             "ping" -> rpcSuccess(id, JSONObject())
             "tools/list" -> {
@@ -437,7 +473,7 @@ internal class ChatGptNativeProbeEngine(
         .put("capabilities", JSONObject().put("tools", JSONObject().put("listChanged", false)))
         .put("serverInfo", JSONObject().put("name", "ai-limbs-chatgpt-gateway")
             .put("title", ChatGptNativeProbePanel.TITLE).put("version", McpGatewayState.PROBE_VERSION))
-        .put("instructions", "Search capabilities, describe the exact ID, then invoke with its schema. Host policy and next_action are authoritative. Read paged results and cached images with result_read/media_read. Do not repeat actions to retry delivery. Check domain state when execution_state is UNKNOWN.")
+        .put("instructions", "Use only the advertised ai_limbs_* tools. If tool metadata is stale, refresh the custom MCP connection in ChatGPT and start a new conversation. Search capabilities, describe the exact ID, then invoke with its schema. Host policy and next_action are authoritative. Read saved pages/images instead of repeating actions. Inspect domain state when execution_state is UNKNOWN.")
 
     private fun toolDefinitions(): JSONArray = JSONArray()
         .put(
@@ -453,6 +489,7 @@ internal class ChatGptNativeProbeEngine(
                                 "query",
                                 JSONObject()
                                     .put("type", "string")
+                                    .put("minLength", 1)
                                     .put("description", "Capability intent or known tool/module name")
                             )
                             .put(
@@ -486,6 +523,7 @@ internal class ChatGptNativeProbeEngine(
                             "capability_id",
                             JSONObject()
                                 .put("type", "string")
+                                .put("minLength", 1)
                                 .put("description", "Capability ID returned by ai_limbs_capability_search")
                         )
                     )
@@ -506,6 +544,7 @@ internal class ChatGptNativeProbeEngine(
                                 "capability_id",
                                 JSONObject()
                                     .put("type", "string")
+                                    .put("minLength", 1)
                                     .put("description", "Exact capability invocation ID")
                             )
                             .put("timeout_ms", JSONObject().put("type", "integer").put("minimum", 1000).put("maximum", 1800000).put("default", 300000)
@@ -524,13 +563,13 @@ internal class ChatGptNativeProbeEngine(
         )
         .put(tool(TOOL_RESULT_READ, "Read another immutable result page. Offsets use UTF-16 units; use next_offset from the previous page. Never reinvoke the original action to retrieve a result.",
             JSONObject().put("type", "object").put("properties", JSONObject()
-                .put("cursor", JSONObject().put("type", "string"))
+                .put("cursor", JSONObject().put("type", "string").put("minLength", 1))
                 .put("offset", JSONObject().put("type", "integer").put("minimum", 0)))
                 .put("required", JSONArray().put("cursor").put("offset")).put("additionalProperties", false)))
         .put(tool(TOOL_MEDIA_READ, "Retrieve a saved image by media_id without executing its originating capability. Cached media expires after ten minutes.",
-            JSONObject().put("type", "object").put("properties", JSONObject().put("media_id", JSONObject().put("type", "string")))
+            JSONObject().put("type", "object").put("properties", JSONObject().put("media_id", JSONObject().put("type", "string").put("minLength", 1)))
                 .put("required", JSONArray().put("media_id")).put("additionalProperties", false)))
-        .put(tool(TOOL_STATUS, "Inspect gateway transport, ingress, execution receipts and result delivery health. This does not prove ChatGPT has refreshed its tool catalog.",
+        .put(tool(TOOL_STATUS, "Inspect gateway transport, current-listener access observations, protocol errors, capability outcomes and delivery health. Includes official custom MCP metadata refresh steps; cannot refresh ChatGPT's catalog automatically.",
             JSONObject().put("type", "object").put("properties", JSONObject()).put("additionalProperties", false)))
 
     private suspend fun handleToolCall(id: Any, params: JSONObject?, epoch: Long, identity: String): JSONObject {
@@ -540,6 +579,7 @@ internal class ChatGptNativeProbeEngine(
         val arguments = params.optJSONObject("arguments") ?: JSONObject()
 
         var executionStarted = false
+        var receivedInvokeResult: JSONObject? = null
         return try {
             val allowed = when (name) {
                 TOOL_SEARCH -> setOf("query", "scope", "limit")
@@ -548,7 +588,7 @@ internal class ChatGptNativeProbeEngine(
                 TOOL_RESULT_READ -> setOf("cursor", "offset")
                 TOOL_MEDIA_READ -> setOf("media_id")
                 TOOL_STATUS -> emptySet()
-                else -> return rpcError(id, -32602, "Unknown tool: $name")
+                else -> return unadvertisedToolError(id)
             }
             require(arguments.keys().asSequence().all { it in allowed }) { "Unknown gateway argument" }
             listOf("query", "scope", "capability_id", "cursor", "media_id").forEach { field ->
@@ -564,10 +604,21 @@ internal class ChatGptNativeProbeEngine(
                 TOOL_RESULT_READ -> {
                     val offset = arguments.getLong("offset")
                     require(offset in 0L..Int.MAX_VALUE.toLong()) { "offset is outside the supported range" }
-                    return rpcSuccess(id, results.pageResult(arguments.getString("cursor"), offset.toInt()))
+                    val cursor = arguments.getString("cursor")
+                    require(cursor.isNotBlank()) { "cursor is required" }
+                    recordAdvertisedToolCall(epoch)
+                    return rpcSuccess(id, results.pageResult(cursor, offset.toInt()))
                 }
-                TOOL_MEDIA_READ -> return rpcSuccess(id, results.readMedia(arguments.getString("media_id")))
-                TOOL_STATUS -> return rpcSuccess(id, results.adapt(statusJson()))
+                TOOL_MEDIA_READ -> {
+                    val mediaId = arguments.getString("media_id")
+                    require(mediaId.isNotBlank()) { "media_id is required" }
+                    recordAdvertisedToolCall(epoch)
+                    return rpcSuccess(id, results.readMedia(mediaId))
+                }
+                TOOL_STATUS -> {
+                    recordAdvertisedToolCall(epoch)
+                    return rpcSuccess(id, results.adapt(statusJson()))
+                }
             }
             val result = when (name) {
                 TOOL_SEARCH -> {
@@ -582,6 +633,7 @@ internal class ChatGptNativeProbeEngine(
                         request.put("limit", limit.toInt())
                     }
                     executionStarted = true
+                    recordAdvertisedToolCall(epoch)
                     invokeAiLimbs("capability.search", request)
                 }
 
@@ -589,6 +641,7 @@ internal class ChatGptNativeProbeEngine(
                     val capabilityId = arguments.optString("capability_id").trim()
                     require(capabilityId.isNotBlank()) { "capability_id is required" }
                     executionStarted = true
+                    recordAdvertisedToolCall(epoch)
                     invokeAiLimbs(
                         "capability.describe",
                         JSONObject().put("capability_id", capabilityId)
@@ -605,14 +658,28 @@ internal class ChatGptNativeProbeEngine(
                     require(!arguments.has("parameters") || arguments.opt("parameters") is JSONObject) { "parameters must be an object" }
                     val parameters = arguments.optJSONObject("parameters") ?: JSONObject()
                     executionStarted = true
+                    recordAdvertisedToolCall(epoch)
+                    update(epoch) { it.copy(access = it.access.copy(capabilityInvokeCount = it.access.capabilityInvokeCount + 1)) }
                     invokeAiLimbs(capabilityId, JSONObject(parameters.toString()))
                 }
 
-                else -> return rpcError(id, -32602, "Unknown tool: $name")
+                else -> return unadvertisedToolError(id)
+            }
+            if (name == TOOL_INVOKE) {
+                receivedInvokeResult = result
+                val failed = GatewayResults.failed(result)
+                val uncertain = result.optString("execution_state") == "UNKNOWN"
+                update(epoch) { it.copy(access = it.access.copy(
+                    capabilitySuccessCount = it.access.capabilitySuccessCount + if (failed || uncertain) 0 else 1,
+                    capabilityFailureCount = it.access.capabilityFailureCount + if (failed && !uncertain) 1 else 0,
+                    capabilityUncertainCount = it.access.capabilityUncertainCount + if (uncertain) 1 else 0,
+                    lastSuccessfulInvokeAtMs = if (failed || uncertain) it.access.lastSuccessfulInvokeAtMs else System.currentTimeMillis()
+                )) }
             }
             update(epoch) { it.copy(lastCapabilityResultAtMs = System.currentTimeMillis()) }
             rpcSuccess(id, results.adapt(result))
         } catch (cancelled: CancellationException) {
+            if (executionStarted && name == TOOL_INVOKE && receivedInvokeResult == null) recordUncertainInvoke(epoch)
             throw cancelled
         } catch (error: GatewayResultUnavailable) {
             rpcSuccess(id, toolError(error.message ?: "Cached result is unavailable", JSONObject()
@@ -620,12 +687,25 @@ internal class ChatGptNativeProbeEngine(
                 .put("automatic_reexecution", false)
                 .put("next_action", "Inspect domain state or an existing output artifact. Do not repeat the original action automatically.")))
         } catch (error: IllegalArgumentException) {
-            if (executionStarted) GatewayProtocol.uncertain(id, "INVOCATION_OR_RESULT_ERROR")
+            val received = receivedInvokeResult
+            if (received != null) receivedResultDeliveryError(id, received, epoch)
+            else if (executionStarted) {
+                if (name == TOOL_INVOKE) recordUncertainInvoke(epoch)
+                GatewayProtocol.uncertain(id, "INVOCATION_OR_RESULT_ERROR")
+            }
             else rpcError(id, -32602, (error.message ?: "Invalid tool arguments").take(200))
         } catch (error: org.json.JSONException) {
-            if (executionStarted) GatewayProtocol.uncertain(id, "INVOCATION_OR_RESULT_ERROR")
+            val received = receivedInvokeResult
+            if (received != null) receivedResultDeliveryError(id, received, epoch)
+            else if (executionStarted) {
+                if (name == TOOL_INVOKE) recordUncertainInvoke(epoch)
+                GatewayProtocol.uncertain(id, "INVOCATION_OR_RESULT_ERROR")
+            }
             else rpcError(id, -32602, "Invalid tool argument type")
         } catch (error: Exception) {
+            val received = receivedInvokeResult
+            if (received != null) return receivedResultDeliveryError(id, received, epoch)
+            if (executionStarted && name == TOOL_INVOKE) recordUncertainInvoke(epoch)
             val safeMessage = "Capability invocation failed: ${error.javaClass.simpleName}; inspect domain state before retrying"
             rpcSuccess(
                 id,
@@ -639,6 +719,41 @@ internal class ChatGptNativeProbeEngine(
                 )
             )
         }
+    }
+
+    private fun recordAdvertisedToolCall(epoch: Long) = update(epoch) {
+        it.copy(access = it.access.copy(advertisedToolCallCount = it.access.advertisedToolCallCount + 1,
+            lastAdvertisedToolCallAtMs = System.currentTimeMillis(), catalogMismatchSuspected = false))
+    }
+
+    private fun recordUncertainInvoke(epoch: Long) = update(epoch) {
+        it.copy(access = it.access.copy(capabilityUncertainCount = it.access.capabilityUncertainCount + 1))
+    }
+
+    private fun receivedResultDeliveryError(id: Any, source: JSONObject, epoch: Long): JSONObject {
+        // Preserve known Host outcome even if caching/formatting failed after it returned.
+        update(epoch) { it.copy(access = it.access.copy(resultPreparationFailureCount = it.access.resultPreparationFailureCount + 1)) }
+        val details = JSONObject().put("success", false).put("execution_state", "RESULT_RECEIVED")
+            .put("host_result_received", true).put("host_result_failed", GatewayResults.failed(source))
+            .put("result_delivery_error", "RESULT_ADAPTATION_FAILED").put("automatic_reexecution", false)
+            .put("next_action", "Inspect existing domain state or output artifacts; do not repeat the action automatically.")
+        source.optJSONObject("execution_policy")?.let { details.put("execution_policy", it) }
+        return rpcSuccess(id, toolError("Host returned a result, but result delivery preparation failed.", details))
+    }
+
+    private fun unadvertisedToolError(id: Any): JSONObject {
+        // A stale client catalog is a possible cause, not proof. Never echo arbitrary input names.
+        val tools = toolDefinitions()
+        val names = JSONArray()
+        for (index in 0 until tools.length()) names.put(tools.getJSONObject(index).getString("name"))
+        return rpcError(id, -32602, "Tool is not advertised by AI Limbs-ChatGPT. Refresh custom MCP metadata and start a new conversation.")
+            .apply { getJSONObject("error").put("data", JSONObject()
+                .put("gateway_error_code", "TOOL_NOT_ADVERTISED")
+                .put("possible_cause", "STALE_CLIENT_TOOL_CATALOG")
+                .put("advertised_tools", names)
+                .put("tool_catalog_sha256", gatewayHash(tools.toString()))
+                .put("metadata_refresh_steps", JSONArray(GatewayAdmission.REFRESH_STEPS))
+                .put("documentation_url", GatewayAdmission.DOCUMENTATION_URL)) }
     }
 
     private suspend fun invokeAiLimbs(
@@ -669,6 +784,15 @@ internal class ChatGptNativeProbeEngine(
         inputSchema: JSONObject
     ): JSONObject = JSONObject()
         .put("name", name)
+        .put("title", when (name) {
+            TOOL_SEARCH -> "Search AI Limbs capabilities"
+            TOOL_DESCRIBE -> "Describe an AI Limbs capability"
+            TOOL_INVOKE -> "Invoke an AI Limbs capability"
+            TOOL_RESULT_READ -> "Read a saved result page"
+            TOOL_MEDIA_READ -> "Read a saved image"
+            TOOL_STATUS -> "Inspect AI Limbs-ChatGPT access"
+            else -> error("Tool title is missing")
+        })
         .put("description", description)
         .put("inputSchema", inputSchema)
         .put("outputSchema", JSONObject().put("type", "object").put("additionalProperties", true))

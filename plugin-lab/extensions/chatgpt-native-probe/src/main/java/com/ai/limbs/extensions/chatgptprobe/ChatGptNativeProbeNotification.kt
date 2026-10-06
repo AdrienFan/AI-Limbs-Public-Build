@@ -21,12 +21,15 @@ internal class ChatGptNativeProbeNotification(
     override fun snapshot(context: Context, control: BridgeProviderControl): BridgeProviderNotificationState {
         val config = storage.readConfig()
         val probe = engine.state.value
+        val access = engine.accessStatus(config)
+        val observed = probe.access
         val phase = control.state.phase
         val heartbeat = control.state.lastHeartbeatAtMs
         val activeCount = engine.activeRequestCount
         val attention = when {
             !config.secureStorageAvailable -> "安全凭据存储不可用，请打开连接诊断"
             !config.configured -> "请在插件设置中填写隧道 ID 与 Runtime Key"
+            access.catalogMismatchSuspected -> "疑似工具目录不匹配，请在 ChatGPT Refresh 后新建会话"
             probe.phase == "AUTH_REQUIRED" -> "连接授权需要更新，请打开插件设置"
             phase == AiLimbsBridgePhase.ERROR || phase == AiLimbsBridgePhase.RECOVERY_FAILED ->
                 "连接需要处理，请打开连接诊断"
@@ -35,13 +38,16 @@ internal class ChatGptNativeProbeNotification(
         return BridgeProviderNotificationState(
             title = "${ChatGptNativeProbePanel.TITLE} · ${phaseLabel(phase)}",
             summary = attention ?: when (phase) {
-                AiLimbsBridgePhase.ONLINE -> "桥接通道已连接"
+                AiLimbsBridgePhase.ONLINE -> access.label
                 AiLimbsBridgePhase.STOPPED -> "连接已停止"
                 AiLimbsBridgePhase.PAIRING -> "等待连接配置"
                 else -> "正在处理连接，请稍候"
             },
             statusLines = buildList {
-                add("请求 ${probe.commandCount} · 已送达 ${probe.responseCount}")
+                add("本次调用 ${observed.capabilityInvokeCount} · 成功结果 ${observed.capabilitySuccessCount}")
+                if (observed.capabilityFailureCount > 0 || observed.capabilityUncertainCount > 0 || observed.resultPreparationFailureCount > 0)
+                    add("未成功 ${observed.capabilityFailureCount} · 不确定 ${observed.capabilityUncertainCount} · 准备异常 ${observed.resultPreparationFailureCount}")
+                add("回复送达 ${probe.responseCount} · 协议错误 ${observed.protocolErrorCount}")
                 if (activeCount > 0) add("正在处理 $activeCount 个请求")
                 add("最近通信：${if (heartbeat == null) "尚无成功通信" else clock(heartbeat)}")
                 // Raw provider detail/errors may contain request information; keep them in diagnostics.

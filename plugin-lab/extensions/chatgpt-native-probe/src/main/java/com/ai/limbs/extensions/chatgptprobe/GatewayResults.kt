@@ -153,6 +153,7 @@ internal class GatewayResults(
         private const val MAX_CACHE_ENTRIES = 64
 
         fun failed(value: JSONObject): Boolean {
+            if (value.optString("execution_state") == "UNKNOWN") return true
             if (value.optBoolean("isError") || (value.has("success") && !value.isNull("success") && value.opt("success") == false)) return true
             val error = value.opt("error")
             if (error != null && error != JSONObject.NULL && error.toString().isNotBlank()) return true

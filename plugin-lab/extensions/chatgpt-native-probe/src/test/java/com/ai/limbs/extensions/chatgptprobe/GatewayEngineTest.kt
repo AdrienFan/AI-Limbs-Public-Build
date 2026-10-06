@@ -29,6 +29,8 @@ class GatewayEngineTest {
             fixture.commands.add(JSONObject(command.toString()).put("shard_token", "refreshed-token"))
             eventually { fixture.responses.count { it.optString("request_id") == "request-one" } >= 2 }
             assertEquals(1, calls.get())
+            assertEquals(1L, fixture.engine.state.value.access.capabilityInvokeCount)
+            assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
             assertTrue(fixture.postAttempts.get() >= 3)
             assertTrue(fixture.responses.first().getJSONObject("resp_json").getJSONObject("result").getJSONObject("structuredContent").getBoolean("success"))
         }
@@ -142,6 +144,139 @@ class GatewayEngineTest {
             eventually { fixture.responses.any { it.optString("request_id") == "bad-input" } }
             assertEquals(0, calls.get())
             assertEquals(-32602, fixture.responses.first().getJSONObject("resp_json").getJSONObject("error").getInt("code"))
+        }
+    }
+
+    @Test fun unknownDemoToolExplainsRefreshWithoutInvokingOrClaimingBusinessSuccess() = runBlocking {
+        Fixture().use { fixture ->
+            val calls = AtomicInteger()
+            fixture.start { _, _ -> calls.incrementAndGet(); JSONObject() }
+            val legacy = toolCommand("legacy", 101)
+            legacy.getJSONObject("jsonrpc").getJSONObject("params").put("name", "server_info")
+            fixture.commands.add(legacy)
+            eventually { fixture.responses.any { it.optString("request_id") == "legacy" } }
+            val error = fixture.responses.first().getJSONObject("resp_json").getJSONObject("error")
+            assertEquals(-32602, error.getInt("code"))
+            val data = error.getJSONObject("data")
+            assertEquals("TOOL_NOT_ADVERTISED", data.getString("gateway_error_code"))
+            assertEquals(6, data.getJSONArray("advertised_tools").length())
+            assertEquals(4, data.getJSONArray("metadata_refresh_steps").length())
+            assertEquals(GatewayAdmission.DOCUMENTATION_URL, data.getString("documentation_url"))
+            assertFalse(error.toString().contains("server_info"))
+            assertEquals(0, calls.get())
+            assertEquals(1L, fixture.engine.state.value.access.protocolErrorCount)
+            assertEquals(1L, fixture.engine.state.value.access.unadvertisedToolCount)
+            eventually { fixture.engine.statusJson().getJSONObject("access").getString("stage") == "CATALOG_MISMATCH_SUSPECTED" }
+
+            fixture.commands.add(rpcCommand("fresh-list", 102, "tools/list"))
+            eventually { fixture.responses.any { it.optString("request_id") == "fresh-list" } }
+            assertTrue(fixture.engine.state.value.access.catalogMismatchSuspected)
+            fixture.commands.add(rpcCommand("fresh-status", 103, "tools/call",
+                JSONObject().put("name", "ai_limbs_gateway_status").put("arguments", JSONObject())))
+            eventually { fixture.responses.any { it.optString("request_id") == "fresh-status" } }
+            val status = fixture.responses.first { it.optString("request_id") == "fresh-status" }
+                .getJSONObject("resp_json").getJSONObject("result").getJSONObject("structuredContent")
+            assertTrue(status.getBoolean("success"))
+            assertEquals("ADVERTISED_TOOL_CALL_OBSERVED", status.getJSONObject("access").getString("stage"))
+            assertFalse(status.getBoolean("client_catalog_refresh_verified"))
+            assertEquals(0L, fixture.engine.state.value.access.capabilitySuccessCount)
+            assertEquals(0, calls.get())
+        }
+    }
+
+    @Test fun hostRefusalsAndUnknownOutcomesAreNotCountedAsSuccessfulInvocations() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.start { _, args -> when (args.getString("kind")) {
+                "ok" -> JSONObject().put("error", JSONObject.NULL).put("value", "read result")
+                "ask" -> JSONObject().put("execution_policy", JSONObject().put("outcome", "ASK"))
+                "unknown" -> JSONObject().put("execution_state", "UNKNOWN")
+                else -> throw java.io.IOException("Simulated ingress interruption")
+            } }
+            listOf("ok", "ask", "unknown", "exception").forEachIndexed { index, kind ->
+                val command = toolCommand(kind, 200 + index)
+                command.getJSONObject("jsonrpc").getJSONObject("params").getJSONObject("arguments")
+                    .put("parameters", JSONObject().put("kind", kind))
+                fixture.commands.add(command)
+            }
+            eventually { fixture.responses.size == 4 }
+            val observed = fixture.engine.state.value.access
+            assertEquals(4L, observed.capabilityInvokeCount)
+            assertEquals(1L, observed.capabilitySuccessCount)
+            assertEquals(1L, observed.capabilityFailureCount)
+            assertEquals(2L, observed.capabilityUncertainCount)
+            assertEquals(0L, observed.protocolErrorCount)
+            assertNotNull(observed.lastSuccessfulInvokeAtMs)
+            val unknown = fixture.responses.first { it.optString("request_id") == "unknown" }
+                .getJSONObject("resp_json").getJSONObject("result")
+            assertTrue(unknown.getBoolean("isError"))
+        }
+    }
+
+    @Test fun metadataContractStaysStableAndRestartRequiresNewAccessEvidence() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.start { _, _ -> JSONObject().put("success", true) }
+            fixture.commands.add(rpcCommand("init", 300, "initialize", JSONObject().put("protocolVersion", "2025-11-25")))
+            fixture.commands.add(rpcCommand("catalog", 301, "tools/list"))
+            fixture.commands.add(toolCommand("invoke", 302))
+            eventually { fixture.responses.size == 3 }
+            val init = fixture.responses.first { it.optString("request_id") == "init" }.getJSONObject("resp_json").getJSONObject("result")
+            assertEquals("0.0.10", init.getJSONObject("serverInfo").getString("version"))
+            assertFalse(init.getJSONObject("capabilities").getJSONObject("tools").getBoolean("listChanged"))
+            assertTrue(init.getString("instructions").contains("new conversation"))
+            val tools = fixture.responses.first { it.optString("request_id") == "catalog" }.getJSONObject("resp_json")
+                .getJSONObject("result").getJSONArray("tools")
+            assertEquals(6, tools.length())
+            for (index in 0 until tools.length()) {
+                val tool = tools.getJSONObject(index)
+                assertTrue(tool.getString("title").isNotBlank())
+                assertEquals("object", tool.getJSONObject("inputSchema").getString("type"))
+                assertFalse(tool.getJSONObject("inputSchema").getBoolean("additionalProperties"))
+                assertEquals("object", tool.getJSONObject("outputSchema").getString("type"))
+                val invoke = tool.getString("name") == "ai_limbs_capability_invoke"
+                assertEquals(!invoke, tool.getJSONObject("annotations").getBoolean("readOnlyHint"))
+                assertEquals(invoke, tool.getJSONObject("annotations").getBoolean("destructiveHint"))
+                if (tool.getString("name") == "ai_limbs_capability_search")
+                    assertEquals(1, tool.getJSONObject("inputSchema").getJSONObject("properties").getJSONObject("query").getInt("minLength"))
+            }
+            assertEquals(1L, fixture.engine.state.value.access.initializeCount)
+            assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
+            val digest = fixture.engine.statusJson().getString("tool_catalog_sha256")
+            fixture.engine.stop()
+            fixture.start { _, _ -> JSONObject() }
+            eventually { fixture.engine.statusJson().getJSONObject("access").getString("stage") == "AWAITING_TOOL_DISCOVERY" }
+            assertEquals(0L, fixture.engine.state.value.access.capabilityInvokeCount)
+            assertEquals(0L, fixture.engine.state.value.access.initializeCount)
+            assertNull(fixture.engine.state.value.lastToolsListAtMs)
+            assertNull(fixture.engine.state.value.access.lastSuccessfulInvokeAtMs)
+            assertEquals(digest, fixture.engine.statusJson().getString("tool_catalog_sha256"))
+        }
+    }
+
+    @Test fun resultPreparationFailurePreservesTheKnownHostOutcomeAndNeverReexecutes() = runBlocking {
+        Fixture().use { fixture ->
+            val calls = AtomicInteger()
+            fixture.start { _, _ ->
+                calls.incrementAndGet()
+                fixture.store.failNextWrite = true
+                JSONObject().put("success", true).put("text", "x".repeat(20_000))
+            }
+            val command = toolCommand("known-result", 400)
+            fixture.commands.add(command)
+            eventually { fixture.responses.any { it.optString("request_id") == "known-result" } }
+            val result = fixture.responses.first().getJSONObject("resp_json").getJSONObject("result")
+            assertTrue(result.getBoolean("isError"))
+            val details = result.getJSONObject("structuredContent")
+            assertEquals("RESULT_RECEIVED", details.getString("execution_state"))
+            assertTrue(details.getBoolean("host_result_received"))
+            assertFalse(details.getBoolean("host_result_failed"))
+            assertFalse(details.getBoolean("automatic_reexecution"))
+            assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
+            assertEquals(0L, fixture.engine.state.value.access.capabilityUncertainCount)
+            assertEquals(1L, fixture.engine.state.value.access.resultPreparationFailureCount)
+            fixture.commands.add(JSONObject(command.toString()).put("shard_token", "fresh-delivery-token"))
+            eventually { fixture.responses.count { it.optString("request_id") == "known-result" } == 2 }
+            assertEquals(1, calls.get())
+            assertEquals(1L, fixture.engine.state.value.access.resultPreparationFailureCount)
         }
     }
 

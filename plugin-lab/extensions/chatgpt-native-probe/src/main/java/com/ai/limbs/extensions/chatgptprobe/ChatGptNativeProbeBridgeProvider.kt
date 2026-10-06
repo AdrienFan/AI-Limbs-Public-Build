@@ -46,6 +46,12 @@ internal class ChatGptNativeProbeBridgeProvider private constructor(
                         append(probe.commandCount)
                         append(", responses=")
                         append(probe.responseCount)
+                        // Access-only updates must also refresh the parent's presentation StateFlow.
+                        append(" | tool_calls=${probe.access.advertisedToolCallCount}, invokes=${probe.access.capabilityInvokeCount}")
+                        append(", outcomes=${probe.access.capabilitySuccessCount}/${probe.access.capabilityFailureCount}/${probe.access.capabilityUncertainCount}")
+                        append(", preparation_errors=${probe.access.resultPreparationFailureCount}")
+                        append(", protocol_errors=${probe.access.protocolErrorCount}, mismatch=${probe.access.catalogMismatchSuspected}")
+                        append(", initialize=${probe.access.initializeCount}")
                         probe.lastMethod?.let {
                             append(", last=")
                             append(it)

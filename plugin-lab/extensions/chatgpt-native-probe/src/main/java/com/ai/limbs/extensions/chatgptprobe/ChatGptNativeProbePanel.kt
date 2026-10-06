@@ -29,6 +29,8 @@ internal class ChatGptNativeProbePanel(
     override fun snapshot(context: Context, control: BridgeProviderControl): BridgeProviderPanelState {
         val config = storage.readConfig()
         val probe = engine.state.value
+        val access = engine.accessStatus(config)
+        val observed = probe.access
         val receipts = engine.uiReceiptCounts(config)
         val phase = control.state.phase
         val stateLine = phaseLabel(phase)
@@ -76,8 +78,14 @@ internal class ChatGptNativeProbePanel(
         return when (view) {
             View.OVERVIEW -> panel("连接 ChatGPT，让 AI Limbs 执行你的任务。", lines = buildList {
                 addAll(summary)
+                add(access.label)
+                if (access.catalogMismatchSuspected) add("请在 ChatGPT 刷新插件工具信息，再新建会话。")
                 if (phase in setOf(AiLimbsBridgePhase.ERROR, AiLimbsBridgePhase.RECOVERY_FAILED)) add("打开连接诊断，查看需要处理的问题。")
-                add("请求 ${probe.commandCount}  ·  已送达 ${probe.responseCount}")
+                add("本次调用 ${observed.capabilityInvokeCount}  ·  成功结果 ${observed.capabilitySuccessCount}")
+                if (observed.capabilityFailureCount > 0 || observed.capabilityUncertainCount > 0)
+                    add("未成功 ${observed.capabilityFailureCount}  ·  结果不确定 ${observed.capabilityUncertainCount}")
+                if (observed.resultPreparationFailureCount > 0) add("本次结果准备异常 ${observed.resultPreparationFailureCount}")
+                add("隧道请求 ${probe.commandCount}  ·  回复送达 ${probe.responseCount}")
                 if (receipts != null) {
                     val pending = receipts.optInt("READY")
                     val failed = receipts.optInt("DELIVERY_FAILED")
@@ -108,6 +116,14 @@ internal class ChatGptNativeProbePanel(
             View.DIAGNOSTICS -> panel("连接诊断 · 查看通信与结果交付情况。", lines = buildList {
                 addAll(summary)
                 add("版本 ${McpGatewayState.PROBE_VERSION}")
+                add("接入观察：${access.label}")
+                observed.startedAtMs?.let { add("本次观察始于 ${time(it)}；重新连接会重置观察计数。") }
+                add("当前工具调用 ${observed.advertisedToolCallCount}  ·  协议错误 ${observed.protocolErrorCount}")
+                add("未知工具请求 ${observed.unadvertisedToolCount}  ·  初始化响应 ${observed.initializeCount}")
+                add("能力调用 ${observed.capabilityInvokeCount}  ·  成功结果 ${observed.capabilitySuccessCount}")
+                add("未成功 ${observed.capabilityFailureCount}  ·  结果不确定 ${observed.capabilityUncertainCount}")
+                add("结果准备异常 ${observed.resultPreparationFailureCount}")
+                observed.lastProtocolErrorCode?.let { add("最近 JSON-RPC 错误码 $it") }
                 add("轮询 ${probe.pollCount}  ·  请求 ${probe.commandCount}  ·  已送达 ${probe.responseCount}")
                 add("正在处理 ${engine.activeRequestCount} 个请求")
                 if (receipts == null) add("交付记录尚未加载，连接时会读取。") else {
@@ -124,6 +140,8 @@ internal class ChatGptNativeProbePanel(
                 probe.lastCommandError?.let { add("请求问题：$it") }
                 if (phase in setOf(AiLimbsBridgePhase.ERROR, AiLimbsBridgePhase.RECOVERY_FAILED)) add(control.state.detail)
                 add("收到目录请求不代表 ChatGPT 已刷新工具列表。")
+                add("Refresh 是 ChatGPT 工具目录刷新，不是本页的检查连接。")
+                if (access.catalogMismatchSuspected || !access.advertisedToolObserved) addAll(GatewayAdmission.REFRESH_STEPS)
             }, actions = listOf(action(ACTION_HOME, "返回概览")) + control.availableActions
                 .filter { it in setOf(BridgeAction.REFRESH, BridgeAction.RECONNECT, BridgeAction.RECOVER) }.map(::bridge))
         }
