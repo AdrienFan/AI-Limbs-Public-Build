@@ -13,3 +13,5 @@ Camera2 通过本次 onCaptureStarted timestamp 与 Image.timestamp 相等验证
 回归用例覆盖匹配旧帧、回调先后、未开相机、失败不重复、期限、上下文 identity 与载荷重复、桥固定路由和重复投递。云端工作流执行回归与打包；设备验收待安装后：关闭相机正常聊天；开启选定镜头后连续消息画面更新时间；停止后无图；原共享屏操作反馈仍有效。
 
 [DONE] 源码与回归用例；云端检查结果以 Actions 为准，实机行为待安装验收。
+
+首轮云端编译定位到共享屏 FreshFrame 的 Kotlin 确定赋值错误；改为 synchronized 取帧代码块直接返回两个采集时钟值。时间仍在真实取帧时生成，保留新 Surface、停止校验与资源释放。基座继续使用未发布的 build110/code205，云端重编译 assembleDebug。

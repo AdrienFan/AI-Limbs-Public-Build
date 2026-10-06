@@ -196,15 +196,16 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
         try {
             // This bounds an actual frame-arrival wait; it is not a fixed UI settling delay.
             withTimeout(2_000L) { ready.await() }
-            val capturedElapsed: Long
-            val capturedAt: Long
-            synchronized(this) {
+            // Return both clocks from the synchronized acquisition; assigning outer vals inside
+            // try/finally is not definite initialization in Kotlin's data-flow analysis.
+            val (capturedElapsed, capturedAt) = synchronized(this) {
                 check(imageReader === reader && pendingFreshFrame === ready) { "Shared screen stopped during capture" }
                 val image = checkNotNull(reader.acquireLatestImage()) { "New shared-screen frame is unavailable" }
                 try {
-                    capturedElapsed = SystemClock.elapsedRealtime()
-                    capturedAt = System.currentTimeMillis()
+                    val acquiredElapsed = SystemClock.elapsedRealtime()
+                    val acquiredAt = System.currentTimeMillis()
                     bitmap = checkNotNull(imageToBitmap(image)) { "New shared-screen frame has invalid dimensions" }
+                    acquiredElapsed to acquiredAt
                 } finally { image.close() }
             }
             val captured = checkNotNull(bitmap)
