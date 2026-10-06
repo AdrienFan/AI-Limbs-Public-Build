@@ -52,3 +52,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 当前搜索优化
 
 - [搜索索引复用](search-index-build106/index.md)：build106，基于 build105，单一可更新 APK
+
+## 当前云编译修复
+
+- [宿主绑定校验同步](host-affinity-ci-build107/index.md)：build107，保留 build105/106 功能，单一可更新 APK

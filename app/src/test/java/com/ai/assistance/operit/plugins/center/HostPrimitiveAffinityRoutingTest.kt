@@ -96,6 +96,36 @@ class HostPrimitiveAffinityRoutingTest {
     }
 
     @Test
+    fun permissionBrokerOperationsAlwaysReturnToAndroidHost() {
+        assertFrameworkOperations("host.permission@1", setOf("check", "request", "open_settings"))
+    }
+
+    @Test
+    fun cameraCaptureAlwaysReturnsToAndroidHost() {
+        assertFrameworkOperations("host.camera.capture@1", setOf("capture"))
+    }
+
+    @Test
+    fun cameraSessionLifecycleAlwaysReturnsToAndroidHost() {
+        assertFrameworkOperations(
+            "host.camera.session@1",
+            setOf("list_sources", "status", "start", "frame", "configure", "stop")
+        )
+    }
+
+    private fun assertFrameworkOperations(id: String, expected: Set<String>) {
+        assertTrue(HostPrimitiveGatewayBindings.affinityEnforced(id))
+        assertEquals(HostGatewayExecutionAffinity.HOST_FRAMEWORK, HostPrimitiveGatewayBindings.primitiveAffinity(id))
+        val operations = HostPrimitiveGatewayBindings.operations(id)
+        assertEquals(expected, operations.keys)
+        expected.forEach { operation ->
+            assertEquals(HostGatewayRouteKind.KERNEL, operations.getValue(operation).kind)
+            assertEquals(HostGatewayExecutionAffinity.HOST_FRAMEWORK, operations.getValue(operation).affinity)
+            assertTrue(HostPrimitiveGatewayBindings.requiresAndroidHost(id, operation))
+        }
+    }
+
+    @Test
     fun networkDirectProxyIsKernelBoundWithoutHostUiAffinity() {
         val operations = HostPrimitiveGatewayBindings.operations("host.network@1")
         assertTrue(operations.containsKey("listeners"))

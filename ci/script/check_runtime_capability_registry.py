@@ -286,16 +286,49 @@ def main() -> int:
             else:
                 enforced_affinity_ids.append(current_primitive_id)
 
+    # build105 made permissions and camera lifecycle Host-framework operations.
+    # Keep this explicit: unrelated primitives must not silently acquire Host affinity.
     allowed_affinity_ids = {
         "host.screen.capture@1",
         "host.chat@1",
         "host.window.overlay@1",
+        "host.permission@1",
+        "host.camera.capture@1",
+        "host.camera.session@1",
     }
     if set(enforced_affinity_ids) != allowed_affinity_ids or len(enforced_affinity_ids) != len(allowed_affinity_ids):
         errors.append(
-            "Operation affinity enforcement must stay on the explicit architecture allowlist: "
-            + repr(sorted(enforced_affinity_ids))
+            "Operation affinity enforcement differs from the explicit architecture allowlist: "
+            + f"expected={sorted(allowed_affinity_ids)}, actual={sorted(enforced_affinity_ids)}"
         )
+
+    # These operations own Android permission/camera resources. An allowlisted id alone
+    # is insufficient: its operations must keep their enforced Host-framework bindings.
+    framework_contracts = {
+        "host.permission@1": {"check", "request", "open_settings"},
+        "host.camera.capture@1": {"capture"},
+        "host.camera.session@1": {"list_sources", "status", "start", "frame", "configure", "stop"},
+    }
+    for primitive_id, expected_operations in framework_contracts.items():
+        block = re.search(
+            r'"' + re.escape(primitive_id) + r'"\s+to\s+primitive\((.*?)\),\s*"',
+            host_gateway_text,
+            re.DOTALL,
+        )
+        if block is None:
+            errors.append(f"{primitive_id} Host-framework operation block is missing")
+            continue
+        body = block.group(1)
+        if not body.lstrip().startswith("HostGatewayExecutionAffinity.HOST_FRAMEWORK,"):
+            errors.append(f"{primitive_id} must inherit Android Host-framework affinity")
+        if "enforceAffinity = true" not in body:
+            errors.append(f"{primitive_id} must enforce Android Host-framework affinity")
+        actual_operations = re.findall(r'kernel\("([^"\n]+)"\)', body)
+        if set(actual_operations) != expected_operations or len(actual_operations) != len(expected_operations):
+            errors.append(
+                f"{primitive_id} must retain its exact Host kernel operations: "
+                f"expected={sorted(expected_operations)}, actual={actual_operations}"
+            )
 
     screen_capture_block = re.search(
         r'"host\.screen\.capture@1"\s+to\s+primitive\((.*?)\),\s*"host\.network@1"',
