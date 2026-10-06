@@ -14,6 +14,7 @@
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SHORT_SERVICE" />
     <uses-permission android:name="android.permission.KILL_BACKGROUND_PROCESSES" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
@@ -112,6 +113,17 @@
         <activity 
             android:name="live.pw.renderX.LatexView"
             tools:node="remove" />
+
+        <activity
+            android:name=".core.tools.system.HostCameraForegroundActivity"
+            android:exported="false"
+            android:excludeFromRecents="true" />
+
+        <activity
+            android:name=".core.tools.system.HostPermissionBrokerActivity"
+            android:exported="false"
+            android:excludeFromRecents="true"
+            android:theme="@android:style/Theme.Translucent.NoTitleBar" />
 
         <activity
             android:name=".core.tools.defaultTool.websession.browser.WebSessionPermissionRequestActivity"
@@ -359,6 +371,11 @@
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="dataSync" />
+
+        <service
+            android:name=".core.tools.system.HostCameraForegroundService"
+            android:exported="false"
+            android:foregroundServiceType="camera" />
 
         <service
             android:name=".core.tools.system.ScreenCaptureService"

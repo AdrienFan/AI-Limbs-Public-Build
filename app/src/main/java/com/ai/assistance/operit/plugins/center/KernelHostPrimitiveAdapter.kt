@@ -4,6 +4,7 @@ import com.ai.assistance.operit.BuildConfig
 import com.ai.assistance.operit.R
 
 import com.ai.assistance.operit.core.tools.system.VisualHostRuntime
+import com.ai.assistance.operit.core.tools.system.HostPermissionBroker
 import com.ai.assistance.operit.core.tools.defaultTool.standard.StandardUITools
 import com.ai.assistance.operit.data.model.AITool
 
@@ -60,6 +61,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             )
         }
         return when (id) {
+            "host.permission@1" -> HostPermissionBroker.invoke(appContext, ownerPluginId, op, parameters)
             "host.network@1" -> invokeNetwork(op)
             "host.chat@1" -> when (op) {
                 "publish_assistant" -> publishAssistantMessage(parameters)
@@ -913,6 +915,9 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.screen.session@1/start",
             "host.screen.session@1/frame",
             "host.screen.session@1/stop",
+            "host.permission@1/check",
+            "host.permission@1/request",
+            "host.permission@1/open_settings",
             "host.camera.capture@1/capture",
             "host.camera.session@1/list_sources",
             "host.camera.session@1/status",

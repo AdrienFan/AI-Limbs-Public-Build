@@ -17,6 +17,8 @@ import android.util.Size
 import java.io.File
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicReference
 import kotlin.coroutines.resume
 import kotlin.coroutines.resumeWithException
 import kotlin.math.abs
@@ -33,10 +35,12 @@ object VisualHostRuntime {
         val id: String,
         val ownerPluginId: String,
         val targetId: String,
-        val startedAtMs: Long
+        val startedAtMs: Long,
+        @Volatile var ready: Boolean = false
     )
 
     private data class CameraSession(
+        val context: Context,
         val id: String,
         val ownerPluginId: String,
         val sourceId: String,
@@ -49,12 +53,19 @@ object VisualHostRuntime {
         val device: CameraDevice,
         val captureSession: CameraCaptureSession,
         val lock: Mutex = Mutex(),
+        val closed: AtomicBoolean = AtomicBoolean(false),
+        val pendingFrame: AtomicReference<CompletableDeferred<ByteArray>?> = AtomicReference(null),
         @Volatile var jpegQuality: Int = 92,
         @Volatile var jpegOrientation: Int = 0
     )
 
     private val screenSessions = ConcurrentHashMap<String, ScreenSession>()
     private val cameraSessions = ConcurrentHashMap<String, CameraSession>()
+    private val cameraStateLock = Any()
+    private val cameraSourceOwners = ConcurrentHashMap<String, String>()
+    private val cameraOwnerEpochs = ConcurrentHashMap<String, Long>()
+    private data class PendingCameraStart(val owner: String, val done: CompletableDeferred<Unit>)
+    private val pendingCameraStarts = ConcurrentHashMap<String, PendingCameraStart>()
 
     suspend fun invokeScreen(
         context: Context,
@@ -66,7 +77,7 @@ object VisualHostRuntime {
         "list_targets" -> listScreenTargets(context)
         "start" -> startScreenSession(context, ownerPluginId, parameters)
         "status" -> screenStatus(ownerPluginId, parameters)
-        "frame" -> screenFrame(ownerPluginId, parameters, captureFrame)
+        "frame" -> screenFrame(context, ownerPluginId, parameters, captureFrame)
         "stop" -> stopScreenSession(context, ownerPluginId, parameters)
         else -> error("Unsupported screen visual operation: $operation")
     }
@@ -104,6 +115,7 @@ object VisualHostRuntime {
                             .put("target_id", "display:${display.displayId}")
                             .put("display_id", display.displayId)
                             .put("name", display.name)
+                            .put("capture_supported", display.displayId == android.view.Display.DEFAULT_DISPLAY)
                             .put("state", display.state)
                     )
                 }
@@ -122,6 +134,8 @@ object VisualHostRuntime {
                 .orEmpty()
                 .mapTo(linkedSetOf()) { "display:${it.displayId}" }
         require(requested in validTargets) { "Unknown screen target: $requested" }
+        require(requested == "display:0") { "Screen capture supports the built-in display only" }
+        check(screenSessions.values.none { it.ownerPluginId == ownerPluginId }) { "A screen session is already running" }
         val session =
             ScreenSession(
                 id = UUID.randomUUID().toString(),
@@ -140,6 +154,9 @@ object VisualHostRuntime {
     }
 
     private fun screenStatus(ownerPluginId: String, parameters: JSONObject): JSONObject {
+        if (MediaProjectionHolder.mediaProjection == null) {
+            screenSessions.values.filter { it.ready }.forEach { screenSessions.remove(it.id, it) }
+        }
         val requested = parameters.optString("session_id").trim()
         if (requested.isNotEmpty()) {
             val session = requireOwnedScreenSession(ownerPluginId, requested)
@@ -157,6 +174,7 @@ object VisualHostRuntime {
     }
 
     private suspend fun screenFrame(
+        context: Context,
         ownerPluginId: String,
         parameters: JSONObject,
         captureFrame: suspend () -> JSONObject
@@ -164,6 +182,12 @@ object VisualHostRuntime {
         val session = requireOwnedScreenSession(ownerPluginId, required(parameters, "session_id"))
         val capturedAt = System.currentTimeMillis()
         val hostResult = captureFrame()
+        check(hostResult.optBoolean("success", false)) { hostResult.optString("error", "Screen capture failed") }
+        if (screenSessions[session.id] !== session) {
+            if (screenSessions.isEmpty()) MediaProjectionHolder.clear(context.applicationContext)
+            error("Screen session stopped during frame capture")
+        }
+        session.ready = true
         return JSONObject()
             .put("session_id", session.id)
             .put("target_id", session.targetId)
@@ -201,6 +225,7 @@ object VisualHostRuntime {
         JSONObject()
             .put("session_id", session.id)
             .put("target_id", session.targetId)
+            .put("state", if (session.ready) "READY" else "STARTING")
             .put("started_at_ms", session.startedAtMs)
 
     private fun requireOwnedScreenSession(ownerPluginId: String, sessionId: String): ScreenSession {
@@ -255,17 +280,12 @@ object VisualHostRuntime {
     ): JSONObject {
         val start = startCameraSession(context, ownerPluginId, parameters)
         if (!start.optBoolean("started", false)) return start
-        val sessionId = start.getString("session_id")
+        val session = requireOwnedCameraSession(ownerPluginId,
+            JSONObject().put("session_id", start.getString("session_id")))
         return try {
-            captureCameraFrame(
-                context,
-                requireOwnedCameraSession(
-                    ownerPluginId,
-                    JSONObject().put("session_id", sessionId)
-                )
-            ).put("transient_session", true)
+            captureCameraFrame(context, session).put("transient_session", true)
         } finally {
-            stopCameraSession(ownerPluginId, JSONObject().put("session_id", sessionId))
+            retireCameraSession(session, IllegalStateException("Single camera capture completed"))
         }
     }
 
@@ -275,57 +295,88 @@ object VisualHostRuntime {
         parameters: JSONObject
     ): JSONObject {
         if (!cameraPermissionGranted(context)) {
-            return JSONObject()
-                .put("started", false)
-                .put("available", true)
-                .put("permission_granted", false)
-                .put("permission_required", Manifest.permission.CAMERA)
+            return JSONObject().put("started", false).put("available", true)
+                .put("permission_granted", false).put("permission_required", Manifest.permission.CAMERA)
+                .put("success", false).put("state", "NEEDS_PERMISSION")
         }
         val manager = context.getSystemService(CameraManager::class.java)
         val sourceId = resolveCameraSource(manager, parameters)
         val characteristics = manager.getCameraCharacteristics(sourceId)
         val size = chooseJpegSize(characteristics, parameters)
-        val thread = HandlerThread("AiLimbsVisualCamera-${UUID.randomUUID()}").apply { start() }
+        val id = UUID.randomUUID().toString()
+        val epoch = synchronized(cameraStateLock) {
+            check(cameraSourceOwners.putIfAbsent(sourceId, id) == null) {
+                "Camera source is already in use: $sourceId"
+            }
+            pendingCameraStarts[id] = PendingCameraStart(ownerPluginId, CompletableDeferred())
+            cameraOwnerEpochs[ownerPluginId] ?: 0L
+        }
+        val thread = HandlerThread("AiLimbsVisualCamera-$id").apply { start() }
         val handler = Handler(thread.looper)
-        val reader = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
-        val device =
-            try {
-                openCamera(manager, sourceId, handler)
-            } catch (error: Throwable) {
-                reader.close()
-                thread.quitSafely()
-                throw error
+        var reader: ImageReader? = null
+        var device: CameraDevice? = null
+        var capture: CameraCaptureSession? = null
+        val failure = AtomicReference<Throwable?>()
+        val live = AtomicReference<CameraSession?>()
+        try {
+            HostCameraForeground.acquire(context, id)
+            synchronized(cameraStateLock) {
+                check(epoch == (cameraOwnerEpochs[ownerPluginId] ?: 0L)) { "Camera start was cancelled by stop" }
             }
-        val captureSession =
-            try {
-                createCaptureSession(device, reader, handler)
-            } catch (error: Throwable) {
-                device.close()
-                reader.close()
-                thread.quitSafely()
-                throw error
+            val output = ImageReader.newInstance(size.width, size.height, ImageFormat.JPEG, 2)
+            reader = output
+            val camera = withTimeout(CAMERA_FRAME_TIMEOUT_MS) {
+                openCamera(manager, sourceId) { error ->
+                    failure.set(error)
+                    live.get()?.let { retireCameraSession(it, error) }
+                }
             }
-        val session =
-            CameraSession(
-                id = UUID.randomUUID().toString(),
-                ownerPluginId = ownerPluginId,
-                sourceId = sourceId,
-                width = size.width,
-                height = size.height,
-                startedAtMs = System.currentTimeMillis(),
-                thread = thread,
-                handler = handler,
-                reader = reader,
-                device = device,
-                captureSession = captureSession,
+            device = camera
+            val configured = withTimeout(CAMERA_FRAME_TIMEOUT_MS) {
+                createCaptureSession(camera, output, handler)
+            }
+            capture = configured
+            val session = CameraSession(
+                context = context.applicationContext,
+                id = id, ownerPluginId = ownerPluginId, sourceId = sourceId,
+                width = size.width, height = size.height, startedAtMs = System.currentTimeMillis(),
+                thread = thread, handler = handler, reader = output,
+                device = camera, captureSession = configured,
                 jpegQuality = parameters.optInt("jpeg_quality", 92).coerceIn(1, 100),
-                jpegOrientation = normalizeOrientation(parameters.optInt("jpeg_orientation", 0))
+                jpegOrientation = if (parameters.has("jpeg_orientation")) {
+                    normalizeOrientation(parameters.getInt("jpeg_orientation"))
+                } else {
+                    defaultJpegOrientation(context, characteristics)
+                }
             )
-        cameraSessions[session.id] = session
-        return cameraSessionJson(session)
-            .put("started", true)
-            .put("active", true)
-            .put("permission_granted", true)
+            synchronized(cameraStateLock) {
+                check(epoch == (cameraOwnerEpochs[ownerPluginId] ?: 0L)) {
+                    "Camera start was cancelled by stop"
+                }
+                failure.get()?.let { throw it }
+                live.set(session)
+                cameraSessions[id] = session
+            }
+            failure.get()?.let {
+                retireCameraSession(session, it)
+                throw it
+            }
+            return cameraSessionJson(session).put("started", true).put("active", true)
+                .put("permission_granted", true)
+        } catch (error: Throwable) {
+            synchronized(cameraStateLock) {
+                cameraSessions.remove(id)
+                cameraSourceOwners.remove(sourceId, id)
+            }
+            runCatching { capture?.close() }
+            runCatching { device?.close() }
+            runCatching { reader?.close() }
+            thread.quitSafely()
+            HostCameraForeground.release(context, id)
+            throw error
+        } finally {
+            pendingCameraStarts.remove(id)?.done?.complete(Unit)
+        }
     }
 
     private fun cameraStatus(ownerPluginId: String, parameters: JSONObject): JSONObject {
@@ -368,105 +419,105 @@ object VisualHostRuntime {
     private suspend fun captureCameraFrame(
         context: Context,
         session: CameraSession
-    ): JSONObject =
-        session.lock.withLock {
-            val deferred = CompletableDeferred<ByteArray>()
-            session.reader.setOnImageAvailableListener(
-                { reader ->
-                    try {
-                        val image =
-                            reader.acquireLatestImage()
-                                ?: return@setOnImageAvailableListener
-                        image.use {
-                            val buffer = it.planes[0].buffer
-                            val bytes = ByteArray(buffer.remaining())
-                            buffer.get(bytes)
-                            if (!deferred.isCompleted) deferred.complete(bytes)
-                        }
-                    } catch (error: Throwable) {
-                        if (!deferred.isCompleted) {
-                            deferred.completeExceptionally(error)
-                        }
-                    }
-                },
-                session.handler
-            )
+    ): JSONObject = session.lock.withLock {
+        check(!session.closed.get()) { "Camera visual session has stopped" }
+        val deferred = CompletableDeferred<ByteArray>()
+        session.pendingFrame.set(deferred)
+        session.reader.setOnImageAvailableListener({ reader ->
             try {
-                val request =
-                    session.device
-                        .createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE)
-                        .apply {
-                            addTarget(session.reader.surface)
-                            set(
-                                CaptureRequest.JPEG_QUALITY,
-                                session.jpegQuality.toByte()
-                            )
-                            set(
-                                CaptureRequest.JPEG_ORIENTATION,
-                                session.jpegOrientation
-                            )
-                        }
-                        .build()
-                session.captureSession.capture(
-                    request,
-                    object : CameraCaptureSession.CaptureCallback() {},
-                    session.handler
-                )
-                val bytes =
-                    withTimeout(CAMERA_FRAME_TIMEOUT_MS) { deferred.await() }
-                val capturedAt = System.currentTimeMillis()
-                val dir =
-                    File(
-                        context.cacheDir,
-                        "visual-host/${safePathPart(session.ownerPluginId)}/${session.id}"
-                    ).apply { mkdirs() }
-                val file = File(dir, "frame-$capturedAt.jpg")
-                file.writeBytes(bytes)
-                JSONObject()
-                    .put("session_id", session.id)
-                    .put("source_id", session.sourceId)
-                    .put("captured_at_ms", capturedAt)
-                    .put("width", session.width)
-                    .put("height", session.height)
-                    .put("mime_type", "image/jpeg")
-                    .put("file_path", file.absolutePath)
-                    .put("bytes", bytes.size)
-            } finally {
-                session.reader.setOnImageAvailableListener(null, null)
+                val image = reader.acquireLatestImage()
+                if (image != null) image.use {
+                    val buffer = it.planes[0].buffer
+                    val bytes = ByteArray(buffer.remaining())
+                    buffer.get(bytes)
+                    deferred.complete(bytes)
+                }
+            } catch (error: Throwable) {
+                deferred.completeExceptionally(error)
             }
+        }, session.handler)
+        try {
+            check(!session.closed.get()) { "Camera visual session has stopped" }
+            val request = session.device.createCaptureRequest(CameraDevice.TEMPLATE_STILL_CAPTURE).apply {
+                addTarget(session.reader.surface)
+                set(CaptureRequest.JPEG_QUALITY, session.jpegQuality.toByte())
+                set(CaptureRequest.JPEG_ORIENTATION, session.jpegOrientation)
+            }.build()
+            session.captureSession.capture(request, object : CameraCaptureSession.CaptureCallback() {
+                override fun onCaptureFailed(
+                    captureSession: CameraCaptureSession, request: CaptureRequest,
+                    failure: android.hardware.camera2.CaptureFailure
+                ) {
+                    deferred.completeExceptionally(IllegalStateException("Camera capture failed: ${failure.reason}"))
+                }
+                override fun onCaptureSequenceAborted(captureSession: CameraCaptureSession, sequenceId: Int) {
+                    deferred.completeExceptionally(IllegalStateException("Camera capture was aborted"))
+                }
+            }, session.handler)
+            val bytes = withTimeout(CAMERA_FRAME_TIMEOUT_MS) { deferred.await() }
+            check(!session.closed.get()) { "Camera visual session has stopped" }
+            val capturedAt = System.currentTimeMillis()
+            val dir = File(context.cacheDir,
+                "visual-host/${safePathPart(session.ownerPluginId)}/${session.id}").apply { mkdirs() }
+            val file = File(dir, "frame-$capturedAt.jpg")
+            file.writeBytes(bytes)
+            JSONObject().put("session_id", session.id).put("source_id", session.sourceId)
+                .put("captured_at_ms", capturedAt).put("width", session.width).put("height", session.height)
+                .put("mime_type", "image/jpeg").put("file_path", file.absolutePath).put("bytes", bytes.size)
+        } finally {
+            session.pendingFrame.compareAndSet(deferred, null)
+            if (!session.closed.get()) session.reader.setOnImageAvailableListener(null, null)
         }
+    }
 
-    private fun stopCameraSession(
-        ownerPluginId: String,
-        parameters: JSONObject
-    ): JSONObject {
+    private suspend fun stopCameraSession(ownerPluginId: String, parameters: JSONObject): JSONObject {
         val requested = parameters.optString("session_id").trim()
-        val sessions =
-            if (requested.isNotEmpty()) {
-                listOf(requireOwnedCameraSession(ownerPluginId, parameters))
-            } else {
+        val inProgress: List<PendingCameraStart>
+        val sessions = synchronized(cameraStateLock) {
+            inProgress = pendingCameraStarts.values.filter { it.owner == ownerPluginId }
+            if (requested.isEmpty()) {
+                cameraOwnerEpochs[ownerPluginId] = (cameraOwnerEpochs[ownerPluginId] ?: 0L) + 1L
                 cameraSessions.values.filter { it.ownerPluginId == ownerPluginId }
-            }
+            } else listOf(requireOwnedCameraSession(ownerPluginId, parameters))
+        }
         val stopped = JSONArray()
         sessions.forEach { session ->
-            if (cameraSessions.remove(session.id, session)) {
-                closeCameraSession(session)
+            if (retireCameraSession(session, IllegalStateException("Camera visual session stopped"))) {
                 stopped.put(session.id)
             }
         }
-        return JSONObject()
-            .put("stopped", stopped)
-            .put(
-                "active",
-                cameraSessions.values.any { it.ownerPluginId == ownerPluginId }
-            )
+        // A pending open may already own hardware before its session is published. Wait for
+        // its invalidated start to close resources before claiming that stop has completed.
+        inProgress.forEach { it.done.await() }
+        HostCameraForeground.awaitStopped()
+        return JSONObject().put("stopped", stopped)
+            .put("active", cameraSessions.values.any { it.ownerPluginId == ownerPluginId && !it.closed.get() })
     }
 
-    private fun closeCameraSession(session: CameraSession) {
+    private fun retireCameraSession(session: CameraSession, error: Throwable): Boolean {
+        if (!session.closed.compareAndSet(false, true)) return false
+        synchronized(cameraStateLock) {
+            cameraSessions.remove(session.id, session)
+            cameraSourceOwners.remove(session.sourceId, session.id)
+        }
+        session.pendingFrame.getAndSet(null)?.completeExceptionally(error)
         runCatching { session.captureSession.close() }
         runCatching { session.device.close() }
         runCatching { session.reader.close() }
-        runCatching { session.thread.quitSafely() }
+        session.thread.quitSafely()
+        HostCameraForeground.release(session.context, session.id)
+        return true
+    }
+
+    internal fun cameraForegroundStopped() {
+        val sessions = synchronized(cameraStateLock) {
+            (pendingCameraStarts.values.map { it.owner } + cameraSessions.values.map { it.ownerPluginId })
+                .distinct().forEach { owner ->
+                    cameraOwnerEpochs[owner] = (cameraOwnerEpochs[owner] ?: 0L) + 1L
+                }
+            cameraSessions.values.toList()
+        }
+        sessions.forEach { retireCameraSession(it, IllegalStateException("Camera foreground ownership ended")) }
     }
 
     private fun cameraSessionJson(session: CameraSession): JSONObject =
@@ -520,14 +571,14 @@ object VisualHostRuntime {
             ) {
                 "front" -> CameraCharacteristics.LENS_FACING_FRONT
                 "external" -> CameraCharacteristics.LENS_FACING_EXTERNAL
-                else -> CameraCharacteristics.LENS_FACING_BACK
+                "back" -> CameraCharacteristics.LENS_FACING_BACK
+                else -> error("Unknown camera lens_facing")
             }
         return manager.cameraIdList.firstOrNull { id ->
             manager
                 .getCameraCharacteristics(id)
                 .get(CameraCharacteristics.LENS_FACING) == desiredFacing
-        } ?: manager.cameraIdList.firstOrNull()
-            ?: error("No camera source is available")
+        } ?: error("No camera source matches requested lens_facing")
     }
 
     private fun chooseJpegSize(
@@ -549,18 +600,19 @@ object VisualHostRuntime {
                 size.width.toLong() * size.height.toLong() -
                     requestedWidth.toLong() * requestedHeight.toLong()
             )
-        } ?: sizes.first()
+        }!!
     }
 
     @Suppress("MissingPermission")
     private suspend fun openCamera(
         manager: CameraManager,
         sourceId: String,
-        handler: Handler
+        onUnavailable: (Throwable) -> Unit
     ): CameraDevice =
         suspendCancellableCoroutine { continuation ->
             manager.openCamera(
                 sourceId,
+                java.util.concurrent.Executor { command -> command.run() },
                 object : CameraDevice.StateCallback() {
                     override fun onOpened(camera: CameraDevice) {
                         if (continuation.isActive) {
@@ -571,6 +623,7 @@ object VisualHostRuntime {
                     }
 
                     override fun onDisconnected(camera: CameraDevice) {
+                        onUnavailable(IllegalStateException("Camera disconnected: $sourceId"))
                         camera.close()
                         if (continuation.isActive) {
                             continuation.resumeWithException(
@@ -585,6 +638,7 @@ object VisualHostRuntime {
                         camera: CameraDevice,
                         error: Int
                     ) {
+                        onUnavailable(IllegalStateException("Camera device failed: $sourceId error=$error"))
                         camera.close()
                         if (continuation.isActive) {
                             continuation.resumeWithException(
@@ -594,8 +648,7 @@ object VisualHostRuntime {
                             )
                         }
                     }
-                },
-                handler
+                }
             )
         }
 
@@ -643,6 +696,20 @@ object VisualHostRuntime {
             CameraCharacteristics.LENS_FACING_EXTERNAL -> "external"
             else -> "unknown"
         }
+
+    private fun defaultJpegOrientation(context: Context, characteristics: CameraCharacteristics): Int {
+        val rotation = context.getSystemService(DisplayManager::class.java)
+            .getDisplay(android.view.Display.DEFAULT_DISPLAY).rotation
+        val degrees = when (rotation) {
+            android.view.Surface.ROTATION_90 -> 90
+            android.view.Surface.ROTATION_180 -> 180
+            android.view.Surface.ROTATION_270 -> 270
+            else -> 0
+        }
+        val sensor = characteristics.get(CameraCharacteristics.SENSOR_ORIENTATION) ?: 0
+        val front = characteristics.get(CameraCharacteristics.LENS_FACING) == CameraCharacteristics.LENS_FACING_FRONT
+        return normalizeOrientation(sensor + if (front) degrees else -degrees)
+    }
 
     private fun normalizeOrientation(value: Int): Int =
         ((value % 360) + 360) % 360

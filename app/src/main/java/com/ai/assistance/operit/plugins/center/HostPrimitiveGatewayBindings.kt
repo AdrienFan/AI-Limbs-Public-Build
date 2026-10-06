@@ -223,7 +223,7 @@ internal object HostPrimitiveGatewayBindings {
         "host.bluetooth@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("permission", "request_bluetooth_permission")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("state", "get_bluetooth_state")), owned(HostGatewayExecutionAffinity.HOST_FRAMEWORK, tool("enable", "request_enable_bluetooth")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("bonded", "list_bluetooth_bonded_devices")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("scan", "scan_bluetooth_devices")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("connect", "bluetooth_connect")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("listen", "bluetooth_listen")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("accept", "bluetooth_accept")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("send", "bluetooth_send")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("read", "bluetooth_read")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("transact", "bluetooth_send_and_read")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("close", "bluetooth_close")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_connect", "bluetooth_ble_connect")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_discover", "bluetooth_ble_discover_services")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_read", "bluetooth_ble_read_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_write", "bluetooth_ble_write_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_transact", "bluetooth_ble_write_and_read_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_subscribe", "bluetooth_ble_subscribe_characteristic")), owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("ble_notifications", "bluetooth_ble_read_notifications"))),
         "host.location@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("locate", "get_device_location")),
         "host.clipboard@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("read"), pending("write"), pending("clear"), pending("observe")),
-        "host.permission@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("check"), pending("request")),
+        "host.permission@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK, kernel("check"), kernel("request"), kernel("open_settings"), enforceAffinity = true),
         "host.audio.capture@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("start"), pending("read"), pending("stop")),
         "host.audio.playback@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("play", "music_play"), tool("pause", "music_pause"), tool("resume", "music_resume"), tool("stop", "music_stop"), tool("seek", "music_seek"), tool("volume", "music_set_volume")),
         "host.android.component@1" to primitive(HostGatewayExecutionAffinity.HOST_FRAMEWORK,
@@ -276,7 +276,8 @@ internal object HostPrimitiveGatewayBindings {
         "host.ui.widget@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("list"), pending("register"), pending("update"), pending("remove")),
         "host.camera.capture@1" to primitive(
             HostGatewayExecutionAffinity.HOST_FRAMEWORK,
-            kernel("capture")
+            kernel("capture"),
+            enforceAffinity = true
         ),
         "host.camera.session@1" to primitive(
             HostGatewayExecutionAffinity.HOST_FRAMEWORK,
@@ -285,7 +286,8 @@ internal object HostPrimitiveGatewayBindings {
             kernel("start"),
             kernel("frame"),
             kernel("configure"),
-            kernel("stop")
+            kernel("stop"),
+            enforceAffinity = true
         ),
         "host.custom_access_prompt@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, document("read", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("write", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("snapshots", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT), document("restore", AiLimbsDocumentId.CUSTOM_ACCESS_PROMPT)),
         "host.work_manual@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, document("read", AiLimbsDocumentId.WORK_MANUAL), document("write", AiLimbsDocumentId.WORK_MANUAL), document("snapshots", AiLimbsDocumentId.WORK_MANUAL), document("restore", AiLimbsDocumentId.WORK_MANUAL)),
