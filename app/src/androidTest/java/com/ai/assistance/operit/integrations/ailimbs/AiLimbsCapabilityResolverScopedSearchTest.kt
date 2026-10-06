@@ -122,7 +122,8 @@ class AiLimbsCapabilityResolverScopedSearchTest {
                     requestedLimit = 8,
                     scope = scopeId
                 )
-            assertTrue(lowConfidenceScoped.getBoolean("live_discovery"))
+            assertFalse(lowConfidenceScoped.getBoolean("live_discovery"))
+            assertTrue(lowConfidenceScoped.getBoolean("low_confidence"))
             assertEquals(scopeId, lowConfidenceScoped.getString("scope"))
             val lowConfidenceIds =
                 (0 until lowConfidenceScoped.getJSONArray("results").length())

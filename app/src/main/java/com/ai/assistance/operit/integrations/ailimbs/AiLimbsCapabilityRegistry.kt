@@ -80,6 +80,9 @@ object AiLimbsCapabilityRegistry {
         val registration: AiLimbsPluginCapabilityRegistration
     )
 
+    @Volatile private var discoveryRevision = 0L
+    internal fun metadataRevision(): Long = discoveryRevision
+
     private val lock = Any()
     private val pluginByInvokeName = ConcurrentHashMap<String, OwnedPluginRegistration>()
 
@@ -128,14 +131,18 @@ object AiLimbsCapabilityRegistry {
                 }
             }
             names.forEach { pluginByInvokeName[it] = owned }
+            discoveryRevision += 1
         }
         return AutoCloseable {
             synchronized(lock) {
+                var removed = false
                 names.forEach { name ->
                     if (pluginByInvokeName[name]?.token == owned.token) {
                         pluginByInvokeName.remove(name)
+                        removed = true
                     }
                 }
+                if (removed) discoveryRevision += 1
             }
         }
     }
@@ -193,13 +200,17 @@ object AiLimbsCapabilityRegistry {
 
     internal fun mergeInto(runtimeCatalog: List<ToolCatalogEntry>): List<ToolCatalogEntry> {
         val coreMerged = AiLimbsCoreCapabilityRegistry.mergeInto(runtimeCatalog)
-        val existingNames = coreMerged.mapTo(linkedSetOf()) { normalize(it.targetToolName) }
         val pluginEntries = pluginByInvokeName.values
             .distinctBy { it.token }
             .map { it.registration.catalogEntry }
             .sortedBy { it.targetToolName }
-            .filter { normalize(it.targetToolName) !in existingNames }
-        return coreMerged + pluginEntries
+        // plugin.* discovery belongs to the live canonical registry. Raw runtime stubs must not
+        // override current plugin metadata or resurrect an unmounted capability/alias.
+        val hostEntries = coreMerged.filter { entry ->
+            !isReservedPluginCapabilityName(entry.targetToolName) ||
+                AiLimbsCoreCapabilityRegistry.isRegisteredInvokeName(normalize(entry.targetToolName))
+        }
+        return hostEntries + pluginEntries
     }
 
     private fun normalize(value: String): String = value.trim().lowercase()

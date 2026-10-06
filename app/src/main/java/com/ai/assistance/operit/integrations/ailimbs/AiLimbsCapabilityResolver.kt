@@ -21,7 +21,8 @@ internal data class AiLimbsCapabilityDefinition(
     val invokeId: String,
     val aliases: List<String>,
     val catalogEntry: ToolCatalogEntry,
-    val role: AiLimbsCapabilityRole = AiLimbsCapabilityRole.BUSINESS
+    val role: AiLimbsCapabilityRole = AiLimbsCapabilityRole.BUSINESS,
+    val ownerPluginId: String? = null
 )
 
 internal data class AiLimbsCapabilitySearchMatch(
@@ -37,7 +38,8 @@ internal data class AiLimbsCapabilitySearchMatch(
 
 private data class AiLimbsCapabilitySearchResult(
     val matches: List<AiLimbsCapabilitySearchMatch>,
-    val lowConfidence: Boolean
+    val lowConfidence: Boolean,
+    val indexReused: Boolean
 )
 
 internal sealed interface AiLimbsOrganizedSearchItem {
@@ -62,7 +64,9 @@ internal object AiLimbsGlobalScopeOrganizer {
         scopes: List<AiLimbsCapabilityScope>,
         ownerPluginIdByInvokeId: Map<String, String>
     ): List<AiLimbsOrganizedSearchItem> {
-        if (matches.isEmpty() || limit <= 0) return emptyList()
+        if (limit <= 0) return emptyList()
+        if (matches.isEmpty()) return scopes.filter { AiLimbsScopeQuery.mentions(query, it) }
+            .take(limit).mapIndexed { index, scope -> AiLimbsOrganizedSearchItem.Scope(index, scope) }
 
         val scopesByOwner = scopes.associateBy { it.ownerPluginId }
         val indexedMatches = matches.withIndex().toList()
@@ -108,7 +112,7 @@ internal object AiLimbsGlobalScopeOrganizer {
                     )
             }
         }
-        val mentionedOwners = scopes.filter { queryMentionsScope(query, it) }
+        val mentionedOwners = scopes.filter { AiLimbsScopeQuery.mentions(query, it) }
             .map { it.ownerPluginId }.toSet()
         fun owner(item: AiLimbsOrganizedSearchItem): String? = when (item) {
             is AiLimbsOrganizedSearchItem.Scope -> item.scope.ownerPluginId
@@ -125,8 +129,9 @@ internal object AiLimbsGlobalScopeOrganizer {
         scope: AiLimbsCapabilityScope,
         matches: List<AiLimbsCapabilitySearchMatch>
     ): Boolean {
+        if (matches.any { AiLimbsScopeQuery.exactCapability(query, it.definition) }) return false
         if (matches.size < SCOPE_FOLD_MIN_MATCHES) return false
-        if (queryMatchesScopeIdentity(query, scope)) return true
+        if (AiLimbsScopeQuery.isIdentity(query, scope)) return true
 
         val top = matches[0]
         val runnerUp = matches.getOrNull(1) ?: return false
@@ -141,36 +146,6 @@ internal object AiLimbsGlobalScopeOrganizer {
                 scoreGap >= SPECIFIC_LEAF_SCORE_GAP
 
         return !(specificByIdentity || specificByScore)
-    }
-
-    private fun queryMatchesScopeIdentity(
-        query: String,
-        scope: AiLimbsCapabilityScope
-    ): Boolean {
-        val needle = normalizeOrganizerText(query)
-        if (needle.isEmpty()) return false
-        return sequenceOf(
-            scope.scopeId,
-            scope.ownerPluginId,
-            scope.displayName
-        ).any { normalizeOrganizerText(it) == needle }
-    }
-
-    private fun normalizeOrganizerText(value: String): String =
-        value
-            .lowercase(Locale.ROOT)
-            .replace(Regex("[^\\p{L}\\p{N}:_./-]+"), " ")
-            .replace(Regex("\\s+"), " ")
-            .trim()
-
-    /** Prefer a named owner without turning a global query into a scope filter. */
-    private fun queryMentionsScope(query: String, scope: AiLimbsCapabilityScope): Boolean {
-        val needle = " ${normalizeOrganizerText(query)} "
-        return sequenceOf(scope.scopeId, scope.ownerPluginId, scope.displayName,
-            scope.ownerPluginId.substringAfterLast('.').replace('_', ' '))
-            .map(::normalizeOrganizerText)
-            .filter { it.isNotEmpty() }
-            .any { needle.contains(" $it ") }
     }
 
     private const val SCOPE_FOLD_MIN_MATCHES = 3
@@ -188,7 +163,8 @@ class AiLimbsCapabilityResolver(
 ) {
     private val appContext = context.applicationContext
     private val handler = AIToolHandler.getInstance(appContext)
-    private val packageManager = handler.getOrCreatePackageManager()
+    private val packageManager by lazy { handler.getOrCreatePackageManager() }
+    private val searchIndexCache = AiLimbsSearchIndexCache()
     private val capabilityUsageStore = AiLimbsCapabilityUsageStore(appContext)
     private val hotRankingPolicySource = AiLimbsHotRankingPolicySource(appContext)
 
@@ -209,40 +185,38 @@ class AiLimbsCapabilityResolver(
         }
         val limit = requestedLimit.coerceIn(1, MAX_SEARCH_RESULTS)
 
-        var activeScope = requestedScope?.let(::resolveCapabilityScope)
-        if (requestedScope != null && activeScope == null) {
-            return unknownScope(requestedScope)
-        }
+        val started = System.nanoTime()
+        val timings = JSONObject()
+        fun elapsed(since: Long): Long = (System.nanoTime() - since) / 1_000_000
+        val registryRevision = AiLimbsCapabilityRegistry.metadataRevision()
+        val scopes = currentCapabilityScopes()
+        val activeScope = requestedScope?.let { id -> scopes.firstOrNull { it.scopeId.equals(id, true) } }
+        if (requestedScope != null && activeScope == null) return unknownScope(requestedScope)
 
-        var definitions =
-            filterDefinitionsForScope(
-                buildDefinitions(forceRefreshPackages = false),
-                activeScope
-            )
-        val candidateLimit = if (activeScope == null) MAX_SEARCH_RESULTS else limit
-        var searchResult = searchDefinitions(definitions, normalizedQuery, candidateLimit)
-        var usedLiveDiscovery = false
-        if (searchResult.lowConfidence) {
-            definitions = buildDefinitions(forceRefreshPackages = true)
-            if (requestedScope != null) {
-                activeScope = resolveCapabilityScope(requestedScope)
-                if (activeScope == null) {
-                    return unknownScope(requestedScope)
-                }
-            }
-            definitions = filterDefinitionsForScope(definitions, activeScope)
-            searchResult = searchDefinitions(definitions, normalizedQuery, candidateLimit)
-            usedLiveDiscovery = true
-        }
+        val managedDefinitions = registeredDefinitions()
+        val plan = AiLimbsCapabilitySearchPlanner.plan(
+            query = normalizedQuery,
+            scope = activeScope,
+            registered = managedDefinitions,
+            scopes = scopes,
+            hostCatalog = { buildHostDefinitions() },
+            fullCatalog = { buildDefinitions(forceRefreshPackages = false, phaseTimings = timings) }
+        )
+        val mode = plan.mode
+        val definitions = plan.definitions
+        val searchQuery = plan.query
+        timings.put("catalog", elapsed(started))
+        val rankingStarted = System.nanoTime()
+        val searchResult = searchDefinitions(definitions, searchQuery, registryRevision)
+        // A weak query is not evidence that every package source has changed. Search the current
+        // catalog once; registration/source metadata mutations invalidate the prepared index.
 
         val organizedItems =
             if (activeScope == null) {
                 val ownerPluginIdByInvokeId =
                     searchResult.matches
                         .mapNotNull { match ->
-                            AiLimbsCapabilityRegistry
-                                .pluginRegistrationForInvokeName(match.definition.invokeId)
-                                ?.ownerPluginId
+                            match.definition.ownerPluginId
                                 ?.let { owner -> match.definition.invokeId to owner }
                         }
                         .toMap()
@@ -250,7 +224,7 @@ class AiLimbsCapabilityResolver(
                     query = normalizedQuery,
                     matches = searchResult.matches,
                     limit = limit,
-                    scopes = currentCapabilityScopes(),
+                    scopes = scopes,
                     ownerPluginIdByInvokeId = ownerPluginIdByInvokeId
                 )
             } else {
@@ -261,33 +235,34 @@ class AiLimbsCapabilityResolver(
                     }
             }
 
+        timings.put("ranking", elapsed(rankingStarted))
+        val policyStarted = System.nanoTime()
         val results = JSONArray()
         val scopeResults = JSONArray()
-        for (item in organizedItems) {
+        val items = JSONArray()
+        for ((index, item) in organizedItems.withIndex()) {
             when (item) {
                 is AiLimbsOrganizedSearchItem.Capability -> {
                     val definition = item.match.definition
                     results.put(compactCard(definition, readAvailability(definition)))
+                    items.put(JSONObject().put("kind", "capability").put("rank", index + 1)
+                        .put("capability_id", definition.capabilityId))
                 }
-                is AiLimbsOrganizedSearchItem.Scope ->
-                    scopeResults.put(scopeCard(item.scope))
+                is AiLimbsOrganizedSearchItem.Scope -> {
+                    scopeResults.put(scopeCard(item.scope, AiLimbsScopeQuery.intent(normalizedQuery, item.scope)))
+                    items.put(JSONObject().put("kind", "scope").put("rank", index + 1)
+                        .put("scope_id", item.scope.scopeId))
+                }
             }
         }
 
+        timings.put("policy", elapsed(policyStarted))
         val activeScopeId = activeScope?.scopeId
         val totalCount = results.length() + scopeResults.length()
-        val nextAction =
-            when {
-                totalCount == 0 ->
-                    capabilitySearchUsage(
-                        "<refined capability intent>",
-                        activeScopeId
-                    )
-                results.length() == 0 && scopeResults.length() > 0 ->
-                    scopeResults.getJSONObject(0).getJSONObject("next_action")
-                else ->
-                    capabilityDescribeUsage("<capability_id from results>")
-            }
+        val nextAction = AiLimbsSearchGuidance.nextAction(
+            items = organizedItems, query = normalizedQuery, activeScopeId = activeScopeId,
+            describe = ::capabilityDescribeUsage, search = { intent, id -> capabilitySearchUsage(intent, id) }
+        )
         val next =
             when {
                 totalCount == 0 && activeScopeId == null ->
@@ -310,15 +285,23 @@ class AiLimbsCapabilityResolver(
                 .put("count", totalCount)
                 .put("capability_count", results.length())
                 .put("scope_count", scopeResults.length())
-                .put("live_discovery", usedLiveDiscovery)
+                .put("live_discovery", false)
                 .put("results", results)
                 .put("scope_results", scopeResults)
+                .put("items", items)
+                .put("search_mode", mode)
+                .put("effective_query", searchQuery)
+                .put("resolved_scopes", JSONArray(plan.scopeIds))
+                .put("low_confidence", searchResult.lowConfidence)
+                .put("catalog", JSONObject().put("registry_revision", registryRevision)
+                    .put("index_reused", searchResult.indexReused).put("candidate_count", searchResult.matches.size))
                 .put("next_action", nextAction)
                 .put("next", next)
         activeScopeId?.let { response.put("scope", it) }
         response.put("hot", hotEntryDescriptor(expanded = false))
 
-        if (activeScopeId == null) {
+        val hotStarted = System.nanoTime()
+        if (mode == "global") {
             val cycleState = AiLimbsInteractionCycleRuntime.state(appContext)
             val generation = cycleState.currentGeneration()
             if (cycleState.claimHotCapabilities(generation)) {
@@ -339,6 +322,8 @@ class AiLimbsCapabilityResolver(
                     .put("hot_capabilities", hotCapabilities)
             }
         }
+        timings.put("hot", elapsed(hotStarted)).put("resolver_total", elapsed(started))
+        response.put("timings_ms", timings)
         return response
     }
 
@@ -373,8 +358,16 @@ class AiLimbsCapabilityResolver(
                 .put("next_action", capabilityDescribeUsage("<capability_id from capability.search>"))
         }
 
-        var definitions = buildDefinitions(forceRefreshPackages = false)
+        var definitions = registeredDefinitions()
         var definition = findDefinition(definitions, normalizedIdentifier)
+        if (definition == null) {
+            definitions = buildHostDefinitions()
+            definition = findDefinition(definitions, normalizedIdentifier)
+        }
+        if (definition == null) {
+            definitions = buildDefinitions(forceRefreshPackages = false)
+            definition = findDefinition(definitions, normalizedIdentifier)
+        }
         var usedLiveDiscovery = false
         if (definition == null) {
             definitions = buildDefinitions(forceRefreshPackages = true)
@@ -472,6 +465,8 @@ class AiLimbsCapabilityResolver(
         val normalizedInvokeId = invokeId.trim()
         if (normalizedInvokeId.isEmpty()) return false
 
+        if (AiLimbsCapabilityRegistry.isRegisteredInvokeName(normalizedInvokeId)) return true
+        if (buildHostDefinitions().any { it.invokeId == normalizedInvokeId }) return true
         var definitions = buildDefinitions(forceRefreshPackages = false)
         if (definitions.any { it.invokeId == normalizedInvokeId }) return true
 
@@ -479,8 +474,22 @@ class AiLimbsCapabilityResolver(
         return definitions.any { it.invokeId == normalizedInvokeId }
     }
 
-    private suspend fun buildDefinitions(forceRefreshPackages: Boolean): List<AiLimbsCapabilityDefinition> {
+    private fun registeredDefinitions(): List<AiLimbsCapabilityDefinition> =
+        AiLimbsCapabilityRegistry.mergeInto(emptyList()).map(::toDefinition)
+
+    private suspend fun buildHostDefinitions(): List<AiLimbsCapabilityDefinition> = withContext(Dispatchers.IO) {
+        val hostCatalog = ToolCapabilityCatalog.buildHostCatalog(
+            context = appContext, useEnglish = false, includeAlternateLanguageMetadata = true
+        )
+        AiLimbsCapabilityRegistry.mergeInto(hostCatalog).distinctBy { catalogIdentity(it) }.map(::toDefinition)
+    }
+
+    private suspend fun buildDefinitions(
+        forceRefreshPackages: Boolean,
+        phaseTimings: JSONObject? = null
+    ): List<AiLimbsCapabilityDefinition> {
         handler.registerDefaultTools()
+        val phases = linkedMapOf<String, Long>()
         val runtimeCatalog =
             withContext(Dispatchers.IO) {
                 ToolCapabilityCatalog.build(
@@ -490,30 +499,16 @@ class AiLimbsCapabilityResolver(
                     useEnglish = false,
                     includeDisabledPackages = true,
                     forceRefreshPackages = forceRefreshPackages,
-                    includeAlternateLanguageMetadata = true
+                    includeAlternateLanguageMetadata = true,
+                    phaseTimings = phases
                 )
             }
+        phases.forEach { (name, millis) -> phaseTimings?.put("catalog_$name", millis) }
         val catalog = AiLimbsCapabilityRegistry.mergeInto(runtimeCatalog)
 
         return catalog
             .distinctBy { catalogIdentity(it) }
             .map(::toDefinition)
-    }
-
-    private fun resolveCapabilityScope(scopeId: String): AiLimbsCapabilityScope? =
-        currentCapabilityScopes()
-            .firstOrNull { it.scopeId.equals(scopeId, ignoreCase = true) }
-
-    private fun filterDefinitionsForScope(
-        definitions: List<AiLimbsCapabilityDefinition>,
-        scope: AiLimbsCapabilityScope?
-    ): List<AiLimbsCapabilityDefinition> {
-        if (scope == null) return definitions
-        return definitions.filter { definition ->
-            AiLimbsCapabilityRegistry
-                .pluginRegistrationForInvokeName(definition.invokeId)
-                ?.ownerPluginId == scope.ownerPluginId
-        }
     }
 
     private fun unknownScope(scopeId: String): JSONObject =
@@ -527,7 +522,7 @@ class AiLimbsCapabilityResolver(
     private fun searchDefinitions(
         definitions: List<AiLimbsCapabilityDefinition>,
         query: String,
-        limit: Int
+        registryRevision: Long
     ): AiLimbsCapabilitySearchResult {
         val searchable = definitions.map { definition ->
             definition to definition.catalogEntry.copy(
@@ -538,13 +533,16 @@ class AiLimbsCapabilityResolver(
                         definition.capabilityId +
                         definition.invokeId +
                         definition.displayName +
-                        definition.provider).distinct()
+                        definition.provider +
+                        listOfNotNull(AiLimbsCapabilityRegistry.pluginRegistrationForInvokeName(definition.invokeId)?.ownerDisplayName))
+                        .distinct()
             )
         }
         val definitionsByIdentity = searchable.associate { (definition, entry) ->
             catalogIdentity(entry) to definition
         }
-        val catalogResult = ToolCapabilityCatalog.searchDetailed(searchable.map { it.second }, query, limit)
+        val prepared = searchIndexCache.current(searchable.map { it.second }, registryRevision)
+        val catalogResult = ToolCapabilityCatalog.searchAll(prepared.index, query)
         val matches = catalogResult.matches.mapNotNull { match ->
             definitionsByIdentity[catalogIdentity(match.entry)]?.let { definition ->
                 AiLimbsCapabilitySearchMatch(
@@ -556,7 +554,7 @@ class AiLimbsCapabilityResolver(
                 )
             }
         }
-        return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence)
+        return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence, prepared.reused)
     }
 
     private suspend fun hotCapabilitiesJson(
@@ -609,7 +607,7 @@ class AiLimbsCapabilityResolver(
         return result
     }
 
-    private fun scopeCard(scope: AiLimbsCapabilityScope): JSONObject =
+    private fun scopeCard(scope: AiLimbsCapabilityScope, query: String): JSONObject =
         JSONObject()
             .put("scope_id", scope.scopeId)
             .put("kind", scope.kind.wireName)
@@ -619,7 +617,7 @@ class AiLimbsCapabilityResolver(
             .put(
                 "next_action",
                 capabilitySearchUsage(
-                    "<specific capability intent>",
+                    query,
                     scope.scopeId
                 )
             )
@@ -669,7 +667,8 @@ class AiLimbsCapabilityResolver(
             invokeId = invokeId,
             aliases = aliases,
             catalogEntry = entry,
-            role = role
+            role = role,
+            ownerPluginId = pluginRegistration?.ownerPluginId
         )
     }
 
@@ -690,6 +689,11 @@ class AiLimbsCapabilityResolver(
             .put("display_name", definition.displayName)
             .put("provider", definition.provider)
             .put("invoke_id", definition.invokeId)
+            .put("purpose", compactPurpose(definition.catalogEntry.description))
+            .apply {
+                AiLimbsCapabilityRegistry.pluginRegistrationForInvokeName(definition.invokeId)
+                    ?.let { put("scope_id", "plugin:${it.ownerPluginId}") }
+            }
             .put("availability", availabilityLabel(availability))
             .put(
                 "requires_confirmation",
@@ -700,6 +704,13 @@ class AiLimbsCapabilityResolver(
                 availability.reason?.let { put("reason", it) }
                 availability.nextAction?.let { put("next_action", it) }
             }
+
+    private fun compactPurpose(description: String): String {
+        val text = description.replace(Regex("\\s+"), " ").trim()
+        val count = minOf(120, text.codePointCount(0, text.length))
+        val end = text.offsetByCodePoints(0, count)
+        return text.substring(0, end) + if (end < text.length) "…" else ""
+    }
 
     private fun availabilityLabel(availability: AiLimbsPolicyInspection): String =
         if (availability.available) "available" else "unavailable"

@@ -1,5 +1,6 @@
 package com.ai.assistance.operit.integrations.ailimbs
 
+import com.ai.assistance.operit.core.tools.catalog.ToolCapabilityCatalog
 import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
 import com.ai.assistance.operit.core.tools.catalog.ToolCatalogSourceKind
 import org.junit.Assert.*
@@ -47,4 +48,27 @@ class AiLimbsNamedScopePriorityTest {
     @Test fun fullDisplayNameSupportsUnknownOwners() {
         assertTrue(organize("Regression Studio command status").first() is AiLimbsOrganizedSearchItem.Scope)
     }
+    @Test fun ownerBeyondOriginalTopTwentyIsRoutedBeforeResultLimit() {
+        val noisy = (1..35).map { index -> match("native.command_status_$index", 500) }
+        val owned = broad.filter { it.definition.invokeId.startsWith("$owner.") }
+        val organized = organize("studio command status session", noisy + owned, limit = 1)
+        assertEquals(scope.scopeId, (organized.single() as AiLimbsOrganizedSearchItem.Scope).scope.scopeId)
+    }
+
+    @Test fun allCatalogCandidatesReachOrganizerWhileLegacyCatalogSearchStaysBounded() {
+        val entries = (1..40).map { index -> ToolCatalogEntry(
+            "plugin.test.scoring_$index.command", "共同操作", "共同操作", emptyList(), ToolCatalogSourceKind.PACKAGE) }
+        val all = ToolCapabilityCatalog.searchAll(ToolCapabilityCatalog.prepareIndex(entries), "共同操作")
+        assertEquals(40, all.matches.size)
+        assertEquals(20, ToolCapabilityCatalog.searchDetailed(entries, "共同操作", 100).matches.size)
+    }
+
+    @Test fun exactLeafCannotFoldEvenWhenOtherScoresAreClose() {
+        val matches = listOf(match("$owner.command", 500, true), match("$owner.status", 490),
+            match("$owner.session", 480))
+        val organized = organize("$owner.command", matches)
+        assertTrue(organized.first() is AiLimbsOrganizedSearchItem.Capability)
+        assertFalse(organized.any { it is AiLimbsOrganizedSearchItem.Scope })
+    }
+
 }

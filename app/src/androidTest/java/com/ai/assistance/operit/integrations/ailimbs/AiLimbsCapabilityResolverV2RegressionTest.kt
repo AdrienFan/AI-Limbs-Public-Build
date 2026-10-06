@@ -123,7 +123,7 @@ class AiLimbsCapabilityResolverV2RegressionTest {
     }
 
     @Test
-    fun limitAndLowConfidenceLiveDiscovery_preserveV2Contract() = runBlocking {
+    fun limitAndLowConfidence_preserveBoundsWithoutRescan() = runBlocking {
         val handles = (1..4).map { index ->
             registerCapability(
                 capabilityId = "plugin.test.unknown_resolver_baseline.limit_$index",
@@ -145,6 +145,7 @@ class AiLimbsCapabilityResolverV2RegressionTest {
             "zzzzzzzz qqqqqqqq no_such_capability",
             8
         )
-        assertTrue(lowConfidence.getBoolean("live_discovery"))
+        assertFalse(lowConfidence.getBoolean("live_discovery"))
+        assertTrue(lowConfidence.getBoolean("low_confidence"))
     }
 }

@@ -3390,13 +3390,33 @@ private constructor(private val context: Context, private val aiToolHandler: AIT
         }
     }
 
+    internal fun getPackageCatalogSnapshot(forceRefresh: Boolean): Map<String, ToolPackage> {
+        val packages = getAvailablePackages(forceRefresh).toMap()
+        val conditions = if (packages.values.any { it.states.isNotEmpty() }) {
+            buildConditionCapabilitiesSnapshot()
+        } else {
+            emptyMap()
+        }
+        return packages.mapValues { (_, toolPackage) -> selectToolPackageState(toolPackage, conditions) }
+    }
+
     private fun selectToolPackageState(toolPackage: ToolPackage): ToolPackage {
         if (toolPackage.states.isEmpty()) {
             activePackageStateIds.remove(toolPackage.name)
             return toolPackage
         }
+        return selectToolPackageState(toolPackage, buildConditionCapabilitiesSnapshot())
+    }
 
-        val capabilities = buildConditionCapabilitiesSnapshot()
+    private fun selectToolPackageState(
+        toolPackage: ToolPackage,
+        capabilities: Map<String, Any?>
+    ): ToolPackage {
+        if (toolPackage.states.isEmpty()) {
+            activePackageStateIds.remove(toolPackage.name)
+            return toolPackage
+        }
+
         val selectedState = toolPackage.states.firstOrNull { state ->
             ConditionEvaluator.evaluate(state.condition, capabilities)
         }

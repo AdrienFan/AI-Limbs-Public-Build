@@ -10,6 +10,7 @@ on:
         type: choice
         options:
           - assembleDebug
+          - assembleDebugAndComparison
           - ':app:assembleNightly'
           - ':app:assembleClone'
           - ':app:bundleRelease'
@@ -235,6 +236,9 @@ jobs:
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsDynamicCapabilityRegistryTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilitySearchScopeContractTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsNamedScopePriorityTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilitySearchPlannerTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsSearchIndexCacheTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsSearchGuidanceTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityUsagePolicyTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityDiscoveryProtocolTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRolePolicyTest \
@@ -268,7 +272,11 @@ jobs:
             *) echo "Unsupported workflow event: $EVENT_NAME" >&2; exit 2 ;;
           esac
           chmod +x ./gradlew
-          ./gradlew "$gradle_task" --stacktrace --no-daemon
+          case "$gradle_task" in
+            assembleDebugAndComparison)
+              ./gradlew :app:assembleDebug :app:assembleClone --stacktrace --no-daemon ;;
+            *) ./gradlew "$gradle_task" --stacktrace --no-daemon ;;
+          esac
 
       - name: Upload Android reports
         if: always()

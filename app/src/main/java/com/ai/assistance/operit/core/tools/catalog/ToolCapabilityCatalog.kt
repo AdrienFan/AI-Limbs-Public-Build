@@ -82,6 +82,30 @@ object ToolCapabilityCatalog {
     private const val MIN_SEARCH_SCORE = 20
     private const val LOW_CONFIDENCE_SCORE = 70
 
+    internal data class PreparedEntry(
+        val entry: ToolCatalogEntry,
+        val displayName: String,
+        val targetName: String,
+        val description: String,
+        val parameterNames: String,
+        val parameterDescriptions: String,
+        val metadata: String,
+        val displayTokens: Set<String>,
+        val targetTokens: Set<String>,
+        val descriptionTokens: Set<String>,
+        val parameterNameTokens: Set<String>,
+        val parameterDescriptionTokens: Set<String>,
+        val metadataTokens: Set<String>,
+        val keywords: List<Pair<String, Set<String>>>,
+        val exactMetadata: Set<String>,
+        val exactParameterNames: Set<String>
+    )
+
+    internal class PreparedIndex(val documents: List<PreparedEntry>)
+
+    internal fun prepareIndex(catalog: List<ToolCatalogEntry>): PreparedIndex =
+        PreparedIndex(catalog.map(::prepareEntry))
+
     private data class SearchScore(
         val score: Int,
         val matchedTerms: Int,
@@ -96,6 +120,151 @@ object ToolCapabilityCatalog {
         useEnglish: Boolean,
         includeDisabledPackages: Boolean = false,
         forceRefreshPackages: Boolean = false,
+        includeAlternateLanguageMetadata: Boolean = false,
+        phaseTimings: MutableMap<String, Long>? = null
+    ): List<ToolCatalogEntry> {
+        var phaseStarted = System.nanoTime()
+        fun finishPhase(name: String) {
+            phaseTimings?.put(name, (System.nanoTime() - phaseStarted) / 1_000_000)
+            phaseStarted = System.nanoTime()
+        }
+        val entries = LinkedHashMap<String, ToolCatalogEntry>()
+        buildHostCatalog(context, roleCardToolAccess, useEnglish, includeAlternateLanguageMetadata)
+            .forEach { entries[entryKey(it)] = it }
+        finishPhase("host")
+
+        // ToolPkg is an optional discovery source. A broken package/cache/runtime must never make
+        // native/core capabilities such as shell, press_key or plugin ingress undiscoverable.
+        val packageDiscovery = runCatching {
+            packageManager.getPackageCatalogSnapshot(forceRefreshPackages)
+        }.onFailure { error ->
+            AppLogger.w(
+                TAG,
+                "Tool package catalog unavailable; continuing with native/core capabilities",
+                error
+            )
+        }
+        val availablePackages = packageDiscovery.getOrDefault(emptyMap())
+        val packageNames: Collection<String> =
+            if (packageDiscovery.isFailure) {
+                emptyList()
+            } else if (includeDisabledPackages) {
+                availablePackages.keys
+            } else {
+                runCatching { packageManager.getEnabledPackageNames() }
+                    .onFailure { error ->
+                        AppLogger.w(TAG, "Enabled ToolPkg discovery unavailable; skipping package entries", error)
+                    }
+                    .getOrDefault(emptyList())
+            }
+
+        packageNames
+            .asSequence()
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .filter { !packageManager.isToolPkgContainer(it) }
+            .filter { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
+            .distinct()
+            .forEach { packageName ->
+                val toolPackage =
+                    availablePackages[packageName] ?: return@forEach
+                val enabled = packageManager.isPackageEnabled(packageName)
+                if (toolPackage.tools.isEmpty()) {
+                    addActivationEntry(
+                        entries = entries,
+                        displayName = packageName,
+                        description = toolPackage.description.resolve(context),
+                        keywordTag = "package",
+                        sourceKind = ToolCatalogSourceKind.ACTIVATION,
+                        sourceEnabled = enabled
+                    )
+                } else {
+                    addPackageToolEntries(
+                        context = context,
+                        entries = entries,
+                        prefix = packageName,
+                        toolPackage = toolPackage,
+                        sourceEnabled = enabled
+                    )
+                }
+            }
+
+        finishPhase("packages")
+        val skillPackages =
+            runCatching { SkillRepository.getInstance(context).getAiVisibleSkillPackages() }
+                .onFailure { error ->
+                    AppLogger.w(TAG, "Skill catalog unavailable; continuing without skill entries", error)
+                }
+                .getOrDefault(emptyMap())
+                .filterKeys { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
+
+        skillPackages.forEach { (skillName, skillPackage) ->
+            addActivationEntry(
+                entries = entries,
+                displayName = skillName,
+                description = skillPackage.description,
+                keywordTag = "skill",
+                sourceKind = ToolCatalogSourceKind.ACTIVATION,
+                sourceEnabled = true
+            )
+        }
+
+        finishPhase("skills")
+        val mcpServers =
+            if (packageDiscovery.isFailure) {
+                emptyMap()
+            } else {
+                runCatching { packageManager.getAvailableServerPackages() }
+                    .onFailure { error ->
+                        AppLogger.w(TAG, "MCP catalog unavailable; continuing without MCP entries", error)
+                    }
+                    .getOrDefault(emptyMap())
+            }.filterKeys { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
+        val mcpLocalServer =
+            if (mcpServers.isEmpty()) {
+                null
+            } else {
+                runCatching { MCPLocalServer.getInstance(context) }
+                    .onFailure { error ->
+                        AppLogger.w(TAG, "MCP local catalog unavailable; continuing without MCP entries", error)
+                    }
+                    .getOrNull()
+            }
+
+        if (mcpLocalServer != null) {
+            mcpServers.forEach { (serverName, serverConfig) ->
+                val enabled = mcpLocalServer.isServerEnabled(serverName)
+                val cachedTools = mcpLocalServer.getCachedTools(serverName).orEmpty()
+                if (cachedTools.isEmpty()) {
+                    addActivationEntry(
+                        entries = entries,
+                        displayName = serverName,
+                        description = serverConfig.description,
+                        keywordTag = "mcp",
+                        sourceKind = ToolCatalogSourceKind.ACTIVATION,
+                        sourceEnabled = enabled
+                    )
+                    return@forEach
+                }
+
+                addCachedMcpToolEntries(
+                    entries = entries,
+                    serverName = serverName,
+                    serverDescription = serverConfig.description,
+                    cachedTools = cachedTools,
+                    sourceEnabled = enabled
+                )
+            }
+        }
+
+        finishPhase("mcp")
+        return entries.values.toList()
+    }
+
+    internal fun buildHostCatalog(
+        context: Context,
+        roleCardToolAccess: ResolvedCharacterCardToolAccess? = null,
+        useEnglish: Boolean,
         includeAlternateLanguageMetadata: Boolean = false
     ): List<ToolCatalogEntry> {
         val categories = buildBuiltinAndInternalCategories(useEnglish)
@@ -146,130 +315,6 @@ object ToolCapabilityCatalog {
             roleCardToolAccess = roleCardToolAccess
         )
 
-        // ToolPkg is an optional discovery source. A broken package/cache/runtime must never make
-        // native/core capabilities such as shell, press_key or plugin ingress undiscoverable.
-        val packageDiscovery = runCatching {
-            packageManager.getAvailablePackages(forceRefreshPackages)
-        }.onFailure { error ->
-            AppLogger.w(
-                TAG,
-                "Tool package catalog unavailable; continuing with native/core capabilities",
-                error
-            )
-        }
-        val availablePackages = packageDiscovery.getOrDefault(emptyMap())
-        val packageNames: Collection<String> =
-            if (packageDiscovery.isFailure) {
-                emptyList()
-            } else if (includeDisabledPackages) {
-                availablePackages.keys
-            } else {
-                runCatching { packageManager.getEnabledPackageNames() }
-                    .onFailure { error ->
-                        AppLogger.w(TAG, "Enabled ToolPkg discovery unavailable; skipping package entries", error)
-                    }
-                    .getOrDefault(emptyList())
-            }
-
-        packageNames
-            .asSequence()
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .filter { !packageManager.isToolPkgContainer(it) }
-            .filter { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
-            .distinct()
-            .forEach { packageName ->
-                val toolPackage =
-                    packageManager.getEffectivePackageTools(packageName)
-                        ?: availablePackages[packageName]
-                        ?: return@forEach
-                val enabled = packageManager.isPackageEnabled(packageName)
-                if (toolPackage.tools.isEmpty()) {
-                    addActivationEntry(
-                        entries = entries,
-                        displayName = packageName,
-                        description = toolPackage.description.resolve(context),
-                        keywordTag = "package",
-                        sourceKind = ToolCatalogSourceKind.ACTIVATION,
-                        sourceEnabled = enabled
-                    )
-                } else {
-                    addPackageToolEntries(
-                        context = context,
-                        entries = entries,
-                        prefix = packageName,
-                        toolPackage = toolPackage,
-                        sourceEnabled = enabled
-                    )
-                }
-            }
-
-        val skillPackages =
-            runCatching { SkillRepository.getInstance(context).getAiVisibleSkillPackages() }
-                .onFailure { error ->
-                    AppLogger.w(TAG, "Skill catalog unavailable; continuing without skill entries", error)
-                }
-                .getOrDefault(emptyMap())
-                .filterKeys { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
-
-        skillPackages.forEach { (skillName, skillPackage) ->
-            addActivationEntry(
-                entries = entries,
-                displayName = skillName,
-                description = skillPackage.description,
-                keywordTag = "skill",
-                sourceKind = ToolCatalogSourceKind.ACTIVATION,
-                sourceEnabled = true
-            )
-        }
-
-        val mcpServers =
-            if (packageDiscovery.isFailure) {
-                emptyMap()
-            } else {
-                runCatching { packageManager.getAvailableServerPackages() }
-                    .onFailure { error ->
-                        AppLogger.w(TAG, "MCP catalog unavailable; continuing without MCP entries", error)
-                    }
-                    .getOrDefault(emptyMap())
-            }.filterKeys { roleCardToolAccess?.isExternalSourceAllowed(it) != false }
-        val mcpLocalServer =
-            if (mcpServers.isEmpty()) {
-                null
-            } else {
-                runCatching { MCPLocalServer.getInstance(context) }
-                    .onFailure { error ->
-                        AppLogger.w(TAG, "MCP local catalog unavailable; continuing without MCP entries", error)
-                    }
-                    .getOrNull()
-            }
-
-        if (mcpLocalServer != null) {
-            mcpServers.forEach { (serverName, serverConfig) ->
-                val enabled = mcpLocalServer.isServerEnabled(serverName)
-                val cachedTools = mcpLocalServer.getCachedTools(serverName).orEmpty()
-                if (cachedTools.isEmpty()) {
-                    addActivationEntry(
-                        entries = entries,
-                        displayName = serverName,
-                        description = serverConfig.description,
-                        keywordTag = "mcp",
-                        sourceKind = ToolCatalogSourceKind.ACTIVATION,
-                        sourceEnabled = enabled
-                    )
-                    return@forEach
-                }
-
-                addCachedMcpToolEntries(
-                    entries = entries,
-                    serverName = serverName,
-                    serverDescription = serverConfig.description,
-                    cachedTools = cachedTools,
-                    sourceEnabled = enabled
-                )
-            }
-        }
-
         return entries.values.toList()
     }
 
@@ -280,6 +325,16 @@ object ToolCapabilityCatalog {
         catalog: List<ToolCatalogEntry>,
         query: String,
         limit: Int
+    ): ToolCatalogSearchResult = searchPrepared(prepareIndex(catalog), query, limit.coerceIn(1, 20))
+
+    // The resolver applies its limit after owner routing/grouping; other consumers keep Top 20.
+    internal fun searchAll(index: PreparedIndex, query: String): ToolCatalogSearchResult =
+        searchPrepared(index, query, null)
+
+    private fun searchPrepared(
+        index: PreparedIndex,
+        query: String,
+        limit: Int?
     ): ToolCatalogSearchResult {
         val normalizedQuery = normalize(query)
         if (normalizedQuery.isBlank()) {
@@ -290,9 +345,11 @@ object ToolCapabilityCatalog {
             return ToolCatalogSearchResult(emptyList(), lowConfidence = true)
         }
 
-        val matches = catalog
-            .mapNotNull { entry ->
-                val scored = scoreEntry(entry, normalizedQuery, terms)
+        val tokenMatches = HashMap<Pair<String, String>, Boolean>()
+        val matches = index.documents
+            .mapNotNull { document ->
+                val entry = document.entry
+                val scored = scoreEntry(document, normalizedQuery, terms, tokenMatches)
                 if (!isRelevant(scored)) {
                     null
                 } else {
@@ -311,7 +368,7 @@ object ToolCapabilityCatalog {
                     .thenBy { it.entry.targetToolName }
                     .thenBy { it.entry.displayName }
             )
-            .take(limit.coerceIn(1, 20))
+            .let { matches -> if (limit == null) matches else matches.take(limit) }
 
         val top = matches.firstOrNull()
         val lowConfidence = top == null ||
@@ -540,11 +597,7 @@ object ToolCapabilityCatalog {
         return parameters
     }
 
-    private fun scoreEntry(
-        entry: ToolCatalogEntry,
-        normalizedQuery: String,
-        terms: List<String>
-    ): SearchScore {
+    private fun prepareEntry(entry: ToolCatalogEntry): PreparedEntry {
         val displayName = normalize(entry.displayName)
         val targetName = normalize(entry.targetToolName)
         val description = normalize(entry.description)
@@ -567,6 +620,33 @@ object ToolCapabilityCatalog {
         val metadataTokens =
             (entry.searchMetadata + listOfNotNull(entry.sourceName)).flatMap(::tokenize).toSet()
 
+        return PreparedEntry(entry, displayName, targetName, description, parameterNames,
+            parameterDescriptions, metadata, displayTokens, targetTokens, descriptionTokens,
+            parameterNameTokens, parameterDescriptionTokens, metadataTokens,
+            entry.keywords.map { normalize(it) to tokenize(it).toSet() },
+            entry.searchMetadata.map(::normalize).toSet(),
+            entry.parameters.map { normalize(it.name) }.toSet())
+    }
+
+    private fun scoreEntry(
+        document: PreparedEntry,
+        normalizedQuery: String,
+        terms: List<String>,
+        tokenMatches: MutableMap<Pair<String, String>, Boolean>
+    ): SearchScore {
+        val displayName = document.displayName
+        val targetName = document.targetName
+        val description = document.description
+        val parameterNames = document.parameterNames
+        val parameterDescriptions = document.parameterDescriptions
+        val metadata = document.metadata
+        val displayTokens = document.displayTokens
+        val targetTokens = document.targetTokens
+        val descriptionTokens = document.descriptionTokens
+        val parameterNameTokens = document.parameterNameTokens
+        val parameterDescriptionTokens = document.parameterDescriptionTokens
+        val metadataTokens = document.metadataTokens
+
         var score = 0
         var strongIdentityMatch = false
         if (displayName == normalizedQuery || targetName == normalizedQuery) {
@@ -583,49 +663,45 @@ object ToolCapabilityCatalog {
             if (parameterDescriptions.contains(normalizedQuery)) score += 45
             if (metadata.contains(normalizedQuery)) score += 55
         }
-        if (entry.keywords.any {
-                normalize(it) == normalizedQuery && normalize(it) !in GENERIC_KEYWORDS
+        if (document.keywords.any { (keyword, _) ->
+                keyword == normalizedQuery && keyword !in GENERIC_KEYWORDS
             }
         ) {
             score += 100
         }
-        if (entry.searchMetadata.any { normalize(it) == normalizedQuery }) score += 90
-        if (entry.parameters.any { normalize(it.name) == normalizedQuery }) score += 70
+        if (normalizedQuery in document.exactMetadata) score += 90
+        if (normalizedQuery in document.exactParameterNames) score += 70
 
         var matchedTerms = 0
         terms.forEach { term ->
             var termMatched = false
-            if (matchesTerm(displayName, displayTokens, term) ||
-                matchesTerm(targetName, targetTokens, term)
+            if (matchesTerm(displayName, displayTokens, term, tokenMatches) ||
+                matchesTerm(targetName, targetTokens, term, tokenMatches)
             ) {
                 score += 55
                 termMatched = true
             }
 
-            val keywordWeight = entry.keywords
-                .filter { keyword ->
-                    matchesTerm(normalize(keyword), tokenize(keyword).toSet(), term)
-                }
-                .maxOfOrNull { keyword ->
-                    if (normalize(keyword) in GENERIC_KEYWORDS) 4 else 30
-                } ?: 0
+            val keywordWeight = document.keywords
+                .filter { (keyword, tokens) -> matchesTerm(keyword, tokens, term, tokenMatches) }
+                .maxOfOrNull { (keyword, _) -> if (keyword in GENERIC_KEYWORDS) 4 else 30 } ?: 0
             if (keywordWeight > 0) {
                 score += keywordWeight
                 termMatched = true
             }
-            if (matchesTerm(description, descriptionTokens, term)) {
+            if (matchesTerm(description, descriptionTokens, term, tokenMatches)) {
                 score += 18
                 termMatched = true
             }
-            if (matchesTerm(parameterNames, parameterNameTokens, term)) {
+            if (matchesTerm(parameterNames, parameterNameTokens, term, tokenMatches)) {
                 score += 24
                 termMatched = true
             }
-            if (matchesTerm(parameterDescriptions, parameterDescriptionTokens, term)) {
+            if (matchesTerm(parameterDescriptions, parameterDescriptionTokens, term, tokenMatches)) {
                 score += 10
                 termMatched = true
             }
-            if (matchesTerm(metadata, metadataTokens, term)) {
+            if (matchesTerm(metadata, metadataTokens, term, tokenMatches)) {
                 score += 22
                 termMatched = true
             }
@@ -650,13 +726,16 @@ object ToolCapabilityCatalog {
     private fun matchesTerm(
         normalizedField: String,
         fieldTokens: Set<String>,
-        term: String
+        term: String,
+        tokenMatches: MutableMap<Pair<String, String>, Boolean>
     ): Boolean {
         if (term.any(::isCommonHanCharacter)) {
             return normalizedField.contains(term)
         }
         if (fieldTokens.contains(term)) return true
-        return fieldTokens.any { candidate -> fuzzyTokenMatch(candidate, term) }
+        return fieldTokens.any { candidate ->
+            tokenMatches.getOrPut(candidate to term) { fuzzyTokenMatch(candidate, term) }
+        }
     }
 
     private fun fuzzyTokenMatch(candidate: String, query: String): Boolean {

@@ -21,7 +21,7 @@ object AiLimbsCoreCapabilityRegistry {
             entry(
                         name = "capability.search",
                         displayName = "AI Limbs Capability Resolver · 能力搜索",
-                        description = "Search the current AI Limbs capability catalog without executing a capability.",
+                        description = "Search current capability metadata without execution. Exact IDs and named plugin owners route directly; otherwise search across sources. Follow next_action; items preserves combined capability/scope ranking.",
                         parameters = listOf(
                             ToolParameterSchema("query", "string", "Capability intent or known tool or module name", true),
                             ToolParameterSchema(
@@ -30,7 +30,7 @@ object AiLimbsCoreCapabilityRegistry {
                                 "Optional dynamic capability scope ID such as plugin:plugin.example",
                                 false
                             ),
-                            ToolParameterSchema("limit", "integer", "Maximum result count from 1 to 20", false, "8")
+                            ToolParameterSchema("limit", "integer", "Maximum combined capability/scope result count from 1 to 20", false, "8")
                         ),
                         keywords = listOf("能力", "查找工具", "resolver", "capability resolver", "AI Limbs Core")
                     )

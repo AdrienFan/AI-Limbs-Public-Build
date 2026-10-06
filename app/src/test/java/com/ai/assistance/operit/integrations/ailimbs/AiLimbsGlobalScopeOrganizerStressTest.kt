@@ -145,7 +145,7 @@ class AiLimbsGlobalScopeOrganizerStressTest {
                 )
             }
 
-        // Global Resolver v3 intentionally analyzes at most the old Top 20 leaf candidates.
+        // A bounded fixture still folds correctly; production now supplies all relevant candidates.
         val topTwenty =
             owners.take(5).flatMap { owner ->
                 (1..4).map { index ->
