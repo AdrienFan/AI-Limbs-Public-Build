@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.12
+# AI Limbs-ChatGPT 0.0.13
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -86,3 +86,7 @@ The panel supports Runtime Key rotation without deleting the tunnel or its execu
 The existing tunnel wire version `2026-08-25` and `/v1/tunnels/...` endpoints are retained. Wire version and MCP version are separate. Supported initialize versions are explicitly listed through `2025-11-25`; unimplemented versions are rejected rather than echoed. MCP Events, modern `server/discover`, subscriptions and domain-specific task APIs are not advertised in this release.
 
 The cloud Android workflow runs `:chatgpt-native-probe-extension:testDebugUnitTest`, builds the APK and signs the `.ailx` with the existing signing secret. Tests cover result reconstruction, media delivery, policy errors, expiry, tunnel isolation, durable receipts, disk failure, concurrent controls, duplicate delivery, cancellation and interrupted-process recovery. JVM tests simulate the tunnel with MockWebServer; actual Android Keystore, screen-off survival and ChatGPT catalog refresh still require device validation after installation. Build and test locally only when explicitly authorized by the project workflow.
+
+## 0.0.13 capability ID normalization
+
+The gateway now learns `capability_id -> invoke_id` mappings from live search/describe results. `ai_limbs_capability_invoke` accepts catalog capability IDs such as `native.list_files`, resolves unseen IDs through `capability.describe`, and caches both the catalog ID and exact invoke ID for 60 seconds. Resolution happens before business execution is marked started, so resolver failures are not misclassified as uncertain domain execution.

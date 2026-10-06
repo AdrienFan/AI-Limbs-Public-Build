@@ -1,6 +1,7 @@
 package com.ai.limbs.extensions.chatgptprobe
 
 import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
+import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
@@ -220,7 +221,7 @@ class GatewayEngineTest {
             fixture.commands.add(toolCommand("invoke", 302))
             eventually { fixture.responses.size == 3 }
             val init = fixture.responses.first { it.optString("request_id") == "init" }.getJSONObject("resp_json").getJSONObject("result")
-            assertEquals("0.0.12", init.getJSONObject("serverInfo").getString("version"))
+            assertEquals("0.0.13", init.getJSONObject("serverInfo").getString("version"))
             assertFalse(init.getJSONObject("capabilities").getJSONObject("tools").getBoolean("listChanged"))
             assertTrue(init.getString("instructions").contains("new conversation"))
             val tools = fixture.responses.first { it.optString("request_id") == "catalog" }.getJSONObject("resp_json")
@@ -326,6 +327,67 @@ class GatewayEngineTest {
         }
     }
 
+    @Test fun searchPrimesCapabilityIdToInvokeIdMappingWithoutExtraDescribe() = runBlocking {
+        Fixture().use { fixture ->
+            val business = AtomicInteger()
+            fixture.start { tool, _ ->
+                when (tool) {
+                    "capability.search" -> JSONObject().put("success", true).put("results", JSONArray().put(
+                        JSONObject().put("capability_id", "native.list_files").put("invoke_id", "list_files")
+                    ))
+                    "list_files" -> { business.incrementAndGet(); JSONObject().put("success", true) }
+                    else -> error("unexpected tool: $tool")
+                }
+            }
+            fixture.commands.add(gatewayToolCommand("search-map", 500, "ai_limbs_capability_search",
+                JSONObject().put("query", "files")))
+            eventually { fixture.responses.any { it.optString("request_id") == "search-map" } }
+            fixture.commands.add(gatewayToolCommand("invoke-map", 501, "ai_limbs_capability_invoke",
+                JSONObject().put("capability_id", "native.list_files").put("parameters", JSONObject())))
+            eventually { fixture.responses.any { it.optString("request_id") == "invoke-map" } }
+            assertEquals(1, business.get())
+            assertEquals(0, fixture.describeCalls.get())
+        }
+    }
+
+    @Test fun directCapabilityIdResolvesOnceAndCachesBothIds() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.invokeAliases["native.list_files"] = "list_files"
+            val tools = ConcurrentLinkedQueue<String>()
+            fixture.start { tool, _ -> tools.add(tool); JSONObject().put("success", true) }
+            listOf("native.list_files", "native.list_files", "list_files").forEachIndexed { index, id ->
+                fixture.commands.add(gatewayToolCommand("resolve-$index", 510 + index, "ai_limbs_capability_invoke",
+                    JSONObject().put("capability_id", id).put("parameters", JSONObject())))
+            }
+            eventually { fixture.responses.count { it.optString("request_id").startsWith("resolve-") } == 3 }
+            assertEquals(listOf("list_files", "list_files", "list_files"), tools.toList())
+            assertEquals(1, fixture.describeCalls.get())
+        }
+    }
+
+    @Test fun resolverFailureIsNotReportedAsUncertainBusinessExecution() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.describeFailures["native.broken"] = "resolver unavailable"
+            val business = AtomicInteger()
+            fixture.start { _, _ -> business.incrementAndGet(); JSONObject().put("success", true) }
+            fixture.commands.add(gatewayToolCommand("resolve-failure", 520, "ai_limbs_capability_invoke",
+                JSONObject().put("capability_id", "native.broken").put("parameters", JSONObject())))
+            eventually { fixture.responses.any { it.optString("request_id") == "resolve-failure" } }
+            val result = fixture.responses.first { it.optString("request_id") == "resolve-failure" }
+                .getJSONObject("resp_json").getJSONObject("result")
+            assertTrue(result.getBoolean("isError"))
+            val details = result.getJSONObject("structuredContent")
+            assertEquals("RESOLUTION_FAILED", details.getString("gateway_error_code"))
+            assertEquals("NOT_STARTED", details.getString("execution_state"))
+            assertEquals(0, business.get())
+            assertEquals(0L, fixture.engine.state.value.access.capabilityInvokeCount)
+            assertEquals(0L, fixture.engine.state.value.access.capabilityUncertainCount)
+        }
+    }
+
+    private fun gatewayToolCommand(requestId: String, rpcId: Int, name: String, arguments: JSONObject): JSONObject =
+        rpcCommand(requestId, rpcId, "tools/call", JSONObject().put("name", name).put("arguments", arguments))
+
     private suspend fun eventually(condition: () -> Boolean) = withTimeout(10_000L) {
         while (!condition()) delay(20L)
     }
@@ -345,6 +407,9 @@ class GatewayEngineTest {
         val commands = ConcurrentLinkedQueue<JSONObject>()
         val responses = ConcurrentLinkedQueue<JSONObject>()
         val postAttempts = AtomicInteger()
+        val describeCalls = AtomicInteger()
+        val invokeAliases = ConcurrentHashMap<String, String>()
+        val describeFailures = ConcurrentHashMap<String, String>()
         val store = MemoryGatewayStore()
         private val failPost = AtomicBoolean(failFirstPost)
         val baseUrl: String
@@ -376,7 +441,16 @@ class GatewayEngineTest {
                 override val transportId = "test"
                 override val providerId = "test"
                 override fun beginSession() = Unit
-                override suspend fun invoke(tool: String, args: JSONObject) = handler(tool, args)
+                override suspend fun invoke(tool: String, args: JSONObject): JSONObject {
+                    if (tool == "capability.describe") {
+                        describeCalls.incrementAndGet()
+                        val requested = args.getString("capability_id")
+                        describeFailures[requested]?.let { throw java.io.IOException(it) }
+                        return JSONObject().put("success", true).put("capability_id", requested)
+                            .put("invoke_id", invokeAliases[requested] ?: requested)
+                    }
+                    return handler(tool, args)
+                }
             })
             engine.start()
         }

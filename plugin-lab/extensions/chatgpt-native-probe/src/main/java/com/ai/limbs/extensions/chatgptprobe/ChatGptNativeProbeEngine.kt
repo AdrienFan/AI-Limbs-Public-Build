@@ -87,7 +87,7 @@ internal data class McpGatewayState(
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.12"
+        const val PROBE_VERSION = "0.0.13"
     }
 }
 
@@ -115,6 +115,8 @@ internal class ChatGptNativeProbeEngine(
     private val admissionLock = Any()
     private val receiptJournal = lazy { GatewayReceipts(encryptedStore) }
     private val receipts by receiptJournal
+    private data class InvokeIdEntry(val invokeId: String, val observedAtMs: Long)
+    private val invokeIds = ConcurrentHashMap<String, InvokeIdEntry>()
     private val resultAdapters = ConcurrentHashMap<String, GatewayResults>()
     private fun results(identity: String): GatewayResults = resultAdapters.computeIfAbsent(identity) {
         if (imageValidator == null) GatewayResults(encryptedStore, binding = identity)
@@ -155,6 +157,7 @@ internal class ChatGptNativeProbeEngine(
         encryptedStore.write("storage_probe", "{}")
         check(encryptedStore.read("storage_probe") == "{}") { "Encrypted result storage verification failed" }
         encryptedStore.delete("storage_probe")
+        invokeIds.clear()
         mutableState.value = mutableState.value.copy(
             running = true,
             phase = "STARTING",
@@ -540,7 +543,7 @@ internal class ChatGptNativeProbeEngine(
         .put(
             tool(
                 name = TOOL_INVOKE,
-                description = "Invoke any current AI Limbs capability by exact capability ID. The request is passed unchanged into AI Limbs; the Host execution policy remains authoritative and may ALLOW, ASK, FORBID, or require prerequisites.",
+                description = "Invoke any current AI Limbs capability by catalog capability ID or exact invoke ID. Catalog IDs are resolved through the live AI Limbs resolver; Host execution policy remains authoritative.",
                 inputSchema = JSONObject()
                     .put("type", "object")
                     .put(
@@ -551,7 +554,7 @@ internal class ChatGptNativeProbeEngine(
                                 JSONObject()
                                     .put("type", "string")
                                     .put("minLength", 1)
-                                    .put("description", "Exact capability invocation ID")
+                                    .put("description", "Capability ID returned by search, or an exact invoke ID")
                             )
                             .put("timeout_ms", JSONObject().put("type", "integer").put("minimum", 1000).put("maximum", 1800000).put("default", 300000)
                                 .put("description", "Gateway execution deadline; does not undo effects already applied. Prefer domain background tasks for long operations."))
@@ -640,7 +643,7 @@ internal class ChatGptNativeProbeEngine(
                     }
                     executionStarted = true
                     recordAdvertisedToolCall(epoch)
-                    invokeAiLimbs("capability.search", request)
+                    invokeAiLimbs("capability.search", request).also(::rememberInvokeIds)
                 }
 
                 TOOL_DESCRIBE -> {
@@ -651,7 +654,7 @@ internal class ChatGptNativeProbeEngine(
                     invokeAiLimbs(
                         "capability.describe",
                         JSONObject().put("capability_id", capabilityId)
-                    )
+                    ).also(::rememberInvokeIds)
                 }
 
                 TOOL_INVOKE -> {
@@ -663,10 +666,11 @@ internal class ChatGptNativeProbeEngine(
                     }
                     require(!arguments.has("parameters") || arguments.opt("parameters") is JSONObject) { "parameters must be an object" }
                     val parameters = arguments.optJSONObject("parameters") ?: JSONObject()
-                    executionStarted = true
                     recordAdvertisedToolCall(epoch)
+                    val invokeId = resolveInvokeId(capabilityId)
+                    executionStarted = true
                     update(epoch) { it.copy(access = it.access.copy(capabilityInvokeCount = it.access.capabilityInvokeCount + 1)) }
-                    invokeAiLimbs(capabilityId, JSONObject(parameters.toString()))
+                    invokeAiLimbs(invokeId, JSONObject(parameters.toString()))
                 }
 
                 else -> return unadvertisedToolError(id)
@@ -714,6 +718,22 @@ internal class ChatGptNativeProbeEngine(
         } catch (error: Exception) {
             val received = receivedInvokeResult
             if (received != null) return receivedResultDeliveryError(id, received, epoch)
+            if (name == TOOL_INVOKE && !executionStarted) {
+                val safeMessage = "Capability ID resolution failed: ${error.javaClass.simpleName}; no business capability was started"
+                return rpcSuccess(
+                    id,
+                    toolError(
+                        message = safeMessage,
+                        structured = JSONObject()
+                            .put("success", false)
+                            .put("bridge_error", safeMessage)
+                            .put("gateway_error_code", "RESOLUTION_FAILED")
+                            .put("execution_state", "NOT_STARTED")
+                            .put("automatic_reexecution", false)
+                            .put("next_action", "Search or describe the capability again, then retry explicitly.")
+                    )
+                )
+            }
             if (executionStarted && name == TOOL_INVOKE) recordUncertainInvoke(epoch)
             val safeMessage = "Capability invocation failed: ${error.javaClass.simpleName}; inspect domain state before retrying"
             rpcSuccess(
@@ -763,6 +783,41 @@ internal class ChatGptNativeProbeEngine(
                 .put("tool_catalog_sha256", gatewayHash(tools.toString()))
                 .put("metadata_refresh_steps", JSONArray(GatewayAdmission.REFRESH_STEPS))
                 .put("documentation_url", GatewayAdmission.DOCUMENTATION_URL)) }
+    }
+
+    private fun rememberInvokeIds(result: JSONObject) {
+        rememberInvokeId(result)
+        result.optJSONArray("results")?.let { items ->
+            for (index in 0 until items.length()) items.optJSONObject(index)?.let(::rememberInvokeId)
+        }
+    }
+
+    private fun rememberInvokeId(item: JSONObject) {
+        if (item.has("success") && !item.optBoolean("success", true)) return
+        val capabilityId = item.optString("capability_id").trim()
+        val invokeId = item.optString("invoke_id").trim()
+        if (capabilityId.isBlank() || invokeId.isBlank()) return
+        val now = System.currentTimeMillis()
+        val entry = InvokeIdEntry(invokeId, now)
+        invokeIds[capabilityId] = entry
+        invokeIds[invokeId] = entry
+    }
+
+    private fun cachedInvokeId(id: String): String? {
+        val entry = invokeIds[id] ?: return null
+        if (System.currentTimeMillis() - entry.observedAtMs <= INVOKE_ID_CACHE_TTL_MS) return entry.invokeId
+        invokeIds.remove(id, entry)
+        return null
+    }
+
+    private suspend fun resolveInvokeId(requestedId: String): String {
+        cachedInvokeId(requestedId)?.let { return it }
+        val descriptor = invokeAiLimbs(
+            "capability.describe",
+            JSONObject().put("capability_id", requestedId)
+        )
+        rememberInvokeIds(descriptor)
+        return cachedInvokeId(requestedId) ?: requestedId
     }
 
     private suspend fun invokeAiLimbs(
@@ -869,6 +924,7 @@ internal class ChatGptNativeProbeEngine(
         private const val POLL_TIMEOUT_MS = 20_000L
         private const val INITIAL_RETRY_MS = 1_000L
         private const val MAX_RETRY_MS = 15_000L
+        private const val INVOKE_ID_CACHE_TTL_MS = 60_000L
         private val JSON_MEDIA_TYPE = "application/json".toMediaType()
     }
 }
