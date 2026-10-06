@@ -1319,6 +1319,7 @@ class TerminalManager private constructor(
                 "laner-net.py",
                 "laner-direct.py",
                 "ai_limbs_direct_profile.sh",
+                "ai_limbs_install_direct.sh",
                 "proxychains-arm64.bin",
                 "proxychains-copyright.txt",
                 "proxychains-GPL-2.txt",
@@ -1714,8 +1715,9 @@ EOF
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-tool.py" "${'$'}LANER_BIN/ail-tool"
           "${'$'}BIN/busybox" cp "${'$'}HOME/laner-net.py" "${'$'}LANER_BIN/laner-net"
           "${'$'}BIN/busybox" cp "${'$'}HOME/laner-direct.py" "${'$'}LANER_BIN/laner-direct"
-          "${'$'}BIN/busybox" cp "${'$'}HOME/proxychains-arm64.bin" "${'$'}AI_LIB_DIR/libproxychains4.so"
-          "${'$'}BIN/busybox" chmod 644 "${'$'}AI_LIB_DIR/libproxychains4.so"
+          # A direct cp truncates the loaded DSO inode and destroys live relocations.
+          source "${'$'}HOME/ai_limbs_install_direct.sh" || return 1
+          ail_install_direct_library "${'$'}HOME/proxychains-arm64.bin" "${'$'}AI_LIB_DIR/libproxychains4.so" "${'$'}BIN/busybox" || return 1
           "${'$'}BIN/busybox" cp "${'$'}HOME/proxychains-copyright.txt" "${'$'}AI_LIB_DIR/proxychains-copyright.txt"
           "${'$'}BIN/busybox" cp "${'$'}HOME/proxychains-GPL-2.txt" "${'$'}AI_LIB_DIR/proxychains-GPL-2.txt"
           "${'$'}BIN/busybox" mkdir -p "${'$'}UBUNTU_PATH/etc/profile.d"
@@ -1795,7 +1797,7 @@ EOF
         val loginUbuntu = """
         login_ubuntu(){
           COMMAND_TO_EXEC="$1"
-          install_ai_limbs_assets
+          install_ai_limbs_assets || return 1
           if [ -z "${'$'}COMMAND_TO_EXEC" ]; then
             COMMAND_TO_EXEC="/bin/bash -il"
           fi

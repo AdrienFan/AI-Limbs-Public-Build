@@ -652,7 +652,17 @@ jobs:
         run: |
           set -euo pipefail
           chmod +x ./gradlew
-          ./gradlew :ubuntu-system-extension:assembleDebug --stacktrace --no-daemon
+          ./gradlew :ubuntu-system-extension:testDebugUnitTest :ubuntu-system-extension:assembleDebug --stacktrace --no-daemon
+      - name: Upload Ubuntu outcome regression reports
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: ubuntu-outcome-tests-${{ github.run_number }}
+          path: |
+            plugin-lab/extensions/ubuntu-system/build/reports/tests/testDebugUnitTest/**
+            plugin-lab/extensions/ubuntu-system/build/test-results/testDebugUnitTest/**
+          if-no-files-found: warn
+          retention-days: 14
       - name: Sign installable Ubuntu extension
         env:
           AILIMBS_CHILD_EXTENSION_PRIVATE_PEM: ${{ secrets.AILIMBS_CHILD_EXTENSION_PRIVATE_PEM }}

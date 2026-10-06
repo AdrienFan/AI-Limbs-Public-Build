@@ -1,5 +1,6 @@
 import importlib.util
 import json
+import mmap
 import os
 from pathlib import Path
 import subprocess
@@ -111,6 +112,50 @@ class DirectRoutingTests(unittest.TestCase):
                                 "bash", str(ASSETS / "ai_limbs_direct_profile.sh")],
                                env=env, text=True, capture_output=True, check=True)
         self.assertEqual("VPN http://127.0.0.1:7890", shell.stdout)
+
+
+class AtomicDirectLibraryTests(unittest.TestCase):
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = Path(self.tmp.name)
+        self.source = self.root / "asset.so"
+        self.destination = self.root / "installed.so"
+        self.source.write_bytes(b"new library image")
+        self.destination.write_bytes(b"mapped library image")
+        self.busybox = self.root / "busybox"
+        self.busybox.write_text('#!/bin/sh\nexec "$@"\n')
+        self.busybox.chmod(0o755)
+
+    def install(self):
+        return subprocess.run(["/bin/bash", "--noprofile", "--norc", "-c",
+            '. "$1"; ail_install_direct_library "$2" "$3" "$4"', "bash",
+            str(ASSETS / "ai_limbs_install_direct.sh"), str(self.source),
+            str(self.destination), str(self.busybox)], capture_output=True, text=True)
+
+    def test_replacement_preserves_already_mapped_inode(self):
+        old_inode = self.destination.stat().st_ino
+        with self.destination.open("rb") as handle, mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mapped:
+            self.assertEqual(0, self.install().returncode)
+            self.assertEqual(b"mapped library image", mapped[:])
+            self.assertEqual(old_inode, os.fstat(handle.fileno()).st_ino)
+            self.assertNotEqual(old_inode, self.destination.stat().st_ino)
+            self.assertEqual(self.source.read_bytes(), self.destination.read_bytes())
+        self.assertFalse(list(self.root.glob("installed.so.new.*")))
+
+    def test_identical_library_keeps_inode(self):
+        self.source.write_bytes(self.destination.read_bytes())
+        old_inode = self.destination.stat().st_ino
+        self.assertEqual(0, self.install().returncode)
+        self.assertEqual(old_inode, self.destination.stat().st_ino)
+
+    def test_failed_copy_leaves_live_library_and_cleans_temporary_file(self):
+        old_inode = self.destination.stat().st_ino
+        self.source.unlink()
+        self.assertNotEqual(0, self.install().returncode)
+        self.assertEqual(old_inode, self.destination.stat().st_ino)
+        self.assertEqual(b"mapped library image", self.destination.read_bytes())
+        self.assertFalse(list(self.root.glob("installed.so.new.*")))
 
 
 if __name__ == "__main__":

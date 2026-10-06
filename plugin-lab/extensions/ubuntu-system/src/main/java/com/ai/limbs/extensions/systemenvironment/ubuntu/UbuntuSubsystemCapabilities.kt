@@ -229,10 +229,14 @@ internal object UbuntuSubsystemCapabilities {
         domain = domain,
         workContextRequiredReceipts = setOf(InProcessCapabilityReceipt.WORK_MANUAL),
         executor = InProcessCapabilityExecutor { raw ->
-            val parameters = parse(raw)
-            runCatching { executor(parameters) }
-                .getOrElse(::failure)
-                .toString()
+            try {
+                val parameters = parse(raw)
+                executor(parameters).toString()
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                UbuntuCapabilityOutcome.failure(error).toString()
+            }
         }
     )
 
@@ -430,12 +434,7 @@ internal object UbuntuSubsystemCapabilities {
         val executorKey = UbuntuHiddenExecutorKeyLimiter.normalize(p.optString("executor_key"))
         val timeoutMs = p.longInRange("timeout_ms", 1_000L, 3_600_000L, 120_000L)
         val result = terminal.executeHiddenCommand(command, executorKey = executorKey, timeoutMs = timeoutMs)
-        return JSONObject()
-            .put("success", result.isOk)
-            .put("status", result.state.name)
-            .put("exit_code", result.exitCode)
-            .put("output", result.output.ifBlank { result.rawOutputPreview })
-            .put("error", result.error.takeIf { it.isNotBlank() } ?: JSONObject.NULL)
+        return UbuntuCapabilityOutcome.hidden(result)
     }
 
     private suspend fun sessionInput(terminal: TerminalManager, p: JSONObject): JSONObject {
@@ -517,8 +516,9 @@ internal object UbuntuSubsystemCapabilities {
 
     private fun requireRunning(terminal: TerminalManager) {
         val state = terminal.currentUbuntuRuntimeState()
-        require(state.phase == UbuntuRuntimePhase.RUNNING) {
-            state.error ?: "Ubuntu is ${state.phase.name}. Call plugin.ubuntu.start first."
+        if (state.phase != UbuntuRuntimePhase.RUNNING) {
+            throw UbuntuRuntimeUnavailable(state.phase.name,
+                state.error ?: "Ubuntu is ${state.phase.name}. Call plugin.ubuntu.start first.")
         }
     }
 
@@ -622,10 +622,6 @@ internal object UbuntuSubsystemCapabilities {
             .put("error", error ?: JSONObject.NULL)
 
     private fun ok() = JSONObject().put("success", true)
-
-    private fun failure(error: Throwable) = JSONObject()
-        .put("success", false)
-        .put("error", error.message ?: error::class.java.simpleName)
 
     private fun parse(raw: String): JSONObject =
         runCatching { JSONObject(raw) }.getOrElse { throw IllegalArgumentException("Capability parameters must be JSON.") }

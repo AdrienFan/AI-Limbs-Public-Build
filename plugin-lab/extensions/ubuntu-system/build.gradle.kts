@@ -10,11 +10,11 @@ android {
     namespace = "com.ai.limbs.extensions.systemenvironment.ubuntu"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.systemenvironment.ubuntu.v0121"
+        applicationId = "com.ai.limbs.payload.systemenvironment.ubuntu.v0122"
         minSdk = 26
         targetSdk = 34
-        versionCode = 22
-        versionName = "0.1.21"
+        versionCode = 23
+        versionName = "0.1.22"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
@@ -60,4 +60,6 @@ dependencies {
     implementation(libs.compose.material.icons.extended)
     implementation(libs.activity.compose)
     implementation(libs.coroutines.android)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")
 }
