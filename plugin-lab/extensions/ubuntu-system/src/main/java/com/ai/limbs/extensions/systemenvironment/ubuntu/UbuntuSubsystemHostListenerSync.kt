@@ -40,7 +40,7 @@ internal class UbuntuSubsystemHostListenerSync(
         // Do not create a fake rootfs before Ubuntu has actually been installed.
         if (!rootfsDir.isDirectory) return
 
-        val snapshot = try {
+        val listeners = try {
             JSONObject(
                 host.invokeHostCapability(
                     HOST_NETWORK_CAPABILITY,
@@ -53,10 +53,22 @@ internal class UbuntuSubsystemHostListenerSync(
                 .put("ports", JSONArray())
                 .put("reason", error.message ?: error::class.java.simpleName)
         }
-        writeSnapshot(sanitize(snapshot))
+        val directProxy = try {
+            JSONObject(
+                host.invokeHostCapability(
+                    HOST_NETWORK_CAPABILITY,
+                    JSONObject().put("operation", "direct_proxy").toString()
+                )
+            )
+        } catch (error: Throwable) {
+            JSONObject()
+                .put("available", false)
+                .put("reason", error.message ?: error::class.java.simpleName)
+        }
+        writeSnapshot(sanitize(listeners, directProxy))
     }
 
-    private fun sanitize(raw: JSONObject): JSONObject {
+    private fun sanitize(raw: JSONObject, directRaw: JSONObject): JSONObject {
         val ports = mutableSetOf<Int>()
         val sourcePorts = raw.optJSONArray("ports") ?: JSONArray()
         for (index in 0 until sourcePorts.length()) {
@@ -65,11 +77,28 @@ internal class UbuntuSubsystemHostListenerSync(
                 ?.let(ports::add)
         }
 
+        val direct = JSONObject()
+            .put("available", directRaw.optBoolean("available", false))
+            .put("scheme", directRaw.optString("scheme", "socks5h"))
+            .put("host", directRaw.optString("host", "127.0.0.1"))
+            .put("port", directRaw.optInt("port", 0))
+            .put("transport", directRaw.optString("transport"))
+            .put("validated", directRaw.optBoolean("validated", false))
+            .put("metered", directRaw.optBoolean("metered", true))
+            .put("network_not_vpn", directRaw.optBoolean("network_not_vpn", false))
+            .put("bypass_verified", directRaw.optBoolean("bypass_verified", false))
+            .put("network_handle", directRaw.optLong("network_handle", 0L))
+            .put("host_updated_at_epoch_ms", directRaw.optLong("updated_at_epoch_ms", 0L))
+        directRaw.optString("reason").trim().takeIf { it.isNotEmpty() }?.let {
+            direct.put("reason", it.take(MAX_REASON_CHARS))
+        }
+
         val result = JSONObject()
-            .put("schema", 1)
-            .put("source", "host.network@1/listeners")
+            .put("schema", 2)
+            .put("source", "host.network@1")
             .put("available", raw.optBoolean("available", false))
             .put("ports", JSONArray(ports.sorted()))
+            .put("direct_proxy", direct)
             .put("updated_at_epoch_ms", System.currentTimeMillis())
             .put(
                 "host_updated_at_epoch_ms",
