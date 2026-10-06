@@ -63,12 +63,9 @@ internal object ResidentUiProxyWire {
         hostGeneration: Long,
         payload: JSONObject = JSONObject()
     ): JSONObject {
-        var lastError: IOException? = null
-        for (name in listOf(socketName(sessionId), legacySocketName()).distinct()) {
-            try { return requestAt(name, operation, sessionId, hostInstanceId, hostGeneration, payload) }
-            catch (error: IOException) { lastError = error }
-        }
-        throw checkNotNull(lastError) { "No Resident UI proxy endpoint was attempted" }
+        // An attested session has one endpoint. Replaying a command on a legacy socket
+        // can duplicate an already-applied action and hides the original timeout.
+        return requestAt(socketName(sessionId), operation, sessionId, hostInstanceId, hostGeneration, payload)
     }
 
     private fun requestAt(
@@ -84,7 +81,7 @@ internal object ResidentUiProxyWire {
         LocalSocket().use { socket ->
             // Android 16 real-device invariant: connect before assigning soTimeout.
             socket.connect(LocalSocketAddress(name, LocalSocketAddress.Namespace.ABSTRACT))
-            socket.soTimeout = TIMEOUT_MS
+            socket.soTimeout = ResidentUiProxyTimeout.forOperation(operation)
             val peer = socket.peerCredentials
             check(peer.uid == Process.myUid()) { "UI proxy peer UID mismatch" }
             write(

@@ -56,3 +56,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 当前云编译修复
 
 - [宿主绑定校验同步](host-affinity-ci-build107/index.md)：build107，保留 build105/106 功能，单一可更新 APK
+
+## 当前视觉 UI 修复
+
+- [Resident UI 命令截止时间修复](visual-ui-result-build108/index.md)：build108
