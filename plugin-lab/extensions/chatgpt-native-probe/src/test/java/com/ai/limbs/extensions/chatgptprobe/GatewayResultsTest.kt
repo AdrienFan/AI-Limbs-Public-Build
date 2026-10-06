@@ -108,8 +108,20 @@ class GatewayResultsTest {
             assertFalse(text.lastOrNull()?.isHighSurrogate() == true)
             reconstructed.append(text)
         }
-        assertEquals(original.toString(), reconstructed.toString())
-        assertEquals(gatewayHash(original.toString()), first.getString("sha256"))
+        // ASK is a policy refusal, so the delivered result includes the producer outcome namespace.
+        // Compare the full current contract while still verifying every original Unicode character.
+        val expectedOutcome = JSONObject()
+            .put("execution_policy", original.getJSONObject("execution_policy"))
+            .put("next_action", original.getString("next_action"))
+        val expected = JSONObject(original.toString()).put("ai_limbs_outcome", expectedOutcome)
+        val reassembled = reconstructed.toString()
+        val restored = JSONObject(reassembled)
+        assertTrue("Reassembled result must match the complete delivery contract", expected.similar(restored))
+        assertEquals(original.getString("text"), restored.getString("text"))
+        assertTrue(expectedOutcome.similar(first.getJSONObject("ai_limbs_outcome")))
+        assertFalse(restored.getJSONObject("ai_limbs_outcome").has("error_code"))
+        assertFalse(original.has("ai_limbs_outcome"))
+        assertEquals(gatewayHash(reassembled), first.getString("sha256"))
         assertEquals(1, store.names().size)
         assertThrows(IllegalArgumentException::class.java) { adapter.readResult(cursor, -1) }
     }
