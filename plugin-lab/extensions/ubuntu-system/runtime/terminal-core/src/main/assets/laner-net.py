@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from urllib.parse import urlparse
 
-VERSION = "0.2.0"
+VERSION = "0.3.0"
 CONFIG_DIR = Path("/root/laner/tools/laner-net")
 CONFIG_FILE = CONFIG_DIR / "config.json"
 HOST_LISTENERS_FILE = CONFIG_DIR / "host-listeners.json"
@@ -29,6 +29,20 @@ PROXY_ENV_KEYS = (
     "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY",
     "http_proxy", "https_proxy", "all_proxy", "no_proxy",
 )
+DIRECT_LIBRARY = "/usr/local/lib/ai-limbs/libproxychains4.so"
+
+
+def remove_direct_routing(env: dict) -> dict:
+    # laner-net is the explicit VPN route; do not inherit Ubuntu's DIRECT preload.
+    preload = env.get("LD_PRELOAD", "").replace(":", " ").split()
+    kept = [item for item in preload if item != DIRECT_LIBRARY]
+    if kept:
+        env["LD_PRELOAD"] = " ".join(kept)
+    else:
+        env.pop("LD_PRELOAD", None)
+    for key in ("LANER_EGRESS_MODE", "LANER_DIRECT_SCOPE", "LANER_DIRECT_PROXY", "PROXYCHAINS_CONF_FILE", "PROXYCHAINS_QUIET_MODE"):
+        env.pop(key, None)
+    return env
 
 
 def default_config() -> dict:
@@ -81,7 +95,7 @@ def clean_proxy_env(env: dict | None = None) -> dict:
     result = (env or os.environ).copy()
     for key in PROXY_ENV_KEYS:
         result.pop(key, None)
-    return result
+    return remove_direct_routing(result)
 
 
 def curl_probe(
@@ -153,6 +167,13 @@ def load_host_listener_ports() -> tuple[list[int], list[str]]:
             if 1 <= port <= 65535:
                 ports.add(port)
     result = sorted(ports)
+    direct = data.get("direct_proxy")
+    if isinstance(direct, dict) and direct.get("host") == SCAN_HOST:
+        direct_port = direct.get("port")
+        # A functioning DIRECT proxy is not a candidate for explicit VPN traffic.
+        if direct_port in result:
+            result.remove(direct_port)
+            notes.append(f"host_direct_proxy:excluded:{direct_port}")
     notes.append(f"host_listener_snapshot:fresh:{age_ms}ms:ports={len(result)}")
     return result, notes
 
@@ -219,9 +240,23 @@ def ensure_proxy(config: dict, force_detect: bool = False) -> tuple[str | None, 
     probe_url = str(config.get("probe_url") or DEFAULT_PROBE_URL)
     preferred_scheme: str | None = None
 
+    direct_url = os.environ.get("LANER_DIRECT_PROXY")
+    if HOST_LISTENERS_FILE.is_file():
+        data = json.loads(HOST_LISTENERS_FILE.read_text(encoding="utf-8"))
+        direct = data.get("direct_proxy")
+        if isinstance(direct, dict) and direct.get("host") == SCAN_HOST:
+            port = direct.get("port")
+            if isinstance(port, int) and 1 <= port <= 65535:
+                direct_url = f"socks5h://{SCAN_HOST}:{port}"
     if cached:
         try:
-            preferred_scheme = parse_proxy(cached).scheme
+            candidate = parse_proxy(cached)
+            preferred_scheme = candidate.scheme
+            if direct_url:
+                direct_endpoint = parse_proxy(direct_url)
+                if candidate.hostname == direct_endpoint.hostname and candidate.port == direct_endpoint.port:
+                    notes.append("cached_proxy_rejected:host_direct_proxy")
+                    cached = None
         except ValueError as exc:
             notes.append(f"cached_proxy_invalid:{exc}")
             cached = None
@@ -274,6 +309,7 @@ def proxy_environment(proxy: str) -> dict:
     env["NO_PROXY"] = env["no_proxy"] = no_proxy
     env["LANER_NET_ACTIVE"] = "1"
     env["LANER_NET_PROXY"] = proxy
+    env["LANER_EGRESS_MODE"] = "VPN"
     return env
 
 
@@ -316,7 +352,7 @@ def show_status() -> int:
         for note in notes:
             if note not in hint_notes:
                 print(note)
-    print("global_environment_modified: no")
+    print("global_environment_modified: no; explicit command overrides Ubuntu DIRECT routing")
     return 0 if proxy else 4
 
 
@@ -355,7 +391,7 @@ def command_test(url: str | None = None) -> int:
     direct_ok, direct_detail = curl_probe(None, target)
     proxy, source, notes = ensure_proxy(config)
     print(f"target: {target}")
-    print(f"direct: {'ok' if direct_ok else 'fail'} ({direct_detail})")
+    print(f"unproxied_system_route: {'ok' if direct_ok else 'fail'} ({direct_detail})")
     if not proxy:
         print("proxy: not found")
         for note in notes:
@@ -376,8 +412,8 @@ def command_env() -> int:
             print(f"laner-net: {note}", file=sys.stderr)
         return 4
     env = proxy_environment(proxy)
-    print("unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy")
-    keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "LANER_NET_ACTIVE", "LANER_NET_PROXY")
+    print("unset HTTP_PROXY HTTPS_PROXY ALL_PROXY http_proxy https_proxy all_proxy LD_PRELOAD PROXYCHAINS_CONF_FILE PROXYCHAINS_QUIET_MODE LANER_DIRECT_PROXY LANER_DIRECT_SCOPE")
+    keys = ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY", "LD_PRELOAD", "LANER_NET_ACTIVE", "LANER_NET_PROXY", "LANER_EGRESS_MODE")
     for key in keys:
         if key in env:
             print(f"export {key}={shlex.quote(env[key])}")

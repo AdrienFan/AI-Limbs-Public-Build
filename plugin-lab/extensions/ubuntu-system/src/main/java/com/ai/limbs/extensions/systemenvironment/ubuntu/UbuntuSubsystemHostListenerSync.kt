@@ -65,7 +65,9 @@ internal class UbuntuSubsystemHostListenerSync(
                 .put("available", false)
                 .put("reason", error.message ?: error::class.java.simpleName)
         }
-        writeSnapshot(sanitize(listeners, directProxy))
+        val snapshot = sanitize(listeners, directProxy)
+        writeSnapshot(snapshot)
+        writeDirectRoute(snapshot.getJSONObject("direct_proxy"))
     }
 
     private fun sanitize(raw: JSONObject, directRaw: JSONObject): JSONObject {
@@ -119,6 +121,25 @@ internal class UbuntuSubsystemHostListenerSync(
             temporary.copyTo(stateFile, overwrite = true)
             temporary.delete()
         }
+    }
+
+    private fun writeDirectRoute(direct: JSONObject) {
+        // Fresh child execs re-read this path after a physical-network/port change.
+        // Without a DIRECT network, fail the SOCKS route on loopback, never use VPN.
+        val available = direct.optBoolean("available") && direct.optBoolean("validated") &&
+            direct.optBoolean("network_not_vpn") && direct.optString("host") == "127.0.0.1" &&
+            direct.optString("scheme") == "socks5h" && direct.optInt("port") in 1..65535
+        val port = if (available) direct.getInt("port") else 1
+        val route = File(stateFile.parentFile, "direct-proxychains.conf")
+        val temporary = File(route.parentFile, ".direct-proxychains.conf.tmp")
+        temporary.writeText(
+            "strict_chain\nquiet_mode\nproxy_dns\nremote_dns_subnet 224\n" +
+                "tcp_read_time_out 15000\ntcp_connect_time_out 12000\n" +
+                "localnet 127.0.0.0/255.0.0.0\nlocalnet ::1/128\n" +
+                "[ProxyList]\nsocks5 127.0.0.1 $port\n",
+            Charsets.UTF_8
+        )
+        check(temporary.renameTo(route)) { "Could not publish DIRECT route configuration" }
     }
 
     override fun close() {

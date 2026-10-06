@@ -635,6 +635,10 @@ jobs:
       - name: Configure Android SDK
         shell: bash
         run: echo "sdk.dir=$ANDROID_HOME" > local.properties
+      - name: Verify Ubuntu DIRECT routing policy
+        run: |
+          python3 -m unittest discover -s tools/plugin_lab/tests -p 'test_ubuntu_direct_routing.py'
+          echo 'cf0904bf69e8fb4520828e1f5713724ddbaab0a7787fca55e7537329e1cd6d06  plugin-lab/extensions/ubuntu-system/runtime/terminal-core/src/main/assets/proxychains-arm64.bin' | sha256sum -c -
       - name: Resolve Ubuntu package version
         id: ubuntu_version
         shell: bash

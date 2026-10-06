@@ -1317,6 +1317,11 @@ class TerminalManager private constructor(
                 "ai_limbs_installer.sh",
                 "ail-tool.py",
                 "laner-net.py",
+                "laner-direct.py",
+                "ai_limbs_direct_profile.sh",
+                "proxychains-arm64.bin",
+                "proxychains-copyright.txt",
+                "proxychains-GPL-2.txt",
                 "ail-status.sh",
                 "ail-preflight.sh",
                 "ail-cloud-build.sh",
@@ -1328,7 +1333,7 @@ class TerminalManager private constructor(
                 val assetFile = File(filesDir, assetName)
                 // 强制更新脚本文件，大文件只在不存在时提取
                 val isTextScript = assetName.endsWith(".sh") || assetName.endsWith(".py")
-                val shouldExtract = !assetFile.exists() || isTextScript
+                val shouldExtract = !assetFile.exists() || isTextScript || assetName.startsWith("proxychains-")
 
                 if (shouldExtract) {
                     val raw = TerminalRuntimeAssets.readBytes(context, assetName)
@@ -1708,6 +1713,13 @@ EOF
 
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-tool.py" "${'$'}LANER_BIN/ail-tool"
           "${'$'}BIN/busybox" cp "${'$'}HOME/laner-net.py" "${'$'}LANER_BIN/laner-net"
+          "${'$'}BIN/busybox" cp "${'$'}HOME/laner-direct.py" "${'$'}LANER_BIN/laner-direct"
+          "${'$'}BIN/busybox" cp "${'$'}HOME/proxychains-arm64.bin" "${'$'}AI_LIB_DIR/libproxychains4.so"
+          "${'$'}BIN/busybox" chmod 644 "${'$'}AI_LIB_DIR/libproxychains4.so"
+          "${'$'}BIN/busybox" cp "${'$'}HOME/proxychains-copyright.txt" "${'$'}AI_LIB_DIR/proxychains-copyright.txt"
+          "${'$'}BIN/busybox" cp "${'$'}HOME/proxychains-GPL-2.txt" "${'$'}AI_LIB_DIR/proxychains-GPL-2.txt"
+          "${'$'}BIN/busybox" mkdir -p "${'$'}UBUNTU_PATH/etc/profile.d"
+          "${'$'}BIN/busybox" cp "${'$'}HOME/ai_limbs_direct_profile.sh" "${'$'}UBUNTU_PATH/etc/profile.d/ai-limbs-direct.sh"
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-status.sh" "${'$'}LANER_BIN/ail-status"
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-preflight.sh" "${'$'}LANER_BIN/ail-preflight"
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-cloud-build.sh" "${'$'}LANER_BIN/ail-cloud-build"
