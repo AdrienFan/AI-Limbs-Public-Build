@@ -22,6 +22,44 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GatewayEngineTest {
+    @Test fun messageContextUsesOneCoreCallAndDuplicateDeliveryDoesNotCaptureAgain() = runBlocking {
+        Fixture(failFirstPost = true).use { fixture ->
+            val calls = AtomicInteger()
+            fixture.start { tool, args ->
+                assertEquals("ai_limbs.message_context.read", tool)
+                assertEquals(0, args.length())
+                calls.incrementAndGet()
+                JSONObject().put("success", true).put("active", false).put("contexts", JSONArray())
+            }
+            val command = rpcCommand("context-once", 701, "tools/call", JSONObject()
+                .put("name", "ai_limbs_message_context").put("arguments", JSONObject()))
+            fixture.commands.add(command)
+            eventually { fixture.responses.any { it.optString("request_id") == "context-once" } }
+            fixture.commands.add(JSONObject(command.toString()).put("shard_token", "new-context-token"))
+            eventually { fixture.responses.count { it.optString("request_id") == "context-once" } >= 2 }
+            assertEquals(1, calls.get())
+            assertEquals(0, fixture.describeCalls.get())
+            val result = fixture.responses.first { it.optString("request_id") == "context-once" }
+                .getJSONObject("resp_json").getJSONObject("result")
+            assertFalse(result.getJSONObject("structuredContent").getBoolean("active"))
+            assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
+        }
+    }
+
+    @Test fun messageContextRejectsExtraArgumentsBeforeAnyCapture() = runBlocking {
+        Fixture().use { fixture ->
+            val calls = AtomicInteger()
+            fixture.start { _, _ -> calls.incrementAndGet(); JSONObject() }
+            fixture.commands.add(rpcCommand("bad-context", 702, "tools/call", JSONObject()
+                .put("name", "ai_limbs_message_context").put("arguments", JSONObject().put("start", true))))
+            eventually { fixture.responses.any { it.optString("request_id") == "bad-context" } }
+            val error = fixture.responses.first { it.optString("request_id") == "bad-context" }
+                .getJSONObject("resp_json").getJSONObject("error")
+            assertEquals(-32602, error.getInt("code"))
+            assertEquals(0, calls.get())
+        }
+    }
+
     @Test fun slowResponsePostDoesNotBlockAnotherCompletedAction() = runBlocking {
         Fixture(blockedResponseId = "slow-response").use { fixture ->
             val calls = AtomicInteger()
@@ -98,8 +136,8 @@ class GatewayEngineTest {
             val tools = fixture.responses.first { it.optString("request_id") == "control-list" }
                 .getJSONObject("resp_json").getJSONObject("result").getJSONArray("tools")
             val names = (0 until tools.length()).map { tools.getJSONObject(it).getString("name") }
-            assertEquals(6, names.size)
-            assertTrue(names.containsAll(listOf("ai_limbs_capability_search", "ai_limbs_capability_describe", "ai_limbs_capability_invoke", "ai_limbs_result_read", "ai_limbs_media_read", "ai_limbs_gateway_status")))
+            assertEquals(7, names.size)
+            assertTrue(names.containsAll(listOf("ai_limbs_capability_search", "ai_limbs_capability_describe", "ai_limbs_capability_invoke", "ai_limbs_result_read", "ai_limbs_media_read", "ai_limbs_gateway_status", "ai_limbs_message_context")))
             assertEquals(4, calls.get())
             gate.complete(Unit)
             eventually { fixture.responses.count { it.optString("request_id").startsWith("business-") } == 5 }
@@ -202,7 +240,7 @@ class GatewayEngineTest {
             assertEquals(-32602, error.getInt("code"))
             val data = error.getJSONObject("data")
             assertEquals("TOOL_NOT_ADVERTISED", data.getString("gateway_error_code"))
-            assertEquals(6, data.getJSONArray("advertised_tools").length())
+            assertEquals(7, data.getJSONArray("advertised_tools").length())
             assertEquals(4, data.getJSONArray("metadata_refresh_steps").length())
             assertEquals(GatewayAdmission.DOCUMENTATION_URL, data.getString("documentation_url"))
             assertFalse(error.toString().contains("server_info"))
@@ -268,7 +306,7 @@ class GatewayEngineTest {
             assertTrue(init.getString("instructions").contains("new conversation"))
             val tools = fixture.responses.first { it.optString("request_id") == "catalog" }.getJSONObject("resp_json")
                 .getJSONObject("result").getJSONArray("tools")
-            assertEquals(6, tools.length())
+            assertEquals(7, tools.length())
             assertEquals((0 until tools.length()).map { tools.getJSONObject(it).getString("name") },
                 fixture.engine.advertisedToolNames())
             for (index in 0 until tools.length()) {

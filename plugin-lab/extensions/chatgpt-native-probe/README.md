@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.13
+# AI Limbs-ChatGPT 0.0.19
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -8,9 +8,9 @@ This is a private, custom MCP connection through OpenAI Secure MCP Tunnel. It do
 
 When tool names, descriptions, schemas or annotations change, keep the bridge running, open its custom MCP connection in ChatGPT Plugins, select Refresh, verify the new metadata and start a new conversation. Follow [Connect and test your plugin](https://developers.openai.com/plugins/deploy/connect-chatgpt). The bridge does not force refresh the client's catalog. Its connection-check action is a transport check, not ChatGPT's Refresh control.
 
-Ordinary Host capability additions are discovered through the stable search and describe entries without changing the six MCP tools. Refresh is needed when their names or metadata change. The current three demo entries belong to old client metadata; they are absent from the server catalog. Refresh updates the connection metadata, and a new conversation is required to retest. Clearing Android binding, execution receipts or saved results does not remove ChatGPT metadata.
+Ordinary Host capability additions are discovered through the stable search and describe entries without changing the seven MCP tools. Refresh is needed when their names or metadata change. The current three demo entries belong to old client metadata; they are absent from the server catalog. Refresh updates the connection metadata, and a new conversation is required to retest. Clearing Android binding, execution receipts or saved results does not remove ChatGPT metadata.
 
-Unknown tools return a JSON-RPC error with `data.gateway_error_code: TOOL_NOT_ADVERTISED`, the six advertised names, the metadata digest, official refresh steps and the documentation URL. Stale metadata is identified as a possible cause, not a proven diagnosis. Arbitrary input tool names and arguments are not echoed. Old demo tools are not mapped to new tools.
+Unknown tools return a JSON-RPC error with `data.gateway_error_code: TOOL_NOT_ADVERTISED`, the seven advertised names, the metadata digest, official refresh steps and the documentation URL. Stale metadata is identified as a possible cause, not a proven diagnosis. Arbitrary input tool names and arguments are not echoed. Old demo tools are not mapped to new tools.
 
 ## Access observations
 
@@ -90,3 +90,7 @@ The cloud Android workflow runs `:chatgpt-native-probe-extension:testDebugUnitTe
 ## 0.0.13 capability ID normalization
 
 The gateway now learns `capability_id -> invoke_id` mappings from live search/describe results. `ai_limbs_capability_invoke` accepts catalog capability IDs such as `native.list_files`, resolves unseen IDs through `capability.describe`, and caches both the catalog ID and exact invoke ID for 60 seconds. Resolution happens before business execution is marked started, so resolver failures are not misclassified as uncertain domain execution.
+
+## 每轮相机画面
+
+基座 build110、视觉插件 0.2.3、ChatGPT 桥 0.0.19 新增 `ai_limbs_message_context`。相机由用户明确开启后，模型在每条新消息开始时调用一次，直接收到该镜头的新帧。未开相机返回 INACTIVE；失败不会返回旧图、重拍或请求权限。该调用是工具反馈，无法替原生 ChatGPT 用户消息加附件，也不能强制上游模型执行。更新后在 ChatGPT 网页/PC 刷新 MCP 工具目录并开启新对话。
