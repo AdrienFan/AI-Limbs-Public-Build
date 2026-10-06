@@ -96,6 +96,14 @@ class HostPrimitiveAffinityRoutingTest {
     }
 
     @Test
+    fun networkDirectProxyIsKernelBoundWithoutHostUiAffinity() {
+        val operations = HostPrimitiveGatewayBindings.operations("host.network@1")
+        assertTrue(operations.containsKey("listeners"))
+        assertTrue(operations.containsKey("direct_proxy"))
+        assertFalse(HostPrimitiveGatewayBindings.requiresAndroidHost("host.network@1", "direct_proxy"))
+    }
+
+    @Test
     fun mixedPrimitiveWaitsForItsOwnMigrationStage() {
         assertFalse(HostPrimitiveGatewayBindings.affinityEnforced("host.filesystem@1"))
         assertFalse(HostPrimitiveGatewayBindings.requiresAndroidHost("host.filesystem@1", "open"))

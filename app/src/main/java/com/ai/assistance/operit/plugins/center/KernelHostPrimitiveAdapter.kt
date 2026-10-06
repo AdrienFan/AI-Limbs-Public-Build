@@ -195,6 +195,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
 
     private suspend fun invokeNetwork(operation: String): JSONObject = when (operation) {
         "listeners" -> snapshotTcpListeners()
+        "direct_proxy" -> HostDirectEgressProxy.snapshot(appContext)
         else -> unsupported("host.network@1", operation)
     }
 
@@ -901,6 +902,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         )
         val SUPPORTED = setOf(
             "host.network@1/listeners",
+            "host.network@1/direct_proxy",
             "host.chat@1/publish_assistant",
             "host.chat@1/publish_user",
             "host.chat@1/set_presentation",

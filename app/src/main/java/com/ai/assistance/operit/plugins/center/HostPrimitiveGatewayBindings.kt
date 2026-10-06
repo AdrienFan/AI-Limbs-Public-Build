@@ -215,7 +215,7 @@ internal object HostPrimitiveGatewayBindings {
             kernel("frame"),
             kernel("stop")
         ),
-        "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), pending("listen")),
+        "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), kernel("direct_proxy"), pending("listen")),
         "host.background.runtime@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("acquire_lease"), pending("update_lease"), pending("release_lease"), pending("status")),
         "host.notification@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("publish", "send_notification")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, tool("observe", "get_notifications"))),
         "host.android.settings@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("get", "get_system_setting")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("set", "modify_system_setting"))),
