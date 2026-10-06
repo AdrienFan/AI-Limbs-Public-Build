@@ -76,6 +76,7 @@ kotlin {
 }
 
 dependencies {
+    testImplementation("junit:junit:4.13.2")
     compileOnly(project(":plugin-inprocess-api"))
     implementation(libs.androidx.core.ktx)
     implementation(platform(libs.compose.bom))

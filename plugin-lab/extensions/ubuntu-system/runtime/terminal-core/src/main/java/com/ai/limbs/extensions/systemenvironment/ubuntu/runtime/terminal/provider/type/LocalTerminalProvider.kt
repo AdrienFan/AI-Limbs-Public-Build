@@ -225,16 +225,13 @@ class LocalTerminalProvider(
         val outputChannel = Channel<String>(Channel.UNLIMITED)
         val readJob =
             hiddenExecScope.launch {
-                val input = process.inputStream
-                val buffer = ByteArray(4096)
                 try {
-                    while (isActive) {
-                        val count = input.read(buffer)
-                        if (count < 0) {
-                            break
-                        }
-                        if (count > 0) {
-                            outputChannel.send(String(buffer, 0, count, Charsets.UTF_8))
+                    // Keep one decoder for the entire shell stream, including all command markers.
+                    // Independent byte-block String conversions corrupt split UTF-8 characters.
+                    HiddenExecOutputReader(process.inputStream).use { reader ->
+                        while (isActive) {
+                            val chunk = reader.readChunk() ?: break
+                            if (chunk.isNotEmpty()) outputChannel.send(chunk)
                         }
                     }
                 } catch (e: Exception) {
