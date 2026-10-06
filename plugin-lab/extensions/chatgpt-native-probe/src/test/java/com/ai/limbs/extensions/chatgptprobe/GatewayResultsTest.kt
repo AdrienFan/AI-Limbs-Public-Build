@@ -18,6 +18,61 @@ internal class MemoryGatewayStore : GatewayBlobStore {
 }
 
 class GatewayResultsTest {
+    @Test fun sourceOutcomeSurvivesTopLevelClientClassification() {
+        for (code in listOf("UBUNTU_COMMAND_EXIT_NONZERO", "UBUNTU_RUNTIME_NOT_RUNNING",
+            "UBUNTU_COMMAND_TIMEOUT", "EXAMPLE_PROVIDER_REJECTED")) {
+            val original = JSONObject().put("success", false).put("error_code", code)
+                .put("error", "producer error").put("execution_state", "UNKNOWN")
+                .put("automatic_reexecution", false)
+                .put("next_action", JSONObject().put("inspect", "provider"))
+            val delivered = GatewayResults(MemoryGatewayStore()).adapt(original)
+            val client = JSONObject(delivered.toString())
+            client.getJSONObject("structuredContent").put("error_code", "INVALID_ARGUMENT")
+            val source = client.getJSONObject("structuredContent").getJSONObject("ai_limbs_outcome")
+            val text = JSONObject(client.getJSONArray("content").getJSONObject(0).getString("text"))
+            assertTrue(client.getBoolean("isError"))
+            assertEquals(code, source.getString("error_code"))
+            assertEquals(code, text.getString("error_code"))
+            assertEquals(code, text.getJSONObject("ai_limbs_outcome").getString("error_code"))
+            assertEquals("UNKNOWN", source.getString("execution_state"))
+            assertFalse(source.getBoolean("automatic_reexecution"))
+            assertEquals("provider", source.getJSONObject("next_action").getString("inspect"))
+            assertFalse(original.has("ai_limbs_outcome"))
+        }
+    }
+
+    @Test fun everyPagedTextBlockMatchesItsStructuredPageWithoutReexecution() {
+        val adapter = GatewayResults(MemoryGatewayStore())
+        val delivered = adapter.adapt(JSONObject().put("success", false)
+            .put("error_code", "PROVIDER_TASK_FAILED").put("status", "COMPLETED")
+            .put("exit_code", 7).put("output", "汉😀".repeat(8000)))
+        val first = delivered.getJSONObject("structuredContent")
+        assertEquals(first.toString(), delivered.getJSONArray("content").getJSONObject(0).getString("text"))
+        assertEquals("PROVIDER_TASK_FAILED", first.getJSONObject("ai_limbs_outcome").getString("error_code"))
+        val combined = StringBuilder(first.getString("output"))
+        var page = first
+        while (!page.isNull("next_offset")) {
+            val read = adapter.pageResult(first.getString("cursor"), page.getInt("next_offset"))
+            page = read.getJSONObject("structuredContent")
+            assertEquals(page.toString(), read.getJSONArray("content").getJSONObject(0).getString("text"))
+            assertFalse(read.getBoolean("isError"))
+            combined.append(page.getString("output"))
+        }
+        val recovered = JSONObject(combined.toString())
+        assertEquals("PROVIDER_TASK_FAILED", recovered.getString("error_code"))
+        assertEquals("PROVIDER_TASK_FAILED", recovered.getJSONObject("ai_limbs_outcome").getString("error_code"))
+        assertEquals("汉😀".repeat(8000), recovered.getString("output"))
+    }
+
+    @Test fun successTextIsJsonWithoutAnInventedFailureOutcome() {
+        val source = JSONObject().put("success", true).put("output", "兰儿😀")
+        val result = GatewayResults(MemoryGatewayStore()).adapt(source)
+        assertEquals(result.getJSONObject("structuredContent").toString(),
+            result.getJSONArray("content").getJSONObject(0).getString("text"))
+        assertFalse(result.getJSONObject("structuredContent").has("ai_limbs_outcome"))
+        assertFalse(result.getBoolean("isError"))
+    }
+
     @Test fun pagedDomainFailureKeepsRecoveryFieldsInImmediateEnvelope() {
         val result = GatewayResults(MemoryGatewayStore()).adapt(JSONObject().put("success", false)
             .put("status", "PROCESS_EXITED").put("exit_code", -1)

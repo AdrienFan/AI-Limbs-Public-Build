@@ -67,6 +67,16 @@ internal class GatewayResults(
         }
         visit(clean)
         val failed = failed(clean)
+        if (failed) {
+            // Top-level error_code was rewritten after delivery by the receiving integration.
+            // Keep the exact producer outcome namespaced; never infer a code from its message.
+            val outcome = JSONObject()
+            listOf("success", "error", "error_code", "status", "exit_code", "execution_state",
+                "automatic_reexecution", "next_action", "execution_policy").forEach { field ->
+                if (clean.has(field)) outcome.put(field, clean.get(field))
+            }
+            clean.put("ai_limbs_outcome", outcome)
+        }
         if (handles.length() > 0 || mediaErrors.length() > 0) clean.put("media_delivery", JSONObject()
             .put("attachments", handles).put("errors", mediaErrors).put("partial", mediaErrors.length() > 0)
             .put("next_action", "Use ai_limbs_media_read for saved media; do not repeat the original action to retry delivery."))
@@ -80,17 +90,13 @@ internal class GatewayResults(
         if (structured !== clean) {
             // Policy and retry guidance must remain immediately visible even when output is paged.
             listOf("success", "error", "error_code", "status", "exit_code", "execution_state",
-                "automatic_reexecution", "execution_policy", "next_action", "media_delivery").forEach { field ->
+                "automatic_reexecution", "execution_policy", "next_action", "media_delivery", "ai_limbs_outcome").forEach { field ->
                 if (clean.has(field)) structured.put(field, clean.get(field))
             }
         }
-        // The full JSON is supplied once in structuredContent, rather than duplicated in a text block.
-        val output = JSONArray().put(JSONObject().put("type", "text").put("text", when {
-            structured.optBoolean("paged") -> "Capability result is paged. Continue with ai_limbs_result_read using cursor and next_offset."
-            failed -> "AI Limbs reported an error or policy refusal. Follow error and next_action in structuredContent."
-            mediaErrors.length() > 0 -> "Capability returned a result with partial media delivery. Inspect structuredContent; do not repeat the action."
-            else -> "AI Limbs result is in structuredContent; attached images are native MCP content."
-        }))
+        // MCP recommends serialized JSON text alongside structuredContent. Preserve the original
+        // code in text as well as the outcome namespace, including a paged first envelope.
+        val output = JSONArray().put(JSONObject().put("type", "text").put("text", structured.toString()))
         for (index in 0 until content.length()) output.put(content.get(index))
         return JSONObject().put("content", output).put("structuredContent", structured).put("isError", failed)
     }
@@ -107,13 +113,20 @@ internal class GatewayResults(
             .put("expires_at_ms", entry.getLong("expires"))
     }
 
-    @Synchronized fun readMedia(id: String): JSONObject = JSONObject()
-        .put("content", JSONArray().put(JSONObject(read(id, "media").getString("value"))))
-        .put("structuredContent", JSONObject().put("media_id", id).put("retrieved", true)).put("isError", false)
+    @Synchronized fun readMedia(id: String): JSONObject {
+        val media = JSONObject(read(id, "media").getString("value"))
+        val structured = JSONObject().put("media_id", id).put("retrieved", true)
+        return JSONObject().put("content", JSONArray()
+            .put(media).put(JSONObject().put("type", "text").put("text", structured.toString())))
+            .put("structuredContent", structured).put("isError", false)
+    }
 
-    @Synchronized fun pageResult(cursor: String, offset: Int): JSONObject = JSONObject()
-        .put("content", JSONArray().put(JSONObject().put("type", "text").put("text", "Immutable result page is in structuredContent. Continue using next_offset until null.")))
-        .put("structuredContent", readResult(cursor, offset)).put("isError", false)
+    @Synchronized fun pageResult(cursor: String, offset: Int): JSONObject {
+        val structured = readResult(cursor, offset)
+        return JSONObject().put("content", JSONArray()
+            .put(JSONObject().put("type", "text").put("text", structured.toString())))
+            .put("structuredContent", structured).put("isError", false)
+    }
 
     private fun read(id: String, kind: String): JSONObject {
         require(id.matches(Regex("${kind}_[a-f0-9]{32}"))) { "Invalid $kind identifier" }

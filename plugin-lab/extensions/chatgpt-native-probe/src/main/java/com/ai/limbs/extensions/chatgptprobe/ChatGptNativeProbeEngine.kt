@@ -898,18 +898,12 @@ internal class ChatGptNativeProbeEngine(
         return ingress.invoke(capabilityId, parameters)
     }
 
-    private fun toolError(message: String, structured: JSONObject): JSONObject =
-        JSONObject()
-            .put(
-                "content",
-                JSONArray().put(
-                    JSONObject()
-                        .put("type", "text")
-                        .put("text", message)
-                )
-            )
-            .put("structuredContent", structured)
-            .put("isError", true)
+    private fun toolError(message: String, structured: JSONObject): JSONObject {
+        val result = JSONObject(structured.toString()).put("bridge_message", message)
+        return JSONObject().put("content", JSONArray()
+            .put(JSONObject().put("type", "text").put("text", result.toString())))
+            .put("structuredContent", result).put("isError", true)
+    }
 
     private fun tool(
         name: String,
