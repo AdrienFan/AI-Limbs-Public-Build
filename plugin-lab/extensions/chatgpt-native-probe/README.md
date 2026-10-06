@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.10
+# AI Limbs-ChatGPT 0.0.11
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -18,6 +18,8 @@ Unknown tools return a JSON-RPC error with `data.gateway_error_code: TOOL_NOT_AD
 
 Protocol errors, unknown tools, capability invocation requests, successful results, failed/refused results, uncertain outcomes and result preparation failures are distinct. ASK/FORBID results are unsuccessful requests, not proof that a business action executed. `execution_state: UNKNOWN` is not a successful result. Successful Host results remain known if later result preparation fails: the tool returns an explicit delivery error with `execution_state: RESULT_RECEIVED`, `host_result_received`, `host_result_failed` and `automatic_reexecution: false`. Host policy remains attached when present. Interrupted calls from an obsolete listener cannot update the new listener's evidence; consult the encrypted receipts and domain state for those outcomes.
 
+In 0.0.11, oversized-result cache limits, write failures and unavailable freshly cached pages reach the engine's preparation-error handler. The adapter no longer converts these failures into a nominally successful tool result. Host outcome counters and policy remain separate from the delivery error, and duplicate requests replay the saved error without another Host invocation.
+
 The six stable tools have human-readable titles, explicit input schemas, object output schemas and conservative annotations. Dynamic Host results and paged envelopes intentionally retain extensible object schemas. Unsupported MCP versions are still rejected. Optional Events, subscriptions, skills imports and automatic catalog updates are not advertised by this release.
 
 ## Panel
@@ -36,7 +38,7 @@ The child now publishes the same Bridge API 5 notification contribution used by 
 
 The short title includes the Chinese connection phase. The notification shows request and acknowledged delivery counts, active request count when nonzero, and the last successful communication time. Authorization, connection and delivery problems use short guidance to the plugin settings or diagnostics. Credentials, tunnel IDs, raw request details and raw errors are never rendered in this contribution.
 
-The 0.0.10 notification adds the access observation, capability outcome counters and safe catalog-mismatch guidance. A connected tunnel with no current tool requests is explicitly shown as awaiting discovery. Reply acknowledgements and protocol errors are labelled separately from successful capability results.
+The 0.0.11 notification adds the access observation, capability outcome counters and safe catalog-mismatch guidance. A connected tunnel with no current tool requests is explicitly shown as awaiting discovery. Reply acknowledgements and protocol errors are labelled separately from successful capability results.
 
 At most two controls are contributed: disconnect and reconnect while online, disconnect and connection check during startup, recovery and disconnect during connection errors, or connect and connection check when stopped if the parent notification remains present. Each control is intersected with the parent-provided available actions and checked again at dispatch, including configuration availability. Editing credentials and clearing configuration stay in the plugin panel. Tapping the notification uses the Host's existing app launch behavior; it does not add a direct settings deep link.
 

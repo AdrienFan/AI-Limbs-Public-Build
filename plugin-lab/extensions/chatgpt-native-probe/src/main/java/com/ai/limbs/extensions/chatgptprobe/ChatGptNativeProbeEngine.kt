@@ -87,7 +87,7 @@ internal data class McpGatewayState(
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.10"
+        const val PROBE_VERSION = "0.0.11"
     }
 }
 
@@ -682,6 +682,9 @@ internal class ChatGptNativeProbeEngine(
             if (executionStarted && name == TOOL_INVOKE && receivedInvokeResult == null) recordUncertainInvoke(epoch)
             throw cancelled
         } catch (error: GatewayResultUnavailable) {
+            // A missing freshly written page is preparation failure, not a new read request.
+            val received = receivedInvokeResult
+            if (received != null) return receivedResultDeliveryError(id, received, epoch)
             rpcSuccess(id, toolError(error.message ?: "Cached result is unavailable", JSONObject()
                 .put("success", false).put("result_delivery_error", "CACHE_UNAVAILABLE")
                 .put("automatic_reexecution", false)

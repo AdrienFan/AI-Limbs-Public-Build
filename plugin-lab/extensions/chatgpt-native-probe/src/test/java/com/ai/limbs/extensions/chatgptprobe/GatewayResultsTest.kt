@@ -97,11 +97,21 @@ class GatewayResultsTest {
         assertThrows(GatewayResultUnavailable::class.java) { adapter.readResult(cursor, 0) }
     }
 
-    @Test fun oversizedResultReportsDeliveryFailureWithoutReexecution() {
-        val output = GatewayResults(MemoryGatewayStore()).adapt(JSONObject().put("success", true).put("text", "a".repeat(4 * 1024 * 1024 + 1)))
-        assertFalse(output.getBoolean("isError"))
-        assertTrue(output.getJSONObject("structuredContent").getBoolean("execution_completed"))
-        assertTrue(output.getJSONObject("structuredContent").has("result_delivery_error"))
+    @Test fun oversizedResultPropagatesPreparationFailureToTheEngine() {
+        val store = MemoryGatewayStore()
+        val source = JSONObject().put("success", true).put("text", "a".repeat(4 * 1024 * 1024 + 1))
+        assertThrows(IllegalArgumentException::class.java) { GatewayResults(store).adapt(source) }
+        assertTrue(source.getBoolean("success"))
+        assertTrue(store.names().isEmpty())
+    }
+
+    @Test fun cacheWriteFailurePropagatesWithoutChangingTheHostResult() {
+        val store = MemoryGatewayStore()
+        store.failNextWrite = true
+        val source = JSONObject().put("success", true).put("text", "x".repeat(20_000))
+        assertThrows(java.io.IOException::class.java) { GatewayResults(store).adapt(source) }
+        assertTrue(source.getBoolean("success"))
+        assertTrue(store.names().isEmpty())
     }
 
     private fun image(data: String) = JSONObject().put("type", "image").put("mimeType", "image/png").put("data", data)

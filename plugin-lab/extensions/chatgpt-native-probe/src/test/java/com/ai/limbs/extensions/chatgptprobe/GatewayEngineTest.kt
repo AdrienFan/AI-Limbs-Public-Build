@@ -220,7 +220,7 @@ class GatewayEngineTest {
             fixture.commands.add(toolCommand("invoke", 302))
             eventually { fixture.responses.size == 3 }
             val init = fixture.responses.first { it.optString("request_id") == "init" }.getJSONObject("resp_json").getJSONObject("result")
-            assertEquals("0.0.10", init.getJSONObject("serverInfo").getString("version"))
+            assertEquals("0.0.11", init.getJSONObject("serverInfo").getString("version"))
             assertFalse(init.getJSONObject("capabilities").getJSONObject("tools").getBoolean("listChanged"))
             assertTrue(init.getString("instructions").contains("new conversation"))
             val tools = fixture.responses.first { it.optString("request_id") == "catalog" }.getJSONObject("resp_json")
@@ -270,13 +270,57 @@ class GatewayEngineTest {
             assertTrue(details.getBoolean("host_result_received"))
             assertFalse(details.getBoolean("host_result_failed"))
             assertFalse(details.getBoolean("automatic_reexecution"))
+            assertEquals("RESULT_ADAPTATION_FAILED", details.getString("result_delivery_error"))
+            assertEquals(1L, fixture.engine.state.value.access.capabilityInvokeCount)
             assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
+            assertEquals(0L, fixture.engine.state.value.access.capabilityFailureCount)
             assertEquals(0L, fixture.engine.state.value.access.capabilityUncertainCount)
             assertEquals(1L, fixture.engine.state.value.access.resultPreparationFailureCount)
             fixture.commands.add(JSONObject(command.toString()).put("shard_token", "fresh-delivery-token"))
             eventually { fixture.responses.count { it.optString("request_id") == "known-result" } == 2 }
             assertEquals(1, calls.get())
             assertEquals(1L, fixture.engine.state.value.access.resultPreparationFailureCount)
+        }
+    }
+
+    @Test fun oversizedHostResultsPreserveSuccessAndRefusalWithoutRepeatingEitherRequest() = runBlocking {
+        Fixture().use { fixture ->
+            val calls = AtomicInteger()
+            fixture.start { _, args ->
+                calls.incrementAndGet()
+                val refused = args.getBoolean("refused")
+                JSONObject().put("success", !refused).put("text", "x".repeat(4 * 1024 * 1024 + 1))
+                    .put("execution_policy", JSONObject().put("outcome", if (refused) "ASK" else "ALLOW"))
+            }
+            val commands = listOf(false, true).mapIndexed { index, refused ->
+                toolCommand("oversized-$refused", 410 + index).apply {
+                    getJSONObject("jsonrpc").getJSONObject("params").getJSONObject("arguments")
+                        .put("parameters", JSONObject().put("refused", refused))
+                }
+            }
+            commands.forEach { fixture.commands.add(it) }
+            eventually { fixture.responses.size == 2 }
+            for (refused in listOf(false, true)) {
+                val result = fixture.responses.first { it.optString("request_id") == "oversized-$refused" }
+                    .getJSONObject("resp_json").getJSONObject("result")
+                assertTrue(result.getBoolean("isError"))
+                val details = result.getJSONObject("structuredContent")
+                assertEquals("RESULT_RECEIVED", details.getString("execution_state"))
+                assertTrue(details.getBoolean("host_result_received"))
+                assertEquals(refused, details.getBoolean("host_result_failed"))
+                assertFalse(details.getBoolean("automatic_reexecution"))
+                assertEquals(if (refused) "ASK" else "ALLOW", details.getJSONObject("execution_policy").getString("outcome"))
+            }
+            assertEquals(2L, fixture.engine.state.value.access.capabilityInvokeCount)
+            assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
+            assertEquals(1L, fixture.engine.state.value.access.capabilityFailureCount)
+            assertEquals(0L, fixture.engine.state.value.access.capabilityUncertainCount)
+            assertEquals(0L, fixture.engine.state.value.access.protocolErrorCount)
+            assertEquals(2L, fixture.engine.state.value.access.resultPreparationFailureCount)
+            commands.forEach { fixture.commands.add(JSONObject(it.toString()).put("shard_token", "second-delivery")) }
+            eventually { fixture.responses.size == 4 }
+            assertEquals(2, calls.get())
+            assertEquals(2L, fixture.engine.state.value.access.resultPreparationFailureCount)
         }
     }
 

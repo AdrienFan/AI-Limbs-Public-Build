@@ -72,14 +72,10 @@ internal class GatewayResults(
             .put("next_action", "Use ai_limbs_media_read for saved media; do not repeat the original action to retry delivery."))
         val text = clean.toString()
         val structured = if (text.toByteArray(Charsets.UTF_8).size <= INLINE_BYTES) clean else {
-            try {
-                val cursor = save("result", text)
-                readResult(cursor, 0).put("operation_result_is_error", failed)
-            } catch (error: Exception) {
-                JSONObject().put("operation_result_is_error", failed).put("result_delivery_error", error.javaClass.simpleName)
-                    .put("execution_completed", true).put("sha256", gatewayHash(text))
-                    .put("next_action", "Inspect device state or domain task status; do not repeat a completed action to recover its result.")
-            }
+            // Let the engine report preparation failure using the already received Host outcome.
+            // Swallowing a cache error here falsely returns isError=false and bypasses its counter.
+            val cursor = save("result", text)
+            readResult(cursor, 0).put("operation_result_is_error", failed)
         }
         if (structured !== clean) {
             // Policy and retry guidance must remain immediately visible even when output is paged.
@@ -89,7 +85,6 @@ internal class GatewayResults(
         }
         // The full JSON is supplied once in structuredContent, rather than duplicated in a text block.
         val output = JSONArray().put(JSONObject().put("type", "text").put("text", when {
-            structured.has("result_delivery_error") -> "Capability completed; its oversized result could not be cached. Inspect structuredContent."
             structured.optBoolean("paged") -> "Capability result is paged. Continue with ai_limbs_result_read using cursor and next_offset."
             failed -> "AI Limbs reported an error or policy refusal. Follow error and next_action in structuredContent."
             mediaErrors.length() > 0 -> "Capability returned a result with partial media delivery. Inspect structuredContent; do not repeat the action."
