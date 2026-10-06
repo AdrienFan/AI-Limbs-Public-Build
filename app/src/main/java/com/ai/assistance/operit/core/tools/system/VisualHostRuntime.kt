@@ -180,10 +180,23 @@ object VisualHostRuntime {
         captureFrame: suspend () -> JSONObject
     ): JSONObject {
         val session = requireOwnedScreenSession(ownerPluginId, required(parameters, "session_id"))
-        val capturedAt = System.currentTimeMillis()
+        if (parameters.optBoolean("fresh", false)) {
+            check(android.os.SystemClock.elapsedRealtime() < parameters.getLong("deadline_elapsed_ms")) {
+                "Fresh frame request deadline has expired"
+            }
+            check(session.ready && MediaProjectionHolder.mediaProjection != null) {
+                "Fresh frames require an already active shared-screen session"
+            }
+        }
         val hostResult = captureFrame()
+        if (parameters.optBoolean("fresh", false) &&
+            android.os.SystemClock.elapsedRealtime() >= parameters.getLong("deadline_elapsed_ms")) {
+            hostResult.optString("path").takeIf { it.isNotBlank() }?.let { File(it).delete() }
+            error("Fresh frame request deadline expired during capture")
+        }
         check(hostResult.optBoolean("success", false)) { hostResult.optString("error", "Screen capture failed") }
         if (screenSessions[session.id] !== session) {
+            if (parameters.optBoolean("fresh", false)) File(hostResult.getString("path")).delete()
             if (screenSessions.isEmpty()) MediaProjectionHolder.clear(context.applicationContext)
             error("Screen session stopped during frame capture")
         }
@@ -191,8 +204,10 @@ object VisualHostRuntime {
         return JSONObject()
             .put("session_id", session.id)
             .put("target_id", session.targetId)
-            .put("captured_at_ms", capturedAt)
+            .put("captured_at_ms", if (parameters.optBoolean("fresh", false))
+                hostResult.getLong("captured_at_ms") else System.currentTimeMillis())
             .put("frame", JSONObject(hostResult.toString()))
+            .apply { if (parameters.optBoolean("fresh", false)) put("freshness", hostResult.getJSONObject("freshness")) }
     }
 
     private fun stopScreenSession(

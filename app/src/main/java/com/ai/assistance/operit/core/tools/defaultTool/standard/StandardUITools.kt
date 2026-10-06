@@ -648,6 +648,19 @@ open class StandardUITools(protected val context: Context) : ToolImplementations
         }
     }
 
+    /** Feedback only: reuse an already authorized, initialized projection; never request consent. */
+    suspend fun captureFreshSharedScreen(file: File): MediaProjectionCaptureManager.FreshFrame = withContext(Dispatchers.IO) {
+        val projection = checkNotNull(MediaProjectionHolder.mediaProjection) { "Shared screen is not active" }
+        check(cachedMediaProjection === projection) { "Shared-screen capture manager is not initialized" }
+        val manager = checkNotNull(cachedMediaProjectionCaptureManager) { "Shared-screen capture manager is not ready" }
+        val frame = manager.captureFreshToFile(file)
+        if (MediaProjectionHolder.mediaProjection !== projection) {
+            file.delete()
+            error("Shared screen stopped during capture")
+        }
+        frame
+    }
+
     override suspend fun captureScreenshot(tool: AITool): Pair<String?, Pair<Int, Int>?> {
         return captureScreenshotToFile(tool)
     }

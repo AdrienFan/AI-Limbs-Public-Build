@@ -60,3 +60,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 当前视觉 UI 修复
 
 - [Resident UI 命令截止时间修复](visual-ui-result-build108/index.md)：build108
+
+## 当前操作后视觉反馈
+
+- [共享屏操作反馈](screen-feedback-build109/index.md)：build109，含无障碍动作与显式 Shell 标记

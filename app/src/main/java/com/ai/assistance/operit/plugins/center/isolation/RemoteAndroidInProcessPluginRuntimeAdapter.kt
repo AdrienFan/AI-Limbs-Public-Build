@@ -270,7 +270,9 @@ internal class RemoteAndroidInProcessPluginRuntimeAdapter(
                                 .put("plugin_id", pluginId)
                                 .put("provider_id", id)
                                 .put("parameters_json", parametersJson),
-                            PluginRuntimeWire.BUSINESS_TIMEOUT_MS
+                            com.ai.assistance.operit.plugins.center.OperationFeedbackProviderPolicy.timeoutMs(
+                                contract.metadata, PluginRuntimeWire.BUSINESS_TIMEOUT_MS
+                            )
                         )
                         result.getJSONObject("operation_result").getString("result_json")
                     }

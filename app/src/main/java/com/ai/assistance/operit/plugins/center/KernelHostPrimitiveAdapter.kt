@@ -77,7 +77,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                     ownerPluginId,
                     op,
                     parameters
-                ) { captureScreenFrame(ownerPluginId) }
+                ) { captureScreenFrame(ownerPluginId, parameters.optBoolean("fresh", false)) }
             "host.camera.capture@1", "host.camera.session@1" ->
                 VisualHostRuntime.invokeCamera(
                     appContext,
@@ -176,10 +176,24 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             .put("persisted", updated)
     }
 
-    private suspend fun captureScreenFrame(ownerPluginId: String): JSONObject {
+    private suspend fun captureScreenFrame(ownerPluginId: String, fresh: Boolean = false): JSONObject {
         // This is already the Host Primitive execution boundary. Re-entering AiLimbsDispatcher
         // here would incorrectly create a second AI/Policy authorization cycle in Host while
         // Resident Core owns policy authority. Only Android MediaProjection consent belongs here.
+        if (fresh) {
+            val ownerPath = ownerPluginId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
+            val directory = File(appContext.cacheDir, "visual-host/$ownerPath")
+            check(directory.exists() || directory.mkdirs()) { "Shared-screen scratch directory is unavailable" }
+            val frame = hostScreenCaptureTools.captureFreshSharedScreen(
+                File(directory, "feedback-${java.util.UUID.randomUUID()}.png")
+            )
+            return JSONObject().put("ok", true).put("success", true).put("path", frame.path)
+                .put("owner_plugin_id", ownerPluginId).put("width", frame.width).put("height", frame.height)
+                .put("captured_at_ms", frame.capturedAtMs)
+                .put("freshness", JSONObject().put("method", "new_surface")
+                    .put("requested_elapsed_ms", frame.requestedElapsedMs)
+                    .put("captured_elapsed_ms", frame.capturedElapsedMs))
+        }
         val (path, dimensions) = hostScreenCaptureTools.captureScreenshot(
             AITool(name = "capture_screenshot", parameters = emptyList())
         )

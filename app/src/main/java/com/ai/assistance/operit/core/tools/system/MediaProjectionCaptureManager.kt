@@ -12,6 +12,11 @@ import android.util.DisplayMetrics
 import android.view.WindowManager
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeout
 import com.ai.assistance.operit.util.AppLogger
 import java.io.File
 import java.io.FileOutputStream
@@ -28,6 +33,13 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
 
     private var virtualDisplay: VirtualDisplay? = null
     private var imageReader: ImageReader? = null
+    private val freshCaptureLock = Mutex()
+    private var pendingFreshFrame: CompletableDeferred<Unit>? = null
+
+    data class FreshFrame(
+        val path: String, val width: Int, val height: Int,
+        val requestedElapsedMs: Long, val capturedElapsedMs: Long, val capturedAtMs: Long
+    )
 
     private val callbackHandler = Handler(Looper.getMainLooper())
     private var projectionCallback: MediaProjection.Callback? = null
@@ -35,7 +47,7 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
     /**
      * Set up the virtual display using the MediaProjection token.
      */
-    fun setupDisplay() {
+    @Synchronized fun setupDisplay() {
         if (virtualDisplay != null) return
         
         try {
@@ -104,7 +116,9 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
     /**
      * Capture the latest frame as a raw bitmap.
      */
-    fun captureToBitmap(): Bitmap? {
+    @Synchronized fun captureToBitmap(): Bitmap? {
+        // A fresh request owns its new reader until its first post-request frame is consumed.
+        if (pendingFreshFrame != null) return null
         val reader = imageReader ?: return null
         var image: Image? = null
         return try {
@@ -115,34 +129,98 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
                  return null
             }
 
-            val width = image.width
-            val height = image.height
-            if (width <= 0 || height <= 0) {
-                return null
-            }
-            
-            val plane = image.planes[0]
-            val buffer = plane.buffer
-            val pixelStride = plane.pixelStride
-            val rowStride = plane.rowStride
-            val rowPadding = rowStride - pixelStride * width
-
-            val bitmap = Bitmap.createBitmap(
-                width + rowPadding / pixelStride,
-                height,
-                Bitmap.Config.ARGB_8888
-            )
-            bitmap.copyPixelsFromBuffer(buffer)
-
-            val cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height)
-            bitmap.recycle()
-
-            cropped
+            imageToBitmap(image)
         } catch (e: Exception) {
             AppLogger.e(TAG, "Error capturing frame from MediaProjection", e)
             null
         } finally {
             image?.close()
+        }
+    }
+
+    private fun imageToBitmap(image: Image): Bitmap? {
+        val width = image.width
+        val height = image.height
+        if (width <= 0 || height <= 0) {
+            return null
+        }
+
+        val plane = image.planes[0]
+        val buffer = plane.buffer
+        val pixelStride = plane.pixelStride
+        val rowStride = plane.rowStride
+        val rowPadding = rowStride - pixelStride * width
+
+        val bitmap = Bitmap.createBitmap(
+            width + rowPadding / pixelStride,
+            height,
+            Bitmap.Config.ARGB_8888
+        )
+        bitmap.copyPixelsFromBuffer(buffer)
+
+        val cropped = Bitmap.createBitmap(bitmap, 0, 0, width, height)
+        if (cropped !== bitmap) bitmap.recycle()
+
+        return cropped
+    }
+
+    /**
+     * Attach an empty reader to the existing display AFTER the action. An image delivered to this
+     * previously unattached surface cannot be an old queued preview. No second projection/display
+     * is created, and no Image.timestamp timebase assumption is required.
+     */
+    suspend fun captureFreshToFile(file: File): FreshFrame = freshCaptureLock.withLock {
+        val ready = CompletableDeferred<Unit>()
+        val requestedElapsed = SystemClock.elapsedRealtime()
+        val reader = synchronized(this) {
+            val display = checkNotNull(virtualDisplay) { "Shared-screen display is not ready" }
+            val previous = checkNotNull(imageReader) { "Shared-screen reader is not ready" }
+            val next = ImageReader.newInstance(previous.width, previous.height, PixelFormat.RGBA_8888, 2)
+            next.setOnImageAvailableListener({ available ->
+                synchronized(this@MediaProjectionCaptureManager) {
+                    if (available === imageReader && pendingFreshFrame === ready) ready.complete(Unit)
+                }
+            }, callbackHandler)
+            try {
+                display.surface = next.surface
+            } catch (error: Exception) {
+                next.close()
+                throw error
+            }
+            imageReader = next
+            pendingFreshFrame = ready
+            previous.close()
+            next
+        }
+        var bitmap: Bitmap? = null
+        try {
+            // This bounds an actual frame-arrival wait; it is not a fixed UI settling delay.
+            withTimeout(2_000L) { ready.await() }
+            val capturedElapsed: Long
+            val capturedAt: Long
+            synchronized(this) {
+                check(imageReader === reader && pendingFreshFrame === ready) { "Shared screen stopped during capture" }
+                val image = checkNotNull(reader.acquireLatestImage()) { "New shared-screen frame is unavailable" }
+                try {
+                    capturedElapsed = SystemClock.elapsedRealtime()
+                    capturedAt = System.currentTimeMillis()
+                    bitmap = checkNotNull(imageToBitmap(image)) { "New shared-screen frame has invalid dimensions" }
+                } finally { image.close() }
+            }
+            val captured = checkNotNull(bitmap)
+            FileOutputStream(file).use { out ->
+                check(captured.compress(Bitmap.CompressFormat.PNG, 100, out)) { "New frame encoding failed" }
+            }
+            FreshFrame(file.absolutePath, captured.width, captured.height, requestedElapsed, capturedElapsed, capturedAt)
+        } catch (error: Exception) {
+            file.delete()
+            throw error
+        } finally {
+            bitmap?.recycle()
+            synchronized(this) {
+                if (imageReader === reader) reader.setOnImageAvailableListener(null, null)
+                if (pendingFreshFrame === ready) pendingFreshFrame = null
+            }
         }
     }
 
@@ -166,7 +244,9 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
         }
     }
 
-    fun release() {
+    @Synchronized fun release() {
+        pendingFreshFrame?.completeExceptionally(IllegalStateException("Shared screen stopped during capture"))
+        pendingFreshFrame = null
         try {
             virtualDisplay?.release()
             imageReader?.close()

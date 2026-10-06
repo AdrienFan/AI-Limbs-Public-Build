@@ -12,6 +12,7 @@ import com.ai.assistance.operit.data.model.ToolInvocation
 import com.ai.assistance.operit.data.model.ToolParameter
 import com.ai.assistance.operit.plugins.center.HostAttentionRegistry
 import com.ai.assistance.operit.plugins.center.PluginPlatformKernel
+import com.ai.assistance.operit.plugins.center.PluginOperationFeedback
 import com.ai.assistance.operit.plugins.center.PluginChatModeRuntime
 import com.ai.assistance.operit.util.stream.StreamCollector
 import com.google.gson.Gson
@@ -269,10 +270,16 @@ class AiLimbsDispatcher(
         name: String,
         parameters: JSONObject
     ): JSONObject {
+        val needsFeedback = try {
+            AiLimbsOperationFeedback.requested(name, parameters)
+        } catch (invalid: IllegalArgumentException) {
+            return error(invalid.message ?: "Invalid screen_action").put("error_code", "INVALID_SCREEN_ACTION")
+        }
         val params = mutableListOf<ToolParameter>()
         val keys = parameters.keys()
         while (keys.hasNext()) {
             val key = keys.next()
+            if (name == "execute_shell" && key == "screen_action") continue
             params += ToolParameter(key, parameters.opt(key)?.toString() ?: "")
         }
         val aiTool = AITool(name = name, parameters = params)
@@ -306,7 +313,7 @@ class AiLimbsDispatcher(
                     }
             )
         val result = results.firstOrNull() ?: return error("Host tool returned no result")
-        return JSONObject()
+        val response = JSONObject()
             .put("success", result.success)
             .put("tool", result.toolName)
             .put("result", parseJsonOrString(gson.toJson(result.result)))
@@ -314,6 +321,14 @@ class AiLimbsDispatcher(
             .put("result_representation", if (preserveHostToolResultData) "structured" else "display")
             .put("error", result.error ?: JSONObject.NULL)
             .put("events", JSONArray(emitted))
+        if (!needsFeedback) return response
+        val request = JSONObject().put("schema", 1).put("event", AiLimbsOperationFeedback.EVENT)
+            .put("operation_id", java.util.UUID.randomUUID().toString()).put("tool", name)
+            .put("operation_success", result.success)
+            .put("completed_at_ms", System.currentTimeMillis())
+            .put("completed_elapsed_ms", android.os.SystemClock.elapsedRealtime())
+            .put("deadline_elapsed_ms", android.os.SystemClock.elapsedRealtime() + 6_000L)
+        return PluginOperationFeedback.attach(response, request)
     }
 
     private suspend fun uiCapabilityStatus(): JSONObject {

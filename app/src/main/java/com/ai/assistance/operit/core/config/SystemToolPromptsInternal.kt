@@ -22,6 +22,13 @@ object SystemToolPromptsInternal {
                                         type = "string",
                                         description = "shell command to execute",
                                         required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "screen_action",
+                                        type = "boolean",
+                                        description = "Set true only when this command controls the phone screen. Default false; when screen sharing is already active, return one fresh post-action image. Leave false for logs, files, processes or network queries.",
+                                        required = false,
+                                        default = "false"
                                     )
                                 )
                         ),
@@ -2897,6 +2904,13 @@ object SystemToolPromptsInternal {
                                         type = "string",
                                         description = "要执行的命令",
                                         required = true
+                                    ),
+                                    ToolParameterSchema(
+                                        name = "screen_action",
+                                        type = "boolean",
+                                        description = "仅当本次命令操控手机屏幕时设置 true；默认 false。已有屏幕共享时附一张操作后新帧。日志、文件、进程和网络查询不要开启。",
+                                        required = false,
+                                        default = "false"
                                     )
                                 )
                         ),
