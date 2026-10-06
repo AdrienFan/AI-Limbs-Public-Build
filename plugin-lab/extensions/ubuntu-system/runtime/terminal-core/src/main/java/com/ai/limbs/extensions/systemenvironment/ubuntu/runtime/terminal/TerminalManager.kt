@@ -4,6 +4,7 @@ import android.content.Context
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.type.Utf8OutputReader
 import java.io.File
 import java.io.IOException
 import java.nio.file.Files
@@ -297,6 +298,15 @@ class TerminalManager private constructor(
         val separator = if (current.output.isNotEmpty()) "\n" else ""
         _sharedHiddenTerminalState.value = current.copy(
             output = (current.output + separator + chunk).takeLast(MAX_SHARED_OUTPUT_CHARS),
+            updatedAtMillis = System.currentTimeMillis()
+        )
+    }
+
+    fun updateSharedHiddenOperationOutput(operationId: String, output: String) {
+        val current = _sharedHiddenTerminalState.value
+        if (current.operationId != operationId) return
+        _sharedHiddenTerminalState.value = current.copy(
+            output = output.takeLast(MAX_SHARED_OUTPUT_CHARS),
             updatedAtMillis = System.currentTimeMillis()
         )
     }
@@ -989,11 +999,10 @@ class TerminalManager private constructor(
                 val readJob = launch {
                     var reachedEof = false
                     try {
-                        terminalSession.stdout.use { inputStream ->
-                            val buffer = ByteArray(4096)
-                            var bytesRead: Int
-                            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                                val chunk = String(buffer, 0, bytesRead)
+                        Utf8OutputReader(terminalSession.stdout).use { reader ->
+                            // One decoder owns the whole PTY stream, including incomplete UTF-8 bytes.
+                            while (true) {
+                                val chunk = reader.readChunk() ?: break
                                 if (sessionManager.getSession(sessionId)?.initState != SessionInitState.READY) {
                                     sessionInitializationOutput.merge(sessionId, chunk) { previous, current ->
                                         (previous + current).takeLast(4096)
@@ -1002,7 +1011,7 @@ class TerminalManager private constructor(
                                 if (sessionManager.getSession(sessionId)?.terminalType == TerminalType.LOCAL) {
                                     recordUbuntuActivity()
                                 }
-                                Log.d(TAG, "Read PTY chunk for session $sessionId (bytes=$bytesRead)")
+                                Log.d(TAG, "Read PTY chunk for session $sessionId (chars=${chunk.length})")
                                 outputProcessor.processOutput(sessionId, chunk, sessionManager)
                             }
                             reachedEof = true

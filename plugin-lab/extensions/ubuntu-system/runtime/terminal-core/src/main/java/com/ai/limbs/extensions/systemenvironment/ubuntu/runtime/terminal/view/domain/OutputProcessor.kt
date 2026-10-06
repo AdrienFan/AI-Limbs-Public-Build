@@ -13,7 +13,8 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.do
  * @property justHandledCarriageReturn 如果最近处理的行分隔符是回车符（CR），则为 true
  */
 private data class SessionProcessingState(
-    var justHandledCarriageReturn: Boolean = false
+    var justHandledCarriageReturn: Boolean = false,
+    val outputLines: CommandOutputLineAssembler = CommandOutputLineAssembler()
 )
 
 /**
@@ -149,11 +150,13 @@ class OutputProcessor(
 
                     // 如果是交互式提示符（非普通 shell 提示符），进入交互模式
                     if (isWaitingInput && !isShellPrompt) {
-                        handleInteractivePrompt(sessionId, cleanContent, sessionManager)
+                        // A PTY read boundary is not a physical newline. Keep the accumulated
+                        // line so subsequent bytes can replace this preview or complete it.
+                        handleInteractivePrompt(sessionId, cleanContent, sessionManager, provisional = true)
                     } else {
                         processLine(sessionId, bufferContent, sessionManager)
+                        session.rawBuffer.clear()
                     }
-                    session.rawBuffer.clear()
                 }
                 break // Exit loop, wait for more data.
             }
@@ -365,7 +368,7 @@ class OutputProcessor(
 
             val outputBeforePrompt = line.substring(0, match.range.first)
             if (outputBeforePrompt.isNotBlank()) {
-                session.currentCommandOutput.append(outputBeforePrompt)
+                updateCommandOutput(sessionId, outputBeforePrompt, sessionManager)
             }
             true
         } else {
@@ -453,7 +456,8 @@ class OutputProcessor(
     private fun handleInteractivePrompt(
         sessionId: String,
         cleanLine: String,
-        sessionManager: SessionManager
+        sessionManager: SessionManager,
+        provisional: Boolean = false
     ) {
         Log.d(TAG, "Detected interactive prompt: $cleanLine")
         val session = sessionManager.getSession(sessionId) ?: return
@@ -467,9 +471,9 @@ class OutputProcessor(
             )
         }
 
-        // 将交互式提示添加到当前命令的输出中
+        // Preview a growing prompt without inventing a line break between read chunks.
         if (cleanLine.isNotBlank()) {
-            updateCommandOutput(sessionId, cleanLine, sessionManager)
+            updateCommandOutput(sessionId, cleanLine, sessionManager, provisional)
         }
     }
 
@@ -492,38 +496,38 @@ class OutputProcessor(
     private fun updateCommandOutput(
         sessionId: String,
         cleanLine: String,
-        sessionManager: SessionManager
+        sessionManager: SessionManager,
+        provisional: Boolean = false
     ) {
         val session = sessionManager.getSession(sessionId) ?: return
         val currentItem = session.currentExecutingCommand
 
         if (currentItem != null && currentItem.isExecuting) {
             val builder = session.currentCommandOutput
-            // 确保输出之间有换行符
-            if (builder.isNotEmpty() && builder.last() != '\n') {
-                builder.append('\n')
-            }
-            builder.append(cleanLine)
+            val state = sessionStates.getOrPut(sessionId) { SessionProcessingState() }
+            val replaced = state.outputLines.append(builder, cleanLine, provisional)
 
             // 实时更新当前输出块
             currentItem.setOutput(builder.toString())
-            session.currentOutputLineCount++
+            if (!replaced) session.currentOutputLineCount++
 
             // 发出命令执行过程事件
             onCommandExecutionEvent(CommandExecutionEvent(
                 commandId = currentItem.id,
                 sessionId = sessionId,
                 outputChunk = cleanLine,
-                isCompleted = false
+                isCompleted = false,
+                replaceLastOutputLine = replaced
             ))
 
-            if (session.currentOutputLineCount >= MAX_LINES_PER_HISTORY_ITEM) {
+            if (!provisional && session.currentOutputLineCount >= MAX_LINES_PER_HISTORY_ITEM) {
                 // 当前页已满，将其添加到已完成的页面列表并开始新的一页
                 while (currentItem.outputPages.size >= MAX_OUTPUT_PAGES_PER_COMMAND) {
                     currentItem.outputPages.removeAt(0)
                 }
                 currentItem.outputPages.add(currentItem.output)
                 builder.clear()
+                state.outputLines.clear()
                 session.currentOutputLineCount = 0
                 currentItem.setOutput("") // 为新页面清空实时输出
             }
@@ -540,6 +544,7 @@ class OutputProcessor(
         val lastExecutingItem = session.currentExecutingCommand
 
         if (lastExecutingItem != null && lastExecutingItem.isExecuting) {
+            sessionStates[sessionId]?.outputLines?.clear()
              // More efficient way to replace the last line
             val lastNewlineIndex = builder.lastIndexOf('\n')
             if (lastNewlineIndex != -1) {
@@ -597,6 +602,7 @@ class OutputProcessor(
             // Clear the reference since command is no longer executing
             session.currentExecutingCommand = null
             session.currentCommandOutput.clear()
+            sessionStates[sessionId]?.outputLines?.clear()
 
             // 通知命令已完成，可以处理下一个队列命令
             onCommandCompleted(sessionId)
@@ -656,6 +662,7 @@ class OutputProcessor(
         }
 
         session.currentCommandOutput.clear()
+        sessionStates[sessionId]?.outputLines?.clear()
         session.currentOutputLineCount = 0
         session.commandQueue.clear()
     }

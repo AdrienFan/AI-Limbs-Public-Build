@@ -228,7 +228,7 @@ class LocalTerminalProvider(
                 try {
                     // Keep one decoder for the entire shell stream, including all command markers.
                     // Independent byte-block String conversions corrupt split UTF-8 characters.
-                    HiddenExecOutputReader(process.inputStream).use { reader ->
+                    Utf8OutputReader(process.inputStream).use { reader ->
                         while (isActive) {
                             val chunk = reader.readChunk() ?: break
                             if (chunk.isNotEmpty()) outputChannel.send(chunk)

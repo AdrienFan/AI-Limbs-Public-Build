@@ -8,7 +8,9 @@ data class CommandExecutionEvent(
     val commandId: String,
     val sessionId: String,
     val outputChunk: String, // 命令执行过程量
-    val isCompleted: Boolean // 是否执行完毕
+    val isCompleted: Boolean, // 是否执行完毕
+    // A growing unterminated line replaces its previous preview instead of adding a newline.
+    val replaceLastOutputLine: Boolean = false
 ) : Parcelable
 
 @Parcelize

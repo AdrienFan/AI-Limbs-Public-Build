@@ -8,7 +8,7 @@ import java.util.concurrent.TimeUnit
 import org.junit.Assert.*
 import org.junit.Test
 
-class HiddenExecOutputReaderTest {
+class Utf8OutputReaderTest {
     @Test fun everyByteBoundaryPreservesChineseEmojiAndShellMarkers() {
         val expected = "__OPERIT_HIDDEN_BEGIN__:one\n汉😀兰儿\n__OPERIT_HIDDEN_END__:one:0\n" +
             "__OPERIT_HIDDEN_BEGIN__:two\n" +
@@ -19,7 +19,7 @@ class HiddenExecOutputReaderTest {
                 override fun read(bytes: ByteArray, offset: Int, length: Int): Int =
                     super.read(bytes, offset, minOf(length, size))
             }
-            val actual = HiddenExecOutputReader(stream).use { reader ->
+            val actual = Utf8OutputReader(stream).use { reader ->
                 buildString {
                     while (true) append(reader.readChunk() ?: break)
                 }
@@ -33,7 +33,7 @@ class HiddenExecOutputReaderTest {
         val input = PipedInputStream()
         val output = PipedOutputStream(input)
         val executor = Executors.newSingleThreadExecutor()
-        val reader = HiddenExecOutputReader(input)
+        val reader = Utf8OutputReader(input)
         try {
             val bytes = "😀".toByteArray(Charsets.UTF_8)
             output.write(bytes, 0, 2)
@@ -54,7 +54,7 @@ class HiddenExecOutputReaderTest {
         val input = PipedInputStream()
         val output = PipedOutputStream(input)
         val executor = Executors.newSingleThreadExecutor()
-        val reader = HiddenExecOutputReader(input)
+        val reader = Utf8OutputReader(input)
         try {
             val pending = executor.submit<String?> { reader.readChunk() }
             output.write("兰儿😀> ".toByteArray(Charsets.UTF_8))
@@ -66,6 +66,18 @@ class HiddenExecOutputReaderTest {
             output.close()
             reader.close()
             executor.shutdownNow()
+        }
+    }
+    @Test fun decodedChunksNeverSplitASupplementaryCharacter() {
+        val expected = "a".repeat(4095) + "😀" + "兰儿" + "b".repeat(4095) + "😀"
+        val chunks = mutableListOf<String>()
+        Utf8OutputReader(ByteArrayInputStream(expected.toByteArray(Charsets.UTF_8))).use { reader ->
+            while (true) chunks += reader.readChunk() ?: break
+        }
+        assertEquals(expected, chunks.joinToString(""))
+        chunks.forEach { chunk ->
+            assertFalse(Character.isHighSurrogate(chunk.last()))
+            assertFalse(Character.isLowSurrogate(chunk.first()))
         }
     }
 }

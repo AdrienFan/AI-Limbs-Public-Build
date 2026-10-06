@@ -57,6 +57,7 @@ internal class UbuntuSubsystemProcessCapability(
         val released: AtomicBoolean = AtomicBoolean(false),
         val lines: MutableList<String> = mutableListOf(),
         var bufferedChars: Int = 0,
+        var lastEventLineCount: Int = 0,
         var baseLine: Int = 0,
         var nextLine: Int = 0,
         var readCursor: Int = 0,
@@ -182,7 +183,7 @@ internal class UbuntuSubsystemProcessCapability(
                     .takeWhile { event ->
                         // Completion carries the full output snapshot, not a new delta.
                         // Use its canonical snapshot to finalize the buffer, never append it as another delta.
-                        if (!event.isCompleted && event.outputChunk.isNotEmpty()) appendOutput(record, event.outputChunk)
+                        if (!event.isCompleted && event.outputChunk.isNotEmpty()) appendOutput(record, event.outputChunk, event.replaceLastOutputLine)
                         if (event.isCompleted) finish(record, null, event.outputChunk)
                         !event.isCompleted
                     }
@@ -317,15 +318,27 @@ internal class UbuntuSubsystemProcessCapability(
         return ok("Process $pid terminated.").put("pid", pid)
     }
 
-    private fun appendOutput(record: ProcessRecord, chunk: String) {
+    private fun appendOutput(record: ProcessRecord, chunk: String, replaceLastOutputLine: Boolean) {
         if (chunk.isEmpty()) return
         val newLines = splitLines(chunk)
         if (newLines.isEmpty()) return
-        synchronized(record) {
+        val snapshot = synchronized(record) {
+            if (replaceLastOutputLine) {
+                // A physical line can occupy multiple bounded buffer entries. Replace all
+                // entries from its preceding preview and make the updated line readable again.
+                repeat(minOf(record.lastEventLineCount, record.lines.size)) {
+                    val previous = record.lines.removeAt(record.lines.lastIndex)
+                    record.bufferedChars -= previous.length + 1
+                    record.nextLine--
+                }
+                record.readCursor = record.readCursor.coerceAtMost(record.nextLine)
+            }
             newLines.forEach { addBufferedLine(record, it) }
+            record.lastEventLineCount = newLines.size
             trimBuffer(record)
+            record.lines.joinToString("\n")
         }
-        terminal.appendSharedHiddenOperationOutput(record.sharedOperationId, newLines.joinToString("\n"))
+        terminal.updateSharedHiddenOperationOutput(record.sharedOperationId, snapshot)
     }
 
     private fun finish(record: ProcessRecord, error: String?, completedOutput: String? = null) {
@@ -445,7 +458,9 @@ internal class UbuntuSubsystemProcessCapability(
             else {
                 var start = 0
                 while (start < line.length) {
-                    val end = (start + MAX_LINE_CHARS).coerceAtMost(line.length)
+                    var end = (start + MAX_LINE_CHARS).coerceAtMost(line.length)
+                    if (end < line.length && Character.isHighSurrogate(line[end - 1]) &&
+                        Character.isLowSurrogate(line[end])) end--
                     result += line.substring(start, end)
                     start = end
                 }
