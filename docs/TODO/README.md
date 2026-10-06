@@ -48,3 +48,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 当前工作
 
 - [视觉工作台重建](visual-workbench/index.md)：新版流程、布局、单向授权及即时状态同步
+
+## 当前视觉 UI 修复
+
+- [视觉工作台连接错误结果处理](visual-ui-result-0.2.1/index.md)：0.2.1

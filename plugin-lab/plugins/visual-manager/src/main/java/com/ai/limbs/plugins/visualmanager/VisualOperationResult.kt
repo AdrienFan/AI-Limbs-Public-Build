@@ -31,6 +31,14 @@ internal object VisualOperationResult {
     }
 
     fun requireSuccess(result: JSONObject): JSONObject {
+        // The presentation transport returns ok=false on connection failures, without
+        // a plugin success flag. Preserve that error before validating the plugin result.
+        if (result.has("ok") && !result.getBoolean("ok")) {
+            throw VisualOperationFailure(result.getString("error_code"), result.getString("error"), result)
+        }
+        if (!result.has("success")) {
+            throw VisualOperationFailure("VISUAL_RESULT_INVALID", "视觉操作返回缺少 success 状态", result)
+        }
         if (!result.getBoolean("success")) {
             throw VisualOperationFailure(result.getString("error_code"), result.getString("error"), result)
         }
