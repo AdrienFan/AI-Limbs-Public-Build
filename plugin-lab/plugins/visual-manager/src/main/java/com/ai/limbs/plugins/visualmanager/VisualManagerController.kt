@@ -1,8 +1,23 @@
 package com.ai.limbs.plugins.visualmanager
 
+import android.graphics.Bitmap
+import android.graphics.BitmapFactory
+import android.graphics.Matrix
+import android.media.ExifInterface
+import android.util.Base64
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
+import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.util.UUID
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -10,340 +25,430 @@ internal const val VISUAL_PLUGIN_ID = "plugin.system.visual_manager"
 internal const val VISUAL_PAGE_ID = "$VISUAL_PLUGIN_ID.page"
 internal const val VISUAL_SCREEN_ID = "$VISUAL_PLUGIN_ID.screen"
 internal const val VISUAL_TILE_ID = "$VISUAL_PLUGIN_ID.tile"
+internal const val VISUAL_STATE_ID = "$VISUAL_PLUGIN_ID.state"
 
-internal class VisualManagerController(
-    private val host: InProcessPluginUiHost
-) : VisualManagerPageActions {
+/** Core owns workflow, operation outcomes, session coordination and all visual files. */
+internal class VisualManagerController(private val host: InProcessPluginUiHost) : VisualManagerPageActions {
     private val pageReader = VisualPageReader()
-    override suspend fun dashboard(): JSONObject = JSONObject()
-        .put("screen", safeHost(HOST_SCREEN_SESSION, "status"))
-        .put("screen_targets", safeHost(HOST_SCREEN_SESSION, "list_targets"))
-        .put("camera", safeHost(HOST_CAMERA_SESSION, "status"))
-        .put("camera_sources", safeHost(HOST_CAMERA_SESSION, "list_sources"))
-        .put("assets", listAssets())
-        .put("page", pageReader.status())
+    private val locks = mapOf("screen" to Mutex(), "camera" to Mutex(), "images" to Mutex(), "page" to Mutex())
+    private val stateLock = Any()
+    private val states = mutableMapOf<String, JSONObject>()
+    private val generations = mutableMapOf("screen" to 0L, "camera" to 0L)
+    private val previewLock = Mutex()
+    private val previews = mutableMapOf<String, JSONObject>()
+    private var revision = 0L
+    private val signal = MutableStateFlow<String?>("""{"revision":0}""")
+    val stateProvider = object : InProcessUiStateProvider {
+        override val stateJson: StateFlow<String?> = signal.asStateFlow()
+        override suspend fun perform(eventId: String, payloadJson: String): String =
+            error("视觉状态通道只读，请调用插件能力")
+    }
+    private fun publishState() {
+        signal.value = JSONObject().put("revision", revision).toString()
+    }
 
-    override suspend fun pageInspect(parameters: JSONObject): JSONObject {
-        val request = JSONObject().put("format", "json").put("detail", "full")
-        if (parameters.has("display")) request.put("display", parameters.getString("display"))
-        val response = invokeHost(HOST_UI_AUTOMATION, "snapshot", request)
-        check(response.optBoolean("success", false)) {
-            response.opt("error")?.toString() ?: "Page inspection failed"
+    override suspend fun call(action: String, parameters: JSONObject): JSONObject = withContext(Dispatchers.IO) {
+        try {
+            val result = when (action) {
+                "status" -> dashboard()
+                "sources" -> sources(kind(parameters))
+                "permission" -> permission(parameters)
+                "start" -> start(kind(parameters), parameters)
+                "frame" -> frame(kind(parameters), parameters)
+                "capture" -> capture(kind(parameters), parameters)
+                "stop" -> stop(parameters)
+                "preview.read" -> previewLock.withLock { previewRead(kind(parameters), parameters.optInt("max_edge", 1024)) }
+                "preview.save" -> perform("images", "保存预览") {
+                    previewLock.withLock {
+                        val meta = previews[kind(parameters)] ?: error("当前来源还没有预览画面")
+                        archive(File(previewRoot(), meta.getString("file_name")), meta)
+                    }
+                }
+                "images.list" -> locks.getValue("images").withLock { listImages() }
+                "images.read" -> locks.getValue("images").withLock {
+                    val meta = imageMetadata(parameters.getString("asset_id"))
+                    val image = encodedImage(imageFile(meta), meta, parameters.optInt("max_edge", 1024))
+                    image.put("mcp_content", content(image))
+                }
+                "images.delete" -> perform("images", "删除图像") {
+                    val meta = imageMetadata(parameters.getString("asset_id"))
+                    check(imageFile(meta).delete()) { "图像文件删除失败" }
+                    check(File(imagesRoot(), "${meta.getString("asset_id")}.json").delete()) { "图像元数据删除失败" }
+                    JSONObject().put("deleted", true).put("asset_id", meta.getString("asset_id"))
+                }
+                "images.clear" -> perform("images", "清空图像记录") {
+                    val count = listImages().getInt("count")
+                    check(imagesRoot().deleteRecursively()) { "图像记录清理失败" }
+                    imagesRoot()
+                    JSONObject().put("cleared", true).put("deleted_count", count)
+                }
+                "page.inspect" -> perform("page", "读取页面") {
+                    val request = JSONObject().put("format", "json").put("detail", "full")
+                    if (parameters.has("display")) request.put("display", parameters.getString("display"))
+                    val response = hostCall("host.ui.automation@1", "snapshot", request)
+                    VisualOperationResult.requireFlag(response, "success", "页面读取未完成")
+                    pageReader.capture(response.getJSONObject("result"))
+                }
+                "page.text" -> locks.getValue("page").withLock { pageReader.read(parameters) }
+                else -> error("未知视觉工作台操作：$action")
+            }
+            result.put("success", true)
+        } catch (error: CancellationException) {
+            throw error
+        } catch (error: Exception) {
+            host.logger.e("VisualWorkbench", "Operation failed: $action", error)
+            val failure = error as? VisualOperationFailure
+            JSONObject().put("success", false).put("error_code", failure?.code ?: "VISUAL_OPERATION_FAILED")
+                .put("error", error.message ?: error.javaClass.simpleName)
+                .put("details", failure?.details ?: JSONObject())
         }
-        return pageReader.capture(response.getJSONObject("result"))
     }
 
-    override suspend fun pageText(parameters: JSONObject): JSONObject = pageReader.read(parameters)
-
-    fun clearPageSnapshots() = pageReader.clear()
-
-    suspend fun screenTargets(): JSONObject =
-        invokeHost(HOST_SCREEN_SESSION, "list_targets")
-
-    override suspend fun screenCapture(parameters: JSONObject): JSONObject {
-        val result = invokeHost(HOST_SCREEN_CAPTURE, "capture", parameters)
-        return attachManagedAsset("screen", result)
+    private fun kind(p: JSONObject): String {
+        val kind = p.getString("kind")
+        require(kind == "screen" || kind == "camera") { "kind 必须是 screen 或 camera" }
+        return kind
     }
 
-    override suspend fun screenStart(parameters: JSONObject): JSONObject {
-        val request = JSONObject(parameters.toString())
-        val prime = if (request.has("prime")) request.optBoolean("prime", true) else true
-        request.remove("prime")
-        val started = invokeHost(HOST_SCREEN_SESSION, "start", request)
-        val sessionId = started.optString("session_id").trim()
-        if (prime && started.optBoolean("active", false) && sessionId.isNotEmpty()) {
+    private suspend fun perform(channel: String, label: String, block: suspend (Long?) -> JSONObject): JSONObject =
+        locks.getValue(channel).withLock {
+            val generation = synchronized(stateLock) { generations[channel] }
+            setState(channel, "BUSY", label)
             try {
-                val firstFrame = screenFrame(JSONObject().put("session_id", sessionId))
-                started.put("first_frame", firstFrame)
-            } catch (error: Throwable) {
-                runCatching {
-                    invokeHost(
-                        HOST_SCREEN_SESSION,
-                        "stop",
-                        JSONObject().put("session_id", sessionId)
-                    )
+                val result = block(generation)
+                synchronized(stateLock) {
+                    if (generation != generations[channel]) {
+                        throw VisualOperationFailure("OPERATION_CANCELLED", "操作已被停止指令取消")
+                    }
+                    setState(channel, "IDLE", "$label 完成")
+                }
+                result
+            } catch (error: CancellationException) {
+                setState(channel, "IDLE", "$label 已取消")
+                throw error
+            } catch (error: Exception) {
+                synchronized(stateLock) {
+                    if (generation == generations[channel]) setState(channel, "ERROR", error.message ?: label)
                 }
                 throw error
             }
         }
-        return started
+
+    private fun setState(channel: String, phase: String, message: String) = synchronized(stateLock) {
+        revision++
+        states[channel] = JSONObject().put("phase", phase).put("message", message)
+            .put("updated_at_ms", System.currentTimeMillis())
+        publishState()
     }
 
-    override suspend fun screenStop(parameters: JSONObject): JSONObject =
-        invokeHost(HOST_SCREEN_SESSION, "stop", parameters)
+    private suspend fun hostCall(primitive: String, operation: String, p: JSONObject = JSONObject()): JSONObject =
+        JSONObject(host.invokeHostCapability(primitive, JSONObject(p.toString()).put("operation", operation).toString()))
 
-    override suspend fun screenFrame(parameters: JSONObject): JSONObject {
-        val result = invokeHost(HOST_SCREEN_SESSION, "frame", parameters)
-        return attachManagedAsset("screen", result)
-    }
-
-    suspend fun cameraSources(): JSONObject =
-        invokeHost(HOST_CAMERA_SESSION, "list_sources")
-
-    override suspend fun cameraStart(parameters: JSONObject): JSONObject =
-        invokeHost(HOST_CAMERA_SESSION, "start", parameters)
-
-    suspend fun cameraConfigure(parameters: JSONObject): JSONObject =
-        invokeHost(HOST_CAMERA_SESSION, "configure", parameters)
-
-    override suspend fun cameraStop(parameters: JSONObject): JSONObject =
-        invokeHost(HOST_CAMERA_SESSION, "stop", parameters)
-
-    override suspend fun cameraFrame(parameters: JSONObject): JSONObject {
-        val result = invokeHost(HOST_CAMERA_SESSION, "frame", parameters)
-        return attachManagedAsset("camera", result)
-    }
-
-    override suspend fun cameraCapture(parameters: JSONObject): JSONObject {
-        val result = invokeHost(HOST_CAMERA_CAPTURE, "capture", parameters)
-        return attachManagedAsset("camera", result)
-    }
-
-    override suspend fun stopAll(): JSONObject {
-        val screen = runCatching {
-            invokeHost(HOST_SCREEN_SESSION, "stop")
-        }.fold(
-            onSuccess = { it },
-            onFailure = { errorJson(it) }
-        )
-        val camera = runCatching {
-            invokeHost(HOST_CAMERA_SESSION, "stop")
-        }.fold(
-            onSuccess = { it },
-            onFailure = { errorJson(it) }
-        )
-        return JSONObject().put("screen", screen).put("camera", camera)
-    }
-
-    fun listAssets(): JSONObject {
-        val root = assetsRoot()
-        val items = root.listFiles()
-            .orEmpty()
-            .asSequence()
-            .filter { it.isFile && it.extension == "json" }
-            .mapNotNull { metadataFile ->
-                runCatching {
-                    val meta = JSONObject(metadataFile.readText(Charsets.UTF_8))
-                    val payloadName = meta.optString("file_name").trim()
-                    val payload = File(root, payloadName)
-                    if (!payload.isFile) {
-                        metadataFile.delete()
-                        null
-                    } else {
-                        JSONObject(meta.toString())
-                            .put("bytes", payload.length())
-                            .put("file_path", payload.absolutePath)
-                    }
-                }.getOrNull()
-            }
-            .sortedByDescending { it.optLong("captured_at_ms", 0L) }
-            .toList()
-
-        var totalBytes = 0L
-        val array = JSONArray()
-        items.forEach {
-            totalBytes += it.optLong("bytes", 0L)
-            array.put(it)
+    private suspend fun hostStatus(primitive: String, operation: String): JSONObject =
+        try { VisualOperationResult.requireHost(hostCall(primitive, operation)) }
+        catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            JSONObject().put("available", false).put("error", error.message ?: error.javaClass.simpleName)
         }
-        return JSONObject()
-            .put("count", items.size)
-            .put("bytes", totalBytes)
-            .put("items", array)
-    }
 
-    override suspend fun deleteAsset(parameters: JSONObject): JSONObject {
-        val assetId = required(parameters, "asset_id")
-        require(assetId.matches(Regex("[A-Za-z0-9._-]{1,160}"))) {
-            "Invalid visual asset id"
+    private fun sessionPrimitive(kind: String) = "host.$kind.session@1"
+
+    private suspend fun dashboard(): JSONObject {
+        val screen = hostStatus(sessionPrimitive("screen"), "status")
+        val camera = hostStatus(sessionPrimitive("camera"), "status")
+        val result = JSONObject().put("screen", screen).put("camera", camera)
+            .put("screen_targets", hostStatus(sessionPrimitive("screen"), "list_targets"))
+            .put("camera_sources", hostStatus(sessionPrimitive("camera"), "list_sources"))
+            .put("camera_permission", hostStatusPermission())
+            .put("assets", locks.getValue("images").withLock { listImages() })
+            .put("page", locks.getValue("page").withLock { pageReader.status() })
+        synchronized(stateLock) {
+            val operations = JSONObject()
+            states.forEach { (key, value) -> operations.put(key, JSONObject(value.toString())) }
+            result.put("operations", operations).put("revision", revision)
         }
-        val root = assetsRoot()
-        val metadata = File(root, "$assetId.json")
-        if (!metadata.isFile) {
-            return JSONObject().put("deleted", false).put("asset_id", assetId)
+        previewLock.withLock {
+            val summary = JSONObject()
+            previews.forEach { (key, value) -> summary.put(key, JSONObject(value.toString())) }
+            result.put("previews", summary)
         }
-        val json = runCatching {
-            JSONObject(metadata.readText(Charsets.UTF_8))
-        }.getOrNull()
-        val payload = json?.optString("file_name")?.trim()?.takeIf { it.isNotEmpty() }
-            ?.let { File(root, it) }
-        val payloadDeleted = payload?.let { !it.exists() || it.delete() } ?: true
-        val metadataDeleted = !metadata.exists() || metadata.delete()
-        return JSONObject()
-            .put("deleted", payloadDeleted && metadataDeleted)
-            .put("asset_id", assetId)
+        return result
     }
 
-    override suspend fun clearAssets(): JSONObject {
-        val root = assetsRoot()
-        val count = listAssets().optInt("count", 0)
-        root.deleteRecursively()
-        root.mkdirs()
-        hostScratchRoot().deleteRecursively()
-        return JSONObject().put("cleared", true).put("deleted_count", count)
-    }
-
-    private suspend fun safeHost(
-        primitiveId: String,
-        operation: String
-    ): JSONObject = runCatching {
-        invokeHost(primitiveId, operation)
-    }.fold(
-        onSuccess = { it },
-        onFailure = { errorJson(it).put("available", false) }
-    )
-
-    private suspend fun invokeHost(
-        primitiveId: String,
-        operation: String,
-        parameters: JSONObject = JSONObject()
-    ): JSONObject {
-        val payload = JSONObject(parameters.toString()).put("operation", operation)
-        return JSONObject(host.invokeHostCapability(primitiveId, payload.toString()))
-    }
-
-    private fun attachManagedAsset(kind: String, result: JSONObject): JSONObject {
-        val source = findExistingFile(result)
-        if (source == null) {
-            return JSONObject(result.toString())
-                .put("managed_asset", JSONObject.NULL)
-                .put("asset_archived", false)
+    private suspend fun hostStatusPermission(): JSONObject =
+        try { VisualOperationResult.requireHost(hostCall("host.permission@1", "check", JSONObject().put("permission", "camera"))) }
+        catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            JSONObject().put("available", false).put("permission_granted", false)
+                .put("error", "相机权限状态不可用：${error.message}。请检查基座版本和插件授权。")
         }
-        val capturedAt = findCapturedAt(result).takeIf { it > 0L }
-            ?: System.currentTimeMillis()
-        val extension = resolveExtension(result, source)
-        val assetId = "$kind-$capturedAt-${UUID.randomUUID().toString().take(8)}"
-        val payload = File(assetsRoot(), "$assetId.$extension")
-        source.copyTo(payload, overwrite = false)
 
-        val meta = JSONObject()
-            .put("asset_id", assetId)
-            .put("kind", kind)
-            .put("captured_at_ms", capturedAt)
-            .put("mime_type", findMimeType(result))
-            .put("file_name", payload.name)
-            .put("bytes", payload.length())
+    private suspend fun sources(kind: String): JSONObject =
+        VisualOperationResult.requireHost(hostCall(sessionPrimitive(kind), if (kind == "screen") "list_targets" else "list_sources"))
 
-        File(assetsRoot(), "$assetId.json")
-            .writeText(meta.toString(2), Charsets.UTF_8)
-
-        deleteOwnedHostScratch(source)
-
-        return JSONObject(result.toString())
-            .put(
-                "managed_asset",
-                JSONObject(meta.toString()).put("file_path", payload.absolutePath)
-            )
-            .put("asset_archived", true)
+    private suspend fun permission(p: JSONObject): JSONObject = perform("camera", "相机授权") {
+        val operation = p.getString("operation")
+        require(operation in setOf("check", "request", "open_settings")) { "无效权限操作" }
+        val result = VisualOperationResult.requireHost(hostCall("host.permission@1", operation, JSONObject().put("permission", "camera")))
+        if (operation == "open_settings") VisualOperationResult.requireFlag(result, "opened", "系统权限设置未打开")
+        if (operation == "request") VisualOperationResult.requireFlag(result, "permission_granted",
+            if (result.optString("state") == "BLOCKED") "相机权限未授予，请打开系统设置授权" else "相机授权未完成，可手动重试")
+        result
     }
 
-    private fun findExistingFile(value: Any?): File? = when (value) {
-        is JSONObject -> {
-            val preferred = listOf(
-                "file_path",
-                "path",
-                "image_path",
-                "screenshot_path",
-                "output_path"
-            )
-            preferred.asSequence()
-                .mapNotNull { key ->
-                    if (!value.has(key) || value.isNull(key)) null
-                    else fileFromString(value.optString(key))
+    private suspend fun start(kind: String, p: JSONObject): JSONObject = perform(kind, "开始会话") {
+        val status = VisualOperationResult.requireHost(hostCall(sessionPrimitive(kind), "status"))
+        check(status.getJSONArray("sessions").length() == 0) { "此来源已有会话，请先停止再切换" }
+        if (kind == "camera") VisualOperationResult.requireFlag(hostStatusPermission(), "permission_granted", "请先授权相机")
+        val request = JSONObject(p.toString()).apply {
+            remove("kind")
+            remove("source_id")
+            if (kind == "screen") put("target_id", p.getString("source_id")) else put("source_id", p.getString("source_id"))
+        }
+        val opened = hostCall(sessionPrimitive(kind), "start", request)
+        VisualOperationResult.requireFlag(opened, if (kind == "camera") "started" else "active", "视觉会话未启动")
+        val id = opened.getString("session_id")
+        try {
+            val captured = captureSession(kind, id)
+            val shown = updatePreview(kind, captured, it)
+            deleteHostScratch(frameFile(kind, captured))
+            opened.put("preview", shown).put("mcp_content", content(shown))
+        } catch (error: Throwable) {
+            // A session that never delivered its first frame is not reported as ready.
+            try { hostCall(sessionPrimitive(kind), "stop", JSONObject().put("session_id", id)) }
+            catch (cleanup: Exception) { host.logger.e("VisualWorkbench", "Failed to release incomplete start", cleanup) }
+            throw error
+        }
+    }
+
+    private suspend fun captureSession(kind: String, id: String): JSONObject {
+        val result = hostCall(sessionPrimitive(kind), "frame", JSONObject().put("session_id", id))
+        val frame = if (kind == "screen") result.getJSONObject("frame") else result
+        VisualOperationResult.requireHost(frame)
+        if (kind == "screen") result.put("mime_type", "image/png")
+        return result
+    }
+
+    private suspend fun frame(kind: String, p: JSONObject): JSONObject = perform(kind, "读取画面") {
+        val captured = captureSession(kind, p.getString("session_id"))
+        val image = updatePreview(kind, captured, it)
+        if (p.optBoolean("save", false)) {
+            val meta = frameMetadata(kind, captured, frameFile(kind, captured))
+            captured.put("managed_asset", locks.getValue("images").withLock { archive(frameFile(kind, captured), meta) })
+        }
+        deleteHostScratch(frameFile(kind, captured))
+        captured.put("preview", image).put("mcp_content", content(image))
+    }
+
+    private suspend fun capture(kind: String, p: JSONObject): JSONObject = perform(kind, "拍摄并保存") {
+        if (kind == "camera") {
+            VisualOperationResult.requireFlag(hostStatusPermission(), "permission_granted", "请先授权相机")
+            val status = hostCall(sessionPrimitive(kind), "status")
+            check(status.getJSONArray("sessions").length() == 0) { "摄像头会话已开启，请使用读取画面并保存" }
+        }
+        if (kind == "screen") require(p.getString("source_id") == "display:0") { "当前屏幕取图只支持内置屏幕" }
+        val request = JSONObject(p.toString()).apply { remove("kind") }
+        val captured = hostCall("host.$kind.capture@1", "capture", request)
+        VisualOperationResult.requireHost(captured)
+        if (kind == "camera" && captured.has("started")) {
+            VisualOperationResult.requireFlag(captured, "started", "相机拍摄未完成")
+        }
+        val file = frameFile(kind, captured)
+        val meta = frameMetadata(kind, captured, file)
+        val saved = locks.getValue("images").withLock { archive(file, meta) }
+        val image = updatePreview(kind, captured, it)
+        deleteHostScratch(file)
+        captured.put("managed_asset", saved).put("preview", image).put("mcp_content", content(image))
+    }
+
+    /** Stop never queues behind a long frame request; generation invalidates its eventual result. */
+    private suspend fun stop(p: JSONObject): JSONObject {
+        val kind = p.optString("kind", "all")
+        require(kind in setOf("screen", "camera", "all")) { "无效停止来源" }
+        val channels = if (kind == "all") listOf("screen", "camera") else listOf(kind)
+        val results = JSONObject()
+        val errors = mutableListOf<String>()
+        for (channel in channels) {
+            synchronized(stateLock) { generations[channel] = generations.getValue(channel) + 1L }
+            setState(channel, "STOPPING", "正在停止")
+            try {
+                val request = JSONObject()
+                if (p.has("session_id")) {
+                    require(kind != "all") { "全部停止不能指定单个会话" }
+                    request.put("session_id", p.getString("session_id"))
                 }
-                .firstOrNull()
-                ?: value.keys().asSequence()
-                    .mapNotNull { key -> findExistingFile(value.opt(key)) }
-                    .firstOrNull()
-        }
-        is JSONArray -> (0 until value.length()).asSequence()
-            .mapNotNull { index -> findExistingFile(value.opt(index)) }
-            .firstOrNull()
-        is String -> fileFromString(value)
-        else -> null
-    }
-
-    private fun fileFromString(value: String): File? {
-        val text = value.trim()
-        if (text.isEmpty() || !text.startsWith("/")) return null
-        return runCatching { File(text).takeIf { it.isFile } }.getOrNull()
-    }
-
-    private fun findCapturedAt(value: Any?): Long = when (value) {
-        is JSONObject -> {
-            val direct = value.optLong("captured_at_ms", 0L)
-            if (direct > 0L) direct
-            else value.keys().asSequence()
-                .map { key -> findCapturedAt(value.opt(key)) }
-                .firstOrNull { it > 0L } ?: 0L
-        }
-        is JSONArray -> (0 until value.length()).asSequence()
-            .map { index -> findCapturedAt(value.opt(index)) }
-            .firstOrNull { it > 0L } ?: 0L
-        else -> 0L
-    }
-
-    private fun findMimeType(value: Any?): String = when (value) {
-        is JSONObject -> {
-            value.optString("mime_type").trim().takeIf { it.isNotEmpty() }
-                ?: value.keys().asSequence()
-                    .map { key -> findMimeType(value.opt(key)) }
-                    .firstOrNull { it.isNotEmpty() }
-                ?: ""
-        }
-        is JSONArray -> (0 until value.length()).asSequence()
-            .map { index -> findMimeType(value.opt(index)) }
-            .firstOrNull { it.isNotEmpty() } ?: ""
-        else -> ""
-    }
-
-    private fun resolveExtension(result: JSONObject, source: File): String {
-        val mime = findMimeType(result).lowercase()
-        return when {
-            "png" in mime -> "png"
-            "jpeg" in mime || "jpg" in mime -> "jpg"
-            "webp" in mime -> "webp"
-            source.extension.lowercase() in setOf("png", "jpg", "jpeg", "webp") ->
-                source.extension.lowercase().replace("jpeg", "jpg")
-            else -> "bin"
-        }
-    }
-
-    private fun deleteOwnedHostScratch(source: File) {
-        runCatching {
-            val root = hostScratchRoot().canonicalFile
-            val candidate = source.canonicalFile
-            if (candidate.path.startsWith(root.path + File.separator)) {
-                candidate.delete()
+                val result = hostCall(sessionPrimitive(channel), "stop", request)
+                VisualOperationResult.requireStopped(result)
+                results.put(channel, result)
+                setState(channel, "IDLE", "已停止")
+            } catch (error: CancellationException) { throw error }
+            catch (error: Exception) {
+                host.logger.e("VisualWorkbench", "Stop failed: $channel", error)
+                errors += "$channel：${error.message}"
+                results.put(channel, JSONObject().put("success", false).put("error", error.message))
+                setState(channel, "ERROR", error.message ?: "停止失败")
             }
         }
+        if (errors.isNotEmpty()) throw VisualOperationFailure("STOP_INCOMPLETE", errors.joinToString("；"), results)
+        return results.put("stopped", true)
     }
 
-    private fun assetsRoot(): File =
-        File(host.cacheDir, "visual-assets").apply { mkdirs() }
+    private fun frameFile(kind: String, result: JSONObject): File {
+        val frame = if (kind == "screen" && result.has("frame")) result.getJSONObject("frame") else result
+        val path = frame.getString(if (kind == "screen") "path" else "file_path")
+        val file = File(path)
+        check(file.length() <= 33_554_432L) { "单帧图像超过 32 MiB 上限" }
+        check(file.isFile && file.length() > 0L) { "宿主未提供有效的图像文件" }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(path, bounds)
+        check(bounds.outWidth > 0 && bounds.outHeight > 0) { "返回内容不是有效图像" }
+        return file
+    }
 
-    private fun hostScratchRoot(): File =
-        File(
-            host.applicationContext.cacheDir,
-            "visual-host/${safePathPart(host.pluginId)}"
-        )
+    private fun frameMetadata(kind: String, result: JSONObject, file: File): JSONObject {
+        val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(file.absolutePath, options)
+        return JSONObject().put("kind", kind).put("captured_at_ms", result.optLong("captured_at_ms", System.currentTimeMillis()))
+            .put("source_id", result.optString(if (kind == "screen") "target_id" else "source_id", "display:0"))
+            .put("session_id", result.optString("session_id"))
+            .put("width", options.outWidth).put("height", options.outHeight)
+            .put("mime_type", options.outMimeType).put("file_name", file.name)
+    }
 
-    private fun errorJson(error: Throwable): JSONObject =
-        JSONObject()
-            .put("ok", false)
-            .put("error", error.message ?: error.javaClass.simpleName)
+    private suspend fun updatePreview(kind: String, result: JSONObject, generation: Long?): JSONObject = previewLock.withLock {
+        val source = frameFile(kind, result)
+        val meta = frameMetadata(kind, result, source)
+        val encoded = encodedImage(source, meta, 1024)
+        val destination = File(previewRoot(), "$kind.jpg")
+        synchronized(stateLock) {
+            check(generation == generations[kind]) { "取帧已被停止指令取消" }
+            destination.writeBytes(Base64.decode(encoded.getString("data"), Base64.NO_WRAP))
+            meta.put("file_name", destination.name).put("bytes", destination.length()).put("mime_type", "image/jpeg")
+                .put("width", encoded.getInt("width")).put("height", encoded.getInt("height"))
+            previews[kind] = meta
+            revision++
+            publishState()
+        }
+        encoded
+    }
 
-    private fun required(parameters: JSONObject, key: String): String =
-        parameters.optString(key).trim().takeIf { it.isNotEmpty() }
-            ?: error("$key is required")
+    private fun previewRead(kind: String, edge: Int): JSONObject {
+        val meta = previews[kind] ?: error("此来源尚无预览")
+        val encoded = encodedImage(File(previewRoot(), meta.getString("file_name")), meta, edge)
+        return encoded.put("mcp_content", content(encoded))
+    }
 
-    private fun safePathPart(value: String): String =
-        value.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
+    private fun encodedImage(source: File, meta: JSONObject, edge: Int): JSONObject {
+        require(edge in 160..1280) { "max_edge 必须在 160 到 1280 之间" }
+        val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
+        BitmapFactory.decodeFile(source.absolutePath, bounds)
+        require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth.toLong() * bounds.outHeight <= 64_000_000L) { "图像尺寸无效或超过 6400 万像素" }
+        var sample = 1
+        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edge) sample *= 2
+        val decoded = BitmapFactory.decodeFile(source.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+            ?: error("图像解码失败")
+        val matrix = Matrix()
+        val orientation = if (bounds.outMimeType == "image/jpeg") {
+            ExifInterface(source.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+        } else ExifInterface.ORIENTATION_NORMAL
+        when (orientation) {
+            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+        }
+        val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+        val ratio = minOf(1f, edge.toFloat() / maxOf(rotated.width, rotated.height))
+        val scaled = Bitmap.createScaledBitmap(rotated, maxOf(1, (rotated.width * ratio).toInt()),
+            maxOf(1, (rotated.height * ratio).toInt()), true)
+        return try {
+            val stream = ByteArrayOutputStream()
+            check(scaled.compress(Bitmap.CompressFormat.JPEG, 82, stream)) { "预览编码失败" }
+            val bytes = stream.toByteArray()
+            check(bytes.size <= 1_048_576) { "预览超过 1 MiB 上限" }
+            JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", scaled.width)
+                .put("height", scaled.height).put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+        } finally {
+            if (scaled !== rotated) scaled.recycle()
+            if (rotated !== decoded) rotated.recycle()
+            decoded.recycle()
+        }
+    }
 
-    private companion object {
-        const val HOST_UI_AUTOMATION = "host.ui.automation@1"
-        const val HOST_SCREEN_CAPTURE = "host.screen.capture@1"
-        const val HOST_SCREEN_SESSION = "host.screen.session@1"
-        const val HOST_CAMERA_SESSION = "host.camera.session@1"
-        const val HOST_CAMERA_CAPTURE = "host.camera.capture@1"
+    private fun content(image: JSONObject) = JSONArray().put(JSONObject()
+        .put("type", "image").put("mimeType", image.getString("mime_type")).put("data", image.getString("data")))
+
+    private fun archive(source: File, info: JSONObject): JSONObject {
+        val id = "${info.getString("kind")}-${info.getLong("captured_at_ms")}-${UUID.randomUUID().toString().take(8)}"
+        val extension = source.extension.lowercase()
+        require(extension in setOf("png", "jpg", "jpeg", "webp")) { "不支持的图像记录格式" }
+        val target = File(imagesRoot(), "$id.$extension")
+        source.copyTo(target)
+        val meta = JSONObject(info.toString()).put("asset_id", id).put("file_name", target.name).put("bytes", target.length())
+        File(imagesRoot(), "$id.json").writeText(meta.toString(), Charsets.UTF_8)
+        trimImages()
+        return JSONObject(meta.toString()).put("file_path", target.absolutePath)
+    }
+
+    private fun imageMetadata(id: String): JSONObject {
+        require(id.matches(Regex("[A-Za-z0-9._-]{1,160}"))) { "无效图像 ID" }
+        return JSONObject(File(imagesRoot(), "$id.json").readText(Charsets.UTF_8))
+    }
+
+    private fun imageFile(meta: JSONObject): File {
+        val root = imagesRoot().canonicalFile
+        val file = File(root, meta.getString("file_name")).canonicalFile
+        require(file.parentFile == root && file.isFile) { "图像记录文件无效" }
+        return file
+    }
+
+    private fun listImages(): JSONObject {
+        val items = imagesRoot().listFiles().orEmpty().filter { it.extension == "json" }
+            .map { JSONObject(it.readText(Charsets.UTF_8)) }
+            .sortedByDescending { it.getLong("captured_at_ms") }
+        val array = JSONArray()
+        var bytes = 0L
+        items.forEach { meta ->
+            val file = imageFile(meta)
+            bytes += file.length()
+            array.put(JSONObject(meta.toString()).put("bytes", file.length()))
+        }
+        return JSONObject().put("count", items.size).put("bytes", bytes).put("items", array)
+            .put("max_count", 60).put("max_bytes", 67_108_864L)
+    }
+
+    private fun trimImages() {
+        val items = listImages().getJSONArray("items")
+        var count = items.length()
+        var bytes = (0 until count).sumOf { items.getJSONObject(it).getLong("bytes") }
+        for (index in items.length() - 1 downTo 0) {
+            if (count <= 60 && bytes <= 67_108_864L) break
+            val item = items.getJSONObject(index)
+            check(imageFile(item).delete()) { "超额图像记录清理失败" }
+            check(File(imagesRoot(), "${item.getString("asset_id")}.json").delete()) { "图像记录元数据清理失败" }
+            bytes -= item.getLong("bytes")
+            count--
+        }
+    }
+
+    private fun imagesRoot() = File(host.cacheDir, "visual-assets").apply { check(exists() || mkdirs()) }
+    private fun previewRoot() = File(host.cacheDir, "visual-preview").apply { check(exists() || mkdirs()) }
+    private fun deleteHostScratch(file: File) {
+        val root = File(host.applicationContext.cacheDir, "visual-host/${host.pluginId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)}").canonicalFile
+        val candidate = file.canonicalFile
+        if (candidate.path.startsWith(root.path + File.separator)) check(candidate.delete()) { "临时帧清理失败" }
+    }
+
+    suspend fun dispose() {
+        val result = call("stop", JSONObject().put("kind", "all"))
+        if (!result.getBoolean("success")) host.logger.e("VisualWorkbench", result.getString("error"))
+        pageReader.clear()
+        previewLock.withLock {
+            previews.clear()
+            check(previewRoot().deleteRecursively()) { "临时预览清理失败" }
+        }
     }
 }

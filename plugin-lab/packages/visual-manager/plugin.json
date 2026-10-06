@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.visual_manager",
-  "version": "0.1.4",
+  "version": "0.2.0",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
-    "name": "视觉管理",
-    "description": "统一管理页面全文读取、屏幕共享、摄像头视觉会话和视觉缓存。"
+    "name": "视觉工作台",
+    "description": "统一管理视觉授权、屏幕与摄像头画面、页面全文及图像记录；需要基座 build105 或更新版本。"
   },
   "roles": [
     "system_plugin"
@@ -35,32 +35,32 @@
       "host.screen.session@1",
       "host.camera.capture@1",
       "host.camera.session@1",
-      "host.ui.automation@1"
+      "host.ui.automation@1",
+      "host.permission@1"
     ]
   },
   "provides": {
     "capabilities": [
       "plugin.system.visual_manager.status",
+      "plugin.system.visual_manager.sources",
+      "plugin.system.visual_manager.permission",
+      "plugin.system.visual_manager.start",
+      "plugin.system.visual_manager.frame",
+      "plugin.system.visual_manager.capture",
+      "plugin.system.visual_manager.stop",
+      "plugin.system.visual_manager.preview.read",
+      "plugin.system.visual_manager.preview.save",
+      "plugin.system.visual_manager.images.list",
+      "plugin.system.visual_manager.images.read",
+      "plugin.system.visual_manager.images.delete",
+      "plugin.system.visual_manager.images.clear",
       "plugin.system.visual_manager.page.inspect",
-      "plugin.system.visual_manager.page.text",
-      "plugin.system.visual_manager.screen.list_targets",
-      "plugin.system.visual_manager.screen.capture",
-      "plugin.system.visual_manager.screen.start",
-      "plugin.system.visual_manager.screen.stop",
-      "plugin.system.visual_manager.screen.frame",
-      "plugin.system.visual_manager.camera.list_sources",
-      "plugin.system.visual_manager.camera.start",
-      "plugin.system.visual_manager.camera.configure",
-      "plugin.system.visual_manager.camera.stop",
-      "plugin.system.visual_manager.camera.frame",
-      "plugin.system.visual_manager.camera.capture",
-      "plugin.system.visual_manager.assets.list",
-      "plugin.system.visual_manager.assets.delete",
-      "plugin.system.visual_manager.assets.clear"
+      "plugin.system.visual_manager.page.text"
     ],
     "services": [],
     "providers": [
-      "plugin.system.visual_manager.page"
+      "plugin.system.visual_manager.page",
+      "plugin.system.visual_manager.state"
     ],
     "extensions": [
       {

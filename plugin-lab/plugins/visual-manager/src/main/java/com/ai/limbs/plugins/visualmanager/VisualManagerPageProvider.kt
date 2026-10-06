@@ -1,45 +1,44 @@
 package com.ai.limbs.plugins.visualmanager
 
 import android.content.Context
+import android.graphics.BitmapFactory
+import android.util.Base64
 import android.view.View
-import android.widget.Toast
-import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
-import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.text.selection.SelectionContainer
+import androidx.compose.foundation.Image
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
-import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
-import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
-import androidx.compose.material3.darkColorScheme
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
-import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
-import androidx.compose.runtime.setValue
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.asImageBitmap
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.ComposeView
-import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalLifecycleOwner
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.ViewCompositionStrategy
 import androidx.compose.ui.unit.dp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import com.ai.limbs.plugin.runtime.InProcessPageProvider
+import com.ai.limbs.plugin.runtime.InProcessProviderDirectory
+import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
+import kotlinx.coroutines.flow.collectLatest
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessSharedUiHost
 import java.text.DateFormat
 import java.util.Date
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -50,439 +49,444 @@ internal class VisualManagerPageProvider(
     override fun createView(context: Context, sharedUi: InProcessSharedUiHost): View =
         ComposeView(host.createPluginContext(context)).apply {
             setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
-            setContent {
-                MaterialTheme(colorScheme = darkColorScheme()) {
-                    VisualManagerPage(actions)
-                }
-            }
+            setContent { MaterialTheme(colorScheme = darkColorScheme()) { VisualWorkbench(actions, host.providers) } }
         }
 }
 
 @Composable
-private fun VisualManagerPage(actions: VisualManagerPageActions) {
-    val context = LocalContext.current
+private fun VisualWorkbench(actions: VisualManagerPageActions, providers: InProcessProviderDirectory) {
     val scope = rememberCoroutineScope()
+    val lifecycle = LocalLifecycleOwner.current.lifecycle
+    val view = LocalView.current
+    var visible by remember { mutableStateOf(lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) }
     var dashboard by remember { mutableStateOf<JSONObject?>(null) }
+    var tab by remember { mutableStateOf(0) }
+    var selectedScreen by remember { mutableStateOf<String?>(null) }
+    var selectedCamera by remember { mutableStateOf<String?>(null) }
+    var previews by remember { mutableStateOf<Map<String, JSONObject>>(emptyMap()) }
+    var notice by remember { mutableStateOf("正在读取工作台状态…") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var working by remember { mutableStateOf(false) }
+    var stopping by remember { mutableStateOf(false) }
+    var operation by remember { mutableStateOf<Job?>(null) }
     var pageText by remember { mutableStateOf("") }
-    var busy by remember { mutableStateOf(false) }
-    var lastError by remember { mutableStateOf<String?>(null) }
+    var shownRecord by remember { mutableStateOf<JSONObject?>(null) }
+    var confirmClear by remember { mutableStateOf(false) }
 
-    fun toast(message: String, long: Boolean = false) {
-        Toast.makeText(
-            context,
-            message,
-            if (long) Toast.LENGTH_LONG else Toast.LENGTH_SHORT
-        ).show()
+    DisposableEffect(lifecycle) {
+        val observer = LifecycleEventObserver { _, _ ->
+            visible = lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)
+        }
+        lifecycle.addObserver(observer)
+        onDispose { lifecycle.removeObserver(observer) }
     }
 
-    suspend fun readPage(snapshotId: String) {
-        val content = StringBuilder()
-        var offset = 0
-        do {
-            val result = actions.pageText(JSONObject().put("snapshot_id", snapshotId).put("offset", offset))
-            content.append(result.getString("text"))
-            val hasMore = result.getBoolean("has_more")
-            if (hasMore) {
-                val next = result.getInt("next_offset")
-                check(next > offset) { "页面续读未前进" }
-                offset = next
+    suspend fun invoke(name: String, p: JSONObject = JSONObject()) =
+        VisualOperationResult.requireSuccess(actions.call(name, p))
+
+    suspend fun reload() {
+        val state = invoke("status")
+        dashboard = state
+        val targets = objects(state.optJSONObject("screen_targets")?.optJSONArray("targets"))
+            .filter { it.optBoolean("capture_supported", false) }
+        val sources = objects(state.optJSONObject("camera_sources")?.optJSONArray("sources"))
+        if (selectedScreen == null && targets.isNotEmpty()) selectedScreen = targets.first().getString("target_id")
+        if (selectedCamera == null && sources.isNotEmpty()) selectedCamera = sources.first().getString("source_id")
+        val availablePreviews = state.getJSONObject("previews")
+        for (kind in listOf("screen", "camera")) {
+            val summary = availablePreviews.optJSONObject(kind)
+            if (summary != null && summary.getLong("captured_at_ms") != previews[kind]?.optLong("captured_at_ms")) {
+                val image = invoke("preview.read", JSONObject().put("kind", kind))
+                previews = previews + (kind to image)
             }
-        } while (hasMore)
-        pageText = content.toString()
-    }
-
-    fun refresh() {
-        scope.launch {
-            busy = true
-            runCatching { actions.dashboard() }
-                .onSuccess {
-                    dashboard = it
-                    lastError = null
-                }
-                .onFailure {
-                    lastError = it.message ?: "视觉状态读取失败"
-                }
-            busy = false
         }
     }
 
-    fun act(success: String, block: suspend () -> Unit) {
-        if (busy) return
-        scope.launch {
-            busy = true
-            runCatching { block() }
-                .onSuccess {
-                    toast(success)
-                    runCatching { actions.dashboard() }
-                        .onSuccess { dashboard = it; lastError = null }
-                        .onFailure { lastError = it.message ?: "刷新视觉状态失败" }
-                }
-                .onFailure {
-                    lastError = it.message ?: "视觉操作失败"
-                    toast(lastError ?: "视觉操作失败", true)
-                }
-            busy = false
+    DisposableEffect(view) {
+        val listener = android.view.ViewTreeObserver.OnWindowFocusChangeListener { focused ->
+            if (focused && visible) scope.launch {
+                try { reload() }
+                catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = "状态读取失败：${e.message}" }
+            }
+        }
+        view.viewTreeObserver.addOnWindowFocusChangeListener(listener)
+        onDispose {
+            if (view.viewTreeObserver.isAlive) view.viewTreeObserver.removeOnWindowFocusChangeListener(listener)
         }
     }
 
-    LaunchedEffect(Unit) { refresh() }
+    fun act(label: String, block: suspend () -> JSONObject) {
+        if (working || stopping) return
+        operation = scope.launch {
+            working = true
+            error = null
+            notice = label
+            try {
+                val result = block()
+                val image = result.optJSONObject("preview")
+                if (image != null) previews = previews + (image.getString("kind") to image)
+                notice = result.optString("message", "$label 完成")
+                try { reload() } catch (e: CancellationException) { throw e }
+                catch (e: Exception) { error = "操作已完成，但状态同步失败：${e.message}" }
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                error = e.message ?: "操作未完成"
+                notice = "操作未完成"
+            } finally { working = false }
+        }
+    }
 
-    val screen = dashboard?.optJSONObject("screen")
-    val targets = dashboard?.optJSONObject("screen_targets")
-    val camera = dashboard?.optJSONObject("camera")
-    val sources = dashboard?.optJSONObject("camera_sources")
-    val assets = dashboard?.optJSONObject("assets")
-    val screenSessions = screen?.optJSONArray("sessions") ?: JSONArray()
-    val cameraSessions = camera?.optJSONArray("sessions") ?: JSONArray()
-    val screenActive = screenSessions.length() > 0
-    val cameraActive = cameraSessions.length() > 0
+    fun stopAll() {
+        if (stopping) return
+        operation?.cancel()
+        scope.launch {
+            stopping = true
+            error = null
+            try {
+                invoke("stop", JSONObject().put("kind", "all"))
+                notice = "屏幕和摄像头均已停止"
+                reload()
+            } catch (e: CancellationException) { throw e }
+            catch (e: Exception) { error = e.message; notice = "停止未完成，请查看异常" }
+            finally { stopping = false }
+        }
+    }
 
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .verticalScroll(rememberScrollState())
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        Text("视觉管理", style = MaterialTheme.typography.headlineSmall)
-        Text(
-            "屏幕共享、摄像头和视觉缓存统一从这里收口。插件停用时会主动释放自己持有的视觉会话。",
-            style = MaterialTheme.typography.bodySmall
-        )
-
-        lastError?.let { message ->
-            Card(
-                modifier = Modifier.fillMaxWidth(),
-                colors = CardDefaults.cardColors(
-                    containerColor = MaterialTheme.colorScheme.errorContainer
-                )
-            ) {
-                Column(Modifier.padding(14.dp)) {
-                    Text("当前异常", style = MaterialTheme.typography.titleSmall)
-                    Text(message, style = MaterialTheme.typography.bodySmall)
-                    if (
-                        message.contains("not bound", ignoreCase = true) ||
-                        message.contains("not registered", ignoreCase = true)
-                    ) {
-                        Text(
-                            "视觉 Host Primitive 需要包含 build72 视觉源语的 AI Limbs 基座。",
-                            style = MaterialTheme.typography.bodySmall
-                        )
+    LaunchedEffect(visible) {
+        if (!visible) return@LaunchedEffect
+        // Core publishes changes through the existing generic state provider.
+        // Reading status never changes the signal, so this is event-driven, without a retry timer.
+        try {
+            reload()
+            if (notice == "正在读取工作台状态…") notice = "状态已同步"
+            providers.observe(VISUAL_STATE_ID).collectLatest { binding ->
+                if (binding != null) {
+                    val provider = checkNotNull(binding.payload as? InProcessUiStateProvider) { "视觉状态通道类型错误" }
+                    provider.stateJson.collectLatest {
+                        try { reload() }
+                        catch (e: CancellationException) { throw e }
+                        catch (e: Exception) { error = "状态读取失败：${e.message}" }
                     }
                 }
             }
-        }
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = "状态读取失败：${e.message}" }
+    }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(
-                Modifier.padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Text("活动视觉", style = MaterialTheme.typography.titleMedium)
-                Text("屏幕共享：${if (screenActive) "开启 · ${screenSessions.length()} 个会话" else "关闭"}")
-                Text("摄像头：${if (cameraActive) "开启 · ${cameraSessions.length()} 个会话" else "关闭"}")
-                Text(
-                    "视觉缓存：${assets?.optInt("count", 0) ?: 0} 项 · ${formatBytes(assets?.optLong("bytes", 0L) ?: 0L)}"
-                )
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        modifier = Modifier.weight(1f),
-                        enabled = !busy,
-                        onClick = { refresh() }
-                    ) { Text("刷新") }
-                    Button(
-                        modifier = Modifier.weight(1f),
-                        enabled = !busy && (screenActive || cameraActive),
-                        onClick = {
-                            act("全部视觉会话已停止") { actions.stopAll() }
-                        }
-                    ) { Text("全部停止") }
-                }
-            }
-        }
+    val latestSnapshotId = dashboard?.optJSONObject("page")?.optJSONObject("latest_snapshot")?.optString("snapshot_id")
+    LaunchedEffect(latestSnapshotId) { pageText = "" }
 
-        Card(modifier = Modifier.fillMaxWidth()) {
-            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text("页面全文", style = MaterialTheme.typography.titleMedium)
-                Text("读取当前应用提供的页面文字，也可以查看兰儿最近读取的同一份快照。文字可长按选择和复制。",
+    val kind = if (tab == 0) "screen" else "camera"
+    val state = dashboard?.optJSONObject(kind)
+    val sessions = objects(state?.optJSONArray("sessions"))
+    val session = sessions.firstOrNull()
+    val sessionId = session?.getString("session_id")
+    val active = session != null
+    val available = state != null && state.optBoolean("available", true)
+    val sharedOperation = dashboard?.optJSONObject("operations")?.optJSONObject(kind)
+    val busy = working || stopping || sharedOperation?.optString("phase") in listOf("BUSY", "STOPPING")
+    val permission = dashboard?.optJSONObject("camera_permission")
+    val authorized = permission?.optBoolean("permission_granted", false) == true
+
+    Column(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).padding(12.dp)) {
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            Column(Modifier.weight(1f)) {
+                Text("视觉工作台", style = MaterialTheme.typography.headlineSmall)
+                Text("屏幕 ${sessionLabel(dashboard?.optJSONObject("screen"))}  ·  相机 ${sessionLabel(dashboard?.optJSONObject("camera"))}",
                     style = MaterialTheme.typography.bodySmall)
-                val latest = dashboard?.optJSONObject("page")?.optJSONObject("latest_snapshot")
-                latest?.let { Text("最近页面：" + it.optString("package_name")) }
-                OutlinedButton(enabled = !busy, onClick = {
-                    act("页面文字已读取") {
-                        val snapshot = actions.pageInspect()
-                        readPage(snapshot.getString("snapshot_id"))
-                    }
-                }) { Text("读取当前页面") }
-                OutlinedButton(enabled = !busy && latest != null, onClick = {
-                    act("最近页面全文已读取") { readPage(latest!!.getString("snapshot_id")) }
-                }) { Text("查看最近页面全文") }
-                if (pageText.isNotEmpty()) SelectionContainer {
-                    Text(pageText, style = MaterialTheme.typography.bodySmall)
+            }
+            Button(enabled = !stopping, onClick = { stopAll() }) {
+                Text(if (stopping) "正在停止…" else "全部停止")
+            }
+        }
+        if (working || stopping) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
+        Text(notice, style = MaterialTheme.typography.bodySmall, modifier = Modifier.padding(vertical = 6.dp))
+        error?.let { message ->
+            Card(colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)) {
+                Row(Modifier.fillMaxWidth().padding(10.dp)) {
+                    Text(message, Modifier.weight(1f), style = MaterialTheme.typography.bodySmall)
+                    TextButton(onClick = { error = null }) { Text("收起") }
                 }
             }
         }
-
-        SectionTitle("屏幕共享")
-        Text(
-            if (screen?.optBoolean("projection_ready", false) == true) {
-                "系统共享屏授权：已就绪"
-            } else {
-                "系统共享屏授权：按需申请；首次开始共享时会触发系统授权。"
-            },
-            style = MaterialTheme.typography.bodySmall
-        )
-        OutlinedButton(
-            enabled = !busy,
-            onClick = {
-                act("屏幕截图已保存到视觉缓存") {
-                    actions.screenCapture()
-                }
+        ScrollableTabRow(selectedTabIndex = tab, edgePadding = 0.dp) {
+            listOf("屏幕", "摄像头", "页面文字", "图像记录").forEachIndexed { index, title ->
+                Tab(selected = tab == index, onClick = { tab = index }, text = { Text(title) })
             }
-        ) { Text("单次截图") }
-
-        jsonObjects(targets?.optJSONArray("targets")).forEach { target ->
-            val targetId = target.optString("target_id")
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text(
-                        target.optString("name").ifBlank { targetId },
-                        style = MaterialTheme.typography.titleSmall
-                    )
-                    Text(targetId, style = MaterialTheme.typography.bodySmall)
-                    Button(
-                        enabled = !busy,
-                        onClick = {
-                            act("屏幕共享已开始") {
-                                actions.screenStart(
-                                    JSONObject()
-                                        .put("target_id", targetId)
-                                        .put("prime", true)
-                                )
+        }
+        Box(Modifier.weight(1f).fillMaxWidth()) {
+            when (tab) {
+                0, 1 -> {
+                    val sources = if (kind == "screen") objects(dashboard?.optJSONObject("screen_targets")?.optJSONArray("targets"))
+                        .filter { it.optBoolean("capture_supported", false) }
+                    else objects(dashboard?.optJSONObject("camera_sources")?.optJSONArray("sources"))
+                    val selected = if (kind == "screen") selectedScreen else selectedCamera
+                    AdaptiveWorkspace(
+                        hasImage = previews[kind] != null,
+                        controls = {
+                            Text(if (kind == "screen") "屏幕共享" else "摄像头画面", style = MaterialTheme.typography.titleLarge)
+                            Text("1 · 选择来源", style = MaterialTheme.typography.titleSmall)
+                            sources.forEach { source ->
+                                val id = source.getString(if (kind == "screen") "target_id" else "source_id")
+                                val label = if (kind == "screen") source.getString("name") else
+                                    "${when (source.getString("lens_facing")) { "front" -> "前置"; "back" -> "后置"; else -> "外接" }}镜头 $id"
+                                FilterChip(selected = selected == id, enabled = !busy && !active,
+                                    onClick = { if (kind == "screen") selectedScreen = id else selectedCamera = id },
+                                    label = { Text(label) })
+                            }
+                            if (sources.isEmpty()) Text("暂无可用来源，请检查设备与宿主状态。")
+                            state?.optString("error")?.takeIf { it.isNotEmpty() }?.let { Text(it) }
+                            if (kind == "camera") {
+                                Text("2 · 相机权限", style = MaterialTheme.typography.titleSmall)
+                                Text(if (authorized) "相机已授权" else "相机尚未授权")
+                                permission?.optString("error")?.takeIf { it.isNotEmpty() }?.let { Text(it) }
+                                if (!authorized) {
+                                    Button(enabled = !busy && permission?.optBoolean("available", true) != false && permission?.optBoolean("can_request_again", true) != false,
+                                        onClick = {
+                                            act("申请相机权限") { invoke("permission", JSONObject().put("operation", "request")) }
+                                        }) { Text("授权相机") }
+                                    OutlinedButton(enabled = !busy, onClick = {
+                                        act("打开权限设置") { invoke("permission", JSONObject().put("operation", "open_settings")) }
+                                    }) { Text("打开系统权限设置") }
+                                }
+                            } else Text("开始共享时由系统申请屏幕授权，请选择共享范围。", style = MaterialTheme.typography.bodySmall)
+                            Text(if (active) "会话正在运行" else "3 · 开始获取画面", style = MaterialTheme.typography.titleSmall)
+                            if (!active) {
+                                Button(enabled = !busy && available && selected != null && (kind == "screen" || authorized), onClick = {
+                                    act("开始获取画面") {
+                                        invoke("start", JSONObject().put("kind", kind).put("source_id", selected))
+                                    }
+                                }) { Text(if (kind == "screen") "开始共享" else "开启摄像头") }
+                                OutlinedButton(enabled = !busy && available && selected != null && (kind == "screen" || authorized), onClick = {
+                                    act("拍摄并保存") { invoke("capture", JSONObject().put("kind", kind).put("source_id", selected)) }
+                                }) { Text(if (kind == "screen") "截图并保存" else "拍一张并保存") }
+                            } else {
+                                Text("来源：${session!!.optString(if (kind == "screen") "target_id" else "source_id")}\n开始：${time(session.optLong("started_at_ms"))}",
+                                    style = MaterialTheme.typography.bodySmall)
+                                OutlinedButton(enabled = !busy, onClick = {
+                                    act("获取新画面") { invoke("frame", JSONObject().put("kind", kind).put("session_id", sessionId)) }
+                                }) { Text("获取一帧") }
+                                OutlinedButton(enabled = !busy, onClick = {
+                                    act("保存原图") { invoke("frame", JSONObject().put("kind", kind).put("session_id", sessionId).put("save", true)) }
+                                }) { Text("获取并保存原图") }
+                                Button(enabled = !stopping, onClick = {
+                                                                operation?.cancel()
+                                    scope.launch {
+                                        stopping = true
+                                        try {
+                                            invoke("stop", JSONObject().put("kind", kind))
+                                            notice = "此会话已停止"
+                                            reload()
+                                        } catch (e: CancellationException) { throw e }
+                                        catch (e: Exception) { error = e.message }
+                                        finally { stopping = false }
+                                    }
+                                }) { Text("停止并释放") }
+                            }
+                            sharedOperation?.optString("message")?.takeIf { it.isNotEmpty() }?.let {
+                                Text(it, style = MaterialTheme.typography.bodySmall)
+                            }
+                            Text("兰儿按需要即时获取画面，也可以在这里手动取图。离开页面不停止会话，使用“停止”释放设备。",
+                                style = MaterialTheme.typography.bodySmall)
+                            OutlinedButton(enabled = !working && !stopping, onClick = {
+                                act("同步状态") { reload(); JSONObject().put("success", true) }
+                            }) { Text("同步状态") }
+                        },
+                        preview = {
+                            PreviewPanel(previews[kind], if (active) "最新获取画面" else "最后获取画面 · 会话未开启")
+                            if (previews[kind] != null) {
+                                OutlinedButton(enabled = !busy, onClick = {
+                                    act("保存当前预览") { invoke("preview.save", JSONObject().put("kind", kind)) }
+                                }) { Text("保存当前预览") }
+                            }
+                        })
+                }
+                2 -> Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                    Text("页面文字", style = MaterialTheme.typography.titleLarge)
+                    Text("兰儿可即时读取目标应用暴露的完整文字。这里查看同一份最近快照，文字可选择和复制。",
+                        style = MaterialTheme.typography.bodyMedium)
+                    dashboard?.optJSONObject("operations")?.optJSONObject("page")?.optString("message")
+                        ?.takeIf { it.isNotEmpty() }?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                    val latest = dashboard?.optJSONObject("page")?.optJSONObject("latest_snapshot")
+                    latest?.let {
+                        Text("最近来源：${it.optString("package_name")}\n读取时间：${time(it.getLong("created_at_ms"))}",
+                            style = MaterialTheme.typography.bodySmall)
+                    }
+                    OutlinedButton(enabled = !working && latest != null, onClick = {
+                        act("加载页面全文") {
+                            val id = latest!!.getString("snapshot_id")
+                            val text = StringBuilder()
+                            var offset = 0
+                            do {
+                                val result = invoke("page.text", JSONObject().put("snapshot_id", id).put("offset", offset))
+                                text.append(result.getString("text"))
+                                val more = result.getBoolean("has_more")
+                                if (more) {
+                                    val next = result.getInt("next_offset")
+                                    check(next > offset) { "页面续读没有前进" }
+                                    offset = next
+                                }
+                            } while (more)
+                            pageText = text.toString()
+                            JSONObject().put("success", true)
+                        }
+                    }) { Text("查看最近页面全文") }
+                    if (pageText.isNotEmpty()) SelectionContainer { Text(pageText) }
+                }
+                3 -> {
+                    val records = dashboard?.getJSONObject("assets")
+                    val entries = objects(records?.optJSONArray("items"))
+                    LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        item {
+                            Text("图像记录", style = MaterialTheme.typography.titleLarge)
+                            Text("${records?.optInt("count", 0) ?: 0} 张 · ${bytes(records?.optLong("bytes", 0) ?: 0)}",
+                                style = MaterialTheme.typography.bodySmall)
+                            Text("仅保留明确保存的图像。最多 60 张、64 MiB，超出后删除最旧记录；预览不会自动存入这里。",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
+                        if (entries.isEmpty()) item { Text("还没有保存图像。") }
+                        items(entries, key = { it.getString("asset_id") }) { meta ->
+                            ImageRecord(actions, meta, !working && !stopping,
+                                onView = { act("查看图像") {
+                                    val result = invoke("images.read", JSONObject().put("asset_id", meta.getString("asset_id")))
+                                    shownRecord = result
+                                    result
+                                } },
+                                onDelete = { act("删除图像") {
+                                    invoke("images.delete", JSONObject().put("asset_id", meta.getString("asset_id")))
+                                } })
+                        }
+                        item {
+                            OutlinedButton(enabled = !working && entries.isNotEmpty(), onClick = { confirmClear = true }) {
+                                Text("清空图像记录")
                             }
                         }
-                    ) { Text("开始共享") }
-                }
-            }
-        }
-        if (targets?.optBoolean("available", true) == false) {
-            Text(
-                targets.optString("error", "当前没有可用显示目标"),
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-
-        jsonObjects(screenSessions).forEach { session ->
-            val sessionId = session.optString("session_id")
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("共享会话", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "${session.optString("target_id")} · ${formatTime(session.optLong("started_at_ms"))}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            enabled = !busy,
-                            onClick = {
-                                act("屏幕帧已保存到视觉缓存") {
-                                    actions.screenFrame(
-                                        JSONObject().put("session_id", sessionId)
-                                    )
-                                }
-                            }
-                        ) { Text("取一帧") }
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            enabled = !busy,
-                            onClick = {
-                                act("共享会话已停止") {
-                                    actions.screenStop(
-                                        JSONObject().put("session_id", sessionId)
-                                    )
-                                }
-                            }
-                        ) { Text("停止") }
                     }
                 }
             }
         }
+    }
 
-        SectionTitle("摄像头")
-        if (sources != null && !sources.optBoolean("permission_granted", true)) {
-            Text(
-                "CAMERA 权限尚未授予 AI Limbs；启动或单拍前需要先授予相机权限。",
-                style = MaterialTheme.typography.bodySmall
-            )
-        }
-        jsonObjects(sources?.optJSONArray("sources")).forEach { source ->
-            val sourceId = source.optString("source_id")
-            val facing = source.optString("lens_facing", "unknown")
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("摄像头 $sourceId · $facing", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "可用 JPEG 尺寸：${source.optJSONArray("jpeg_sizes")?.length() ?: 0}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            enabled = !busy,
-                            onClick = {
-                                act("摄像头会话已开始") {
-                                    actions.cameraStart(
-                                        JSONObject().put("source_id", sourceId)
-                                    )
-                                }
-                            }
-                        ) { Text("启动") }
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            enabled = !busy,
-                            onClick = {
-                                act("照片已保存到视觉缓存") {
-                                    actions.cameraCapture(
-                                        JSONObject().put("source_id", sourceId)
-                                    )
-                                }
-                            }
-                        ) { Text("单拍") }
-                    }
-                }
-            }
-        }
+    if (shownRecord != null) AlertDialog(
+        onDismissRequest = { shownRecord = null }, title = { Text("图像记录") },
+        text = { PreviewPanel(shownRecord, "已保存图像") },
+        confirmButton = { TextButton(onClick = { shownRecord = null }) { Text("关闭") } })
+    if (confirmClear) AlertDialog(
+        onDismissRequest = { confirmClear = false }, title = { Text("清空图像记录？") },
+        text = { Text("将删除本插件保存的全部图像。当前预览和视觉会话不受影响。") },
+        confirmButton = { TextButton(onClick = {
+            confirmClear = false
+            act("清空图像记录") { invoke("images.clear") }
+        }) { Text("清空") } },
+        dismissButton = { TextButton(onClick = { confirmClear = false }) { Text("取消") } })
+}
 
-        jsonObjects(cameraSessions).forEach { session ->
-            val sessionId = session.optString("session_id")
-            Card(modifier = Modifier.fillMaxWidth()) {
-                Column(
-                    Modifier.padding(14.dp),
-                    verticalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    Text("摄像头会话", style = MaterialTheme.typography.titleSmall)
-                    Text(
-                        "${session.optString("source_id")} · ${session.optInt("width")}×${session.optInt("height")} · ${formatTime(session.optLong("started_at_ms"))}",
-                        style = MaterialTheme.typography.bodySmall
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        OutlinedButton(
-                            modifier = Modifier.weight(1f),
-                            enabled = !busy,
-                            onClick = {
-                                act("摄像头帧已保存到视觉缓存") {
-                                    actions.cameraFrame(
-                                        JSONObject().put("session_id", sessionId)
-                                    )
-                                }
-                            }
-                        ) { Text("取一帧") }
-                        Button(
-                            modifier = Modifier.weight(1f),
-                            enabled = !busy,
-                            onClick = {
-                                act("摄像头会话已停止") {
-                                    actions.cameraStop(
-                                        JSONObject().put("session_id", sessionId)
-                                    )
-                                }
-                            }
-                        ) { Text("停止") }
-                    }
-                }
+@Composable
+private fun AdaptiveWorkspace(hasImage: Boolean, controls: @Composable () -> Unit, preview: @Composable () -> Unit) {
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        if (maxWidth >= 720.dp) {
+            Row(Modifier.fillMaxSize().padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(16.dp)) {
+                Column(Modifier.width(280.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) { controls() }
+                Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)) { preview() }
             }
-        }
-
-        SectionTitle("视觉缓存")
-        Text(
-            "这里只管理视觉管理插件自己的帧，不会删除其他插件或聊天产生的图片。",
-            style = MaterialTheme.typography.bodySmall
-        )
-        val assetItems = jsonObjects(assets?.optJSONArray("items"))
-        if (assetItems.isEmpty()) {
-            Text("暂无视觉缓存。", style = MaterialTheme.typography.bodySmall)
-        } else {
-            assetItems.take(30).forEach { asset ->
-                val assetId = asset.optString("asset_id")
-                Card(modifier = Modifier.fillMaxWidth()) {
-                    Column(
-                        Modifier.padding(14.dp),
-                        verticalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Text(
-                            "${asset.optString("kind")} · ${formatTime(asset.optLong("captured_at_ms"))}",
-                            style = MaterialTheme.typography.titleSmall
-                        )
-                        Text(
-                            "${formatBytes(asset.optLong("bytes"))} · ${asset.optString("file_name")}",
-                            style = MaterialTheme.typography.bodySmall
-                        )
-                        TextButton(
-                            enabled = !busy,
-                            onClick = {
-                                act("视觉缓存已删除") {
-                                    actions.deleteAsset(
-                                        JSONObject().put("asset_id", assetId)
-                                    )
-                                }
-                            }
-                        ) { Text("删除") }
-                    }
-                }
+        } else Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            if (hasImage) {
+                preview()
+                HorizontalDivider()
+                controls()
+            } else {
+                controls()
+                HorizontalDivider()
+                preview()
             }
-            Spacer(Modifier.height(2.dp))
-            OutlinedButton(
-                enabled = !busy,
-                onClick = {
-                    act("视觉缓存已清空") { actions.clearAssets() }
-                }
-            ) { Text("清空全部视觉缓存") }
         }
     }
 }
 
 @Composable
-private fun SectionTitle(text: String) {
-    Text(text, style = MaterialTheme.typography.titleLarge)
-}
-
-private fun jsonObjects(array: JSONArray?): List<JSONObject> {
-    if (array == null) return emptyList()
-    return (0 until array.length()).mapNotNull { index ->
-        array.optJSONObject(index)
+private fun PreviewPanel(image: JSONObject?, label: String) {
+    Card(Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(label, style = MaterialTheme.typography.titleSmall)
+            if (image == null) {
+                Box(Modifier.fillMaxWidth().height(240.dp).background(Color(0xFF11151C))) {
+                    Text("尚未获取画面\n授权并开始后，画面会显示在这里。", Modifier.padding(24.dp))
+                }
+            } else {
+                EncodedImage(image.getString("data"), "视觉画面", Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 420.dp))
+                Text("获取于 ${time(image.getLong("captured_at_ms"))} · ${image.getInt("width")}×${image.getInt("height")}",
+                    style = MaterialTheme.typography.bodySmall)
+                Text("这是一帧画面，获取时间才代表新鲜度。", style = MaterialTheme.typography.bodySmall)
+            }
+        }
     }
 }
 
-private fun formatTime(epochMs: Long): String {
-    if (epochMs <= 0L) return "时间未知"
-    return DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM)
-        .format(Date(epochMs))
+@Composable
+private fun EncodedImage(data: String, description: String, modifier: Modifier) {
+    val state by produceState<Pair<ImageBitmap?, String?>>(null to null, data) {
+        try {
+            val bitmap = withContext(Dispatchers.IO) {
+                val decoded = Base64.decode(data, Base64.NO_WRAP)
+                checkNotNull(BitmapFactory.decodeByteArray(decoded, 0, decoded.size)) { "图像解码失败" }.asImageBitmap()
+            }
+            value = bitmap to null
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { value = null to e.message }
+    }
+    val bitmap = state.first
+    if (bitmap == null) Box(modifier) {
+        Text(state.second ?: "正在加载画面…", Modifier.padding(12.dp))
+    } else Image(bitmap, description, modifier, contentScale = ContentScale.Fit)
 }
 
-private fun formatBytes(bytes: Long): String = when {
-    bytes >= 1024L * 1024L -> String.format("%.1f MB", bytes / (1024.0 * 1024.0))
-    bytes >= 1024L -> String.format("%.1f KB", bytes / 1024.0)
-    else -> "$bytes B"
+@Composable
+private fun ImageRecord(actions: VisualManagerPageActions, meta: JSONObject, enabled: Boolean,
+                        onView: () -> Unit, onDelete: () -> Unit) {
+    var image by remember { mutableStateOf<JSONObject?>(null) }
+    var error by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(meta.getString("asset_id")) {
+        try {
+            image = VisualOperationResult.requireSuccess(actions.call("images.read",
+                JSONObject().put("asset_id", meta.getString("asset_id")).put("max_edge", 240)))
+        } catch (e: CancellationException) { throw e }
+        catch (e: Exception) { error = "缩略图读取失败：${e.message}" }
+    }
+    Card(Modifier.fillMaxWidth()) {
+        Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+            image?.let { EncodedImage(it.getString("data"), "图像缩略图", Modifier.size(80.dp)) }
+            Column(Modifier.weight(1f)) {
+                Text(if (meta.getString("kind") == "camera") "摄像头图像" else "屏幕图像")
+                Text(time(meta.getLong("captured_at_ms")), style = MaterialTheme.typography.bodySmall)
+                Text(bytes(meta.getLong("bytes")), style = MaterialTheme.typography.bodySmall)
+                error?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+                Row {
+                    TextButton(enabled = enabled, onClick = onView) { Text("查看") }
+                    TextButton(enabled = enabled, onClick = onDelete) { Text("删除") }
+                }
+            }
+        }
+    }
+}
+
+private fun objects(array: JSONArray?): List<JSONObject> =
+    if (array == null) emptyList() else (0 until array.length()).map { array.getJSONObject(it) }
+
+private fun time(ms: Long): String =
+    if (ms > 0L) DateFormat.getDateTimeInstance(DateFormat.SHORT, DateFormat.MEDIUM).format(Date(ms)) else "尚无记录"
+
+private fun bytes(bytes: Long): String =
+    if (bytes >= 1_048_576) "%.1f MiB".format(bytes / 1_048_576.0) else "%.1f KiB".format(bytes / 1024.0)
+
+private fun sessionLabel(state: JSONObject?): String = when {
+    state == null -> "未同步"
+    !state.optBoolean("available", true) -> "状态异常"
+    state.optBoolean("active", false) -> "运行中"
+    else -> "未开启"
 }

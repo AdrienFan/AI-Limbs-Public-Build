@@ -11,11 +11,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.visualmanager.v014"
+        applicationId = "com.ai.limbs.payload.visualmanager.v020"
         minSdk = 29
         targetSdk = 34
-        versionCode = 5
-        versionName = "0.1.4"
+        versionCode = 6
+        versionName = "0.2.0"
     }
 
     compileOptions {
@@ -37,6 +37,7 @@ kotlin { compilerOptions { jvmTarget = JvmTarget.JVM_17 } }
 
 dependencies {
     testImplementation("junit:junit:4.13.2")
+    testImplementation(project(":plugin-inprocess-api"))
     testImplementation("org.json:json:20240303")
     compileOnly(project(":plugin-inprocess-api"))
     implementation(platform(libs.compose.bom))
@@ -44,5 +45,6 @@ dependencies {
     implementation(libs.compose.material3)
     implementation(libs.compose.material.icons.extended)
     implementation(libs.activity.compose)
+    implementation(libs.lifecycle.runtime.ktx)
     implementation(libs.coroutines.android)
 }

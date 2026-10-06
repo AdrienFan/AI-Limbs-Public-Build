@@ -15,276 +15,118 @@ import org.json.JSONObject
 
 class VisualManagerEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
-        require(host.pluginId == VISUAL_PLUGIN_ID) {
-            "Unexpected Visual Manager identity: ${host.pluginId}"
-        }
-
+        require(host.pluginId == VISUAL_PLUGIN_ID) { "Unexpected Visual Workbench identity" }
         val controller = VisualManagerController(host)
-        host.registerProvider(
-            VISUAL_PAGE_ID,
-            VisualManagerPageProvider(host, controller),
-            mapOf("kind" to "plugin_page", "screen_id" to VISUAL_SCREEN_ID)
-        )
-        host.registerScreen(
-            InProcessScreen(
-                id = VISUAL_SCREEN_ID,
-                title = "视觉管理",
-                description = "管理屏幕共享、摄像头视觉会话与视觉缓存。",
-                schemaId = "ai_limbs.plugin_center.ui.v1",
-                documentJson = JSONObject()
-                    .put("schema", 1)
-                    .put("layout", "edge_to_edge")
-                    .put(
-                        "blocks",
-                        JSONArray().put(
-                            JSONObject()
-                                .put("type", "plugin_page")
-                                .put("provider_id", VISUAL_PAGE_ID)
-                        )
-                    )
-                    .toString()
-            )
-        )
-        host.registerHomeTile(
-            InProcessHomeTile(
-                id = VISUAL_TILE_ID,
-                title = "视觉管理",
-                description = "屏幕共享 · 摄像头 · 视觉缓存",
-                screenId = VISUAL_SCREEN_ID
-            )
-        )
+        host.registerProvider(VISUAL_STATE_ID, controller.stateProvider, mapOf("kind" to "ui_state"))
+        host.registerProvider(VISUAL_PAGE_ID, VisualManagerPageProvider(host, controller),
+            mapOf("kind" to "plugin_page", "screen_id" to VISUAL_SCREEN_ID))
+        host.registerScreen(InProcessScreen(
+            id = VISUAL_SCREEN_ID, title = "视觉工作台",
+            description = "屏幕、摄像头、页面文字与图像记录",
+            schemaId = "ai_limbs.plugin_center.ui.v1",
+            documentJson = JSONObject().put("schema", 1).put("layout", "edge_to_edge")
+                .put("blocks", JSONArray().put(JSONObject().put("type", "plugin_page").put("provider_id", VISUAL_PAGE_ID)))
+                .toString()))
+        host.registerHomeTile(InProcessHomeTile(id = VISUAL_TILE_ID, title = "视觉工作台",
+            description = "看画面 · 读页面 · 管理图像", screenId = VISUAL_SCREEN_ID))
 
-        fun parameter(
-            name: String,
-            type: String = "string",
-            description: String = "",
-            required: Boolean = true,
-            default: String? = null
-        ) = InProcessCapabilityParameterSpec(
-            name = name,
-            type = type,
-            description = description,
-            required = required,
-            default = default
-        )
+        fun p(name: String, type: String = "string", description: String,
+              required: Boolean = true, default: String? = null) =
+            InProcessCapabilityParameterSpec(name, type, description, required, default)
+        val kind = p("kind", description = "screen 或 camera")
+        val source = p("source_id", description = "sources 返回的 target_id 或 source_id")
+        val session = p("session_id", description = "start/status 返回的会话 ID")
+        val image = p("asset_id", description = "images.list/preview.save 返回的图像记录 ID")
+        val edge = p("max_edge", "integer", "预览最长边 160..1280", false, "1024")
+        val cameraOptions = listOf(
+            p("width", "integer", "期望拍摄宽度", false, "1280"),
+            p("height", "integer", "期望拍摄高度", false, "720"),
+            p("jpeg_quality", "integer", "JPEG 质量 1..100", false, "92"),
+            p("jpeg_orientation", "integer", "指定 JPEG 角度；省略时使用传感器和屏幕方向", false))
 
-        fun capability(
-            name: String,
-            title: String,
-            effect: InProcessCapabilityEffect,
-            description: String,
-            parameters: List<InProcessCapabilityParameterSpec> = emptyList(),
-            block: suspend (JSONObject) -> JSONObject
-        ) {
+        fun capability(name: String, title: String, effect: InProcessCapabilityEffect,
+                       description: String, parameters: List<InProcessCapabilityParameterSpec> = emptyList(),
+                       example: String = "{}") {
             val properties = JSONObject()
             val required = JSONArray()
-            parameters.forEach { item ->
-                val field = JSONObject()
-                    .put("type", item.type)
-                    .put("description", item.description)
-                item.default?.let { field.put("default", it) }
-                properties.put(item.name, field)
-                if (item.required) required.put(item.name)
+            parameters.forEach { parameter ->
+                val field = JSONObject().put("type", parameter.type).put("description", parameter.description)
+                when (parameter.name) {
+                    "kind" -> field.put("enum", JSONArray(if (name == "stop") listOf("screen", "camera", "all") else listOf("screen", "camera")))
+                    "operation" -> field.put("enum", JSONArray(listOf("check", "request", "open_settings")))
+                }
+                parameter.default?.let { value ->
+                    field.put("default", when (parameter.type) {
+                        "integer" -> value.toInt()
+                        "boolean" -> value.toBooleanStrict()
+                        else -> value
+                    })
+                }
+                properties.put(parameter.name, field)
+                if (parameter.required) required.put(parameter.name)
             }
-            host.registerCapability(
-                InProcessCapabilitySpec(
-                    id = "$VISUAL_PLUGIN_ID.$name",
-                    displayName = title,
-                    description = description,
-                    keywords = if (name.startsWith("page.")) listOf("页面", "读取当前界面", "页面结构", "全文", "长文字", "控件")
-                        else listOf("视觉", "屏幕", "摄像头", "共享"),
-                    parameters = parameters,
-                    inputSchema = JSONObject()
-                        .put("type", "object")
-                        .put("properties", properties)
-                        .put("required", required)
-                        .put("additionalProperties", false)
-                        .toString(),
-                    effect = effect,
-                    domain = InProcessCapabilityDomain.PLUGIN,
-                    executor = InProcessCapabilityExecutor { json ->
-                        block(JSONObject(json.ifBlank { "{}" })).toString()
-                    }
-                )
-            )
+            host.registerCapability(InProcessCapabilitySpec(
+                id = "$VISUAL_PLUGIN_ID.$name", displayName = title, description = description,
+                keywords = listOf("视觉", "工作台", "屏幕", "摄像头", "页面", "图像"),
+                parameters = parameters, suggestedParamsJson = example,
+                inputSchema = JSONObject().put("type", "object").put("properties", properties)
+                    .put("required", required).put("additionalProperties", false).toString(),
+                effect = effect, domain = InProcessCapabilityDomain.PLUGIN,
+                executor = InProcessCapabilityExecutor { json ->
+                    controller.call(name, JSONObject(json.ifBlank { "{}" })).toString()
+                }))
         }
 
         val read = InProcessCapabilityEffect.READ_ONLY
         val change = InProcessCapabilityEffect.STATE_CHANGE
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
+        capability("status", "视觉工作台状态", read,
+            "读取真实会话、授权、操作状态和最新画面时间。未启动时先 sources；相机未授权先 permission request；start 成功才可 frame。success=false 必须处理，勿把调用返回当操作成功。")
+        capability("sources", "列出视觉来源", read, "列出显示目标或相机镜头及授权状态。",
+            listOf(kind), """{"kind":"camera"}""")
+        capability("permission", "相机授权", change,
+            "check 查询、request 请求 Android 相机授权、open_settings 打开 AI Limbs 权限设置。拒绝/取消明确失败，不自动重试。",
+            listOf(p("operation", description = "check/request/open_settings")), """{"operation":"request"}""")
+        capability("start", "开始视觉会话", change,
+            "启动指定来源并取得首帧才报告成功。每类同时一个会话；已有会话需明确停止。返回 session_id、preview 和 MCP 图像。不会自动保存图像记录。",
+            listOf(kind, source) + cameraOptions, """{"kind":"camera","source_id":"0"}""")
+        capability("frame", "获取会话画面", write,
+            "从已开启会话取得新画面。save=false 仅替换临时预览；save=true 同时保存原图。返回 MCP 图像；查询 status/preview.read 不重新拍摄。",
+            listOf(kind, session, p("save", "boolean", "是否保存原图记录", false, "false")),
+            """{"kind":"camera","session_id":"<start 返回的 ID>","save":false}""")
+        capability("capture", "拍摄并保存单张图像", write,
+            "屏幕单次截图，或未开启会话时相机单拍并自动释放。保存原图记录并返回预览。已有相机会话请用 frame save=true。",
+            listOf(kind, source) + cameraOptions, """{"kind":"screen","source_id":"display:0"}""")
+        capability("stop", "停止视觉会话", change,
+            "kind=all 停止两类视觉，单类可指定 session_id。会验证停止结果，部分失败返回 success=false 和分项详情；不自动重试。",
+            listOf(p("kind", description = "screen/camera/all", required = false, default = "all"),
+                p("session_id", description = "可选单类会话 ID", required = false)), """{"kind":"all"}""")
+        capability("preview.read", "查看最新预览", read,
+            "读取最新已获取画面，不重新取帧。附来源和时间及 MCP 图像；停止后保留最后画面，不表示仍在拍摄。",
+            listOf(kind, edge), """{"kind":"camera"}""")
+        capability("preview.save", "保存当前预览", write,
+            "把最新预览保存为图像记录，不重新拍摄。预览最长边 1024；保存原图请用 frame save=true。",
+            listOf(kind), """{"kind":"camera"}""")
+        capability("images.list", "列出图像记录", read,
+            "列出明确保存的图像。最多 60 张、64 MiB，超过后删除最旧记录；临时预览不入此列表。")
+        capability("images.read", "查看图像记录", read,
+            "读取指定记录的图像预览，返回 MCP 图像，不触发摄像头或屏幕拍摄。",
+            listOf(image, edge), """{"asset_id":"<images.list 返回的 ID>"}""")
+        capability("images.delete", "删除图像记录", write, "删除指定图像及元数据。",
+            listOf(image), """{"asset_id":"<images.list 返回的 ID>"}""")
+        capability("images.clear", "清空图像记录", write, "清空本插件已保存图像，不关闭会话、不清除当前预览。")
+        capability("page.inspect", "读取当前页面", read,
+            "固定当前应用暴露的完整节点文字快照。返回 snapshot_id；在工作台内调用会读取当前工作台，读取其他应用请从兰儿入口调用。",
+            listOf(p("display", description = "可选显示标识", required = false)))
+        capability("page.text", "读取页面全文", read,
+            "读取固定快照全文。按 next_offset 续读到 has_more=false；偏移按 UTF-16 字符，不能猜测跳页。",
+            listOf(p("snapshot_id", description = "page.inspect 返回的 ID"),
+                p("node_id", description = "可选节点 ID", required = false),
+                p("offset", "integer", "全文偏移", false, "0"),
+                p("limit", "integer", "分页字符数，默认 12000", false, "12000")),
+            """{"snapshot_id":"<page.inspect 返回的 ID>","offset":0}""")
 
-        capability(
-            "status",
-            "读取视觉管理状态",
-            read,
-            "读取本插件持有的屏幕共享、摄像头会话、可用视觉来源和视觉缓存摘要。"
-        ) { controller.dashboard() }
-
-        capability(
-            "page.inspect",
-            "读取当前页面结构",
-            read,
-            "保存当前应用提供的完整页面文字快照；节点预览是摘要，全文通过 page.text 分段读取。",
-            listOf(parameter("display", description = "可选显示目标", required = false))
-        ) { controller.pageInspect(it) }
-
-        capability(
-            "page.text",
-            "读取页面或节点全文",
-            read,
-            "读取 page.inspect 的固定快照全文。按 next_offset 续读直至 has_more=false；快照保留十分钟，最多四份。",
-            listOf(
-                parameter("snapshot_id", description = "page.inspect 返回的 snapshot_id"),
-                parameter("node_id", description = "节点 ID；省略时读取整页文字", required = false),
-                parameter("field", description = "text 或 content_description", required = false, default = "text"),
-                parameter("offset", "integer", "UTF-16 字符偏移，续读使用 next_offset", false, "0"),
-                parameter("length", "integer", "每页字符数 1-4000", false, "3000")
-            )
-        ) { controller.pageText(it) }
-
-        capability(
-            "screen.list_targets",
-            "列出屏幕共享目标",
-            read,
-            "列出 Host 当前可用于屏幕视觉会话的显示目标。"
-        ) { controller.screenTargets() }
-
-        capability(
-            "screen.capture",
-            "单次屏幕截图",
-            change,
-            "通过 Host 的单帧截图原语获取一张屏幕图像，并归档进视觉管理缓存。"
-        ) { controller.screenCapture(it) }
-
-        capability(
-            "screen.start",
-            "开始屏幕共享",
-            change,
-            "创建本插件拥有的屏幕视觉会话。默认 prime=true，会立即取首帧并触发必要的系统共享屏授权。",
-            listOf(
-                parameter("target_id", description = "目标 ID，例如 display:0", required = false),
-                parameter("prime", "boolean", "是否立即取首帧并触发授权", false, "true")
-            )
-        ) { controller.screenStart(it) }
-
-        capability(
-            "screen.stop",
-            "停止屏幕共享",
-            change,
-            "停止指定屏幕视觉会话；不传 session_id 时停止本插件拥有的全部屏幕会话。",
-            listOf(
-                parameter("session_id", description = "屏幕会话 ID", required = false)
-            )
-        ) { controller.screenStop(it) }
-
-        capability(
-            "screen.frame",
-            "读取屏幕共享帧",
-            change,
-            "从指定屏幕视觉会话读取一帧，并将可访问的结果归档进视觉管理缓存。",
-            listOf(parameter("session_id", description = "屏幕会话 ID"))
-        ) { controller.screenFrame(it) }
-
-        capability(
-            "camera.list_sources",
-            "列出摄像头来源",
-            read,
-            "列出可用摄像头、朝向、传感器方向和常用 JPEG 尺寸，并报告 CAMERA 权限状态。"
-        ) { controller.cameraSources() }
-
-        capability(
-            "camera.start",
-            "开始摄像头视觉会话",
-            change,
-            "启动本插件拥有的持续摄像头视觉会话。",
-            cameraParameters(::parameter)
-        ) { controller.cameraStart(it) }
-
-        capability(
-            "camera.configure",
-            "配置摄像头视觉会话",
-            change,
-            "修改 JPEG 质量或方向；修改宽高时 Host 会报告是否需要重启会话。",
-            listOf(
-                parameter("session_id", description = "摄像头会话 ID"),
-                parameter("jpeg_quality", "integer", "JPEG 质量 1-100", false),
-                parameter("jpeg_orientation", "integer", "JPEG 方向角度", false),
-                parameter("width", "integer", "期望宽度", false),
-                parameter("height", "integer", "期望高度", false)
-            )
-        ) { controller.cameraConfigure(it) }
-
-        capability(
-            "camera.stop",
-            "停止摄像头视觉会话",
-            change,
-            "停止指定摄像头会话；不传 session_id 时停止本插件拥有的全部摄像头会话。",
-            listOf(
-                parameter("session_id", description = "摄像头会话 ID", required = false)
-            )
-        ) { controller.cameraStop(it) }
-
-        capability(
-            "camera.frame",
-            "读取摄像头会话帧",
-            change,
-            "从指定持续摄像头会话读取一帧，并归档进视觉管理缓存。",
-            listOf(parameter("session_id", description = "摄像头会话 ID"))
-        ) { controller.cameraFrame(it) }
-
-        capability(
-            "camera.capture",
-            "摄像头单帧拍摄",
-            change,
-            "临时打开指定摄像头拍摄一帧，Host 拍摄完成后立即释放摄像头，并将结果归档进视觉管理缓存。",
-            cameraParameters(::parameter)
-        ) { controller.cameraCapture(it) }
-
-        capability(
-            "assets.list",
-            "列出视觉缓存",
-            read,
-            "列出视觉管理插件保存的屏幕和摄像头帧及其大小、时间和本地路径。"
-        ) { controller.listAssets() }
-
-        capability(
-            "assets.delete",
-            "删除视觉缓存项",
-            write,
-            "删除指定视觉缓存项及其元数据。",
-            listOf(parameter("asset_id", description = "assets.list 返回的 asset_id"))
-        ) { controller.deleteAsset(it) }
-
-        capability(
-            "assets.clear",
-            "清空视觉缓存",
-            write,
-            "清空视觉管理插件自己的视觉缓存以及属于本插件的 Host 临时帧目录。"
-        ) { controller.clearAssets() }
-
-        host.logger.i("VisualManager", "Visual Manager mounted")
-        return InProcessPluginHandle {
-            runCatching { controller.stopAll() }
-                .onFailure { host.logger.e("VisualManager", "Failed to stop visual sessions", it) }
-            controller.clearPageSnapshots()
-            host.logger.i("VisualManager", "Visual Manager stopped")
-        }
+        host.logger.i("VisualWorkbench", "Visual Workbench mounted")
+        return InProcessPluginHandle { controller.dispose() }
     }
-
-    private fun cameraParameters(
-        parameter: (
-            String,
-            String,
-            String,
-            Boolean,
-            String?
-        ) -> InProcessCapabilityParameterSpec
-    ): List<InProcessCapabilityParameterSpec> = listOf(
-        parameter("source_id", "string", "摄像头 source_id；为空时可按 lens_facing 选择", false, null),
-        parameter("lens_facing", "string", "back、front 或 external", false, "back"),
-        parameter("width", "integer", "期望 JPEG 宽度", false, "1280"),
-        parameter("height", "integer", "期望 JPEG 高度", false, "720"),
-        parameter("jpeg_quality", "integer", "JPEG 质量 1-100", false, "92"),
-        parameter("jpeg_orientation", "integer", "JPEG 方向角度", false, "0")
-    )
 }

@@ -9,7 +9,7 @@ class VisualManagerPresentationEntry : InProcessPluginPresentationEntry {
         host: InProcessPluginPresentationHost
     ): InProcessPluginPresentationHandle {
         require(host.pluginId == VISUAL_PLUGIN_ID) {
-            "Unexpected Visual Manager presentation identity: ${host.pluginId}"
+            "Unexpected Visual Workbench presentation identity: ${host.pluginId}"
         }
         val registration = host.registerPageProvider(
             VISUAL_PAGE_ID,
