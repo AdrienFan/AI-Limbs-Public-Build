@@ -79,7 +79,8 @@ internal class GatewayResults(
         }
         if (structured !== clean) {
             // Policy and retry guidance must remain immediately visible even when output is paged.
-            listOf("success", "error", "error_code", "execution_policy", "next_action", "media_delivery").forEach { field ->
+            listOf("success", "error", "error_code", "status", "exit_code", "execution_state",
+                "automatic_reexecution", "execution_policy", "next_action", "media_delivery").forEach { field ->
                 if (clean.has(field)) structured.put(field, clean.get(field))
             }
         }

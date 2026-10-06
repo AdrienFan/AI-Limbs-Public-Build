@@ -10,11 +10,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.chatgptprobe.v013"
+        applicationId = "com.ai.limbs.payload.chatgptprobe.v014"
         minSdk = 26
         targetSdk = 34
-        versionCode = 13
-        versionName = "0.0.13"
+        versionCode = 14
+        versionName = "0.0.14"
     }
 
     compileOptions {

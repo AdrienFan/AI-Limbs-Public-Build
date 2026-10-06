@@ -18,6 +18,22 @@ internal class MemoryGatewayStore : GatewayBlobStore {
 }
 
 class GatewayResultsTest {
+    @Test fun pagedDomainFailureKeepsRecoveryFieldsInImmediateEnvelope() {
+        val result = GatewayResults(MemoryGatewayStore()).adapt(JSONObject().put("success", false)
+            .put("status", "PROCESS_EXITED").put("exit_code", -1)
+            .put("error_code", "UBUNTU_PROCESS_EXITED").put("execution_state", "UNKNOWN")
+            .put("automatic_reexecution", false).put("next_action", JSONObject().put("inspect", "runtime"))
+            .put("output", "partial output".repeat(3000)))
+        assertTrue(result.getBoolean("isError"))
+        val first = result.getJSONObject("structuredContent")
+        assertTrue(first.getBoolean("paged"))
+        assertEquals("UBUNTU_PROCESS_EXITED", first.getString("error_code"))
+        assertEquals("PROCESS_EXITED", first.getString("status"))
+        assertEquals(-1, first.getInt("exit_code"))
+        assertEquals("UNKNOWN", first.getString("execution_state"))
+        assertFalse(first.getBoolean("automatic_reexecution"))
+        assertEquals("runtime", first.getJSONObject("next_action").getString("inspect"))
+    }
     @Test fun unicodePagesReassembleAndDoNotPageTheirOwnEnvelope() {
         val store = MemoryGatewayStore()
         val adapter = GatewayResults(store)

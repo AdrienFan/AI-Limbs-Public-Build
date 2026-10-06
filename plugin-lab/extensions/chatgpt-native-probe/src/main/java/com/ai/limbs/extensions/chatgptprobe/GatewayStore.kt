@@ -67,11 +67,20 @@ internal class GatewayEncryptedStore(context: Context) : GatewayBlobStore {
     }
 
     @Synchronized override fun delete(name: String) = file(name).delete()
-    @Synchronized override fun names(): List<String> = directory.listFiles().orEmpty()
-        .filter { it.isFile && !it.name.contains('.') }.map { it.name }
+    @Synchronized override fun names(): List<String> = gatewayCommittedRecordNames(
+        directory.listFiles().orEmpty().filter { it.isFile }.map { it.name })
 
     companion object { private const val KEY_ALIAS = "ai_limbs_chatgpt_gateway_records_v1" }
 }
+
+/** AtomicFile may leave only its committed .bak after a process dies during replacement. */
+internal fun gatewayCommittedRecordNames(names: List<String>): List<String> = names.mapNotNull {
+    when {
+        it.endsWith(".bak") -> it.removeSuffix(".bak")
+        !it.contains('.') -> it
+        else -> null
+    }
+}.distinct()
 
 internal fun gatewayHash(value: String): String = MessageDigest.getInstance("SHA-256")
     .digest(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -89,7 +98,36 @@ internal fun canonicalJson(value: Any?): String = when (value) {
 
 /** A durable receipt is claimed before execution; only recorded responses may be replayed. */
 internal class GatewayReceipts(private val store: GatewayBlobStore, private val now: () -> Long = System::currentTimeMillis) {
-    private val records = store.read("receipts")?.let(::JSONObject) ?: JSONObject()
+    private val records = JSONObject()
+    private val encodedSizes = mutableMapOf<String, Int>()
+    private var storedBytes = 0L
+
+    init {
+        // A state transition writes one encrypted receipt, not the whole 24-hour ledger.
+        store.names().filter { it.startsWith(RECORD_PREFIX) }.forEach { name ->
+            val id = name.removePrefix(RECORD_PREFIX)
+            require(id.matches(Regex("[a-f0-9]{64}"))) { "Invalid receipt identifier" }
+            val text = requireNotNull(store.read(name)) { "Receipt disappeared during recovery" }
+            records.put(id, JSONObject(text))
+            encodedSizes[id] = text.toByteArray(Charsets.UTF_8).size
+            storedBytes += encodedSizes.getValue(id)
+        }
+        // Forward migration is restartable: persisted per-record state is authoritative.
+        // No business request is accepted until all legacy receipts have been preserved.
+        store.read("receipts")?.let { text ->
+            val legacy = JSONObject(text)
+            legacy.keys().forEach { id ->
+                val record = legacy.getJSONObject(id)
+                if (records.has(id)) {
+                    require(records.getJSONObject(id).getString("fingerprint") == record.getString("fingerprint")) {
+                        "Legacy receipt identity conflict"
+                    }
+                } else commit(id, record)
+            }
+            store.delete("receipts")
+        }
+        require(records.length() <= MAX_RECORDS && storedBytes <= MAX_BYTES) { "Gateway receipt storage limit reached" }
+    }
 
     @Synchronized fun claim(binding: String, command: JSONObject): Pair<String, Boolean> {
         val id = gatewayHash(binding + "\n" + command.getString("channel") + "\n" + command.getString("request_id"))
@@ -106,7 +144,11 @@ internal class GatewayReceipts(private val store: GatewayBlobStore, private val 
             val record = records.getJSONObject(it)
             record.getString("phase") in setOf("ACKED", "DELIVERY_FAILED") && now() - record.getLong("created") > RETENTION_MS
         }.toList()
-        expired.forEach(records::remove)
+        expired.forEach { expiredId ->
+            store.delete(RECORD_PREFIX + expiredId)
+            storedBytes -= encodedSizes.remove(expiredId)!!
+            records.remove(expiredId)
+        }
         require(records.length() < MAX_RECORDS) { "Gateway receipt capacity reached; no action executed" }
         commit(id, JSONObject().put("binding", binding).put("fingerprint", fingerprint)
             .put("command", receiptCommand(command)).put("created", now()).put("phase", "EXECUTING"))
@@ -116,10 +158,11 @@ internal class GatewayReceipts(private val store: GatewayBlobStore, private val 
     @Synchronized fun ready(id: String, payload: JSONObject) {
         commit(id, JSONObject(records.getJSONObject(id).toString()).put("response", payload).put("phase", "READY"))
     }
-    @Synchronized fun mark(id: String, phase: String) {
+    @Synchronized fun mark(id: String, phase: String, shardToken: String? = null) {
+        if (shardToken != null && records.getJSONObject(id).getJSONObject("command").getString("shard_token") != shardToken) return
         commit(id, JSONObject(records.getJSONObject(id).toString()).put("phase", phase))
     }
-    @Synchronized fun delivered(id: String, shardToken: String) {
+    @Synchronized fun delivered(id: String, shardToken: String): Boolean {
         val current = records.getJSONObject(id)
         // A duplicate may refresh its shard token while the preceding POST is in flight.
         if (current.getJSONObject("command").getString("shard_token") == shardToken) {
@@ -137,7 +180,9 @@ internal class GatewayReceipts(private val store: GatewayBlobStore, private val 
                 result?.optJSONObject("structuredContent")?.put("delivery_replay", "Retrieve previously delivered images using their cache handles")
             }
             commit(id, compact)
+            return true
         }
+        return false
     }
     @Synchronized fun list(binding: String, phase: String): List<Pair<String, JSONObject>> = records.keys().asSequence()
         .filter { records.getJSONObject(it).getString("binding") == binding && records.getJSONObject(it).getString("phase") == phase }
@@ -155,11 +200,16 @@ internal class GatewayReceipts(private val store: GatewayBlobStore, private val 
         }
     }
     private fun commit(id: String, record: JSONObject) {
-        val next = JSONObject(records.toString()).put(id, record)
-        val text = next.toString()
-        require(text.toByteArray(Charsets.UTF_8).size <= MAX_BYTES) { "Gateway receipt storage limit reached" }
-        store.write("receipts", text)
+        require(id.matches(Regex("[a-f0-9]{64}"))) { "Invalid receipt identifier" }
+        val text = record.toString()
+        val bytes = text.toByteArray(Charsets.UTF_8).size
+        val previousBytes = if (records.has(id)) encodedSizes.getValue(id) else 0
+        val nextBytes = storedBytes - previousBytes + bytes
+        require(nextBytes <= MAX_BYTES) { "Gateway receipt storage limit reached" }
+        store.write(RECORD_PREFIX + id, text)
         records.put(id, record)
+        encodedSizes[id] = bytes
+        storedBytes = nextBytes
     }
     private fun receiptCommand(command: JSONObject): JSONObject = JSONObject()
         .put("request_id", command.getString("request_id")).put("channel", command.getString("channel"))
@@ -172,6 +222,7 @@ internal class GatewayReceipts(private val store: GatewayBlobStore, private val 
             }
         }
     companion object {
+        private const val RECORD_PREFIX = "receipt_"
         const val RETENTION_MS = 24 * 60 * 60 * 1000L
         private const val MAX_RECORDS = 4096
         private const val MAX_BYTES = 32 * 1024 * 1024

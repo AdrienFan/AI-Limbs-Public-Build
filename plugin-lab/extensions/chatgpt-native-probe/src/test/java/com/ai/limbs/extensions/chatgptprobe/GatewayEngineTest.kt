@@ -3,6 +3,8 @@ package com.ai.limbs.extensions.chatgptprobe
 import com.ai.assistance.operit.integrations.ailimbs.BridgeRemoteIngress
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.ConcurrentLinkedQueue
+import java.util.concurrent.CountDownLatch
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import kotlinx.coroutines.CompletableDeferred
@@ -20,6 +22,46 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GatewayEngineTest {
+    @Test fun slowResponsePostDoesNotBlockAnotherCompletedAction() = runBlocking {
+        Fixture(blockedResponseId = "slow-response").use { fixture ->
+            val calls = AtomicInteger()
+            fixture.start { _, _ -> calls.incrementAndGet(); JSONObject().put("success", true) }
+            fixture.commands.add(toolCommand("slow-response", 201))
+            eventually { fixture.blockedPost.get() }
+            fixture.commands.add(toolCommand("fast-response", 202))
+            eventually { fixture.responses.any { it.optString("request_id") == "fast-response" } }
+            assertFalse(fixture.responses.any { it.optString("request_id") == "slow-response" })
+            fixture.postGate.countDown()
+            eventually { fixture.responses.any { it.optString("request_id") == "slow-response" } }
+            assertEquals(2, calls.get())
+        }
+    }
+
+    @Test fun simultaneousResponsePostsAreBounded() = runBlocking {
+        Fixture(blockAllPosts = true).use { fixture ->
+            fixture.start { _, _ -> JSONObject() }
+            repeat(6) { fixture.commands.add(rpcCommand("post-$it", 300 + it, "ping")) }
+            eventually { fixture.activePosts.get() == 4 }
+            assertEquals(4, fixture.maximumPosts.get())
+            fixture.postGate.countDown()
+            eventually { fixture.responses.size == 6 }
+            assertTrue(fixture.maximumPosts.get() <= 4)
+        }
+    }
+
+    @Test fun retryBackoffDoesNotOccupyAllDeliverySlots() = runBlocking {
+        Fixture(retryPostIds = (0 until 4).map { "retry-$it" }.toSet()).use { fixture ->
+            val calls = AtomicInteger()
+            fixture.start { _, _ -> calls.incrementAndGet(); JSONObject().put("success", true) }
+            repeat(4) { fixture.commands.add(toolCommand("retry-$it", 400 + it)) }
+            eventually { fixture.postAttempts.get() >= 4 }
+            fixture.commands.add(toolCommand("new-result", 404))
+            eventually { fixture.responses.any { it.optString("request_id") == "new-result" } }
+            assertEquals(5, calls.get())
+            assertFalse(fixture.responses.any { it.optString("request_id").startsWith("retry-") })
+        }
+    }
+
     @Test fun deliveryRetryAndDuplicateDoNotRepeatBusinessAction() = runBlocking {
         Fixture(failFirstPost = true).use { fixture ->
             val calls = AtomicInteger()
@@ -402,11 +444,16 @@ class GatewayEngineTest {
             .put("command_type", "jsonrpc").put("jsonrpc", rpc)
     }
 
-    private class Fixture(failFirstPost: Boolean = false) : AutoCloseable {
+    private class Fixture(failFirstPost: Boolean = false, private val blockedResponseId: String? = null,
+        private val blockAllPosts: Boolean = false, private val retryPostIds: Set<String> = emptySet()) : AutoCloseable {
         val server = MockWebServer()
         val commands = ConcurrentLinkedQueue<JSONObject>()
         val responses = ConcurrentLinkedQueue<JSONObject>()
         val postAttempts = AtomicInteger()
+        val blockedPost = AtomicBoolean()
+        val postGate = CountDownLatch(1)
+        val activePosts = AtomicInteger()
+        val maximumPosts = AtomicInteger()
         val describeCalls = AtomicInteger()
         val invokeAliases = ConcurrentHashMap<String, String>()
         val describeFailures = ConcurrentHashMap<String, String>()
@@ -420,8 +467,19 @@ class GatewayEngineTest {
                     if (request.path.orEmpty().contains("/response")) {
                         postAttempts.incrementAndGet()
                         if (failPost.compareAndSet(true, false)) return MockResponse().setResponseCode(503)
-                        responses.add(JSONObject(request.body.readUtf8()))
-                        return MockResponse().setResponseCode(200).setBody("{}")
+                        val payload = JSONObject(request.body.readUtf8())
+                        if (payload.optString("request_id") in retryPostIds)
+                            return MockResponse().setResponseCode(503).setHeader("Retry-After", "5")
+                        val count = activePosts.incrementAndGet()
+                        maximumPosts.updateAndGet { maxOf(it, count) }
+                        try {
+                            if (blockAllPosts || payload.optString("request_id") == blockedResponseId) {
+                                blockedPost.set(true)
+                                if (!postGate.await(8, TimeUnit.SECONDS)) return MockResponse().setResponseCode(504)
+                            }
+                            responses.add(payload)
+                            return MockResponse().setResponseCode(200).setBody("{}")
+                        } finally { activePosts.decrementAndGet() }
                     }
                     val batch = JSONArray()
                     repeat(8) { commands.poll()?.let(batch::put) }
@@ -454,6 +512,6 @@ class GatewayEngineTest {
             })
             engine.start()
         }
-        override fun close() { engine.close(); server.shutdown() }
+        override fun close() { postGate.countDown(); engine.close(); server.shutdown() }
     }
 }

@@ -33,6 +33,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -87,7 +89,7 @@ internal data class McpGatewayState(
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.13"
+        const val PROBE_VERSION = "0.0.14"
     }
 }
 
@@ -123,6 +125,8 @@ internal class ChatGptNativeProbeEngine(
         else GatewayResults(encryptedStore, binding = identity, validImage = imageValidator)
     }
     private val businessSlots = Semaphore(4)
+    private val deliveryWake = Channel<Unit>(Channel.CONFLATED)
+    private val requestTimings = GatewayTimings()
     private data class ActiveRequest(val job: Job, val rpcKey: String, val channel: String, val binding: String)
     private val activeRequests = ConcurrentHashMap<String, ActiveRequest>()
     @Volatile private var pollCall: Call? = null
@@ -153,10 +157,6 @@ internal class ChatGptNativeProbeEngine(
         require(config.configured) { "Tunnel ID / Runtime API Key 尚未配置" }
         require(remoteIngress != null) { "BridgeRemoteIngress 尚未绑定；Bridge Provider 尚未就绪" }
 
-        receipts.counts()
-        encryptedStore.write("storage_probe", "{}")
-        check(encryptedStore.read("storage_probe") == "{}") { "Encrypted result storage verification failed" }
-        encryptedStore.delete("storage_probe")
         invokeIds.clear()
         mutableState.value = mutableState.value.copy(
             running = true,
@@ -169,6 +169,19 @@ internal class ChatGptNativeProbeEngine(
         )
         val epoch = generation.incrementAndGet()
         loopJob = scope.launch {
+            try {
+                // Ledger recovery/migration and Keystore I/O must not block the UI thread.
+                receipts.counts()
+                encryptedStore.write("storage_probe", "{}")
+                check(encryptedStore.read("storage_probe") == "{}") { "Encrypted result storage verification failed" }
+                encryptedStore.delete("storage_probe")
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (error: Exception) {
+                update(epoch) { it.copy(running = false, phase = "ERROR",
+                    detail = "Durable gateway storage could not be initialized", lastError = error.javaClass.simpleName) }
+                return@launch
+            }
             supervisorScope {
                 val delivery = launch { deliveryLoop(epoch) }
                 try { pollLoop(epoch, this) } finally { delivery.cancel() }
@@ -204,6 +217,7 @@ internal class ChatGptNativeProbeEngine(
             .put("state", mutableState.value.toJson())
             .put("ingress_bound", remoteIngress != null)
             .put("active_requests", activeRequests.size)
+            .put("request_timings", requestTimings.snapshot())
             .put("receipts", receipts.counts())
             .put("dedup_retention_ms", GatewayReceipts.RETENTION_MS)
             .put("supported_mcp_versions", JSONArray(GatewayProtocol.supportedVersions.toList()))
@@ -316,8 +330,9 @@ internal class ChatGptNativeProbeEngine(
             update(epoch) { it.copy(lastSuccessfulPollAtMs = System.currentTimeMillis()) }
             if (response.code == 204) return "Tunnel poll healthy; no commands"
             val commands = JSONObject(response.body?.string().orEmpty()).optJSONArray("commands") ?: JSONArray()
+            val receivedAt = System.nanoTime()
             for (index in 0 until commands.length()) {
-                try { acceptCommand(config, commands.getJSONObject(index), epoch, workers) }
+                try { acceptCommand(config, commands.getJSONObject(index), epoch, workers, receivedAt) }
                 catch (error: Exception) {
                     update(epoch) { it.copy(rejectedCommandCount = it.rejectedCommandCount + 1, lastCommandError = "Command rejected before execution: ${error.javaClass.simpleName}") }
                     warn("Gateway command rejected before execution: ${error.javaClass.simpleName}")
@@ -327,7 +342,7 @@ internal class ChatGptNativeProbeEngine(
         }
     }
 
-    private fun acceptCommand(config: ChatGptProbeConfig, input: JSONObject, epoch: Long, workers: CoroutineScope): Unit = synchronized(admissionLock) {
+    private fun acceptCommand(config: ChatGptProbeConfig, input: JSONObject, epoch: Long, workers: CoroutineScope, receivedAt: Long): Unit = synchronized(admissionLock) {
         val command = JSONObject(input.toString())
         require(command.opt("request_id") is String && command.opt("shard_token") is String && command.optString("request_id").isNotBlank() && command.optString("shard_token").isNotBlank()) { "Invalid tunnel command identity" }
         command.put("channel", command.optString("channel").ifBlank { DEFAULT_CHANNEL })
@@ -339,27 +354,42 @@ internal class ChatGptNativeProbeEngine(
         val identity = binding(config)
         val (receiptId, fresh) = receipts.claim(identity, command)
         update(epoch) { it.copy(commandCount = it.commandCount + 1) }
-        if (!fresh) return@synchronized
+        if (!fresh) {
+            deliveryWake.trySend(Unit)
+            return@synchronized
+        }
+        requestTimings.accepted(receiptId, rpc?.optJSONObject("params")?.optString("name")
+            ?.takeIf { it in setOf(TOOL_SEARCH, TOOL_DESCRIBE, TOOL_INVOKE, TOOL_RESULT_READ, TOOL_MEDIA_READ, TOOL_STATUS) }
+            ?: "protocol", receivedAt)
         if (!control && activeRequests.size >= 32) {
             val answer = GatewayProtocol.delivery(command, GatewayProtocol.error(rpc?.opt("id"), -32001, "Gateway busy; this request was not executed"))
             observeProtocolResponse(answer, epoch)
             receipts.ready(receiptId, answer)
+            deliveryWake.trySend(Unit)
             return@synchronized
         }
         val rpcKey = canonicalJson(rpc?.opt("id"))
         val job = workers.launch(start = CoroutineStart.LAZY) {
             try {
-                val answer = if (control) processCommand(command, identity, epoch) else businessSlots.withPermit {
+                val answer = if (control) {
+                    requestTimings.mark(receiptId, "started")
+                    processCommand(command, identity, epoch)
+                } else businessSlots.withPermit {
+                    requestTimings.mark(receiptId, "started")
                     val arguments = rpc?.optJSONObject("params")?.optJSONObject("arguments")
                     val requestedTimeout = arguments?.opt("timeout_ms") as? Number
                     val deadline = if (rpc?.optJSONObject("params")?.optString("name") == TOOL_INVOKE && requestedTimeout != null)
                         requestedTimeout.toLong().coerceIn(1_000L, 1_800_000L) else 300_000L
                     withTimeout(deadline) { processCommand(command, identity, epoch) }
                 }
+                requestTimings.mark(receiptId, "processed")
                 receipts.ready(receiptId, answer)
+                requestTimings.mark(receiptId, "ready")
+                deliveryWake.trySend(Unit)
             } catch (cancelled: CancellationException) {
                 val reason = if (cancelled is TimeoutCancellationException) "TIMEOUT" else "CANCELLED_OR_STOPPED"
                 receipts.ready(receiptId, GatewayProtocol.delivery(command, rpc?.opt("id")?.takeIf { it != JSONObject.NULL }?.let { GatewayProtocol.uncertain(it, reason) }))
+                deliveryWake.trySend(Unit)
                 throw cancelled
             } catch (error: Exception) {
                 // Do not convert persistence failure into an automatic capability retry.
@@ -434,7 +464,12 @@ internal class ChatGptNativeProbeEngine(
         return GatewayProtocol.delivery(command, answer)
     }
 
-    private suspend fun deliveryLoop(epoch: Long) {
+    private data class DeliveryRetry(val shardToken: String, val nextAttemptAtNs: Long, val backoffMs: Long)
+
+    private suspend fun deliveryLoop(epoch: Long): Unit = supervisorScope {
+        val deliveries = ConcurrentHashMap<String, Job>()
+        val retries = ConcurrentHashMap<String, DeliveryRetry>()
+        val slots = Semaphore(4)
         var backoff = INITIAL_RETRY_MS
         while (currentCoroutineContext().isActive) {
             try {
@@ -448,26 +483,59 @@ internal class ChatGptNativeProbeEngine(
                     }
                 }
                 val apiKey = storage.readApiKey() ?: error("Runtime API Key unavailable")
+                // Independent completed responses must not wait behind a slow HTTP POST.
+                // Backoff occupies no HTTP slot, and only persisted responses are retried.
                 for ((id, record) in receipts.list(identity, "READY")) {
-                    try {
-                        postTunnelResponse(config, apiKey, record.getJSONObject("command").getString("shard_token"), record.getJSONObject("response"), epoch)
-                        receipts.delivered(id, record.getJSONObject("command").getString("shard_token"))
-                    } catch (error: TunnelHttpException) {
-                        if (!error.retryable) {
-                            if (error.status != 401) receipts.mark(id, "DELIVERY_FAILED")
-                            update(epoch) { it.copy(lastDeliveryError = "Result delivery HTTP ${error.status}; execution will not be repeated") }
-                            if (error.status == 401) { delay(30_000L); break }
-                        } else throw error
+                    if (deliveries.containsKey(id)) continue
+                    val shard = record.getJSONObject("command").getString("shard_token")
+                    val retry = retries[id]?.takeIf { it.shardToken == shard }
+                    if (retry != null && System.nanoTime() < retry.nextAttemptAtNs) continue
+                    if (!slots.tryAcquire()) continue
+                    val job = launch(start = CoroutineStart.LAZY) {
+                        try {
+                            val next = deliverReceipt(id, record, config, apiKey, epoch, retry?.backoffMs ?: INITIAL_RETRY_MS)
+                            if (next == null) retries.remove(id) else retries[id] = next
+                        } finally { deliveries.remove(id); slots.release(); deliveryWake.trySend(Unit) }
                     }
+                    deliveries[id] = job
+                    job.start()
                 }
                 backoff = INITIAL_RETRY_MS
-                delay(750L)
+                withTimeoutOrNull(750L) { deliveryWake.receive() }
             } catch (cancelled: CancellationException) { throw cancelled
             } catch (error: Exception) {
                 update(epoch) { it.copy(lastDeliveryError = "Delivery interrupted: ${error.javaClass.simpleName}; results retained") }
                 delay(retryDelay(backoff, error))
                 backoff = (backoff * 2).coerceAtMost(MAX_RETRY_MS)
             }
+        }
+    }
+
+    private suspend fun deliverReceipt(id: String, record: JSONObject, config: ChatGptProbeConfig, apiKey: String,
+        epoch: Long, backoff: Long): DeliveryRetry? {
+        val shard = record.getJSONObject("command").getString("shard_token")
+        fun retry(error: Exception, waitMs: Long = retryDelay(backoff, error)): DeliveryRetry =
+            DeliveryRetry(shard, System.nanoTime() + waitMs * 1_000_000L, (backoff * 2).coerceAtMost(MAX_RETRY_MS))
+        try {
+            requestTimings.mark(id, "posting")
+            postTunnelResponse(config, apiKey, shard, record.getJSONObject("response"), epoch)
+            requestTimings.mark(id, "posted")
+            if (receipts.delivered(id, shard)) requestTimings.mark(id, "acked")
+            return null
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (error: Exception) {
+            update(epoch) { it.copy(lastDeliveryError = "Result delivery ${error.javaClass.simpleName}; execution will not be repeated") }
+            if (error is TunnelHttpException && !error.retryable) {
+                if (error.status == 401) return retry(error, 30_000L)
+                try {
+                    receipts.mark(id, "DELIVERY_FAILED", shard)
+                    return null
+                } catch (persistence: Exception) {
+                    warn("Delivery rejection could not be persisted: ${persistence.javaClass.simpleName}; receipt retained")
+                    return retry(persistence)
+                }
+            }
+            return retry(error)
         }
     }
 
