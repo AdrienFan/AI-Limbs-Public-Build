@@ -29,7 +29,7 @@ internal class ChatGptNativeProbeNotification(
         val attention = when {
             !config.secureStorageAvailable -> "安全凭据存储不可用，请打开连接诊断"
             !config.configured -> "请在插件设置中填写隧道 ID 与 Runtime Key"
-            access.catalogMismatchSuspected -> "疑似工具目录不匹配，请在 ChatGPT Refresh 后新建会话"
+            access.catalogMismatchSuspected -> "疑似旧工具目录，请在 ChatGPT 刷新此连接并新建会话；重连隧道不更新目录"
             probe.phase == "AUTH_REQUIRED" -> "连接授权需要更新，请打开插件设置"
             phase == AiLimbsBridgePhase.ERROR || phase == AiLimbsBridgePhase.RECOVERY_FAILED ->
                 "连接需要处理，请打开连接诊断"
@@ -93,7 +93,7 @@ internal class ChatGptNativeProbeNotification(
         AiLimbsBridgePhase.STARTING -> "正在启动"
         AiLimbsBridgePhase.CONNECTING -> "连接中"
         AiLimbsBridgePhase.PAIRING -> "等待配置"
-        AiLimbsBridgePhase.ONLINE -> "已连接"
+        AiLimbsBridgePhase.ONLINE -> "隧道已连接"
         AiLimbsBridgePhase.RECONNECTING -> "重连中"
         AiLimbsBridgePhase.RECOVERING -> "恢复中"
         AiLimbsBridgePhase.RECOVERY_FAILED -> "恢复失败"
@@ -101,11 +101,11 @@ internal class ChatGptNativeProbeNotification(
     }
 
     private fun actionLabel(action: BridgeAction): String = when (action) {
-        BridgeAction.CONNECT -> "连接"
+        BridgeAction.CONNECT -> "连接隧道"
         BridgeAction.STOP -> "断开连接"
-        BridgeAction.RECONNECT -> "重新连接"
+        BridgeAction.RECONNECT -> "重连隧道"
         BridgeAction.RECOVER -> "恢复连接"
-        BridgeAction.REFRESH -> "检查连接"
+        BridgeAction.REFRESH -> "检查隧道"
         BridgeAction.REPAIR, BridgeAction.OPEN_AUTH -> error("不支持的通知动作")
     }
 

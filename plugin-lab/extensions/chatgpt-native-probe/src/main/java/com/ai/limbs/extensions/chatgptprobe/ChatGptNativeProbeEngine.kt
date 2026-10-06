@@ -87,7 +87,7 @@ internal data class McpGatewayState(
 
     companion object {
         const val WIRE_PROTOCOL_VERSION = "2026-08-25"
-        const val PROBE_VERSION = "0.0.11"
+        const val PROBE_VERSION = "0.0.12"
     }
 }
 
@@ -474,6 +474,12 @@ internal class ChatGptNativeProbeEngine(
         .put("serverInfo", JSONObject().put("name", "ai-limbs-chatgpt-gateway")
             .put("title", ChatGptNativeProbePanel.TITLE).put("version", McpGatewayState.PROBE_VERSION))
         .put("instructions", "Use only the advertised ai_limbs_* tools. If tool metadata is stale, refresh the custom MCP connection in ChatGPT and start a new conversation. Search capabilities, describe the exact ID, then invoke with its schema. Host policy and next_action are authoritative. Read saved pages/images instead of repeating actions. Inspect domain state when execution_state is UNKNOWN.")
+
+    // Derive the guide from the advertised catalog so UI and protocol cannot drift apart.
+    internal fun advertisedToolNames(): List<String> {
+        val tools = toolDefinitions()
+        return (0 until tools.length()).map { tools.getJSONObject(it).getString("name") }
+    }
 
     private fun toolDefinitions(): JSONArray = JSONArray()
         .put(

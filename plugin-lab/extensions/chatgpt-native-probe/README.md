@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.11
+# AI Limbs-ChatGPT 0.0.12
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -7,6 +7,8 @@ This Android child extension attaches to `plugin.system.bridge` through `ai_limb
 This is a private, custom MCP connection through OpenAI Secure MCP Tunnel. It does not claim public plugin-directory approval. OpenAI's public submission requirements are a separate workflow and require a public HTTPS endpoint; the private tunnel alone does not satisfy them. See [Build an MCP server](https://developers.openai.com/plugins/build/mcp-server) and [Secure MCP Tunnel](https://developers.openai.com/api/docs/guides/secure-mcp-tunnels), checked on 2026-10-06.
 
 When tool names, descriptions, schemas or annotations change, keep the bridge running, open its custom MCP connection in ChatGPT Plugins, select Refresh, verify the new metadata and start a new conversation. Follow [Connect and test your plugin](https://developers.openai.com/plugins/deploy/connect-chatgpt). The bridge does not force refresh the client's catalog. Its connection-check action is a transport check, not ChatGPT's Refresh control.
+
+Ordinary Host capability additions are discovered through the stable search and describe entries without changing the six MCP tools. Refresh is needed when their names or metadata change. The current three demo entries belong to old client metadata; they are absent from the server catalog. Refresh updates the connection metadata, and a new conversation is required to retest. Clearing Android binding, execution receipts or saved results does not remove ChatGPT metadata.
 
 Unknown tools return a JSON-RPC error with `data.gateway_error_code: TOOL_NOT_ADVERTISED`, the six advertised names, the metadata digest, official refresh steps and the documentation URL. Stale metadata is identified as a possible cause, not a proven diagnosis. Arbitrary input tool names and arguments are not echoed. Old demo tools are not mapped to new tools.
 
@@ -29,6 +31,8 @@ The child keeps all presentation in the existing Bridge API 5 panel contract. Th
 The overview shows a Chinese connection indicator, request/delivery counts, successful communication time and pending delivery warnings. Routine controls are chosen for the current phase. Settings, key replacement and diagnostics open on demand; the normal overview contains no secret input. First-time setup shows the tunnel ID and Runtime Key, with the control-plane URL behind Advanced Settings. Leaving forms clears the transient secret field. Clearing binding has its own confirmation view.
 
 Overview and diagnostics also show current-listener access evidence and capability outcomes, separately from acknowledged replies. Diagnostics provide the official metadata refresh steps when current tools have not been observed or an unknown-tool request suggests stale metadata.
+
+In 0.0.12, the overview and diagnostics expose a Tool catalog guide with official Refresh steps and the six current names derived directly from the engine catalog. It distinguishes dynamic business discovery from outer MCP metadata changes and explains migration from echo, server_info and uppercase. Panel and notification controls use Tunnel connected, Reconnect tunnel and Check tunnel labels; none claims to refresh ChatGPT metadata. MCP listChanged remains false because no notification delivery and client auto-refresh have been verified.
 
 Diagnostics show counters, actual communication timestamps and errors. Pending receipt counts are scoped to the current tunnel. An unopened receipt journal is shown as not loaded; drawing the panel does not initialize it or claim zero pending records. Existing Plugin Center components continue to render the child-provided presentation; no Host styling code or Bridge ABI change is required.
 

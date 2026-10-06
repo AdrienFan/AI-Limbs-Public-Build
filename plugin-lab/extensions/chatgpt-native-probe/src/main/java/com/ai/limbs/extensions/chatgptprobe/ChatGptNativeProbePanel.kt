@@ -21,7 +21,7 @@ internal class ChatGptNativeProbePanel(
 ) : BridgeProviderPanel {
     private val storage = ChatGptNativeProbeStorage(context.applicationContext)
     private val initialConfig = storage.readConfig()
-    private enum class View { OVERVIEW, SETTINGS, ROTATE_KEY, DIAGNOSTICS, CONFIRM_CLEAR }
+    private enum class View { OVERVIEW, SETTINGS, ROTATE_KEY, DIAGNOSTICS, CATALOG_GUIDE, CONFIRM_CLEAR }
     @Volatile private var view = View.OVERVIEW
     @Volatile private var showAdvancedSetup = initialConfig.baseUrl != ChatGptNativeProbeStorage.DEFAULT_BASE_URL
     @Volatile private var setupBaseUrl = initialConfig.baseUrl
@@ -59,7 +59,7 @@ internal class ChatGptNativeProbePanel(
         )
 
         // Setup is the only unconfigured form. A live-state refresh must not expose a secret editor.
-        if (!config.configured && view != View.DIAGNOSTICS) {
+        if (!config.configured && view !in setOf(View.DIAGNOSTICS, View.CATALOG_GUIDE)) {
             val fields = buildList {
                 add(BridgeProviderPanelField(FIELD_TUNNEL_ID, "隧道 ID", value = config.tunnelId, placeholder = "tunnel_…"))
                 add(BridgeProviderPanelField(FIELD_API_KEY, "Runtime Key", kind = BridgeProviderPanelFieldKind.SECRET,
@@ -79,7 +79,7 @@ internal class ChatGptNativeProbePanel(
             View.OVERVIEW -> panel("连接 ChatGPT，让 AI Limbs 执行你的任务。", lines = buildList {
                 addAll(summary)
                 add(access.label)
-                if (access.catalogMismatchSuspected) add("请在 ChatGPT 刷新插件工具信息，再新建会话。")
+                if (access.catalogMismatchSuspected) add("疑似仍在使用旧工具目录，请打开工具目录指引。")
                 if (phase in setOf(AiLimbsBridgePhase.ERROR, AiLimbsBridgePhase.RECOVERY_FAILED)) add("打开连接诊断，查看需要处理的问题。")
                 add("本次调用 ${observed.capabilityInvokeCount}  ·  成功结果 ${observed.capabilitySuccessCount}")
                 if (observed.capabilityFailureCount > 0 || observed.capabilityUncertainCount > 0)
@@ -92,7 +92,20 @@ internal class ChatGptNativeProbePanel(
                     if (pending > 0 || failed > 0) add("待送结果 $pending  ·  交付异常 $failed")
                 }
                 if (heartbeat != null) add("最近通信 ${time(heartbeat)}")
-            }, actions = connectionActions() + listOf(action(ACTION_SETTINGS, "连接设置"), action(ACTION_DIAGNOSTICS, "连接诊断")))
+            }, actions = connectionActions() + listOf(action(ACTION_CATALOG_GUIDE, "工具目录指引"),
+                action(ACTION_SETTINGS, "连接设置"), action(ACTION_DIAGNOSTICS, "连接诊断")))
+
+            View.CATALOG_GUIDE -> panel("工具目录 · 六个稳定入口，动态发现 Host 能力。", lines = buildList {
+                addAll(summary)
+                add("新增 Host 业务能力通过搜索和描述工具发现；六个入口的元数据未变时，无需刷新 ChatGPT 工具目录。")
+                add("入口名称、描述或参数等元数据变化后，需要在 ChatGPT 更新这条连接。")
+                add("如果还看到 echo、server_info、uppercase 三个演示工具，请按下面步骤更新旧目录。")
+                addAll(GatewayAdmission.REFRESH_STEPS)
+                add("当前正式入口：")
+                addAll(engine.advertisedToolNames())
+                add("重连隧道和检查隧道只处理本机通信，不会清除 ChatGPT 保存的工具目录。")
+                add("本机不自动更新 ChatGPT 工具目录；旧会话请停止使用并新建会话。")
+            }, actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_DIAGNOSTICS, "连接诊断")))
 
             View.SETTINGS -> panel("连接设置 · 密钥已加密保存。", lines = summary + "当前隧道 ${shortTunnel(config.tunnelId)}",
                 fields = listOf(
@@ -140,9 +153,9 @@ internal class ChatGptNativeProbePanel(
                 probe.lastCommandError?.let { add("请求问题：$it") }
                 if (phase in setOf(AiLimbsBridgePhase.ERROR, AiLimbsBridgePhase.RECOVERY_FAILED)) add(control.state.detail)
                 add("收到目录请求不代表 ChatGPT 已刷新工具列表。")
-                add("Refresh 是 ChatGPT 工具目录刷新，不是本页的检查连接。")
+                add("Refresh 是 ChatGPT 工具目录刷新，不是本页的检查隧道或重连隧道。")
                 if (access.catalogMismatchSuspected || !access.advertisedToolObserved) addAll(GatewayAdmission.REFRESH_STEPS)
-            }, actions = listOf(action(ACTION_HOME, "返回概览")) + control.availableActions
+            }, actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_CATALOG_GUIDE, "工具目录指引")) + control.availableActions
                 .filter { it in setOf(BridgeAction.REFRESH, BridgeAction.RECONNECT, BridgeAction.RECOVER) }.map(::bridge))
         }
     }
@@ -157,6 +170,7 @@ internal class ChatGptNativeProbePanel(
             ACTION_SETTINGS -> view = View.SETTINGS
             ACTION_EDIT_KEY -> { require(storage.readConfig().configured) { "请先完成连接配置" }; view = View.ROTATE_KEY }
             ACTION_DIAGNOSTICS -> view = View.DIAGNOSTICS
+            ACTION_CATALOG_GUIDE -> view = View.CATALOG_GUIDE
             ACTION_SHOW_CLEAR -> { require(storage.readConfig().configured) { "没有可清除的连接配置" }; view = View.CONFIRM_CLEAR }
             ACTION_ADVANCED -> {
                 showAdvancedSetup = !showAdvancedSetup
@@ -205,7 +219,7 @@ internal class ChatGptNativeProbePanel(
     private fun shortTunnel(value: String): String = if (value.length <= 24) value else value.take(14) + "…" + value.takeLast(6)
 
     private fun phaseLabel(phase: AiLimbsBridgePhase): String = when (phase) {
-        AiLimbsBridgePhase.ONLINE -> "🟢 已连接"
+        AiLimbsBridgePhase.ONLINE -> "🟢 隧道已连接"
         AiLimbsBridgePhase.STOPPED -> "⚪ 已停止"
         AiLimbsBridgePhase.PAIRING -> "⚪ 等待配置"
         AiLimbsBridgePhase.STARTING -> "🟠 正在启动"
@@ -217,11 +231,11 @@ internal class ChatGptNativeProbePanel(
     }
 
     private fun actionLabel(action: BridgeAction): String = when (action) {
-        BridgeAction.CONNECT -> "连接"
+        BridgeAction.CONNECT -> "连接隧道"
         BridgeAction.STOP -> "断开连接"
-        BridgeAction.RECONNECT -> "重新连接"
+        BridgeAction.RECONNECT -> "重连隧道"
         BridgeAction.RECOVER -> "恢复连接"
-        BridgeAction.REFRESH -> "检查连接"
+        BridgeAction.REFRESH -> "检查隧道"
         BridgeAction.REPAIR -> "重新配置"
         BridgeAction.OPEN_AUTH -> "授权"
     }
@@ -238,6 +252,7 @@ internal class ChatGptNativeProbePanel(
         private const val ACTION_SETTINGS = "chatgpt_probe.view_settings"
         private const val ACTION_EDIT_KEY = "chatgpt_probe.edit_key"
         private const val ACTION_DIAGNOSTICS = "chatgpt_probe.view_diagnostics"
+        private const val ACTION_CATALOG_GUIDE = "chatgpt_probe.view_catalog_guide"
         private const val ACTION_SHOW_CLEAR = "chatgpt_probe.confirm_clear"
         private const val ACTION_ADVANCED = "chatgpt_probe.toggle_advanced"
     }
