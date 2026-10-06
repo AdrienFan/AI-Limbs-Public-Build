@@ -52,3 +52,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 当前视觉 UI 修复
 
 - [视觉工作台连接错误结果处理](visual-ui-result-0.2.1/index.md)：0.2.1
+
+## 当前操作后视觉反馈
+
+- [共享屏操作反馈](screen-feedback-0.2.2/index.md)：视觉工作台 0.2.2，配合基座 build109

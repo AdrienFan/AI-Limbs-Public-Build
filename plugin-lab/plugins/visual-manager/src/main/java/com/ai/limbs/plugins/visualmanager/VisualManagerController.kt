@@ -26,6 +26,7 @@ internal const val VISUAL_PAGE_ID = "$VISUAL_PLUGIN_ID.page"
 internal const val VISUAL_SCREEN_ID = "$VISUAL_PLUGIN_ID.screen"
 internal const val VISUAL_TILE_ID = "$VISUAL_PLUGIN_ID.tile"
 internal const val VISUAL_STATE_ID = "$VISUAL_PLUGIN_ID.state"
+internal const val VISUAL_FEEDBACK_ID = "$VISUAL_PLUGIN_ID.operation_feedback"
 
 /** Core owns workflow, operation outcomes, session coordination and all visual files. */
 internal class VisualManagerController(private val host: InProcessPluginUiHost) : VisualManagerPageActions {
@@ -55,6 +56,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 "permission" -> permission(parameters)
                 "start" -> start(kind(parameters), parameters)
                 "frame" -> frame(kind(parameters), parameters)
+                "operation.feedback" -> operationFeedback(parameters)
                 "capture" -> capture(kind(parameters), parameters)
                 "stop" -> stop(parameters)
                 "preview.read" -> previewLock.withLock { previewRead(kind(parameters), parameters.optInt("max_edge", 1024)) }
@@ -108,6 +110,62 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val kind = p.getString("kind")
         require(kind == "screen" || kind == "camera") { "kind 必须是 screen 或 camera" }
         return kind
+    }
+
+    suspend fun postActionFeedback(request: JSONObject): JSONObject {
+        val result = call("operation.feedback", request)
+        if (result.getBoolean("success")) return result
+        return ScreenFeedbackContract.response(request, "FAILED")
+            .put("error_code", result.getString("error_code")).put("error", result.getString("error"))
+    }
+
+    private suspend fun operationFeedback(request: JSONObject): JSONObject {
+        ScreenFeedbackContract.validateRequest(request)
+        val status = VisualOperationResult.requireHost(hostCall(sessionPrimitive("screen"), "status"))
+        if (!status.getBoolean("active") || !status.getBoolean("projection_ready")) {
+            return ScreenFeedbackContract.response(request, "INACTIVE")
+        }
+        val sessions = status.getJSONArray("sessions")
+        check(sessions.length() == 1 && sessions.getJSONObject(0).getString("state") == "READY") {
+            "Shared-screen session is not ready for feedback"
+        }
+        // Feedback must not queue behind another long screen operation or initiate a new session.
+        val lock = locks.getValue("screen")
+        if (!lock.tryLock()) throw VisualOperationFailure("SCREEN_FEEDBACK_BUSY", "屏幕取帧正在进行，本次操作反馈未取图")
+        val generation = synchronized(stateLock) { generations.getValue("screen") }
+        var scratch: File? = null
+        try {
+            setState("screen", "BUSY", "获取操作后画面")
+            val captured = hostCall(sessionPrimitive("screen"), "frame", JSONObject()
+                .put("session_id", sessions.getJSONObject(0).getString("session_id")).put("fresh", true)
+                .put("deadline_elapsed_ms", request.getLong("deadline_elapsed_ms")))
+            VisualOperationResult.requireHost(captured)
+            val hostFrame = captured.getJSONObject("frame")
+            VisualOperationResult.requireHost(hostFrame)
+            scratch = File(hostFrame.getString("path"))
+            ScreenFeedbackContract.requireFresh(request, captured)
+            val image = updatePreview("screen", captured, generation, 524_288)
+            val imageContent = content(image)
+            image.remove("data")
+            return synchronized(stateLock) {
+                check(generation == generations.getValue("screen")) { "取帧已被停止指令取消" }
+                setState("screen", "IDLE", "操作后画面已更新")
+                ScreenFeedbackContract.response(request, "READY")
+                    .put("session_id", captured.getString("session_id"))
+                    .put("target_id", captured.getString("target_id"))
+                    .put("captured_at_ms", captured.getLong("captured_at_ms"))
+                    .put("freshness", captured.getJSONObject("freshness"))
+                    .put("image", image).put("mcp_content", imageContent)
+            }
+        } catch (error: Exception) {
+            synchronized(stateLock) {
+                if (generation == generations.getValue("screen")) setState("screen", "ERROR", error.message ?: "操作反馈取帧失败")
+            }
+            throw error
+        } finally {
+            try { scratch?.let { deleteHostScratch(it) } }
+            finally { lock.unlock() }
+        }
     }
 
     private suspend fun perform(channel: String, label: String, block: suspend (Long?) -> JSONObject): JSONObject =
@@ -315,10 +373,10 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             .put("mime_type", options.outMimeType).put("file_name", file.name)
     }
 
-    private suspend fun updatePreview(kind: String, result: JSONObject, generation: Long?): JSONObject = previewLock.withLock {
+    private suspend fun updatePreview(kind: String, result: JSONObject, generation: Long?, maxBytes: Int = 1_048_576): JSONObject = previewLock.withLock {
         val source = frameFile(kind, result)
         val meta = frameMetadata(kind, result, source)
-        val encoded = encodedImage(source, meta, 1024)
+        val encoded = encodedImage(source, meta, 1024, maxBytes)
         val destination = File(previewRoot(), "$kind.jpg")
         synchronized(stateLock) {
             check(generation == generations[kind]) { "取帧已被停止指令取消" }
@@ -338,7 +396,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         return encoded.put("mcp_content", content(encoded))
     }
 
-    private fun encodedImage(source: File, meta: JSONObject, edge: Int): JSONObject {
+    private fun encodedImage(source: File, meta: JSONObject, edge: Int, maxBytes: Int = 1_048_576): JSONObject {
         require(edge in 160..1280) { "max_edge 必须在 160 到 1280 之间" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         BitmapFactory.decodeFile(source.absolutePath, bounds)
@@ -368,7 +426,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             val stream = ByteArrayOutputStream()
             check(scaled.compress(Bitmap.CompressFormat.JPEG, 82, stream)) { "预览编码失败" }
             val bytes = stream.toByteArray()
-            check(bytes.size <= 1_048_576) { "预览超过 1 MiB 上限" }
+            check(bytes.size <= maxBytes) { "预览超过 $maxBytes 字节上限" }
             JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", scaled.width)
                 .put("height", scaled.height).put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
         } finally {

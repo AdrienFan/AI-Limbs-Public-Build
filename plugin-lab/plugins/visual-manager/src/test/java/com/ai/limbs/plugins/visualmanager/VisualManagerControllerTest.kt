@@ -14,6 +14,48 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualManagerControllerTest {
+    private fun feedbackRequest() = JSONObject().put("schema", 1).put("event", "screen_interaction")
+        .put("operation_id", "action-1").put("completed_elapsed_ms", 100L).put("deadline_elapsed_ms", 6100L)
+
+    @Test fun inactiveScreenFeedbackNeverRequestsConsentOrCapturesAnything() = runBlocking {
+        for (active in listOf(false, true)) {
+            val f = Fixture { id, op, _ ->
+                assertEquals("host.screen.session@1", id)
+                assertEquals("status", op)
+                JSONObject().put("active", active).put("projection_ready", false).put("sessions", JSONArray())
+            }
+            try {
+                val response = f.controller.postActionFeedback(feedbackRequest())
+                assertEquals("INACTIVE", response.getString("status"))
+                assertFalse(response.has("mcp_content"))
+                assertEquals(1, f.calls.size)
+            } finally { f.scope.cancel() }
+        }
+    }
+
+    @Test fun stoppedDuringFeedbackReturnsFailureWithoutRetryOrOldPreview() = runBlocking {
+        val f = Fixture { id, op, p ->
+            assertEquals("host.screen.session@1", id)
+            when (op) {
+                "status" -> JSONObject().put("active", true).put("projection_ready", true)
+                    .put("sessions", JSONArray().put(JSONObject().put("session_id", "owned").put("state", "READY")))
+                "frame" -> {
+                    assertTrue(p.getBoolean("fresh"))
+                    assertEquals("owned", p.getString("session_id"))
+                    error("Shared screen stopped during capture")
+                }
+                else -> error("Feedback must not open or stop sessions")
+            }
+        }
+        try {
+            val response = f.controller.postActionFeedback(feedbackRequest())
+            assertEquals("FAILED", response.getString("status"))
+            assertEquals("Shared screen stopped during capture", response.getString("error"))
+            assertFalse(response.has("mcp_content"))
+            assertEquals(listOf("host.screen.session@1/status", "host.screen.session@1/frame"), f.calls)
+        } finally { f.scope.cancel() }
+    }
+
     private class Fixture(val response: (String, String, JSONObject) -> JSONObject) {
         val calls = mutableListOf<String>()
         val scope = CoroutineScope(SupervisorJob() + Dispatchers.Unconfined)

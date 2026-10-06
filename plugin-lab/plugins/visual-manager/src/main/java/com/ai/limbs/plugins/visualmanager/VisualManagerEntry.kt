@@ -7,6 +7,7 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
 import com.ai.limbs.plugin.runtime.InProcessPluginEntry
+import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessPluginHandle
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.plugin.runtime.InProcessScreen
@@ -17,6 +18,9 @@ class VisualManagerEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
         require(host.pluginId == VISUAL_PLUGIN_ID) { "Unexpected Visual Workbench identity" }
         val controller = VisualManagerController(host)
+        host.registerProvider(VISUAL_FEEDBACK_ID,
+            InProcessCapabilityExecutor { request -> controller.postActionFeedback(JSONObject(request)).toString() },
+            mapOf("kind" to "operation_feedback", "feedback_api" to "1", "event" to "screen_interaction"))
         host.registerProvider(VISUAL_STATE_ID, controller.stateProvider, mapOf("kind" to "ui_state"))
         host.registerProvider(VISUAL_PAGE_ID, VisualManagerPageProvider(host, controller),
             mapOf("kind" to "plugin_page", "screen_id" to VISUAL_SCREEN_ID))
