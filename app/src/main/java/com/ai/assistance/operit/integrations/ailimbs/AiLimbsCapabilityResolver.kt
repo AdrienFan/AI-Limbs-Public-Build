@@ -108,7 +108,16 @@ internal object AiLimbsGlobalScopeOrganizer {
                     )
             }
         }
-        return items.sortedBy { it.sourceIndex }.take(limit)
+        val mentionedOwners = scopes.filter { queryMentionsScope(query, it) }
+            .map { it.ownerPluginId }.toSet()
+        fun owner(item: AiLimbsOrganizedSearchItem): String? = when (item) {
+            is AiLimbsOrganizedSearchItem.Scope -> item.scope.ownerPluginId
+            is AiLimbsOrganizedSearchItem.Capability ->
+                ownerPluginIdByInvokeId[item.match.definition.invokeId]
+        }
+        return items.sortedWith(compareBy<AiLimbsOrganizedSearchItem> {
+            if (owner(it) in mentionedOwners) 0 else 1
+        }.thenBy { it.sourceIndex }).take(limit)
     }
 
     private fun shouldFoldScope(
@@ -153,6 +162,16 @@ internal object AiLimbsGlobalScopeOrganizer {
             .replace(Regex("[^\\p{L}\\p{N}:_./-]+"), " ")
             .replace(Regex("\\s+"), " ")
             .trim()
+
+    /** Prefer a named owner without turning a global query into a scope filter. */
+    private fun queryMentionsScope(query: String, scope: AiLimbsCapabilityScope): Boolean {
+        val needle = " ${normalizeOrganizerText(query)} "
+        return sequenceOf(scope.scopeId, scope.ownerPluginId, scope.displayName,
+            scope.ownerPluginId.substringAfterLast('.').replace('_', ' '))
+            .map(::normalizeOrganizerText)
+            .filter { it.isNotEmpty() }
+            .any { needle.contains(" $it ") }
+    }
 
     private const val SCOPE_FOLD_MIN_MATCHES = 3
     private const val SPECIFIC_LEAF_MIN_SCORE = 220

@@ -234,6 +234,7 @@ jobs:
             --tests com.ai.assistance.operit.core.tools.catalog.ToolCapabilityCatalogSearchTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsDynamicCapabilityRegistryTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilitySearchScopeContractTest \
+            --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsNamedScopePriorityTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityUsagePolicyTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityDiscoveryProtocolTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilityRolePolicyTest \
