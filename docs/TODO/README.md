@@ -48,3 +48,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 当前视觉宿主支持
 
 - [通用权限与视觉生命周期](visual-host-permission/index.md)：build105，配合视觉工作台 0.2.0
+
+## 当前搜索优化
+
+- [搜索索引复用](search-index-build106/index.md)：build106，基于 build105，单一可更新 APK

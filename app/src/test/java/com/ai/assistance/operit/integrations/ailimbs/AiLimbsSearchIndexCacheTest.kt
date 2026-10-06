@@ -104,4 +104,82 @@ class AiLimbsSearchIndexCacheTest {
         assertTrue(merged.any { it.targetToolName == host.targetToolName })
     }
 
+    @Test fun globalScopeAndExactViewsDoNotEvictEachOther() {
+        val all = (1..40).map { entry("plugin.test.shared.$it") }
+        val cache = AiLimbsSearchIndexCache()
+        val global = cache.current(all, 1)
+        val scoped = cache.current(all.take(8), 1)
+        val exact = cache.current(all.take(1), 1)
+        assertEquals(40, global.preparedDocuments)
+        assertEquals(0, scoped.preparedDocuments)
+        assertEquals(8, scoped.reusedDocuments)
+        assertEquals(0, exact.preparedDocuments)
+        val returned = cache.current(all, 1)
+        assertTrue(returned.reused)
+        assertSame(global.index, returned.index)
+    }
+
+    @Test fun firstGlobalViewOnlyPreparesDocumentsMissingFromTheScopedView() {
+        val all = (1..12).map { entry("plugin.test.incremental.$it") }
+        val cache = AiLimbsSearchIndexCache()
+        val scoped = cache.current(all.take(4), 1)
+        val global = cache.current(all, 1)
+        assertEquals(8, global.preparedDocuments)
+        assertEquals(4, global.reusedDocuments)
+        assertSame(scoped.index.documents.first(), global.index.documents.first())
+    }
+
+    @Test fun evictedCatalogViewReassemblesFromExistingDocumentsWithoutTokenizingAgain() {
+        val all = (1..12).map { entry("plugin.test.views.$it") }
+        val cache = AiLimbsSearchIndexCache(maxIndexes = 2)
+        val first = cache.current(all, 1)
+        cache.current(all.take(4), 1)
+        cache.current(all.take(1), 1)
+        val returned = cache.current(all, 1)
+        assertFalse(returned.reused)
+        assertEquals(0, returned.preparedDocuments)
+        assertEquals(12, returned.reusedDocuments)
+        assertSame(first.index.documents.first(), returned.index.documents.first())
+    }
+
+    @Test fun metadataChangePreparesOnlyTheChangedDocumentAndKeepsCanonicalMetadata() {
+        val all = (1..5).map { entry("plugin.test.changed.$it", "oldtoken") }
+        val cache = AiLimbsSearchIndexCache()
+        val first = cache.current(all, 1)
+        val changed = cache.current(all.dropLast(1) + all.last().copy(description = "newtoken"), 1)
+        assertEquals(1, changed.preparedDocuments)
+        assertEquals(4, changed.reusedDocuments)
+        assertSame(first.index.documents.first(), changed.index.documents.first())
+        assertEquals("newtoken", changed.index.documents.last().entry.description)
+    }
+
+    @Test fun registryRemovalInvalidatesAllViewsWithoutRebuildingUnchangedLexicalDocuments() {
+        val removed = entry("plugin.test.removal.retired", "退役秘钥")
+        val retained = entry("plugin.test.removal.retained", "活跃状态")
+        val cache = AiLimbsSearchIndexCache()
+        cache.current(listOf(removed, retained), 1)
+        cache.current(listOf(removed), 1)
+        val current = cache.current(listOf(retained), 2)
+        assertFalse(current.reused)
+        assertEquals(0, current.preparedDocuments)
+        assertEquals(1, current.reusedDocuments)
+        assertTrue(ToolCapabilityCatalog.searchAll(current.index, "退役秘钥").matches.isEmpty())
+        val remounted = cache.current(listOf(retained, removed.copy(description = "remounttoken")), 3)
+        assertEquals(1, remounted.preparedDocuments)
+        assertEquals("remounttoken", remounted.index.documents.last().entry.description)
+    }
+
+    @Test fun documentCacheUsesLeastRecentlyUsedEviction() {
+        val cache = AiLimbsSearchIndexCache(maxIndexes = 1, maxDocuments = 2)
+        val a = entry("plugin.test.lru.a")
+        val b = entry("plugin.test.lru.b")
+        val c = entry("plugin.test.lru.c")
+        cache.current(listOf(a), 1)
+        cache.current(listOf(b), 1)
+        cache.current(listOf(a), 1)
+        cache.current(listOf(c), 1)
+        assertEquals(0, cache.current(listOf(a), 1).preparedDocuments)
+        assertEquals(1, cache.current(listOf(b), 1).preparedDocuments)
+    }
+
 }

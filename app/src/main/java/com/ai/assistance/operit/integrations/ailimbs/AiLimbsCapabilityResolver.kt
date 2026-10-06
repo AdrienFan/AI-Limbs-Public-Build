@@ -39,7 +39,11 @@ internal data class AiLimbsCapabilitySearchMatch(
 private data class AiLimbsCapabilitySearchResult(
     val matches: List<AiLimbsCapabilitySearchMatch>,
     val lowConfidence: Boolean,
-    val indexReused: Boolean
+    val indexReused: Boolean,
+    val indexPrepareMs: Long,
+    val scoringMs: Long,
+    val preparedDocuments: Int,
+    val reusedDocuments: Int
 )
 
 internal sealed interface AiLimbsOrganizedSearchItem {
@@ -241,6 +245,8 @@ class AiLimbsCapabilityResolver(
             }
 
         timings.put("ranking", elapsed(rankingStarted))
+            .put("index_prepare", searchResult.indexPrepareMs)
+            .put("scoring", searchResult.scoringMs)
         val policyStarted = System.nanoTime()
         val results = JSONArray()
         val scopeResults = JSONArray()
@@ -299,7 +305,9 @@ class AiLimbsCapabilityResolver(
                 .put("resolved_scopes", JSONArray(plan.scopeIds))
                 .put("low_confidence", searchResult.lowConfidence)
                 .put("catalog", JSONObject().put("registry_revision", registryRevision)
-                    .put("index_reused", searchResult.indexReused).put("candidate_count", searchResult.matches.size))
+                    .put("index_reused", searchResult.indexReused).put("candidate_count", searchResult.matches.size)
+                    .put("prepared_documents", searchResult.preparedDocuments)
+                    .put("reused_documents", searchResult.reusedDocuments))
                 .put("next_action", nextAction)
                 .put("next", next)
         activeScopeId?.let { response.put("scope", it) }
@@ -546,8 +554,12 @@ class AiLimbsCapabilityResolver(
         val definitionsByIdentity = searchable.associate { (definition, entry) ->
             catalogIdentity(entry) to definition
         }
+        val prepareStarted = System.nanoTime()
         val prepared = searchIndexCache.current(searchable.map { it.second }, registryRevision)
+        val prepareMs = (System.nanoTime() - prepareStarted) / 1_000_000
+        val scoringStarted = System.nanoTime()
         val catalogResult = ToolCapabilityCatalog.searchAll(prepared.index, query)
+        val scoringMs = (System.nanoTime() - scoringStarted) / 1_000_000
         val matches = catalogResult.matches.mapNotNull { match ->
             definitionsByIdentity[catalogIdentity(match.entry)]?.let { definition ->
                 AiLimbsCapabilitySearchMatch(
@@ -559,7 +571,8 @@ class AiLimbsCapabilityResolver(
                 )
             }
         }
-        return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence, prepared.reused)
+        return AiLimbsCapabilitySearchResult(matches, catalogResult.lowConfidence, prepared.reused,
+            prepareMs, scoringMs, prepared.preparedDocuments, prepared.reusedDocuments)
     }
 
     private suspend fun hotCapabilitiesJson(

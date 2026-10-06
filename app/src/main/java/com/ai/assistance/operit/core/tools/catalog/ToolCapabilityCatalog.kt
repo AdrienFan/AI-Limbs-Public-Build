@@ -72,6 +72,10 @@ data class ToolCatalogSearchResult(
  */
 object ToolCapabilityCatalog {
     private const val TAG = "ToolCapabilityCatalog"
+    // Android's Unicode pattern compilation is costly; compile once, outside each field/entry.
+    private val NON_SEARCH_CHARACTERS = Regex("[^\\p{L}\\p{N}:_./-]+")
+    private val WHITESPACE = Regex("\\s+")
+    private val TOKEN_SEPARATORS = Regex("[:_./-]+")
     private val RESERVED_TARGETS = setOf("search", "proxy", "package_proxy")
     private val ENGLISH_STOP_WORDS = setOf(
         "a", "an", "the", "by", "to", "for", "of", "with", "from", "on", "in", "at", "via"
@@ -597,35 +601,41 @@ object ToolCapabilityCatalog {
         return parameters
     }
 
-    private fun prepareEntry(entry: ToolCatalogEntry): PreparedEntry {
-        val displayName = normalize(entry.displayName)
-        val targetName = normalize(entry.targetToolName)
-        val description = normalize(entry.description)
-        val parameterNames = normalize(entry.parameters.joinToString(" ") { it.name })
-        val parameterDescriptions = normalize(
+    internal fun prepareEntry(entry: ToolCatalogEntry): PreparedEntry {
+        val normalized = HashMap<String, String>()
+        val tokenSets = HashMap<String, Set<String>>()
+        fun text(value: String): String = normalized.getOrPut(value) { normalize(value) }
+        fun tokens(value: String): Set<String> = tokenSets.getOrPut(value) {
+            tokenizeNormalized(text(value)).toSet()
+        }
+        val displayName = text(entry.displayName)
+        val targetName = text(entry.targetToolName)
+        val description = text(entry.description)
+        val parameterNames = text(entry.parameters.joinToString(" ") { it.name })
+        val parameterDescriptions = text(
             entry.parameters.joinToString(" ") { it.description } +
                 " " + entry.parameterHints.joinToString(" ")
         )
-        val metadata = normalize(
+        val metadata = text(
             (entry.searchMetadata + listOfNotNull(entry.sourceName)).joinToString(" ")
         )
 
-        val displayTokens = tokenize(entry.displayName).toSet()
-        val targetTokens = tokenize(entry.targetToolName).toSet()
-        val descriptionTokens = tokenize(entry.description).toSet()
-        val parameterNameTokens = entry.parameters.flatMap { tokenize(it.name) }.toSet()
+        val displayTokens = tokens(entry.displayName)
+        val targetTokens = tokens(entry.targetToolName)
+        val descriptionTokens = tokens(entry.description)
+        val parameterNameTokens = entry.parameters.flatMap { tokens(it.name) }.toSet()
         val parameterDescriptionTokens =
-            (entry.parameters.flatMap { tokenize(it.description) } +
-                entry.parameterHints.flatMap(::tokenize)).toSet()
+            (entry.parameters.flatMap { tokens(it.description) } +
+                entry.parameterHints.flatMap { tokens(it) }).toSet()
         val metadataTokens =
-            (entry.searchMetadata + listOfNotNull(entry.sourceName)).flatMap(::tokenize).toSet()
+            (entry.searchMetadata + listOfNotNull(entry.sourceName)).flatMap { tokens(it) }.toSet()
 
         return PreparedEntry(entry, displayName, targetName, description, parameterNames,
             parameterDescriptions, metadata, displayTokens, targetTokens, descriptionTokens,
             parameterNameTokens, parameterDescriptionTokens, metadataTokens,
-            entry.keywords.map { normalize(it) to tokenize(it).toSet() },
-            entry.searchMetadata.map(::normalize).toSet(),
-            entry.parameters.map { normalize(it.name) }.toSet())
+            entry.keywords.map { text(it) to tokens(it) },
+            entry.searchMetadata.map { text(it) }.toSet(),
+            entry.parameters.map { text(it.name) }.toSet())
     }
 
     private fun scoreEntry(
@@ -815,8 +825,10 @@ object ToolCapabilityCatalog {
             .distinct()
 
     private fun tokenize(value: String): List<String> =
-        normalize(value)
-            .replace(Regex("[:_./-]+"), " ")
+        tokenizeNormalized(normalize(value))
+
+    private fun tokenizeNormalized(value: String): List<String> =
+        value.replace(TOKEN_SEPARATORS, " ")
             .split(' ')
             .filter { it.isNotBlank() }
 
@@ -826,7 +838,7 @@ object ToolCapabilityCatalog {
     private fun normalize(value: String): String =
         value
             .lowercase(Locale.ROOT)
-            .replace(Regex("[^\\p{L}\\p{N}:_./-]+"), " ")
-            .replace(Regex("\\s+"), " ")
+            .replace(NON_SEARCH_CHARACTERS, " ")
+            .replace(WHITESPACE, " ")
             .trim()
 }
