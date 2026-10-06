@@ -2,6 +2,9 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.d
 
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.RuntimeLog as Log
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.CommandExecutionEvent
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.PtyInputWaitState
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.provider.type.TerminalType
+import java.util.concurrent.ConcurrentHashMap
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.SessionDirectoryEvent
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.SessionManager
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.SessionInitState
@@ -14,7 +17,8 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.view.do
  */
 private data class SessionProcessingState(
     var justHandledCarriageReturn: Boolean = false,
-    val outputLines: CommandOutputLineAssembler = CommandOutputLineAssembler()
+    val outputLines: CommandOutputLineAssembler = CommandOutputLineAssembler(),
+    @Volatile var partialOutput: String = ""
 )
 
 /**
@@ -27,7 +31,7 @@ class OutputProcessor(
     private val onCommandCompleted: (String) -> Unit = {}
 ) {
 
-    private val sessionStates = mutableMapOf<String, SessionProcessingState>()
+    private val sessionStates = ConcurrentHashMap<String, SessionProcessingState>()
 
     companion object {
         private const val TAG = "OutputProcessor"
@@ -135,28 +139,20 @@ class OutputProcessor(
                     break
                 }
 
+                // Retain/display every unterminated physical line without labeling it as input.
+                state.partialOutput = cleanContent
+
                 // 检查是否是普通 shell 提示符
                 val isShellPrompt = isPrompt(cleanContent)
 
-                // 使用 PTY 模式检测是否在等待输入
-                val isWaitingInput = isInteractivePrompt(cleanContent, sessionId, sessionManager)
-
-                if (isShellPrompt || isWaitingInput) {
-                    Log.d(TAG, "Processing remaining buffer as interactive/shell prompt: '$bufferContent'")
-                    // Since this is not a newline-terminated line, the justHandledCarriageReturn
-                    // state from a previous CR is not relevant here. We reset it to ensure
-                    // the prompt is processed correctly by handleReadyState.
-                    state.justHandledCarriageReturn = false
-
-                    // 如果是交互式提示符（非普通 shell 提示符），进入交互模式
-                    if (isWaitingInput && !isShellPrompt) {
-                        // A PTY read boundary is not a physical newline. Keep the accumulated
-                        // line so subsequent bytes can replace this preview or complete it.
-                        handleInteractivePrompt(sessionId, cleanContent, sessionManager, provisional = true)
-                    } else {
-                        processLine(sessionId, bufferContent, sessionManager)
-                        session.rawBuffer.clear()
-                    }
+                state.justHandledCarriageReturn = false
+                if (isShellPrompt) {
+                    processLine(sessionId, bufferContent, sessionManager)
+                    session.rawBuffer.clear()
+                    state.partialOutput = ""
+                } else {
+                    updateCommandOutput(sessionId, cleanContent, sessionManager, provisional = true)
+                    refreshInputWaitState(sessionId, sessionManager)
                 }
                 break // Exit loop, wait for more data.
             }
@@ -172,6 +168,7 @@ class OutputProcessor(
 
     private fun handleCarriageReturn(sessionId: String, line: String, sessionManager: SessionManager) {
         val cleanLine = AnsiUtils.stripAnsi(line)
+        sessionStates[sessionId]?.partialOutput = ""
         val session = sessionManager.getSession(sessionId) ?: return
         if (session.initState != SessionInitState.READY) {
             processLine(sessionId, line, sessionManager)
@@ -203,6 +200,7 @@ class OutputProcessor(
         sessionManager: SessionManager
     ) {
         val session = sessionManager.getSession(sessionId) ?: return
+        sessionStates[sessionId]?.partialOutput = ""
 
         when (session.initState) {
             SessionInitState.INITIALIZING -> {
@@ -418,40 +416,33 @@ class OutputProcessor(
         return false
     }
 
-    /**
-     * 使用 PTY 模式检测是否正在等待交互式输入
-     * 完全依赖 PTY 层面的状态，不使用任何文本模式匹配
-     */
-    fun isInteractivePrompt(line: String, sessionId: String, sessionManager: SessionManager): Boolean {
-        val session = sessionManager.getSession(sessionId) ?: return false
-        val pty = session.pty ?: return false
-
-        // 只在有命令执行时才检测（避免误判普通 shell 提示符）
-        if (session.currentExecutingCommand?.isExecuting != true) {
-            return false
+    fun refreshInputWaitState(sessionId: String, sessionManager: SessionManager): PtyInputWaitState {
+        val session = sessionManager.getSession(sessionId) ?: return PtyInputWaitState.NOT_WAITING
+        val command = session.currentExecutingCommand
+        val state = when {
+            command?.isExecuting != true -> PtyInputWaitState.NOT_WAITING
+            session.terminalType != TerminalType.LOCAL -> PtyInputWaitState.UNKNOWN
+            else -> session.pty?.getInputWaitState() ?: PtyInputWaitState.UNKNOWN
         }
-
-        try {
-            val ptyMode = pty.getPtyMode()
-            val isWaiting = ptyMode.isWaitingForInput()
-
-            if (!isWaiting) {
-                return false
+        if (sessionManager.getSession(sessionId)?.currentExecutingCommand?.id != command?.id) {
+            return PtyInputWaitState.NOT_WAITING
+        }
+        val waiting = state == PtyInputWaitState.WAITING
+        val preview = sessionStates[sessionId]?.partialOutput.orEmpty()
+        if (session.isWaitingForInteractiveInput != waiting || session.isInteractiveMode != waiting ||
+            (waiting && session.lastInteractivePrompt != preview)) {
+            sessionManager.updateSession(sessionId) { current ->
+                // A sample from a completed/replaced command must not affect a newer command.
+                if (current.currentExecutingCommand?.id != command?.id) current else current.copy(
+                    isWaitingForInteractiveInput = waiting,
+                    lastInteractivePrompt = if (waiting) preview else "",
+                    isInteractiveMode = waiting,
+                    interactivePrompt = if (waiting) preview else ""
+                )
             }
-
-            // 无论 canonical 还是 non-canonical mode，都完全依赖 PTY 状态判断
-            // 不使用任何文本模式匹配或关键词判断
-            val mode = if (ptyMode.isCanonicalMode) "canonical" else "non-canonical"
-            Log.d(TAG, "Detected interactive prompt ($mode mode, available=${ptyMode.availableBytes}): $line")
-
-            return true
-        } catch (e: Exception) {
-            Log.e(TAG, "Error checking PTY mode", e)
-            return false
         }
+        return state
     }
-
-
 
     private fun handleInteractivePrompt(
         sessionId: String,

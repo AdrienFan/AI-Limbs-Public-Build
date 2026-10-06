@@ -87,6 +87,7 @@ class TerminalManager private constructor(
     private val nativeLibDir: String = context.applicationInfo.nativeLibraryDir
     private val activeSessions = ConcurrentHashMap<String, TerminalSession>()
     private val closingSessions = ConcurrentHashMap.newKeySet<String>()
+    private val inputStateObservers = ConcurrentHashMap<String, Job>()
     private val sessionInitializationFailures = ConcurrentHashMap<String, String>()
     private val sessionInitializationOutput = ConcurrentHashMap<String, String>()
 
@@ -687,6 +688,7 @@ class TerminalManager private constructor(
      * 会话关闭后的运行态清理（非持久化状态）。
      */
     fun onSessionClosed(sessionId: String) {
+        inputStateObservers.remove(sessionId)?.cancel()
         outputProcessor.clearSessionState(sessionId)
     }
 
@@ -929,8 +931,11 @@ class TerminalManager private constructor(
             true
         }
 
+    fun sessionInputWaitState(sessionId: String): PtyInputWaitState =
+        outputProcessor.refreshInputWaitState(sessionId, sessionManager)
+
     fun isSessionWaitingForInput(sessionId: String): Boolean =
-        sessionManager.getSession(sessionId)?.isWaitingForInteractiveInput == true
+        sessionInputWaitState(sessionId) == PtyInputWaitState.WAITING
 
     /**
      * 发送中断信号
@@ -1021,6 +1026,7 @@ class TerminalManager private constructor(
                     } catch (e: Exception) {
                         Log.e(TAG, "Error in read job for session $sessionId", e)
                     } finally {
+                        inputStateObservers.remove(sessionId)?.cancel()
                         if (closingSessions.remove(sessionId)) {
                             return@launch
                         }
@@ -1029,6 +1035,17 @@ class TerminalManager private constructor(
                         }
                     }
                 }
+
+                val inputObserver = launch {
+                    while (isActive) {
+                        val current = sessionManager.getSession(sessionId) ?: break
+                        if (current.currentExecutingCommand?.isExecuting == true) {
+                            sessionInputWaitState(sessionId)
+                        }
+                        delay(250)
+                    }
+                }
+                inputStateObservers.put(sessionId, inputObserver)?.cancel()
 
                 // 更新会话信息
                 sessionManager.updateSession(sessionId) { session ->
@@ -1125,6 +1142,8 @@ class TerminalManager private constructor(
             runCatching { session.process.destroy() }
         }
         activeSessions.clear()
+        inputStateObservers.values.forEach { it.cancel() }
+        inputStateObservers.clear()
         closingSessions.clear()
         sessionInitializationFailures.clear()
         sessionInitializationOutput.clear()

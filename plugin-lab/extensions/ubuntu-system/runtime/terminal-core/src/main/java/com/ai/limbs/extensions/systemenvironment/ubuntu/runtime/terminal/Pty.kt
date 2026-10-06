@@ -14,15 +14,17 @@ open class Pty(
     val masterFd: FileDescriptor?,
     private val ptyMaster: Int,
     val stdout: InputStream,
-    val stdin: OutputStream
+    val stdin: OutputStream,
+    private val subprocessPid: Int = 0
 ) {
     // 为本地终端提供的便利构造函数
-    constructor(process: Process, masterFd: FileDescriptor, ptyMaster: Int) : this(
+    constructor(process: Process, masterFd: FileDescriptor, ptyMaster: Int, subprocessPid: Int = 0) : this(
         process = process,
         masterFd = masterFd,
         ptyMaster = ptyMaster,
         stdout = FileInputStream(masterFd),
-        stdin = FileOutputStream(masterFd)
+        stdin = FileOutputStream(masterFd),
+        subprocessPid = subprocessPid
     )
 
     fun waitFor(): Int {
@@ -122,7 +124,7 @@ open class Pty(
                 }
             }
 
-            return Pty(dummyProcess, fileDescriptor, masterFdInt)
+            return Pty(dummyProcess, fileDescriptor, masterFdInt, pid)
         }
 
         private external fun createSubprocess(cmdArray: Array<String>, envArray: Array<String>, workingDir: String): IntArray
@@ -142,6 +144,24 @@ open class Pty(
          * 获取可读字节数（用于检测是否有输出等待读取）
          */
         private external fun getAvailableBytes(fd: Int): Int
+        private external fun getForegroundProcessGroup(fd: Int): Int
+        private external fun getSlaveTerminalPath(fd: Int): String?
+        private external fun getReadSyscalls(): LongArray
+    }
+
+    private val inputWaitProbe by lazy {
+        Companion.ensureNativeLoaded()
+        PtyInputWaitProbe(subprocessPid, Companion.getReadSyscalls().toSet())
+    }
+
+    open fun getInputWaitState(): PtyInputWaitState {
+        if (ptyMaster <= 0 || subprocessPid <= 0) return PtyInputWaitState.UNKNOWN
+        Companion.ensureNativeLoaded()
+        val group = Companion.getForegroundProcessGroup(ptyMaster)
+        val slave = Companion.getSlaveTerminalPath(ptyMaster) ?: return PtyInputWaitState.UNKNOWN
+        val state = inputWaitProbe.inspect(group, slave)
+        return if (Companion.getForegroundProcessGroup(ptyMaster) == group) state
+            else PtyInputWaitState.UNKNOWN
     }
 
     /**
@@ -200,7 +220,7 @@ open class Pty(
 
 /**
  * PTY 模式信息
- * 用于检测终端是否处于交互式输入状态
+ * 仅描述终端设置，不代表进程正在等输入
  */
 data class PtyMode(
     val isCanonicalMode: Boolean,  // true = 行缓冲模式（正常命令），false = 字符模式（交互式输入）
@@ -208,30 +228,7 @@ data class PtyMode(
     val isSignalEnabled: Boolean,   // 是否启用信号处理
     val isExtendedEnabled: Boolean, // 是否启用扩展处理
     val availableBytes: Int         // 可读字节数
-) {
-    /**
-     * 判断是否正在等待交互式输入
-     *
-     * 两种场景：
-     * 1. 非规范模式（Node.js REPL, Python REPL）：禁用 ICANON，字符模式输入
-     * 2. 规范模式但等待输入（apt upgrade, sudo）：保持 ICANON，但输出已停止
-     */
-    fun isWaitingForInput(): Boolean {
-        // 场景 1: 非规范模式 = REPL（Node/Python）
-        if (!isCanonicalMode && availableBytes == 0) {
-            return true
-        }
-
-        // 场景 2: 规范模式但输出已停止 = 等待确认（apt/sudo）
-        // 条件：缓冲区为空（输出已停止）
-        if (availableBytes == 0) {
-            // 需要由上层结合命令状态判断（是否有命令正在执行）
-            return true
-        }
-
-        return false
-    }
-}
+)
 
 // Reflection helper to create FileDescriptor from an int fd.
 object Reflect {

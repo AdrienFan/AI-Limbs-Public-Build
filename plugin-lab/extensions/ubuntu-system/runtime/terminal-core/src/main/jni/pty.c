@@ -5,6 +5,7 @@
 #include <fcntl.h>
 #include <sys/wait.h>
 #include <sys/ioctl.h>
+#include <sys/syscall.h>
 #include <errno.h>
 #include <stdio.h>
 #include <android/log.h>
@@ -169,7 +170,7 @@ Java_com_ai_limbs_extensions_systemenvironment_ubuntu_runtime_terminal_Pty_00024
 }
 
 /**
- * 检查 PTY 是否有未读数据（用于检测程序是否在等待输入）
+ * 检查 PTY 是否有未读输出数据；这不代表程序正在等待输入
  * 返回值：可读字节数，-1 表示错误
  */
 JNIEXPORT jint JNICALL
@@ -205,4 +206,25 @@ Java_com_ai_limbs_extensions_systemenvironment_ubuntu_runtime_terminal_Pty_setPt
 
     LOGD("PTY window size set to %dx%d for fd %d", rows, cols, fd);
     return 0;
+}
+
+/* Empty output/ICANON cannot prove an input wait. Query the owned PTY's foreground tree. */
+JNIEXPORT jint JNICALL
+Java_com_ai_limbs_extensions_systemenvironment_ubuntu_runtime_terminal_Pty_00024Companion_getForegroundProcessGroup(JNIEnv *env, jobject thiz, jint fd) {
+    return (jint) tcgetpgrp(fd);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_ai_limbs_extensions_systemenvironment_ubuntu_runtime_terminal_Pty_00024Companion_getSlaveTerminalPath(JNIEnv *env, jobject thiz, jint fd) {
+    char path[128];
+    if (ptsname_r(fd, path, sizeof(path)) != 0) return NULL;
+    return (*env)->NewStringUTF(env, path);
+}
+
+JNIEXPORT jlongArray JNICALL
+Java_com_ai_limbs_extensions_systemenvironment_ubuntu_runtime_terminal_Pty_00024Companion_getReadSyscalls(JNIEnv *env, jobject thiz) {
+    const jlong numbers[] = { SYS_read, SYS_readv };
+    jlongArray result = (*env)->NewLongArray(env, 2);
+    if (result != NULL) (*env)->SetLongArrayRegion(env, result, 0, 2, numbers);
+    return result;
 }

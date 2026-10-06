@@ -8,6 +8,7 @@ import com.ai.limbs.plugin.runtime.InProcessCapabilityReceipt
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessPluginHost
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.TerminalManager
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.PtyInputWaitState
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicBoolean
@@ -259,7 +260,9 @@ internal class UbuntuSubsystemProcessCapability(
             if (offset == 0) record.readCursor = end
             ReadSnapshot(start, end, record.nextLine, record.running, selected, record.terminalError, record.baseLine)
         }
-        val waiting = snapshot.running && terminal.isSessionWaitingForInput(record.sessionId)
+        val inputState = if (snapshot.running) terminal.sessionInputWaitState(record.sessionId)
+            else PtyInputWaitState.NOT_WAITING
+        val waiting = inputState == PtyInputWaitState.WAITING
         val output = snapshot.lines.joinToString("\n")
         return ok(output)
             .put("pid", pid)
@@ -273,6 +276,7 @@ internal class UbuntuSubsystemProcessCapability(
             .put("retained_start_line", snapshot.retainedStart)
             .put("running", snapshot.running)
             .put("waiting_for_input", waiting)
+            .put("input_state", inputState.name)
             .put("error", snapshot.error ?: JSONObject.NULL)
     }
 
@@ -285,8 +289,7 @@ internal class UbuntuSubsystemProcessCapability(
         if (!waitForPrompt) return ok("✅ Input sent to process $pid. Use read_process_output to get the response.").put("pid", pid)
         val deadline = System.currentTimeMillis() + requestedWaitMs.coerceIn(0L, MAX_INTERACT_WAIT_MS)
         while (scope.isActive && System.currentTimeMillis() < deadline) {
-            val snapshot = outputFrom(record, beforeLine, MAX_INTERACT_LINES)
-            if (!synchronized(record) { record.running } || terminal.isSessionWaitingForInput(record.sessionId) || looksLikePrompt(snapshot)) break
+            if (!synchronized(record) { record.running } || terminal.isSessionWaitingForInput(record.sessionId)) break
             delay(INTERACT_POLL_MS)
         }
         return ok(buildInteractionResult(record, outputFrom(record, beforeLine, MAX_INTERACT_LINES))).put("pid", pid)
@@ -440,13 +443,6 @@ internal class UbuntuSubsystemProcessCapability(
             running -> append("\nProcess ${record.pid} is still running.")
             else -> append("\nProcess ${record.pid} finished.")
         }
-    }
-
-    private fun looksLikePrompt(output: String): Boolean {
-        val trimmed = output.trimEnd()
-        if (trimmed.isEmpty()) return false
-        if (trimmed.endsWith(">>>")) return true
-        return trimmed.lastOrNull() in setOf('>', '$', '#')
     }
 
     private fun splitLines(text: String): List<String> {
