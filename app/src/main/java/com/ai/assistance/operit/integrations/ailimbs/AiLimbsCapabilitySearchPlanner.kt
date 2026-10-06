@@ -43,9 +43,18 @@ internal object AiLimbsScopeQuery {
         return reduced.ifBlank { query }
     }
 
-    fun exactCapability(query: String, definition: AiLimbsCapabilityDefinition): Boolean =
-        sequenceOf(definition.capabilityId, definition.invokeId, definition.displayName)
-            .plus(definition.aliases.asSequence()).any { it.equals(query.trim(), ignoreCase = true) }
+    // Identity addresses take precedence. A shared display label cannot select one capability.
+    fun exactDefinition(
+        definitions: List<AiLimbsCapabilityDefinition>,
+        query: String
+    ): AiLimbsCapabilityDefinition? {
+        val ids = definitions.filter { definition ->
+            sequenceOf(definition.capabilityId, definition.invokeId).plus(definition.aliases.asSequence())
+                .any { it.equals(query.trim(), true) }
+        }
+        if (ids.isNotEmpty()) return ids.singleOrNull()
+        return definitions.filter { it.displayName.equals(query.trim(), true) }.singleOrNull()
+    }
 }
 
 internal data class AiLimbsCapabilitySearchPlan(
@@ -70,7 +79,7 @@ internal object AiLimbsCapabilitySearchPlanner {
             val owned = registered.filter { it.ownerPluginId == scope.ownerPluginId }
             return AiLimbsCapabilitySearchPlan("scope", preferExactAction(owned, intent), intent, listOf(scope.scopeId))
         }
-        exactDefinition(registered, query)?.let {
+        AiLimbsScopeQuery.exactDefinition(registered, query)?.let {
             return AiLimbsCapabilitySearchPlan("exact_identity", listOf(it), query)
         }
         val named = scopes.filter { AiLimbsScopeQuery.mentions(query, it) }
@@ -82,30 +91,18 @@ internal object AiLimbsCapabilitySearchPlanner {
             return AiLimbsCapabilitySearchPlan("named_scope", preferExactAction(owned, intent), intent, named.map { it.scopeId })
         }
         if (query.matches(Regex("[A-Za-z0-9._:-]+"))) {
-            exactDefinition(hostCatalog(), query)?.let {
+            AiLimbsScopeQuery.exactDefinition(hostCatalog(), query)?.let {
                 return AiLimbsCapabilitySearchPlan("exact_identity", listOf(it), query)
             }
         }
         return AiLimbsCapabilitySearchPlan("global", fullCatalog(), query)
     }
 
-    private fun exactDefinition(
-        definitions: List<AiLimbsCapabilityDefinition>,
-        query: String
-    ): AiLimbsCapabilityDefinition? {
-        val ids = definitions.filter { definition ->
-            sequenceOf(definition.capabilityId, definition.invokeId).plus(definition.aliases.asSequence())
-                .any { it.equals(query.trim(), true) }
-        }
-        if (ids.isNotEmpty()) return ids.singleOrNull()
-        return definitions.filter { it.displayName.equals(query.trim(), true) }.singleOrNull()
-    }
-
     private fun preferExactAction(
         definitions: List<AiLimbsCapabilityDefinition>,
         intent: String
     ): List<AiLimbsCapabilityDefinition> {
-        exactDefinition(definitions, intent)?.let { return listOf(it) }
+        AiLimbsScopeQuery.exactDefinition(definitions, intent)?.let { return listOf(it) }
         val needle = AiLimbsScopeQuery.normalize(intent)
         val exact = definitions.filter { definition ->
             sequenceOf(definition.invokeId).plus(definition.aliases.asSequence())

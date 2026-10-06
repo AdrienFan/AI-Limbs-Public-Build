@@ -182,4 +182,85 @@ class AiLimbsGlobalScopeOrganizerStressTest {
         assertEquals(5, scopeIds.size)
         assertTrue(organized.all { it is AiLimbsOrganizedSearchItem.Scope })
     }
+
+    private fun organizeDefinitions(query: String, definitions: List<AiLimbsCapabilityDefinition>) =
+        AiLimbsGlobalScopeOrganizer.organize(
+            query = query,
+            matches = definitions.map { match(it, score = 320) },
+            limit = 10,
+            scopes = definitions.groupBy { it.provider.removePrefix("plugin:") }.map { (owner, owned) ->
+                AiLimbsCapabilityScope(
+                    scopeId = "plugin:$owner",
+                    kind = AiLimbsCapabilityScopeKind.PLUGIN,
+                    ownerPluginId = owner,
+                    displayName = owner,
+                    description = null,
+                    capabilityIds = owned.map { it.capabilityId },
+                    invokeIds = owned.map { it.invokeId }
+                )
+            },
+            ownerPluginIdByInvokeId = definitions.associate {
+                it.invokeId to it.provider.removePrefix("plugin:")
+            }
+        )
+
+    @Test
+    fun sharedDisplayNameWithinOwnerRemainsAmbiguousAndFolds() {
+        val definitions = (1..4).map { definition("plugin.test.shared_name", it, "共享操作") }
+        val organized = organizeDefinitions("共享操作", definitions)
+        assertEquals(1, organized.size)
+        assertTrue(organized.single() is AiLimbsOrganizedSearchItem.Scope)
+    }
+
+    @Test
+    fun displayNameUniqueWithinEachOwnerButSharedAcrossOwnersStillFolds() {
+        val definitions = listOf("plugin.test.owner_alpha", "plugin.test.owner_beta").flatMap { owner ->
+            listOf(definition(owner, 1, "共享操作")) + (2..4).map { definition(owner, it) }
+        }
+        val organized = organizeDefinitions("共享操作", definitions)
+        assertEquals(2, organized.size)
+        assertTrue(organized.all { it is AiLimbsOrganizedSearchItem.Scope })
+    }
+
+    @Test
+    fun uniqueDisplayNamePreservesLeafEvenWithCloseScores() {
+        val owner = "plugin.test.unique_name"
+        val leaf = definition(owner, 1, "唯一操作")
+        val organized = organizeDefinitions("唯一操作", listOf(leaf) + (2..4).map { definition(owner, it) })
+        assertEquals(4, organized.size)
+        assertEquals(leaf.capabilityId,
+            (organized.first() as AiLimbsOrganizedSearchItem.Capability).match.definition.capabilityId)
+        assertFalse(organized.any { it is AiLimbsOrganizedSearchItem.Scope })
+    }
+
+    @Test
+    fun capabilityAddressWinsOverAnotherOwnersMatchingDisplayName() {
+        val owner = "plugin.test.address_owner"
+        val otherOwner = "plugin.test.label_owner"
+        val leaf = definition(owner, 1)
+        val definitions = listOf(leaf) + (2..4).map { definition(owner, it) } +
+            listOf(definition(otherOwner, 1, leaf.capabilityId)) +
+            (2..4).map { definition(otherOwner, it) }
+        val organized = organizeDefinitions(leaf.capabilityId, definitions)
+        assertEquals(leaf.capabilityId,
+            (organized.first() as AiLimbsOrganizedSearchItem.Capability).match.definition.capabilityId)
+        val scopes = organized.filterIsInstance<AiLimbsOrganizedSearchItem.Scope>()
+        assertEquals(listOf("plugin:$otherOwner"), scopes.map { it.scope.scopeId })
+    }
+
+    @Test
+    fun uniqueAliasPreservesCanonicalLeafAndSharedAliasRemainsAmbiguous() {
+        val owner = "plugin.test.alias_owner"
+        val leaf = definition(owner, 1).copy(aliases = listOf("unique-action"))
+        val definitions = listOf(leaf) + (2..4).map { definition(owner, it) }
+        val organized = organizeDefinitions("UNIQUE-ACTION", definitions)
+        assertEquals(leaf.capabilityId,
+            (organized.first() as AiLimbsOrganizedSearchItem.Capability).match.definition.capabilityId)
+        assertFalse(organized.any { it is AiLimbsOrganizedSearchItem.Scope })
+        val ambiguous = organizeDefinitions("shared-action", definitions.map {
+            it.copy(aliases = listOf("shared-action"))
+        })
+        assertEquals(1, ambiguous.size)
+        assertTrue(ambiguous.single() is AiLimbsOrganizedSearchItem.Scope)
+    }
 }

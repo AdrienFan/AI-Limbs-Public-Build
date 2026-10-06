@@ -68,6 +68,10 @@ internal object AiLimbsGlobalScopeOrganizer {
         if (matches.isEmpty()) return scopes.filter { AiLimbsScopeQuery.mentions(query, it) }
             .take(limit).mapIndexed { index, scope -> AiLimbsOrganizedSearchItem.Scope(index, scope) }
 
+        // Resolve across all candidates: a name unique within one owner may collide elsewhere.
+        val exactCapabilityId = AiLimbsScopeQuery.exactDefinition(
+            matches.map { it.definition }, query
+        )?.capabilityId
         val scopesByOwner = scopes.associateBy { it.ownerPluginId }
         val indexedMatches = matches.withIndex().toList()
         val groupedByOwner =
@@ -86,7 +90,7 @@ internal object AiLimbsGlobalScopeOrganizer {
                 .mapNotNull { (ownerPluginId, ownedMatches) ->
                     val scope = scopesByOwner[ownerPluginId] ?: return@mapNotNull null
                     val groupMatches = ownedMatches.map { it.value }
-                    if (shouldFoldScope(query, scope, groupMatches)) ownerPluginId else null
+                    if (shouldFoldScope(query, scope, groupMatches, exactCapabilityId)) ownerPluginId else null
                 }
                 .toSet()
 
@@ -127,9 +131,10 @@ internal object AiLimbsGlobalScopeOrganizer {
     private fun shouldFoldScope(
         query: String,
         scope: AiLimbsCapabilityScope,
-        matches: List<AiLimbsCapabilitySearchMatch>
+        matches: List<AiLimbsCapabilitySearchMatch>,
+        exactCapabilityId: String?
     ): Boolean {
-        if (matches.any { AiLimbsScopeQuery.exactCapability(query, it.definition) }) return false
+        if (matches.any { it.definition.capabilityId == exactCapabilityId }) return false
         if (matches.size < SCOPE_FOLD_MIN_MATCHES) return false
         if (AiLimbsScopeQuery.isIdentity(query, scope)) return true
 
