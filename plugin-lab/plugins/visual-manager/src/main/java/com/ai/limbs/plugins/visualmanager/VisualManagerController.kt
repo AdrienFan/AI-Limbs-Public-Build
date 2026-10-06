@@ -26,6 +26,7 @@ internal const val VISUAL_PAGE_ID = "$VISUAL_PLUGIN_ID.page"
 internal const val VISUAL_SCREEN_ID = "$VISUAL_PLUGIN_ID.screen"
 internal const val VISUAL_TILE_ID = "$VISUAL_PLUGIN_ID.tile"
 internal const val VISUAL_STATE_ID = "$VISUAL_PLUGIN_ID.state"
+internal const val VISUAL_MESSAGE_CONTEXT_ID = "$VISUAL_PLUGIN_ID.message_context"
 internal const val VISUAL_FEEDBACK_ID = "$VISUAL_PLUGIN_ID.operation_feedback"
 
 /** Core owns workflow, operation outcomes, session coordination and all visual files. */
@@ -57,6 +58,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 "start" -> start(kind(parameters), parameters)
                 "frame" -> frame(kind(parameters), parameters)
                 "operation.feedback" -> operationFeedback(parameters)
+                "message.context" -> cameraMessageContext(parameters)
                 "capture" -> capture(kind(parameters), parameters)
                 "stop" -> stop(parameters)
                 "preview.read" -> previewLock.withLock { previewRead(kind(parameters), parameters.optInt("max_edge", 1024)) }
@@ -117,6 +119,51 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         if (result.getBoolean("success")) return result
         return ScreenFeedbackContract.response(request, "FAILED")
             .put("error_code", result.getString("error_code")).put("error", result.getString("error"))
+    }
+
+    suspend fun readMessageContext(request: JSONObject): JSONObject {
+        val result = call("message.context", request)
+        if (result.getBoolean("success")) return result
+        return CameraMessageContextContract.response(request, "FAILED")
+            .put("error_code", result.getString("error_code")).put("error", result.getString("error"))
+    }
+
+    private suspend fun cameraMessageContext(request: JSONObject): JSONObject {
+        CameraMessageContextContract.validate(request)
+        val status = VisualOperationResult.requireHost(hostCall(sessionPrimitive("camera"), "status"))
+        if (!status.getBoolean("active")) return CameraMessageContextContract.response(request, "INACTIVE")
+        val sessions = status.getJSONArray("sessions")
+        check(sessions.length() == 1) { "Expected one active camera session" }
+        val lock = locks.getValue("camera")
+        if (!lock.tryLock()) throw VisualOperationFailure("CAMERA_CONTEXT_BUSY", "相机取帧正在进行，本轮未取图")
+        val generation = synchronized(stateLock) { generations.getValue("camera") }
+        var scratch: File? = null
+        try {
+            setState("camera", "BUSY", "获取本轮相机画面")
+            val captured = VisualOperationResult.requireHost(hostCall(sessionPrimitive("camera"), "frame", JSONObject()
+                .put("session_id", sessions.getJSONObject(0).getString("session_id"))
+                .put("deadline_elapsed_ms", request.getLong("deadline_elapsed_ms"))))
+            scratch = File(captured.getString("file_path"))
+            CameraMessageContextContract.requireFresh(request, captured)
+            val image = updatePreview("camera", captured, generation, 524_288)
+            val imageContent = content(image)
+            image.remove("data")
+            return synchronized(stateLock) {
+                check(generation == generations.getValue("camera")) { "取帧已被停止指令取消" }
+                setState("camera", "IDLE", "本轮相机画面已更新")
+                CameraMessageContextContract.response(request, "READY")
+                    .put("session_id", captured.getString("session_id")).put("source_id", captured.getString("source_id"))
+                    .put("captured_at_ms", captured.getLong("captured_at_ms")).put("freshness", captured.getJSONObject("freshness"))
+                    .put("image", image).put("mcp_content", imageContent)
+            }
+        } catch (error: Exception) {
+            synchronized(stateLock) {
+                if (generation == generations.getValue("camera")) setState("camera", "ERROR", error.message ?: "本轮取帧失败")
+            }
+            throw error
+        } finally {
+            try { scratch?.let { deleteHostScratch(it) } } finally { lock.unlock() }
+        }
     }
 
     private suspend fun operationFeedback(request: JSONObject): JSONObject {

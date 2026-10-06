@@ -14,6 +14,40 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualManagerControllerTest {
+    private fun contextRequest() = JSONObject().put("schema", 1).put("event", "user_message").put("context_id", "turn-1")
+        .put("requested_elapsed_ms", 100L).put("deadline_elapsed_ms", 12100L)
+
+    @Test fun inactiveCameraContextNeverOpensHardwareOrRequestsPermission() = runBlocking {
+        val f = Fixture { id, op, _ ->
+            assertEquals("host.camera.session@1", id); assertEquals("status", op)
+            JSONObject().put("active", false).put("sessions", JSONArray())
+        }
+        try {
+            val response = f.controller.readMessageContext(contextRequest())
+            assertEquals("INACTIVE", response.getString("status"))
+            assertFalse(response.has("mcp_content")); assertEquals(1, f.calls.size)
+        } finally { f.scope.cancel() }
+    }
+
+    @Test fun cameraContextCaptureFailureReturnsNoCachedImageAndDoesNotRetry() = runBlocking {
+        val f = Fixture { id, op, p ->
+            assertEquals("host.camera.session@1", id)
+            when (op) {
+                "status" -> JSONObject().put("active", true).put("sessions", JSONArray().put(JSONObject().put("session_id", "owned")))
+                "frame" -> {
+                    assertEquals("owned", p.getString("session_id")); assertEquals(12100L, p.getLong("deadline_elapsed_ms"))
+                    error("Camera stopped")
+                }
+                else -> error("Must not start or stop camera")
+            }
+        }
+        try {
+            val response = f.controller.readMessageContext(contextRequest())
+            assertEquals("FAILED", response.getString("status")); assertFalse(response.has("mcp_content"))
+            assertEquals(2, f.calls.size)
+        } finally { f.scope.cancel() }
+    }
+
     private fun feedbackRequest() = JSONObject().put("schema", 1).put("event", "screen_interaction")
         .put("operation_id", "action-1").put("completed_elapsed_ms", 100L).put("deadline_elapsed_ms", 6100L)
 

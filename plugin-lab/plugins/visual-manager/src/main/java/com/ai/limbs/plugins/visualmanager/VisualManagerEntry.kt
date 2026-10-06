@@ -2,7 +2,6 @@ package com.ai.limbs.plugins.visualmanager
 
 import com.ai.limbs.plugin.runtime.InProcessCapabilityDomain
 import com.ai.limbs.plugin.runtime.InProcessCapabilityEffect
-import com.ai.limbs.plugin.runtime.InProcessCapabilityExecutor
 import com.ai.limbs.plugin.runtime.InProcessCapabilityParameterSpec
 import com.ai.limbs.plugin.runtime.InProcessCapabilitySpec
 import com.ai.limbs.plugin.runtime.InProcessHomeTile
@@ -18,6 +17,9 @@ class VisualManagerEntry : InProcessPluginEntry {
     override suspend fun mount(host: InProcessPluginHost): InProcessPluginHandle {
         require(host.pluginId == VISUAL_PLUGIN_ID) { "Unexpected Visual Workbench identity" }
         val controller = VisualManagerController(host)
+        host.registerProvider(VISUAL_MESSAGE_CONTEXT_ID,
+            InProcessCapabilityExecutor { request -> controller.readMessageContext(JSONObject(request)).toString() },
+            mapOf("kind" to "message_context", "context_api" to "1", "event" to "user_message"))
         host.registerProvider(VISUAL_FEEDBACK_ID,
             InProcessCapabilityExecutor { request -> controller.postActionFeedback(JSONObject(request)).toString() },
             mapOf("kind" to "operation_feedback", "feedback_api" to "1", "event" to "screen_interaction"))
