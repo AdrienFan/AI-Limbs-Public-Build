@@ -177,39 +177,26 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
     }
 
     private suspend fun captureScreenFrame(ownerPluginId: String, fresh: Boolean = false, format: String = "png"): JSONObject {
-        require(format == "png" || (fresh && format == "rgba8888")) { "Raw screen frames require fresh=true" }
-        // This is already the Host Primitive execution boundary. Re-entering AiLimbsDispatcher
-        // here would incorrectly create a second AI/Policy authorization cycle in Host while
-        // Resident Core owns policy authority. Only Android MediaProjection consent belongs here.
-        if (fresh) {
-            val ownerPath = ownerPluginId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
-            val directory = File(appContext.cacheDir, "visual-host/$ownerPath")
-            check(directory.exists() || directory.mkdirs()) { "Shared-screen scratch directory is unavailable" }
-            val frame = hostScreenCaptureTools.captureFreshSharedScreen(
-                File(directory, "feedback-${java.util.UUID.randomUUID()}.${if (format == "png") "png" else "rgba"}"), format
-            )
-            return JSONObject().put("ok", true).put("success", true).put("path", frame.path)
-                .put("owner_plugin_id", ownerPluginId).put("width", frame.width).put("height", frame.height)
-                .put("format", frame.format).put("byte_count", File(frame.path).length())
-                .put("mime_type", if (frame.format == "png") "image/png" else "application/octet-stream")
-                .apply { if (frame.format == "rgba8888") put("row_stride", frame.width * 4).put("pixel_stride", 4) }
-                .put("captured_at_ms", frame.capturedAtMs)
-                .put("freshness", JSONObject().put("method", "new_surface")
-                    .put("requested_elapsed_ms", frame.requestedElapsedMs)
-                    .put("captured_elapsed_ms", frame.capturedElapsedMs))
-        }
-        val (path, dimensions) = hostScreenCaptureTools.captureScreenshot(
-            AITool(name = "capture_screenshot", parameters = emptyList())
+        require(format == "png" || format == "rgba8888") { "Unsupported screen frame format" }
+        // One acquisition contract for initial, explicit and post-action frames. Initial calls
+        // retain normal Android consent; feedback only uses the existing authorized projection.
+        val ownerPath = ownerPluginId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
+        val directory = File(appContext.cacheDir, "visual-host/$ownerPath")
+        check(directory.exists() || directory.mkdirs()) { "Shared-screen scratch directory is unavailable" }
+        val frame = hostScreenCaptureTools.captureFreshSharedScreen(
+            File(directory, "frame-${java.util.UUID.randomUUID()}.${if (format == "png") "png" else "rgba"}"),
+            format, initialize = !fresh
         )
-        val success = !path.isNullOrBlank()
-        return JSONObject()
-            .put("ok", true)
-            .put("success", success)
-            .put("path", path.orEmpty())
-            .put("owner_plugin_id", ownerPluginId)
-            .put("width", dimensions?.first ?: JSONObject.NULL)
-            .put("height", dimensions?.second ?: JSONObject.NULL)
-            .put("error", if (success) JSONObject.NULL else "Screenshot failed")
+        return JSONObject().put("ok", true).put("success", true).put("path", frame.path)
+            .put("owner_plugin_id", ownerPluginId).put("width", frame.width).put("height", frame.height)
+            .put("format", frame.format).put("byte_count", File(frame.path).length())
+            .put("mime_type", if (frame.format == "png") "image/png" else "application/octet-stream")
+            .apply { if (frame.format == "rgba8888") put("row_stride", frame.width * 4).put("pixel_stride", 4) }
+            .put("frame_id", frame.frameId).put("geometry", frame.geometry).put("timings_ms", frame.timings)
+            .put("captured_at_ms", frame.capturedAtMs)
+            .put("freshness", JSONObject().put("method", "new_surface")
+                .put("requested_elapsed_ms", frame.requestedElapsedMs)
+                .put("captured_elapsed_ms", frame.capturedElapsedMs))
     }
 
 

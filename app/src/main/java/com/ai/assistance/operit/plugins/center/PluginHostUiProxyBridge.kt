@@ -1153,6 +1153,7 @@ private class ResidentHostComponentExecutor(
                             )
                         }
                     val tool = AITool(name = toolName, parameters = parameters)
+                    com.ai.assistance.operit.core.tools.defaultTool.UiAutomationRuntime.validateDisplayPrecondition(appContext, tool)
                     val accessibilityTools = AccessibilityUITools(appContext)
                     val result =
                         when (operation) {

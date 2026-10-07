@@ -204,10 +204,12 @@ object VisualHostRuntime {
         return JSONObject()
             .put("session_id", session.id)
             .put("target_id", session.targetId)
-            .put("captured_at_ms", if (parameters.optBoolean("fresh", false))
-                hostResult.getLong("captured_at_ms") else System.currentTimeMillis())
+            .put("captured_at_ms", hostResult.getLong("captured_at_ms"))
+            .put("frame_id", hostResult.getString("frame_id"))
+            .put("geometry", hostResult.getJSONObject("geometry"))
+            .put("timings_ms", hostResult.getJSONObject("timings_ms"))
             .put("frame", JSONObject(hostResult.toString()))
-            .apply { if (parameters.optBoolean("fresh", false)) put("freshness", hostResult.getJSONObject("freshness")) }
+            .put("freshness", hostResult.getJSONObject("freshness"))
     }
 
     private fun stopScreenSession(

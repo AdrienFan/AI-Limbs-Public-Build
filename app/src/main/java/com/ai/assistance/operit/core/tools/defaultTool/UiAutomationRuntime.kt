@@ -330,6 +330,24 @@ internal object UiAutomationRuntime {
         )
     }
 
+    /** Optional generic geometry precondition, checked at the chosen injection backend. */
+    fun validateDisplayPrecondition(context: Context, tool: AITool) {
+        val parameters = tool.parameters.associate { it.name to it.value }
+        val fields = listOf("expected_display_width", "expected_display_height", "expected_display_rotation")
+        if (fields.none { parameters.containsKey(it) }) return
+        require(fields.all { parameters.containsKey(it) }) { "Incomplete display geometry precondition" }
+        val display = checkNotNull(context.getSystemService(android.hardware.display.DisplayManager::class.java)
+            .getDisplay(android.view.Display.DEFAULT_DISPLAY)) { "Display is unavailable" }
+        val metrics = android.util.DisplayMetrics()
+        @Suppress("DEPRECATION")
+        display.getRealMetrics(metrics)
+        check(parameters.getValue(fields[0]).toInt() == metrics.widthPixels &&
+            parameters.getValue(fields[1]).toInt() == metrics.heightPixels &&
+            parameters.getValue(fields[2]).toInt() == display.rotation * 90) {
+            "SCREEN_GEOMETRY_CHANGED: obtain a new frame before injecting this action"
+        }
+    }
+
     suspend fun execute(
         context: Context,
         tool: AITool,
@@ -369,6 +387,7 @@ internal object UiAutomationRuntime {
             if (residentCore && selection.backend == UiAutomationBackend.ACCESSIBILITY) {
                 executeAccessibilityInHost(tool, operation)
             } else {
+                validateDisplayPrecondition(context, tool)
                 val localTools = checkNotNull(tools)
                 when (operation) {
                     UiAutomationOperation.SNAPSHOT -> localTools.getPageInfo(tool)
