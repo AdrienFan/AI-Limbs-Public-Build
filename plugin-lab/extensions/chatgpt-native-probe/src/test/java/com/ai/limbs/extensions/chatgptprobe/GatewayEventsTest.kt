@@ -10,6 +10,44 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GatewayEventsTest {
+    @Test fun transportFailureDetailsSurviveRestartAndNeverCommitSubscription() = runBlocking {
+        val store = EventMemoryStore()
+        val transport = object : GatewayEventTransport {
+            override suspend fun post(url: String, headers: Map<String, String>, body: String): GatewayWebhookReply {
+                throw GatewayWebhookFailure("dns_resolution_failed", "dns", "UnknownHostException")
+            }
+        }
+        val events = GatewayEvents(store, transport)
+        try { events.subscribe("a", subscription()); fail() }
+        catch (error: GatewayEventFailure) {
+            assertEquals(-32015, error.code)
+            assertEquals("dns_resolution_failed", error.reason)
+            assertEquals("dns", error.diagnostic!!.getString("stage"))
+        }
+        val restarted = GatewayEvents(store, transport)
+        restarted.recover("a")
+        val status = restarted.snapshot("a")
+        assertEquals(0, status.getInt("active_subscriptions"))
+        assertEquals("UnknownHostException", status.getJSONObject("last_diagnostic").getString("exception_type"))
+        assertFalse(status.toString().contains(secret))
+        assertFalse(status.toString().contains("callback.example"))
+        assertTrue(store.names().none { it.startsWith("eventsub_") })
+    }
+
+    @Test fun verificationHttpStatusIsDistinctFromChallengeMismatch() = runBlocking {
+        val f = Fixture()
+        f.transport.verificationCode = 403
+        try { f.events.subscribe("a", subscription()); fail() }
+        catch (error: GatewayEventFailure) {
+            assertEquals("verification_http_failed", error.reason)
+            assertEquals(403, error.diagnostic!!.getInt("http_status"))
+        }
+        f.transport.verificationCode = 200
+        f.transport.verify = false
+        try { f.events.subscribe("a", subscription()); fail() }
+        catch (error: GatewayEventFailure) { assertEquals("challenge_failed", error.reason) }
+    }
+
     private val secret = "whsec_" + Base64.getEncoder().encodeToString(ByteArray(32) { it.toByte() })
     private fun subscription(url: String = "https://callback.example/events", signing: String = secret) = JSONObject()
         .put("name", GatewayEvents.NAME).put("arguments", JSONObject().put("source_id", "manual"))
@@ -224,13 +262,14 @@ internal class FakeEventTransport : GatewayEventTransport {
     val posts = java.util.concurrent.CopyOnWriteArrayList<Post>()
     var verify = true
     var code = 200
+    var verificationCode = 200
     var cancelVerification = false
     override suspend fun post(url: String, headers: Map<String, String>, body: String): GatewayWebhookReply {
         posts.add(Post(url, headers, body))
         val data = JSONObject(body)
         if (data.optString("type") == "verification") {
             if (cancelVerification) throw CancellationException()
-            return GatewayWebhookReply(200, JSONObject().put("challenge", if (verify) data.getString("challenge") else "wrong").toString())
+            return GatewayWebhookReply(verificationCode, JSONObject().put("challenge", if (verify) data.getString("challenge") else "wrong").toString())
         }
         return GatewayWebhookReply(code, "{}")
     }

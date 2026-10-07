@@ -50,6 +50,12 @@ class GatewayEngineTest {
             eventually { f.eventTransport.posts.any { JSONObject(it.body).has("eventId") } }
             eventually { f.engine.eventStatus().optLong("accepted_count") == 1L }
             assertFalse(f.engine.eventStatus().getBoolean("model_response_verified"))
+            f.commands.add(rpcCommand("event-status", 805, "tools/call", JSONObject()
+                .put("name", "ai_limbs_gateway_status").put("arguments", JSONObject())))
+            eventually { f.responses.any { it.getString("request_id") == "event-status" } }
+            val status = f.responses.first { it.getString("request_id") == "event-status" }
+                .getJSONObject("resp_json").getJSONObject("result").getJSONObject("structuredContent")
+            assertEquals(1L, status.getJSONObject("events").getLong("accepted_count"))
             assertEquals(0, hostCalls.get())
         }
     }

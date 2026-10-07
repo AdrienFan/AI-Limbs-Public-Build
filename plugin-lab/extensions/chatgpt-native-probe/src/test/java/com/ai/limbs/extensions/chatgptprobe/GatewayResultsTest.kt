@@ -18,6 +18,31 @@ internal class MemoryGatewayStore : GatewayBlobStore {
 }
 
 class GatewayResultsTest {
+    @Test fun gatewayDiagnosticsAndNestedDomainEventsArePreserved() {
+        val source = JSONObject().put("success", true)
+            .put("events", JSONObject().put("last_error", "dns_resolution_failed")
+                .put("last_diagnostic", JSONObject().put("stage", "dns")))
+            .put("domain", JSONObject().put("events", JSONArray().put(JSONObject().put("eventId", "evt_1"))))
+        val result = GatewayResults(MemoryGatewayStore()).adapt(source)
+        val delivered = result.getJSONObject("structuredContent")
+        assertJsonEquals(source, delivered, "preserved provider events")
+        assertEquals(source.toString(), result.getJSONArray("content").getJSONObject(0).getString("text"))
+    }
+
+    @Test fun largeEventsUsePaginationWithoutDroppingTheirData() {
+        val adapter = GatewayResults(MemoryGatewayStore())
+        val events = JSONArray().put(JSONObject().put("text", "汉😀".repeat(6000)))
+        val first = adapter.adapt(JSONObject().put("events", events)).getJSONObject("structuredContent")
+        assertTrue(first.getBoolean("paged"))
+        val text = StringBuilder(first.getString("output"))
+        var page = first
+        while (!page.isNull("next_offset")) {
+            page = adapter.readResult(first.getString("cursor"), page.getInt("next_offset"))
+            text.append(page.getString("output"))
+        }
+        assertJsonEquals(events, JSONObject(text.toString()).getJSONArray("events"), "paged events")
+    }
+
     @Test fun sourceOutcomeSurvivesTopLevelClientClassification() {
         for (code in listOf("UBUNTU_COMMAND_EXIT_NONZERO", "UBUNTU_RUNTIME_NOT_RUNNING",
             "UBUNTU_COMMAND_TIMEOUT", "EXAMPLE_PROVIDER_REJECTED")) {

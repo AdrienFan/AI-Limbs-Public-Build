@@ -30,7 +30,8 @@ internal class GatewayResults(
         fun visit(value: Any?) {
             when (value) {
                 is JSONObject -> {
-                    value.remove("events")
+                    // events is ordinary provider data too. Deleting it hid gateway diagnostics
+                    // and domain event lists; retain it and apply normal pagination/media limits.
                     val attachments = value.optJSONArray("mcp_content")
                     if (value.has("mcp_content") && !value.isNull("mcp_content") && attachments == null) {
                         mediaErrors.put(JSONObject().put("reason", "mcp_content must be an array of image blocks"))

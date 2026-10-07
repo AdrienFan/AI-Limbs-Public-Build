@@ -513,7 +513,8 @@ internal class ChatGptNativeProbeEngine(
         } catch (cancelled: CancellationException) { throw cancelled
         } catch (error: GatewayEventFailure) {
             rpcError(id, error.code, "MCP event request failed")
-                .apply { getJSONObject("error").put("data", JSONObject().put("reason", error.reason)) }
+                .apply { getJSONObject("error").put("data", JSONObject().put("reason", error.reason)
+                    .put("diagnostic", error.diagnostic ?: JSONObject.NULL)) }
         } catch (_: Exception) { rpcError(id, -32603, "MCP event storage or validation failed")
         } finally { if (verifies) subscriptionSlots.release() }
     }

@@ -127,6 +127,13 @@ internal class ChatGptNativeProbePanel(
                             else -> "等待订阅"
                         }}")
                         events.optString("last_error").takeIf { it.isNotBlank() && it != "null" }?.let { add("交付问题：$it") }
+                        events.optJSONObject("last_diagnostic")?.let { diagnostic ->
+                            add("失败阶段：${diagnostic.optString("stage")}")
+                            if (diagnostic.has("exception_type")) add("异常分类：${diagnostic.getString("exception_type")}")
+                            if (diagnostic.has("http_status")) add("回调 HTTP 状态：${diagnostic.getInt("http_status")}")
+                        }
+                        if (events.optString("last_error") == "non_public_destination")
+                            add("DNS 返回了非公网目标，连接被拒绝；请核对 VPN 的 DNS / 假 IP 设置。不会放宽公网地址校验。")
                     }
                     add("收到 HTTP 接收确认不代表模型已响应；请在订阅的对话中核对回复。")
                     add("当前只发送手动测试事件，不自动启动相机或持续取图。")

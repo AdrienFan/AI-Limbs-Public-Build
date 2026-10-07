@@ -15,7 +15,7 @@ import kotlinx.coroutines.sync.withLock
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal class GatewayEventFailure(val code: Int, val reason: String) : IllegalStateException(reason)
+internal class GatewayEventFailure(val code: Int, val reason: String, val diagnostic: JSONObject? = null) : IllegalStateException(reason)
 internal data class GatewayWebhookReply(val code: Int, val body: String, val retryAfterMs: Long = 0)
 internal interface GatewayEventTransport {
     suspend fun post(url: String, headers: Map<String, String>, body: String): GatewayWebhookReply
@@ -91,14 +91,17 @@ internal class GatewayEvents(
             val reply = try {
                 transport.post(url, GatewayWebhookSecurity.headers(id, "verify_" + UUID.randomUUID(), now(), secret, body), body)
             } catch (cancelled: CancellationException) { throw cancelled
-            } catch (_: Exception) {
-                recordDiagnostic(binding, "verification_failed", now(), "verification_transport_failed"); publish(binding)
-                throw GatewayEventFailure(-32015, "verification_transport_failed")
+            } catch (error: Exception) {
+                val failure = GatewayWebhookFailure.classify(error, "transport")
+                recordDiagnostic(binding, "verification_failed", now(), failure.reason, failure.diagnostic()); publish(binding)
+                throw GatewayEventFailure(-32015, failure.reason, failure.diagnostic())
             }
             val echoed = try { JSONObject(reply.body).opt("challenge") as? String } catch (_: Exception) { null }
             if (reply.code !in 200..299 || echoed == null || !MessageDigest.isEqual(challenge.toByteArray(Charsets.UTF_8), echoed.toByteArray(Charsets.UTF_8))) {
-                recordDiagnostic(binding, "verification_failed", now(), "challenge_failed"); publish(binding)
-                throw GatewayEventFailure(-32015, "challenge_failed")
+                val reason = if (reply.code !in 200..299) "verification_http_failed" else "challenge_failed"
+                val diagnostic = JSONObject().put("stage", "http_response").put("http_status", reply.code)
+                recordDiagnostic(binding, "verification_failed", now(), reason, diagnostic); publish(binding)
+                throw GatewayEventFailure(-32015, reason, diagnostic)
             }
         }
         currentCoroutineContext().ensureActive()
@@ -182,6 +185,7 @@ internal class GatewayEvents(
                 store.write(name, record.toString())
                 var reply: GatewayWebhookReply? = null
                 var failure: String? = null
+                var diagnostic: JSONObject? = null
                 try {
                     val body = record.getString("body")
                     val signedAt = now()
@@ -194,7 +198,10 @@ internal class GatewayEvents(
                     }
                     reply = transport.post(sub.getString("url"), headers, body)
                 } catch (cancelled: CancellationException) { throw cancelled
-                } catch (_: Exception) { failure = "delivery_transport_failed" }
+                } catch (error: Exception) {
+                    val problem = GatewayWebhookFailure.classify(error, "transport")
+                    failure = problem.reason; diagnostic = problem.diagnostic()
+                }
                 val code = reply?.code
                 val retryable = code == null || code == 408 || code == 429 || code in 500..599
                 when {
@@ -204,12 +211,12 @@ internal class GatewayEvents(
                         val wait = maxOf(backoff, reply?.retryAfterMs ?: 0L).coerceAtMost(300_000L)
                         record.put("next_at", now() + wait)
                         store.write(name, record.toString())
-                        recordDiagnostic(binding, "retry_pending", now(), failure ?: "http_$code")
+                        recordDiagnostic(binding, "retry_pending", now(), failure ?: "http_$code", diagnostic)
                     }
                     else -> {
                         store.delete(name)
                         if (code == 410) store.delete(SUB_PREFIX + sub.getString("id"))
-                        recordDiagnostic(binding, "delivery_failed", now(), failure ?: "http_$code")
+                        recordDiagnostic(binding, "delivery_failed", now(), failure ?: "http_$code", diagnostic)
                     }
                 }
             }
@@ -239,7 +246,7 @@ internal class GatewayEvents(
                 store.delete(name)
         }
     }
-    private fun recordDiagnostic(binding: String, phase: String, at: Long, error: String? = null) {
+    private fun recordDiagnostic(binding: String, phase: String, at: Long, error: String? = null, diagnostic: JSONObject? = null) {
         val key = STATE_PREFIX + gatewayHash(binding)
         val other = store.names().filter { it.startsWith(STATE_PREFIX) && it != key }
             .sortedBy { store.read(it)?.let(::JSONObject)?.getLong("updated_at_ms") ?: 0L }
@@ -247,6 +254,7 @@ internal class GatewayEvents(
         other.take((other.size - 15).coerceAtLeast(0)).forEach { store.delete(it) }
         val state = store.read(key)?.let(::JSONObject) ?: JSONObject()
         state.put("phase", phase).put("updated_at_ms", at).put("last_error", error ?: JSONObject.NULL)
+            .put("last_diagnostic", diagnostic ?: JSONObject.NULL)
         if (phase == "webhook_accepted") state.put("accepted_count", state.optLong("accepted_count") + 1)
         store.write(key, state.toString())
     }

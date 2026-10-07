@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.20
+# AI Limbs-ChatGPT 0.0.21
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -114,3 +114,15 @@ The gateway now learns `capability_id -> invoke_id` mappings from live search/de
 整个存储最多十六条有效订阅、三十二项待发投递、十六份诊断。事件寿命十五分钟，投递最多四次；临时失败进行有限指数退避，遵守有上限的 Retry-After，410/413 不重试。重试沿用同一事件 ID 和序列化内容，更新签名时间，不重做手机操作或取图。到期条目由运行中的投递循环或下一次订阅/排队清理；停止期间不运行清理计时器。回调验证最多接受两项并发请求，使用独立通道，不占业务执行槽位。
 
 `status.events` 只记录本机可证实的阶段和计数。`webhook_accepted` 意味着回调返回 2xx；`model_response_verified` 始终为 false，因为桥没有 ChatGPT 对话回复的确认接口。后续相机及其他外部事件源应在本轮上游验收成功后接入，继续沿用订阅、签名、队列和生命周期。
+
+## 0.0.21 回调失败诊断
+
+0.0.20 的实机事件发现已通过：ChatGPT 工具目录和事件源都能识别本桥。但首个订阅返回 -32015，手机显示 verification_transport_failed，有效订阅为零。这只证明请求抛出异常；旧代码丢弃了异常类型，无法区分具体网络原因。
+
+0.0.21 修复两处已确认的代码问题：回调异常按安全类别与实际网络阶段记录；结果适配器不再递归删除名为 events 的业务字段。状态工具现在能交付 status.events，包括 last_error 和 last_diagnostic，面板同时显示失败阶段、异常分类或 HTTP 状态码。事件列表和大型事件数据继续使用原有图片处理、缓存容量和分页规则。
+
+网络类别包括 dns_resolution_failed、non_public_destination、connection_failed、timeout、tls_handshake_failed、tls_peer_verification_failed、tls_failed、http_protocol_failed、io_failed 和 transport_exception。超时结合 stage 区分 DNS、连接、TLS、请求和响应读取。非 2xx 校验响应记录 verification_http_failed 及状态码；2xx 挑战不匹配仍是 challenge_failed。分类数据不含回调地址、密钥、原始异常消息或响应内容。
+
+这版不改变 DNS 解析路线、HTTPS、证书、公网地址检查、重定向和代理策略，不将 private/fake IP 当作公网目标，也不自动更改手机 VPN。非公网目标提示用户核对 VPN DNS / 假 IP 设置只是排查方向，不能据此断言本次故障由 VPN 引起。
+
+安装后保持桥连接，再尝试创建一次手动唤醒订阅；若失败，通过状态工具读取新的分类与阶段。若成功，再点击手机面板测试按钮并核对实际 ChatGPT 回复。0.0.21 的目的为补齐根因证据和修复诊断交付，不能以构建或模拟测试通过宣称公网回调已经修复。MCP 工具名与事件定义未变，此次安装后无需为诊断字段单独刷新目录。
