@@ -240,6 +240,7 @@ jobs:
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsCapabilitySearchPlannerTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsSearchIndexCacheTest \
             --tests com.ai.assistance.operit.core.tools.system.RawRgbaFrameWriterTest \
+            --tests com.ai.assistance.operit.core.tools.system.ScreenFrameReadRequestTest \
             --tests com.ai.assistance.operit.core.tools.system.CameraFrameMatcherTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsMessageContextTest \
             --tests com.ai.assistance.operit.integrations.ailimbs.AiLimbsOperationFeedbackTest \

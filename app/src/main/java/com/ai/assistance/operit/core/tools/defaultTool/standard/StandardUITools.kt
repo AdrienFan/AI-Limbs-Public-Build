@@ -579,22 +579,9 @@ open class StandardUITools(protected val context: Context) : ToolImplementations
 
         return try {
             val projection = MediaProjectionHolder.mediaProjection ?: return null
-            val manager =
-                if (cachedMediaProjectionCaptureManager == null || cachedMediaProjection !== projection) {
-                    try {
-                        cachedMediaProjectionCaptureManager?.release()
-                    } catch (_: Exception) {
-                    }
-                    cachedMediaProjection = projection
-                    MediaProjectionCaptureManager(context, projection).also {
-                        cachedMediaProjectionCaptureManager = it
-                    }
-                } else {
-                    cachedMediaProjectionCaptureManager!!
-                }
-
-            manager.setupDisplay()
-            delay(200)
+            val manager = MediaProjectionCaptureManager.forProjection(context, projection)
+            cachedMediaProjection = projection
+            cachedMediaProjectionCaptureManager = manager
             manager
         } catch (e: Exception) {
             AppLogger.e(TAG, "captureScreenshot: Error preparing MediaProjectionCaptureManager", e)
@@ -648,19 +635,29 @@ open class StandardUITools(protected val context: Context) : ToolImplementations
         }
     }
 
-    /** Feedback only: reuse an already authorized, initialized projection; never request consent. */
-    suspend fun captureFreshSharedScreen(file: File, format: String = "png", initialize: Boolean = false): MediaProjectionCaptureManager.FreshFrame = withContext(Dispatchers.IO) {
+    /** Unified frame acquisition. Only explicit initialization may request Android consent. */
+    suspend fun captureFreshSharedScreen(file: File, format: String = "png", initialize: Boolean = false,
+        mode: String = "new_surface", afterFrameId: String? = null, maxAgeMs: Long = 1_000L,
+        timeoutMs: Long = 2_000L): MediaProjectionCaptureManager.FreshFrame = withContext(Dispatchers.IO) {
         if (initialize) checkNotNull(ensureMediaProjectionCaptureManager()) { "Shared-screen capture initialization failed" }
         val projection = checkNotNull(MediaProjectionHolder.mediaProjection) { "Shared screen is not active" }
         check(cachedMediaProjection === projection) { "Shared-screen capture manager is not initialized" }
         val manager = checkNotNull(cachedMediaProjectionCaptureManager) { "Shared-screen capture manager is not ready" }
-        val frame = manager.captureFreshToFile(file, format)
+        val frame = manager.captureFreshToFile(file, format, mode, afterFrameId, maxAgeMs, timeoutMs)
         if (MediaProjectionHolder.mediaProjection !== projection) {
             file.delete()
             error("Shared screen stopped during capture")
         }
         frame
     }
+
+    fun sharedScreenCaptureState(): org.json.JSONObject =
+        (cachedMediaProjectionCaptureManager?.snapshotState()
+            ?: org.json.JSONObject().put("active", false).put("frame_available", false))
+            .put("frame_api_version", 2)
+            .put("frame_modes", org.json.JSONArray(listOf("new_surface", "latest")))
+            .put("frame_formats", org.json.JSONArray(listOf("png", "rgba8888")))
+            .put("supports_newer_frame_wait", true).put("supports_geometry_precondition", true)
 
     override suspend fun captureScreenshot(tool: AITool): Pair<String?, Pair<Int, Int>?> {
         return captureScreenshotToFile(tool)

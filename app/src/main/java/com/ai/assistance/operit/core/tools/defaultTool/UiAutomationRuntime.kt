@@ -334,8 +334,13 @@ internal object UiAutomationRuntime {
     fun validateDisplayPrecondition(context: Context, tool: AITool) {
         val parameters = tool.parameters.associate { it.name to it.value }
         val fields = listOf("expected_display_width", "expected_display_height", "expected_display_rotation")
-        if (fields.none { parameters.containsKey(it) }) return
-        require(fields.all { parameters.containsKey(it) }) { "Incomplete display geometry precondition" }
+        val hasDisplayFields = fields.any { parameters.containsKey(it) }
+        if (!hasDisplayFields && !parameters.containsKey("expected_geometry_id")) return
+        if (hasDisplayFields) require(fields.all { parameters.containsKey(it) }) { "Incomplete display geometry precondition" }
+        parameters["expected_geometry_id"]?.let {
+            com.ai.assistance.operit.core.tools.system.MediaProjectionCaptureManager.requireCurrentGeometry(it)
+        }
+        if (!hasDisplayFields) return
         val display = checkNotNull(context.getSystemService(android.hardware.display.DisplayManager::class.java)
             .getDisplay(android.view.Display.DEFAULT_DISPLAY)) { "Display is unavailable" }
         val metrics = android.util.DisplayMetrics()
@@ -387,7 +392,16 @@ internal object UiAutomationRuntime {
             if (residentCore && selection.backend == UiAutomationBackend.ACCESSIBILITY) {
                 executeAccessibilityInHost(tool, operation)
             } else {
-                validateDisplayPrecondition(context, tool)
+                if (residentCore && tool.parameters.any { it.name.startsWith("expected_display_") || it.name == "expected_geometry_id" }) {
+                    val wire = JSONArray().apply {
+                        tool.parameters.forEach { put(JSONObject().put("name", it.name).put("value", it.value)) }
+                    }
+                    val validation = withContext(Dispatchers.IO) {
+                        ResidentHostComponentProxy.request(ResidentComponentProxyBroker.KIND_UI_AUTOMATION_HOST,
+                            JSONObject().put("action", "validate_display").put("tool_name", tool.name).put("parameters", wire))
+                    }
+                    check(validation.optBoolean("ok", false)) { validation.optString("error", "Display precondition failed") }
+                } else validateDisplayPrecondition(context, tool)
                 val localTools = checkNotNull(tools)
                 when (operation) {
                     UiAutomationOperation.SNAPSHOT -> localTools.getPageInfo(tool)

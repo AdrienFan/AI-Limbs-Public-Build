@@ -72,11 +72,22 @@ object VisualHostRuntime {
         ownerPluginId: String,
         operation: String,
         parameters: JSONObject,
-        captureFrame: suspend () -> JSONObject
+        captureFrame: suspend () -> JSONObject,
+        captureState: () -> JSONObject
     ): JSONObject = when (operation) {
         "list_targets" -> listScreenTargets(context)
         "start" -> startScreenSession(context, ownerPluginId, parameters)
-        "status" -> screenStatus(ownerPluginId, parameters)
+        "status" -> screenStatus(ownerPluginId, parameters).put("capture", captureState())
+        "geometry" -> {
+            requireOwnedScreenSession(ownerPluginId, required(parameters, "session_id"))
+            captureState().put("session_id", parameters.getString("session_id"))
+        }
+        "wait_frame" -> {
+            val session = requireOwnedScreenSession(ownerPluginId, required(parameters, "session_id"))
+            check(session.ready && MediaProjectionHolder.mediaProjection != null) { "Frame waits require an active shared-screen session" }
+            require(parameters.getString("after_frame_id").isNotBlank()) { "after_frame_id is required" }
+            screenFrame(context, ownerPluginId, parameters, captureFrame)
+        }
         "frame" -> screenFrame(context, ownerPluginId, parameters, captureFrame)
         "stop" -> stopScreenSession(context, ownerPluginId, parameters)
         else -> error("Unsupported screen visual operation: $operation")

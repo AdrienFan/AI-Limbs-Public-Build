@@ -326,14 +326,20 @@ class AiLimbsDispatcher(
             .put("error", result.error ?: JSONObject.NULL)
             .put("events", JSONArray(emitted))
         if (!needsFeedback) return response
-        return attachOperationFeedback(response, name, result.success)
+        return attachOperationFeedback(response, name, result.success, parameters)
     }
 
     /** Read an already active Provider after caller-completed work; never start sharing. */
-    private suspend fun attachOperationFeedback(response: JSONObject, name: String, succeeded: Boolean): JSONObject {
+    private suspend fun attachOperationFeedback(response: JSONObject, name: String, succeeded: Boolean, parameters: JSONObject = JSONObject()): JSONObject {
+        val actionParameters = JSONObject()
+        // Only generic spatial/control fields belong to visual action context. Text input and
+        // arbitrary shell commands must not be copied into screenshots or action history.
+        listOf("x", "y", "start_x", "start_y", "end_x", "end_y", "duration", "key_code", "package_name").forEach {
+            if (parameters.has(it)) actionParameters.put(it, parameters.get(it))
+        }
         val request = JSONObject().put("schema", 1).put("event", AiLimbsOperationFeedback.EVENT)
             .put("operation_id", java.util.UUID.randomUUID().toString()).put("tool", name)
-            .put("operation_success", succeeded)
+            .put("operation_success", succeeded).put("action_parameters", actionParameters)
             .put("completed_at_ms", System.currentTimeMillis())
             .put("completed_elapsed_ms", android.os.SystemClock.elapsedRealtime())
             .put("deadline_elapsed_ms", android.os.SystemClock.elapsedRealtime() + 6_000L)

@@ -69,15 +69,20 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
                 "set_presentation" -> setMessagePresentation(parameters)
                 else -> unsupported(id, op)
             }
-            "host.screen.capture@1" -> captureScreenFrame(ownerPluginId)
+            "host.screen.capture@1" -> captureScreenFrame(ownerPluginId, format = parameters.optString("frame_format", "png"), parameters = parameters)
             "host.screen.session@1" ->
 
                 VisualHostRuntime.invokeScreen(
                     appContext,
                     ownerPluginId,
                     op,
-                    parameters
-                ) { captureScreenFrame(ownerPluginId, parameters.optBoolean("fresh", false), parameters.optString("frame_format", "png")) }
+                    parameters,
+                    captureFrame = {
+                        captureScreenFrame(ownerPluginId, parameters.optBoolean("fresh", false),
+                            parameters.optString("frame_format", "png"), parameters,
+                            waitOnly = op == "wait_frame")
+                    }, captureState = { hostScreenCaptureTools.sharedScreenCaptureState() }
+                )
             "host.camera.capture@1", "host.camera.session@1" ->
                 VisualHostRuntime.invokeCamera(
                     appContext,
@@ -176,16 +181,27 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             .put("persisted", updated)
     }
 
-    private suspend fun captureScreenFrame(ownerPluginId: String, fresh: Boolean = false, format: String = "png"): JSONObject {
+    private suspend fun captureScreenFrame(ownerPluginId: String, fresh: Boolean = false, format: String = "png", parameters: JSONObject = JSONObject(), waitOnly: Boolean = false): JSONObject {
         require(format == "png" || format == "rgba8888") { "Unsupported screen frame format" }
         // One acquisition contract for initial, explicit and post-action frames. Initial calls
         // retain normal Android consent; feedback only uses the existing authorized projection.
         val ownerPath = ownerPluginId.replace(Regex("[^A-Za-z0-9._-]"), "_").take(96)
         val directory = File(appContext.cacheDir, "visual-host/$ownerPath")
         check(directory.exists() || directory.mkdirs()) { "Shared-screen scratch directory is unavailable" }
+        val mode = if (waitOnly) "latest" else parameters.optString("frame_mode", "new_surface")
+        require(!fresh || mode == "new_surface") { "Post-action fresh frames require new_surface mode" }
+        val requestedTimeout = parameters.optLong("timeout_ms", 2_000L)
+        require(requestedTimeout in 1L..15_000L) { "Invalid frame wait timeout" }
+        val timeout = if (parameters.has("deadline_elapsed_ms")) {
+            val remaining = parameters.getLong("deadline_elapsed_ms") - android.os.SystemClock.elapsedRealtime()
+            check(remaining > 0L) { "Frame deadline expired" }
+            minOf(requestedTimeout, remaining)
+        } else requestedTimeout
         val frame = hostScreenCaptureTools.captureFreshSharedScreen(
             File(directory, "frame-${java.util.UUID.randomUUID()}.${if (format == "png") "png" else "rgba"}"),
-            format, initialize = !fresh
+            format, initialize = !fresh && !waitOnly, mode = mode,
+            afterFrameId = if (parameters.has("after_frame_id")) parameters.getString("after_frame_id") else null,
+            maxAgeMs = parameters.optLong("max_age_ms", 1_000L), timeoutMs = timeout
         )
         return JSONObject().put("ok", true).put("success", true).put("path", frame.path)
             .put("owner_plugin_id", ownerPluginId).put("width", frame.width).put("height", frame.height)
@@ -194,7 +210,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             .apply { if (frame.format == "rgba8888") put("row_stride", frame.width * 4).put("pixel_stride", 4) }
             .put("frame_id", frame.frameId).put("geometry", frame.geometry).put("timings_ms", frame.timings)
             .put("captured_at_ms", frame.capturedAtMs)
-            .put("freshness", JSONObject().put("method", "new_surface")
+            .put("freshness", JSONObject().put("method", frame.method)
                 .put("requested_elapsed_ms", frame.requestedElapsedMs)
                 .put("captured_elapsed_ms", frame.capturedElapsedMs))
     }
@@ -914,11 +930,14 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
             "host.chat@1/publish_user",
             "host.chat@1/set_presentation",
             "host.screen.capture@1/capture",
+            "host.screen.capture@1/capture_frame",
             "host.screen.session@1/list_targets",
 
             "host.screen.session@1/status",
             "host.screen.session@1/start",
             "host.screen.session@1/frame",
+            "host.screen.session@1/wait_frame",
+            "host.screen.session@1/geometry",
             "host.screen.session@1/stop",
             "host.permission@1/check",
             "host.permission@1/request",

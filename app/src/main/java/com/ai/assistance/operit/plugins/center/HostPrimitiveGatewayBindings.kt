@@ -205,6 +205,7 @@ internal object HostPrimitiveGatewayBindings {
                 "capture_screenshot",
                 HostGatewayHostExecution.MEDIA_PROJECTION_SCREEN_CAPTURE
             ),
+            kernel("capture_frame"),
             enforceAffinity = true
         ),
         "host.screen.session@1" to primitive(
@@ -213,6 +214,8 @@ internal object HostPrimitiveGatewayBindings {
             kernel("status"),
             kernel("start"),
             kernel("frame"),
+            kernel("wait_frame"),
+            kernel("geometry"),
             kernel("stop")
         ),
         "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), kernel("direct_proxy"), pending("listen")),

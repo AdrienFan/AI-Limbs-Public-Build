@@ -1142,6 +1142,14 @@ private class ResidentHostComponentExecutor(
                         )
                         .put("accessibility_available", accessibilityAvailable)
                 }
+                "validate_display" -> {
+                    val parameters = payload.getJSONArray("parameters").objects().map { item ->
+                        ToolParameter(name = item.getString("name"), value = item.getString("value"))
+                    }
+                    val tool = AITool(name = payload.getString("tool_name"), parameters = parameters)
+                    com.ai.assistance.operit.core.tools.defaultTool.UiAutomationRuntime.validateDisplayPrecondition(appContext, tool)
+                    JSONObject().put("ok", true)
+                }
                 "execute_accessibility" -> {
                     val toolName = payload.getString("tool_name").trim()
                     val operation = payload.getString("operation").trim().uppercase()
