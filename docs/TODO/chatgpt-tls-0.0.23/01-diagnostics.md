@@ -4,4 +4,4 @@
 
 旧 reason、stage、exception_type 保持存在，新增 cause_types、certificate_reason、tls_signal；状态工具和面板都保留这些字段。DNS 路线、公网检查、TLS 信任、超时和业务执行语义不变。
 
-[DONE] 分类、交付与回归用例完成，待云端运行；实际 TLS 根因仍待复验。
+[DONE] 分类、交付与回归用例完成，云端 89 项测试通过；实际 TLS 根因仍待复验。

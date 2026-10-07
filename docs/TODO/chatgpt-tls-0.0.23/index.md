@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
-status: implementation-awaiting-cloud-validation
+status: cloud-validated-awaiting-device-tls-cause
 ---
 
 # TLS 内部原因安全分类
