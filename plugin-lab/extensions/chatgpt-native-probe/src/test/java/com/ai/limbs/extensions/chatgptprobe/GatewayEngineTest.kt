@@ -502,6 +502,31 @@ class GatewayEngineTest {
         }
     }
 
+    @Test fun invokeDiagnosticsReachStatusWithoutRequestOrResultContents() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.start { tool, args ->
+                assertEquals("native.execute_shell", tool)
+                assertEquals("private command text", args.getString("command"))
+                JSONObject().put("success", true).put("output", "private result text")
+            }
+            fixture.commands.add(gatewayToolCommand("private-request-id", 521, "ai_limbs_capability_invoke",
+                JSONObject().put("capability_id", "native.execute_shell")
+                    .put("parameters", JSONObject().put("command", "private command text"))))
+            eventually { fixture.responses.any { it.optString("request_id") == "private-request-id" } }
+            val samples = fixture.engine.statusJson().getJSONArray("request_timings")
+            val sample = (0 until samples.length()).map { samples.getJSONObject(it) }
+                .single { it.optString("capability_id") == "native.execute_shell" }
+            for (field in listOf("capability_resolve_ms", "host_invoke_ms", "result_adapt_ms",
+                "result_adapter_wait_ms", "result_adapter_work_ms", "structured_text_bytes")) {
+                assertTrue("Missing diagnostic: $field", sample.has(field))
+                assertTrue(sample.getLong(field) >= 0L)
+            }
+            assertFalse(sample.has("cached_read_ms"))
+            assertFalse(sample.has("cache_write_ms"))
+            assertFalse(samples.toString().contains("private"))
+        }
+    }
+
     @Test fun resolverFailureIsNotReportedAsUncertainBusinessExecution() = runBlocking {
         Fixture().use { fixture ->
             fixture.describeFailures["native.broken"] = "resolver unavailable"

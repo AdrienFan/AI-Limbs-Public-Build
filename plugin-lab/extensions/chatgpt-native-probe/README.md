@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.26
+# AI Limbs-ChatGPT 0.0.27
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -203,3 +203,22 @@ It does not accept duplicate deliveries by changing the assertion to >= five.
 
 The newly added wake-switch tests passed in run 37569375137. This repair is submitted for cloud testing,
 compilation and packaging only; no local project tests or build were run, and the new run is not polled.
+
+## Request processing diagnostics in 0.0.27
+
+The bounded gateway-status timing samples now identify the resolved capability and separate
+capability resolution, the Host invocation, result adaptation, and cached page/media reads.
+Result adaptation additionally reports monitor wait, adapter work, cache scan and write costs,
+scan passes, cumulative entries and plaintext bytes scanned, image Base64 characters, and
+structured text bytes. Durations are monotonic milliseconds.
+
+Diagnostics retain only public capability identifiers, durations and aggregate sizes/counts.
+They never expose parameters, result contents, record names, callback URLs or signing keys.
+Missing stages remain absent or null; measurements are recorded on exceptional paths as well.
+No operation is re-executed for measurement.
+
+This release is diagnostic only. It retains the existing image settings, cache expiry and
+capacity checks, encryption, delivery semantics and wire protocol. The observed 10–17 second
+interaction latency has not been consistently reproduced; this version does not claim a fix.
+Compare host_invoke_ms with result_adapt_ms, then result_adapter_wait_ms, cache_scan_ms and
+cache_write_ms, alongside the existing response_post_ms to attribute the next slow request.

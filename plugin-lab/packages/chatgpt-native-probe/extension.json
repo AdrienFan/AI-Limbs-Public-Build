@@ -2,7 +2,7 @@
   "format": "AIL_EXTENSION_V1",
   "schema_version": 1,
   "extension_id": "ai_limbs.bridge.chatgpt_native_probe",
-  "version": "0.0.26",
+  "version": "0.0.27",
   "roles": [
     "system_extension"
   ],

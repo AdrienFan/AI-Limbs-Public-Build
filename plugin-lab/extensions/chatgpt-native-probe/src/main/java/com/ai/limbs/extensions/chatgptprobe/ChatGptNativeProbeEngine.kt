@@ -396,7 +396,7 @@ internal class ChatGptNativeProbeEngine(
             try {
                 val answer = if (control) {
                     requestTimings.mark(receiptId, "started")
-                    processCommand(command, identity, epoch)
+                    processCommand(command, identity, epoch, receiptId)
                 } else businessSlots.withPermit {
                     requestTimings.mark(receiptId, "started")
                     val arguments = rpc?.optJSONObject("params")?.optJSONObject("arguments")
@@ -407,7 +407,7 @@ internal class ChatGptNativeProbeEngine(
                         toolName == TOOL_INVOKE && requestedTimeout != null -> requestedTimeout.toLong().coerceIn(1_000L, 1_800_000L)
                         else -> 300_000L
                     }
-                    withTimeout(deadline) { processCommand(command, identity, epoch) }
+                    withTimeout(deadline) { processCommand(command, identity, epoch, receiptId) }
                 }
                 requestTimings.mark(receiptId, "processed")
                 receipts.ready(receiptId, answer)
@@ -430,8 +430,8 @@ internal class ChatGptNativeProbeEngine(
         Unit
     }
 
-    private suspend fun processCommand(command: JSONObject, identity: String, epoch: Long): JSONObject {
-        val answer = processRpcCommand(command, identity, epoch)
+    private suspend fun processCommand(command: JSONObject, identity: String, epoch: Long, timingId: String): JSONObject {
+        val answer = processRpcCommand(command, identity, epoch, timingId)
         observeProtocolResponse(answer, epoch)
         return answer
     }
@@ -450,7 +450,7 @@ internal class ChatGptNativeProbeEngine(
         }
     }
 
-    private suspend fun processRpcCommand(command: JSONObject, identity: String, epoch: Long): JSONObject {
+    private suspend fun processRpcCommand(command: JSONObject, identity: String, epoch: Long, timingId: String): JSONObject {
         val channel = command.getString("channel")
         if (command.getString("command_type") == "session_termination") {
             activeRequests.values.filter { it.binding == identity && it.channel == channel && it.rpcKey != "null" }.forEach { it.job.cancel() }
@@ -491,7 +491,7 @@ internal class ChatGptNativeProbeEngine(
                 update(epoch) { it.copy(lastToolsListAtMs = System.currentTimeMillis()) }
                 rpcSuccess(id, JSONObject().put("tools", toolDefinitions()))
             }
-            "tools/call" -> handleToolCall(id, rpc.optJSONObject("params"), epoch, identity)
+            "tools/call" -> handleToolCall(id, rpc.optJSONObject("params"), epoch, identity, timingId)
             else -> rpcError(id, -32601, "Method not found: $method")
         }
         return GatewayProtocol.delivery(command, answer)
@@ -726,8 +726,24 @@ internal class ChatGptNativeProbeEngine(
         .put(tool(TOOL_STATUS, "Inspect gateway transport, current-listener access observations, protocol errors, capability outcomes and delivery health. Includes official custom MCP metadata refresh steps; cannot refresh ChatGPT's catalog automatically.",
             JSONObject().put("type", "object").put("properties", JSONObject()).put("additionalProperties", false)))
 
-    private suspend fun handleToolCall(id: Any, params: JSONObject?, epoch: Long, identity: String): JSONObject {
+    private suspend fun handleToolCall(id: Any, params: JSONObject?, epoch: Long, identity: String, timingId: String): JSONObject {
         val results = results(identity)
+        fun <T> measureLocal(field: String, block: () -> T): T {
+            val started = System.nanoTime()
+            try { return block() }
+            finally { requestTimings.cost(timingId, field, System.nanoTime() - started) }
+        }
+        suspend fun invokeMeasured(capabilityId: String, parameters: JSONObject): JSONObject {
+            requestTimings.capability(timingId, capabilityId)
+            val started = System.nanoTime()
+            try { return invokeAiLimbs(capabilityId, parameters) }
+            finally { requestTimings.cost(timingId, "host_invoke_ms", System.nanoTime() - started) }
+        }
+        fun adaptMeasured(value: JSONObject): JSONObject {
+            val metrics = GatewayResultMetrics()
+            try { return measureLocal("result_adapt_ms") { results.adapt(value, metrics) } }
+            finally { requestTimings.metrics(timingId, metrics.snapshot()) }
+        }
         val name = params?.optString("name")?.trim().orEmpty()
         if (params == null || params.opt("name") !is String || (params.has("arguments") && params.opt("arguments") !is JSONObject)) return rpcError(id, -32602, "Invalid tools/call parameters")
         val arguments = params.optJSONObject("arguments") ?: JSONObject()
@@ -761,17 +777,17 @@ internal class ChatGptNativeProbeEngine(
                     val cursor = arguments.getString("cursor")
                     require(cursor.isNotBlank()) { "cursor is required" }
                     recordAdvertisedToolCall(epoch)
-                    return rpcSuccess(id, results.pageResult(cursor, offset.toInt()))
+                    return rpcSuccess(id, measureLocal("cached_read_ms") { results.pageResult(cursor, offset.toInt()) })
                 }
                 TOOL_MEDIA_READ -> {
                     val mediaId = arguments.getString("media_id")
                     require(mediaId.isNotBlank()) { "media_id is required" }
                     recordAdvertisedToolCall(epoch)
-                    return rpcSuccess(id, results.readMedia(mediaId))
+                    return rpcSuccess(id, measureLocal("cached_read_ms") { results.readMedia(mediaId) })
                 }
                 TOOL_STATUS -> {
                     recordAdvertisedToolCall(epoch)
-                    return rpcSuccess(id, results.adapt(statusJson()))
+                    return rpcSuccess(id, adaptMeasured(statusJson()))
                 }
             }
             val result = when (name) {
@@ -779,7 +795,7 @@ internal class ChatGptNativeProbeEngine(
                     recordAdvertisedToolCall(epoch)
                     executionStarted = true
                     update(epoch) { it.copy(access = it.access.copy(capabilityInvokeCount = it.access.capabilityInvokeCount + 1)) }
-                    invokeAiLimbs("ai_limbs.message_context.read", JSONObject())
+                    invokeMeasured("ai_limbs.message_context.read", JSONObject())
                 }
                 TOOL_SEARCH -> {
                     val query = arguments.optString("query").trim()
@@ -794,7 +810,7 @@ internal class ChatGptNativeProbeEngine(
                     }
                     executionStarted = true
                     recordAdvertisedToolCall(epoch)
-                    invokeAiLimbs("capability.search", request).also(::rememberInvokeIds)
+                    invokeMeasured("capability.search", request).also(::rememberInvokeIds)
                 }
 
                 TOOL_DESCRIBE -> {
@@ -802,7 +818,7 @@ internal class ChatGptNativeProbeEngine(
                     require(capabilityId.isNotBlank()) { "capability_id is required" }
                     executionStarted = true
                     recordAdvertisedToolCall(epoch)
-                    invokeAiLimbs(
+                    invokeMeasured(
                         "capability.describe",
                         JSONObject().put("capability_id", capabilityId)
                     ).also(::rememberInvokeIds)
@@ -818,10 +834,12 @@ internal class ChatGptNativeProbeEngine(
                     require(!arguments.has("parameters") || arguments.opt("parameters") is JSONObject) { "parameters must be an object" }
                     val parameters = arguments.optJSONObject("parameters") ?: JSONObject()
                     recordAdvertisedToolCall(epoch)
-                    val invokeId = resolveInvokeId(capabilityId)
+                    val resolveStarted = System.nanoTime()
+                    val invokeId = try { resolveInvokeId(capabilityId) }
+                    finally { requestTimings.cost(timingId, "capability_resolve_ms", System.nanoTime() - resolveStarted) }
                     executionStarted = true
                     update(epoch) { it.copy(access = it.access.copy(capabilityInvokeCount = it.access.capabilityInvokeCount + 1)) }
-                    invokeAiLimbs(invokeId, JSONObject(parameters.toString()))
+                    invokeMeasured(invokeId, JSONObject(parameters.toString()))
                 }
 
                 else -> return unadvertisedToolError(id)
@@ -838,7 +856,7 @@ internal class ChatGptNativeProbeEngine(
                 )) }
             }
             update(epoch) { it.copy(lastCapabilityResultAtMs = System.currentTimeMillis()) }
-            rpcSuccess(id, results.adapt(result))
+            rpcSuccess(id, adaptMeasured(result))
         } catch (cancelled: CancellationException) {
             if (executionStarted && (name == TOOL_INVOKE || name == TOOL_MESSAGE_CONTEXT) && receivedInvokeResult == null) recordUncertainInvoke(epoch)
             throw cancelled

@@ -20,7 +20,15 @@ internal class GatewayResults(
         }
     }
 ) {
-    @Synchronized fun adapt(result: JSONObject): JSONObject {
+    fun adapt(result: JSONObject, metrics: GatewayResultMetrics = GatewayResultMetrics()): JSONObject {
+        val queuedAt = metrics.clock()
+        return synchronized(this) {
+            metrics.duration("result_adapter_wait_ms", metrics.clock() - queuedAt)
+            metrics.measure("result_adapter_work_ms") { adaptLocked(result, metrics) }
+        }
+    }
+
+    private fun adaptLocked(result: JSONObject, metrics: GatewayResultMetrics): JSONObject {
         val clean = JSONObject(result.toString())
         val content = JSONArray()
         val mediaErrors = JSONArray()
@@ -50,12 +58,13 @@ internal class GatewayResults(
                                 require(handles.length() < 4 && encodedSize + data.length <= MEDIA_LIMIT) { "Media budget exhausted" }
                                 require(validImage(Base64.getDecoder().decode(data), mime)) { "Invalid image data" }
                                 val image = JSONObject().put("type", "image").put("mimeType", mime).put("data", data)
-                                val handle = save("media", image.toString())
+                                val handle = save("media", image.toString(), metrics)
                                 image.put("_meta", JSONObject().put("ai_limbs_media_id", handle))
                                 handles.put(JSONObject().put("media_id", handle).put("mimeType", mime).put("sha256", hash))
                                 content.put(image)
                                 seen.add(hash)
                                 encodedSize += data.length
+                                metrics.count("media_base64_chars", data.length.toLong())
                             }
                         } catch (error: Exception) {
                             mediaErrors.put(JSONObject().put("index", index).put("reason", error.javaClass.simpleName))
@@ -82,10 +91,12 @@ internal class GatewayResults(
             .put("attachments", handles).put("errors", mediaErrors).put("partial", mediaErrors.length() > 0)
             .put("next_action", "Use ai_limbs_media_read for saved media; do not repeat the original action to retry delivery."))
         val text = clean.toString()
-        val structured = if (text.toByteArray(Charsets.UTF_8).size <= INLINE_BYTES) clean else {
+        val textBytes = text.toByteArray(Charsets.UTF_8).size
+        metrics.count("structured_text_bytes", textBytes.toLong())
+        val structured = if (textBytes <= INLINE_BYTES) clean else {
             // Let the engine report preparation failure using the already received Host outcome.
             // Swallowing a cache error here falsely returns isError=false and bypasses its counter.
-            val cursor = save("result", text)
+            val cursor = save("result", text, metrics)
             readResult(cursor, 0).put("operation_result_is_error", failed)
         }
         if (structured !== clean) {
@@ -137,19 +148,29 @@ internal class GatewayResults(
         return entry
     }
 
-    private fun save(kind: String, value: String): String {
+    private fun save(kind: String, value: String, metrics: GatewayResultMetrics): String {
         require(value.toByteArray(Charsets.UTF_8).size <= MAX_RESULT_BYTES) { "Result exceeds cache limit" }
         val entry = JSONObject().put("expires", now() + CACHE_TTL_MS).put("binding", binding).put("value", value).toString()
-        val cached = store.names().filter { it.startsWith("result_") || it.startsWith("media_") }
-        var bytes = 0L
-        var count = 0
-        cached.forEach { name ->
-            val text = store.read(name) ?: return@forEach
-            if (JSONObject(text).getLong("expires") <= now()) store.delete(name) else { count++; bytes += text.toByteArray(Charsets.UTF_8).size }
+        // Attribute the existing full encrypted-cache scan before deciding whether it needs
+        // optimization. Keep expiry/capacity and write ordering identical during diagnosis.
+        val (count, bytes) = metrics.measure("cache_scan_ms") {
+            metrics.count("cache_scan_passes", 1L)
+            val cached = store.names().filter { it.startsWith("result_") || it.startsWith("media_") }
+            var bytes = 0L
+            var count = 0
+            cached.forEach { name ->
+                metrics.count("cache_entries_scanned", 1L)
+                val text = store.read(name) ?: return@forEach
+                val size = text.toByteArray(Charsets.UTF_8).size.toLong()
+                metrics.count("cache_plaintext_bytes_scanned", size)
+                if (JSONObject(text).getLong("expires") <= now()) store.delete(name)
+                else { count++; bytes += size }
+            }
+            count to bytes
         }
         require(count < MAX_CACHE_ENTRIES && bytes + entry.toByteArray(Charsets.UTF_8).size <= MAX_CACHE_BYTES) { "Result cache capacity reached" }
         val id = kind + "_" + UUID.randomUUID().toString().replace("-", "")
-        store.write(id, entry)
+        metrics.measure("cache_write_ms") { store.write(id, entry) }
         return id
     }
 
