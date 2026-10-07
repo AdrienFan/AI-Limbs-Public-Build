@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.27
+# AI Limbs-ChatGPT 0.0.28
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -222,3 +222,31 @@ capacity checks, encryption, delivery semantics and wire protocol. The observed 
 interaction latency has not been consistently reproduced; this version does not claim a fix.
 Compare host_invoke_ms with result_adapt_ms, then result_adapter_wait_ms, cache_scan_ms and
 cache_write_ms, alongside the existing response_post_ms to attribute the next slow request.
+
+## Response POST diagnostics in 0.0.28
+
+Version 0.0.27 reproduced a 10.8-second tool call: Host invocation took 1.52 s,
+result adaptation 0.13 s, and the response POST 5.68 s. Smaller stored previews did
+not consistently return faster than larger ones. This identifies a slow transport
+phase, but does not yet distinguish local upload from connection setup or waiting
+for response headers. The full PNG-to-JPEG screenshot path remains another suspect.
+
+The latest POST attempt adds numeric fields to the same bounded request timings:
+- `post_request_start_ms`: call start to first request headers; includes dispatch,
+  connection selection and any DNS/connect/TLS work before that request.
+- `post_dns_ms`, `post_connect_ms`, `post_tls_ms`: cumulative observed phases, including
+  failed connection attempts. Connect includes TLS, and all three overlap the first
+  field; do not add them together. A reused connection omits unobserved setup phases.
+- `post_upload_ms`, `post_body_bytes`: body writes and byte count across HTTP attempts.
+  Socket write completion does not prove the remote server has received all bytes.
+- `post_wait_headers_ms`: body write completion to response header completion;
+  includes network transit, remote processing and header reading. It is not a pure
+  server processing measurement. An interrupted phase records time until failure.
+- `post_completion_ms`: final response headers to local response close/cleanup.
+- `post_connect_attempts`: connections attempted by this call, when observed.
+
+HTTP-level retries accumulate within a POST; a later gateway delivery attempt
+replaces its previous network fields. No URL, host, IP, proxy, headers, request IDs,
+body contents or credentials enter these metrics. Pools, dispatcher, routing, TLS,
+timeouts, retries, wire format and screenshot quality remain unchanged. This release
+adds evidence and does not claim a latency fix.

@@ -30,6 +30,19 @@ class GatewayTimingsTest {
         timings.mark("id-0", "acked")
         assertEquals(16, timings.snapshot().length())
     }
+    @Test fun latestPostAttemptClearsEarlierSetupAndIgnoresPrivateFields() {
+        val timings = GatewayTimings { 0L }
+        timings.accepted("private-id", "ai_limbs_capability_invoke", 0L)
+        timings.metrics("private-id", mapOf("cache_scan_ms" to 2L))
+        timings.networkMetrics("private-id", mapOf("post_dns_ms" to 10L, "post_upload_ms" to 20L))
+        timings.networkMetrics("private-id", mapOf("post_upload_ms" to 3L, "private-host" to 999L))
+        val sample = timings.snapshot().getJSONObject(0)
+        assertFalse(sample.has("post_dns_ms"))
+        assertEquals(3L, sample.getLong("post_upload_ms"))
+        assertEquals(2L, sample.getLong("cache_scan_ms"))
+        assertFalse(sample.toString().contains("private"))
+    }
+
     @Test fun processingDetailsAreBoundedNumericAndAssociatedWithPublicCapability() {
         val timings = GatewayTimings { 0L }
         timings.accepted("private-id", "ai_limbs_capability_invoke", 0L)

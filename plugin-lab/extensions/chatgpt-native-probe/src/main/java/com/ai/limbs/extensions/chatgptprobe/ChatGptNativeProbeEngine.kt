@@ -289,8 +289,11 @@ internal class ChatGptNativeProbeEngine(
     }
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
-    private suspend fun execute(request: Request, polling: Boolean = false): Response {
-        val call = httpClient.newCall(request)
+    private suspend fun execute(request: Request, polling: Boolean = false, postMetrics: GatewayPostMetrics? = null): Response {
+        // newBuilder shares the original connection pool and dispatcher and preserves all routing,
+        // TLS and timeout settings. Only response POSTs receive request-local observation hooks.
+        val client = if (postMetrics == null) httpClient else httpClient.newBuilder().eventListener(postMetrics).build()
+        val call = client.newCall(request)
         if (polling) pollCall = call
         return suspendCancellableCoroutine { continuation ->
             continuation.invokeOnCancellation { call.cancel() }
@@ -593,7 +596,7 @@ internal class ChatGptNativeProbeEngine(
             DeliveryRetry(shard, System.nanoTime() + waitMs * 1_000_000L, (backoff * 2).coerceAtMost(MAX_RETRY_MS))
         try {
             requestTimings.mark(id, "posting")
-            postTunnelResponse(config, apiKey, shard, record.getJSONObject("response"), epoch)
+            postTunnelResponse(config, apiKey, shard, record.getJSONObject("response"), epoch, id)
             requestTimings.mark(id, "posted")
             if (receipts.delivered(id, shard)) requestTimings.mark(id, "acked")
             return null
@@ -1045,14 +1048,20 @@ internal class ChatGptNativeProbeEngine(
                     .put("message", message)
             )
 
-    private suspend fun postTunnelResponse(config: ChatGptProbeConfig, apiKey: String, shardToken: String, payload: JSONObject, epoch: Long) {
+    private suspend fun postTunnelResponse(config: ChatGptProbeConfig, apiKey: String, shardToken: String, payload: JSONObject, epoch: Long, timingId: String) {
+        val metrics = GatewayPostMetrics()
         val url = config.baseUrl.toHttpUrl().newBuilder().addPathSegments("v1/tunnels").addPathSegment(config.tunnelId).addPathSegment("response").build()
         val request = commonHeaders(Request.Builder().url(url).post(payload.toString().toRequestBody(JSON_MEDIA_TYPE)), apiKey)
             .header("Content-Type", "application/json").header("X-Tunnel-Shard-Token", shardToken).build()
-        execute(request).use { response ->
-            if (!response.isSuccessful) throw httpFailure(response)
-            update(epoch) { it.copy(responseCount = it.responseCount + 1, lastStatusCode = response.code,
-                lastServiceRequestId = response.header("x-request-id"), lastResponseAckAtMs = System.currentTimeMillis(), lastDeliveryError = null) }
+        try {
+            execute(request, postMetrics = metrics).use { response ->
+                if (!response.isSuccessful) throw httpFailure(response)
+                update(epoch) { it.copy(responseCount = it.responseCount + 1, lastStatusCode = response.code,
+                    lastServiceRequestId = response.header("x-request-id"), lastResponseAckAtMs = System.currentTimeMillis(), lastDeliveryError = null) }
+            }
+        } finally {
+            metrics.finish()
+            requestTimings.networkMetrics(timingId, metrics.snapshot())
         }
     }
 

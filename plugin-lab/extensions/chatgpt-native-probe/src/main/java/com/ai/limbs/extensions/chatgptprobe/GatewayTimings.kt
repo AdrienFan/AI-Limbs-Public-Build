@@ -46,6 +46,15 @@ internal class GatewayTimings(private val clock: () -> Long = System::nanoTime) 
         }
     }
 
+    @Synchronized fun networkMetrics(id: String, values: Map<String, Long>) {
+        val sample = samples[id] ?: return
+        // response_post_ms describes the latest attempt. Drop earlier attempt-only phases too.
+        GatewayPostMetrics.FIELDS.forEach { sample.metrics.remove(it) }
+        values.forEach { (field, value) ->
+            if (field in GatewayPostMetrics.FIELDS) sample.metrics[field] = value.coerceAtLeast(0L)
+        }
+    }
+
     @Synchronized fun snapshot(): JSONArray = JSONArray().apply {
         samples.values.forEach { sample ->
             val value = JSONObject().put("tool", sample.tool).put("delivery_attempts", sample.attempts)

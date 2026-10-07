@@ -513,6 +513,13 @@ class GatewayEngineTest {
                 JSONObject().put("capability_id", "native.execute_shell")
                     .put("parameters", JSONObject().put("command", "private command text"))))
             eventually { fixture.responses.any { it.optString("request_id") == "private-request-id" } }
+            eventually {
+                val samples = fixture.engine.statusJson().getJSONArray("request_timings")
+                (0 until samples.length()).any {
+                    val value = samples.getJSONObject(it)
+                    value.optString("capability_id") == "native.execute_shell" && value.has("post_completion_ms")
+                }
+            }
             val samples = fixture.engine.statusJson().getJSONArray("request_timings")
             val sample = (0 until samples.length()).map { samples.getJSONObject(it) }
                 .single { it.optString("capability_id") == "native.execute_shell" }
@@ -521,6 +528,11 @@ class GatewayEngineTest {
                 assertTrue("Missing diagnostic: $field", sample.has(field))
                 assertTrue(sample.getLong(field) >= 0L)
             }
+            for (field in listOf("post_request_start_ms", "post_upload_ms", "post_wait_headers_ms", "post_completion_ms")) {
+                assertTrue("Missing POST diagnostic: $field", sample.has(field))
+                assertTrue(sample.getLong(field) >= 0L)
+            }
+            assertTrue(sample.getLong("post_body_bytes") > 0L)
             assertFalse(sample.has("cached_read_ms"))
             assertFalse(sample.has("cache_write_ms"))
             assertFalse(samples.toString().contains("private"))

@@ -65,3 +65,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [回复投递快照竞态修复](chatgpt-delivery-0.0.26/index.md)：0.0.26
 
 - [ChatGPT 操作延迟分段诊断](chatgpt-latency-0.0.27/index.md)：0.0.27
+
+- [ChatGPT response POST diagnostics 0.0.28](chatgpt-latency-0.0.28/index.md)
