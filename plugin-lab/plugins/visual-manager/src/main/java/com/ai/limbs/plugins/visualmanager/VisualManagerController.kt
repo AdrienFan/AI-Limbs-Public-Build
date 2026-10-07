@@ -5,6 +5,7 @@ import android.graphics.BitmapFactory
 import android.graphics.Matrix
 import android.media.ExifInterface
 import android.util.Base64
+import android.os.SystemClock
 import com.ai.limbs.plugin.runtime.InProcessPluginUiHost
 import com.ai.limbs.plugin.runtime.InProcessUiStateProvider
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -57,7 +58,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 "sources" -> sources(kind(parameters))
                 "permission" -> permission(parameters)
                 "start" -> start(kind(parameters), parameters)
-                "frame" -> frame(kind(parameters), parameters)
+                "frame", "get_frame" -> frame(kind(parameters), parameters)
+                "tap_on_frame" -> tapOnFrame(parameters)
                 "operation.feedback" -> operationFeedback(parameters)
                 "message.context" -> cameraMessageContext(parameters)
                 "capture" -> capture(kind(parameters), parameters)
@@ -73,7 +75,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 "images.read" -> locks.getValue("images").withLock {
                     val meta = imageMetadata(parameters.getString("asset_id"))
                     val image = encodedImage(imageFile(meta), meta, parameters.optInt("max_edge", 1024))
-                    image.put("mcp_content", content(image))
+                    attachImage(image, image)
                 }
                 "images.delete" -> perform("images", "删除图像") {
                     val meta = imageMetadata(parameters.getString("asset_id"))
@@ -193,6 +195,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             scratch = File(hostFrame.getString("path"))
             ScreenFeedbackContract.requireFresh(request, captured)
             val image = updatePreview("screen", captured, generation, 524_288, 960)
+            image.put("last_operation", JSONObject().put("operation_id", request.getString("operation_id"))
+                .put("completed_elapsed_ms", request.getLong("completed_elapsed_ms")))
             val imageContent = content(image)
             image.remove("data")
             return synchronized(stateLock) {
@@ -316,9 +320,11 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val id = opened.getString("session_id")
         try {
             val captured = captureSession(kind, id)
-            val shown = updatePreview(kind, captured, it)
-            deleteHostScratch(frameFile(kind, captured))
-            opened.put("preview", shown).put("mcp_content", content(shown))
+            val source = frameFile(kind, captured)
+            try {
+                val shown = updatePreview(kind, captured, it)
+                attachImage(opened.put("preview", shown), shown)
+            } finally { deleteHostScratch(source) }
         } catch (error: Throwable) {
             // A session that never delivered its first frame is not reported as ready.
             try { hostCall(sessionPrimitive(kind), "stop", JSONObject().put("session_id", id)) }
@@ -327,25 +333,29 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         }
     }
 
-    private suspend fun captureSession(kind: String, id: String): JSONObject {
-        val result = hostCall(sessionPrimitive(kind), "frame", JSONObject().put("session_id", id))
+    private suspend fun captureSession(kind: String, id: String, save: Boolean = false): JSONObject {
+        val request = JSONObject().put("session_id", id)
+        if (kind == "screen") request.put("frame_format", if (save) "png" else "rgba8888")
+        val result = hostCall(sessionPrimitive(kind), "frame", request)
         val frame = if (kind == "screen") result.getJSONObject("frame") else result
         VisualOperationResult.requireHost(frame)
-        if (kind == "screen") result.put("mime_type", "image/png")
+        if (kind == "screen") result.put("mime_type", frame.getString("mime_type"))
         return result
     }
 
     private suspend fun frame(kind: String, p: JSONObject): JSONObject = perform(kind, "读取画面") {
-        val captured = captureSession(kind, p.getString("session_id"))
         val edge = p.optInt("max_edge", 1024)
         require(edge in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
-        val image = updatePreview(kind, captured, it, edge = edge)
-        if (p.optBoolean("save", false)) {
-            val meta = frameMetadata(kind, captured, frameFile(kind, captured))
-            captured.put("managed_asset", locks.getValue("images").withLock { archive(frameFile(kind, captured), meta) })
-        }
-        deleteHostScratch(frameFile(kind, captured))
-        captured.put("preview", image).put("mcp_content", content(image))
+        val captured = captureSession(kind, p.getString("session_id"), p.optBoolean("save", false))
+        val source = frameFile(kind, captured)
+        try {
+            val image = updatePreview(kind, captured, it, edge = edge)
+            if (p.optBoolean("save", false)) {
+                val meta = frameMetadata(kind, captured, source)
+                captured.put("managed_asset", locks.getValue("images").withLock { archive(source, meta) })
+            }
+            attachImage(captured.put("preview", image), image)
+        } finally { deleteHostScratch(source) }
     }
 
     private suspend fun capture(kind: String, p: JSONObject): JSONObject = perform(kind, "拍摄并保存") {
@@ -366,7 +376,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val saved = locks.getValue("images").withLock { archive(file, meta) }
         val image = updatePreview(kind, captured, it)
         deleteHostScratch(file)
-        captured.put("managed_asset", saved).put("preview", image).put("mcp_content", content(image))
+        attachImage(captured.put("managed_asset", saved).put("preview", image), image)
     }
 
     /** Stop never queues behind a long frame request; generation invalidates its eventual result. */
@@ -427,16 +437,31 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             .put("session_id", result.optString("session_id"))
             .put("width", raw?.width ?: options.outWidth).put("height", raw?.height ?: options.outHeight)
             .put("mime_type", if (raw != null) "application/octet-stream" else options.outMimeType).put("file_name", file.name)
+            .put("original_width", raw?.width ?: options.outWidth).put("original_height", raw?.height ?: options.outHeight)
+            .apply {
+                if (kind == "screen") {
+                    put("frame_id", frame.getString("frame_id"))
+                    put("geometry", JSONObject(frame.getJSONObject("geometry").toString()))
+                    put("timings_ms", JSONObject(frame.getJSONObject("timings_ms").toString()))
+                }
+            }
     }
 
     private data class EncodedPreview(val image: JSONObject, val bytes: ByteArray)
 
     private suspend fun updatePreview(kind: String, result: JSONObject, generation: Long?, maxBytes: Int = 1_048_576, edge: Int = 1024): JSONObject = previewLock.withLock {
+        val startedElapsed = SystemClock.elapsedRealtime()
         val source = frameFile(kind, result)
         val meta = frameMetadata(kind, result, source)
         val frame = if (kind == "screen" && result.has("frame")) result.getJSONObject("frame") else result
         val raw = if (frame.optString("format") == "rgba8888") RawScreenFrame.read(frame, source) else null
         val encoded = encodeImage(source, meta, edge, maxBytes, raw)
+        if (kind == "screen") {
+            encoded.image.getJSONObject("timings_ms").put("preview_encode_ms", SystemClock.elapsedRealtime() - startedElapsed)
+            encoded.image.put("image_to_touch", FrameCoordinates.mapping(encoded.image))
+            meta.put("timings_ms", encoded.image.getJSONObject("timings_ms"))
+                .put("image_to_touch", encoded.image.get("image_to_touch"))
+        }
         val destination = File(previewRoot(), "$kind.jpg")
         synchronized(stateLock) {
             check(generation == generations[kind]) { "取帧已被停止指令取消" }
@@ -455,7 +480,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         require(edge in 160..1280) { "max_edge 必须在 160 到 1280 之间" }
         val meta = previews[kind] ?: error("此来源尚无预览")
         val encoded = encodedImage(File(previewRoot(), meta.getString("file_name")), meta, edge)
-        return encoded.put("mcp_content", content(encoded))
+        return attachImage(encoded, encoded)
     }
 
     private fun encodedImage(source: File, meta: JSONObject, edge: Int, maxBytes: Int = 1_048_576): JSONObject {
@@ -505,13 +530,62 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             check(resized.compress(Bitmap.CompressFormat.JPEG, 82, stream)) { "预览编码失败" }
             val bytes = stream.toByteArray()
             check(bytes.size <= maxBytes) { "预览超过 $maxBytes 字节上限" }
-            EncodedPreview(JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", resized.width)
-                .put("height", resized.height), bytes)
+            val image = JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", resized.width)
+                .put("height", resized.height)
+            if (image.optString("kind") == "screen") image.put("image_to_touch", FrameCoordinates.mapping(image))
+            EncodedPreview(image, bytes)
         } finally {
             // Rotation/resize allocation failures must also release the full raw-frame bitmap.
             scaled?.takeIf { it !== rotated && it !== decoded }?.recycle()
             rotated?.takeIf { it !== decoded }?.recycle()
             decoded.recycle()
+        }
+    }
+
+    private fun attachImage(result: JSONObject, image: JSONObject): JSONObject {
+        val attachment = content(image)
+        image.remove("data")
+        return result.put("mcp_content", attachment)
+    }
+
+    private suspend fun tapOnFrame(p: JSONObject): JSONObject = perform("screen", "按画面点击") { generation ->
+        require(p.optInt("max_edge", 1024) in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
+        val meta = previewLock.withLock {
+            JSONObject(checkNotNull(previews["screen"]) { "请先获取屏幕帧" }.toString())
+        }
+        check(p.getString("frame_id") == meta.getString("frame_id")) { "STALE_FRAME: 请使用最新屏幕帧" }
+        val status = VisualOperationResult.requireHost(hostCall(sessionPrimitive("screen"), "status",
+            JSONObject().put("session_id", meta.getString("session_id"))))
+        check(status.getBoolean("active") && status.getBoolean("projection_ready")) { "共享屏会话已停止" }
+        val (x, y) = FrameCoordinates.normalized(meta, p.getDouble("x"), p.getDouble("y"))
+        val geometry = meta.getJSONObject("geometry")
+        val started = SystemClock.elapsedRealtime()
+        val actionId = UUID.randomUUID().toString()
+        val action = hostCall("host.ui.automation@1", "tap", JSONObject().put("x", x).put("y", y)
+            .put("screen_feedback", false)
+            .put("expected_display_width", geometry.getInt("touch_width"))
+            .put("expected_display_height", geometry.getInt("touch_height"))
+            .put("expected_display_rotation", geometry.getInt("rotation")))
+        VisualOperationResult.requireFlag(action, "success", "触控未完成")
+        val completed = SystemClock.elapsedRealtime()
+        // Observe exactly once after the action. A delivery failure must retain the successful
+        // injection outcome so the caller does not repeat an uncertain tap.
+        val result = JSONObject().put("action_success", true).put("operation_id", actionId)
+            .put("source_frame_id", meta.getString("frame_id")).put("touch_x", x).put("touch_y", y)
+            .put("completed_elapsed_ms", completed).put("action_elapsed_ms", completed - started)
+        try {
+            val captured = captureSession("screen", meta.getString("session_id"))
+            val source = frameFile("screen", captured)
+            try {
+                val image = updatePreview("screen", captured, generation, edge = p.optInt("max_edge", 1024))
+                result.put("observation_success", true).put("frame", captured).put("preview", image)
+                attachImage(result, image)
+            } finally { deleteHostScratch(source) }
+        } catch (error: CancellationException) { throw error }
+        catch (error: Exception) {
+            host.logger.e("VisualWorkbench", "Tap completed but observation failed", error)
+            result.put("observation_success", false).put("observation_error", error.message ?: error.javaClass.simpleName)
+                .put("automatic_reexecution", false)
         }
     }
 

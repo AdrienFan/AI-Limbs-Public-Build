@@ -100,6 +100,15 @@ class VisualManagerEntry : InProcessPluginEntry {
             "从已开启会话取得新画面。save=false 仅替换临时预览；save=true 同时保存原图。返回 MCP 图像；查询 status/preview.read 不重新拍摄。",
             listOf(kind, session, p("save", "boolean", "是否保存原图记录", false, "false"), p("max_edge", "integer", "新画面预览最长边 160..2048；需要细小文字时可取 2048", false, "1024")),
             """{"kind":"camera","session_id":"<start 返回的 ID>","save":false}""")
+        capability("get_frame", "获取当前视觉帧", read,
+            "从活动会话获取新帧，附 frame_id、原始/预览尺寸、采集时间、屏幕 geometry 和 image_to_touch；图像通过附件返回。屏幕不需要调用观察子代理。",
+            listOf(kind, session, p("max_edge", "integer", "预览最长边 160..2048", false, "1024")),
+            """{"kind":"screen","session_id":"<status 返回的 ID>"}""")
+        capability("tap_on_frame", "按帧点击并观察", change,
+            "对最新全屏共享帧按比例坐标点击一次并返回随后新帧。frame_id 来自 get_frame/frame 或动作反馈图像；x/y 在 0..1。旧帧或已变化的屏幕几何拒绝执行。action_success 与 observation_success 分开；观察失败不能自动重放点击。",
+            listOf(p("frame_id", description = "最新屏幕帧编号"), p("x", "number", "图片横向比例 0..1"),
+                p("y", "number", "图片纵向比例 0..1"), p("max_edge", "integer", "观察帧最长边 160..2048", false, "1024")),
+            """{"frame_id":"<最新帧编号>","x":0.51,"y":0.73}""")
         capability("capture", "拍摄并保存单张图像", write,
             "屏幕单次截图，或未开启会话时相机单拍并自动释放。保存原图记录并返回预览。已有相机会话请用 frame save=true。",
             listOf(kind, source) + cameraOptions, """{"kind":"screen","source_id":"display:0"}""")
