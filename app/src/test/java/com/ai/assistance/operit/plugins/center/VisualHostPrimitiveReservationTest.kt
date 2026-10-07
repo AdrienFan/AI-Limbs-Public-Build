@@ -25,7 +25,7 @@ class VisualHostPrimitiveReservationTest {
     @Test
     fun visualSessionOperationsUseHostFrameworkBindings() {
         assertEquals(
-            listOf("frame", "list_targets", "start", "status", "stop"),
+            listOf("frame", "geometry", "list_targets", "start", "status", "stop", "wait_frame"),
             HostPrimitiveGatewayBindings.operationNames("host.screen.session@1")
         )
         assertEquals(
@@ -43,6 +43,15 @@ class VisualHostPrimitiveReservationTest {
         assertEquals(
             HostGatewayExecutionAffinity.HOST_FRAMEWORK,
             HostPrimitiveGatewayBindings.primitiveAffinity("host.camera.session@1")
+        )
+        listOf("frame", "geometry", "wait_frame").forEach { operation ->
+            val binding = requireNotNull(HostPrimitiveGatewayBindings.operations("host.screen.session@1")[operation])
+            assertEquals(HostGatewayRouteKind.KERNEL, binding.kind)
+            assertEquals(HostGatewayExecutionAffinity.HOST_FRAMEWORK, binding.affinity)
+        }
+        assertEquals(
+            listOf("capture", "capture_frame"),
+            HostPrimitiveGatewayBindings.operationNames("host.screen.capture@1")
         )
     }
 
