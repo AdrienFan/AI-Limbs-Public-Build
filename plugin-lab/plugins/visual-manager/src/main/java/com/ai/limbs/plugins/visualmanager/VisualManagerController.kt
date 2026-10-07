@@ -58,7 +58,11 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 "sources" -> sources(kind(parameters))
                 "permission" -> permission(parameters)
                 "start" -> start(kind(parameters), parameters)
-                "frame", "get_frame" -> frame(kind(parameters), parameters)
+                "frame" -> frame(kind(parameters), parameters)
+                "get_frame" -> {
+                    require(!parameters.has("save")) { "get_frame 不保存图像记录；请使用 frame save=true" }
+                    frame(kind(parameters), parameters)
+                }
                 "tap_on_frame" -> tapOnFrame(parameters)
                 "operation.feedback" -> operationFeedback(parameters)
                 "message.context" -> cameraMessageContext(parameters)

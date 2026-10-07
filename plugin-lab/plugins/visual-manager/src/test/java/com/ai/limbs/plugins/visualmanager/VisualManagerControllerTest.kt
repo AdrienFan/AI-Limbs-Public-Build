@@ -14,6 +14,17 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualManagerControllerTest {
+    @Test fun readOnlyFrameCannotRequestAnArchiveThroughInternalCalls() = runBlocking {
+        val f = Fixture { _, _, _ -> error("Must reject before invoking Host") }
+        try {
+            val result = f.controller.call("get_frame", JSONObject().put("kind", "screen")
+                .put("session_id", "owned").put("save", true))
+            assertFalse(result.getBoolean("success"))
+            assertTrue(result.getString("error").contains("frame save=true"))
+            assertTrue(f.calls.isEmpty())
+        } finally { f.scope.cancel() }
+    }
+
     private fun contextRequest() = JSONObject().put("schema", 1).put("event", "user_message").put("context_id", "turn-1")
         .put("requested_elapsed_ms", 100L).put("deadline_elapsed_ms", 12100L)
 
