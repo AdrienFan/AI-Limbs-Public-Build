@@ -196,7 +196,10 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             ScreenFeedbackContract.requireFresh(request, captured)
             val image = updatePreview("screen", captured, generation, 524_288, 960)
             image.put("last_operation", JSONObject().put("operation_id", request.getString("operation_id"))
-                .put("completed_elapsed_ms", request.getLong("completed_elapsed_ms")))
+                .put("completed_elapsed_ms", request.getLong("completed_elapsed_ms"))
+                .apply {
+                    for (key in listOf("tool", "operation_success", "action_parameters")) if (request.has(key)) put(key, request.get(key))
+                })
             val imageContent = content(image)
             image.remove("data")
             return synchronized(stateLock) {
@@ -366,7 +369,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         }
         if (kind == "screen") require(p.getString("source_id") == "display:0") { "当前屏幕取图只支持内置屏幕" }
         val request = JSONObject(p.toString()).apply { remove("kind") }
-        val captured = hostCall("host.$kind.capture@1", "capture", request)
+        val captured = hostCall("host.$kind.capture@1", if (kind == "screen") "capture_frame" else "capture", request)
         VisualOperationResult.requireHost(captured)
         if (kind == "camera" && captured.has("started")) {
             VisualOperationResult.requireFlag(captured, "started", "相机拍摄未完成")
@@ -565,7 +568,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             .put("screen_feedback", false)
             .put("expected_display_width", geometry.getInt("touch_width"))
             .put("expected_display_height", geometry.getInt("touch_height"))
-            .put("expected_display_rotation", geometry.getInt("rotation")))
+            .put("expected_display_rotation", geometry.getInt("rotation"))
+            .put("expected_geometry_id", geometry.getString("geometry_id")))
         VisualOperationResult.requireFlag(action, "success", "触控未完成")
         val completed = SystemClock.elapsedRealtime()
         // Observe exactly once after the action. A delivery failure must retain the successful
