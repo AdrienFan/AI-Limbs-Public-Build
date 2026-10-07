@@ -63,14 +63,14 @@ private fun VisualWorkbench(actions: VisualManagerPageActions, providers: InProc
     var tab by remember { mutableStateOf(0) }
     var selectedScreen by remember { mutableStateOf<String?>(null) }
     var selectedCamera by remember { mutableStateOf<String?>(null) }
-    var previews by remember { mutableStateOf<Map<String, JSONObject>>(emptyMap()) }
+    var previews by remember { mutableStateOf<Map<String, VisualPreview>>(emptyMap()) }
     var notice by remember { mutableStateOf("正在读取工作台状态…") }
     var error by remember { mutableStateOf<String?>(null) }
     var working by remember { mutableStateOf(false) }
     var stopping by remember { mutableStateOf(false) }
     var operation by remember { mutableStateOf<Job?>(null) }
     var pageText by remember { mutableStateOf("") }
-    var shownRecord by remember { mutableStateOf<JSONObject?>(null) }
+    var shownRecord by remember { mutableStateOf<VisualPreview?>(null) }
     var confirmClear by remember { mutableStateOf(false) }
 
     DisposableEffect(lifecycle) {
@@ -95,8 +95,10 @@ private fun VisualWorkbench(actions: VisualManagerPageActions, providers: InProc
         val availablePreviews = state.getJSONObject("previews")
         for (kind in listOf("screen", "camera")) {
             val summary = availablePreviews.optJSONObject(kind)
-            if (summary != null && summary.getLong("captured_at_ms") != previews[kind]?.optLong("captured_at_ms")) {
-                val image = invoke("preview.read", JSONObject().put("kind", kind))
+            if (summary != null && summary.getLong("captured_at_ms") != previews[kind]?.capturedAtMs) {
+                val result = invoke("preview.read", JSONObject().put("kind", kind))
+                val image = VisualPreview.fromResponse(result, result)
+                check(image.kind == kind) { "预览来源与请求不一致" }
                 previews = previews + (kind to image)
             }
         }
@@ -124,8 +126,10 @@ private fun VisualWorkbench(actions: VisualManagerPageActions, providers: InProc
             notice = label
             try {
                 val result = block()
-                val image = result.optJSONObject("preview")
-                if (image != null) previews = previews + (image.getString("kind") to image)
+                result.optJSONObject("preview")?.let { metadata ->
+                    val image = VisualPreview.fromResponse(result, metadata)
+                    previews = previews + (image.kind to image)
+                }
                 notice = result.optString("message", "$label 完成")
                 try { reload() } catch (e: CancellationException) { throw e }
                 catch (e: Exception) { error = "操作已完成，但状态同步失败：${e.message}" }
@@ -352,7 +356,7 @@ private fun VisualWorkbench(actions: VisualManagerPageActions, providers: InProc
                             ImageRecord(actions, meta, !working && !stopping,
                                 onView = { act("查看图像") {
                                     val result = invoke("images.read", JSONObject().put("asset_id", meta.getString("asset_id")))
-                                    shownRecord = result
+                                    shownRecord = VisualPreview.fromResponse(result, result)
                                     result
                                 } },
                                 onDelete = { act("删除图像") {
@@ -410,7 +414,7 @@ private fun AdaptiveWorkspace(hasImage: Boolean, controls: @Composable () -> Uni
 }
 
 @Composable
-private fun PreviewPanel(image: JSONObject?, label: String) {
+private fun PreviewPanel(image: VisualPreview?, label: String) {
     Card(Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(label, style = MaterialTheme.typography.titleSmall)
@@ -419,8 +423,8 @@ private fun PreviewPanel(image: JSONObject?, label: String) {
                     Text("尚未获取画面\n授权并开始后，画面会显示在这里。", Modifier.padding(24.dp))
                 }
             } else {
-                EncodedImage(image.getString("data"), "视觉画面", Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 420.dp))
-                Text("获取于 ${time(image.getLong("captured_at_ms"))} · ${image.getInt("width")}×${image.getInt("height")}",
+                EncodedImage(image.data, "视觉画面", Modifier.fillMaxWidth().heightIn(min = 180.dp, max = 420.dp))
+                Text("获取于 ${time(image.capturedAtMs)} · ${image.width}×${image.height}",
                     style = MaterialTheme.typography.bodySmall)
                 Text("这是一帧画面，获取时间才代表新鲜度。", style = MaterialTheme.typography.bodySmall)
             }
@@ -449,18 +453,19 @@ private fun EncodedImage(data: String, description: String, modifier: Modifier) 
 @Composable
 private fun ImageRecord(actions: VisualManagerPageActions, meta: JSONObject, enabled: Boolean,
                         onView: () -> Unit, onDelete: () -> Unit) {
-    var image by remember { mutableStateOf<JSONObject?>(null) }
+    var image by remember { mutableStateOf<VisualPreview?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(meta.getString("asset_id")) {
         try {
-            image = VisualOperationResult.requireSuccess(actions.call("images.read",
+            val result = VisualOperationResult.requireSuccess(actions.call("images.read",
                 JSONObject().put("asset_id", meta.getString("asset_id")).put("max_edge", 240)))
+            image = VisualPreview.fromResponse(result, result)
         } catch (e: CancellationException) { throw e }
         catch (e: Exception) { error = "缩略图读取失败：${e.message}" }
     }
     Card(Modifier.fillMaxWidth()) {
         Row(Modifier.padding(12.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            image?.let { EncodedImage(it.getString("data"), "图像缩略图", Modifier.size(80.dp)) }
+            image?.let { EncodedImage(it.data, "图像缩略图", Modifier.size(80.dp)) }
             Column(Modifier.weight(1f)) {
                 Text(if (meta.getString("kind") == "camera") "摄像头图像" else "屏幕图像")
                 Text(time(meta.getLong("captured_at_ms")), style = MaterialTheme.typography.bodySmall)

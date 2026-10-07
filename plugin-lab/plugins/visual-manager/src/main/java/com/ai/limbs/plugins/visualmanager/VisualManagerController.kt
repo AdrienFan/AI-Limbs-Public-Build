@@ -559,11 +559,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         }
     }
 
-    private fun attachImage(result: JSONObject, image: JSONObject): JSONObject {
-        val attachment = content(image)
-        image.remove("data")
-        return result.put("mcp_content", attachment)
-    }
+    private fun attachImage(result: JSONObject, image: JSONObject): JSONObject =
+        VisualImageAttachment.attach(result, image)
 
     private suspend fun tapOnFrame(p: JSONObject): JSONObject = perform("screen", "按画面点击") { generation ->
         require(p.optInt("max_edge", 1024) in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
@@ -682,8 +679,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         } finally { scratch?.let { deleteHostScratch(it) } }
     }
 
-    private fun content(image: JSONObject) = JSONArray().put(JSONObject()
-        .put("type", "image").put("mimeType", image.getString("mime_type")).put("data", image.getString("data")))
+    private fun content(image: JSONObject) = VisualImageAttachment.content(image)
 
     private fun archive(source: File, info: JSONObject): JSONObject {
         val id = "${info.getString("kind")}-${info.getLong("captured_at_ms")}-${UUID.randomUUID().toString().take(8)}"

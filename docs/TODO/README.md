@@ -64,3 +64,6 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [Encode screen feedback once](single-pass-screen-feedback/index.md)
 
 - [画面变化与区域稳定检测](visual-wait-0.2.6/index.md)：视觉工作台 0.2.6，复用基座 build112。
+
+
+- [图片附件预览崩溃修复](visual-preview-0.2.7/index.md)：视觉工作台 0.2.7，首帧、重进、相机及图像记录。
