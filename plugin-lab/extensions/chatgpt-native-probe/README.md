@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.23
+# AI Limbs-ChatGPT 0.0.25
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -158,3 +158,27 @@ The gateway now learns `capability_id -> invoke_id` mappings from live search/de
 callback_dns 新增 route_selection 候选/选中计数及 last_connection_family，不返回回调地址。面板展示相同信息。保持 DNS、原域名 SNI、证书和签名校验，以及禁止重定向/连接重试的策略。修复明确的路由选择缺陷，之前 TLS 失败是否仍存在须安装后验证。
 
 本轮只提交 ChatGPT 组件云端测试、编译和打包；提交后遵照用户要求停止轮询，云端结果和实机问题由用户反馈。未运行本地项目测试或构建，未宣称云端测试或公网唤醒已通过。
+
+## External wake switch in 0.0.25
+
+Open the external-wake secondary panel and select Enable external wake / Disable external wake.
+The persistent switch defaults to OFF, including the first upgrade from a version without this setting.
+Disabling rejects new wake requests and clears pending deliveries for every tunnel binding. Enabling
+retains verified subscriptions and admits only fresh events. It does not replay the cleared queue.
+Subscription validation/refresh remains available while OFF; verification alone is not a wake event.
+The MCP listener and ordinary tools remain available.
+
+Switch changes, event admission and delivery share one mutex. Disable waits for an already-started
+callback to finish, then clears queued events before returning. Events accepted upstream may still
+produce a response; the phone cannot retract a ChatGPT run. Restarting while OFF also clears pending
+records before any delivery. Storage errors propagate without reporting a saved switch.
+
+The panel switch is a direct user UI action. It does not invoke the AI wake-test capability or request
+an additional ASK. The installation manifest and entry contain no plugin-specific ASK declaration.
+The Host retains authoritative tool permissions. Its build110 source already carries explicit UI
+authorization for provider selection. An installation-time ASK has not been reproduced in this edit;
+no global permission default or AI invocation policy was changed to suppress an unidentified prompt.
+
+New regression tests cover disabled admission, all-binding queue cleanup, restart recovery, in-flight
+serialization and failed setting persistence. They are submitted for cloud execution; no local project
+build or tests were run.

@@ -110,14 +110,19 @@ internal class ChatGptNativeProbePanel(
 
             View.EVENTS -> {
                 val events = engine.eventStatus()
-                panel("外部唤醒 · 先订阅，再发送测试事件。", lines = buildList {
+                panel("外部唤醒 · 按需要开启，先订阅再发送。", lines = buildList {
                     addAll(summary)
+                    add(if (config.externalWakeEnabled) "外部唤醒：已开启" else "外部唤醒：已关闭")
+                    add("关闭后停止发送并清空待发唤醒事件，重新开启不补发。开关会保存，隧道与正常工具调用继续工作。")
+                    add("已经交给 ChatGPT 的事件可能仍会完成；此开关不能撤回上游任务。")
                     add("在 ChatGPT 网页版 Work，或桌面版 Work / Cloud 刷新插件的工具与事件目录。")
                     add("请 ChatGPT 订阅 ${GatewayEvents.NAME}，过滤 source_id=manual；收到后回复确认。")
                     if (!events.optBoolean("loaded")) add("连接后加载订阅与待发事件。") else {
                         add("已验证订阅 ${events.optInt("active_subscriptions")}  ·  待发事件 ${events.optInt("pending_deliveries")}")
                         add("回调接收确认 ${events.optLong("accepted_count")} 次")
                         add("当前状态：${when (events.optString("phase")) {
+                            "wake_enabled" -> "唤醒已开启，等待新事件"
+                            "wake_disabled" -> "唤醒已关闭，待发事件已清空"
                             "callback_verified" -> "回调验证成功"
                             "verification_failed" -> "回调验证失败"
                             "queued" -> "测试事件待发送"
@@ -153,8 +158,12 @@ internal class ChatGptNativeProbePanel(
                     if (events.optString("last_error") in setOf("no_usable_callback_route", "callback_network_unavailable", "callback_route_unavailable"))
                         add("当前网络没有可用的回调路由；请核对 VPN 连接及其地址族支持。")
                     add("当前只发送手动测试事件，不自动启动相机或持续取图。")
-                }, actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_DNS, "回调网络设置"),
-                    BridgeProviderPanelAction(ACTION_WAKE_TEST, "发送唤醒测试", enabled = probe.running && events.optInt("active_subscriptions") > 0)))
+                }, actions = listOf(
+                    action(if (config.externalWakeEnabled) ACTION_WAKE_DISABLE else ACTION_WAKE_ENABLE,
+                        if (config.externalWakeEnabled) "关闭外部唤醒" else "开启外部唤醒"),
+                    BridgeProviderPanelAction(ACTION_WAKE_TEST, "发送唤醒测试",
+                        enabled = config.externalWakeEnabled && probe.running && events.optInt("active_subscriptions") > 0),
+                    action(ACTION_HOME, "返回概览"), action(ACTION_DNS, "回调网络设置")))
             }
 
             View.SETTINGS -> panel("连接设置 · 密钥已加密保存。", lines = summary + "当前隧道 ${shortTunnel(config.tunnelId)}",
@@ -239,11 +248,21 @@ internal class ChatGptNativeProbePanel(
                 val normalized = storage.saveCallbackDns(fieldValues.getValue(FIELD_CALLBACK_DNS))
                 return BridgeProviderPanelResult("DNS 地址已保存；下一次回调使用新配置", mapOf(FIELD_CALLBACK_DNS to normalized, FIELD_API_KEY to ""))
             }
+            ACTION_WAKE_ENABLE, ACTION_WAKE_DISABLE -> {
+                require(view == View.EVENTS) { "请先打开外部唤醒页面" }
+                val enabled = actionId == ACTION_WAKE_ENABLE
+                engine.setExternalWakeEnabled(enabled)
+                return BridgeProviderPanelResult(if (enabled) "外部唤醒已开启；只发送新的唤醒事件"
+                    else "外部唤醒已关闭，待发事件已清空；隧道保持连接")
+            }
             ACTION_WAKE_TEST -> {
                 val result = try { engine.sendWakeTest() }
                 catch (failure: GatewayEventFailure) {
-                    return BridgeProviderPanelResult(if (failure.reason == "no_verified_subscription")
-                        "请先在 ChatGPT 订阅手动唤醒事件" else "测试未发送：${failure.reason}")
+                    return BridgeProviderPanelResult(when (failure.reason) {
+                        "external_wake_disabled" -> "请先开启外部唤醒"
+                        "no_verified_subscription" -> "请先在 ChatGPT 订阅手动唤醒事件"
+                        else -> "测试未发送：${failure.reason}"
+                    })
                 }
                 return BridgeProviderPanelResult("已排队 ${result.getInt("queued_deliveries")} 个测试事件；请查看订阅的 ChatGPT 对话")
             }
@@ -334,6 +353,8 @@ internal class ChatGptNativeProbePanel(
         private const val ACTION_ADVANCED = "chatgpt_probe.toggle_advanced"
         private const val ACTION_EVENTS = "chatgpt_probe.view_events"
         private const val ACTION_WAKE_TEST = "chatgpt_probe.wake_test"
+        private const val ACTION_WAKE_ENABLE = "chatgpt_probe.wake_enable"
+        private const val ACTION_WAKE_DISABLE = "chatgpt_probe.wake_disable"
         private const val ACTION_DNS = "chatgpt_probe.view_dns"
         private const val ACTION_SAVE_DNS = "chatgpt_probe.save_dns"
     }

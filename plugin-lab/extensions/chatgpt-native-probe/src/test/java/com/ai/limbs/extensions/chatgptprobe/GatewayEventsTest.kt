@@ -5,6 +5,9 @@ import java.util.Base64
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.CoroutineStart
+import kotlinx.coroutines.launch
 import org.json.JSONObject
 import org.junit.Assert.*
 import org.junit.Test
@@ -17,14 +20,14 @@ class GatewayEventsTest {
                 throw GatewayWebhookFailure("dns_resolution_failed", "dns", "UnknownHostException")
             }
         }
-        val events = GatewayEvents(store, transport)
+        val events = GatewayEvents(store, transport, EventWakeControl())
         try { events.subscribe("a", subscription()); fail() }
         catch (error: GatewayEventFailure) {
             assertEquals(-32015, error.code)
             assertEquals("dns_resolution_failed", error.reason)
             assertEquals("dns", error.diagnostic!!.getString("stage"))
         }
-        val restarted = GatewayEvents(store, transport)
+        val restarted = GatewayEvents(store, transport, EventWakeControl())
         restarted.recover("a")
         val status = restarted.snapshot("a")
         assertEquals(0, status.getInt("active_subscriptions"))
@@ -178,7 +181,7 @@ class GatewayEventsTest {
         val queued = f.events.testWake("a")
         f.transport.code = 503
         f.events.deliverOne("a")
-        val restarted = GatewayEvents(f.store, f.transport) { f.clock }
+        val restarted = GatewayEvents(f.store, f.transport, EventWakeControl()) { f.clock }
         f.clock += 30_000
         f.transport.code = 200
         restarted.recover("a"); restarted.deliverOne("a")
@@ -242,11 +245,92 @@ class GatewayEventsTest {
         assertTrue(f.store.names().none { it.startsWith("eventsub_") })
     }
 
+    @Test fun disabledWakeRejectsNewEventsButPreservesVerifiedSubscriptions() = runBlocking {
+        val store = EventMemoryStore(); val transport = FakeEventTransport(); val control = EventWakeControl(false)
+        val events = GatewayEvents(store, transport, control)
+        events.subscribe("a", subscription())
+        assertFalse(events.snapshot("a").getBoolean("enabled"))
+        assertEquals(1, events.snapshot("a").getInt("active_subscriptions"))
+        try { events.testWake("a"); fail() }
+        catch (error: GatewayEventFailure) { assertEquals("external_wake_disabled", error.reason) }
+        events.deliverOne("a")
+        assertEquals(1, transport.posts.size) // Verification only; no model-wake delivery.
+        assertEquals(0, events.snapshot("a").getInt("pending_deliveries"))
+    }
+
+    @Test fun disablingDropsAllBindingsAndReenablingSendsOnlyNewEvents() = runBlocking {
+        val store = EventMemoryStore(); val transport = FakeEventTransport(); val control = EventWakeControl()
+        val events = GatewayEvents(store, transport, control)
+        events.subscribe("a", subscription()); events.subscribe("b", subscription())
+        events.testWake("a"); events.testWake("b")
+        events.setEnabled("a", false)
+        assertFalse(control.externalWakeEnabled)
+        assertTrue(store.names().none { it.startsWith("eventout_") })
+        events.setEnabled("a", true)
+        events.deliverOne("a"); events.deliverOne("b")
+        assertEquals(2, transport.posts.size)
+        val newId = events.testWake("a").getString("event_id")
+        events.deliverOne("a")
+        assertEquals(3, transport.posts.size)
+        assertEquals(newId, JSONObject(transport.posts.last().body).getString("eventId"))
+        assertEquals(1, events.snapshot("a").getInt("active_subscriptions"))
+    }
+
+    @Test fun disabledRecoveryClearsDurableQueueWithoutPost() = runBlocking {
+        val store = EventMemoryStore(); val transport = FakeEventTransport(); val control = EventWakeControl()
+        val events = GatewayEvents(store, transport, control)
+        events.subscribe("a", subscription()); events.testWake("a")
+        control.saveExternalWakeEnabled(false)
+        val restarted = GatewayEvents(store, transport, control)
+        restarted.recover("a"); restarted.deliverOne("a")
+        assertFalse(restarted.snapshot("a").getBoolean("enabled"))
+        assertEquals(0, restarted.snapshot("a").getInt("pending_deliveries"))
+        assertEquals(1, transport.posts.size)
+    }
+
+    @Test fun disableSerializesWithInFlightDeliveryAndBlocksFollowingPost() = runBlocking {
+        val store = EventMemoryStore(); val control = EventWakeControl()
+        val entered = CompletableDeferred<Unit>(); val release = CompletableDeferred<Unit>()
+        var wakePosts = 0
+        val transport = object : GatewayEventTransport {
+            override suspend fun post(url: String, headers: Map<String, String>, body: String): GatewayWebhookReply {
+                val data = JSONObject(body)
+                if (data.optString("type") == "verification")
+                    return GatewayWebhookReply(200, JSONObject().put("challenge", data.getString("challenge")).toString())
+                wakePosts++; entered.complete(Unit); release.await()
+                return GatewayWebhookReply(200, "{}")
+            }
+        }
+        val events = GatewayEvents(store, transport, control)
+        events.subscribe("a", subscription()); events.testWake("a"); events.testWake("a")
+        val delivery = launch(start = CoroutineStart.UNDISPATCHED) { events.deliverOne("a") }
+        entered.await()
+        val disabled = launch(start = CoroutineStart.UNDISPATCHED) { events.setEnabled("a", false) }
+        assertFalse(disabled.isCompleted)
+        release.complete(Unit); delivery.join(); disabled.join()
+        events.deliverOne("a")
+        assertEquals(1, wakePosts)
+        assertEquals(0, events.snapshot("a").getInt("pending_deliveries"))
+        assertFalse(events.snapshot("a").getBoolean("enabled"))
+    }
+
+    @Test fun failedSettingPersistenceDoesNotReportSuccess() = runBlocking {
+        val store = EventMemoryStore(); val transport = FakeEventTransport()
+        val control = object : GatewayWakeControl {
+            override val externalWakeEnabled = false
+            override fun saveExternalWakeEnabled(enabled: Boolean) { throw java.io.IOException("write failed") }
+        }
+        val events = GatewayEvents(store, transport, control)
+        events.recover("a")
+        try { events.setEnabled("a", true); fail() } catch (_: java.io.IOException) { }
+        assertFalse(events.snapshot("a").getBoolean("enabled"))
+    }
+
     private class Fixture {
         var clock = 1_800_000_000_000L
         val store = EventMemoryStore()
         val transport = FakeEventTransport()
-        val events = GatewayEvents(store, transport) { clock }
+        val events = GatewayEvents(store, transport, EventWakeControl()) { clock }
     }
 }
 
@@ -273,4 +357,10 @@ internal class FakeEventTransport : GatewayEventTransport {
         }
         return GatewayWebhookReply(code, "{}")
     }
+}
+
+internal class EventWakeControl(initiallyEnabled: Boolean = true) : GatewayWakeControl {
+    override var externalWakeEnabled = initiallyEnabled
+        private set
+    override fun saveExternalWakeEnabled(enabled: Boolean) { externalWakeEnabled = enabled }
 }

@@ -10,10 +10,16 @@ internal data class ChatGptProbeConfig(
     val secureStorageAvailable: Boolean,
     val tunnelId: String,
     val baseUrl: String,
-    val callbackDnsUrl: String = GatewayCallbackDns.DEFAULT_URL
+    val callbackDnsUrl: String = GatewayCallbackDns.DEFAULT_URL,
+    val externalWakeEnabled: Boolean = false
 )
 
-internal interface GatewayConfiguration {
+internal interface GatewayWakeControl {
+    val externalWakeEnabled: Boolean
+    fun saveExternalWakeEnabled(enabled: Boolean)
+}
+
+internal interface GatewayConfiguration : GatewayWakeControl {
     fun readConfig(): ChatGptProbeConfig
     fun readApiKey(): String?
 }
@@ -33,7 +39,8 @@ internal class ChatGptNativeProbeStorage(context: Context) : GatewayConfiguratio
             tunnelId = readTunnelId(),
             baseUrl = metadata.getString(KEY_BASE_URL, null)?.trim()?.trimEnd('/')
                 ?: DEFAULT_BASE_URL,
-            callbackDnsUrl = metadata.getString(KEY_CALLBACK_DNS, GatewayCallbackDns.DEFAULT_URL)!!
+            callbackDnsUrl = metadata.getString(KEY_CALLBACK_DNS, GatewayCallbackDns.DEFAULT_URL)!!,
+            externalWakeEnabled = externalWakeEnabled
         )
     }
 
@@ -53,6 +60,13 @@ internal class ChatGptNativeProbeStorage(context: Context) : GatewayConfiguratio
             .putString(KEY_TUNNEL_ID, normalizedTunnel)
             .putString(KEY_BASE_URL, normalizedBase)
             .commit()) { "Tunnel 配置保存失败" }
+    }
+
+    override val externalWakeEnabled: Boolean
+        get() = metadata.getBoolean(KEY_EXTERNAL_WAKE, false)
+
+    override fun saveExternalWakeEnabled(enabled: Boolean) {
+        check(metadata.edit().putBoolean(KEY_EXTERNAL_WAKE, enabled).commit()) { "外部唤醒开关保存失败" }
     }
 
     fun saveCallbackDns(value: String): String {
@@ -108,5 +122,6 @@ internal class ChatGptNativeProbeStorage(context: Context) : GatewayConfiguratio
         private const val KEY_TUNNEL_ID = "tunnel_id"
         private const val KEY_BASE_URL = "base_url"
         private const val KEY_CALLBACK_DNS = "callback_dns_url"
+        private const val KEY_EXTERNAL_WAKE = "external_wake_enabled"
     }
 }

@@ -125,7 +125,7 @@ internal class ChatGptNativeProbeEngine(
     private data class InvokeIdEntry(val invokeId: String, val observedAtMs: Long)
     private val invokeIds = ConcurrentHashMap<String, InvokeIdEntry>()
     private val resultAdapters = ConcurrentHashMap<String, GatewayResults>()
-    private val events = GatewayEvents(encryptedStore, eventTransport)
+    private val events = GatewayEvents(encryptedStore, eventTransport, storage)
     private fun results(identity: String): GatewayResults = resultAdapters.computeIfAbsent(identity) {
         if (imageValidator == null) GatewayResults(encryptedStore, binding = identity)
         else GatewayResults(encryptedStore, binding = identity, validImage = imageValidator)
@@ -524,6 +524,11 @@ internal class ChatGptNativeProbeEngine(
     }
 
     fun eventStatus(): JSONObject = events.snapshot(binding(storage.readConfig()))
+    suspend fun setExternalWakeEnabled(enabled: Boolean): JSONObject {
+        val result = events.setEnabled(binding(storage.readConfig()), enabled)
+        eventWake.trySend(Unit)
+        return result
+    }
     suspend fun sendWakeTest(): JSONObject {
         check(mutableState.value.running) { "请先连接 ChatGPT 桥" }
         val result = events.testWake(binding(storage.readConfig()))

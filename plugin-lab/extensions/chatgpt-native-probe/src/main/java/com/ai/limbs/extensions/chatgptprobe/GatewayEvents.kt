@@ -28,6 +28,7 @@ internal interface GatewayEventTransport {
 internal class GatewayEvents(
     private val store: GatewayBlobStore,
     private val transport: GatewayEventTransport,
+    private val wakeControl: GatewayWakeControl,
     private val now: () -> Long = System::currentTimeMillis
 ) {
     private val lock = Mutex()
@@ -59,10 +60,30 @@ internal class GatewayEvents(
                 .put("occurred_at_ms", JSONObject().put("type", "integer")))
             .put("required", JSONArray().put("source_id").put("reason").put("occurred_at_ms")))))
 
-    fun snapshot(binding: String): JSONObject = diagnostics?.takeIf { it.first == binding }?.let { JSONObject(it.second.toString()) }
-        ?: JSONObject().put("loaded", false).put("model_response_verified", false)
+    fun snapshot(binding: String): JSONObject = (diagnostics?.takeIf { it.first == binding }?.let { JSONObject(it.second.toString()) }
+        ?: JSONObject().put("loaded", false).put("model_response_verified", false))
+        .put("enabled", wakeControl.externalWakeEnabled)
 
-    suspend fun recover(binding: String) = lock.withLock { prune(); publish(binding) }
+    suspend fun recover(binding: String) = lock.withLock {
+        if (!wakeControl.externalWakeEnabled) clearPending()
+        prune(); publish(binding)
+    }
+
+    /** Same mutex as admission/delivery: after disabling returns no old event can start a POST. */
+    suspend fun setEnabled(binding: String, enabled: Boolean): JSONObject = lock.withLock {
+        val previous = wakeControl.externalWakeEnabled
+        if (!enabled || !previous) clearPending()
+        // Persist before reporting success, so restarting the child cannot silently enable wakes.
+        wakeControl.saveExternalWakeEnabled(enabled)
+        if (previous != enabled) recordDiagnostic(binding, if (enabled) "wake_enabled" else "wake_disabled", now())
+        publish(binding)
+        snapshot(binding)
+    }
+
+    private fun clearPending() {
+        // Clear all bindings; a later tunnel change must not resurrect old quota-consuming events.
+        store.names().filter { it.startsWith(QUEUE_PREFIX) }.forEach { store.delete(it) }
+    }
 
     suspend fun subscribe(binding: String, p: JSONObject): JSONObject = lock.withLock {
         requireKeys(p, setOf("name", "arguments", "delivery", "cursor", "ttlMs", "_meta"))
@@ -141,6 +162,7 @@ internal class GatewayEvents(
     }
 
     suspend fun testWake(binding: String): JSONObject = lock.withLock {
+        if (!wakeControl.externalWakeEnabled) throw GatewayEventFailure(-32000, "external_wake_disabled")
         prune()
         val recipients = subscriptions(binding)
         if (recipients.isEmpty()) throw GatewayEventFailure(-32000, "no_verified_subscription")
@@ -172,6 +194,9 @@ internal class GatewayEvents(
 
     /** Serialize delivery with unsubscribe: once unsubscribe returns no old callback can begin. */
     suspend fun deliverOne(binding: String) = lock.withLock {
+        if (!wakeControl.externalWakeEnabled) {
+            clearPending(); publish(binding); return@withLock
+        }
         prune()
         val item = queue(binding).firstOrNull { it.second.getLong("next_at") <= now() }
         if (item != null) {
@@ -263,6 +288,7 @@ internal class GatewayEvents(
         val state = store.read(STATE_PREFIX + gatewayHash(binding))?.let(::JSONObject) ?: JSONObject().put("phase", "awaiting_subscription")
         state.put("loaded", true).put("active_subscriptions", subscriptions(binding).size).put("pending_deliveries", queue(binding).size)
             .put("event_name", NAME).put("source_id", SOURCE).put("model_response_verified", false)
+            .put("enabled", wakeControl.externalWakeEnabled)
             .put("delivery_semantics", "Webhook acknowledgement only; ChatGPT processes events asynchronously")
         diagnostics = binding to state
     }

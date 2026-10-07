@@ -579,7 +579,10 @@ class GatewayEngineTest {
             server.start()
             baseUrl = server.url("/").toString().trimEnd('/')
             engine = ChatGptNativeProbeEngine(object : GatewayConfiguration {
-                override fun readConfig() = ChatGptProbeConfig(true, true, "tunnel-test", baseUrl)
+                override var externalWakeEnabled = true
+                override fun saveExternalWakeEnabled(enabled: Boolean) { externalWakeEnabled = enabled }
+                override fun readConfig() = ChatGptProbeConfig(true, true, "tunnel-test", baseUrl,
+                    externalWakeEnabled = externalWakeEnabled)
                 override fun readApiKey() = "fake-runtime-key"
             }, store, eventTransport = eventTransport)
         }
