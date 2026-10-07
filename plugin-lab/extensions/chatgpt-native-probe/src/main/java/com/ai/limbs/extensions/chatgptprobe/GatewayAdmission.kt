@@ -68,7 +68,7 @@ internal object GatewayAdmission {
     val REFRESH_STEPS = listOf(
         "保持本机桥运行，在 ChatGPT 插件中打开该自定义 MCP 连接。",
         "选择 Refresh，刷新工具信息。",
-        "确认工具目录显示当前六个 ai_limbs_* 工具。",
+        "确认工具目录与桥面板列出的当前 ai_limbs_* 工具一致。",
         "新建会话，启用插件后重新测试。"
     )
 

@@ -22,6 +22,50 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GatewayEngineTest {
+    @Test fun eventDiscoveryAndSubscriptionUseTunnelWithoutInvokingHost() = runBlocking {
+        Fixture().use { f ->
+            val hostCalls = AtomicInteger()
+            f.start { _, _ -> hostCalls.incrementAndGet(); JSONObject() }
+            val p = JSONObject().put("name", GatewayEvents.NAME)
+                .put("arguments", JSONObject().put("source_id", "manual"))
+                .put("delivery", JSONObject().put("mode", "webhook").put("url", "https://callback.example/events")
+                    .put("secret", "whsec_" + java.util.Base64.getEncoder().encodeToString(ByteArray(32) { 1 })))
+                .put("cursor", JSONObject.NULL)
+            f.commands.add(rpcCommand("discover-events", 801, "server/discover"))
+            f.commands.add(rpcCommand("list-events", 802, "events/list"))
+            val subscribe = rpcCommand("subscribe-events", 803, "events/subscribe", p)
+            f.commands.add(subscribe)
+            eventually { f.responses.size >= 3 }
+            val discovery = f.responses.first { it.getString("request_id") == "discover-events" }.getJSONObject("resp_json").getJSONObject("result")
+            assertEquals("complete", discovery.getString("resultType"))
+            assertEquals(GatewayProtocol.EVENTS_VERSION, discovery.getJSONArray("supportedVersions").getString(0))
+            assertTrue(discovery.getJSONObject("capabilities").has("events"))
+            val listed = f.responses.first { it.getString("request_id") == "list-events" }.getJSONObject("resp_json").getJSONObject("result")
+            assertEquals(GatewayEvents.NAME, listed.getJSONArray("events").getJSONObject(0).getString("name"))
+            assertEquals(1, f.eventTransport.posts.size)
+            f.commands.add(JSONObject(subscribe.toString()).put("shard_token", "new-token"))
+            eventually { f.responses.count { it.getString("request_id") == "subscribe-events" } >= 2 }
+            assertEquals(1, f.eventTransport.posts.size)
+            assertTrue(f.engine.sendWakeTest().getBoolean("success"))
+            eventually { f.eventTransport.posts.any { JSONObject(it.body).has("eventId") } }
+            eventually { f.engine.eventStatus().optLong("accepted_count") == 1L }
+            assertFalse(f.engine.eventStatus().getBoolean("model_response_verified"))
+            assertEquals(0, hostCalls.get())
+        }
+    }
+
+    @Test fun invalidEventSubscriptionReturnsCategorizedRpcError() = runBlocking {
+        Fixture().use { f ->
+            f.start { _, _ -> fail("Event RPC must not call Host"); JSONObject() }
+            f.commands.add(rpcCommand("invalid-event", 804, "events/subscribe", JSONObject().put("name", "camera")))
+            eventually { f.responses.isNotEmpty() }
+            val error = f.responses.first().getJSONObject("resp_json").getJSONObject("error")
+            assertEquals(-32602, error.getInt("code"))
+            assertEquals("unknown_event", error.getJSONObject("data").getString("reason"))
+            assertTrue(f.eventTransport.posts.isEmpty())
+        }
+    }
+
     @Test fun messageContextUsesOneCoreCallAndDuplicateDeliveryDoesNotCaptureAgain() = runBlocking {
         Fixture(failFirstPost = true).use { fixture ->
             val calls = AtomicInteger()
@@ -496,6 +540,7 @@ class GatewayEngineTest {
         val invokeAliases = ConcurrentHashMap<String, String>()
         val describeFailures = ConcurrentHashMap<String, String>()
         val store = MemoryGatewayStore()
+        val eventTransport = FakeEventTransport()
         private val failPost = AtomicBoolean(failFirstPost)
         val baseUrl: String
         val engine: ChatGptNativeProbeEngine
@@ -530,7 +575,7 @@ class GatewayEngineTest {
             engine = ChatGptNativeProbeEngine(object : GatewayConfiguration {
                 override fun readConfig() = ChatGptProbeConfig(true, true, "tunnel-test", baseUrl)
                 override fun readApiKey() = "fake-runtime-key"
-            }, store)
+            }, store, eventTransport = eventTransport)
         }
         fun start(handler: suspend (String, JSONObject) -> JSONObject) {
             engine.bindRemoteIngress(object : BridgeRemoteIngress {

@@ -21,7 +21,7 @@ internal class ChatGptNativeProbePanel(
 ) : BridgeProviderPanel {
     private val storage = ChatGptNativeProbeStorage(context.applicationContext)
     private val initialConfig = storage.readConfig()
-    private enum class View { OVERVIEW, SETTINGS, ROTATE_KEY, DIAGNOSTICS, CATALOG_GUIDE, CONFIRM_CLEAR }
+    private enum class View { OVERVIEW, SETTINGS, ROTATE_KEY, DIAGNOSTICS, CATALOG_GUIDE, CONFIRM_CLEAR, EVENTS }
     @Volatile private var view = View.OVERVIEW
     @Volatile private var showAdvancedSetup = initialConfig.baseUrl != ChatGptNativeProbeStorage.DEFAULT_BASE_URL
     @Volatile private var setupBaseUrl = initialConfig.baseUrl
@@ -93,11 +93,12 @@ internal class ChatGptNativeProbePanel(
                 }
                 if (heartbeat != null) add("最近通信 ${time(heartbeat)}")
             }, actions = connectionActions() + listOf(action(ACTION_CATALOG_GUIDE, "工具目录指引"),
+                action(ACTION_EVENTS, "外部唤醒"),
                 action(ACTION_SETTINGS, "连接设置"), action(ACTION_DIAGNOSTICS, "连接诊断")))
 
-            View.CATALOG_GUIDE -> panel("工具目录 · 六个稳定入口，动态发现 Host 能力。", lines = buildList {
+            View.CATALOG_GUIDE -> panel("工具目录 · ${engine.advertisedToolNames().size} 个稳定入口，动态发现 Host 能力。", lines = buildList {
                 addAll(summary)
-                add("新增 Host 业务能力通过搜索和描述工具发现；六个入口的元数据未变时，无需刷新 ChatGPT 工具目录。")
+                add("新增 Host 业务能力通过搜索和描述工具发现；入口元数据未变时，无需刷新 ChatGPT 工具目录。")
                 add("入口名称、描述或参数等元数据变化后，需要在 ChatGPT 更新这条连接。")
                 add("如果还看到 echo、server_info、uppercase 三个演示工具，请按下面步骤更新旧目录。")
                 addAll(GatewayAdmission.REFRESH_STEPS)
@@ -106,6 +107,32 @@ internal class ChatGptNativeProbePanel(
                 add("重连隧道和检查隧道只处理本机通信，不会清除 ChatGPT 保存的工具目录。")
                 add("本机不自动更新 ChatGPT 工具目录；旧会话请停止使用并新建会话。")
             }, actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_DIAGNOSTICS, "连接诊断")))
+
+            View.EVENTS -> {
+                val events = engine.eventStatus()
+                panel("外部唤醒 · 先订阅，再发送测试事件。", lines = buildList {
+                    addAll(summary)
+                    add("在 ChatGPT 网页版 Work，或桌面版 Work / Cloud 刷新插件的工具与事件目录。")
+                    add("请 ChatGPT 订阅 ${GatewayEvents.NAME}，过滤 source_id=manual；收到后回复确认。")
+                    if (!events.optBoolean("loaded")) add("连接后加载订阅与待发事件。") else {
+                        add("已验证订阅 ${events.optInt("active_subscriptions")}  ·  待发事件 ${events.optInt("pending_deliveries")}")
+                        add("回调接收确认 ${events.optLong("accepted_count")} 次")
+                        add("当前状态：${when (events.optString("phase")) {
+                            "callback_verified" -> "回调验证成功"
+                            "verification_failed" -> "回调验证失败"
+                            "queued" -> "测试事件待发送"
+                            "webhook_accepted" -> "回调已接收，等待 ChatGPT 响应"
+                            "retry_pending" -> "网络交付重试中"
+                            "delivery_failed" -> "事件交付失败"
+                            else -> "等待订阅"
+                        }}")
+                        events.optString("last_error").takeIf { it.isNotBlank() && it != "null" }?.let { add("交付问题：$it") }
+                    }
+                    add("收到 HTTP 接收确认不代表模型已响应；请在订阅的对话中核对回复。")
+                    add("当前只发送手动测试事件，不自动启动相机或持续取图。")
+                }, actions = listOf(action(ACTION_HOME, "返回概览"),
+                    BridgeProviderPanelAction(ACTION_WAKE_TEST, "发送唤醒测试", enabled = probe.running && events.optInt("active_subscriptions") > 0)))
+            }
 
             View.SETTINGS -> panel("连接设置 · 密钥已加密保存。", lines = summary + "当前隧道 ${shortTunnel(config.tunnelId)}",
                 fields = listOf(
@@ -171,6 +198,15 @@ internal class ChatGptNativeProbePanel(
             ACTION_EDIT_KEY -> { require(storage.readConfig().configured) { "请先完成连接配置" }; view = View.ROTATE_KEY }
             ACTION_DIAGNOSTICS -> view = View.DIAGNOSTICS
             ACTION_CATALOG_GUIDE -> view = View.CATALOG_GUIDE
+            ACTION_EVENTS -> view = View.EVENTS
+            ACTION_WAKE_TEST -> {
+                val result = try { engine.sendWakeTest() }
+                catch (failure: GatewayEventFailure) {
+                    return BridgeProviderPanelResult(if (failure.reason == "no_verified_subscription")
+                        "请先在 ChatGPT 订阅手动唤醒事件" else "测试未发送：${failure.reason}")
+                }
+                return BridgeProviderPanelResult("已排队 ${result.getInt("queued_deliveries")} 个测试事件；请查看订阅的 ChatGPT 对话")
+            }
             ACTION_SHOW_CLEAR -> { require(storage.readConfig().configured) { "没有可清除的连接配置" }; view = View.CONFIRM_CLEAR }
             ACTION_ADVANCED -> {
                 showAdvancedSetup = !showAdvancedSetup
@@ -255,5 +291,7 @@ internal class ChatGptNativeProbePanel(
         private const val ACTION_CATALOG_GUIDE = "chatgpt_probe.view_catalog_guide"
         private const val ACTION_SHOW_CLEAR = "chatgpt_probe.confirm_clear"
         private const val ACTION_ADVANCED = "chatgpt_probe.toggle_advanced"
+        private const val ACTION_EVENTS = "chatgpt_probe.view_events"
+        private const val ACTION_WAKE_TEST = "chatgpt_probe.wake_test"
     }
 }

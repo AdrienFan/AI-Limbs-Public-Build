@@ -4,7 +4,9 @@ import org.json.JSONArray
 import org.json.JSONObject
 
 internal object GatewayProtocol {
-    val supportedVersions = setOf("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+    const val EVENTS_VERSION = "2026-07-28"
+    val initializeVersions = setOf("2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25")
+    val supportedVersions = initializeVersions + EVENTS_VERSION
 
     fun validRequest(rpc: JSONObject): Boolean = rpc.optString("jsonrpc") == "2.0" &&
         rpc.opt("method") is String && rpc.getString("method").isNotBlank() &&

@@ -100,7 +100,8 @@ internal class ChatGptNativeProbeEngine(
     private val httpClient: OkHttpClient = OkHttpClient.Builder().connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(30, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS).build(),
     private val imageValidator: ((ByteArray, String) -> Boolean)? = null,
-    private val warn: (String) -> Unit = {}
+    private val warn: (String) -> Unit = {},
+    private val eventTransport: GatewayEventTransport = GatewayWebhookHttp()
 ) {
     constructor(host: ChildExtensionHost) : this(
         ChatGptNativeProbeStorage(host.applicationContext), GatewayEncryptedStore(host.applicationContext),
@@ -121,12 +122,16 @@ internal class ChatGptNativeProbeEngine(
     private data class InvokeIdEntry(val invokeId: String, val observedAtMs: Long)
     private val invokeIds = ConcurrentHashMap<String, InvokeIdEntry>()
     private val resultAdapters = ConcurrentHashMap<String, GatewayResults>()
+    private val events = GatewayEvents(encryptedStore, eventTransport)
     private fun results(identity: String): GatewayResults = resultAdapters.computeIfAbsent(identity) {
         if (imageValidator == null) GatewayResults(encryptedStore, binding = identity)
         else GatewayResults(encryptedStore, binding = identity, validImage = imageValidator)
     }
     private val businessSlots = Semaphore(4)
+    // Callback verification waits on the network; bound it independently of business execution.
+    private val subscriptionSlots = Semaphore(2)
     private val deliveryWake = Channel<Unit>(Channel.CONFLATED)
+    private val eventWake = Channel<Unit>(Channel.CONFLATED)
     private val requestTimings = GatewayTimings()
     private data class ActiveRequest(val job: Job, val rpcKey: String, val channel: String, val binding: String)
     private val activeRequests = ConcurrentHashMap<String, ActiveRequest>()
@@ -176,6 +181,7 @@ internal class ChatGptNativeProbeEngine(
                 encryptedStore.write("storage_probe", "{}")
                 check(encryptedStore.read("storage_probe") == "{}") { "Encrypted result storage verification failed" }
                 encryptedStore.delete("storage_probe")
+                events.recover(binding(config))
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (error: Exception) {
@@ -185,7 +191,16 @@ internal class ChatGptNativeProbeEngine(
             }
             supervisorScope {
                 val delivery = launch { deliveryLoop(epoch) }
-                try { pollLoop(epoch, this) } finally { delivery.cancel() }
+                val eventDelivery = launch {
+                    while (currentCoroutineContext().isActive) {
+                        try { events.deliverOne(binding(storage.readConfig())) }
+                        catch (cancelled: CancellationException) { throw cancelled }
+                        catch (error: Exception) { warn("Event delivery interrupted: ${error.javaClass.simpleName}") }
+                        val wait = if (events.snapshot(binding(storage.readConfig())).optInt("pending_deliveries") > 0) 500L else 30_000L
+                        withTimeoutOrNull(wait) { eventWake.receive() }
+                    }
+                }
+                try { pollLoop(epoch, this) } finally { delivery.cancel(); eventDelivery.cancel() }
             }
         }
         true
@@ -198,6 +213,7 @@ internal class ChatGptNativeProbeEngine(
         generation.incrementAndGet()
         job?.cancel()
         httpClient.dispatcher.cancelAll()
+        eventTransport.cancel()
         mutableState.value = mutableState.value.copy(
             running = false,
             phase = "STOPPED",
@@ -222,6 +238,7 @@ internal class ChatGptNativeProbeEngine(
             .put("receipts", receipts.counts())
             .put("dedup_retention_ms", GatewayReceipts.RETENTION_MS)
             .put("supported_mcp_versions", JSONArray(GatewayProtocol.supportedVersions.toList()))
+            .put("events", events.snapshot(binding(config)))
             .put("tool_catalog_sha256", gatewayHash(toolDefinitions().toString()))
             .put("tools_list_requested", mutableState.value.lastToolsListAtMs != null)
             .put("client_catalog_refresh_verified", false)
@@ -233,6 +250,7 @@ internal class ChatGptNativeProbeEngine(
 
     fun close() {
         stop()
+        eventTransport.close()
         scope.coroutineContext[Job]?.cancel()
         httpClient.dispatcher.executorService.shutdown()
         httpClient.connectionPool.evictAll()
@@ -451,13 +469,19 @@ internal class ChatGptNativeProbeEngine(
         val answer = when (method) {
             "initialize" -> {
                 val version = rpc.optJSONObject("params")?.optString("protocolVersion").orEmpty()
-                if (version !in GatewayProtocol.supportedVersions) rpcError(id, -32602, "Unsupported protocolVersion; supported: ${GatewayProtocol.supportedVersions.joinToString()}")
+                if (version !in GatewayProtocol.initializeVersions) rpcError(id, -32602, "Unsupported initialize protocolVersion; use server/discover for MCP 2.0")
                 else {
                     update(epoch) { it.copy(access = it.access.copy(initializeCount = it.access.initializeCount + 1,
                         lastInitializeAtMs = System.currentTimeMillis())) }
                     rpcSuccess(id, initializeResult(version))
                 }
             }
+            "server/discover" -> rpcSuccess(id, JSONObject()
+                .put("resultType", "complete").put("supportedVersions", JSONArray().put(GatewayProtocol.EVENTS_VERSION))
+                .put("capabilities", JSONObject().put("tools", JSONObject()).put("events", JSONObject()))
+                .put("serverInfo", initializeResult("2025-11-25").getJSONObject("serverInfo"))
+                .put("instructions", initializeResult("2025-11-25").getString("instructions")))
+            "events/list", "events/subscribe", "events/unsubscribe" -> handleEventRpc(id, method, rpc.optJSONObject("params"), identity)
             "ping" -> rpcSuccess(id, JSONObject())
             "tools/list" -> {
                 update(epoch) { it.copy(lastToolsListAtMs = System.currentTimeMillis()) }
@@ -467,6 +491,39 @@ internal class ChatGptNativeProbeEngine(
             else -> rpcError(id, -32601, "Method not found: $method")
         }
         return GatewayProtocol.delivery(command, answer)
+    }
+
+    private suspend fun handleEventRpc(id: Any, method: String, params: JSONObject?, identity: String): JSONObject {
+        val verifies = method == "events/subscribe"
+        if (verifies && !subscriptionSlots.tryAcquire()) return rpcError(id, -32000, "Event subscription admission is busy")
+        return try {
+            val p = params ?: JSONObject()
+            val result = when (method) {
+                "events/list" -> {
+                    if (p.keys().asSequence().any { it != "cursor" && it != "_meta" } ||
+                        (p.has("cursor") && !p.isNull("cursor")) || (p.has("_meta") && p.opt("_meta") !is JSONObject))
+                        throw GatewayEventFailure(-32602, "invalid_event_cursor")
+                    events.definitions()
+                }
+                "events/subscribe" -> events.subscribe(identity, p)
+                "events/unsubscribe" -> events.unsubscribe(identity, p)
+                else -> error("Unsupported event method")
+            }
+            rpcSuccess(id, result)
+        } catch (cancelled: CancellationException) { throw cancelled
+        } catch (error: GatewayEventFailure) {
+            rpcError(id, error.code, "MCP event request failed")
+                .apply { getJSONObject("error").put("data", JSONObject().put("reason", error.reason)) }
+        } catch (_: Exception) { rpcError(id, -32603, "MCP event storage or validation failed")
+        } finally { if (verifies) subscriptionSlots.release() }
+    }
+
+    fun eventStatus(): JSONObject = events.snapshot(binding(storage.readConfig()))
+    suspend fun sendWakeTest(): JSONObject {
+        check(mutableState.value.running) { "请先连接 ChatGPT 桥" }
+        val result = events.testWake(binding(storage.readConfig()))
+        eventWake.trySend(Unit)
+        return result
     }
 
     private data class DeliveryRetry(val shardToken: String, val nextAttemptAtNs: Long, val backoffMs: Long)

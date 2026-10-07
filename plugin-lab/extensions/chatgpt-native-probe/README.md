@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.19
+# AI Limbs-ChatGPT 0.0.20
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -22,7 +22,7 @@ Protocol errors, unknown tools, capability invocation requests, successful resul
 
 In 0.0.11, oversized-result cache limits, write failures and unavailable freshly cached pages reach the engine's preparation-error handler. The adapter no longer converts these failures into a nominally successful tool result. Host outcome counters and policy remain separate from the delivery error, and duplicate requests replay the saved error without another Host invocation.
 
-The six stable tools have human-readable titles, explicit input schemas, object output schemas and conservative annotations. Dynamic Host results and paged envelopes intentionally retain extensible object schemas. Unsupported MCP versions are still rejected. Optional Events, subscriptions, skills imports and automatic catalog updates are not advertised by this release.
+The seven stable tools have human-readable titles, explicit input schemas, object output schemas and conservative annotations. Dynamic Host results and paged envelopes intentionally retain extensible object schemas. Unsupported MCP versions are still rejected. Events use the separate discovery path described below. Skills imports and automatic catalog updates are not advertised by this release.
 
 ## Panel
 
@@ -54,6 +54,7 @@ At most two controls are contributed: disconnect and reconnect while online, dis
 - `ai_limbs_result_read`: read immutable result pages using the returned cursor and `next_offset`.
 - `ai_limbs_media_read`: retrieve an immutable cached image without repeating the originating action.
 - `ai_limbs_gateway_status`: inspect transport timestamps, ingress binding, receipt phases, catalog observations and delivery errors. A successful poll does not prove that ChatGPT refreshed its catalog or that a capability completed.
+- `ai_limbs_message_context`: read a fresh frame from an already active camera once at the start of a new user message. Does not start capture or request permission.
 
 Search and describe before invoking when the ID or schema is unknown. Treat Host `execution_policy`, errors, prerequisites and `next_action` as authoritative. The generic invoke tool conservatively declares destructive and open-world hints; it is not labelled read-only.
 
@@ -83,7 +84,7 @@ The panel supports Runtime Key rotation without deleting the tunnel or its execu
 
 ## Protocol and validation
 
-The existing tunnel wire version `2026-08-25` and `/v1/tunnels/...` endpoints are retained. Wire version and MCP version are separate. Supported initialize versions are explicitly listed through `2025-11-25`; unimplemented versions are rejected rather than echoed. MCP Events, modern `server/discover`, subscriptions and domain-specific task APIs are not advertised in this release.
+The existing tunnel wire version `2026-08-25` and `/v1/tunnels/...` endpoints are retained. Wire version and MCP version are separate. The published legacy initialize versions through `2025-11-25` remain supported. The new `server/discover` path advertises `2026-07-28` with tools and events capabilities. Event methods travel through the same authenticated tunnel endpoint. Domain-specific task APIs remain owned by their plugins.
 
 The cloud Android workflow runs `:chatgpt-native-probe-extension:testDebugUnitTest`, builds the APK and signs the `.ailx` with the existing signing secret. Tests cover result reconstruction, media delivery, policy errors, expiry, tunnel isolation, durable receipts, disk failure, concurrent controls, duplicate delivery, cancellation and interrupted-process recovery. JVM tests simulate the tunnel with MockWebServer; actual Android Keystore, screen-off survival and ChatGPT catalog refresh still require device validation after installation. Build and test locally only when explicitly authorized by the project workflow.
 
@@ -94,3 +95,22 @@ The gateway now learns `capability_id -> invoke_id` mappings from live search/de
 ## 每轮相机画面
 
 基座 build110、视觉插件 0.2.3、ChatGPT 桥 0.0.19 新增 `ai_limbs_message_context`。相机由用户明确开启后，模型在每条新消息开始时调用一次，直接收到该镜头的新帧。未开相机返回 INACTIVE；失败不会返回旧图、重拍或请求权限。该调用是工具反馈，无法替原生 ChatGPT 用户消息加附件，也不能强制上游模型执行。更新后在 ChatGPT 网页/PC 刷新 MCP 工具目录并开启新对话。
+
+## 外部唤醒首轮验收
+
+0.0.20 实现官方 [MCP Events](https://developers.openai.com/plugins/build/mcp-events) 的事件发现、订阅、续期、退订和签名 HTTPS 投递，文档核对日期 2026-10-07。本轮仅开放 `ai_limbs.wake_requested`、`source_id: manual`；没有相机定时采样或画面变化检测。基座 build110 和视觉插件 0.2.3 无需修改。
+
+支持入口按官方要求使用网页版 Work、桌面版 Work 的 Cloud 或 dots。当前私有 Secure MCP Tunnel 是否完整转发 Events，以及当前账户能否创建事件任务，必须实机验证；本地模拟接收端或 webhook 的 2xx 均不能证明 ChatGPT 已响应。
+
+1. 安装本轮桥并连接，网页或桌面端 Refresh 连接元数据，开启新的受支持会话。
+2. 告诉 ChatGPT：订阅 `ai_limbs.wake_requested`，参数 `source_id=manual`，收到后回复“收到手机唤醒测试”，无需读取相机。
+3. 在 AI Limbs 的桥面板打开“外部唤醒”，确认有效订阅至少一条，再点击“发送唤醒测试”。也可通过现有通用能力调用入口执行 `plugin.chatgpt_native_probe.wake.test`，参数为空。
+4. 分别检查订阅回调验证、事件待发/接收状态和对话中实际出现的回复。只有最后一项完成才算端到端通过。无有效订阅时按钮禁用，能力调用返回明确错误。
+
+订阅身份按当前认证隧道绑定、回调 URL、事件名及规范化参数确定。本桥为单手机私有连接，隧道绑定是认证主体边界，不宣称支持同一隧道下多个独立账户的授权隔离。暂停或卸载桥停止投递；换隧道不发送原绑定事件。订阅、签名密钥和待发事件沿用 Keystore AES-GCM 私有文件，不展示回调地址、密钥或原始错误。
+
+回调校验要求 HTTPS、公网地址、TLS 主机名校验和签名随机挑战，不跟随重定向。每次实际 DNS 连接检查所有目标地址，IP 字面量单独检查。相同身份和密钥的验证缓存最多五分钟；更换密钥重新验证，六十秒内使用新旧双签名，窗口过后删除旧密钥。订阅默认六小时，最长二十四小时，最短一分钟；不接受非空重放 cursor。
+
+整个存储最多十六条有效订阅、三十二项待发投递、十六份诊断。事件寿命十五分钟，投递最多四次；临时失败进行有限指数退避，遵守有上限的 Retry-After，410/413 不重试。重试沿用同一事件 ID 和序列化内容，更新签名时间，不重做手机操作或取图。到期条目由运行中的投递循环或下一次订阅/排队清理；停止期间不运行清理计时器。回调验证最多接受两项并发请求，使用独立通道，不占业务执行槽位。
+
+`status.events` 只记录本机可证实的阶段和计数。`webhook_accepted` 意味着回调返回 2xx；`model_response_verified` 始终为 false，因为桥没有 ChatGPT 对话回复的确认接口。后续相机及其他外部事件源应在本轮上游验收成功后接入，继续沿用订阅、签名、队列和生命周期。

@@ -72,6 +72,26 @@ class ChatGptNativeProbeExtensionEntry : ChildExtensionEntry {
                 )
             )
 
+            handles += host.registerCapability(
+                InProcessCapabilitySpec(
+                    id = "$CAPABILITY_PREFIX.wake.test",
+                    displayName = "发送 ChatGPT 外部唤醒测试",
+                    description = "向已经过回调验证的 source_id=manual 订阅发送一条测试事件。队列接收或 HTTP 确认均不代表模型已响应。不会启动视觉来源。",
+                    keywords = listOf("ChatGPT", "外部唤醒", "MCP Events", "wake", "manual"),
+                    suggestedParamsJson = "{}", inputSchema = EMPTY_SCHEMA,
+                    effect = InProcessCapabilityEffect.EXTERNAL_COMMUNICATION,
+                    domain = InProcessCapabilityDomain.PLUGIN,
+                    executor = InProcessCapabilityExecutor {
+                        try { engine.sendWakeTest().toString() }
+                        catch (failure: GatewayEventFailure) {
+                            JSONObject().put("success", false).put("error_code", failure.reason)
+                                .put("error", "外部唤醒测试未发送")
+                                .put("automatic_reexecution", false).toString()
+                        }
+                    }
+                )
+            )
+
             host.publish(
                 BridgeProviderContribution(
                     factory = ChatGptNativeProbeBridgeProvider.Factory(engine),
