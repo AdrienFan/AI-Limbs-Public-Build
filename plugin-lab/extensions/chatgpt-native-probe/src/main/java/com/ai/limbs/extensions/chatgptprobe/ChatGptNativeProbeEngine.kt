@@ -375,7 +375,7 @@ internal class ChatGptNativeProbeEngine(
         require(command.getString("command_type") in setOf("jsonrpc", "session_termination")) { "Unsupported tunnel command type" }
         val rpc = command.optJSONObject("jsonrpc")
         val control = command.getString("command_type") != "jsonrpc" || rpc?.optString("method") != "tools/call" ||
-            rpc?.optJSONObject("params")?.optString("name") !in setOf(TOOL_SEARCH, TOOL_DESCRIBE, TOOL_INVOKE, TOOL_MESSAGE_CONTEXT)
+            rpc?.optJSONObject("params")?.optString("name") !in setOf(TOOL_SEARCH, TOOL_DESCRIBE, TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT)
         // Never accept more business work than can be retained in memory. Control traffic stays responsive.
         val identity = binding(config)
         val (receiptId, fresh) = receipts.claim(identity, command)
@@ -385,7 +385,7 @@ internal class ChatGptNativeProbeEngine(
             return@synchronized
         }
         requestTimings.accepted(receiptId, rpc?.optJSONObject("params")?.optString("name")
-            ?.takeIf { it in setOf(TOOL_SEARCH, TOOL_DESCRIBE, TOOL_INVOKE, TOOL_MESSAGE_CONTEXT, TOOL_RESULT_READ, TOOL_MEDIA_READ, TOOL_STATUS) }
+            ?.takeIf { it in setOf(TOOL_SEARCH, TOOL_DESCRIBE, TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT, TOOL_RESULT_READ, TOOL_MEDIA_READ, TOOL_STATUS) }
             ?: "protocol", receivedAt)
         if (!control && activeRequests.size >= 32) {
             val answer = GatewayProtocol.delivery(command, GatewayProtocol.error(rpc?.opt("id"), -32001, "Gateway busy; this request was not executed"))
@@ -407,7 +407,7 @@ internal class ChatGptNativeProbeEngine(
                     val toolName = rpc?.optJSONObject("params")?.optString("name")
                     val deadline = when {
                         toolName == TOOL_MESSAGE_CONTEXT -> 15_000L
-                        toolName == TOOL_INVOKE && requestedTimeout != null -> requestedTimeout.toLong().coerceIn(1_000L, 1_800_000L)
+                        toolName in setOf(TOOL_INVOKE, TOOL_BATCH) && requestedTimeout != null -> requestedTimeout.toLong().coerceIn(1_000L, 1_800_000L)
                         else -> 300_000L
                     }
                     withTimeout(deadline) { processCommand(command, identity, epoch, receiptId) }
@@ -724,6 +724,14 @@ internal class ChatGptNativeProbeEngine(
         .put(tool(TOOL_MEDIA_READ, "Retrieve a saved image by media_id without executing its originating capability. Cached media expires after ten minutes.",
             JSONObject().put("type", "object").put("properties", JSONObject().put("media_id", JSONObject().put("type", "string").put("minLength", 1)))
                 .put("required", JSONArray().put("media_id")).put("additionalProperties", false)))
+        .put(tool(TOOL_BATCH, "Run 1..8 already-known native UI actions sequentially through normal Host permissions, stop at the first failed/uncertain step, and read one fresh feedback after the sequence. Use only when later steps do not require inspecting intermediate screens. Earlier effects remain on failure or deadline. Never replay the batch automatically. Requires base build111 and matching visual plugin; refresh MCP metadata to expose this tool.",
+            JSONObject().put("type", "object").put("additionalProperties", false).put("required", JSONArray().put("steps"))
+                .put("properties", JSONObject().put("steps", JSONObject().put("type", "array").put("minItems", 1).put("maxItems", 8)
+                    .put("items", JSONObject().put("type", "object").put("additionalProperties", false)
+                        .put("required", JSONArray().put("capability_id")).put("properties", JSONObject()
+                            .put("capability_id", JSONObject().put("type", "string"))
+                            .put("parameters", JSONObject().put("type", "object")))))
+                    .put("timeout_ms", JSONObject().put("type", "integer").put("minimum", 1000).put("maximum", 1800000)))))
         .put(tool(TOOL_MESSAGE_CONTEXT, "Call once at the start of every new user message before answering. Returns one fresh image from the already active camera, or INACTIVE if none is running. Never starts a camera or requests permission. Do not repeat within the turn or substitute cached previews after failure. This tool does not intercept ChatGPT messages or attach files to them.",
             JSONObject().put("type", "object").put("properties", JSONObject()).put("additionalProperties", false)))
         .put(tool(TOOL_STATUS, "Inspect gateway transport, current-listener access observations, protocol errors, capability outcomes and delivery health. Includes official custom MCP metadata refresh steps; cannot refresh ChatGPT's catalog automatically.",
@@ -758,6 +766,7 @@ internal class ChatGptNativeProbeEngine(
                 TOOL_SEARCH -> setOf("query", "scope", "limit")
                 TOOL_DESCRIBE -> setOf("capability_id")
                 TOOL_INVOKE -> setOf("capability_id", "parameters", "timeout_ms")
+                TOOL_BATCH -> setOf("steps", "timeout_ms")
                 TOOL_RESULT_READ -> setOf("cursor", "offset")
                 TOOL_MEDIA_READ -> setOf("media_id")
                 TOOL_STATUS, TOOL_MESSAGE_CONTEXT -> emptySet()
@@ -827,6 +836,22 @@ internal class ChatGptNativeProbeEngine(
                     ).also(::rememberInvokeIds)
                 }
 
+                TOOL_BATCH -> {
+                    if (arguments.has("timeout_ms")) require(arguments.getLong("timeout_ms") in 1000L..1800000L) { "timeout_ms must be in 1000..1800000" }
+                    require(arguments.opt("steps") is JSONArray) { "steps must be an array" }
+                    recordAdvertisedToolCall(epoch)
+                    GatewayUiBatch.execute(arguments, resolve = { capabilityId ->
+                        val started = System.nanoTime()
+                        try { resolveBatchInvokeId(capabilityId) }
+                        finally { requestTimings.cost(timingId, "capability_resolve_ms", System.nanoTime() - started) }
+                    }, invoke = { invokeId, parameters ->
+                        if (!executionStarted) {
+                            executionStarted = true
+                            update(epoch) { it.copy(access = it.access.copy(capabilityInvokeCount = it.access.capabilityInvokeCount + 1)) }
+                        }
+                        invokeMeasured(invokeId, parameters)
+                    })
+                }
                 TOOL_INVOKE -> {
                     val capabilityId = arguments.optString("capability_id").trim()
                     require(capabilityId.isNotBlank()) { "capability_id is required" }
@@ -847,7 +872,7 @@ internal class ChatGptNativeProbeEngine(
 
                 else -> return unadvertisedToolError(id)
             }
-            if (name == TOOL_INVOKE || name == TOOL_MESSAGE_CONTEXT) {
+            if (name in setOf(TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT)) {
                 receivedInvokeResult = result
                 val failed = GatewayResults.failed(result)
                 val uncertain = result.optString("execution_state") == "UNKNOWN"
@@ -861,7 +886,7 @@ internal class ChatGptNativeProbeEngine(
             update(epoch) { it.copy(lastCapabilityResultAtMs = System.currentTimeMillis()) }
             rpcSuccess(id, adaptMeasured(result))
         } catch (cancelled: CancellationException) {
-            if (executionStarted && (name == TOOL_INVOKE || name == TOOL_MESSAGE_CONTEXT) && receivedInvokeResult == null) recordUncertainInvoke(epoch)
+            if (executionStarted && (name in setOf(TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT)) && receivedInvokeResult == null) recordUncertainInvoke(epoch)
             throw cancelled
         } catch (error: GatewayResultUnavailable) {
             // A missing freshly written page is preparation failure, not a new read request.
@@ -875,7 +900,7 @@ internal class ChatGptNativeProbeEngine(
             val received = receivedInvokeResult
             if (received != null) receivedResultDeliveryError(id, received, epoch)
             else if (executionStarted) {
-                if (name == TOOL_INVOKE || name == TOOL_MESSAGE_CONTEXT) recordUncertainInvoke(epoch)
+                if (name in setOf(TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT)) recordUncertainInvoke(epoch)
                 GatewayProtocol.uncertain(id, "INVOCATION_OR_RESULT_ERROR")
             }
             else rpcError(id, -32602, (error.message ?: "Invalid tool arguments").take(200))
@@ -883,14 +908,14 @@ internal class ChatGptNativeProbeEngine(
             val received = receivedInvokeResult
             if (received != null) receivedResultDeliveryError(id, received, epoch)
             else if (executionStarted) {
-                if (name == TOOL_INVOKE || name == TOOL_MESSAGE_CONTEXT) recordUncertainInvoke(epoch)
+                if (name in setOf(TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT)) recordUncertainInvoke(epoch)
                 GatewayProtocol.uncertain(id, "INVOCATION_OR_RESULT_ERROR")
             }
             else rpcError(id, -32602, "Invalid tool argument type")
         } catch (error: Exception) {
             val received = receivedInvokeResult
             if (received != null) return receivedResultDeliveryError(id, received, epoch)
-            if (name == TOOL_INVOKE && !executionStarted) {
+            if (name in setOf(TOOL_INVOKE, TOOL_BATCH) && !executionStarted) {
                 val safeMessage = "Capability ID resolution failed: ${error.javaClass.simpleName}; no business capability was started"
                 return rpcSuccess(
                     id,
@@ -906,7 +931,7 @@ internal class ChatGptNativeProbeEngine(
                     )
                 )
             }
-            if (executionStarted && (name == TOOL_INVOKE || name == TOOL_MESSAGE_CONTEXT)) recordUncertainInvoke(epoch)
+            if (executionStarted && (name in setOf(TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT))) recordUncertainInvoke(epoch)
             val safeMessage = "Capability invocation failed: ${error.javaClass.simpleName}; inspect domain state before retrying"
             rpcSuccess(
                 id,
@@ -982,6 +1007,17 @@ internal class ChatGptNativeProbeEngine(
         return null
     }
 
+    /** Batches must prove every address exists before their first side effect. */
+    private suspend fun resolveBatchInvokeId(requestedId: String): String {
+        cachedInvokeId(requestedId)?.let { return it }
+        val descriptor = invokeAiLimbs("capability.describe",
+            JSONObject().put("capability_id", requestedId))
+        require(!GatewayResults.failed(descriptor)) { "Batch capability is unavailable" }
+        rememberInvokeIds(descriptor)
+        return cachedInvokeId(requestedId)
+            ?: throw IllegalArgumentException("Batch capability has no verified invoke address")
+    }
+
     private suspend fun resolveInvokeId(requestedId: String): String {
         cachedInvokeId(requestedId)?.let { return it }
         val descriptor = invokeAiLimbs(
@@ -1018,6 +1054,7 @@ internal class ChatGptNativeProbeEngine(
             TOOL_SEARCH -> "Search AI Limbs capabilities"
             TOOL_DESCRIBE -> "Describe an AI Limbs capability"
             TOOL_INVOKE -> "Invoke an AI Limbs capability"
+            TOOL_BATCH -> "Run known sequential UI actions"
             TOOL_RESULT_READ -> "Read a saved result page"
             TOOL_MEDIA_READ -> "Read a saved image"
             TOOL_STATUS -> "Inspect AI Limbs-ChatGPT access"
@@ -1027,9 +1064,9 @@ internal class ChatGptNativeProbeEngine(
         .put("description", description)
         .put("inputSchema", inputSchema)
         .put("outputSchema", JSONObject().put("type", "object").put("additionalProperties", true))
-        .put("annotations", JSONObject().put("readOnlyHint", name != TOOL_INVOKE)
-            .put("destructiveHint", name == TOOL_INVOKE).put("idempotentHint", name != TOOL_INVOKE && name != TOOL_MESSAGE_CONTEXT)
-            .put("openWorldHint", name == TOOL_INVOKE))
+        .put("annotations", JSONObject().put("readOnlyHint", name !in setOf(TOOL_INVOKE, TOOL_BATCH))
+            .put("destructiveHint", name in setOf(TOOL_INVOKE, TOOL_BATCH)).put("idempotentHint", name !in setOf(TOOL_INVOKE, TOOL_BATCH, TOOL_MESSAGE_CONTEXT))
+            .put("openWorldHint", name in setOf(TOOL_INVOKE, TOOL_BATCH)))
 
     private fun rpcSuccess(id: Any, result: JSONObject): JSONObject =
         JSONObject()
@@ -1090,6 +1127,7 @@ internal class ChatGptNativeProbeEngine(
         private const val TOOL_SEARCH = "ai_limbs_capability_search"
         private const val TOOL_DESCRIBE = "ai_limbs_capability_describe"
         private const val TOOL_INVOKE = "ai_limbs_capability_invoke"
+        private const val TOOL_BATCH = "ai_limbs_capability_batch"
         private const val TOOL_RESULT_READ = "ai_limbs_result_read"
         private const val TOOL_MEDIA_READ = "ai_limbs_media_read"
         private const val TOOL_MESSAGE_CONTEXT = "ai_limbs_message_context"

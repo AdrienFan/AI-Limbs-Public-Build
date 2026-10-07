@@ -186,8 +186,8 @@ class GatewayEngineTest {
             val tools = fixture.responses.first { it.optString("request_id") == "control-list" }
                 .getJSONObject("resp_json").getJSONObject("result").getJSONArray("tools")
             val names = (0 until tools.length()).map { tools.getJSONObject(it).getString("name") }
-            assertEquals(7, names.size)
-            assertTrue(names.containsAll(listOf("ai_limbs_capability_search", "ai_limbs_capability_describe", "ai_limbs_capability_invoke", "ai_limbs_result_read", "ai_limbs_media_read", "ai_limbs_gateway_status", "ai_limbs_message_context")))
+            assertEquals(8, names.size)
+            assertTrue(names.containsAll(listOf("ai_limbs_capability_search", "ai_limbs_capability_describe", "ai_limbs_capability_invoke", "ai_limbs_capability_batch", "ai_limbs_result_read", "ai_limbs_media_read", "ai_limbs_gateway_status", "ai_limbs_message_context")))
             assertEquals(4, calls.get())
             gate.complete(Unit)
             val expected = (0 until 5).map { "business-$it" }.toSet()
@@ -297,7 +297,7 @@ class GatewayEngineTest {
             assertEquals(-32602, error.getInt("code"))
             val data = error.getJSONObject("data")
             assertEquals("TOOL_NOT_ADVERTISED", data.getString("gateway_error_code"))
-            assertEquals(7, data.getJSONArray("advertised_tools").length())
+            assertEquals(8, data.getJSONArray("advertised_tools").length())
             assertEquals(4, data.getJSONArray("metadata_refresh_steps").length())
             assertEquals(GatewayAdmission.DOCUMENTATION_URL, data.getString("documentation_url"))
             assertFalse(error.toString().contains("server_info"))
@@ -363,7 +363,7 @@ class GatewayEngineTest {
             assertTrue(init.getString("instructions").contains("new conversation"))
             val tools = fixture.responses.first { it.optString("request_id") == "catalog" }.getJSONObject("resp_json")
                 .getJSONObject("result").getJSONArray("tools")
-            assertEquals(7, tools.length())
+            assertEquals(8, tools.length())
             assertEquals((0 until tools.length()).map { tools.getJSONObject(it).getString("name") },
                 fixture.engine.advertisedToolNames())
             for (index in 0 until tools.length()) {
@@ -372,11 +372,18 @@ class GatewayEngineTest {
                 assertEquals("object", tool.getJSONObject("inputSchema").getString("type"))
                 assertFalse(tool.getJSONObject("inputSchema").getBoolean("additionalProperties"))
                 assertEquals("object", tool.getJSONObject("outputSchema").getString("type"))
-                val invoke = tool.getString("name") == "ai_limbs_capability_invoke"
+                val invoke = tool.getString("name") in setOf("ai_limbs_capability_invoke", "ai_limbs_capability_batch")
                 assertEquals(!invoke, tool.getJSONObject("annotations").getBoolean("readOnlyHint"))
                 assertEquals(invoke, tool.getJSONObject("annotations").getBoolean("destructiveHint"))
                 if (tool.getString("name") == "ai_limbs_capability_search")
                     assertEquals(1, tool.getJSONObject("inputSchema").getJSONObject("properties").getJSONObject("query").getInt("minLength"))
+                if (tool.getString("name") == "ai_limbs_capability_batch") {
+                    val properties = tool.getJSONObject("inputSchema").getJSONObject("properties")
+                    assertEquals(1, properties.getJSONObject("steps").getInt("minItems"))
+                    assertEquals(8, properties.getJSONObject("steps").getInt("maxItems"))
+                    assertEquals(1800000, properties.getJSONObject("timeout_ms").getInt("maximum"))
+                    assertFalse(properties.getJSONObject("steps").getJSONObject("items").getBoolean("additionalProperties"))
+                }
             }
             assertEquals(1L, fixture.engine.state.value.access.initializeCount)
             assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
@@ -561,6 +568,59 @@ class GatewayEngineTest {
 
     private fun gatewayToolCommand(requestId: String, rpcId: Int, name: String, arguments: JSONObject): JSONObject =
         rpcCommand(requestId, rpcId, "tools/call", JSONObject().put("name", name).put("arguments", arguments))
+
+    @Test fun batchDuplicateDeliveryExecutesActionsOnceAndDeliversOnlyFinalImage() = runBlocking {
+        Fixture(failFirstPost = true).use { fixture ->
+            fixture.invokeAliases["native.tap"] = "tap"
+            fixture.invokeAliases["native.press_key"] = "press_key"
+            val calls = ConcurrentLinkedQueue<String>()
+            fixture.start { tool, params ->
+                calls.add(tool)
+                if (tool == "ai_limbs.operation_feedback.read") {
+                    assertEquals(0, params.length())
+                    JSONObject().put("success", true).put("operation_feedback", JSONObject()
+                        .put("mcp_content", JSONArray().put(JSONObject().put("type", "image")
+                            .put("mimeType", "image/png")
+                            .put("data", "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6GAAAAABJRU5ErkJggg=="))))
+                } else {
+                    assertFalse(params.getBoolean("screen_feedback"))
+                    JSONObject().put("success", true)
+                }
+            }
+            val command = gatewayToolCommand("batch-once", 530, "ai_limbs_capability_batch",
+                JSONObject().put("steps", JSONArray()
+                    .put(JSONObject().put("capability_id", "native.tap").put("parameters", JSONObject().put("x", 10).put("y", 20)))
+                    .put(JSONObject().put("capability_id", "native.press_key").put("parameters", JSONObject().put("key_code", "HOME")))))
+            fixture.commands.add(command)
+            eventually { fixture.responses.any { it.optString("request_id") == "batch-once" } }
+            fixture.commands.add(JSONObject(command.toString()).put("shard_token", "new-batch-token"))
+            eventually { fixture.responses.count { it.optString("request_id") == "batch-once" } >= 2 }
+            assertEquals(listOf("tap", "press_key", "ai_limbs.operation_feedback.read"), calls.toList())
+            val result = fixture.responses.first { it.optString("request_id") == "batch-once" }
+                .getJSONObject("resp_json").getJSONObject("result")
+            assertFalse(result.getBoolean("isError"))
+            assertEquals("COMPLETED", result.getJSONObject("structuredContent").getJSONObject("batch").getString("status"))
+            val content = result.getJSONArray("content")
+            assertEquals(1, (0 until content.length()).count { content.getJSONObject(it).optString("type") == "image" })
+            assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
+        }
+    }
+
+    @Test fun batchPreflightFailureDoesNotExecuteAnyNativeAction() = runBlocking {
+        Fixture().use { fixture ->
+            fixture.invokeAliases["native.tap"] = "tap"
+            fixture.describeFailures["ai_limbs.operation_feedback.read"] = "unsupported core"
+            val calls = AtomicInteger()
+            fixture.start { _, _ -> calls.incrementAndGet(); JSONObject().put("success", true) }
+            fixture.commands.add(gatewayToolCommand("batch-preflight", 531, "ai_limbs_capability_batch",
+                JSONObject().put("steps", JSONArray().put(JSONObject().put("capability_id", "native.tap")))))
+            eventually { fixture.responses.any { it.optString("request_id") == "batch-preflight" } }
+            assertEquals(0, calls.get())
+            val result = fixture.responses.first { it.optString("request_id") == "batch-preflight" }
+                .getJSONObject("resp_json").getJSONObject("result")
+            assertTrue(result.getBoolean("isError"))
+        }
+    }
 
     private suspend fun eventually(condition: () -> Boolean) = withTimeout(10_000L) {
         while (!condition()) delay(20L)
