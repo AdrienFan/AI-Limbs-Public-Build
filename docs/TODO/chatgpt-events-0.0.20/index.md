@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
-status: implementation-awaiting-validation
+status: cloud-validated-awaiting-device
 ---
 
 # ChatGPT 外部唤醒首轮验收
