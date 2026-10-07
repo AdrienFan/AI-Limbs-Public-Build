@@ -13,13 +13,18 @@ import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Dns
 import okhttp3.EventListener
+import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.Response
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
-internal class GatewayWebhookHttp(private val resolver: Dns = GatewayCallbackDns()) : GatewayEventTransport {
+internal class GatewayWebhookHttp(
+    private val resolver: Dns = GatewayCallbackDns(),
+    private val routes: GatewayCallbackRoutes? = null
+) : GatewayEventTransport {
+    @Volatile private var lastConnectionFamily: String? = null
     constructor(resolve: (String) -> List<InetAddress>) : this(object : Dns {
         override fun lookup(hostname: String) = resolve(hostname)
     })
@@ -34,14 +39,18 @@ internal class GatewayWebhookHttp(private val resolver: Dns = GatewayCallbackDns
                 if (addresses.isEmpty()) throw java.net.UnknownHostException("No callback addresses")
                 if (addresses.any { !GatewayWebhookSecurity.publicAddress(it) })
                     throw GatewayNonPublicDestination()
-                return addresses
+                return if (routes == null) addresses else routes.select(addresses)
             }
         }).build()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     override suspend fun post(url: String, headers: Map<String, String>, body: String): GatewayWebhookReply {
         GatewayWebhookSecurity.requireUrl(url)
-        val trace = Trace()
+        val trace = Trace { lastConnectionFamily = it }
+        // Numeric callback URLs bypass OkHttp DNS; apply the same route policy explicitly.
+        val host = url.toHttpUrl().host
+        if (routes != null && (host.contains(':') || host.matches(Regex("[0-9.]+"))))
+            routes.select(listOf(InetAddress.getByName(host)))
         try {
             val request = Request.Builder().url(url).post(body.toRequestBody("application/json".toMediaType()))
                 .tag(Trace::class.java, trace)
@@ -77,10 +86,13 @@ internal class GatewayWebhookHttp(private val resolver: Dns = GatewayCallbackDns
         } catch (error: Exception) { throw GatewayWebhookFailure.classify(error, trace.stage) }
     }
 
-    private class Trace : EventListener() {
+    private class Trace(private val connectedFamily: (String) -> Unit) : EventListener() {
         @Volatile var stage = "prepare"
         override fun dnsStart(call: Call, domainName: String) { stage = "dns" }
-        override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) { stage = "connect" }
+        override fun connectStart(call: Call, inetSocketAddress: InetSocketAddress, proxy: Proxy) {
+            stage = "connect"
+            connectedFamily(if (inetSocketAddress.address.address.size == 4) "IPv4" else "IPv6")
+        }
         override fun secureConnectStart(call: Call) { stage = "tls" }
         override fun requestHeadersStart(call: Call) { stage = "request_headers" }
         override fun requestBodyStart(call: Call) { stage = "request_body" }
@@ -90,7 +102,8 @@ internal class GatewayWebhookHttp(private val resolver: Dns = GatewayCallbackDns
     override fun dnsStatus(): JSONObject = when (resolver) {
         is GatewayCallbackDns -> resolver.status()
         else -> JSONObject().put("mode", "CUSTOM")
-    }
+    }.put("route_selection", routes?.status() ?: JSONObject.NULL)
+        .put("last_connection_family", lastConnectionFamily ?: JSONObject.NULL)
     override fun cancel() {
         client.dispatcher.cancelAll()
         if (resolver is GatewayCallbackDns) resolver.cancel()

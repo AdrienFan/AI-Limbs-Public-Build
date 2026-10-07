@@ -101,7 +101,9 @@ internal class ChatGptNativeProbeEngine(
         .readTimeout(30, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS).build(),
     private val imageValidator: ((ByteArray, String) -> Boolean)? = null,
     private val warn: (String) -> Unit = {},
-    private val eventTransport: GatewayEventTransport = GatewayWebhookHttp(GatewayCallbackDns({ storage.readConfig().callbackDnsUrl }))
+    private val callbackRoutes: GatewayCallbackRoutes? = null,
+    private val eventTransport: GatewayEventTransport = GatewayWebhookHttp(
+        GatewayCallbackDns({ storage.readConfig().callbackDnsUrl }), callbackRoutes)
 ) {
     constructor(host: ChildExtensionHost) : this(
         ChatGptNativeProbeStorage(host.applicationContext), GatewayEncryptedStore(host.applicationContext),
@@ -109,7 +111,8 @@ internal class ChatGptNativeProbeEngine(
             val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
             BitmapFactory.decodeByteArray(bytes, 0, bytes.size, bounds)
             bounds.outWidth in 1..8192 && bounds.outHeight in 1..8192 && bounds.outWidth.toLong() * bounds.outHeight <= 32_000_000L && bounds.outMimeType == mime
-        }, warn = { message -> host.logger.w(TAG, message) }
+        }, warn = { message -> host.logger.w(TAG, message) },
+        callbackRoutes = gatewayAndroidCallbackRoutes(host.applicationContext)
     )
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val mutableState = MutableStateFlow(McpGatewayState())

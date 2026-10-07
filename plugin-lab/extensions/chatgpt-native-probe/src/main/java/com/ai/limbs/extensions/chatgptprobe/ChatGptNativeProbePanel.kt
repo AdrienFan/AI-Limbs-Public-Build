@@ -142,6 +142,16 @@ internal class ChatGptNativeProbePanel(
                     }
                     add("收到 HTTP 接收确认不代表模型已响应；请在订阅的对话中核对回复。")
                     add("回调使用加密 DNS 获取真实公网 IP，不绑定 VPN 节点。")
+                    engine.statusJson().optJSONObject("callback_dns")?.let { dns ->
+                        dns.optJSONObject("route_selection")?.takeIf { it.optBoolean("checked") }?.let { route ->
+                            add("当前可路由地址：IPv4 ${route.optInt("ipv4_selected")}/${route.optInt("ipv4_candidates")} · IPv6 ${route.optInt("ipv6_selected")}/${route.optInt("ipv6_candidates")}")
+                        }
+                        dns.optString("last_connection_family").takeIf { it.isNotBlank() && it != "null" }?.let {
+                            add("最近连接使用：$it")
+                        }
+                    }
+                    if (events.optString("last_error") in setOf("no_usable_callback_route", "callback_network_unavailable", "callback_route_unavailable"))
+                        add("当前网络没有可用的回调路由；请核对 VPN 连接及其地址族支持。")
                     add("当前只发送手动测试事件，不自动启动相机或持续取图。")
                 }, actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_DNS, "回调网络设置"),
                     BridgeProviderPanelAction(ACTION_WAKE_TEST, "发送唤醒测试", enabled = probe.running && events.optInt("active_subscriptions") > 0)))

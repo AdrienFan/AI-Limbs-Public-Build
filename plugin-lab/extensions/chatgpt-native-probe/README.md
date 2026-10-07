@@ -147,3 +147,14 @@ The gateway now learns `capability_id -> invoke_id` mappings from live search/de
 实机 0.0.22 已完成一次 HTTPS DNS 查询，success=1、failure=0；回调进入 TLS 后出现 SSLHandshakeException，测试订阅没有保存。DNS 修复实机生效，不等于回调和唤醒通过。
 
 0.0.23 保留至多 8 层异常类名及标准证书验证枚举，不保存异常消息、URL、域名、证书正文或签名密钥。分类区分证书过期/尚未生效、信任链验证、协议问题、EOF 关闭与套接字中断，面板和状态诊断交付相同字段。此次仅补齐证据，不调整 TLS 信任、IP 校验、DNS/代理路线或超时，不能作为回调故障已修复的结论。
+
+
+## 0.0.24 当前网络路由筛选
+
+0.0.23 实机订阅未通过：DoH success=1，connect 阶段出现 NoRouteToHostException。手机 VPN tun0 只有 IPv4 源地址，IPv6 路由表有 unreachable default；旧代码将 A/AAAA 回答直接交给关闭连接重试的客户端，没有按当前网络路由筛选。
+
+生产桥在连接前重新读取调用进程默认网络的 LinkProperties；所有 DNS 回答先完成公网校验，再按源地址族、目标最长前缀路由和 unicast 类型选择可路由地址。没有可用地址时明确返回 route 阶段；不借用其他 Wi-Fi/蜂窝网络、不绑定节点、固定 IP 或失败后改道。默认网络支持 IPv6 时保留 IPv6。API 26–32 使用系统仅公开的 unicast 路由；API 33+ 同时判断显式 unreachable/throw。
+
+callback_dns 新增 route_selection 候选/选中计数及 last_connection_family，不返回回调地址。面板展示相同信息。保持 DNS、原域名 SNI、证书和签名校验，以及禁止重定向/连接重试的策略。修复明确的路由选择缺陷，之前 TLS 失败是否仍存在须安装后验证。
+
+本轮只提交 ChatGPT 组件云端测试、编译和打包；提交后遵照用户要求停止轮询，云端结果和实机问题由用户反馈。未运行本地项目测试或构建，未宣称云端测试或公网唤醒已通过。
