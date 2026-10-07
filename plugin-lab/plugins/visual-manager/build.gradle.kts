@@ -11,11 +11,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.visualmanager.v028"
+        applicationId = "com.ai.limbs.payload.visualmanager.v029"
         minSdk = 29
         targetSdk = 34
-        versionCode = 14
-        versionName = "0.2.8"
+        versionCode = 15
+        versionName = "0.2.9"
     }
 
     compileOptions {

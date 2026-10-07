@@ -2,7 +2,7 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.visual_manager",
-  "version": "0.2.8",
+  "version": "0.2.9",
   "api": {
     "target": 1,
     "min": 1
@@ -60,7 +60,8 @@
       "plugin.system.visual_manager.tap_on_frame",
       "plugin.system.visual_manager.wait_for_visual_change",
       "plugin.system.visual_manager.wait_until_stable",
-      "plugin.system.visual_manager.observe"
+      "plugin.system.visual_manager.observe",
+      "plugin.system.visual_manager.page.nodes"
     ],
     "services": [],
     "providers": [

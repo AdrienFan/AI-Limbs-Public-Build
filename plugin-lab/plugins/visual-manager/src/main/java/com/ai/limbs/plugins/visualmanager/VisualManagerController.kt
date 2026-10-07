@@ -99,6 +99,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                     JSONObject().put("cleared", true).put("deleted_count", count)
                 }
                 "page.inspect" -> inspectPage(parameters)
+                "page.nodes" -> pageReader.readNodes(parameters)
                 "observe" -> observePage(parameters)
                 "page.text" -> locks.getValue("page").withLock { pageReader.read(parameters) }
                 else -> error("未知视觉工作台操作：$action")
@@ -264,12 +265,15 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
     private suspend fun hostCall(primitive: String, operation: String, p: JSONObject = JSONObject()): JSONObject =
         JSONObject(host.invokeHostCapability(primitive, JSONObject(p.toString()).put("operation", operation).toString()))
 
-    private suspend fun inspectPage(parameters: JSONObject): JSONObject = perform("page", "读取页面") {
+    private suspend fun inspectPage(parameters: JSONObject, compact: Boolean = false): JSONObject = perform("page", "读取页面") {
         val request = JSONObject().put("format", "json").put("detail", "full")
         if (parameters.has("display")) request.put("display", parameters.getString("display"))
+        val started = SystemClock.elapsedRealtime()
         val response = hostCall("host.ui.automation@1", "snapshot", request)
+        val captured = SystemClock.elapsedRealtime()
         VisualOperationResult.requireFlag(response, "success", "页面读取未完成")
-        pageReader.capture(response.getJSONObject("result"))
+        pageReader.capture(response.getJSONObject("result"), compact).put("timings_ms", JSONObject()
+            .put("host_snapshot", captured - started).put("page_projection", SystemClock.elapsedRealtime() - captured))
     }
 
     private suspend fun observePage(p: JSONObject): JSONObject {
@@ -278,7 +282,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val edge = p.optInt("max_edge", 1024)
         require(edge in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
         // Explicit visual observation needs no UI tree or accessibility permission.
-        val page = if (requested == "visual") null else inspectPage(JSONObject())
+        val page = if (requested == "visual") null else inspectPage(JSONObject(), compact = true)
         val selection = page?.getJSONObject("visual_mode") ?: JSONObject().put("mode", "visual")
             .put("requested_mode", requested).put("reason", "EXPLICIT_MODE").put("preferred_modality", "image")
         if (requested == "ui") selection.put("requested_mode", "ui").put("mode", "ui")
@@ -681,22 +685,36 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         generation: Long?, edge: Int): JSONObject {
         val started = SystemClock.elapsedRealtime()
         val deadline = started + options.timeoutMs
+        val budget = VisualPollBudget(deadline)
         val detector = VisualChangeDetector(baseline, options)
         val geometryId = meta.getJSONObject("geometry").getString("geometry_id")
         var captured: JSONObject? = null
         var scratch: File? = null
         var met = false
         var polls = 0
+        var frameMs = 0L
+        var sampleMs = 0L
+        var sourceCheckMs = 0L
+        var budgetExhausted = false
         try {
             while (SystemClock.elapsedRealtime() < deadline) {
                 synchronized(stateLock) { check(generation == generations["screen"]) { "取帧已被停止指令取消" } }
                 val remaining = deadline - SystemClock.elapsedRealtime()
                 if (remaining <= 0) break
+                if (!budget.canStart(SystemClock.elapsedRealtime())) {
+                    budgetExhausted = true
+                    // Preserve the last verified observation; do not start work known to exceed the budget.
+                    delay((deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0))
+                    break
+                }
+                val pollStarted = SystemClock.elapsedRealtime()
                 // First obtain a post-request surface; later observations use the latest buffer.
                 val response = VisualOperationResult.requireHost(hostCall(sessionPrimitive("screen"), "frame", JSONObject()
                     .put("session_id", meta.getString("session_id")).put("frame_format", "rgba8888")
                     .put("frame_mode", if (polls == 0) "new_surface" else "latest")
                     .put("max_age_ms", 60000).put("timeout_ms", remaining.coerceAtMost(15000))))
+                val frameEnded = SystemClock.elapsedRealtime()
+                frameMs += frameEnded - pollStarted
                 val rawMeta = VisualOperationResult.requireHost(response.getJSONObject("frame"))
                 val next = File(rawMeta.getString("path"))
                 val previousScratch = scratch
@@ -708,22 +726,30 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 val raw = RawScreenFrame.read(rawMeta, next)
                 val sample = VisualSample.raw(raw, next)
                 val observedElapsed = SystemClock.elapsedRealtime()
+                sampleMs += observedElapsed - frameEnded
                 val status = hostCall(sessionPrimitive("screen"), "status",
                     JSONObject().put("session_id", meta.getString("session_id")))
                 VisualCaptureEvidence.requireActive(status, meta.getString("session_id"), geometryId)
+                sourceCheckMs += SystemClock.elapsedRealtime() - observedElapsed
                 captured = response
                 polls++
                 met = detector.accept(rawMeta.getString("frame_id"),
                     response.getJSONObject("freshness").getLong("captured_elapsed_ms"), sample,
                     observedElapsed, sourceVerified = true)
+                budget.completed(pollStarted, SystemClock.elapsedRealtime())
                 // A frame delivered after the deadline cannot retroactively satisfy the condition.
                 if (SystemClock.elapsedRealtime() >= deadline) { met = false; break }
                 if (met) break
                 delay(minOf(options.intervalMs, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)))
             }
             val last = checkNotNull(captured) { "VISUAL_WAIT_TIMEOUT: 等待期限内没有画面" }
+            val finished = SystemClock.elapsedRealtime()
             val wait = JSONObject().put("mode", options.mode).put("condition_met", met)
-                .put("status", if (met) "READY" else "TIMEOUT").put("elapsed_ms", SystemClock.elapsedRealtime() - started)
+                .put("status", if (met) "READY" else "TIMEOUT").put("elapsed_ms", finished - started)
+                .put("timeout_ms", options.timeoutMs).put("deadline_overshoot_ms", (finished - deadline).coerceAtLeast(0))
+                .put("deadline_policy", "poll_admission").put("poll_budget_exhausted", budgetExhausted)
+                .put("timings_ms", JSONObject().put("host_frame", frameMs).put("sampling", sampleMs)
+                    .put("source_check", sourceCheckMs).put("longest_poll", budget.longestPollMs))
                 .put("samples", detector.samples).put("polls", polls).put("changed", detector.changed)
                 .put("observations", detector.observations).put("reused_observations", detector.observations - detector.samples)
                 .put("stability_clock", "observation_elapsed").put("capture_source_verified", true)

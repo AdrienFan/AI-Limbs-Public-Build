@@ -63,6 +63,7 @@ class VisualManagerEntry : InProcessPluginEntry {
                     "observe_mode" -> field.put("enum", JSONArray(listOf("new_frame", "stable", "change_then_stable")))
                     "mode" -> field.put("enum", JSONArray(listOf("auto", "ui", "visual")))
                     "field" -> field.put("enum", JSONArray(listOf("text", "content_description")))
+                    "scope" -> field.put("enum", JSONArray(listOf("all", "semantic")))
                 }
                 parameter.default?.let { value ->
                     field.put("default", when (parameter.type) {
@@ -90,7 +91,7 @@ class VisualManagerEntry : InProcessPluginEntry {
         val change = InProcessCapabilityEffect.STATE_CHANGE
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
         val waitParameters = listOf(
-            p("timeout_ms", "integer", "等待上限 100..15000 毫秒，包含内部取帧，不包含网络回传", false, "5000"),
+            p("timeout_ms", "integer", "观察预算 100..15000 毫秒，包含整轮取帧/采样/健康检查；按已测轮耗时停止新轮询，在途 Host 调用不强制取消，超额见 deadline_overshoot_ms；不含最终编码/网络回传", false, "5000"),
             p("stable_ms", "integer", "稳定窗口 100..5000 毫秒，不大于 timeout_ms", false, "250"),
             p("sample_interval_ms", "integer", "采样间隔 50..1000 毫秒", false, "100"),
             p("change_ratio", "number", "发生变化的采样点比例阈值 (0,1]", false),
@@ -119,7 +120,7 @@ class VisualManagerEntry : InProcessPluginEntry {
             listOf(kind, session, p("max_edge", "integer", "预览最长边 160..2048", false, "1024")),
             """{"kind":"screen","session_id":"<status 返回的 ID>"}""")
         capability("observe", "自动选择页面观察方式", read,
-            "mode=auto 根据当前完整 UI 节点、可读内容和 Surface 区域选择 UI 或图像。普通页面返回 page 固定快照；自绘/稀疏页面返回一帧及 page_evidence。判断依据在 visual_mode，属于启发式，可指定 ui/visual。include_image=true 为 UI 补充图像；图像必须已有 READY 共享屏会话，不自动授权或启动。明确 visual 跳过 UI 树。UI 读取失败直接报错，不伪装为视觉模式。页面与图片不是原子快照。",
+            "mode=auto 根据完整 UI 快照选择 UI 或图像。UI 返回 page：默认仅首批有文字/描述/可点击/可编辑的紧凑节点，nodes_has_more 为真时按 nodes_next_offset 调用 page.nodes scope=semantic；scope=all 可读全部节点，page.text 可读完整文字。分类仍使用完整树，node_count 为全部节点数；nodes_total 为当前筛选范围数量。include_image=true 为 UI 补充已有 READY 共享屏图像。明确 visual 跳过 UI 树。失败直接报错，不自动授权、启动或降级。页面和图片不是原子快照；page.timings_ms 区分 Host 快照与插件处理。",
             listOf(p("mode", description = "auto/ui/visual", required = false, default = "auto"),
                 p("include_image", "boolean", "为 UI 观察附上一帧；visual 本来就返回图像", false, "false"),
                 p("max_edge", "integer", "图像最长边 160..2048", false, "1024")), """{"mode":"auto"}""")
@@ -167,6 +168,13 @@ class VisualManagerEntry : InProcessPluginEntry {
                 p("offset", "integer", "全文偏移", false, "0"),
                 p("limit", "integer", "分页字符数，默认 12000", false, "12000")),
             """{"snapshot_id":"<page.inspect 返回的 ID>","offset":0}""")
+        capability("page.nodes", "分页读取固定页面节点", read,
+            "读取 observe/page.inspect 的同一固定快照节点；scope=all 全部节点，semantic 仅有文字/描述/可点击/可编辑节点。offset 是当前 scope 的节点序号，按 nodes_next_offset 续读，不重新获取 UI。节点 ID 不变，文字全文仍用 page.text。快照过期明确报错，不返回其他快照。",
+            listOf(p("snapshot_id", description = "observe/page.inspect 返回的 ID"),
+                p("scope", description = "all/semantic", required = false, default = "all"),
+                p("offset", "integer", "当前 scope 的节点偏移", false, "0"),
+                p("limit", "integer", "每页节点数 1..100", false, "20")),
+            """{"snapshot_id":"<observe 返回的 ID>","scope":"semantic","offset":0,"limit":8}""")
 
         host.logger.i("VisualWorkbench", "Visual Workbench mounted")
         return InProcessPluginHandle { controller.dispose() }

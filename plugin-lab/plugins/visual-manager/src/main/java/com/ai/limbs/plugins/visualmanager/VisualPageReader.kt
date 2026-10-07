@@ -14,7 +14,7 @@ internal class VisualPageReader {
     private val snapshots = LinkedHashMap<String, Snapshot>()
 
     @Synchronized
-    fun capture(data: JSONObject): JSONObject {
+    fun capture(data: JSONObject, compact: Boolean = false): JSONObject {
         expire()
         require(data.toString().toByteArray(Charsets.UTF_8).size <= MAX_BYTES) {
             "Page snapshot exceeds 4 MiB; use a smaller visible page"
@@ -22,7 +22,10 @@ internal class VisualPageReader {
         val nodes = mutableListOf<Node>()
         fun visit(node: JSONObject, path: String, depth: Int = 0) {
             require(depth <= 128 && nodes.size < 10000) { "页面节点数量或深度超过上限" }
-            nodes.add(Node(path, JSONObject(node.toString()).apply { remove("children") }))
+            // Copy attributes once; serializing the whole remaining subtree at every depth is quadratic.
+            val attributes = JSONObject()
+            node.keys().forEach { key -> if (key != "children") attributes.put(key, node.get(key)) }
+            nodes.add(Node(path, JSONObject(attributes.toString())))
             val children = node.optJSONArray("children") ?: JSONArray()
             for (i in 0 until children.length()) visit(children.getJSONObject(i), path + "." + i, depth + 1)
         }
@@ -42,20 +45,64 @@ internal class VisualPageReader {
             VisualModeSelector.select(nodes.map { it.data }))
         snapshots[snapshot.id] = snapshot
         while (snapshots.size > MAX_SNAPSHOTS) snapshots.remove(snapshots.keys.first())
-        val summaries = JSONArray()
-        nodes.forEach { node ->
-            val value = node.data.optString("text", "")
-            val description = node.data.optString("contentDesc", "")
-            summaries.put(JSONObject().put("node_id", node.id)
-                .put("class_name", node.data.optString("className", ""))
-                .put("resource_id", node.data.optString("resourceId", ""))
-                .put("bounds", node.data.optString("bounds", ""))
-                .put("clickable", node.data.optBoolean("isClickable"))
-                .put("text_chars", value.length).put("content_description_chars", description.length)
-                .put("text_preview", preview(value)).put("content_description_preview", preview(description)))
+        if (compact) {
+            val page = nodePage(snapshot, "semantic", 0, 8, true)
+            return metadata(snapshot).apply {
+                for (key in listOf("nodes", "nodes_scope", "nodes_total", "nodes_returned", "nodes_has_more", "nodes_next_offset"))
+                    put(key, page.get(key))
+                put("nodes_compact", true).put("nodes_read_capability", VISUAL_PLUGIN_ID + ".page.nodes")
+                put("read_capability", VISUAL_PLUGIN_ID + ".page.text")
+            }
         }
+        val summaries = JSONArray()
+        nodes.forEach { summaries.put(summary(it, false)) }
         return metadata(snapshot).put("nodes", summaries)
             .put("read_capability", VISUAL_PLUGIN_ID + ".page.text")
+    }
+
+    @Synchronized
+    fun readNodes(parameters: JSONObject): JSONObject {
+        expire()
+        val id = parameters.getString("snapshot_id")
+        val snapshot = snapshots[id] ?: error("Page snapshot expired; inspect the page again")
+        return nodePage(snapshot, parameters.optString("scope", "all"),
+            parameters.optInt("offset", 0), parameters.optInt("limit", 20), false)
+    }
+
+    private fun nodePage(snapshot: Snapshot, scope: String, offset: Int, limit: Int, compact: Boolean): JSONObject {
+        require(scope in setOf("all", "semantic")) { "Unknown node scope" }
+        require(limit in 1..100) { "Node limit must be between 1 and 100" }
+        val nodes = if (scope == "all") snapshot.nodes else snapshot.nodes.filter { node ->
+            node.data.optString("text").isNotEmpty() || node.data.optString("contentDesc").isNotEmpty() ||
+                node.data.optBoolean("isClickable") || node.data.optBoolean("isEditable")
+        }
+        require(offset in 0..nodes.size) { "Node offset is outside the snapshot" }
+        val result = JSONArray()
+        var end = offset
+        var chars = 0
+        while (end < nodes.size && end - offset < limit) {
+            val node = summary(nodes[end], compact)
+            val size = node.toString().length
+            if (compact && result.length() > 0 && chars + size > 1800) break
+            result.put(node); chars += size; end++
+        }
+        return JSONObject().put("snapshot_id", snapshot.id).put("nodes", result)
+            .put("nodes_scope", scope).put("nodes_total", nodes.size).put("nodes_returned", result.length())
+            .put("nodes_has_more", end < nodes.size)
+            .put("nodes_next_offset", if (end < nodes.size) end else JSONObject.NULL)
+    }
+
+    private fun summary(node: Node, compact: Boolean): JSONObject {
+        val value = node.data.optString("text", "")
+        val description = node.data.optString("contentDesc", "")
+        val result = JSONObject().put("node_id", node.id).put("bounds", node.data.optString("bounds", ""))
+            .put("clickable", node.data.optBoolean("isClickable"))
+            .put("text_chars", value.length).put("content_description_chars", description.length)
+        if (!compact) result.put("class_name", node.data.optString("className", ""))
+            .put("resource_id", node.data.optString("resourceId", ""))
+        if (!compact || value.isNotEmpty()) result.put("text_preview", preview(value))
+        if (!compact || description.isNotEmpty()) result.put("content_description_preview", preview(description))
+        return result
     }
 
     @Synchronized
