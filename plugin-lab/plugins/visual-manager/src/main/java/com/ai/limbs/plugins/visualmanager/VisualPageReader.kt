@@ -9,7 +9,7 @@ internal class VisualPageReader {
     private data class Node(val id: String, val data: JSONObject)
     private data class Snapshot(
         val id: String, val packageName: String, val activityName: String,
-        val createdAt: Long, val nodes: List<Node>, val text: String
+        val createdAt: Long, val nodes: List<Node>, val text: String, val mode: JSONObject
     )
     private val snapshots = LinkedHashMap<String, Snapshot>()
 
@@ -20,10 +20,11 @@ internal class VisualPageReader {
             "Page snapshot exceeds 4 MiB; use a smaller visible page"
         }
         val nodes = mutableListOf<Node>()
-        fun visit(node: JSONObject, path: String) {
+        fun visit(node: JSONObject, path: String, depth: Int = 0) {
+            require(depth <= 128 && nodes.size < 10000) { "页面节点数量或深度超过上限" }
             nodes.add(Node(path, JSONObject(node.toString()).apply { remove("children") }))
             val children = node.optJSONArray("children") ?: JSONArray()
-            for (i in 0 until children.length()) visit(children.getJSONObject(i), path + "." + i)
+            for (i in 0 until children.length()) visit(children.getJSONObject(i), path + "." + i, depth + 1)
         }
         visit(data.getJSONObject("uiElements"), "0")
         val text = buildString {
@@ -37,7 +38,8 @@ internal class VisualPageReader {
             }
         }
         val snapshot = Snapshot(UUID.randomUUID().toString(), data.optString("packageName"),
-            data.optString("activityName"), System.currentTimeMillis(), nodes, text)
+            data.optString("activityName"), System.currentTimeMillis(), nodes, text,
+            VisualModeSelector.select(nodes.map { it.data }))
         snapshots[snapshot.id] = snapshot
         while (snapshots.size > MAX_SNAPSHOTS) snapshots.remove(snapshots.keys.first())
         val summaries = JSONArray()
@@ -69,9 +71,10 @@ internal class VisualPageReader {
             node.data.optString(if (field == "text") "text" else "contentDesc", "")
         }
         val offset = parameters.optInt("offset", 0)
-        val length = parameters.optInt("length", 3000)
+        require(!parameters.has("length")) { "分页请使用公开参数 limit" }
+        val length = parameters.optInt("limit", 12000)
         require(offset in 0..text.length) { "offset is outside the text" }
-        require(length in 1..4000) { "length must be between 1 and 4000" }
+        require(length in 1..12000) { "limit must be between 1 and 12000" }
         require(offset == 0 || offset == text.length ||
             !(text[offset].isLowSurrogate() && text[offset - 1].isHighSurrogate())) {
             "offset splits a Unicode character"
@@ -105,6 +108,7 @@ internal class VisualPageReader {
         .put("snapshot_id", snapshot.id).put("package_name", snapshot.packageName)
         .put("activity_name", snapshot.activityName).put("created_at_ms", snapshot.createdAt)
         .put("text_chars", snapshot.text.length).put("node_count", snapshot.nodes.size)
+        .put("visual_mode", JSONObject(snapshot.mode.toString()))
 
     private fun preview(value: String): String {
         if (value.length <= 120) return value

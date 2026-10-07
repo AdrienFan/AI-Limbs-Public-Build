@@ -70,38 +70,45 @@ internal data class VisualWaitOptions(val mode: String, val timeoutMs: Long = 50
     }
 }
 
-/** Uses distinct producer frames and their monotonic capture times, never repeated cached frames. */
+/** Observation time measures quiet pixels; producer identity/capture time remain truthful. */
 internal class VisualChangeDetector(private val baseline: VisualSample, private val options: VisualWaitOptions) {
     private var previous = baseline
     private var anchor: VisualSample? = null
     private var anchorTime = 0L
     private var lastTime = -1L
     private var lastId: String? = null
+    private var lastObservationTime = -1L
     var samples = 0; private set
+    var observations = 0; private set
     var changed = false; private set
     var baselineRatio = 0.0; private set
     var adjacentRatio = 0.0; private set
     var quietMs = 0L; private set
 
-    fun accept(id: String, capturedElapsedMs: Long, sample: VisualSample): Boolean {
-        if (id == lastId) return false
+    fun accept(id: String, capturedElapsedMs: Long, sample: VisualSample,
+        observedElapsedMs: Long = capturedElapsedMs, sourceVerified: Boolean = false): Boolean {
+        require(observedElapsedMs >= capturedElapsedMs && observedElapsedMs >= lastObservationTime) { "观察时间倒退" }
+        if (id == lastId) {
+            require(capturedElapsedMs == lastTime && sample.pixels.contentEquals(previous.pixels)) { "同一帧的时间或像素改变" }
+            if (!sourceVerified) return false
+        } else samples++
         require(capturedElapsedMs >= lastTime) { "帧时间倒退" }
-        lastId = id; lastTime = capturedElapsedMs; samples++
+        lastId = id; lastTime = capturedElapsedMs; lastObservationTime = observedElapsedMs; observations++
         baselineRatio = baseline.difference(sample, options.region, options.pixelTolerance)
         adjacentRatio = previous.difference(sample, options.region, options.pixelTolerance)
         changed = changed || baselineRatio >= options.changeRatio
         val currentAnchor = anchor
         if (currentAnchor == null || adjacentRatio > options.stableRatio ||
             currentAnchor.difference(sample, options.region, options.pixelTolerance) > options.stableRatio) {
-            anchor = sample; anchorTime = capturedElapsedMs
+            anchor = sample; anchorTime = observedElapsedMs
         }
-        quietMs = capturedElapsedMs - anchorTime
+        quietMs = observedElapsedMs - anchorTime
         previous = sample
         return when (options.mode) {
             "new_frame" -> true
             "change" -> changed
-            "stable" -> samples >= 2 && quietMs >= options.stableMs
-            "change_then_stable" -> changed && samples >= 2 && quietMs >= options.stableMs
+            "stable" -> observations >= 2 && quietMs >= options.stableMs
+            "change_then_stable" -> changed && observations >= 2 && quietMs >= options.stableMs
             else -> error("Invalid visual wait mode")
         }
     }

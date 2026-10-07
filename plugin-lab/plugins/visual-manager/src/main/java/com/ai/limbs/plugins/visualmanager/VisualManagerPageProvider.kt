@@ -318,6 +318,10 @@ private fun VisualWorkbench(actions: VisualManagerPageActions, providers: InProc
                     latest?.let {
                         Text("最近来源：${it.optString("package_name")}\n读取时间：${time(it.getLong("created_at_ms"))}",
                             style = MaterialTheme.typography.bodySmall)
+                        it.optJSONObject("visual_mode")?.let { mode ->
+                            Text("建议观察方式：${if (mode.optString("mode") == "ui") "页面节点优先" else "图像优先"} · ${mode.optInt("labeled_node_count")} 个可读节点",
+                                style = MaterialTheme.typography.bodySmall)
+                        }
                     }
                     OutlinedButton(enabled = !working && latest != null, onClick = {
                         act("加载页面全文") {

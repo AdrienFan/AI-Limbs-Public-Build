@@ -61,6 +61,8 @@ class VisualManagerEntry : InProcessPluginEntry {
                     "kind" -> field.put("enum", JSONArray(if (name == "stop") listOf("screen", "camera", "all") else listOf("screen", "camera")))
                     "operation" -> field.put("enum", JSONArray(listOf("check", "request", "open_settings")))
                     "observe_mode" -> field.put("enum", JSONArray(listOf("new_frame", "stable", "change_then_stable")))
+                    "mode" -> field.put("enum", JSONArray(listOf("auto", "ui", "visual")))
+                    "field" -> field.put("enum", JSONArray(listOf("text", "content_description")))
                 }
                 parameter.default?.let { value ->
                     field.put("default", when (parameter.type) {
@@ -116,6 +118,11 @@ class VisualManagerEntry : InProcessPluginEntry {
             "从活动会话获取新帧，附 frame_id、原始/预览尺寸、采集时间、屏幕 geometry 和 image_to_touch；图像通过附件返回。屏幕不需要调用观察子代理。",
             listOf(kind, session, p("max_edge", "integer", "预览最长边 160..2048", false, "1024")),
             """{"kind":"screen","session_id":"<status 返回的 ID>"}""")
+        capability("observe", "自动选择页面观察方式", read,
+            "mode=auto 根据当前完整 UI 节点、可读内容和 Surface 区域选择 UI 或图像。普通页面返回 page 固定快照；自绘/稀疏页面返回一帧及 page_evidence。判断依据在 visual_mode，属于启发式，可指定 ui/visual。include_image=true 为 UI 补充图像；图像必须已有 READY 共享屏会话，不自动授权或启动。明确 visual 跳过 UI 树。UI 读取失败直接报错，不伪装为视觉模式。页面与图片不是原子快照。",
+            listOf(p("mode", description = "auto/ui/visual", required = false, default = "auto"),
+                p("include_image", "boolean", "为 UI 观察附上一帧；visual 本来就返回图像", false, "false"),
+                p("max_edge", "integer", "图像最长边 160..2048", false, "1024")), """{"mode":"auto"}""")
         capability("tap_on_frame", "按帧点击并观察", change,
             "对最新全屏共享帧按比例坐标点击一次。observe_mode 默认 new_frame；stable 等像素稳定；change_then_stable 先检测变化再等稳定，推荐页面跳转使用。可指定区域排除持续动画。旧帧或变化的几何拒绝执行。action_success、observation_success、wait_success 分开；TIMEOUT 表示条件未满足，不能重放点击。像素稳定不保证加载完成。",
             listOf(p("frame_id", description = "最新屏幕帧编号"), p("x", "number", "图片横向比例 0..1"),
@@ -126,7 +133,7 @@ class VisualManagerEntry : InProcessPluginEntry {
             "以最新屏幕 frame_id 为基准，等待选定区域的像素发生变化。仅使用已有会话，返回最终一帧及 visual_wait；wait_success=false/status=TIMEOUT 表示未检测到变化。不能把 success=true 当作条件满足。几何变化/停止明确失败，不自动开会话。",
             listOf(p("frame_id", description = "最新屏幕帧编号"), p("max_edge", "integer", "返回预览最长边 160..2048", false, "1024")) + waitParameters)
         capability("wait_until_stable", "等待画面稳定", read,
-            "等待指定区域在 stable_ms 窗口内像素稳定。基于 64×64 RGB 网格和不同 producer 帧，缓存重复帧不计时；像素稳定不保证业务加载完成。可排除游戏动态区域。返回最终一帧和条件结果，TIMEOUT 不得报告稳定。",
+            "等待指定区域在 stable_ms 窗口内像素稳定。基于 64×64 RGB 网格；静止页面允许同一最新生产帧跨观察窗口计时，每轮检查采集有效、可见性、错误和几何。samples 是不同生产帧数，observations 是有效观察次数；不伪造帧时间。像素稳定不保证加载完成或渲染器持续出帧。可排除游戏动态区域，TIMEOUT 不得报告稳定。",
             listOf(p("frame_id", description = "最新屏幕帧编号"), p("max_edge", "integer", "返回预览最长边 160..2048", false, "1024")) + waitParameters)
         capability("capture", "拍摄并保存单张图像", write,
             "屏幕单次截图，或未开启会话时相机单拍并自动释放。保存原图记录并返回预览。已有相机会话请用 frame save=true。",
@@ -150,12 +157,13 @@ class VisualManagerEntry : InProcessPluginEntry {
             listOf(image), """{"asset_id":"<images.list 返回的 ID>"}""")
         capability("images.clear", "清空图像记录", write, "清空本插件已保存图像，不关闭会话、不清除当前预览。")
         capability("page.inspect", "读取当前页面", read,
-            "固定当前应用暴露的完整节点文字快照。返回 snapshot_id；在工作台内调用会读取当前工作台，读取其他应用请从兰儿入口调用。",
+            "固定当前应用暴露的完整节点文字快照，附 visual_mode 自动观察方式及依据。返回 snapshot_id；在工作台内调用会读取当前工作台，读取其他应用请从兰儿入口调用。",
             listOf(p("display", description = "可选显示标识", required = false)))
         capability("page.text", "读取页面全文", read,
             "读取固定快照全文。按 next_offset 续读到 has_more=false；偏移按 UTF-16 字符，不能猜测跳页。",
             listOf(p("snapshot_id", description = "page.inspect 返回的 ID"),
                 p("node_id", description = "可选节点 ID", required = false),
+                p("field", description = "节点字段 text/content_description；未指定节点时读取全文", required = false, default = "text"),
                 p("offset", "integer", "全文偏移", false, "0"),
                 p("limit", "integer", "分页字符数，默认 12000", false, "12000")),
             """{"snapshot_id":"<page.inspect 返回的 ID>","offset":0}""")

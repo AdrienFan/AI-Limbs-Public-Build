@@ -14,6 +14,55 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualManagerControllerTest {
+    @Test fun automaticNativeObservationUsesUiWithoutOpeningScreenHardware() = runBlocking {
+        val f = Fixture { id, op, _ ->
+            assertEquals("host.ui.automation@1", id); assertEquals("snapshot", op)
+            JSONObject().put("success", true).put("result", JSONObject().put("packageName", "native.app")
+                .put("uiElements", JSONObject().put("className", "android.widget.TextView").put("text", "可读文字")))
+        }
+        try {
+            val result = f.controller.call("observe", JSONObject())
+            assertTrue(result.getBoolean("success")); assertEquals("ui", result.getJSONObject("visual_mode").getString("mode"))
+            assertTrue(result.getJSONObject("page").has("snapshot_id")); assertFalse(result.has("mcp_content"))
+            assertEquals(listOf("host.ui.automation@1/snapshot"), f.calls)
+        } finally { f.scope.cancel() }
+    }
+    @Test fun treeFailureCannotTriggerAutomaticVisualFallback() = runBlocking {
+        for (response in listOf(JSONObject().put("success", false).put("error", "permission denied"),
+            JSONObject().put("success", true).put("result", JSONObject()))) {
+            val f = Fixture { id, op, _ ->
+                assertEquals("host.ui.automation@1", id); assertEquals("snapshot", op); response
+            }
+            try {
+                val result = f.controller.call("observe", JSONObject())
+                assertFalse(result.getBoolean("success")); assertEquals(1, f.calls.size)
+                assertFalse(result.has("mcp_content"))
+            } finally { f.scope.cancel() }
+        }
+    }
+    @Test fun explicitVisualModeSkipsUiAndNeverStartsAnInactiveSession() = runBlocking {
+        val f = Fixture { id, op, _ ->
+            assertEquals("host.screen.session@1", id); assertEquals("status", op)
+            JSONObject().put("active", false).put("projection_ready", false)
+        }
+        try {
+            val result = f.controller.call("observe", JSONObject().put("mode", "visual"))
+            assertFalse(result.getBoolean("success")); assertEquals(1, f.calls.size)
+            assertTrue(result.getString("error").contains("SCREEN_SESSION_REQUIRED"))
+        } finally { f.scope.cancel() }
+    }
+    @Test fun sparseSurfaceModeRequiresExistingSessionAndCannotAutoAuthorize() = runBlocking {
+        val f = Fixture { id, op, _ -> when (op) {
+            "snapshot" -> JSONObject().put("success", true).put("result", JSONObject().put("uiElements",
+                JSONObject().put("className", "android.view.SurfaceView").put("bounds", "[0,0][100,100]")))
+            "status" -> { assertEquals("host.screen.session@1", id); JSONObject().put("active", false).put("projection_ready", false) }
+            else -> error("Must not start or request consent")
+        } }
+        try {
+            val result = f.controller.call("observe", JSONObject())
+            assertFalse(result.getBoolean("success")); assertEquals(2, f.calls.size)
+        } finally { f.scope.cancel() }
+    }
     @Test fun stopAfterACompletedTapCannotEraseTheActionOrDeliverAnInvalidatedFrame() {
         val result = JSONObject().put("action_success", true).put("operation_id", "once")
             .put("observation_success", true).put("frame", JSONObject()).put("preview", JSONObject())

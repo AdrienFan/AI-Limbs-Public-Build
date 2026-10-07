@@ -42,6 +42,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
     private val previewLock = Mutex()
     private val previews = mutableMapOf<String, JSONObject>()
     private var screenSample: VisualSample? = null // Owned by previewLock; matches the screen preview frame_id.
+    private var lastScreenOperation: JSONObject? = null // Owned by stateLock; scoped to session and generation.
     private var revision = 0L
     private val signal = MutableStateFlow<String?>("""{"revision":0}""")
     val stateProvider = object : InProcessUiStateProvider {
@@ -97,13 +98,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                     imagesRoot()
                     JSONObject().put("cleared", true).put("deleted_count", count)
                 }
-                "page.inspect" -> perform("page", "读取页面") {
-                    val request = JSONObject().put("format", "json").put("detail", "full")
-                    if (parameters.has("display")) request.put("display", parameters.getString("display"))
-                    val response = hostCall("host.ui.automation@1", "snapshot", request)
-                    VisualOperationResult.requireFlag(response, "success", "页面读取未完成")
-                    pageReader.capture(response.getJSONObject("result"))
-                }
+                "page.inspect" -> inspectPage(parameters)
+                "observe" -> observePage(parameters)
                 "page.text" -> locks.getValue("page").withLock { pageReader.read(parameters) }
                 else -> error("未知视觉工作台操作：$action")
             }
@@ -194,6 +190,11 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         var scratch: File? = null
         try {
             setState("screen", "BUSY", "获取操作后画面")
+            recordScreenOperation(JSONObject().put("operation_id", request.getString("operation_id"))
+                .put("completed_elapsed_ms", request.getLong("completed_elapsed_ms")).apply {
+                    for (key in listOf("tool", "operation_success", "action_parameters"))
+                        if (request.has(key)) put(key, request.get(key))
+                }, sessions.getJSONObject(0).getString("session_id"), generation)
             val captured = hostCall(sessionPrimitive("screen"), "frame", JSONObject()
                 .put("session_id", sessions.getJSONObject(0).getString("session_id")).put("fresh", true).put("frame_format", "rgba8888")
                 .put("deadline_elapsed_ms", request.getLong("deadline_elapsed_ms")))
@@ -203,11 +204,6 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             scratch = File(hostFrame.getString("path"))
             ScreenFeedbackContract.requireFresh(request, captured)
             val image = updatePreview("screen", captured, generation, 524_288, 960)
-            image.put("last_operation", JSONObject().put("operation_id", request.getString("operation_id"))
-                .put("completed_elapsed_ms", request.getLong("completed_elapsed_ms"))
-                .apply {
-                    for (key in listOf("tool", "operation_success", "action_parameters")) if (request.has(key)) put(key, request.get(key))
-                })
             val imageContent = content(image)
             image.remove("data")
             return synchronized(stateLock) {
@@ -267,6 +263,58 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
 
     private suspend fun hostCall(primitive: String, operation: String, p: JSONObject = JSONObject()): JSONObject =
         JSONObject(host.invokeHostCapability(primitive, JSONObject(p.toString()).put("operation", operation).toString()))
+
+    private suspend fun inspectPage(parameters: JSONObject): JSONObject = perform("page", "读取页面") {
+        val request = JSONObject().put("format", "json").put("detail", "full")
+        if (parameters.has("display")) request.put("display", parameters.getString("display"))
+        val response = hostCall("host.ui.automation@1", "snapshot", request)
+        VisualOperationResult.requireFlag(response, "success", "页面读取未完成")
+        pageReader.capture(response.getJSONObject("result"))
+    }
+
+    private suspend fun observePage(p: JSONObject): JSONObject {
+        val requested = p.optString("mode", "auto")
+        require(requested in setOf("auto", "ui", "visual")) { "mode 必须为 auto/ui/visual" }
+        val edge = p.optInt("max_edge", 1024)
+        require(edge in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
+        // Explicit visual observation needs no UI tree or accessibility permission.
+        val page = if (requested == "visual") null else inspectPage(JSONObject())
+        val selection = page?.getJSONObject("visual_mode") ?: JSONObject().put("mode", "visual")
+            .put("requested_mode", requested).put("reason", "EXPLICIT_MODE").put("preferred_modality", "image")
+        if (requested == "ui") selection.put("requested_mode", "ui").put("mode", "ui")
+            .put("reason", "EXPLICIT_MODE").put("preferred_modality", "accessibility")
+        val result = JSONObject().put("visual_mode", selection)
+        if (selection.getString("mode") == "ui") {
+            result.put("page", page)
+            if (!p.optBoolean("include_image", false)) return result
+        } else if (page != null) {
+            // Sparse trees are retained by snapshot ID without flooding the visual result.
+            result.put("page_evidence", JSONObject().put("snapshot_id", page.getString("snapshot_id"))
+                .put("package_name", page.getString("package_name")).put("created_at_ms", page.getLong("created_at_ms")))
+        }
+        val status = VisualOperationResult.requireHost(hostCall(sessionPrimitive("screen"), "status"))
+        check(status.getBoolean("active") && status.getBoolean("projection_ready")) { "SCREEN_SESSION_REQUIRED: 请先开启共享屏" }
+        val sessions = status.getJSONArray("sessions")
+        check(sessions.length() == 1 && sessions.getJSONObject(0).getString("state") == "READY") { "共享屏会话尚未就绪" }
+        val image = frame("screen", JSONObject().put("session_id", sessions.getJSONObject(0).getString("session_id"))
+            .put("max_edge", edge))
+        for (key in image.keys()) result.put(key, image.get(key))
+        result.put("atomic_page_and_frame", false)
+        return result
+    }
+
+    private fun recordScreenOperation(operation: JSONObject, sessionId: String, generation: Long?) = synchronized(stateLock) {
+        if (generation == generations["screen"] && (lastScreenOperation == null ||
+            operation.getLong("completed_elapsed_ms") >= lastScreenOperation!!.getLong("completed_elapsed_ms")))
+            lastScreenOperation = JSONObject(operation.toString()).put("session_id", sessionId)
+    }
+
+    private fun addScreenOperation(meta: JSONObject) = synchronized(stateLock) {
+        lastScreenOperation?.takeIf { it.getString("session_id") == meta.optString("session_id") }?.let {
+            meta.put("last_operation", JSONObject(it.toString()))
+        }
+        VisualActionMetadata.refresh(meta, SystemClock.elapsedRealtime())
+    }
 
     private suspend fun hostStatus(primitive: String, operation: String): JSONObject =
         try { VisualOperationResult.requireHost(hostCall(primitive, operation)) }
@@ -401,7 +449,10 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val results = JSONObject()
         val errors = mutableListOf<String>()
         for (channel in channels) {
-            synchronized(stateLock) { generations[channel] = generations.getValue(channel) + 1L }
+            synchronized(stateLock) {
+                generations[channel] = generations.getValue(channel) + 1L
+                if (channel == "screen") lastScreenOperation = null
+            }
             setState(channel, "STOPPING", "正在停止")
             try {
                 val request = JSONObject()
@@ -457,6 +508,9 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                     put("frame_id", frame.getString("frame_id"))
                     put("geometry", JSONObject(frame.getJSONObject("geometry").toString()))
                     put("timings_ms", JSONObject(frame.getJSONObject("timings_ms").toString()))
+                    put("freshness", JSONObject(result.getJSONObject("freshness").toString()))
+                    result.optJSONObject("visual_wait")?.let { put("visual_wait", JSONObject(it.toString())) }
+                    addScreenOperation(this)
                 }
             }
     }
@@ -494,7 +548,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
     private fun previewRead(kind: String, edge: Int): JSONObject {
         require(edge in 160..1280) { "max_edge 必须在 160 到 1280 之间" }
         val meta = previews[kind] ?: error("此来源尚无预览")
-        val encoded = encodedImage(File(previewRoot(), meta.getString("file_name")), meta, edge)
+        val shown = VisualActionMetadata.refresh(JSONObject(meta.toString()), SystemClock.elapsedRealtime())
+        val encoded = encodedImage(File(previewRoot(), meta.getString("file_name")), shown, edge)
         return attachImage(encoded, encoded)
     }
 
@@ -587,10 +642,11 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             .put("source_frame_id", meta.getString("frame_id")).put("touch_x", x).put("touch_y", y)
             .put("completed_elapsed_ms", completed).put("action_elapsed_ms", completed - started)
         try {
+            recordScreenOperation(JSONObject().put("operation_id", actionId)
+                .put("source_frame_id", meta.getString("frame_id")).put("touch_x", x).put("touch_y", y)
+                .put("completed_elapsed_ms", completed).put("operation_success", true)
+                .put("tool", "tap_on_frame"), meta.getString("session_id"), generation)
             val observed = observeScreen(meta, sample, options, generation, p.optInt("max_edge", 1024))
-            observed.getJSONObject("preview").put("last_operation", JSONObject()
-                .put("operation_id", actionId).put("source_frame_id", meta.getString("frame_id"))
-                .put("touch_x", x).put("touch_y", y).put("completed_elapsed_ms", completed))
             for (key in observed.keys()) result.put(key, observed.get(key))
             result
         } catch (error: CancellationException) { throw error }
@@ -636,8 +692,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 synchronized(stateLock) { check(generation == generations["screen"]) { "取帧已被停止指令取消" } }
                 val remaining = deadline - SystemClock.elapsedRealtime()
                 if (remaining <= 0) break
-                // The first image is a post-request surface. Subsequent reads reuse the latest
-                // producer image. Cached duplicates cannot advance the stable-time detector.
+                // First obtain a post-request surface; later observations use the latest buffer.
                 val response = VisualOperationResult.requireHost(hostCall(sessionPrimitive("screen"), "frame", JSONObject()
                     .put("session_id", meta.getString("session_id")).put("frame_format", "rgba8888")
                     .put("frame_mode", if (polls == 0) "new_surface" else "latest")
@@ -652,27 +707,34 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 }
                 val raw = RawScreenFrame.read(rawMeta, next)
                 val sample = VisualSample.raw(raw, next)
+                val observedElapsed = SystemClock.elapsedRealtime()
+                val status = hostCall(sessionPrimitive("screen"), "status",
+                    JSONObject().put("session_id", meta.getString("session_id")))
+                VisualCaptureEvidence.requireActive(status, meta.getString("session_id"), geometryId)
                 captured = response
                 polls++
                 met = detector.accept(rawMeta.getString("frame_id"),
-                    response.getJSONObject("freshness").getLong("captured_elapsed_ms"), sample)
+                    response.getJSONObject("freshness").getLong("captured_elapsed_ms"), sample,
+                    observedElapsed, sourceVerified = true)
                 // A frame delivered after the deadline cannot retroactively satisfy the condition.
                 if (SystemClock.elapsedRealtime() >= deadline) { met = false; break }
                 if (met) break
                 delay(minOf(options.intervalMs, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)))
             }
             val last = checkNotNull(captured) { "VISUAL_WAIT_TIMEOUT: 等待期限内没有画面" }
-            val image = updatePreview("screen", last, generation, edge = edge)
             val wait = JSONObject().put("mode", options.mode).put("condition_met", met)
                 .put("status", if (met) "READY" else "TIMEOUT").put("elapsed_ms", SystemClock.elapsedRealtime() - started)
                 .put("samples", detector.samples).put("polls", polls).put("changed", detector.changed)
+                .put("observations", detector.observations).put("reused_observations", detector.observations - detector.samples)
+                .put("stability_clock", "observation_elapsed").put("capture_source_verified", true)
                 .put("baseline_change_ratio", detector.baselineRatio).put("adjacent_change_ratio", detector.adjacentRatio)
                 .put("stable_elapsed_ms", detector.quietMs).put("stable_ms", options.stableMs)
                 .put("change_ratio", options.changeRatio).put("stable_ratio", options.stableRatio)
                 .put("pixel_tolerance", options.pixelTolerance).put("sample_grid", VisualSample.EDGE)
                 .put("region", JSONObject().put("left", options.region.left).put("top", options.region.top)
                     .put("width", options.region.width).put("height", options.region.height))
-            image.put("visual_wait", JSONObject(wait.toString()))
+            last.put("visual_wait", wait)
+            val image = updatePreview("screen", last, generation, edge = edge)
             return attachImage(JSONObject().put("observation_success", true).put("wait_success", met)
                 .put("visual_wait", wait).put("frame", last).put("preview", image)
                 .put("automatic_reexecution", false), image)

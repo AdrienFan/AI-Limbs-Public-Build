@@ -10,7 +10,7 @@ class VisualChangeDetectorTest {
     private fun detector(mode: String = "stable", region: VisualRegion = VisualRegion(), tolerance: Int = 12) =
         VisualChangeDetector(solid(0), VisualWaitOptions(mode, region = region, pixelTolerance = tolerance))
 
-    @Test fun stableRequiresDistinctFramesAcrossTheEntireWindow() {
+    @Test fun newFramesMustSpanTheEntireQuietWindow() {
         val d = detector()
         assertFalse(d.accept("a", 100, solid(0)))
         assertFalse(d.accept("b", 349, solid(0)))
@@ -20,8 +20,35 @@ class VisualChangeDetectorTest {
     @Test fun aCachedFrameCannotProveStability() {
         val d = detector()
         assertFalse(d.accept("a", 100, solid(0)))
-        assertFalse(d.accept("a", 9999, solid(0)))
+        assertFalse(d.accept("a", 100, solid(0), observedElapsedMs = 9999))
         assertEquals(1, d.samples); assertEquals(0L, d.quietMs)
+    }
+    @Test fun verifiedStaticProducerCanProveQuietPixelsWithoutForgingCaptureTime() {
+        val d = detector()
+        assertFalse(d.accept("a", 100, solid(0), 200, true))
+        assertFalse(d.accept("a", 100, solid(0), 449, true))
+        assertTrue(d.accept("a", 100, solid(0), 450, true))
+        assertEquals(1, d.samples); assertEquals(3, d.observations); assertEquals(250L, d.quietMs)
+    }
+    @Test fun staticRepeatedProducerCannotInventAChange() {
+        val d = detector("change_then_stable")
+        assertFalse(d.accept("a", 100, solid(0), 100, true))
+        assertFalse(d.accept("a", 100, solid(0), 1000, true))
+        assertFalse(d.changed)
+        assertFalse(d.accept("b", 1001, solid(0xffffff), 1001, true))
+        assertTrue(d.accept("b", 1001, solid(0xffffff), 1251, true))
+    }
+    @Test(expected = IllegalArgumentException::class) fun cachedIdentityCannotHideChangedPixels() {
+        val d = detector(); d.accept("a", 100, solid(0), 100, true)
+        d.accept("a", 100, solid(0xffffff), 400, true)
+    }
+    @Test(expected = IllegalArgumentException::class) fun cachedIdentityCannotForgeCaptureTime() {
+        val d = detector(); d.accept("a", 100, solid(0), 100, true)
+        d.accept("a", 400, solid(0), 400, true)
+    }
+    @Test(expected = IllegalArgumentException::class) fun reversedObservationClockIsRejected() {
+        val d = detector(); d.accept("a", 100, solid(0), 300, true)
+        d.accept("a", 100, solid(0), 299, true)
     }
     @Test fun changeWaitDoesNotTreatNoChangeAsSuccess() {
         val d = detector("change")

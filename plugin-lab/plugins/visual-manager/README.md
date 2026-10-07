@@ -1,6 +1,6 @@
-# AI Limbs 视觉工作台 0.2.7
+# AI Limbs 视觉工作台 0.2.8
 
-本版修复开启共享后及重新进入工作台时的预览崩溃，保留通用画面变化与区域稳定检测，需要基座 0.8.0.18-build112。逻辑插件身份仍为 plugin.system.visual_manager，安装包 payload applicationId 更新为 v027。
+本版补齐自动观察方式、静止页面稳定等待与动作历史，修正页面文字分页。需要基座 0.8.0.18-build112；无需迭代基座或 ChatGPT 桥。逻辑插件身份仍为 plugin.system.visual_manager，payload applicationId 更新为 v028。
 
 工作台分为屏幕、摄像头、页面文字和图像记录。宽屏左侧操作、右侧画面；窄屏未获取画面时先显示操作，已有画面时先显示画面；状态和全部停止固定置顶。
 
@@ -30,7 +30,7 @@ start 只有取得首帧才返回成功。同一类在本插件同时一个会�
 
 ## 能力与结果
 
-所有结果含 success。success=false 表示操作未完成，含 error_code、error 和 details；不可仅凭工具返回就弹成功提示。stop 部分失败会保留各来源的处理结果。读取图像返回 data、mime_type 以及 mcp_content，UI 与兰儿使用同一份画面。
+所有结果含 success。success=false 表示操作未完成，含 error_code、error 和 details；不可仅凭工具返回就弹成功提示。stop 部分失败会保留各来源的处理结果。图像内容只通过唯一的 mcp_content 附件传输，JSON 保留 mime_type 等元数据，不再含 data；UI 与兰儿使用同一份画面。
 
 - status：真实会话、权限、操作状态、最新预览摘要和图像记录摘要
 - sources：kind=screen/camera，列出可选来源
@@ -41,7 +41,8 @@ start 只有取得首帧才返回成功。同一类在本插件同时一个会�
 - stop：kind=screen/camera/all，可选 session_id
 - preview.read / preview.save：kind，读取或保存当前预览
 - images.list / images.read / images.delete / images.clear：图像记录管理
-- page.inspect / page.text：即时固定页面快照及全文分页
+- page.inspect / page.text：即时固定页面快照、观察方式建议及全文分页
+- observe：mode=auto/ui/visual，按当前页面证据选择节点或图像；include_image=true 可为 UI 补充一帧
 
 示例，每步读取前一步结果后再调用，不把占位符当真实参数：
 
@@ -59,7 +60,7 @@ Core 控制器负责业务状态、结果验证、临时预览及记录。presen
 
 保留可用的完整页面读取器与 Unicode 分页用例。已有未授权启动、拒绝不重试、部分停止失败、取消截图、重复占用和即时状态发布的回归用例。本版新增反馈关闭时不访问设备、途中停止不重试及旧帧拒绝等用例。
 
-0.2.7 通过云端工作流执行测试、编译和签名打包；安装后的共享、重进工作台及等待与动画表现仍需实机验收。
+0.2.7 已实机验收共享、预览恢复、存图、旋转映射及动态画面等待；0.2.8 修改通过云端工作流测试、编译和签名打包，安装后的新增行为仍需实机验收。
 
 ## 0.2.7 图片附件与预览读取修复
 
@@ -90,6 +91,22 @@ Core 与 UI 现在使用同一附件契约。屏幕、相机、恢复预览、�
 
 tap_on_frame 保持原来的 observe_mode=new_frame 默认行为。页面跳转可显式选择 change_then_stable；只观察最终页面稳定时可选择 stable。等待默认上限 5000 毫秒、稳定窗口 250 毫秒、采样间隔 100 毫秒。可通过 region_left/top/width/height 指定图片比例区域，排除持续动画。内部使用 64×64 RGB 网格，最终回图时才编码一次 JPEG。
 
-必须检查 wait_success 或 visual_wait.condition_met。TIMEOUT 可以带最后观察图像，但不表示稳定；success=true 仅代表返回结果。重复缓存帧不累积稳定时间，几何改变或会话停止明确失败。点击执行后观察失败仍保留 action_success=true，automatic_reexecution=false。
+必须检查 wait_success 或 visual_wait.condition_met。TIMEOUT 可以带最后观察图像，但不表示稳定；success=true 仅代表返回结果。0.2.8 起，有效采集会话内重复的最新生产帧可累积观察稳定时间；每轮检查会话、采集错误、可见性和几何。几何改变或会话停止明确失败。点击执行后观察失败仍保留 action_success=true，automatic_reexecution=false。
 
 这是像素稳定启发式检测，不能保证网络请求或业务加载已完成，也可能错过采样点之间的细小变化。静止加载页仍可能满足像素稳定，持续动态游戏可能超时。完整参数、边界和验证见 [观察接口说明](../../../../docs/TODO/visual-wait-0.2.6/index.md)。
+
+## 0.2.8 自动观察与静止页面修复
+
+`observe {"mode":"auto"}` 先固定完整 UI 快照。根据可读节点、可操作节点及 SurfaceView/TextureView/GLSurfaceView 面积选择观察方式：普通可读页面优先返回 page；大面积自绘且语义稀疏时返回图像和简短 page_evidence，全文仍可按 snapshot_id 读取。visual_mode 附 policy_version、原因及节点/面积统计；这是启发式判断，可指定 ui 或 visual。明确 visual 不查询 UI 树。自绘组件也可能暴露完整虚拟无障碍节点，因此不按游戏包名或类名单独断言。
+
+UI 模式无需共享屏；include_image=true 或 visual 模式必须已经开启 READY 共享屏。该能力不启动会话、不请求授权、不归档；UI 读取错误直接失败，不暗中切换成功路径。页面和图像先后采集，atomic_page_and_frame=false，不能视作同一时刻。get_frame 保持直接取图，不额外遍历页面。
+
+原静止页面不重绘时 samples 一直为 1，quietMs 无法增长。现在稳定窗口使用真实单调观察时间；samples 保持不同生产帧数量，observations/reused_observations 单独报告有效重复观察。帧编号、采集时间和 freshness 不变。同一帧若时间或像素发生不一致则报错。每轮读取已有会话状态并验证采集仍有效、有帧、未报告 producer_error、共享内容未明确不可见、几何未改变。旧平台可见性未知时不宣称可见。采集状态并不是生产器心跳证明，静止画面的像素稳定不能证明渲染器持续提交帧或业务完成。
+
+后续屏幕帧、预览恢复和存图携带同一会话的 last_operation，包含 operation_id、完成时间及可得的动作参数。age_ms 是返回时距离完成的时间；frame_after_action 由真实采集时间判断，未知时为 null。停止或新会话不套用上一会话动作，较旧动作反馈不覆盖较新记录。等待结果 visual_wait 同步保存到预览元数据。该记录只覆盖本插件点击及宿主反馈通知的动作，不是全设备审计日志。
+
+page.text 的公开 limit 参数现在实际控制分页（1..12000，默认 12000）；节点可指定 field=text/content_description。UTF-16 页边界不拆表情；limit=1 遇到双字符表情时返回完整字符以保证前进。快照数量、容量、节点数和深度均有上限。
+
+官方依据：[ImageReader 新图像回调](https://developer.android.com/reference/android/media/ImageReader.OnImageAvailableListener)、[自绘组件与虚拟无障碍层级](https://developer.android.com/guide/topics/ui/accessibility/views/custom-views)。本插件中的观察时间规则和自动模式阈值是项目实现，不是 Android 保证。
+
+详情及安装后验收清单见 [0.2.8 补齐记录](../../../../docs/TODO/visual-completion-0.2.8/index.md)。本轮不新增连续视频流，不修改共享权限或把手机唤醒作为后台工作条件。
