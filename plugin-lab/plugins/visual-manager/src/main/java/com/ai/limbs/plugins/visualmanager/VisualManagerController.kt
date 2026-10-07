@@ -268,12 +268,13 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
     private suspend fun inspectPage(parameters: JSONObject, compact: Boolean = false): JSONObject = perform("page", "读取页面") {
         val request = JSONObject().put("format", "json").put("detail", "full")
         if (parameters.has("display")) request.put("display", parameters.getString("display"))
-        val started = SystemClock.elapsedRealtime()
+        val started = System.nanoTime()
         val response = hostCall("host.ui.automation@1", "snapshot", request)
-        val captured = SystemClock.elapsedRealtime()
+        val captured = System.nanoTime()
         VisualOperationResult.requireFlag(response, "success", "页面读取未完成")
         pageReader.capture(response.getJSONObject("result"), compact).put("timings_ms", JSONObject()
-            .put("host_snapshot", captured - started).put("page_projection", SystemClock.elapsedRealtime() - captured))
+            .put("host_snapshot", (captured - started) / 1_000_000)
+            .put("page_projection", (System.nanoTime() - captured) / 1_000_000))
     }
 
     private suspend fun observePage(p: JSONObject): JSONObject {

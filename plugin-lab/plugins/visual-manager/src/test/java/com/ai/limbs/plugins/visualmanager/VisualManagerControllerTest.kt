@@ -22,7 +22,8 @@ class VisualManagerControllerTest {
         }
         try {
             val result = f.controller.call("observe", JSONObject())
-            assertTrue(result.getBoolean("success")); assertEquals("ui", result.getJSONObject("visual_mode").getString("mode"))
+            assertTrue(result.toString(), result.getBoolean("success")); assertEquals("ui", result.getJSONObject("visual_mode").getString("mode"))
+            assertTrue(result.getJSONObject("page").getJSONObject("timings_ms").getLong("host_snapshot") >= 0)
             assertTrue(result.getJSONObject("page").has("snapshot_id")); assertFalse(result.has("mcp_content"))
             assertEquals(listOf("host.ui.automation@1/snapshot"), f.calls)
         } finally { f.scope.cancel() }
