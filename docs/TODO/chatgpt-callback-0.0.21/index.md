@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
-status: implementation-awaiting-cloud-validation
+status: cloud-validated-awaiting-device-callback
 ---
 
 # 回调异常分类与诊断交付
