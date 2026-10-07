@@ -239,9 +239,12 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 val result = block(generation)
                 synchronized(stateLock) {
                     if (generation != generations[channel]) {
-                        throw VisualOperationFailure("OPERATION_CANCELLED", "操作已被停止指令取消")
+                        // Stop invalidates the image, never an already completed input action.
+                        if (result.optBoolean("action_success", false)) observationStoppedAfterAction(result)
+                        else throw VisualOperationFailure("OPERATION_CANCELLED", "操作已被停止指令取消")
+                    } else {
+                        setState(channel, "IDLE", "$label 完成")
                     }
-                    setState(channel, "IDLE", "$label 完成")
                 }
                 result
             } catch (error: CancellationException) {
@@ -753,4 +756,11 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             check(previewRoot().deleteRecursively()) { "临时预览清理失败" }
         }
     }
+}
+
+internal fun observationStoppedAfterAction(result: JSONObject): JSONObject {
+    require(result.getBoolean("action_success"))
+    for (key in listOf("mcp_content", "frame", "preview", "visual_wait", "wait_success")) result.remove(key)
+    return result.put("observation_success", false).put("observation_error", "操作完成后共享屏已停止，观察已取消")
+        .put("automatic_reexecution", false)
 }

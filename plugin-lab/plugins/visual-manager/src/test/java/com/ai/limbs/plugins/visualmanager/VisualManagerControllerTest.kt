@@ -14,6 +14,15 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualManagerControllerTest {
+    @Test fun stopAfterACompletedTapCannotEraseTheActionOrDeliverAnInvalidatedFrame() {
+        val result = JSONObject().put("action_success", true).put("operation_id", "once")
+            .put("observation_success", true).put("frame", JSONObject()).put("preview", JSONObject())
+            .put("mcp_content", JSONArray()).put("wait_success", true).put("visual_wait", JSONObject())
+        val stopped = observationStoppedAfterAction(result)
+        assertTrue(stopped.getBoolean("action_success")); assertEquals("once", stopped.getString("operation_id"))
+        assertFalse(stopped.getBoolean("observation_success")); assertFalse(stopped.getBoolean("automatic_reexecution"))
+        for (key in listOf("frame", "preview", "mcp_content", "wait_success", "visual_wait")) assertFalse(stopped.has(key))
+    }
     @Test fun invalidObservationSettingsAreRejectedBeforeAnyTapOrHostCall() = runBlocking {
         for (request in listOf(JSONObject().put("observe_mode", "invalid"),
             JSONObject().put("timeout_ms", 15001), JSONObject().put("stable_ratio", 0.5),
