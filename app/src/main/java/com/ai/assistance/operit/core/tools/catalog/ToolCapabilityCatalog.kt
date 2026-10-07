@@ -300,7 +300,11 @@ object ToolCapabilityCatalog {
                         parameterHints = buildParameterHints(tool),
                         sourceKind = sourceKind,
                         keywords = listOf(category.categoryName),
-                        parameters = tool.parametersStructured.orEmpty(),
+                        parameters = tool.parametersStructured.orEmpty() +
+                            if (com.ai.assistance.operit.integrations.ailimbs.AiLimbsOperationFeedback.supports(tool.name))
+                                listOf(ToolParameterSchema("screen_feedback", "boolean",
+                                    "Return post-action screen feedback; false defers feedback for caller-orchestrated sequential steps. Does not change action permission.", false, "true"))
+                            else emptyList(),
                         searchMetadata = alternateSearchMetadata[tool.name].orEmpty(),
                         sourceLocator =
                             if (sourceKind == ToolCatalogSourceKind.BUILTIN) {

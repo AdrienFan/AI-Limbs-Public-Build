@@ -38,7 +38,8 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
 
     data class FreshFrame(
         val path: String, val width: Int, val height: Int,
-        val requestedElapsedMs: Long, val capturedElapsedMs: Long, val capturedAtMs: Long
+        val requestedElapsedMs: Long, val capturedElapsedMs: Long, val capturedAtMs: Long,
+        val format: String = "png"
     )
 
     private val callbackHandler = Handler(Looper.getMainLooper())
@@ -169,7 +170,8 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
      * previously unattached surface cannot be an old queued preview. No second projection/display
      * is created, and no Image.timestamp timebase assumption is required.
      */
-    suspend fun captureFreshToFile(file: File): FreshFrame = freshCaptureLock.withLock {
+    suspend fun captureFreshToFile(file: File, format: String = "png"): FreshFrame = freshCaptureLock.withLock {
+        require(format == "png" || format == "rgba8888") { "Unsupported screen frame format" }
         val ready = CompletableDeferred<Unit>()
         val requestedElapsed = SystemClock.elapsedRealtime()
         val reader = synchronized(this) {
@@ -198,21 +200,32 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
             withTimeout(2_000L) { ready.await() }
             // Return both clocks from the synchronized acquisition; assigning outer vals inside
             // try/finally is not definite initialization in Kotlin's data-flow analysis.
-            val (capturedElapsed, capturedAt) = synchronized(this) {
+            val (capturedElapsed, capturedAt, dimensions) = synchronized(this) {
                 check(imageReader === reader && pendingFreshFrame === ready) { "Shared screen stopped during capture" }
                 val image = checkNotNull(reader.acquireLatestImage()) { "New shared-screen frame is unavailable" }
                 try {
                     val acquiredElapsed = SystemClock.elapsedRealtime()
                     val acquiredAt = System.currentTimeMillis()
-                    bitmap = checkNotNull(imageToBitmap(image)) { "New shared-screen frame has invalid dimensions" }
-                    acquiredElapsed to acquiredAt
+                    val dimensions = if (format == "rgba8888") {
+                        val plane = image.planes[0]
+                        RawRgbaFrameWriter.write(plane.buffer, image.width, image.height,
+                            plane.rowStride, plane.pixelStride, file)
+                        image.width to image.height
+                    } else {
+                        bitmap = checkNotNull(imageToBitmap(image)) { "New shared-screen frame has invalid dimensions" }
+                        checkNotNull(bitmap).let { it.width to it.height }
+                    }
+                    Triple(acquiredElapsed, acquiredAt, dimensions)
                 } finally { image.close() }
             }
-            val captured = checkNotNull(bitmap)
-            FileOutputStream(file).use { out ->
-                check(captured.compress(Bitmap.CompressFormat.PNG, 100, out)) { "New frame encoding failed" }
+            if (format == "png") {
+                val captured = checkNotNull(bitmap)
+                FileOutputStream(file).use { out ->
+                    check(captured.compress(Bitmap.CompressFormat.PNG, 100, out)) { "New frame encoding failed" }
+                }
             }
-            FreshFrame(file.absolutePath, captured.width, captured.height, requestedElapsed, capturedElapsed, capturedAt)
+            FreshFrame(file.absolutePath, dimensions.first, dimensions.second,
+                requestedElapsed, capturedElapsed, capturedAt, format)
         } catch (error: Exception) {
             file.delete()
             throw error

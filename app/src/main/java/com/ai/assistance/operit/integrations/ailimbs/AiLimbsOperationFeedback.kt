@@ -16,12 +16,17 @@ internal object AiLimbsOperationFeedback {
         "start_app", "stop_app", "run_ui_subagent"
     )
 
+    fun supports(tool: String): Boolean = tool == "execute_shell" || tool in screenTools
+
     fun requested(tool: String, parameters: JSONObject): Boolean {
-        if (tool != "execute_shell") return tool in screenTools
-        if (!parameters.has("screen_action")) return false
-        val flag = parameters.get("screen_action")
-        require(flag is Boolean) { "screen_action must be a boolean" }
-        return flag
+        val enabled = if (parameters.has("screen_feedback")) {
+            parameters.get("screen_feedback").also { require(it is Boolean) { "screen_feedback must be a boolean" } } as Boolean
+        } else true
+        val action = if (tool == "execute_shell") {
+            if (!parameters.has("screen_action")) false
+            else parameters.get("screen_action").also { require(it is Boolean) { "screen_action must be a boolean" } } as Boolean
+        } else tool in screenTools
+        return action && enabled
     }
 
     data class Provider(val id: String, val owner: String, val invoke: suspend (String) -> String)

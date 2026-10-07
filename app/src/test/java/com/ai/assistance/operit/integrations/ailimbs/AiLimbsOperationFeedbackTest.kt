@@ -28,6 +28,15 @@ class AiLimbsOperationFeedbackTest {
         }
     }
 
+    @Test fun feedbackCanBeDeferredWithoutGuessingOrChangingScreenIntent() {
+        assertFalse(AiLimbsOperationFeedback.requested("tap", JSONObject().put("screen_feedback", false)))
+        assertTrue(AiLimbsOperationFeedback.requested("tap", JSONObject().put("screen_feedback", true)))
+        assertFalse(AiLimbsOperationFeedback.requested("execute_shell", JSONObject().put("screen_action", true).put("screen_feedback", false)))
+        assertFalse(AiLimbsOperationFeedback.requested("execute_shell", JSONObject().put("screen_action", false).put("screen_feedback", true)))
+        assertThrows(IllegalArgumentException::class.java) { AiLimbsOperationFeedback.requested("tap", JSONObject().put("screen_feedback", "false")) }
+        assertThrows(IllegalArgumentException::class.java) { AiLimbsOperationFeedback.requested("execute_shell", JSONObject().put("screen_action", "true").put("screen_feedback", false)) }
+    }
+
     @Test fun shellCommandsAreNeverGuessedFromTheirText() {
         assertFalse(AiLimbsOperationFeedback.requested("execute_shell", JSONObject().put("command", "input tap 1 2")))
         assertFalse(AiLimbsOperationFeedback.requested("execute_shell", JSONObject().put("command", "logcat | grep input")))

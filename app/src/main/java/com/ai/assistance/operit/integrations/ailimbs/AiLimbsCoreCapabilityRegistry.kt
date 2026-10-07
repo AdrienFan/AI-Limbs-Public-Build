@@ -145,6 +145,15 @@ object AiLimbsCoreCapabilityRegistry {
                 )
         ),
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.OPERATION_FEEDBACK_READ),
+            catalogEntry = entry(
+                name = "ai_limbs.operation_feedback.read",
+                displayName = "读取操作后屏幕反馈",
+                description = "Read one fresh screen feedback from already active Providers after caller-completed operations. Never starts sharing, requests consent, repeats actions or owns batching policy.",
+                keywords = listOf("操作反馈", "屏幕", "screen feedback", "fresh frame")
+            )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ),
             catalogEntry = entry(
                 name = "ai_limbs.message_context.read",

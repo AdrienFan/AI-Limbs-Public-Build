@@ -117,6 +117,8 @@ class AiLimbsDispatcher(
         args: JSONObject
     ): JSONObject =
         when (operation) {
+            AiLimbsCoreLocalOperation.OPERATION_FEEDBACK_READ ->
+                attachOperationFeedback(ok(), "screen_feedback_read", true)
             AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ ->
                 com.ai.assistance.operit.plugins.center.PluginMessageContext.read()
             AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ ->
@@ -281,7 +283,7 @@ class AiLimbsDispatcher(
         val keys = parameters.keys()
         while (keys.hasNext()) {
             val key = keys.next()
-            if (name == "execute_shell" && key == "screen_action") continue
+            if (key == "screen_feedback" || (name == "execute_shell" && key == "screen_action")) continue
             params += ToolParameter(key, parameters.opt(key)?.toString() ?: "")
         }
         val aiTool = AITool(name = name, parameters = params)
@@ -324,9 +326,14 @@ class AiLimbsDispatcher(
             .put("error", result.error ?: JSONObject.NULL)
             .put("events", JSONArray(emitted))
         if (!needsFeedback) return response
+        return attachOperationFeedback(response, name, result.success)
+    }
+
+    /** Read an already active Provider after caller-completed work; never start sharing. */
+    private suspend fun attachOperationFeedback(response: JSONObject, name: String, succeeded: Boolean): JSONObject {
         val request = JSONObject().put("schema", 1).put("event", AiLimbsOperationFeedback.EVENT)
             .put("operation_id", java.util.UUID.randomUUID().toString()).put("tool", name)
-            .put("operation_success", result.success)
+            .put("operation_success", succeeded)
             .put("completed_at_ms", System.currentTimeMillis())
             .put("completed_elapsed_ms", android.os.SystemClock.elapsedRealtime())
             .put("deadline_elapsed_ms", android.os.SystemClock.elapsedRealtime() + 6_000L)

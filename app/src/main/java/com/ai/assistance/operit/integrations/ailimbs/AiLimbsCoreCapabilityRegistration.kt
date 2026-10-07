@@ -5,6 +5,7 @@ import com.ai.assistance.operit.core.tools.catalog.ToolCatalogEntry
 internal enum class AiLimbsCoreLocalOperation {
     ACCESS_CONTEXT_READ,
     MESSAGE_CONTEXT_READ,
+    OPERATION_FEEDBACK_READ,
     CAPABILITY_SEARCH,
     CAPABILITY_DESCRIBE,
     CAPABILITY_HOT,
