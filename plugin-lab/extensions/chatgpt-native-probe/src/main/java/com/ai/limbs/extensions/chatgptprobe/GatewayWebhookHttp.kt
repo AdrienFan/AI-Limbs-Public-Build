@@ -19,11 +19,13 @@ internal class GatewayWebhookHttp : GatewayEventTransport {
     private val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS).callTimeout(10, TimeUnit.SECONDS)
         .followRedirects(false).followSslRedirects(false).proxy(Proxy.NO_PROXY)
-        .dns(Dns { host ->
-            val addresses = InetAddress.getAllByName(host).toList()
-            if (addresses.isEmpty() || addresses.any { !GatewayWebhookSecurity.publicAddress(it) })
-                throw IOException("Non-public callback destination")
-            addresses
+        .dns(object : Dns {
+            override fun lookup(hostname: String): List<InetAddress> {
+                val addresses = InetAddress.getAllByName(hostname).toList()
+                if (addresses.isEmpty() || addresses.any { !GatewayWebhookSecurity.publicAddress(it) })
+                    throw IOException("Non-public callback destination")
+                return addresses
+            }
         }).build()
 
     @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
