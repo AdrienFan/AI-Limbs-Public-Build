@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.nio.ByteBuffer
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
@@ -184,14 +185,14 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         try {
             setState("screen", "BUSY", "获取操作后画面")
             val captured = hostCall(sessionPrimitive("screen"), "frame", JSONObject()
-                .put("session_id", sessions.getJSONObject(0).getString("session_id")).put("fresh", true)
+                .put("session_id", sessions.getJSONObject(0).getString("session_id")).put("fresh", true).put("frame_format", "rgba8888")
                 .put("deadline_elapsed_ms", request.getLong("deadline_elapsed_ms")))
             VisualOperationResult.requireHost(captured)
             val hostFrame = captured.getJSONObject("frame")
             VisualOperationResult.requireHost(hostFrame)
             scratch = File(hostFrame.getString("path"))
             ScreenFeedbackContract.requireFresh(request, captured)
-            val image = updatePreview("screen", captured, generation, 524_288)
+            val image = updatePreview("screen", captured, generation, 524_288, 960)
             val imageContent = content(image)
             image.remove("data")
             return synchronized(stateLock) {
@@ -336,7 +337,9 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
 
     private suspend fun frame(kind: String, p: JSONObject): JSONObject = perform(kind, "读取画面") {
         val captured = captureSession(kind, p.getString("session_id"))
-        val image = updatePreview(kind, captured, it)
+        val edge = p.optInt("max_edge", 1024)
+        require(edge in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
+        val image = updatePreview(kind, captured, it, edge = edge)
         if (p.optBoolean("save", false)) {
             val meta = frameMetadata(kind, captured, frameFile(kind, captured))
             captured.put("managed_asset", locks.getValue("images").withLock { archive(frameFile(kind, captured), meta) })
@@ -402,6 +405,10 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val frame = if (kind == "screen" && result.has("frame")) result.getJSONObject("frame") else result
         val path = frame.getString(if (kind == "screen") "path" else "file_path")
         val file = File(path)
+        if (kind == "screen" && frame.optString("format") == "rgba8888") {
+            RawScreenFrame.read(frame, file)
+            return file
+        }
         check(file.length() <= 33_554_432L) { "单帧图像超过 32 MiB 上限" }
         check(file.isFile && file.length() > 0L) { "宿主未提供有效的图像文件" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
@@ -411,74 +418,99 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
     }
 
     private fun frameMetadata(kind: String, result: JSONObject, file: File): JSONObject {
+        val frame = if (kind == "screen" && result.has("frame")) result.getJSONObject("frame") else result
+        val raw = if (frame.optString("format") == "rgba8888") RawScreenFrame.read(frame, file) else null
         val options = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(file.absolutePath, options)
+        if (raw == null) BitmapFactory.decodeFile(file.absolutePath, options)
         return JSONObject().put("kind", kind).put("captured_at_ms", result.optLong("captured_at_ms", System.currentTimeMillis()))
             .put("source_id", result.optString(if (kind == "screen") "target_id" else "source_id", "display:0"))
             .put("session_id", result.optString("session_id"))
-            .put("width", options.outWidth).put("height", options.outHeight)
-            .put("mime_type", options.outMimeType).put("file_name", file.name)
+            .put("width", raw?.width ?: options.outWidth).put("height", raw?.height ?: options.outHeight)
+            .put("mime_type", if (raw != null) "application/octet-stream" else options.outMimeType).put("file_name", file.name)
     }
 
-    private suspend fun updatePreview(kind: String, result: JSONObject, generation: Long?, maxBytes: Int = 1_048_576): JSONObject = previewLock.withLock {
+    private data class EncodedPreview(val image: JSONObject, val bytes: ByteArray)
+
+    private suspend fun updatePreview(kind: String, result: JSONObject, generation: Long?, maxBytes: Int = 1_048_576, edge: Int = 1024): JSONObject = previewLock.withLock {
         val source = frameFile(kind, result)
         val meta = frameMetadata(kind, result, source)
-        val encoded = encodedImage(source, meta, 1024, maxBytes)
+        val frame = if (kind == "screen" && result.has("frame")) result.getJSONObject("frame") else result
+        val raw = if (frame.optString("format") == "rgba8888") RawScreenFrame.read(frame, source) else null
+        val encoded = encodeImage(source, meta, edge, maxBytes, raw)
         val destination = File(previewRoot(), "$kind.jpg")
         synchronized(stateLock) {
             check(generation == generations[kind]) { "取帧已被停止指令取消" }
-            destination.writeBytes(Base64.decode(encoded.getString("data"), Base64.NO_WRAP))
-            meta.put("file_name", destination.name).put("bytes", destination.length()).put("mime_type", "image/jpeg")
-                .put("width", encoded.getInt("width")).put("height", encoded.getInt("height"))
+            // Write the one encoder output directly; do not decode our own Base64 to save it.
+            destination.writeBytes(encoded.bytes)
+            meta.put("file_name", destination.name).put("bytes", encoded.bytes.size).put("mime_type", "image/jpeg")
+                .put("width", encoded.image.getInt("width")).put("height", encoded.image.getInt("height"))
             previews[kind] = meta
             revision++
             publishState()
         }
-        encoded
+        encoded.image.put("file_name", destination.name).put("data", Base64.encodeToString(encoded.bytes, Base64.NO_WRAP))
     }
 
     private fun previewRead(kind: String, edge: Int): JSONObject {
+        require(edge in 160..1280) { "max_edge 必须在 160 到 1280 之间" }
         val meta = previews[kind] ?: error("此来源尚无预览")
         val encoded = encodedImage(File(previewRoot(), meta.getString("file_name")), meta, edge)
         return encoded.put("mcp_content", content(encoded))
     }
 
     private fun encodedImage(source: File, meta: JSONObject, edge: Int, maxBytes: Int = 1_048_576): JSONObject {
-        require(edge in 160..1280) { "max_edge 必须在 160 到 1280 之间" }
+        val encoded = encodeImage(source, meta, edge, maxBytes, null)
+        return encoded.image.put("data", Base64.encodeToString(encoded.bytes, Base64.NO_WRAP))
+    }
+
+    private fun encodeImage(source: File, meta: JSONObject, edge: Int, maxBytes: Int, raw: RawScreenFrame?): EncodedPreview {
+        require(edge in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
-        BitmapFactory.decodeFile(source.absolutePath, bounds)
-        require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth.toLong() * bounds.outHeight <= 64_000_000L) { "图像尺寸无效或超过 6400 万像素" }
-        var sample = 1
-        while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edge) sample *= 2
-        val decoded = BitmapFactory.decodeFile(source.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
-            ?: error("图像解码失败")
-        val matrix = Matrix()
-        val orientation = if (bounds.outMimeType == "image/jpeg") {
-            ExifInterface(source.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
-        } else ExifInterface.ORIENTATION_NORMAL
-        when (orientation) {
-            ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
-            ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
-            ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
-            ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
-            ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
-            ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
-            ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+        val decoded = if (raw != null) {
+            Bitmap.createBitmap(raw.width, raw.height, Bitmap.Config.ARGB_8888).also { bitmap ->
+                try { bitmap.copyPixelsFromBuffer(ByteBuffer.wrap(source.readBytes())) }
+                catch (error: Throwable) { bitmap.recycle(); throw error }
+            }
+        } else {
+            BitmapFactory.decodeFile(source.absolutePath, bounds)
+            require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth.toLong() * bounds.outHeight <= 64_000_000L) { "图像尺寸无效或超过 6400 万像素" }
+            var sample = 1
+            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edge) sample *= 2
+            BitmapFactory.decodeFile(source.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+                ?: error("图像解码失败")
         }
-        val rotated = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
-        val ratio = minOf(1f, edge.toFloat() / maxOf(rotated.width, rotated.height))
-        val scaled = Bitmap.createScaledBitmap(rotated, maxOf(1, (rotated.width * ratio).toInt()),
-            maxOf(1, (rotated.height * ratio).toInt()), true)
+        var rotated: Bitmap? = null
+        var scaled: Bitmap? = null
         return try {
+            val matrix = Matrix()
+            val orientation = if (bounds.outMimeType == "image/jpeg") {
+                ExifInterface(source.absolutePath).getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+            } else ExifInterface.ORIENTATION_NORMAL
+            when (orientation) {
+                ExifInterface.ORIENTATION_ROTATE_90 -> matrix.postRotate(90f)
+                ExifInterface.ORIENTATION_ROTATE_180 -> matrix.postRotate(180f)
+                ExifInterface.ORIENTATION_ROTATE_270 -> matrix.postRotate(270f)
+                ExifInterface.ORIENTATION_FLIP_HORIZONTAL -> matrix.postScale(-1f, 1f)
+                ExifInterface.ORIENTATION_FLIP_VERTICAL -> matrix.postScale(1f, -1f)
+                ExifInterface.ORIENTATION_TRANSPOSE -> { matrix.postRotate(90f); matrix.postScale(-1f, 1f) }
+                ExifInterface.ORIENTATION_TRANSVERSE -> { matrix.postRotate(270f); matrix.postScale(-1f, 1f) }
+            }
+            val oriented = Bitmap.createBitmap(decoded, 0, 0, decoded.width, decoded.height, matrix, true)
+            rotated = oriented
+            val ratio = minOf(1f, edge.toFloat() / maxOf(oriented.width, oriented.height))
+            val resized = Bitmap.createScaledBitmap(oriented, maxOf(1, (oriented.width * ratio).toInt()),
+                maxOf(1, (oriented.height * ratio).toInt()), true)
+            scaled = resized
             val stream = ByteArrayOutputStream()
-            check(scaled.compress(Bitmap.CompressFormat.JPEG, 82, stream)) { "预览编码失败" }
+            check(resized.compress(Bitmap.CompressFormat.JPEG, 82, stream)) { "预览编码失败" }
             val bytes = stream.toByteArray()
             check(bytes.size <= maxBytes) { "预览超过 $maxBytes 字节上限" }
-            JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", scaled.width)
-                .put("height", scaled.height).put("data", Base64.encodeToString(bytes, Base64.NO_WRAP))
+            EncodedPreview(JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", resized.width)
+                .put("height", resized.height), bytes)
         } finally {
-            if (scaled !== rotated) scaled.recycle()
-            if (rotated !== decoded) rotated.recycle()
+            // Rotation/resize allocation failures must also release the full raw-frame bitmap.
+            scaled?.takeIf { it !== rotated && it !== decoded }?.recycle()
+            rotated?.takeIf { it !== decoded }?.recycle()
             decoded.recycle()
         }
     }

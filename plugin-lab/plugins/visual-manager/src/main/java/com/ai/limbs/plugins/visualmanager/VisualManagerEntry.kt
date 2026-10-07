@@ -98,7 +98,7 @@ class VisualManagerEntry : InProcessPluginEntry {
             listOf(kind, source) + cameraOptions, """{"kind":"camera","source_id":"0"}""")
         capability("frame", "获取会话画面", write,
             "从已开启会话取得新画面。save=false 仅替换临时预览；save=true 同时保存原图。返回 MCP 图像；查询 status/preview.read 不重新拍摄。",
-            listOf(kind, session, p("save", "boolean", "是否保存原图记录", false, "false")),
+            listOf(kind, session, p("save", "boolean", "是否保存原图记录", false, "false"), p("max_edge", "integer", "新画面预览最长边 160..2048；需要细小文字时可取 2048", false, "1024")),
             """{"kind":"camera","session_id":"<start 返回的 ID>","save":false}""")
         capability("capture", "拍摄并保存单张图像", write,
             "屏幕单次截图，或未开启会话时相机单拍并自动释放。保存原图记录并返回预览。已有相机会话请用 frame save=true。",

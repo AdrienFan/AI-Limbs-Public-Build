@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.visual_manager",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "视觉工作台",
-    "description": "统一管理视觉授权、屏幕与摄像头画面、页面全文及图像记录；本轮相机新帧上下文需要基座 build110、ChatGPT 桥 0.0.19。"
+    "description": "统一管理视觉授权、屏幕与摄像头画面、页面全文及图像记录；单次编码的屏幕操作反馈需要基座 build111；连续操作合并使用 ChatGPT 桥 0.0.29。"
   },
   "roles": [
     "system_plugin"
