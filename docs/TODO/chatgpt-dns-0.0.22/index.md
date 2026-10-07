@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
-status: implementation-in-progress
+status: cloud-validated-awaiting-device-callback
 ---
 
 # 回调真实地址解析与手动 DNS 配置
