@@ -187,6 +187,12 @@ internal class GatewayReceipts(private val store: GatewayBlobStore, private val 
     @Synchronized fun list(binding: String, phase: String): List<Pair<String, JSONObject>> = records.keys().asSequence()
         .filter { records.getJSONObject(it).getString("binding") == binding && records.getJSONObject(it).getString("phase") == phase }
         .map { it to JSONObject(records.getJSONObject(it).toString()) }.toList()
+    /** READY lists are detached snapshots; a completed POST may invalidate an entry before admission. */
+    @Synchronized fun readyForDelivery(binding: String, id: String): JSONObject? {
+        val record = records.optJSONObject(id) ?: return null
+        if (record.getString("binding") != binding || record.getString("phase") != "READY") return null
+        return JSONObject(record.toString())
+    }
     @Synchronized fun counts(): JSONObject = JSONObject().apply {
         records.keys().forEach { val phase = records.getJSONObject(it).getString("phase"); put(phase, optInt(phase) + 1) }
     }

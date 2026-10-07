@@ -5,6 +5,35 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GatewayReceiptsTest {
+    @Test fun acknowledgedRecordFromStaleReadySnapshotIsNotReadmitted() {
+        val ledger = GatewayReceipts(MemoryGatewayStore())
+        val command = command()
+        val id = ledger.claim("binding", command).first
+        ledger.ready(id, GatewayProtocol.delivery(command, GatewayProtocol.success(1, JSONObject())))
+        val stale = ledger.list("binding", "READY").single()
+        assertTrue(ledger.delivered(id, "first"))
+        assertEquals("READY", stale.second.getString("phase"))
+        assertNull(ledger.readyForDelivery("binding", stale.first))
+        assertEquals(1, ledger.list("binding", "ACKED").size)
+    }
+
+    @Test fun currentDeliveryReadHonorsBindingPhaseAndRefreshedToken() {
+        val ledger = GatewayReceipts(MemoryGatewayStore())
+        val command = command()
+        val id = ledger.claim("binding", command).first
+        assertNull(ledger.readyForDelivery("binding", id))
+        ledger.ready(id, GatewayProtocol.delivery(command, GatewayProtocol.success(1, JSONObject())))
+        assertNull(ledger.readyForDelivery("other-binding", id))
+        val snapshot = ledger.readyForDelivery("binding", id)!!
+        ledger.claim("binding", command().put("shard_token", "second"))
+        assertEquals("first", snapshot.getJSONObject("command").getString("shard_token"))
+        assertEquals("second", ledger.readyForDelivery("binding", id)!!.getJSONObject("command").getString("shard_token"))
+        snapshot.put("phase", "ACKED")
+        assertNotNull(ledger.readyForDelivery("binding", id))
+        ledger.mark(id, "DELIVERY_FAILED", "second")
+        assertNull(ledger.readyForDelivery("binding", id))
+    }
+
     @Test fun duplicateSurvivesRestartAndRefreshesDeliveryToken() {
         val store = MemoryGatewayStore()
         val ledger = GatewayReceipts(store)

@@ -190,7 +190,14 @@ class GatewayEngineTest {
             assertTrue(names.containsAll(listOf("ai_limbs_capability_search", "ai_limbs_capability_describe", "ai_limbs_capability_invoke", "ai_limbs_result_read", "ai_limbs_media_read", "ai_limbs_gateway_status", "ai_limbs_message_context")))
             assertEquals(4, calls.get())
             gate.complete(Unit)
-            eventually { fixture.responses.count { it.optString("request_id").startsWith("business-") } == 5 }
+            val expected = (0 until 5).map { "business-$it" }.toSet()
+            eventually {
+                fixture.responses.map { it.optString("request_id") }.filter { it.startsWith("business-") }.toSet() == expected &&
+                    fixture.engine.statusJson().getJSONObject("receipts").optInt("ACKED") == 6
+            }
+            val businessResponses = fixture.responses.map { it.optString("request_id") }.filter { it.startsWith("business-") }
+            assertEquals("Each business response must be delivered once, not once per stale READY snapshot", 5, businessResponses.size)
+            assertEquals(expected, businessResponses.toSet())
             assertEquals(4, maximum.get())
             assertEquals(5, calls.get())
         }

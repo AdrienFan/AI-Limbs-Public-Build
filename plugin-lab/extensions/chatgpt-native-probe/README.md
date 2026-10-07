@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.25
+# AI Limbs-ChatGPT 0.0.26
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -182,3 +182,24 @@ no global permission default or AI invocation policy was changed to suppress an 
 New regression tests cover disabled admission, all-binding queue cleanup, restart recovery, in-flight
 serialization and failed setting persistence. They are submitted for cloud execution; no local project
 build or tests were run.
+
+## Delivery snapshot race in 0.0.26
+
+Cloud run 37569375137 compiled 0.0.25, but the concurrency test timed out at GatewayEngineTest.kt:193
+while waiting for exactly five business responses. The cloud log does not record the actual response
+count. Code review identified a real race: deliveryLoop iterates a detached READY list; an earlier POST
+can ACK a receipt and remove its in-flight job before the iterator reaches that stale entry. It could
+then submit an acknowledged response again.
+
+The scheduler now reads the authoritative READY receipt after checking the in-flight map. An ACKED,
+failed, executing, absent or different-binding receipt is not admitted. A refreshed duplicate token
+still uses the current record, and business execution is not repeated. No delivery persistence format,
+retry policy or concurrency limit changed.
+
+Deterministic ledger tests cover the stale-list/ACK ordering, binding and phase isolation, fresh tokens
+and detached reads. The integration concurrency test waits for all distinct expected IDs and all six
+ACKs, then still asserts exactly five business responses and four maximum concurrent business calls.
+It does not accept duplicate deliveries by changing the assertion to >= five.
+
+The newly added wake-switch tests passed in run 37569375137. This repair is submitted for cloud testing,
+compilation and packaging only; no local project tests or build were run, and the new run is not polled.

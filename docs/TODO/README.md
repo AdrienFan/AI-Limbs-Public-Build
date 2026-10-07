@@ -61,3 +61,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [ChatGPT 0.0.24 当前网络路由筛选](chatgpt-routes-0.0.24/index.md)
 
 - [外部唤醒持久开关](chatgpt-wake-switch-0.0.25/index.md)：0.0.25
+
+- [回复投递快照竞态修复](chatgpt-delivery-0.0.26/index.md)：0.0.26

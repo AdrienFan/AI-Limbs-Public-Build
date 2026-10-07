@@ -557,8 +557,11 @@ internal class ChatGptNativeProbeEngine(
                 val apiKey = storage.readApiKey() ?: error("Runtime API Key unavailable")
                 // Independent completed responses must not wait behind a slow HTTP POST.
                 // Backoff occupies no HTTP slot, and only persisted responses are retried.
-                for ((id, record) in receipts.list(identity, "READY")) {
+                for ((id, _) in receipts.list(identity, "READY")) {
                     if (deliveries.containsKey(id)) continue
+                    // A previous job can ACK and remove itself after this loop took its READY list.
+                    // Re-read after checking the in-flight map; never POST an acknowledged snapshot.
+                    val record = receipts.readyForDelivery(identity, id) ?: continue
                     val shard = record.getJSONObject("command").getString("shard_token")
                     val retry = retries[id]?.takeIf { it.shardToken == shard }
                     if (retry != null && System.nanoTime() < retry.nextAttemptAtNs) continue
