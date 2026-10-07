@@ -222,6 +222,32 @@ class GatewayResultsTest {
         assertTrue(store.names().isEmpty())
     }
 
+    @Test fun warmCacheDoesNotReadUnrelatedBodiesAndExpirationReclaimsCapacity() {
+        var clock = 0L
+        var namesCalls = 0
+        var readCalls = 0
+        val memory = MemoryGatewayStore()
+        val store = object : GatewayBlobStore {
+            override fun names(): List<String> { namesCalls++; return memory.names() }
+            override fun read(name: String): String? { readCalls++; return memory.read(name) }
+            override fun write(name: String, value: String) = memory.write(name, value)
+            override fun delete(name: String) = memory.delete(name)
+        }
+        val adapter = GatewayResults(store, now = { clock })
+        repeat(64) { adapter.adapt(JSONObject().put("text", "x".repeat(13_000))) }
+        assertEquals(1, namesCalls)
+        // Only the newly saved first page is read per result; old bodies are never rescanned.
+        assertEquals(64, readCalls)
+        assertThrows(IllegalArgumentException::class.java) {
+            adapter.adapt(JSONObject().put("text", "x".repeat(13_000)))
+        }
+        clock = GatewayResults.CACHE_TTL_MS
+        val result = adapter.adapt(JSONObject().put("text", "x".repeat(13_000)))
+        assertFalse(result.getBoolean("isError"))
+        assertEquals(1, memory.names().size)
+        assertEquals(1, namesCalls)
+    }
+
     // Test compilation uses Android org.json, which does not expose JSONObject.similar().
     // Compare complete structures with supported APIs so object key order is irrelevant.
     private fun assertJsonEquals(expected: Any?, actual: Any?, path: String) {

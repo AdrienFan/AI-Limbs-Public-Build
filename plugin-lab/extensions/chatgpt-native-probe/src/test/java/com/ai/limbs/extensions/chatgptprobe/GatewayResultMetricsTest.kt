@@ -6,7 +6,7 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class GatewayResultMetricsTest {
-    @Test fun imageAndPagedTextAttributeRepeatedCacheScansWithoutExposingContents() {
+    @Test fun imageAndPagedTextScanCacheOnceWithoutExposingContents() {
         var tick = 0L
         val backing = MemoryGatewayStore()
         for (name in listOf("media_private_seed", "result_private_seed")) {
@@ -29,12 +29,12 @@ class GatewayResultMetricsTest {
         assertFalse(delivered.getBoolean("isError"))
         assertTrue(delivered.getJSONObject("structuredContent").getBoolean("paged"))
         assertEquals(2, delivered.getJSONArray("content").length())
-        assertEquals(2L, costs.getValue("cache_scan_passes"))
-        assertEquals(5L, costs.getValue("cache_entries_scanned"))
-        assertEquals(7L, costs.getValue("cache_scan_ms"))
+        assertEquals(1L, costs.getValue("cache_scan_passes"))
+        assertEquals(2L, costs.getValue("cache_entries_scanned"))
+        assertEquals(3L, costs.getValue("cache_scan_ms"))
         assertEquals(4L, costs.getValue("cache_write_ms"))
         // Adapter work also includes the one read of its newly saved first result page.
-        assertEquals(12L, costs.getValue("result_adapter_work_ms"))
+        assertEquals(8L, costs.getValue("result_adapter_work_ms"))
         assertEquals(0L, costs.getValue("result_adapter_wait_ms"))
         assertEquals(8L, costs.getValue("media_base64_chars"))
         assertTrue(costs.getValue("cache_plaintext_bytes_scanned") > 0)

@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.29
+# AI Limbs-ChatGPT 0.0.30
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -26,7 +26,7 @@ The eight stable tools have human-readable titles, explicit input schemas, objec
 
 ## Panel
 
-The child keeps all presentation in the existing Bridge API 5 panel contract. The installed extension name, provider selection label, panel heading and MCP server title are `AI Limbs-ChatGPT`. Existing protocol IDs, signing identity, field IDs and tool names stay unchanged; version 0.0.29 adds the batch tool.
+The child keeps all presentation in the existing Bridge API 5 panel contract. The installed extension name, provider selection label, panel heading and MCP server title are `AI Limbs-ChatGPT`. Existing protocol IDs, signing identity, field IDs and tool names stay unchanged; version 0.0.30 adds the batch tool.
 
 The overview shows a Chinese connection indicator, request/delivery counts, successful communication time and pending delivery warnings. Routine controls are chosen for the current phase. Settings, key replacement and diagnostics open on demand; the normal overview contains no secret input. First-time setup shows the tunnel ID and Runtime Key, with the control-plane URL behind Advanced Settings. Leaving forms clears the transient secret field. Clearing binding has its own confirmation view.
 
@@ -251,9 +251,13 @@ body contents or credentials enter these metrics. Pools, dispatcher, routing, TL
 timeouts, retries, wire format and screenshot quality remain unchanged. This release
 adds evidence and does not claim a latency fix.
 
-## 0.0.29 连续 UI 操作
+## 0.0.30 连续 UI 操作
 
 新增 `ai_limbs_capability_batch`，需刷新自定义 MCP 工具目录。输入 `steps` 为 1..8 条预先确定的原生 UI 操作，每项含 `capability_id` 和 `parameters`；可传 `timeout_ms`。仅接受 tap、long_press、click_element、swipe、set_input_text、press_key、start_app 和明确 `screen_action:true` 的 execute_shell。
 先解析全部地址并确认基座支持最终反馈读取，再顺序执行。每一步仍经过原有 Host 权限；中间步骤传 screen_feedback:false，结束或首次失败后调用 ai_limbs.operation_feedback.read 取一次已有共享屏的新图。未开启共享不会自动启动。
 失败/不确定时停止后续步骤，已执行的动作不撤销，不自动重做。返回每步结果、尝试/成功数量、失败序号及单独的 feedback_result；反馈失败不改写已收到的业务结果。去重及持久化投递仍以整条请求为单位。一条 batch 按一次桥调用统计，Host 对其中每一步独立执行权限检查。
 配套基座 build111、视觉工作台 0.2.4。只合并不依赖中间画面判断的步骤；新页面、动态内容或不确定路径仍应逐步看图决定。保留既有单能力工具和协议。
+
+## Result cache accounting
+
+0.0.30 scans cached media/result bodies only on the adapter cold path and accounts subsequent saves using expiry/size metadata. This change is transport-only; visual frame and tap capabilities live in the universal Visual Manager plugin.

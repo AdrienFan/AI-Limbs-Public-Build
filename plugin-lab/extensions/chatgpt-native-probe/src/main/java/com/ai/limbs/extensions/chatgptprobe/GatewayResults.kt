@@ -20,6 +20,9 @@ internal class GatewayResults(
         }
     }
 ) {
+    private data class CachedSize(val expires: Long, val bytes: Long)
+    private var cacheIndex: MutableMap<String, CachedSize>? = null
+
     fun adapt(result: JSONObject, metrics: GatewayResultMetrics = GatewayResultMetrics()): JSONObject {
         val queuedAt = metrics.clock()
         return synchronized(this) {
@@ -151,26 +154,38 @@ internal class GatewayResults(
     private fun save(kind: String, value: String, metrics: GatewayResultMetrics): String {
         require(value.toByteArray(Charsets.UTF_8).size <= MAX_RESULT_BYTES) { "Result exceeds cache limit" }
         val entry = JSONObject().put("expires", now() + CACHE_TTL_MS).put("binding", binding).put("value", value).toString()
-        // Attribute the existing full encrypted-cache scan before deciding whether it needs
-        // optimization. Keep expiry/capacity and write ordering identical during diagnosis.
-        val (count, bytes) = metrics.measure("cache_scan_ms") {
-            metrics.count("cache_scan_passes", 1L)
-            val cached = store.names().filter { it.startsWith("result_") || it.startsWith("media_") }
-            var bytes = 0L
-            var count = 0
-            cached.forEach { name ->
-                metrics.count("cache_entries_scanned", 1L)
-                val text = store.read(name) ?: return@forEach
-                val size = text.toByteArray(Charsets.UTF_8).size.toLong()
-                metrics.count("cache_plaintext_bytes_scanned", size)
-                if (JSONObject(text).getLong("expires") <= now()) store.delete(name)
-                else { count++; bytes += size }
+        // One cold scan per adapter lifetime; subsequent writes account from metadata only.
+        // Updating the index AFTER a successful write preserves failure/capacity semantics.
+        var index = cacheIndex
+        if (index == null) {
+            val loaded = metrics.measure("cache_scan_ms") {
+                metrics.count("cache_scan_passes", 1L)
+                val entries = mutableMapOf<String, CachedSize>()
+                store.names().filter { it.startsWith("result_") || it.startsWith("media_") }.forEach { name ->
+                    metrics.count("cache_entries_scanned", 1L)
+                    val text = store.read(name) ?: return@forEach
+                    val size = text.toByteArray(Charsets.UTF_8).size.toLong()
+                    metrics.count("cache_plaintext_bytes_scanned", size)
+                    val expires = JSONObject(text).getLong("expires")
+                    if (expires <= now()) store.delete(name) else entries[name] = CachedSize(expires, size)
+                }
+                entries
             }
-            count to bytes
+            cacheIndex = loaded
+            index = loaded
         }
-        require(count < MAX_CACHE_ENTRIES && bytes + entry.toByteArray(Charsets.UTF_8).size <= MAX_CACHE_BYTES) { "Result cache capacity reached" }
+        val current = checkNotNull(index)
+        current.filterValues { it.expires <= now() }.keys.toList().forEach { name ->
+            store.delete(name)
+            current.remove(name)
+        }
+        val size = entry.toByteArray(Charsets.UTF_8).size.toLong()
+        require(current.size < MAX_CACHE_ENTRIES && current.values.sumOf { it.bytes } + size <= MAX_CACHE_BYTES) {
+            "Result cache capacity reached"
+        }
         val id = kind + "_" + UUID.randomUUID().toString().replace("-", "")
         metrics.measure("cache_write_ms") { store.write(id, entry) }
+        current[id] = CachedSize(JSONObject(entry).getLong("expires"), size)
         return id
     }
 
