@@ -21,7 +21,7 @@ internal class GatewayWebhookFailure(val reason: String, val stage: String, val 
         fun classify(error: Exception, stage: String): GatewayWebhookFailure {
             if (error is GatewayWebhookFailure) return error
             val causes = generateSequence(error as Throwable?) { it.cause }.take(8).toList()
-            val cause = causes.firstOrNull { it is GatewayNonPublicDestination || it is UnknownHostException ||
+            val cause = causes.lastOrNull { it is GatewayNonPublicDestination || it is UnknownHostException ||
                 it is SSLPeerUnverifiedException || it is SSLHandshakeException || it is SSLException ||
                 it is InterruptedIOException || it is ConnectException || it is NoRouteToHostException || it is ProtocolException }
                 ?: error

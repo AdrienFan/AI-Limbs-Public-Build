@@ -10,11 +10,11 @@ android {
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.chatgptprobe.v021"
+        applicationId = "com.ai.limbs.payload.chatgptprobe.v022"
         minSdk = 26
         targetSdk = 34
-        versionCode = 21
-        versionName = "0.0.21"
+        versionCode = 22
+        versionName = "0.0.22"
     }
 
     compileOptions {
@@ -32,10 +32,12 @@ dependencies {
     compileOnly(project(":bridge-contract"))
     implementation(libs.coroutines.android)
     implementation(libs.okhttp)
+    implementation("com.squareup.okhttp3:okhttp-dnsoverhttps:4.12.0")
     implementation("androidx.security:security-crypto:1.1.0-alpha06")
     testImplementation(project(":plugin-inprocess-api"))
     testImplementation(project(":bridge-contract"))
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20240303")
     testImplementation("com.squareup.okhttp3:mockwebserver:4.12.0")
+    testImplementation("com.squareup.okhttp3:okhttp-tls:4.12.0")
 }

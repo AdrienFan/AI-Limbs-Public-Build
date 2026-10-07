@@ -19,6 +19,7 @@ internal class GatewayEventFailure(val code: Int, val reason: String, val diagno
 internal data class GatewayWebhookReply(val code: Int, val body: String, val retryAfterMs: Long = 0)
 internal interface GatewayEventTransport {
     suspend fun post(url: String, headers: Map<String, String>, body: String): GatewayWebhookReply
+    fun dnsStatus(): JSONObject = JSONObject()
     fun cancel() {}
     fun close() {}
 }

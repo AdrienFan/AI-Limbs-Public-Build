@@ -9,7 +9,8 @@ internal data class ChatGptProbeConfig(
     val configured: Boolean,
     val secureStorageAvailable: Boolean,
     val tunnelId: String,
-    val baseUrl: String
+    val baseUrl: String,
+    val callbackDnsUrl: String = GatewayCallbackDns.DEFAULT_URL
 )
 
 internal interface GatewayConfiguration {
@@ -31,7 +32,8 @@ internal class ChatGptNativeProbeStorage(context: Context) : GatewayConfiguratio
             secureStorageAvailable = keyRead.isSuccess,
             tunnelId = readTunnelId(),
             baseUrl = metadata.getString(KEY_BASE_URL, null)?.trim()?.trimEnd('/')
-                ?: DEFAULT_BASE_URL
+                ?: DEFAULT_BASE_URL,
+            callbackDnsUrl = metadata.getString(KEY_CALLBACK_DNS, GatewayCallbackDns.DEFAULT_URL)!!
         )
     }
 
@@ -51,6 +53,12 @@ internal class ChatGptNativeProbeStorage(context: Context) : GatewayConfiguratio
             .putString(KEY_TUNNEL_ID, normalizedTunnel)
             .putString(KEY_BASE_URL, normalizedBase)
             .commit()) { "Tunnel 配置保存失败" }
+    }
+
+    fun saveCallbackDns(value: String): String {
+        val normalized = GatewayCallbackDns.validateEndpoint(value).toString()
+        check(metadata.edit().putString(KEY_CALLBACK_DNS, normalized).commit()) { "加密 DNS 配置保存失败" }
+        return normalized
     }
 
     fun validateApiKey(apiKey: String) {
@@ -99,5 +107,6 @@ internal class ChatGptNativeProbeStorage(context: Context) : GatewayConfiguratio
         private const val KEY_API_KEY = "runtime_api_key"
         private const val KEY_TUNNEL_ID = "tunnel_id"
         private const val KEY_BASE_URL = "base_url"
+        private const val KEY_CALLBACK_DNS = "callback_dns_url"
     }
 }

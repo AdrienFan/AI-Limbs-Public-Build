@@ -7,6 +7,8 @@ import java.net.Proxy
 import java.util.concurrent.TimeUnit
 import kotlin.coroutines.resumeWithException
 import kotlinx.coroutines.suspendCancellableCoroutine
+import okhttp3.ConnectionPool
+import org.json.JSONObject
 import okhttp3.Call
 import okhttp3.Callback
 import okhttp3.Dns
@@ -17,16 +19,18 @@ import okhttp3.Response
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.RequestBody.Companion.toRequestBody
 
-internal class GatewayWebhookHttp(
-    private val resolve: (String) -> List<InetAddress> = { InetAddress.getAllByName(it).toList() }
-) : GatewayEventTransport {
+internal class GatewayWebhookHttp(private val resolver: Dns = GatewayCallbackDns()) : GatewayEventTransport {
+    constructor(resolve: (String) -> List<InetAddress>) : this(object : Dns {
+        override fun lookup(hostname: String) = resolve(hostname)
+    })
     private val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS).callTimeout(10, TimeUnit.SECONDS)
-        .followRedirects(false).followSslRedirects(false).proxy(Proxy.NO_PROXY)
+        .followRedirects(false).followSslRedirects(false).retryOnConnectionFailure(false).proxy(Proxy.NO_PROXY)
+        .connectionPool(ConnectionPool(0, 1, TimeUnit.SECONDS))
         .eventListenerFactory { call -> requireNotNull(call.request().tag(Trace::class.java)) }
         .dns(object : Dns {
             override fun lookup(hostname: String): List<InetAddress> {
-                val addresses = resolve(hostname)
+                val addresses = resolver.lookup(hostname)
                 if (addresses.isEmpty()) throw java.net.UnknownHostException("No callback addresses")
                 if (addresses.any { !GatewayWebhookSecurity.publicAddress(it) })
                     throw GatewayNonPublicDestination()
@@ -83,10 +87,18 @@ internal class GatewayWebhookHttp(
         override fun responseHeadersStart(call: Call) { stage = "response_headers" }
         override fun responseBodyStart(call: Call) { stage = "response_body" }
     }
-    override fun cancel() = client.dispatcher.cancelAll()
+    override fun dnsStatus(): JSONObject = when (resolver) {
+        is GatewayCallbackDns -> resolver.status()
+        else -> JSONObject().put("mode", "CUSTOM")
+    }
+    override fun cancel() {
+        client.dispatcher.cancelAll()
+        if (resolver is GatewayCallbackDns) resolver.cancel()
+    }
     override fun close() {
         cancel()
         client.dispatcher.executorService.shutdown()
         client.connectionPool.evictAll()
+        if (resolver is GatewayCallbackDns) resolver.close()
     }
 }

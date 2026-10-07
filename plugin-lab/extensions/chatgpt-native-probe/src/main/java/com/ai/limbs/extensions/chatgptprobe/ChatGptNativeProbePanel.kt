@@ -21,7 +21,7 @@ internal class ChatGptNativeProbePanel(
 ) : BridgeProviderPanel {
     private val storage = ChatGptNativeProbeStorage(context.applicationContext)
     private val initialConfig = storage.readConfig()
-    private enum class View { OVERVIEW, SETTINGS, ROTATE_KEY, DIAGNOSTICS, CATALOG_GUIDE, CONFIRM_CLEAR, EVENTS }
+    private enum class View { OVERVIEW, SETTINGS, ROTATE_KEY, DIAGNOSTICS, CATALOG_GUIDE, CONFIRM_CLEAR, EVENTS, DNS }
     @Volatile private var view = View.OVERVIEW
     @Volatile private var showAdvancedSetup = initialConfig.baseUrl != ChatGptNativeProbeStorage.DEFAULT_BASE_URL
     @Volatile private var setupBaseUrl = initialConfig.baseUrl
@@ -59,7 +59,7 @@ internal class ChatGptNativeProbePanel(
         )
 
         // Setup is the only unconfigured form. A live-state refresh must not expose a secret editor.
-        if (!config.configured && view !in setOf(View.DIAGNOSTICS, View.CATALOG_GUIDE)) {
+        if (!config.configured && view !in setOf(View.DIAGNOSTICS, View.CATALOG_GUIDE, View.DNS)) {
             val fields = buildList {
                 add(BridgeProviderPanelField(FIELD_TUNNEL_ID, "隧道 ID", value = config.tunnelId, placeholder = "tunnel_…"))
                 add(BridgeProviderPanelField(FIELD_API_KEY, "Runtime Key", kind = BridgeProviderPanelFieldKind.SECRET,
@@ -71,7 +71,7 @@ internal class ChatGptNativeProbePanel(
                 BridgeProviderPanelAction(ACTION_SAVE_START, "保存并连接", enabled = config.secureStorageAvailable,
                     requiredFieldIds = setOf(FIELD_API_KEY, FIELD_TUNNEL_ID)),
                 action(ACTION_ADVANCED, if (showAdvancedSetup) "收起高级设置" else "高级设置"),
-                action(ACTION_DIAGNOSTICS, "连接诊断")
+                action(ACTION_DIAGNOSTICS, "连接诊断"), action(ACTION_DNS, "回调网络设置")
             ))
         }
 
@@ -133,11 +133,12 @@ internal class ChatGptNativeProbePanel(
                             if (diagnostic.has("http_status")) add("回调 HTTP 状态：${diagnostic.getInt("http_status")}")
                         }
                         if (events.optString("last_error") == "non_public_destination")
-                            add("DNS 返回了非公网目标，连接被拒绝；请核对 VPN 的 DNS / 假 IP 设置。不会放宽公网地址校验。")
+                            add("解析返回了非公网目标，连接被拒绝；请在回调网络设置中核对加密 DNS 服务。")
                     }
                     add("收到 HTTP 接收确认不代表模型已响应；请在订阅的对话中核对回复。")
+                    add("回调使用加密 DNS 获取真实公网 IP，不绑定 VPN 节点。")
                     add("当前只发送手动测试事件，不自动启动相机或持续取图。")
-                }, actions = listOf(action(ACTION_HOME, "返回概览"),
+                }, actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_DNS, "回调网络设置"),
                     BridgeProviderPanelAction(ACTION_WAKE_TEST, "发送唤醒测试", enabled = probe.running && events.optInt("active_subscriptions") > 0)))
             }
 
@@ -145,7 +146,18 @@ internal class ChatGptNativeProbePanel(
                 fields = listOf(
                     BridgeProviderPanelField(FIELD_TUNNEL_ID, "隧道 ID", value = config.tunnelId, enabled = false),
                     BridgeProviderPanelField(FIELD_BASE_URL, "服务地址", value = config.baseUrl, enabled = false)
-                ), actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_EDIT_KEY, "更换密钥"), action(ACTION_SHOW_CLEAR, "清除配置…")))
+                ), actions = listOf(action(ACTION_HOME, "返回概览"), action(ACTION_DNS, "回调网络设置"),
+                    action(ACTION_EDIT_KEY, "更换密钥"), action(ACTION_SHOW_CLEAR, "清除配置…")))
+
+            View.DNS -> panel("回调网络设置 · 动态解析真实公网地址。", lines = summary + listOf(
+                "通过当前手机网络查询，不绑定 VPN 节点或回调 IP。",
+                "填写支持 DNS over HTTPS 的服务地址；每次回调重新解析。",
+                "服务不可用时明确报错，可在这里更换地址；保存不修改 VPN 或隧道密钥。",
+                "保存后下一次回调使用新配置，正在执行的请求不被重发。"
+            ), fields = listOf(BridgeProviderPanelField(FIELD_CALLBACK_DNS, "加密 DNS 服务地址", value = config.callbackDnsUrl,
+                placeholder = GatewayCallbackDns.DEFAULT_URL)), actions = listOf(
+                BridgeProviderPanelAction(ACTION_SAVE_DNS, "保存 DNS 地址", requiredFieldIds = setOf(FIELD_CALLBACK_DNS)),
+                action(ACTION_EVENTS, "返回外部唤醒"), action(ACTION_HOME, "返回概览")))
 
             View.ROTATE_KEY -> panel("更换密钥 · 保存后重新连接，隧道不变。", lines = summary + "当前隧道 ${shortTunnel(config.tunnelId)}",
                 fields = listOf(BridgeProviderPanelField(FIELD_API_KEY, "新的 Runtime Key", kind = BridgeProviderPanelFieldKind.SECRET,
@@ -206,6 +218,12 @@ internal class ChatGptNativeProbePanel(
             ACTION_DIAGNOSTICS -> view = View.DIAGNOSTICS
             ACTION_CATALOG_GUIDE -> view = View.CATALOG_GUIDE
             ACTION_EVENTS -> view = View.EVENTS
+            ACTION_DNS -> view = View.DNS
+            ACTION_SAVE_DNS -> {
+                require(view == View.DNS) { "请先打开回调网络设置" }
+                val normalized = storage.saveCallbackDns(fieldValues.getValue(FIELD_CALLBACK_DNS))
+                return BridgeProviderPanelResult("DNS 地址已保存；下一次回调使用新配置", mapOf(FIELD_CALLBACK_DNS to normalized, FIELD_API_KEY to ""))
+            }
             ACTION_WAKE_TEST -> {
                 val result = try { engine.sendWakeTest() }
                 catch (failure: GatewayEventFailure) {
@@ -288,6 +306,7 @@ internal class ChatGptNativeProbePanel(
         private const val FIELD_API_KEY = "runtime_api_key"
         private const val FIELD_TUNNEL_ID = "tunnel_id"
         private const val FIELD_BASE_URL = "base_url"
+        private const val FIELD_CALLBACK_DNS = "callback_dns_url"
         private const val ACTION_SAVE_START = "chatgpt_probe.save_start"
         private const val ACTION_ROTATE = "chatgpt_probe.rotate_key"
         private const val ACTION_CLEAR = "chatgpt_probe.clear"
@@ -300,5 +319,7 @@ internal class ChatGptNativeProbePanel(
         private const val ACTION_ADVANCED = "chatgpt_probe.toggle_advanced"
         private const val ACTION_EVENTS = "chatgpt_probe.view_events"
         private const val ACTION_WAKE_TEST = "chatgpt_probe.wake_test"
+        private const val ACTION_DNS = "chatgpt_probe.view_dns"
+        private const val ACTION_SAVE_DNS = "chatgpt_probe.save_dns"
     }
 }

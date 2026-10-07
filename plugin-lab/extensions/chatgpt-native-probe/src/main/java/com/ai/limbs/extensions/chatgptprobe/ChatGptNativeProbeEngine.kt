@@ -101,7 +101,7 @@ internal class ChatGptNativeProbeEngine(
         .readTimeout(30, TimeUnit.SECONDS).callTimeout(35, TimeUnit.SECONDS).build(),
     private val imageValidator: ((ByteArray, String) -> Boolean)? = null,
     private val warn: (String) -> Unit = {},
-    private val eventTransport: GatewayEventTransport = GatewayWebhookHttp()
+    private val eventTransport: GatewayEventTransport = GatewayWebhookHttp(GatewayCallbackDns({ storage.readConfig().callbackDnsUrl }))
 ) {
     constructor(host: ChildExtensionHost) : this(
         ChatGptNativeProbeStorage(host.applicationContext), GatewayEncryptedStore(host.applicationContext),
@@ -239,6 +239,7 @@ internal class ChatGptNativeProbeEngine(
             .put("dedup_retention_ms", GatewayReceipts.RETENTION_MS)
             .put("supported_mcp_versions", JSONArray(GatewayProtocol.supportedVersions.toList()))
             .put("events", events.snapshot(binding(config)))
+            .put("callback_dns", eventTransport.dnsStatus())
             .put("tool_catalog_sha256", gatewayHash(toolDefinitions().toString()))
             .put("tools_list_requested", mutableState.value.lastToolsListAtMs != null)
             .put("client_catalog_refresh_verified", false)

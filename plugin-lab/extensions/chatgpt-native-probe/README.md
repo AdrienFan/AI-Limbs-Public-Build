@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.21
+# AI Limbs-ChatGPT 0.0.22
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -126,3 +126,16 @@ The gateway now learns `capability_id -> invoke_id` mappings from live search/de
 这版不改变 DNS 解析路线、HTTPS、证书、公网地址检查、重定向和代理策略，不将 private/fake IP 当作公网目标，也不自动更改手机 VPN。非公网目标提示用户核对 VPN DNS / 假 IP 设置只是排查方向，不能据此断言本次故障由 VPN 引起。
 
 安装后保持桥连接，再尝试创建一次手动唤醒订阅；若失败，通过状态工具读取新的分类与阶段。若成功，再点击手机面板测试按钮并核对实际 ChatGPT 回复。0.0.21 的目的为补齐根因证据和修复诊断交付，不能以构建或模拟测试通过宣称公网回调已经修复。MCP 工具名与事件定义未变，此次安装后无需为诊断字段单独刷新目录。
+
+
+## 0.0.22 动态回调解析
+
+回调域名通过 DNS over HTTPS 获取真实公网 IP，再进行已有的公网地址校验。默认服务为 https://cloudflare-dns.com/dns-query；服务域名使用当前手机网络和系统 DNS 连接，保留正常 TLS 信任，不设置固定 VPN 节点、callback IP 或 bootstrap IP。VPN fake-ip 只用于到解析服务的正常 HTTPS 访问，不能成为事件回调目标。
+
+面板路径：外部唤醒 → 回调网络设置，或连接设置 → 回调网络设置。填写支持 RFC 8484 POST 的公网 HTTPS DNS 服务地址，点击保存；下一次回调使用新配置，无需替换隧道凭据、刷新工具目录或修改手机 VPN。输入地址不可包含账号、查询参数或 fragment。
+
+每次回调建立新连接并重新查询，不持久缓存地址，不设置 HTTP DNS 响应缓存。解析服务与回调禁止重定向，解析请求有 6 秒 deadline，最多 4 个并行请求；停止桥时取消 DNS 与回调请求。保留 A/AAAA 回答中任何非公网地址即拒绝整个回答的规则，证书校验和原域名 SNI 保持不变。服务不可用时报告 dns_https 阶段的安全分类，不自动切换服务、使用系统 DNS 回退或重试业务操作。
+
+状态工具增加 callback_dns：解析模式、provider_host、成功/失败计数、最近成功时间和安全错误类别；不返回 callback 域名、URL、DNS 服务路径或签名密钥。工具及事件元数据、ABI5 和之前的连接配置兼容，旧配置自动获得默认解析服务。
+
+云端测试包含真实 TLS 的 DNS wire-format POST、更换服务/返回 IP 后重新查询、fake-ip 拒绝、HTTP 错误/重定向不降级和 TLS 信任验证。公网回调验证及 ChatGPT 实际回复仍需安装后复验。

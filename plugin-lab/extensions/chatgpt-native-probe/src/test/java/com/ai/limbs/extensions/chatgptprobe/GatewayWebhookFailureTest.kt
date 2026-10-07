@@ -39,6 +39,14 @@ class GatewayWebhookFailureTest {
         assertSame(result, GatewayWebhookFailure.classify(result, "transport"))
     }
 
+    @Test fun dohWrappingKeepsTheSpecificTlsFailureInsteadOfOuterDnsError() {
+        val cause = UnknownHostException("callback-private-token").apply { initCause(SSLHandshakeException("private-certificate")) }
+        val result = GatewayWebhookFailure.classify(cause, "dns_https")
+        assertEquals("tls_handshake_failed", result.reason)
+        assertEquals("dns_https", result.stage)
+        assertFalse(result.diagnostic().toString().contains("private"))
+    }
+
     @Test fun productionTransportReportsDnsFailureWithRealListenerStage() = runBlocking {
         val transport = GatewayWebhookHttp { throw UnknownHostException("private-callback-token") }
         try {

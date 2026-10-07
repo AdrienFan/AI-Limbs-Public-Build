@@ -51,3 +51,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [新用户消息取相机新帧](camera-message-0.0.19/index.md)：0.0.19
 - [ChatGPT 外部唤醒首轮验收](chatgpt-events-0.0.20/index.md)：0.0.20
 - [回调异常分类与诊断交付](chatgpt-callback-0.0.21/index.md)：0.0.21
+
+- [回调真实地址解析与手动 DNS 配置](chatgpt-dns-0.0.22/index.md)：0.0.22
