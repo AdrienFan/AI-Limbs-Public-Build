@@ -1,6 +1,6 @@
 ---
 fork: https://github.com/AdrienFan/AI-Limbs-Public-Build
-status: implementation complete; cloud validation pending
+status: implementation and cloud validation complete; device performance retest pending
 ---
 
 # 视觉延迟归因与针对性修正 0.2.9
@@ -26,5 +26,9 @@ status: implementation complete; cloud validation pending
 云端执行既有单元测试和 APK 构建、能力声明一致性检查、来源版本检查、签名与产物来源记录。新增回归覆盖紧凑观察续读后无节点丢失、完整快照与文字不随页面变化、长标签预算续读、整轮成本的超时准入以及首轮可能超额。
 
 安装后的真实收益需同页面复测：默认 observe 是否减少桥分页；等待的 deadline_overshoot_ms 和分段耗时。不能把云端构建通过描述为已经在手机上验证新版性能。
+
+云端 [Run 37698062128](https://github.com/AdrienFan/AI-Limbs-Public-Build/actions/runs/37698062128) 已通过全套回归、APK 编译、21 项能力声明校验、签名及来源记录。构建源码为 db2dfb3e3a4e704c0031b584eef3558086d2c934。页面耗时使用 JVM 标准单调时钟；帧和等待的手机时间基准保持不变。
+
+下载产物已核对版本、包哈希与来源记录：AI-Limbs-Visual-Manager-v0.2.9.ailp，SHA-256 为 c5acd66be464bbd92a27d0ca19e3e963e31e62b35e7d6d760549f2ddb5eeeab7。本文验证记录更新不修改上述构建源码及安装包。
 
 [DONE] 实现与归因记录
