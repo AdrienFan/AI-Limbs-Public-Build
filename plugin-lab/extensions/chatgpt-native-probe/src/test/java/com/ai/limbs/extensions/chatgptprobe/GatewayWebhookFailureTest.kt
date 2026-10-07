@@ -47,6 +47,68 @@ class GatewayWebhookFailureTest {
         assertFalse(result.diagnostic().toString().contains("private"))
     }
 
+    @Test fun tlsCertificateCausesHaveSpecificCategoriesAndSafeReasonCodes() {
+        val cases = listOf(
+            java.security.cert.CertificateExpiredException("private-token") to "tls_certificate_expired",
+            java.security.cert.CertificateNotYetValidException("private-token") to "tls_certificate_not_yet_valid",
+            java.security.cert.CertPathValidatorException("private-token") to "tls_certificate_validation_failed",
+            java.security.cert.CertificateException("private-token") to "tls_certificate_failed")
+        for ((cause, reason) in cases) {
+            val error = SSLHandshakeException("callback-private-token").apply { initCause(cause) }
+            val result = GatewayWebhookFailure.classify(error, "tls")
+            assertEquals(reason, result.reason)
+            assertEquals(2, result.diagnostic().getJSONArray("cause_types").length())
+            assertFalse(result.diagnostic().toString().contains("private-token"))
+            assertNull(result.cause)
+        }
+    }
+
+    @Test fun tlsSocketAndProtocolCausesDoNotMasqueradeAsCertificateFailures() {
+        val cases = listOf(
+            java.io.EOFException("private-token") to "tls_connection_closed",
+            java.net.SocketException("private-token") to "tls_connection_interrupted",
+            javax.net.ssl.SSLProtocolException("private-token") to "tls_protocol_failed")
+        for ((cause, reason) in cases) {
+            val result = GatewayWebhookFailure.classify(SSLHandshakeException("callback-private-token").apply { initCause(cause) }, "tls")
+            assertEquals(reason, result.reason)
+            assertFalse(result.diagnostic().toString().contains("private-token"))
+        }
+        assertEquals("io_failed", GatewayWebhookFailure.classify(java.io.EOFException(), "response_body").reason)
+    }
+
+    @Test fun standardCertificateReasonAndDohTlsStageAreRetained() {
+        val cert = java.security.cert.CertPathValidatorException("private-token", null, null, -1,
+            java.security.cert.CertPathValidatorException.BasicReason.INVALID_SIGNATURE)
+        val wrapped = UnknownHostException("callback-token").apply { initCause(SSLHandshakeException("private-token").apply { initCause(cert) }) }
+        val result = GatewayWebhookFailure.classify(wrapped, "dns_https")
+        assertEquals("tls_certificate_validation_failed", result.reason)
+        assertEquals("INVALID_SIGNATURE", result.diagnostic().getString("certificate_reason"))
+        assertEquals("dns_https", result.stage)
+    }
+
+    @Test fun causeChainIsBoundedAndClassifiedFailureIsNotExpandedAgain() {
+        var error: Exception = IOException("sensitive-URL")
+        repeat(20) { error = IOException("whsec_sensitive", error) }
+        val result = GatewayWebhookFailure.classify(error, "tls")
+        assertEquals(8, result.diagnostic().getJSONArray("cause_types").length())
+        assertFalse(result.diagnostic().toString().contains("sensitive"))
+        assertSame(result, GatewayWebhookFailure.classify(result, "transport"))
+    }
+
+    @Test fun onlyFixedTlsSignalsCrossTheDiagnosticBoundary() {
+        for ((text, signal) in listOf(
+            "SSLV3_ALERT_HANDSHAKE_FAILURE callback-secret" to "alert_handshake_failure",
+            "TLSV1_ALERT_PROTOCOL_VERSION callback-secret" to "alert_protocol_version",
+            "Trust anchor for certification path not found callback-secret" to "trust_anchor_missing",
+            "Connection reset by peer callback-secret" to "connection_reset")) {
+            val result = GatewayWebhookFailure.classify(SSLHandshakeException(text), "tls")
+            assertEquals(signal, result.diagnostic().getString("tls_signal"))
+            assertFalse(result.diagnostic().toString().contains("callback-secret"))
+        }
+        assertFalse(GatewayWebhookFailure.classify(SSLHandshakeException("unknown-secret"), "tls").diagnostic().has("tls_signal"))
+        assertFalse(GatewayWebhookFailure.classify(IOException("connection reset by peer"), "response_body").diagnostic().has("tls_signal"))
+    }
+
     @Test fun productionTransportReportsDnsFailureWithRealListenerStage() = runBlocking {
         val transport = GatewayWebhookHttp { throw UnknownHostException("private-callback-token") }
         try {

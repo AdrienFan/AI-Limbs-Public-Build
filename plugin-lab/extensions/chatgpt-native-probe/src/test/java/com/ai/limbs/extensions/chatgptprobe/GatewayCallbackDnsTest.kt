@@ -105,7 +105,7 @@ class GatewayCallbackDnsTest {
                 try { dns.lookup("callback.example.com"); fail("Untrusted TLS cannot resolve") }
                 catch (error: GatewayWebhookFailure) {
                     assertEquals("dns_https", error.stage)
-                    assertEquals("tls_handshake_failed", error.reason)
+                    assertTrue("TLS rejection must identify certificate validation", error.reason.startsWith("tls_certificate_"))
                 }
             }
         }

@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.22
+# AI Limbs-ChatGPT 0.0.23
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -139,3 +139,11 @@ The gateway now learns `capability_id -> invoke_id` mappings from live search/de
 状态工具增加 callback_dns：解析模式、provider_host、成功/失败计数、最近成功时间和安全错误类别；不返回 callback 域名、URL、DNS 服务路径或签名密钥。工具及事件元数据、ABI5 和之前的连接配置兼容，旧配置自动获得默认解析服务。
 
 云端测试包含真实 TLS 的 DNS wire-format POST、更换服务/返回 IP 后重新查询、fake-ip 拒绝、HTTP 错误/重定向不降级和 TLS 信任验证。公网回调验证及 ChatGPT 实际回复仍需安装后复验。
+
+
+
+## 0.0.23 TLS 内部原因诊断
+
+实机 0.0.22 已完成一次 HTTPS DNS 查询，success=1、failure=0；回调进入 TLS 后出现 SSLHandshakeException，测试订阅没有保存。DNS 修复实机生效，不等于回调和唤醒通过。
+
+0.0.23 保留至多 8 层异常类名及标准证书验证枚举，不保存异常消息、URL、域名、证书正文或签名密钥。分类区分证书过期/尚未生效、信任链验证、协议问题、EOF 关闭与套接字中断，面板和状态诊断交付相同字段。此次仅补齐证据，不调整 TLS 信任、IP 校验、DNS/代理路线或超时，不能作为回调故障已修复的结论。

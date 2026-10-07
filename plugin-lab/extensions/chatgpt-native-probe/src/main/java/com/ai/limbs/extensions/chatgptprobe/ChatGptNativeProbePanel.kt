@@ -130,6 +130,11 @@ internal class ChatGptNativeProbePanel(
                         events.optJSONObject("last_diagnostic")?.let { diagnostic ->
                             add("失败阶段：${diagnostic.optString("stage")}")
                             if (diagnostic.has("exception_type")) add("异常分类：${diagnostic.getString("exception_type")}")
+                            diagnostic.optJSONArray("cause_types")?.let { types ->
+                                if (types.length() > 0) add("异常链：${(0 until types.length()).joinToString(" → ") { types.getString(it) }}")
+                            }
+                            if (diagnostic.has("certificate_reason")) add("证书验证分类：${diagnostic.getString("certificate_reason")}")
+                            if (diagnostic.has("tls_signal")) add("TLS 信号：${diagnostic.getString("tls_signal")}")
                             if (diagnostic.has("http_status")) add("回调 HTTP 状态：${diagnostic.getInt("http_status")}")
                         }
                         if (events.optString("last_error") == "non_public_destination")

@@ -53,3 +53,6 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [回调异常分类与诊断交付](chatgpt-callback-0.0.21/index.md)：0.0.21
 
 - [回调真实地址解析与手动 DNS 配置](chatgpt-dns-0.0.22/index.md)：0.0.22
+
+
+- [TLS 内部原因安全分类](chatgpt-tls-0.0.23/index.md)：0.0.23
