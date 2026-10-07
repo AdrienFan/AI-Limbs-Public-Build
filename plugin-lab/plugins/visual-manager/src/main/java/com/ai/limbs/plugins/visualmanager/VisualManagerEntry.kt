@@ -60,6 +60,7 @@ class VisualManagerEntry : InProcessPluginEntry {
                 when (parameter.name) {
                     "kind" -> field.put("enum", JSONArray(if (name == "stop") listOf("screen", "camera", "all") else listOf("screen", "camera")))
                     "operation" -> field.put("enum", JSONArray(listOf("check", "request", "open_settings")))
+                    "observe_mode" -> field.put("enum", JSONArray(listOf("new_frame", "stable", "change_then_stable")))
                 }
                 parameter.default?.let { value ->
                     field.put("default", when (parameter.type) {
@@ -86,6 +87,17 @@ class VisualManagerEntry : InProcessPluginEntry {
         val read = InProcessCapabilityEffect.READ_ONLY
         val change = InProcessCapabilityEffect.STATE_CHANGE
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
+        val waitParameters = listOf(
+            p("timeout_ms", "integer", "等待上限 100..15000 毫秒，包含内部取帧，不包含网络回传", false, "5000"),
+            p("stable_ms", "integer", "稳定窗口 100..5000 毫秒，不大于 timeout_ms", false, "250"),
+            p("sample_interval_ms", "integer", "采样间隔 50..1000 毫秒", false, "100"),
+            p("change_ratio", "number", "发生变化的采样点比例阈值 (0,1]", false),
+            p("stable_ratio", "number", "稳定时允许的变化比例 [0,change_ratio)，默认 0；容忍微小动画时可增大", false),
+            p("pixel_tolerance", "integer", "RGB 单通道差异容忍值 0..254", false, "12"),
+            p("region_left", "number", "观察区域左边比例，默认 0", false),
+            p("region_top", "number", "观察区域上边比例，默认 0", false),
+            p("region_width", "number", "区域宽度比例，至少 1/64，默认 1", false),
+            p("region_height", "number", "区域高度比例，至少 1/64，默认 1", false))
         capability("status", "视觉工作台状态", read,
             "读取真实会话、授权、操作状态和最新画面时间。未启动时先 sources；相机未授权先 permission request；start 成功才可 frame。success=false 必须处理，勿把调用返回当操作成功。")
         capability("sources", "列出视觉来源", read, "列出显示目标或相机镜头及授权状态。",
@@ -105,10 +117,17 @@ class VisualManagerEntry : InProcessPluginEntry {
             listOf(kind, session, p("max_edge", "integer", "预览最长边 160..2048", false, "1024")),
             """{"kind":"screen","session_id":"<status 返回的 ID>"}""")
         capability("tap_on_frame", "按帧点击并观察", change,
-            "对最新全屏共享帧按比例坐标点击一次并返回随后新帧。frame_id 来自 get_frame/frame 或动作反馈图像；x/y 在 0..1。旧帧或已变化的屏幕几何拒绝执行。action_success 与 observation_success 分开；观察失败不能自动重放点击。",
+            "对最新全屏共享帧按比例坐标点击一次。observe_mode 默认 new_frame；stable 等像素稳定；change_then_stable 先检测变化再等稳定，推荐页面跳转使用。可指定区域排除持续动画。旧帧或变化的几何拒绝执行。action_success、observation_success、wait_success 分开；TIMEOUT 表示条件未满足，不能重放点击。像素稳定不保证加载完成。",
             listOf(p("frame_id", description = "最新屏幕帧编号"), p("x", "number", "图片横向比例 0..1"),
-                p("y", "number", "图片纵向比例 0..1"), p("max_edge", "integer", "观察帧最长边 160..2048", false, "1024")),
-            """{"frame_id":"<最新帧编号>","x":0.51,"y":0.73}""")
+                p("y", "number", "图片纵向比例 0..1"), p("max_edge", "integer", "观察帧最长边 160..2048", false, "1024"),
+                p("observe_mode", description = "new_frame/stable/change_then_stable", required = false, default = "new_frame")) + waitParameters,
+            """{"frame_id":"<最新帧编号>","x":0.51,"y":0.73,"observe_mode":"change_then_stable"}""")
+        capability("wait_for_visual_change", "等待画面变化", read,
+            "以最新屏幕 frame_id 为基准，等待选定区域的像素发生变化。仅使用已有会话，返回最终一帧及 visual_wait；wait_success=false/status=TIMEOUT 表示未检测到变化。不能把 success=true 当作条件满足。几何变化/停止明确失败，不自动开会话。",
+            listOf(p("frame_id", description = "最新屏幕帧编号"), p("max_edge", "integer", "返回预览最长边 160..2048", false, "1024")) + waitParameters)
+        capability("wait_until_stable", "等待画面稳定", read,
+            "等待指定区域在 stable_ms 窗口内像素稳定。基于 64×64 RGB 网格和不同 producer 帧，缓存重复帧不计时；像素稳定不保证业务加载完成。可排除游戏动态区域。返回最终一帧和条件结果，TIMEOUT 不得报告稳定。",
+            listOf(p("frame_id", description = "最新屏幕帧编号"), p("max_edge", "integer", "返回预览最长边 160..2048", false, "1024")) + waitParameters)
         capability("capture", "拍摄并保存单张图像", write,
             "屏幕单次截图，或未开启会话时相机单拍并自动释放。保存原图记录并返回预览。已有相机会话请用 frame save=true。",
             listOf(kind, source) + cameraOptions, """{"kind":"screen","source_id":"display:0"}""")

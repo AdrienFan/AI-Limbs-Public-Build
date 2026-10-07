@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.visual_manager",
-  "version": "0.2.5",
+  "version": "0.2.6",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "视觉工作台",
-    "description": "通用视觉工作台：旋转同步、统一取帧、帧编号与按帧点击观察。完整屏幕几何信息需要基座 build112；通过统一能力入口供各桥调用。"
+    "description": "通用视觉工作台：画面变化与区域稳定检测、按帧点击后等待观察、旋转同步与统一取帧。需要基座 build112；通过统一能力入口供各桥调用。"
   },
   "roles": [
     "system_plugin"
@@ -57,7 +57,9 @@
       "plugin.system.visual_manager.page.inspect",
       "plugin.system.visual_manager.page.text",
       "plugin.system.visual_manager.get_frame",
-      "plugin.system.visual_manager.tap_on_frame"
+      "plugin.system.visual_manager.tap_on_frame",
+      "plugin.system.visual_manager.wait_for_visual_change",
+      "plugin.system.visual_manager.wait_until_stable"
     ],
     "services": [],
     "providers": [

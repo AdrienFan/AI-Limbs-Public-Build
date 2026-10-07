@@ -17,6 +17,7 @@ import java.nio.ByteBuffer
 import java.util.UUID
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
@@ -40,6 +41,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
     private val generations = mutableMapOf("screen" to 0L, "camera" to 0L)
     private val previewLock = Mutex()
     private val previews = mutableMapOf<String, JSONObject>()
+    private var screenSample: VisualSample? = null // Owned by previewLock; matches the screen preview frame_id.
     private var revision = 0L
     private val signal = MutableStateFlow<String?>("""{"revision":0}""")
     val stateProvider = object : InProcessUiStateProvider {
@@ -64,6 +66,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                     frame(kind(parameters), parameters)
                 }
                 "tap_on_frame" -> tapOnFrame(parameters)
+                "wait_for_visual_change" -> waitForScreen(parameters, "change")
+                "wait_until_stable" -> waitForScreen(parameters, "stable")
                 "operation.feedback" -> operationFeedback(parameters)
                 "message.context" -> cameraMessageContext(parameters)
                 "capture" -> capture(kind(parameters), parameters)
@@ -454,7 +458,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             }
     }
 
-    private data class EncodedPreview(val image: JSONObject, val bytes: ByteArray)
+    private data class EncodedPreview(val image: JSONObject, val bytes: ByteArray, val sample: VisualSample?)
 
     private suspend fun updatePreview(kind: String, result: JSONObject, generation: Long?, maxBytes: Int = 1_048_576, edge: Int = 1024): JSONObject = previewLock.withLock {
         val startedElapsed = SystemClock.elapsedRealtime()
@@ -477,6 +481,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             meta.put("file_name", destination.name).put("bytes", encoded.bytes.size).put("mime_type", "image/jpeg")
                 .put("width", encoded.image.getInt("width")).put("height", encoded.image.getInt("height"))
             previews[kind] = meta
+            if (kind == "screen") screenSample = encoded.sample
             revision++
             publishState()
         }
@@ -540,7 +545,9 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             val image = JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", resized.width)
                 .put("height", resized.height)
             if (image.optString("kind") == "screen") image.put("image_to_touch", FrameCoordinates.mapping(image))
-            EncodedPreview(image, bytes)
+            val sample = if (meta.getString("kind") == "screen")
+                VisualSample.sample(oriented.width, oriented.height) { x, y -> oriented.getPixel(x, y) } else null
+            EncodedPreview(image, bytes, sample)
         } finally {
             // Rotation/resize allocation failures must also release the full raw-frame bitmap.
             scaled?.takeIf { it !== rotated && it !== decoded }?.recycle()
@@ -557,10 +564,9 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
 
     private suspend fun tapOnFrame(p: JSONObject): JSONObject = perform("screen", "按画面点击") { generation ->
         require(p.optInt("max_edge", 1024) in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
-        val meta = previewLock.withLock {
-            JSONObject(checkNotNull(previews["screen"]) { "请先获取屏幕帧" }.toString())
-        }
-        check(p.getString("frame_id") == meta.getString("frame_id")) { "STALE_FRAME: 请使用最新屏幕帧" }
+        val options = waitOptions(p, p.optString("observe_mode", "new_frame"))
+        require(options.mode != "change") { "点击观察请使用 new_frame/stable/change_then_stable" }
+        val (meta, sample) = screenBaseline(p)
         val status = VisualOperationResult.requireHost(hostCall(sessionPrimitive("screen"), "status",
             JSONObject().put("session_id", meta.getString("session_id"))))
         check(status.getBoolean("active") && status.getBoolean("projection_ready")) { "共享屏会话已停止" }
@@ -576,25 +582,101 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             .put("expected_geometry_id", geometry.getString("geometry_id")))
         VisualOperationResult.requireFlag(action, "success", "触控未完成")
         val completed = SystemClock.elapsedRealtime()
-        // Observe exactly once after the action. A delivery failure must retain the successful
-        // injection outcome so the caller does not repeat an uncertain tap.
+        // Inject once. Waiting/observation can never re-enter the action path.
         val result = JSONObject().put("action_success", true).put("operation_id", actionId)
             .put("source_frame_id", meta.getString("frame_id")).put("touch_x", x).put("touch_y", y)
             .put("completed_elapsed_ms", completed).put("action_elapsed_ms", completed - started)
         try {
-            val captured = captureSession("screen", meta.getString("session_id"))
-            val source = frameFile("screen", captured)
-            try {
-                val image = updatePreview("screen", captured, generation, edge = p.optInt("max_edge", 1024))
-                result.put("observation_success", true).put("frame", captured).put("preview", image)
-                attachImage(result, image)
-            } finally { deleteHostScratch(source) }
+            val observed = observeScreen(meta, sample, options, generation, p.optInt("max_edge", 1024))
+            observed.getJSONObject("preview").put("last_operation", JSONObject()
+                .put("operation_id", actionId).put("source_frame_id", meta.getString("frame_id"))
+                .put("touch_x", x).put("touch_y", y).put("completed_elapsed_ms", completed))
+            for (key in observed.keys()) result.put(key, observed.get(key))
+            result
         } catch (error: CancellationException) { throw error }
         catch (error: Exception) {
             host.logger.e("VisualWorkbench", "Tap completed but observation failed", error)
             result.put("observation_success", false).put("observation_error", error.message ?: error.javaClass.simpleName)
                 .put("automatic_reexecution", false)
         }
+    }
+
+    private fun waitOptions(p: JSONObject, mode: String) = VisualWaitOptions(mode,
+        p.optLong("timeout_ms", 5000), p.optLong("stable_ms", 250), p.optLong("sample_interval_ms", 100),
+        p.optDouble("change_ratio", 0.02), p.optDouble("stable_ratio", 0.0), p.optInt("pixel_tolerance", 12),
+        VisualRegion(p.optDouble("region_left", 0.0), p.optDouble("region_top", 0.0),
+            p.optDouble("region_width", 1.0), p.optDouble("region_height", 1.0)))
+
+    private suspend fun screenBaseline(p: JSONObject): Pair<JSONObject, VisualSample> = previewLock.withLock {
+        val meta = JSONObject(checkNotNull(previews["screen"]) { "请先获取屏幕帧" }.toString())
+        check(p.getString("frame_id") == meta.getString("frame_id")) { "STALE_FRAME: 请使用最新屏幕帧" }
+        meta to checkNotNull(screenSample) { "屏幕帧没有原始像素采样" }
+    }
+
+    private suspend fun waitForScreen(p: JSONObject, mode: String): JSONObject = perform("screen", "等待画面") { generation ->
+        val edge = p.optInt("max_edge", 1024)
+        require(edge in 160..2048)
+        val options = waitOptions(p, mode)
+        val (meta, sample) = screenBaseline(p)
+        observeScreen(meta, sample, options, generation, edge)
+    }
+
+    private suspend fun observeScreen(meta: JSONObject, baseline: VisualSample, options: VisualWaitOptions,
+        generation: Long?, edge: Int): JSONObject {
+        val started = SystemClock.elapsedRealtime()
+        val deadline = started + options.timeoutMs
+        val detector = VisualChangeDetector(baseline, options)
+        val geometryId = meta.getJSONObject("geometry").getString("geometry_id")
+        var captured: JSONObject? = null
+        var scratch: File? = null
+        var met = false
+        var polls = 0
+        try {
+            while (SystemClock.elapsedRealtime() < deadline) {
+                synchronized(stateLock) { check(generation == generations["screen"]) { "取帧已被停止指令取消" } }
+                val remaining = deadline - SystemClock.elapsedRealtime()
+                if (remaining <= 0) break
+                // The first image is a post-request surface. Subsequent reads reuse the latest
+                // producer image. Cached duplicates cannot advance the stable-time detector.
+                val response = VisualOperationResult.requireHost(hostCall(sessionPrimitive("screen"), "frame", JSONObject()
+                    .put("session_id", meta.getString("session_id")).put("frame_format", "rgba8888")
+                    .put("frame_mode", if (polls == 0) "new_surface" else "latest")
+                    .put("max_age_ms", 60000).put("timeout_ms", remaining.coerceAtMost(15000))))
+                val rawMeta = VisualOperationResult.requireHost(response.getJSONObject("frame"))
+                val next = File(rawMeta.getString("path"))
+                val previousScratch = scratch
+                scratch = next
+                previousScratch?.let { deleteHostScratch(it) }
+                check(rawMeta.getJSONObject("geometry").getString("geometry_id") == geometryId) {
+                    "SCREEN_GEOMETRY_CHANGED: 等待期间屏幕方向或尺寸改变"
+                }
+                val raw = RawScreenFrame.read(rawMeta, next)
+                val sample = VisualSample.raw(raw, next)
+                captured = response
+                polls++
+                met = detector.accept(rawMeta.getString("frame_id"),
+                    response.getJSONObject("freshness").getLong("captured_elapsed_ms"), sample)
+                // A frame delivered after the deadline cannot retroactively satisfy the condition.
+                if (SystemClock.elapsedRealtime() >= deadline) { met = false; break }
+                if (met) break
+                delay(minOf(options.intervalMs, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)))
+            }
+            val last = checkNotNull(captured) { "VISUAL_WAIT_TIMEOUT: 等待期限内没有画面" }
+            val image = updatePreview("screen", last, generation, edge = edge)
+            val wait = JSONObject().put("mode", options.mode).put("condition_met", met)
+                .put("status", if (met) "READY" else "TIMEOUT").put("elapsed_ms", SystemClock.elapsedRealtime() - started)
+                .put("samples", detector.samples).put("polls", polls).put("changed", detector.changed)
+                .put("baseline_change_ratio", detector.baselineRatio).put("adjacent_change_ratio", detector.adjacentRatio)
+                .put("stable_elapsed_ms", detector.quietMs).put("stable_ms", options.stableMs)
+                .put("change_ratio", options.changeRatio).put("stable_ratio", options.stableRatio)
+                .put("pixel_tolerance", options.pixelTolerance).put("sample_grid", VisualSample.EDGE)
+                .put("region", JSONObject().put("left", options.region.left).put("top", options.region.top)
+                    .put("width", options.region.width).put("height", options.region.height))
+            image.put("visual_wait", JSONObject(wait.toString()))
+            return attachImage(JSONObject().put("observation_success", true).put("wait_success", met)
+                .put("visual_wait", wait).put("frame", last).put("preview", image)
+                .put("automatic_reexecution", false), image)
+        } finally { scratch?.let { deleteHostScratch(it) } }
     }
 
     private fun content(image: JSONObject) = JSONArray().put(JSONObject()
@@ -667,6 +749,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         pageReader.clear()
         previewLock.withLock {
             previews.clear()
+            screenSample = null
             check(previewRoot().deleteRecursively()) { "临时预览清理失败" }
         }
     }

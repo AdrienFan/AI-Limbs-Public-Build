@@ -14,6 +14,27 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualManagerControllerTest {
+    @Test fun invalidObservationSettingsAreRejectedBeforeAnyTapOrHostCall() = runBlocking {
+        for (request in listOf(JSONObject().put("observe_mode", "invalid"),
+            JSONObject().put("timeout_ms", 15001), JSONObject().put("stable_ratio", 0.5),
+            JSONObject().put("region_width", 0.001))) {
+            val f = Fixture { _, _, _ -> error("Must validate before action") }
+            try {
+                val result = f.controller.call("tap_on_frame", request.put("frame_id", "unknown").put("x", 0.5).put("y", 0.5))
+                assertFalse(result.getBoolean("success")); assertTrue(f.calls.isEmpty())
+            } finally { f.scope.cancel() }
+        }
+    }
+    @Test fun waitWithoutABaselineCannotStartAProjectionOrReadACachedImage() = runBlocking {
+        for (name in listOf("wait_for_visual_change", "wait_until_stable")) {
+            val f = Fixture { _, _, _ -> error("Wait must not open sessions") }
+            try {
+                val result = f.controller.call(name, JSONObject().put("frame_id", "unknown"))
+                assertFalse(result.getBoolean("success")); assertTrue(f.calls.isEmpty())
+                assertFalse(result.has("mcp_content"))
+            } finally { f.scope.cancel() }
+        }
+    }
     @Test fun readOnlyFrameCannotRequestAnArchiveThroughInternalCalls() = runBlocking {
         val f = Fixture { _, _, _ -> error("Must reject before invoking Host") }
         try {
