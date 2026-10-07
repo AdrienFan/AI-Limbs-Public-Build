@@ -167,7 +167,7 @@ class VisualManagerControllerTest {
     @Test fun transportOkWithCancelledScreenshotDoesNotSaveOrPreview() = runBlocking {
         val f = Fixture { id, op, _ ->
             assertEquals("host.screen.capture@1", id)
-            assertEquals("capture", op)
+            assertEquals("capture_frame", op)
             JSONObject().put("ok", true).put("success", false).put("path", "").put("error", "User cancelled")
         }
         try {
