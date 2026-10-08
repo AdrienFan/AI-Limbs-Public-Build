@@ -125,7 +125,9 @@ internal data class ResidentComponentProxyRequest(
  * Requests contain neutral IDs/JSON only. A raw Activity, Context, ActivityResultLauncher, Binder or
  * window token is never stored here. Window access is represented by an opaque Host-local lease ID.
  */
-internal class ResidentComponentProxyBroker {
+internal class ResidentComponentProxyBroker(
+    private val elapsedRealtime: () -> Long = { android.os.SystemClock.elapsedRealtime() }
+) {
     private data class Pending(
         val request: ResidentComponentProxyRequest,
         val claimedByHost: AtomicReference<String?> = AtomicReference(null),
@@ -148,7 +150,7 @@ internal class ResidentComponentProxyBroker {
             kind == KIND_UI_AUTOMATION_HOST -> HOST_TOOL_EXECUTION_TIMEOUT_MS
             else -> DEFAULT_TIMEOUT_MS
         }
-        val now = android.os.SystemClock.elapsedRealtime()
+        val now = elapsedRealtime()
         val id = UUID.randomUUID().toString()
         val entry = Pending(
             ResidentComponentProxyRequest(
@@ -184,11 +186,12 @@ internal class ResidentComponentProxyBroker {
     private fun claim(hostInstanceId: String, maxItems: Int, canClaim: () -> Boolean): JSONArray {
         require(hostInstanceId.isNotBlank()) { "Host instance ID is required for component polling" }
         check(canClaim()) { "Stale UI proxy Host instance" }
-        val now = android.os.SystemClock.elapsedRealtime()
+        val now = elapsedRealtime()
         val result = JSONArray()
         pending.values
             .asSequence()
-            .filter { it.request.deadlineElapsedMs > now && it.claimedByHost.compareAndSet(null, hostInstanceId) }
+            .filter { it.result.get() == null && it.request.deadlineElapsedMs > now &&
+                it.claimedByHost.compareAndSet(null, hostInstanceId) }
             .take(maxItems.coerceIn(1, 32))
             .forEach { entry ->
                 val request = entry.request

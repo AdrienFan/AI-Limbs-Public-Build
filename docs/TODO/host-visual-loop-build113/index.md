@@ -32,3 +32,5 @@ UIActionResultData 新增可选 backend、completionState、timingsMs。Host 结
 保留既有云端测试，新增唤醒竞态、闲置中断、按路由懒探测和手势终态回归。云编译产物为 0.8.0.19-build113、versionCode 208，稳定 applicationId 不变。需和视觉 0.2.10 配套部署后验证。
 
 [DONE] implementation；构建及实机验收另行记录。
+
+新增 broker 回归直接覆盖请求唤醒、一次完成、Host 替换和取消终态；已取消的请求不能再由 claim 交付。时钟在测试中注入，运行时仍使用 Android 单调时间。

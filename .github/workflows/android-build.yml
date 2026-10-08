@@ -229,6 +229,7 @@ jobs:
             --tests com.ai.assistance.operit.plugins.center.VisualHostPrimitiveReservationTest \
             --tests com.ai.assistance.operit.plugins.center.ResidentUiProxyPollingTest \
             --tests com.ai.assistance.operit.core.tools.system.resident.ResidentComponentWakeSignalTest \
+            --tests com.ai.assistance.operit.core.tools.system.resident.ResidentComponentProxyBrokerTest \
             --tests com.ai.assistance.ailimbs.accessibility.GestureCompletionTest \
             --tests com.ai.assistance.operit.core.tools.system.resident.ResidentUiProxyTimeoutTest \
             --tests com.ai.assistance.operit.plugins.center.isolation.PluginRuntimeRequestGateTest \
