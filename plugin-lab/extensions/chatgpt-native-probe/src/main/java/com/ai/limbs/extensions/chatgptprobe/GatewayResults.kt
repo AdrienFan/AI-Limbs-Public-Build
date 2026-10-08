@@ -128,12 +128,16 @@ internal class GatewayResults(
             .put("expires_at_ms", entry.getLong("expires"))
     }
 
-    @Synchronized fun readMedia(id: String): JSONObject {
+    @Synchronized fun readMedia(id: String, contentOnly: Boolean = false): JSONObject {
         val media = JSONObject(read(id, "media").getString("value"))
         val structured = JSONObject().put("media_id", id).put("retrieved", true)
-        return JSONObject().put("content", JSONArray()
+        val envelope = JSONObject().put("content", JSONArray()
             .put(media).put(JSONObject().put("type", "text").put("text", structured.toString())))
-            .put("structuredContent", structured).put("isError", false)
+            .put("isError", false)
+        // Opt-in A/B diagnostic: no structuredContent only when explicitly requested.
+        // The default remains byte-for-byte compatible with the existing tool result.
+        if (!contentOnly) envelope.put("structuredContent", structured)
+        return envelope
     }
 
     @Synchronized fun pageResult(cursor: String, offset: Int): JSONObject {

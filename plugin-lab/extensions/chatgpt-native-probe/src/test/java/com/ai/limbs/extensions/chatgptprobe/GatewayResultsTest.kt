@@ -164,6 +164,20 @@ class GatewayResultsTest {
         assertEquals(PNG, adapter.readMedia(handle).getJSONArray("content").getJSONObject(0).getString("data"))
     }
 
+    @Test fun mediaReadDiagnosticVariantsUseIdenticalImageBytes() {
+        val adapter = GatewayResults(MemoryGatewayStore())
+        val result = adapter.adapt(JSONObject().put("success", true)
+            .put("mcp_content", JSONArray().put(image(JPEG).put("mimeType", "image/jpeg"))))
+        val handle = result.getJSONObject("structuredContent").getJSONObject("media_delivery")
+            .getJSONArray("attachments").getJSONObject(0).getString("media_id")
+        val both = adapter.readMedia(handle)
+        val contentOnly = adapter.readMedia(handle, contentOnly = true)
+        assertTrue(both.has("structuredContent"))
+        assertFalse(contentOnly.has("structuredContent"))
+        assertEquals(both.getJSONArray("content").toString(), contentOnly.getJSONArray("content").toString())
+        assertEquals(JPEG, contentOnly.getJSONArray("content").getJSONObject(0).getString("data"))
+        assertFalse(contentOnly.getBoolean("isError"))
+    }
     @Test fun jpegDeliveryKeepsTheImageAndRejectsAMissingEndMarker() {
         val adapter = GatewayResults(MemoryGatewayStore())
         fun result(data: String) = adapter.adapt(JSONObject().put("success", true)

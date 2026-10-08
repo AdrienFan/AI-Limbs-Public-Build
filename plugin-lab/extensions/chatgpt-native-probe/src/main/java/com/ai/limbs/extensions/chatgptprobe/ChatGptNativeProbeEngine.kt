@@ -721,8 +721,11 @@ internal class ChatGptNativeProbeEngine(
                 .put("cursor", JSONObject().put("type", "string").put("minLength", 1))
                 .put("offset", JSONObject().put("type", "integer").put("minimum", 0)))
                 .put("required", JSONArray().put("cursor").put("offset")).put("additionalProperties", false)))
-        .put(tool(TOOL_MEDIA_READ, "Retrieve a saved image by media_id without executing its originating capability. Cached media expires after ten minutes.",
-            JSONObject().put("type", "object").put("properties", JSONObject().put("media_id", JSONObject().put("type", "string").put("minLength", 1)))
+        .put(tool(TOOL_MEDIA_READ, "Retrieve saved image by media_id. Optional response_variant=content_only is a diagnostic that omits structuredContent. Default both preserves production behavior. Does not execute original capability.",
+            JSONObject().put("type", "object").put("properties", JSONObject()
+                .put("media_id", JSONObject().put("type", "string").put("minLength", 1))
+                .put("response_variant", JSONObject().put("type", "string")
+                    .put("enum", JSONArray().put("both").put("content_only"))))
                 .put("required", JSONArray().put("media_id")).put("additionalProperties", false)))
         .put(tool(TOOL_BATCH, "Run 1..8 already-known native UI actions sequentially through normal Host permissions, stop at the first failed/uncertain step, and read one fresh feedback after the sequence. Use only when later steps do not require inspecting intermediate screens. Earlier effects remain on failure or deadline. Never replay the batch automatically. Requires base build111 and matching visual plugin; refresh MCP metadata to expose this tool.",
             JSONObject().put("type", "object").put("additionalProperties", false).put("required", JSONArray().put("steps"))
@@ -768,7 +771,7 @@ internal class ChatGptNativeProbeEngine(
                 TOOL_INVOKE -> setOf("capability_id", "parameters", "timeout_ms")
                 TOOL_BATCH -> setOf("steps", "timeout_ms")
                 TOOL_RESULT_READ -> setOf("cursor", "offset")
-                TOOL_MEDIA_READ -> setOf("media_id")
+                TOOL_MEDIA_READ -> setOf("media_id", "response_variant")
                 TOOL_STATUS, TOOL_MESSAGE_CONTEXT -> emptySet()
                 else -> return unadvertisedToolError(id)
             }
@@ -795,7 +798,11 @@ internal class ChatGptNativeProbeEngine(
                     val mediaId = arguments.getString("media_id")
                     require(mediaId.isNotBlank()) { "media_id is required" }
                     recordAdvertisedToolCall(epoch)
-                    return rpcSuccess(id, measureLocal("cached_read_ms") { results.readMedia(mediaId) })
+                    val responseVariant = arguments.optString("response_variant", "both")
+                    require(responseVariant in setOf("both", "content_only")) { "Invalid response_variant" }
+                    return rpcSuccess(id, measureLocal("cached_read_ms") {
+                        results.readMedia(mediaId, contentOnly = responseVariant == "content_only")
+                    })
                 }
                 TOOL_STATUS -> {
                     recordAdvertisedToolCall(epoch)

@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.30
+# AI Limbs-ChatGPT 0.0.31
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -261,3 +261,11 @@ adds evidence and does not claim a latency fix.
 ## Result cache accounting
 
 0.0.30 scans cached media/result bodies only on the adapter cold path and accounts subsequent saves using expiry/size metadata. This change is transport-only; visual frame and tap capabilities live in the universal Visual Manager plugin.
+
+## 0.0.31 MCP image A/B diagnostic
+Only the existing ai_limbs_media_read tool is extended. Optional `response_variant` may be
+`both` (default, unchanged) or `content_only` (omits `structuredContent` entirely).
+Each variant reads the same immutable media_id from the same cached JPEG, without running
+the originating capability again. It retains the same `content` array and media metadata,
+and the original Host policy/Bridge boundaries. This is a temporary diagnostic, not a fix.
+After installing, refresh the custom MCP plugin catalog in ChatGPT and start a new chat.
