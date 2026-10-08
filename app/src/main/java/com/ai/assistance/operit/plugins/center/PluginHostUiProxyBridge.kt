@@ -144,7 +144,7 @@ internal class ResidentUiProxyClient(
                 while (isActive) {
                     try {
                         componentExecutor.pollAndExecute()
-                        delay(POLL_MS)
+                        // component_poll waits for a queue signal when idle; serial requests must not each pay 350 ms.
                     } catch (error: CancellationException) {
                         throw error
                     } catch (error: Throwable) {
@@ -933,9 +933,10 @@ private class ResidentHostComponentExecutor(
     private val hostScreenCaptureTools = StandardUITools(appContext)
 
     suspend fun pollAndExecute() {
-        val result = client.componentRequest("component_poll", JSONObject().put("max_items", 8))
+        val result = client.componentRequest("component_poll", JSONObject().put("max_items", 8).put("wait_ms", 2000))
         result.optJSONArray("requests")?.objects().orEmpty().forEach { request ->
             val id = request.getString("request_id")
+            val executionStarted = android.os.SystemClock.elapsedRealtime()
             val outcome: JSONObject? = try {
                 execute(
                     id,
@@ -947,6 +948,9 @@ private class ResidentHostComponentExecutor(
                 JSONObject().put("ok", false).put("error", error.toString().take(1024))
             }
             if (outcome != null) {
+                outcome.put("host_component_timings_ms", JSONObject()
+                    .put("queue_wait", request.getLong("claimed_elapsed_ms") - request.getLong("created_elapsed_ms"))
+                    .put("host_execution", android.os.SystemClock.elapsedRealtime() - executionStarted))
                 runCatching {
                     client.componentRequest(
                         "component_result",

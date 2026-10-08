@@ -1,6 +1,7 @@
 package com.ai.assistance.operit.core.tools.defaultTool.accessbility
 
 import android.content.ComponentName
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationTouchFeedback
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -458,15 +459,18 @@ open class AccessibilityUITools(context: Context) : StandardUITools(context) {
             )
         }
 
+            val showTouchFeedback = UiAutomationTouchFeedback.enabled(tool)
             withContext(Dispatchers.Main) { operationOverlay.hideImmediately() }
 
             // 使用无障碍服务执行点击
             val result = performAccessibilityClick(x, y)
 
                 if (result) {
-                withContext(Dispatchers.Main) {
-                    operationOverlay.showTap(x, y)
-                    operationOverlay.hide()
+                if (showTouchFeedback) {
+                    withContext(Dispatchers.Main) {
+                        operationOverlay.showTap(x, y)
+                        operationOverlay.hide()
+                    }
                 }
                 ToolResult(
                         toolName = tool.name,

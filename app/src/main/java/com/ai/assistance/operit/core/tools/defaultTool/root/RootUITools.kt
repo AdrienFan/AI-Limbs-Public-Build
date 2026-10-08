@@ -2,6 +2,7 @@ package com.ai.assistance.operit.core.tools.defaultTool.root
 
 import android.content.ClipData
 import android.content.ClipboardManager
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationTouchFeedback
 import android.content.Context
 import com.ai.assistance.operit.util.AppLogger
 import com.ai.assistance.operit.core.tools.SimplifiedUINode
@@ -56,6 +57,7 @@ open class RootUITools(context: Context) : AdminUITools(
             )
         }
 
+        val showTouchFeedback = UiAutomationTouchFeedback.enabled(tool)
         val overlay = operationOverlay
         withContext(Dispatchers.Main) { overlay.hideImmediately() }
 
@@ -66,9 +68,11 @@ open class RootUITools(context: Context) : AdminUITools(
 
             return if (result.success) {
                 AppLogger.d(TAG, "Tap successful at coordinates: ($x, $y)")
-                withContext(Dispatchers.Main) {
-                    overlay.showTap(x, y)
-                    overlay.hide()
+                if (showTouchFeedback) {
+                    withContext(Dispatchers.Main) {
+                        overlay.showTap(x, y)
+                        overlay.hide()
+                    }
                 }
                 ToolResult(
                         toolName = tool.name,

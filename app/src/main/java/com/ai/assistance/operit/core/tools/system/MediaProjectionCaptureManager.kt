@@ -365,10 +365,12 @@ class MediaProjectionCaptureManager(private val context: Context, private val me
                     }
                 }
             }
-            val copyStarted = SystemClock.elapsedRealtime()
+            var copyStarted = 0L
             val stamp = synchronized(this) {
                 check(virtualDisplay != null) { "Shared screen stopped during capture" }
                 val frame = checkNotNull(bufferedFrame) { "Frame invalidated during capture" }
+                // Select the frame and start its copy clock under the same lock as the producer.
+                copyStarted = SystemClock.elapsedRealtime()
                 check(frame.sequence > afterSequence) { "Frame sequence precondition changed" }
                 if (mode == "new_surface") check(pendingFreshFrame === ready && frame.acquiredElapsed >= requestedElapsed) {
                     "Fresh frame invalidated during capture"

@@ -70,3 +70,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [新用户消息取相机新帧](camera-message-build110/index.md)：build110
 
 - [Single-pass screen feedback primitives](single-pass-screen-feedback/index.md)
+
+- [通用 Host 队列与触控反馈 build113](host-visual-loop-build113/index.md)：请求唤醒、动作完成、反馈坐标及真实计时。

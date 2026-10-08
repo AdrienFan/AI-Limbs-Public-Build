@@ -8,6 +8,8 @@ import android.graphics.Path
 import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.os.Looper
 import android.util.Log
 import android.util.Xml
 import android.view.Display
@@ -51,7 +53,7 @@ class AiLimbsAccessibilityService : AccessibilityService() {
                 lineTo(endX.toFloat(), endY.toFloat())
             }
             val stroke = GestureDescription.StrokeDescription(path, 0L, duration.coerceAtLeast(1L))
-            return dispatchGesture(GestureDescription.Builder().addStroke(stroke).build(), null, null)
+            return dispatchCompletedGesture(GestureDescription.Builder().addStroke(stroke).build(), duration.coerceAtLeast(1L))
         }
         override fun findFocusedNodeId(): String? {
             val node = findFocus(AccessibilityNodeInfo.FOCUS_INPUT)
@@ -179,7 +181,27 @@ class AiLimbsAccessibilityService : AccessibilityService() {
         }
         val stroke = GestureDescription.StrokeDescription(path, 0L, durationMs)
         val gesture = GestureDescription.Builder().addStroke(stroke).build()
-        return dispatchGesture(gesture, null, null)
+        return dispatchCompletedGesture(gesture, durationMs)
+    }
+
+    private fun dispatchCompletedGesture(gesture: GestureDescription, durationMs: Long): Boolean {
+        // Binder callers use IO threads. Blocking the service main Looper would prevent callbacks.
+        check(Looper.myLooper() != Looper.getMainLooper()) { "Gesture completion must be awaited off the main Looper" }
+        val completion = GestureCompletion()
+        val accepted = dispatchGesture(gesture, object : GestureResultCallback() {
+            override fun onCompleted(gestureDescription: GestureDescription) { completion.complete(GestureOutcome.COMPLETED) }
+            override fun onCancelled(gestureDescription: GestureDescription) { completion.complete(GestureOutcome.CANCELLED) }
+        }, Handler(Looper.getMainLooper()))
+        if (!accepted) completion.complete(GestureOutcome.REJECTED)
+        val outcome = try { completion.await(durationMs + 2000L) }
+        catch (error: InterruptedException) {
+            Thread.currentThread().interrupt()
+            completion.complete(GestureOutcome.CANCELLED)
+            Log.w(TAG, "Gesture completion interrupted", error)
+            return false
+        }
+        Log.d(TAG, "Gesture terminal outcome=$outcome duration_ms=$durationMs")
+        return outcome == GestureOutcome.COMPLETED
     }
 
     private fun writeBitmap(bitmap: Bitmap, file: File, format: String): Boolean {

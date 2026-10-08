@@ -3,6 +3,7 @@ package com.ai.assistance.operit.core.tools.defaultTool
 import android.content.Context
 import com.ai.assistance.operit.core.tools.StringResultData
 import com.ai.assistance.operit.core.tools.ToolResultData
+import com.ai.assistance.operit.core.tools.UIActionResultData
 import com.ai.assistance.operit.core.tools.defaultTool.accessbility.AccessibilityUITools
 import com.ai.assistance.operit.core.tools.defaultTool.admin.AdminUITools
 import com.ai.assistance.operit.core.tools.defaultTool.debugger.DebuggerUITools
@@ -75,6 +76,14 @@ internal fun selectCoexistingUiAutomationBackend(
             AndroidPermissionLevel.ROOT to rootAvailable
         )
 
+    return selectCoexistingUiAutomationBackend(allowAccessibility) { availability[it] == true }
+}
+
+/** Probe only candidates needed by the existing routing policy; do not launch unused Root probes. */
+internal fun selectCoexistingUiAutomationBackend(
+    allowAccessibility: Boolean,
+    available: (AndroidPermissionLevel) -> Boolean
+): UiAutomationBackendSelection {
     for (
         level in PermissionRoutingPolicy.uiCandidates(
             coexistEnabled = true,
@@ -82,7 +91,7 @@ internal fun selectCoexistingUiAutomationBackend(
             allowAccessibility = allowAccessibility
         )
     ) {
-        if (availability[level] != true) continue
+        if (!available(level)) continue
         when (level) {
             AndroidPermissionLevel.ACCESSIBILITY ->
                 return UiAutomationBackendSelection(
@@ -271,25 +280,14 @@ internal object UiAutomationRuntime {
         val allowAccessibilityFallback = !hasExplicitDisplay(tool)
 
         if (state.permissionCoexistEnabled) {
-            val debuggerAvailable =
-                isShellBackendAvailable(context, AndroidPermissionLevel.DEBUGGER)
-            val rootAvailable =
-                isShellBackendAvailable(context, AndroidPermissionLevel.ROOT)
-            val selection =
-                selectCoexistingUiAutomationBackend(
-                    accessibilityAvailable = state.accessibilityAvailable,
-                    debuggerAvailable = debuggerAvailable,
-                    rootAvailable = rootAvailable,
-                    allowAccessibility = allowAccessibilityFallback
-                )
-            AppLogger.d(
-                TAG,
-                "Resolved coexist UI route source=" + state.source +
-                    " accessibility=" + state.accessibilityAvailable +
-                    " debugger=" + debuggerAvailable +
-                    " root=" + rootAvailable +
-                    " effective=" + selection.backend
-            )
+            val selection = selectCoexistingUiAutomationBackend(allowAccessibilityFallback) { level ->
+                when (level) {
+                    AndroidPermissionLevel.ACCESSIBILITY -> state.accessibilityAvailable
+                    AndroidPermissionLevel.DEBUGGER, AndroidPermissionLevel.ROOT -> isShellBackendAvailable(context, level)
+                    else -> false
+                }
+            }
+            AppLogger.d(TAG, "Resolved coexist UI route source=${state.source} effective=${selection.backend}")
             return selection
         }
 
@@ -358,7 +356,10 @@ internal object UiAutomationRuntime {
         tool: AITool,
         operation: UiAutomationOperation
     ): ToolResult {
+        val started = android.os.SystemClock.elapsedRealtime()
+        if (operation == UiAutomationOperation.TAP) UiAutomationTouchFeedback.enabled(tool)
         val selection = resolveBackend(context, tool)
+        val selected = android.os.SystemClock.elapsedRealtime()
         if (selection.backend == UiAutomationBackend.UNSUPPORTED) {
             return ToolResult(
                 toolName = tool.name,
@@ -386,8 +387,11 @@ internal object UiAutomationRuntime {
                 "fallback=${selection.fallbackReason ?: "none"}"
         )
 
+        val prepared = android.os.SystemClock.elapsedRealtime()
         presentation.beginTool(showStatusIndicator = true)
-        return try {
+        val presentationStarted = android.os.SystemClock.elapsedRealtime()
+        var executionFinished = presentationStarted
+        val result = try {
             delay(50)
             if (residentCore && selection.backend == UiAutomationBackend.ACCESSIBILITY) {
                 executeAccessibilityInHost(tool, operation)
@@ -414,8 +418,24 @@ internal object UiAutomationRuntime {
                 }
             }
         } finally {
+            executionFinished = android.os.SystemClock.elapsedRealtime()
             presentation.endTool()
         }
+        val finished = android.os.SystemClock.elapsedRealtime()
+        val timings = mapOf("backend_selection" to selected - started,
+            "backend_preparation" to prepared - selected,
+            "presentation_begin" to presentationStarted - prepared,
+            "backend_execution" to executionFinished - presentationStarted,
+            "presentation_end" to finished - executionFinished,
+            "total" to finished - started)
+        AppLogger.d(TAG, "UI action timings operation=$operation backend=${selection.backend} timings_ms=$timings")
+        val data = result.result
+        return if (data is UIActionResultData) ToolResult(
+            toolName = result.toolName, success = result.success, error = result.error,
+            result = data.copy(backend = selection.backend.name.lowercase(),
+                completionState = if (!result.success) "backend_failed" else if (selection.backend == UiAutomationBackend.ACCESSIBILITY &&
+                    operation in setOf(UiAutomationOperation.TAP, UiAutomationOperation.LONG_PRESS, UiAutomationOperation.SWIPE))
+                    "gesture_completed" else "backend_returned", timingsMs = timings)) else result
     }
 
     private val toolResultJson = Json {

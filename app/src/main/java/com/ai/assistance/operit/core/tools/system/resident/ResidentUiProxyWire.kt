@@ -134,6 +134,7 @@ internal class ResidentComponentProxyBroker {
     )
 
     private val pending = ConcurrentHashMap<String, Pending>()
+    private val wakeSignal = ResidentComponentWakeSignal()
 
     fun request(kind: String, payload: JSONObject, timeoutMs: Long = 0L): JSONObject {
         require(kind in SUPPORTED_KINDS) { "Unsupported Host component proxy kind: $kind" }
@@ -159,6 +160,7 @@ internal class ResidentComponentProxyBroker {
             )
         )
         check(pending.putIfAbsent(id, entry) == null)
+        wakeSignal.signal()
         try {
             check(entry.latch.await(effectiveTimeoutMs, TimeUnit.MILLISECONDS)) {
                 "Host component proxy timed out: $kind/$id"
@@ -169,8 +171,19 @@ internal class ResidentComponentProxyBroker {
         }
     }
 
-    fun poll(hostInstanceId: String, maxItems: Int = 8): JSONArray {
+    fun poll(hostInstanceId: String, maxItems: Int = 8, waitMs: Long = 0L,
+        canClaim: () -> Boolean = { true }): JSONArray {
+        require(waitMs in 0L..2000L) { "Component wait_ms must be between 0 and 2000" }
+        val observedVersion = wakeSignal.version()
+        val available = claim(hostInstanceId, maxItems, canClaim)
+        if (available.length() > 0 || waitMs == 0L) return available
+        wakeSignal.awaitChange(observedVersion, waitMs)
+        return claim(hostInstanceId, maxItems, canClaim)
+    }
+
+    private fun claim(hostInstanceId: String, maxItems: Int, canClaim: () -> Boolean): JSONArray {
         require(hostInstanceId.isNotBlank()) { "Host instance ID is required for component polling" }
+        check(canClaim()) { "Stale UI proxy Host instance" }
         val now = android.os.SystemClock.elapsedRealtime()
         val result = JSONArray()
         pending.values
@@ -184,6 +197,8 @@ internal class ResidentComponentProxyBroker {
                         .put("request_id", request.requestId)
                         .put("kind", request.kind)
                         .put("payload", JSONObject(request.payload.toString()))
+                        .put("created_elapsed_ms", request.createdElapsedMs)
+                        .put("claimed_elapsed_ms", now)
                         .put("deadline_elapsed_ms", request.deadlineElapsedMs)
                 )
             }
@@ -206,6 +221,7 @@ internal class ResidentComponentProxyBroker {
                 entry.latch.countDown()
             }
         }
+        wakeSignal.signal()
     }
 
     fun cancelAll(reason: String) {
@@ -214,6 +230,7 @@ internal class ResidentComponentProxyBroker {
                 entry.latch.countDown()
             }
         }
+        wakeSignal.signal()
     }
 
     companion object {
@@ -344,7 +361,11 @@ internal class ResidentUiProxyServer(
                     }
                     "component_poll" -> JSONObject().put(
                         "requests",
-                        componentBroker.poll(hostInstanceId, payload.optInt("max_items", 8))
+                        componentBroker.poll(hostInstanceId, payload.optInt("max_items", 8),
+                            payload.optLong("wait_ms", 0L)) {
+                            activeHostInstanceId.get() == hostInstanceId &&
+                                request.getLong("host_generation") == hostGeneration.get()
+                        }
                     )
                     "component_result" -> {
                         val componentRequestId = payload.getString("request_id")

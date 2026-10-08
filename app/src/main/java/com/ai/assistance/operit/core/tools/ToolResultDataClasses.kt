@@ -948,7 +948,10 @@ data class UIActionResultData(
         val actionType: String,
         val actionDescription: String,
         val coordinates: Pair<Int, Int>? = null,
-        val elementId: String? = null
+        val elementId: String? = null,
+        val backend: String? = null,
+        val completionState: String? = null,
+        val timingsMs: Map<String, Long> = emptyMap()
 ) : ToolResultData() {
     override fun toString(): String {
         return actionDescription

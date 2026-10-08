@@ -7,6 +7,28 @@ import org.junit.Assert.assertNull
 import org.junit.Test
 
 class UiAutomationBackendPolicyTest {
+    @Test fun coexistDoesNotProbeShellBackendsAfterSelectingAccessibility() {
+        val probed = mutableListOf<AndroidPermissionLevel>()
+        val selection = selectCoexistingUiAutomationBackend(true) { level ->
+            probed += level
+            assertEquals(AndroidPermissionLevel.ACCESSIBILITY, level)
+            true
+        }
+        assertEquals(UiAutomationBackend.ACCESSIBILITY, selection.backend)
+        assertEquals(listOf(AndroidPermissionLevel.ACCESSIBILITY), probed)
+    }
+
+    @Test fun explicitDisplayStopsProbingAfterDebuggerIsAvailable() {
+        val probed = mutableListOf<AndroidPermissionLevel>()
+        val selection = selectCoexistingUiAutomationBackend(false) { level ->
+            probed += level
+            assertEquals(AndroidPermissionLevel.DEBUGGER, level)
+            true
+        }
+        assertEquals(UiAutomationBackend.DEBUGGER, selection.backend)
+        assertEquals(listOf(AndroidPermissionLevel.DEBUGGER), probed)
+    }
+
     @Test
     fun debuggerStaysPreferredWhenAvailable() {
         val selection = selectUiAutomationBackend(

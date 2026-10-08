@@ -78,6 +78,7 @@ class UIOperationOverlay private constructor(private val context: Context) {
     private var windowManager: WindowManager? = null
     private var overlayView: ComposeView? = null
     private var lifecycleOwner: ServiceLifecycleOwner? = null
+    private var screenOrigin by mutableStateOf(Offset.Zero)
     
     // 为每个操作定义一个带唯一ID的数据类
     data class TapEvent(val x: Int, val y: Int, val id: UUID = UUID.randomUUID())
@@ -106,14 +107,6 @@ class UIOperationOverlay private constructor(private val context: Context) {
         object TextInput : OperationType()
     }
     
-    private val statusBarHeight: Int by lazy {
-        val resourceId = context.resources.getIdentifier("status_bar_height", "dimen", "android")
-        if (resourceId > 0) {
-            context.resources.getDimensionPixelSize(resourceId)
-        } else {
-            0
-        }
-    }
     
     /**
      * 检查是否有悬浮窗权限
@@ -208,6 +201,13 @@ class UIOperationOverlay private constructor(private val context: Context) {
             }
             
             overlayView = ComposeView(context).apply {
+                screenOrigin = Offset.Zero
+                // Insets and cutouts change with orientation. Use this view's actual screen origin.
+                viewTreeObserver.addOnGlobalLayoutListener {
+                    val position = IntArray(2)
+                    getLocationOnScreen(position)
+                    screenOrigin = Offset(position[0].toFloat(), position[1].toFloat())
+                }
                 setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnDetachedFromWindow)
                 
                 // 设置生命周期所有者
@@ -220,7 +220,8 @@ class UIOperationOverlay private constructor(private val context: Context) {
                         OperationFeedbackContent(
                             tapEvents = tapEvents,
                             swipeEvents = swipeEvents,
-                            textInputEvents = textInputEvents
+                            textInputEvents = textInputEvents,
+                            screenOrigin = screenOrigin
                         )
                     }
                 }
@@ -243,7 +244,7 @@ class UIOperationOverlay private constructor(private val context: Context) {
     fun showTap(x: Int, y: Int, autoHideDelayMs: Long = 1500) {
         AppLogger.d(TAG, "Showing tap at ($x, $y)")
         
-        val newTapEvent = TapEvent(x, y - statusBarHeight)
+        val newTapEvent = TapEvent(x, y)
         
         runOnMainThread {
             initOverlay()
@@ -262,7 +263,7 @@ class UIOperationOverlay private constructor(private val context: Context) {
     fun showSwipe(startX: Int, startY: Int, endX: Int, endY: Int, autoHideDelayMs: Long = 1500) {
         AppLogger.d(TAG, "Showing swipe from ($startX, $startY) to ($endX, $endY)")
         
-        val newSwipeEvent = SwipeEvent(startX, startY - statusBarHeight, endX, endY - statusBarHeight)
+        val newSwipeEvent = SwipeEvent(startX, startY, endX, endY)
 
         runOnMainThread {
             initOverlay()
@@ -280,7 +281,7 @@ class UIOperationOverlay private constructor(private val context: Context) {
     fun showTextInput(x: Int, y: Int, text: String, autoHideDelayMs: Long = 2000) {
         AppLogger.d(TAG, "Showing text input at ($x, $y): $text")
         
-        val newTextInputEvent = TextInputEvent(x, y - statusBarHeight, text)
+        val newTextInputEvent = TextInputEvent(x, y, text)
         
         runOnMainThread {
             initOverlay()
@@ -363,7 +364,8 @@ class UIOperationOverlay private constructor(private val context: Context) {
 private fun OperationFeedbackContent(
     tapEvents: List<UIOperationOverlay.TapEvent>,
     swipeEvents: List<UIOperationOverlay.SwipeEvent>,
-    textInputEvents: List<UIOperationOverlay.TextInputEvent>
+    textInputEvents: List<UIOperationOverlay.TextInputEvent>,
+    screenOrigin: Offset
 ) {
     // 获取屏幕密度用于坐标转换
     val density = androidx.compose.ui.platform.LocalDensity.current
@@ -376,19 +378,20 @@ private fun OperationFeedbackContent(
         Box(modifier = Modifier.fillMaxSize()) {
             tapEvents.forEach { event ->
                 key(event.id) {
-                    TapIndicator(event.x, event.y, density)
+                    TapIndicator(event.x - screenOrigin.x.toInt(), event.y - screenOrigin.y.toInt(), density)
                 }
             }
 
             swipeEvents.forEach { event ->
                 key(event.id) {
-                    SwipeIndicator(event.startX, event.startY, event.endX, event.endY, density)
+                    SwipeIndicator(event.startX - screenOrigin.x.toInt(), event.startY - screenOrigin.y.toInt(),
+                        event.endX - screenOrigin.x.toInt(), event.endY - screenOrigin.y.toInt(), density)
                 }
             }
 
             textInputEvents.forEach { event ->
                 key(event.id) {
-                    TextInputIndicator(event.x, event.y, event.text, density)
+                    TextInputIndicator(event.x - screenOrigin.x.toInt(), event.y - screenOrigin.y.toInt(), event.text, density)
                 }
             }
         }

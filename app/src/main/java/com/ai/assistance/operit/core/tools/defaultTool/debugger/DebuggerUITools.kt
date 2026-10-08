@@ -3,6 +3,7 @@ package com.ai.assistance.operit.core.tools.defaultTool.debugger
 import android.annotation.SuppressLint
 import android.content.ClipData
 import android.content.ClipboardManager
+import com.ai.assistance.operit.core.tools.defaultTool.UiAutomationTouchFeedback
 import android.content.Context
 import android.graphics.Bitmap
 import android.graphics.BitmapFactory
@@ -102,6 +103,7 @@ open class DebuggerUITools(
                             "Missing or invalid coordinates. Both 'x' and 'y' must be valid integers."
             )
         }
+        val showTouchFeedback = UiAutomationTouchFeedback.enabled(tool)
         withContext(Dispatchers.Main) { operationOverlay.hideImmediately() }
 
         // 使用Shell命令执行点击
@@ -112,9 +114,11 @@ open class DebuggerUITools(
 
             if (result.success) {
                 AppLogger.d(TAG, "Tap successful at coordinates: ($x, $y)")
-                withContext(Dispatchers.Main) {
-                    operationOverlay.showTap(x, y)
-                    operationOverlay.hide()
+                if (showTouchFeedback) {
+                    withContext(Dispatchers.Main) {
+                        operationOverlay.showTap(x, y)
+                        operationOverlay.hide()
+                    }
                 }
                 return ToolResult(
                         toolName = tool.name,
