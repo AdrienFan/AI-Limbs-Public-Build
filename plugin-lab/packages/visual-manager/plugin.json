@@ -2,14 +2,14 @@
   "format": "AIL_PLUGIN_V1",
   "schema_version": 1,
   "plugin_id": "plugin.system.visual_manager",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "api": {
     "target": 1,
     "min": 1
   },
   "display": {
     "name": "视觉工作台",
-    "description": "通用视觉工作台：统一 RGBA 采样、动态场景策略、点击后旋转观察与清晰参数错误；剔除取帧与状态检查间被旋转替换的帧。完整功能需基座 build113，各桥共用统一能力入口。"
+    "description": "通用视觉工作台：统一 RGBA 采样、动态场景策略与点击后旋转观察；正确处理旋转换帧期间的空缓存，明确区分采集停止、生产器异常及当前方向无帧。完整功能需基座 build113，各桥共用统一能力入口。"
   },
   "roles": [
     "system_plugin"
