@@ -534,6 +534,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             encoded.image.put("image_to_touch", FrameCoordinates.mapping(encoded.image))
             meta.put("timings_ms", encoded.image.getJSONObject("timings_ms"))
                 .put("image_to_touch", encoded.image.get("image_to_touch"))
+            encoded.image.optJSONObject("sampling")?.let { meta.put("sampling", it) }
         }
         val destination = File(previewRoot(), "$kind.jpg")
         synchronized(stateLock) {
@@ -575,8 +576,12 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             BitmapFactory.decodeFile(source.absolutePath, bounds)
             require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth.toLong() * bounds.outHeight <= 64_000_000L) { "图像尺寸无效或超过 6400 万像素" }
             var sample = 1
-            while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edge) sample *= 2
-            BitmapFactory.decodeFile(source.absolutePath, BitmapFactory.Options().apply { inSampleSize = sample })
+            // A screen baseline samples original pixels; preview size must not change its coordinates.
+            if (meta.getString("kind") != "screen")
+                while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edge) sample *= 2
+            BitmapFactory.decodeFile(source.absolutePath, BitmapFactory.Options().apply {
+                inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888
+            })
                 ?: error("图像解码失败")
         }
         var rotated: Bitmap? = null
@@ -608,8 +613,20 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             val image = JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", resized.width)
                 .put("height", resized.height)
             if (image.optString("kind") == "screen") image.put("image_to_touch", FrameCoordinates.mapping(image))
-            val sample = if (meta.getString("kind") == "screen")
+            val bitmapSample = if (meta.getString("kind") == "screen")
                 VisualSample.sample(oriented.width, oriented.height) { x, y -> oriented.getPixel(x, y) } else null
+            // Baseline and later observations must interpret the exact same RGBA bytes.
+            // Keep the Bitmap comparison as evidence instead of hiding disagreement with a looser threshold.
+            val sample = if (meta.getString("kind") != "screen") null else if (raw != null) VisualSample.raw(raw, source) else {
+                val pixels = ByteBuffer.allocate(oriented.byteCount)
+                oriented.copyPixelsToBuffer(pixels)
+                VisualSample.rgba(oriented.width, oriented.height, oriented.rowBytes, pixels.array())
+            }
+            if (sample != null) image.put("sampling", JSONObject().put("source", "packed_rgba8888")
+                .put("input", if (raw != null) "host_raw" else "decoded_argb8888_native_bytes")
+                .put("grid", VisualSample.EDGE).put("bitmap_difference_ratio",
+                    sample.difference(checkNotNull(bitmapSample), VisualRegion(), 12))
+                .put("bitmap_exact_difference_ratio", sample.difference(checkNotNull(bitmapSample), VisualRegion(), 0)))
             EncodedPreview(image, bytes, sample)
         } finally {
             // Rotation/resize allocation failures must also release the full raw-frame bitmap.
@@ -636,6 +653,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val actionId = UUID.randomUUID().toString()
         val action = hostCall("host.ui.automation@1", "tap", JSONObject().put("x", x).put("y", y)
             .put("screen_feedback", false)
+            .put("show_touch_feedback", p.optBoolean("show_touch_feedback", false))
             .put("expected_display_width", geometry.getInt("touch_width"))
             .put("expected_display_height", geometry.getInt("touch_height"))
             .put("expected_display_rotation", geometry.getInt("rotation"))
@@ -646,12 +664,13 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val result = JSONObject().put("action_success", true).put("operation_id", actionId)
             .put("source_frame_id", meta.getString("frame_id")).put("touch_x", x).put("touch_y", y)
             .put("completed_elapsed_ms", completed).put("action_elapsed_ms", completed - started)
+        action.optJSONObject("structured_result")?.optJSONObject("timingsMs")?.let { result.put("action_timings_ms", it) }
         try {
             recordScreenOperation(JSONObject().put("operation_id", actionId)
                 .put("source_frame_id", meta.getString("frame_id")).put("touch_x", x).put("touch_y", y)
                 .put("completed_elapsed_ms", completed).put("operation_success", true)
                 .put("tool", "tap_on_frame"), meta.getString("session_id"), generation)
-            val observed = observeScreen(meta, sample, options, generation, p.optInt("max_edge", 1024))
+            val observed = observeScreen(meta, sample, options, generation, p.optInt("max_edge", 1024), followGeometry = true)
             for (key in observed.keys()) result.put(key, observed.get(key))
             result
         } catch (error: CancellationException) { throw error }
@@ -662,11 +681,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         }
     }
 
-    private fun waitOptions(p: JSONObject, mode: String) = VisualWaitOptions(mode,
-        p.optLong("timeout_ms", 5000), p.optLong("stable_ms", 250), p.optLong("sample_interval_ms", 100),
-        p.optDouble("change_ratio", 0.02), p.optDouble("stable_ratio", 0.0), p.optInt("pixel_tolerance", 12),
-        VisualRegion(p.optDouble("region_left", 0.0), p.optDouble("region_top", 0.0),
-            p.optDouble("region_width", 1.0), p.optDouble("region_height", 1.0)))
+    private fun waitOptions(p: JSONObject, mode: String) = VisualObservationPolicy.options(p, mode)
 
     private suspend fun screenBaseline(p: JSONObject): Pair<JSONObject, VisualSample> = previewLock.withLock {
         val meta = JSONObject(checkNotNull(previews["screen"]) { "请先获取屏幕帧" }.toString())
@@ -683,12 +698,17 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
     }
 
     private suspend fun observeScreen(meta: JSONObject, baseline: VisualSample, options: VisualWaitOptions,
-        generation: Long?, edge: Int): JSONObject {
+        generation: Long?, edge: Int, followGeometry: Boolean = false): JSONObject {
         val started = SystemClock.elapsedRealtime()
         val deadline = started + options.timeoutMs
         val budget = VisualPollBudget(deadline)
-        val detector = VisualChangeDetector(baseline, options)
-        val geometryId = meta.getJSONObject("geometry").getString("geometry_id")
+        var detector = VisualChangeDetector(baseline, options)
+        val originalGeometryId = meta.getJSONObject("geometry").getString("geometry_id")
+        var geometryId = originalGeometryId
+        var baselineFrameId = meta.getString("frame_id")
+        val geometryChanges = JSONArray()
+        var priorSamples = 0
+        var priorObservations = 0
         var captured: JSONObject? = null
         var scratch: File? = null
         var met = false
@@ -721,11 +741,20 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 val previousScratch = scratch
                 scratch = next
                 previousScratch?.let { deleteHostScratch(it) }
-                check(rawMeta.getJSONObject("geometry").getString("geometry_id") == geometryId) {
-                    "SCREEN_GEOMETRY_CHANGED: 等待期间屏幕方向或尺寸改变"
-                }
                 val raw = RawScreenFrame.read(rawMeta, next)
                 val sample = VisualSample.raw(raw, next)
+                val nextGeometryId = rawMeta.getJSONObject("geometry").getString("geometry_id")
+                if (nextGeometryId != geometryId) {
+                    check(followGeometry) { "SCREEN_GEOMETRY_CHANGED: 等待期间屏幕方向或尺寸改变" }
+                    // Only post-action observation follows a new geometry. Never reinterpret or reinject the old tap.
+                    geometryChanges.put(JSONObject().put("from", geometryId).put("to", nextGeometryId)
+                        .put("frame_id", rawMeta.getString("frame_id")))
+                    priorSamples += detector.samples
+                    priorObservations += detector.observations
+                    geometryId = nextGeometryId
+                    baselineFrameId = rawMeta.getString("frame_id")
+                    detector = VisualChangeDetector(sample, options, initialChange = true)
+                }
                 val observedElapsed = SystemClock.elapsedRealtime()
                 sampleMs += observedElapsed - frameEnded
                 val status = hostCall(sessionPrimitive("screen"), "status",
@@ -751,8 +780,13 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 .put("deadline_policy", "poll_admission").put("poll_budget_exhausted", budgetExhausted)
                 .put("timings_ms", JSONObject().put("host_frame", frameMs).put("sampling", sampleMs)
                     .put("source_check", sourceCheckMs).put("longest_poll", budget.longestPollMs))
-                .put("samples", detector.samples).put("polls", polls).put("changed", detector.changed)
-                .put("observations", detector.observations).put("reused_observations", detector.observations - detector.samples)
+                .put("samples", priorSamples + detector.samples).put("polls", polls).put("changed", detector.changed)
+                .put("observations", priorObservations + detector.observations)
+                .put("reused_observations", priorObservations + detector.observations - priorSamples - detector.samples)
+                .put("scene_profile", options.sceneProfile).put("baseline_frame_id", baselineFrameId)
+                .put("geometry_changed", geometryChanges.length() > 0).put("geometry_changes", geometryChanges)
+                .put("original_geometry_id", originalGeometryId).put("current_geometry_id", geometryId)
+                .put("change_basis", if (geometryChanges.length() > 0) "geometry_and_current_segment_pixels" else "pixels")
                 .put("stability_clock", "observation_elapsed").put("capture_source_verified", true)
                 .put("baseline_change_ratio", detector.baselineRatio).put("adjacent_change_ratio", detector.adjacentRatio)
                 .put("stable_elapsed_ms", detector.quietMs).put("stable_ms", options.stableMs)

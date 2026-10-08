@@ -27,6 +27,15 @@ internal class VisualSample(val pixels: IntArray) {
         fun sample(width: Int, height: Int, pixel: (Int, Int) -> Int): VisualSample = VisualSample(
             IntArray(EDGE * EDGE) { i -> pixel(((i % EDGE + 0.5) * width / EDGE).toInt(),
                 ((i / EDGE + 0.5) * height / EDGE).toInt()) })
+        fun rgba(width: Int, height: Int, rowStride: Int, bytes: ByteArray): VisualSample {
+            require(width > 0 && height > 0 && rowStride.toLong() >= width.toLong() * 4 &&
+                bytes.size.toLong() == rowStride.toLong() * height) { "Invalid RGBA sample dimensions or stride" }
+            return sample(width, height) { x, y ->
+                val at = y * rowStride + x * 4
+                ((bytes[at].toInt() and 255) shl 16) or ((bytes[at + 1].toInt() and 255) shl 8) or
+                    (bytes[at + 2].toInt() and 255)
+            }
+        }
         fun raw(frame: RawScreenFrame, file: File): VisualSample {
             val pixels = IntArray(EDGE * EDGE)
             RandomAccessFile(file, "r").use { input ->
@@ -50,7 +59,7 @@ internal class VisualSample(val pixels: IntArray) {
 internal data class VisualRegion(val left: Double = 0.0, val top: Double = 0.0,
     val width: Double = 1.0, val height: Double = 1.0) {
     init {
-        require(listOf(left, top, width, height).all { it.isFinite() })
+        require(listOf(left, top, width, height).all { it.isFinite() }) { "region coordinates must be finite" }
         require(left >= 0 && top >= 0 && width >= 1.0 / VisualSample.EDGE && height >= 1.0 / VisualSample.EDGE &&
             left + width <= 1.0 && top + height <= 1.0) { "region 必须位于图内，宽高至少 1/64" }
     }
@@ -59,19 +68,30 @@ internal data class VisualRegion(val left: Double = 0.0, val top: Double = 0.0,
 
 internal data class VisualWaitOptions(val mode: String, val timeoutMs: Long = 5000,
     val stableMs: Long = 250, val intervalMs: Long = 100, val changeRatio: Double = 0.02,
-    val stableRatio: Double = 0.0, val pixelTolerance: Int = 12, val region: VisualRegion = VisualRegion()) {
+    val stableRatio: Double = 0.0, val pixelTolerance: Int = 12, val region: VisualRegion = VisualRegion(),
+    val sceneProfile: String = "ui") {
     init {
         require(mode in setOf("new_frame", "change", "stable", "change_then_stable")) { "无效观察模式" }
-        require(timeoutMs in 100..15000 && intervalMs in 50..1000 && stableMs in 100..5000)
-        require(mode !in setOf("stable", "change_then_stable") || stableMs <= timeoutMs)
-        require(changeRatio.isFinite() && changeRatio > 0 && changeRatio <= 1)
-        require(stableRatio.isFinite() && stableRatio >= 0 && stableRatio < changeRatio)
-        require(pixelTolerance in 0..254)
+        require(timeoutMs in 100..15000) { "timeout_ms must be between 100 and 15000" }
+        require(intervalMs in 50..1000) { "sample_interval_ms must be between 50 and 1000" }
+        require(stableMs in 100..5000) { "stable_ms must be between 100 and 5000" }
+        require(mode !in setOf("stable", "change_then_stable") || stableMs <= timeoutMs) {
+            "stable_ms must not exceed timeout_ms for stable observation"
+        }
+        require(changeRatio.isFinite() && changeRatio > 0 && changeRatio <= 1) {
+            "change_ratio must be finite and in (0, 1]"
+        }
+        require(stableRatio.isFinite() && stableRatio >= 0 && stableRatio < changeRatio) {
+            "stable_ratio must be finite, non-negative and smaller than change_ratio ($changeRatio)"
+        }
+        require(pixelTolerance in 0..254) { "pixel_tolerance must be between 0 and 254" }
+        require(sceneProfile in setOf("ui", "dynamic")) { "scene_profile must be ui or dynamic" }
     }
 }
 
 /** Observation time measures quiet pixels; producer identity/capture time remain truthful. */
-internal class VisualChangeDetector(private val baseline: VisualSample, private val options: VisualWaitOptions) {
+internal class VisualChangeDetector(private val baseline: VisualSample, private val options: VisualWaitOptions,
+    initialChange: Boolean = false) {
     private var previous = baseline
     private var anchor: VisualSample? = null
     private var anchorTime = 0L
@@ -80,7 +100,7 @@ internal class VisualChangeDetector(private val baseline: VisualSample, private 
     private var lastObservationTime = -1L
     var samples = 0; private set
     var observations = 0; private set
-    var changed = false; private set
+    var changed = initialChange; private set
     var baselineRatio = 0.0; private set
     var adjacentRatio = 0.0; private set
     var quietMs = 0L; private set

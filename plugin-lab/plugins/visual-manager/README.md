@@ -1,6 +1,6 @@
-# AI Limbs 视觉工作台 0.2.8
+# AI Limbs 视觉工作台 0.2.10
 
-本版补齐自动观察方式、静止页面稳定等待与动作历史，修正页面文字分页。需要基座 0.8.0.18-build112；无需迭代基座或 ChatGPT 桥。逻辑插件身份仍为 plugin.system.visual_manager，payload applicationId 更新为 v028。
+本版统一屏幕原始像素采样，增加动态观察策略、点击后旋转衔接、明确参数错误与采样诊断。完整能力配套基座 0.8.0.19-build113；逻辑身份仍为 plugin.system.visual_manager，payload applicationId 为 v0210。ChatGPT 桥保持 0.0.30，各桥共用视觉能力。
 
 工作台分为屏幕、摄像头、页面文字和图像记录。宽屏左侧操作、右侧画面；窄屏未获取画面时先显示操作，已有画面时先显示画面；状态和全部停止固定置顶。
 
@@ -110,3 +110,20 @@ page.text 的公开 limit 参数现在实际控制分页（1..12000，默认 120
 官方依据：[ImageReader 新图像回调](https://developer.android.com/reference/android/media/ImageReader.OnImageAvailableListener)、[自绘组件与虚拟无障碍层级](https://developer.android.com/guide/topics/ui/accessibility/views/custom-views)。本插件中的观察时间规则和自动模式阈值是项目实现，不是 Android 保证。
 
 详情及安装后验收清单见 [0.2.8 补齐记录](../../../../docs/TODO/visual-completion-0.2.8/index.md)。本轮不新增连续视频流，不修改共享权限或把手机唤醒作为后台工作条件。
+
+
+## 0.2.10 正确性与动作闭环
+
+屏幕基准帧和观察帧都从 RGBA 字节读取 64×64 RGB 网格，不再将 Bitmap.getPixel 的解释与原始 RGBA 解释混用。PNG 存图路径保留原始尺寸采样后再缩放预览；原始路径和解码路径都读取 native RGBA 通道。preview.sampling 包含 input、bitmap_difference_ratio 和 bitmap_exact_difference_ratio，用于验证同一帧两种解释是否一致。历史暂停画面 51.4% 误报的确切像素原因仍需新版实机诊断，不声明已经证实。
+
+scene_profile=ui 保持 stable_ratio=0 默认行为，dynamic 默认 0.01。change_ratio 默认 0.02，显式参数覆盖策略，错误阈值直接返回说明，不自动修正。动态策略不是场景识别，也不自动屏蔽动画。可使用 region_left/top/width/height 选择有意义的区域。
+
+tap_on_frame 默认 show_touch_feedback=false，关闭点击圆环但仍返回动作坐标与历史。Host 提供通用 show_touch_feedback 参数，原生 tap 默认仍显示反馈。screen_feedback 控制自动回图，与圆环控制相互独立。
+
+点击前仍校验最新 frame_id 和当前几何。点击成功后的观察允许跟随旋转或尺寸变化，建立新几何基准并重启稳定窗口，visual_wait.geometry_changes 记录每次变化。几何变化本身计为变化，baseline_change_ratio 只描述当前几何段的像素变化；change_basis 明确两者。standalone wait_for_visual_change/wait_until_stable 仍严格绑定原几何。所有路径仅注入一次点击，TIMEOUT 或停止不重放操作。
+
+new_frame 只要求一帧，不保证动画、网络加载或业务完成。页面跳转需要显式使用 stable/change_then_stable 与有意义的区域。action_timings_ms 来自 Host 的真实分段，完整耗时仍包含图片上传和远端处理，不能以本地优化承诺实时游戏反应。
+
+Chat 的图片接收诊断保持标准单份 MCP 图片附件：以相同 media_id 在 Chat 与 Work 对照 content 图片块、mime_type、字节数和实际识图结果。retrieved:true 是读取回执，不是没有图片的证据。确认我们返回边界失误才修改桥；网络及上游处理波动不增加重试或降低默认画质。
+
+详见 [本次迭代记录](../../../../docs/TODO/visual-loop-0.2.10/index.md)。云端 JVM 测试和编译通过后，静止游戏、旋转、反馈层及性能收益仍需部署验收。

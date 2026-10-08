@@ -6,6 +6,34 @@ import org.junit.Assert.*
 import org.junit.Test
 
 class VisualChangeDetectorTest {
+    @Test fun rawFileAndNativeBitmapBytesUseIdenticalSampleCoordinatesAndChannels() {
+        val width = 129
+        val height = 131
+        val packed = ByteArray(width * height * 4)
+        for (y in 0 until height) for (x in 0 until width) {
+            val at = (y * width + x) * 4
+            packed[at] = (x * 3).toByte(); packed[at + 1] = (y * 5).toByte()
+            packed[at + 2] = (x xor y).toByte(); packed[at + 3] = (x + y).toByte()
+        }
+        val file = File.createTempFile("visual-coordinate", ".rgba")
+        try {
+            file.writeBytes(packed)
+            val meta = JSONObject().put("format", "rgba8888").put("width", width).put("height", height)
+                .put("pixel_stride", 4).put("row_stride", width * 4).put("byte_count", packed.size)
+            val original = VisualSample.raw(RawScreenFrame.read(meta, file), file)
+            val stride = width * 4 + 12
+            val padded = ByteArray(stride * height)
+            for (y in 0 until height) packed.copyInto(padded, y * stride, y * width * 4, (y + 1) * width * 4)
+            val decoded = VisualSample.rgba(width, height, stride, padded)
+            assertArrayEquals(original.pixels, decoded.pixels)
+            val expected = VisualSample.sample(width, height) { x, y ->
+                (((x * 3) and 255) shl 16) or (((y * 5) and 255) shl 8) or ((x xor y) and 255)
+            }
+            assertArrayEquals(expected.pixels, original.pixels)
+            assertEquals(0.0, original.difference(decoded, VisualRegion(0.84, 0.80, 0.08, 0.10), 0), 0.0)
+        } finally { file.delete() }
+    }
+
     private fun solid(color: Int) = VisualSample(IntArray(4096) { color })
     private fun detector(mode: String = "stable", region: VisualRegion = VisualRegion(), tolerance: Int = 12) =
         VisualChangeDetector(solid(0), VisualWaitOptions(mode, region = region, pixelTolerance = tolerance))

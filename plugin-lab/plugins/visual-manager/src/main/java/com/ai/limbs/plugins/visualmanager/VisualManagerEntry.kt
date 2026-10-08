@@ -64,6 +64,7 @@ class VisualManagerEntry : InProcessPluginEntry {
                     "mode" -> field.put("enum", JSONArray(listOf("auto", "ui", "visual")))
                     "field" -> field.put("enum", JSONArray(listOf("text", "content_description")))
                     "scope" -> field.put("enum", JSONArray(listOf("all", "semantic")))
+                    "scene_profile" -> field.put("enum", JSONArray(listOf("ui", "dynamic")))
                 }
                 parameter.default?.let { value ->
                     field.put("default", when (parameter.type) {
@@ -91,11 +92,12 @@ class VisualManagerEntry : InProcessPluginEntry {
         val change = InProcessCapabilityEffect.STATE_CHANGE
         val write = InProcessCapabilityEffect.PERSISTENT_WRITE
         val waitParameters = listOf(
+            p("scene_profile", description = "ui 保持严格稳定默认值；dynamic 默认 stable_ratio=0.01。显式阈值覆盖策略；不自动屏蔽动画区域", required = false, default = "ui"),
             p("timeout_ms", "integer", "观察预算 100..15000 毫秒，包含整轮取帧/采样/健康检查；按已测轮耗时停止新轮询，在途 Host 调用不强制取消，超额见 deadline_overshoot_ms；不含最终编码/网络回传", false, "5000"),
             p("stable_ms", "integer", "稳定窗口 100..5000 毫秒，不大于 timeout_ms", false, "250"),
             p("sample_interval_ms", "integer", "采样间隔 50..1000 毫秒", false, "100"),
             p("change_ratio", "number", "发生变化的采样点比例阈值 (0,1]", false),
-            p("stable_ratio", "number", "稳定时允许的变化比例 [0,change_ratio)，默认 0；容忍微小动画时可增大", false),
+            p("stable_ratio", "number", "稳定时允许的变化比例 [0,change_ratio)，ui 默认 0、dynamic 默认 0.01；change_ratio 默认 0.02", false),
             p("pixel_tolerance", "integer", "RGB 单通道差异容忍值 0..254", false, "12"),
             p("region_left", "number", "观察区域左边比例，默认 0", false),
             p("region_top", "number", "观察区域上边比例，默认 0", false),
@@ -125,10 +127,11 @@ class VisualManagerEntry : InProcessPluginEntry {
                 p("include_image", "boolean", "为 UI 观察附上一帧；visual 本来就返回图像", false, "false"),
                 p("max_edge", "integer", "图像最长边 160..2048", false, "1024")), """{"mode":"auto"}""")
         capability("tap_on_frame", "按帧点击并观察", change,
-            "对最新全屏共享帧按比例坐标点击一次。observe_mode 默认 new_frame；stable 等像素稳定；change_then_stable 先检测变化再等稳定，推荐页面跳转使用。可指定区域排除持续动画。旧帧或变化的几何拒绝执行。action_success、observation_success、wait_success 分开；TIMEOUT 表示条件未满足，不能重放点击。像素稳定不保证加载完成。",
+            "对最新全屏共享帧按比例坐标点击一次。observe_mode 默认 new_frame，只保证新帧；stable 等区域像素稳定；change_then_stable 先检测变化再等稳定。scene_profile=dynamic 容忍少量动画，可指定区域。点击前旧帧或变化的几何拒绝执行；点击后观察跟随旋转，重新建立基准并返回 geometry_changes，不重复点击。show_touch_feedback 默认 false，避免点击圆环污染观察。action_success、observation_success、wait_success 分开；TIMEOUT 不可重放点击。像素稳定不保证加载完成。",
             listOf(p("frame_id", description = "最新屏幕帧编号"), p("x", "number", "图片横向比例 0..1"),
                 p("y", "number", "图片纵向比例 0..1"), p("max_edge", "integer", "观察帧最长边 160..2048", false, "1024"),
-                p("observe_mode", description = "new_frame/stable/change_then_stable", required = false, default = "new_frame")) + waitParameters,
+                p("observe_mode", description = "new_frame/stable/change_then_stable", required = false, default = "new_frame"),
+                p("show_touch_feedback", "boolean", "是否显示 Host 点击圆环；默认关闭，动作元数据仍返回", false, "false")) + waitParameters,
             """{"frame_id":"<最新帧编号>","x":0.51,"y":0.73,"observe_mode":"change_then_stable"}""")
         capability("wait_for_visual_change", "等待画面变化", read,
             "以最新屏幕 frame_id 为基准，等待选定区域的像素发生变化。仅使用已有会话，返回最终一帧及 visual_wait；wait_success=false/status=TIMEOUT 表示未检测到变化。不能把 success=true 当作条件满足。几何变化/停止明确失败，不自动开会话。",
