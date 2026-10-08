@@ -714,6 +714,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         var scratch: File? = null
         var met = false
         var polls = 0
+        var supersededFrames = 0
         var frameMs = 0L
         var sampleMs = 0L
         var sourceCheckMs = 0L
@@ -745,35 +746,44 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 val raw = RawScreenFrame.read(rawMeta, next)
                 val sample = VisualSample.raw(raw, next)
                 val nextGeometryId = rawMeta.getJSONObject("geometry").getString("geometry_id")
-                if (nextGeometryId != geometryId) {
-                    check(followGeometry) { "SCREEN_GEOMETRY_CHANGED: 等待期间屏幕方向或尺寸改变" }
-                    // Only post-action observation follows a new geometry. Never reinterpret or reinject the old tap.
-                    geometryChanges.put(JSONObject().put("from", geometryId).put("to", nextGeometryId)
-                        .put("frame_id", rawMeta.getString("frame_id")))
-                    priorSamples += detector.samples
-                    priorObservations += detector.observations
-                    geometryId = nextGeometryId
-                    baselineFrameId = rawMeta.getString("frame_id")
-                    detector = VisualChangeDetector(sample, options, initialChange = true)
-                }
                 val observedElapsed = SystemClock.elapsedRealtime()
                 sampleMs += observedElapsed - frameEnded
                 val status = hostCall(sessionPrimitive("screen"), "status",
                     JSONObject().put("session_id", meta.getString("session_id")))
-                VisualCaptureEvidence.requireActive(status, meta.getString("session_id"), geometryId)
+                val sourceMatches = VisualCaptureEvidence.requireActive(status, meta.getString("session_id"),
+                    nextGeometryId, followGeometry)
                 sourceCheckMs += SystemClock.elapsedRealtime() - observedElapsed
-                captured = response
                 polls++
-                met = detector.accept(rawMeta.getString("frame_id"),
-                    response.getJSONObject("freshness").getLong("captured_elapsed_ms"), sample,
-                    observedElapsed, sourceVerified = true)
+                if (!sourceMatches) {
+                    // Rotation can occur after frame selection but before the separate status query.
+                    // Discard that evidence inside the existing observation budget; never replay the action.
+                    supersededFrames++
+                    captured = null
+                    detector.invalidateStability()
+                } else {
+                    if (nextGeometryId != geometryId) {
+                        check(followGeometry) { "SCREEN_GEOMETRY_CHANGED: 等待期间屏幕方向或尺寸改变" }
+                        // Adopt only a frame whose geometry matches the verified active source.
+                        geometryChanges.put(JSONObject().put("from", geometryId).put("to", nextGeometryId)
+                            .put("frame_id", rawMeta.getString("frame_id")))
+                        priorSamples += detector.samples
+                        priorObservations += detector.observations
+                        geometryId = nextGeometryId
+                        baselineFrameId = rawMeta.getString("frame_id")
+                        detector = VisualChangeDetector(sample, options, initialChange = true)
+                    }
+                    captured = response
+                    met = detector.accept(rawMeta.getString("frame_id"),
+                        response.getJSONObject("freshness").getLong("captured_elapsed_ms"), sample,
+                        observedElapsed, sourceVerified = true)
+                }
                 budget.completed(pollStarted, SystemClock.elapsedRealtime())
                 // A frame delivered after the deadline cannot retroactively satisfy the condition.
                 if (SystemClock.elapsedRealtime() >= deadline) { met = false; break }
                 if (met) break
                 delay(minOf(options.intervalMs, (deadline - SystemClock.elapsedRealtime()).coerceAtLeast(0)))
             }
-            val last = checkNotNull(captured) { "VISUAL_WAIT_TIMEOUT: 等待期限内没有画面" }
+            val last = checkNotNull(captured) { "VISUAL_WAIT_TIMEOUT: 等待期限内没有经过状态校验的画面" }
             val finished = SystemClock.elapsedRealtime()
             val wait = JSONObject().put("mode", options.mode).put("condition_met", met)
                 .put("status", if (met) "READY" else "TIMEOUT").put("elapsed_ms", finished - started)
@@ -782,6 +792,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
                 .put("timings_ms", JSONObject().put("host_frame", frameMs).put("sampling", sampleMs)
                     .put("source_check", sourceCheckMs).put("longest_poll", budget.longestPollMs))
                 .put("samples", priorSamples + detector.samples).put("polls", polls).put("changed", detector.changed)
+                .put("superseded_frames", supersededFrames)
                 .put("observations", priorObservations + detector.observations)
                 .put("reused_observations", priorObservations + detector.observations - priorSamples - detector.samples)
                 .put("scene_profile", options.sceneProfile).put("baseline_frame_id", baselineFrameId)

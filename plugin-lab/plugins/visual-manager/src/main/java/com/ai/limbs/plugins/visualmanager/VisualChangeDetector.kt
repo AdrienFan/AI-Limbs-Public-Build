@@ -105,6 +105,12 @@ internal class VisualChangeDetector(private val baseline: VisualSample, private 
     var adjacentRatio = 0.0; private set
     var quietMs = 0L; private set
 
+    /** An unverified capture interval cannot extend an earlier stable window. */
+    fun invalidateStability() {
+        anchor = null
+        quietMs = 0L
+    }
+
     fun accept(id: String, capturedElapsedMs: Long, sample: VisualSample,
         observedElapsedMs: Long = capturedElapsedMs, sourceVerified: Boolean = false): Boolean {
         require(observedElapsedMs >= capturedElapsedMs && observedElapsedMs >= lastObservationTime) { "观察时间倒退" }

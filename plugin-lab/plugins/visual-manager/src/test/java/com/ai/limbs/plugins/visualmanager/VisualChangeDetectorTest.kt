@@ -51,6 +51,20 @@ class VisualChangeDetectorTest {
         assertFalse(d.accept("a", 100, solid(0), observedElapsedMs = 9999))
         assertEquals(1, d.samples); assertEquals(0L, d.quietMs)
     }
+    @Test fun supersededEvidenceCannotExtendThePreviousQuietWindow() {
+        val d = detector()
+        assertFalse(d.accept("a", 100, solid(0), 100, true))
+        assertFalse(d.accept("b", 200, solid(0), 200, true))
+        assertEquals(100L, d.quietMs)
+        d.invalidateStability()
+        assertEquals(0L, d.quietMs)
+        assertEquals(2, d.samples)
+        assertEquals(2, d.observations)
+        assertFalse(d.accept("c", 1000, solid(0), 1000, true))
+        assertFalse(d.accept("c", 1000, solid(0), 1249, true))
+        assertTrue(d.accept("c", 1000, solid(0), 1250, true))
+        assertEquals(250L, d.quietMs)
+    }
     @Test fun verifiedStaticProducerCanProveQuietPixelsWithoutForgingCaptureTime() {
         val d = detector()
         assertFalse(d.accept("a", 100, solid(0), 200, true))
