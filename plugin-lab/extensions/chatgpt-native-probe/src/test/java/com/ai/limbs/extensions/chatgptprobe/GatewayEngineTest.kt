@@ -599,7 +599,9 @@ class GatewayEngineTest {
             val result = fixture.responses.first { it.optString("request_id") == "batch-once" }
                 .getJSONObject("resp_json").getJSONObject("result")
             assertFalse(result.getBoolean("isError"))
-            assertEquals("COMPLETED", result.getJSONObject("structuredContent").getJSONObject("batch").getString("status"))
+            assertFalse(result.has("structuredContent"))
+            val metadata = JSONObject(result.getJSONArray("content").getJSONObject(0).getString("text"))
+            assertEquals("COMPLETED", metadata.getJSONObject("batch").getString("status"))
             val content = result.getJSONArray("content")
             assertEquals(1, (0 until content.length()).count { content.getJSONObject(it).optString("type") == "image" })
             assertEquals(1L, fixture.engine.state.value.access.capabilitySuccessCount)
@@ -619,6 +621,59 @@ class GatewayEngineTest {
             val result = fixture.responses.first { it.optString("request_id") == "batch-preflight" }
                 .getJSONObject("resp_json").getJSONObject("result")
             assertTrue(result.getBoolean("isError"))
+        }
+    }
+
+    @Test fun imageToolDefaultsAndCachedReadsUseContentWithoutAnotherHostCall() = runBlocking {
+        Fixture().use { f ->
+            val calls = AtomicInteger()
+            val png = GatewayResultsTest.PNG
+            f.start { _, _ ->
+                calls.incrementAndGet()
+                JSONObject().put("success", true).put("frame_id", "frame-default")
+                    .put("mcp_content", JSONArray().put(JSONObject().put("type", "image")
+                        .put("mimeType", "image/png").put("data", png)))
+            }
+            f.commands.add(rpcCommand("image-tools", 810, "tools/list"))
+            f.commands.add(toolCommand("image-origin", 811))
+            eventually { f.responses.any { it.optString("request_id") == "image-tools" } &&
+                f.responses.any { it.optString("request_id") == "image-origin" } }
+            fun result(id: String) = f.responses.first { it.getString("request_id") == id }
+                .getJSONObject("resp_json").getJSONObject("result")
+            val tools = result("image-tools").getJSONArray("tools")
+            val mediaTool = (0 until tools.length()).map { tools.getJSONObject(it) }
+                .first { it.getString("name") == "ai_limbs_media_read" }
+            assertEquals("content_only", mediaTool.getJSONObject("inputSchema")
+                .getJSONObject("properties").getJSONObject("response_variant").getString("default"))
+            val origin = result("image-origin")
+            assertFalse(origin.has("structuredContent"))
+            val metadata = JSONObject(origin.getJSONArray("content").getJSONObject(0).getString("text"))
+            assertEquals("frame-default", metadata.getString("frame_id"))
+            val mediaId = metadata.getJSONObject("media_delivery").getJSONArray("attachments")
+                .getJSONObject(0).getString("media_id")
+            for ((index, variant) in listOf<String?>(null, "content_only", "both").withIndex()) {
+                val args = JSONObject().put("media_id", mediaId)
+                if (variant != null) args.put("response_variant", variant)
+                f.commands.add(gatewayToolCommand("image-read-$index", 812 + index, "ai_limbs_media_read", args))
+            }
+            eventually { (0..2).all { index ->
+                f.responses.any { it.optString("request_id") == "image-read-$index" } } }
+            val defaults = result("image-read-0")
+            val explicit = result("image-read-1")
+            val both = result("image-read-2")
+            assertFalse(defaults.has("structuredContent"))
+            assertFalse(explicit.has("structuredContent"))
+            assertTrue(both.has("structuredContent"))
+            assertEquals(defaults.getJSONArray("content").toString(), explicit.getJSONArray("content").toString())
+            assertEquals(defaults.getJSONArray("content").toString(), both.getJSONArray("content").toString())
+            assertEquals(png, defaults.getJSONArray("content").getJSONObject(0).getString("data"))
+            assertEquals(1, calls.get())
+            f.commands.add(gatewayToolCommand("image-invalid", 815, "ai_limbs_media_read",
+                JSONObject().put("media_id", mediaId).put("response_variant", "invalid")))
+            eventually { f.responses.any { it.optString("request_id") == "image-invalid" } }
+            assertEquals(-32602, f.responses.first { it.getString("request_id") == "image-invalid" }
+                .getJSONObject("resp_json").getJSONObject("error").getInt("code"))
+            assertEquals(1, calls.get())
         }
     }
 

@@ -721,11 +721,13 @@ internal class ChatGptNativeProbeEngine(
                 .put("cursor", JSONObject().put("type", "string").put("minLength", 1))
                 .put("offset", JSONObject().put("type", "integer").put("minimum", 0)))
                 .put("required", JSONArray().put("cursor").put("offset")).put("additionalProperties", false)))
-        .put(tool(TOOL_MEDIA_READ, "Retrieve saved image by media_id. Optional response_variant=content_only is a diagnostic that omits structuredContent. Default both preserves production behavior. Does not execute original capability.",
+        .put(tool(TOOL_MEDIA_READ, "Retrieve saved image by media_id without executing the original capability. Default content_only returns the image and JSON metadata in MCP content for Chat/Work compatibility. Optional both is for diagnostics.",
             JSONObject().put("type", "object").put("properties", JSONObject()
                 .put("media_id", JSONObject().put("type", "string").put("minLength", 1))
                 .put("response_variant", JSONObject().put("type", "string")
-                    .put("enum", JSONArray().put("both").put("content_only"))))
+                    .put("enum", JSONArray().put("both").put("content_only"))
+                    .put("default", "content_only")
+                    .put("description", "Normally omit this parameter; both retains structuredContent for diagnostics.")))
                 .put("required", JSONArray().put("media_id")).put("additionalProperties", false)))
         .put(tool(TOOL_BATCH, "Run 1..8 already-known native UI actions sequentially through normal Host permissions, stop at the first failed/uncertain step, and read one fresh feedback after the sequence. Use only when later steps do not require inspecting intermediate screens. Earlier effects remain on failure or deadline. Never replay the batch automatically. Requires base build111 and matching visual plugin; refresh MCP metadata to expose this tool.",
             JSONObject().put("type", "object").put("additionalProperties", false).put("required", JSONArray().put("steps"))
@@ -798,7 +800,7 @@ internal class ChatGptNativeProbeEngine(
                     val mediaId = arguments.getString("media_id")
                     require(mediaId.isNotBlank()) { "media_id is required" }
                     recordAdvertisedToolCall(epoch)
-                    val responseVariant = arguments.optString("response_variant", "both")
+                    val responseVariant = arguments.optString("response_variant", "content_only")
                     require(responseVariant in setOf("both", "content_only")) { "Invalid response_variant" }
                     return rpcSuccess(id, measureLocal("cached_read_ms") {
                         results.readMedia(mediaId, contentOnly = responseVariant == "content_only")

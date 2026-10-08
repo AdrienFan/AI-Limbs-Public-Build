@@ -109,11 +109,14 @@ internal class GatewayResults(
                 if (clean.has(field)) structured.put(field, clean.get(field))
             }
         }
-        // MCP recommends serialized JSON text alongside structuredContent. Preserve the original
-        // code in text as well as the outcome namespace, including a paged first envelope.
+        // Chat A/B tests exposed image content only when structuredContent was absent.
+        // Image responses use one content envelope; JSON text retains all frame, policy and
+        // pagination fields. Text-only tools keep their existing structured contract.
         val output = JSONArray().put(JSONObject().put("type", "text").put("text", structured.toString()))
         for (index in 0 until content.length()) output.put(content.get(index))
-        return JSONObject().put("content", output).put("structuredContent", structured).put("isError", failed)
+        val envelope = JSONObject().put("content", output).put("isError", failed)
+        if (content.length() == 0) envelope.put("structuredContent", structured)
+        return envelope
     }
 
     @Synchronized fun readResult(cursor: String, offset: Int): JSONObject {
@@ -128,14 +131,14 @@ internal class GatewayResults(
             .put("expires_at_ms", entry.getLong("expires"))
     }
 
-    @Synchronized fun readMedia(id: String, contentOnly: Boolean = false): JSONObject {
+    @Synchronized fun readMedia(id: String, contentOnly: Boolean = true): JSONObject {
         val media = JSONObject(read(id, "media").getString("value"))
         val structured = JSONObject().put("media_id", id).put("retrieved", true)
         val envelope = JSONObject().put("content", JSONArray()
             .put(media).put(JSONObject().put("type", "text").put("text", structured.toString())))
             .put("isError", false)
-        // Opt-in A/B diagnostic: no structuredContent only when explicitly requested.
-        // The default remains byte-for-byte compatible with the existing tool result.
+        // Use the same content-only image delivery by default in Chat and Work.
+        // Explicit both remains available for existing callers and diagnostic comparisons.
         if (!contentOnly) envelope.put("structuredContent", structured)
         return envelope
     }

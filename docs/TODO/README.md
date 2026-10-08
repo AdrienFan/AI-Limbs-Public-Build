@@ -69,3 +69,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [ChatGPT response POST diagnostics 0.0.28](chatgpt-latency-0.0.28/index.md)
 
 - [Known sequential UI feedback batches](ui-feedback-batch/index.md)
+
+- [Unified Chat/Work image delivery](chatgpt-unified-images-0.0.32/index.md): 0.0.32

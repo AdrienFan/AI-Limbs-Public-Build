@@ -27,7 +27,9 @@ class GatewayResultMetricsTest {
         val delivered = adapter.adapt(source, metrics)
         val costs = metrics.snapshot()
         assertFalse(delivered.getBoolean("isError"))
-        assertTrue(delivered.getJSONObject("structuredContent").getBoolean("paged"))
+        assertFalse(delivered.has("structuredContent"))
+        val metadata = JSONObject(delivered.getJSONArray("content").getJSONObject(0).getString("text"))
+        assertTrue(metadata.getBoolean("paged"))
         assertEquals(2, delivered.getJSONArray("content").length())
         assertEquals(1L, costs.getValue("cache_scan_passes"))
         assertEquals(2L, costs.getValue("cache_entries_scanned"))
@@ -41,7 +43,7 @@ class GatewayResultMetricsTest {
         assertTrue(costs.getValue("structured_text_bytes") > 13_000)
         assertFalse(costs.toString().contains("private"))
         assertTrue(source.has("mcp_content"))
-        assertFalse(delivered.getJSONObject("structuredContent").has("cache_scan_ms"))
+        assertFalse(metadata.has("cache_scan_ms"))
     }
 
     @Test fun failedWriteRetainsMeasuredCostAndExistingFailureSemantics() {

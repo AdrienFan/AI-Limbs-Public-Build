@@ -1,4 +1,4 @@
-# AI Limbs-ChatGPT 0.0.31
+# AI Limbs-ChatGPT 0.0.32
 
 This Android child extension attaches to `plugin.system.bridge` through `ai_limbs.bridge.provider@5`. Host capability resolution, permissions, prerequisites and lifecycle remain authoritative. No ChatGPT-specific Host protocol has been added.
 
@@ -72,7 +72,7 @@ Receipts and cached results use AES-GCM in Android Keystore and atomic private f
 
 ## Results
 
-JSON results are returned once in `structuredContent` with a short text explanation. Explicit failure and Host ASK/FORBID outcomes set MCP `isError`; `error: null` does not. Policy fields stay intact. Native PNG/JPEG attachments are extracted recursively from `mcp_content`; binary data does not enter JSON pagination. Up to four images with a combined 2 MiB base64 budget are delivered. Android validates image MIME and dimensions without allocating decoded pixels, allowing dimensions up to 8192 and at most 32 million pixels. Invalid or oversized media produces a partial-delivery warning without changing business success.
+Results without images retain `structuredContent` and matching JSON text. Results with successfully attached images use MCP `content` only: native image blocks plus a JSON text block containing the complete result metadata, or its immutable first-page envelope. Explicit failure and Host ASK/FORBID outcomes set MCP `isError`; `error: null` does not. Policy fields stay intact. Native PNG/JPEG attachments are extracted recursively from `mcp_content`; binary data does not enter JSON pagination. Up to four images with a combined 2 MiB base64 budget are delivered. Android validates image MIME and dimensions without allocating decoded pixels, allowing dimensions up to 8192 and at most 32 million pixels. Invalid or oversized media produces a partial-delivery warning without changing business success.
 
 Results larger than 12000 UTF-8 bytes use saved pages. Page offsets count UTF-16 units, and boundaries preserve surrogate pairs. Each page includes the original SHA-256, expiry, total character count and next offset. Result pages are not themselves paged again. A cached result may occupy up to 4 MiB; the cache permits 64 entries and 32 MiB, with a ten-minute lifetime. Reads enforce the original tunnel binding. Cache expiry or capacity errors are explicit and never reinvoke a capability. Oversized results that cannot be cached report completed execution with a delivery error and instruct callers to inspect existing state or artifacts.
 
@@ -263,9 +263,28 @@ adds evidence and does not claim a latency fix.
 0.0.30 scans cached media/result bodies only on the adapter cold path and accounts subsequent saves using expiry/size metadata. This change is transport-only; visual frame and tap capabilities live in the universal Visual Manager plugin.
 
 ## 0.0.31 MCP image A/B diagnostic
-Only the existing ai_limbs_media_read tool is extended. Optional `response_variant` may be
-`both` (default, unchanged) or `content_only` (omits `structuredContent` entirely).
+In 0.0.31, only ai_limbs_media_read was extended. Its optional `response_variant`
+was `both` by default or `content_only`, which omitted `structuredContent`.
+The 0.0.32 unified default described below supersedes that diagnostic default.
 Each variant reads the same immutable media_id from the same cached JPEG, without running
 the originating capability again. It retains the same `content` array and media metadata,
 and the original Host policy/Bridge boundaries. This is a temporary diagnostic, not a fix.
 After installing, refresh the custom MCP plugin catalog in ChatGPT and start a new chat.
+
+## 0.0.32 Unified image responses
+
+Image-bearing capability results, active camera message context and final UI batch
+feedback now omit structuredContent. Their JSON text block preserves frame_id,
+geometry, image-to-touch mapping, action history, timings, execution policy and
+media_delivery handles. Large metadata retains the existing first-page cursor and
+result_read flow; image bytes remain outside text pagination. Text-only tools and
+result_read keep structuredContent.
+
+ai_limbs_media_read defaults to content_only; normally pass only media_id.
+Explicit response_variant=both remains available for diagnostics. Both modes read
+identical cached bytes and never repeat the originating action.
+
+This is a response-envelope compatibility change supported by user-reported Chat
+A/B testing and Work tests. It does not prove a universal upstream bug or guarantee
+latency savings. After installing, refresh the custom MCP plugin catalog; verify
+preview/get_frame, action feedback and media_read in both Chat and Work.
