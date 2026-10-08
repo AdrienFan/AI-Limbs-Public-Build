@@ -528,7 +528,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         val meta = frameMetadata(kind, result, source)
         val frame = if (kind == "screen" && result.has("frame")) result.getJSONObject("frame") else result
         val raw = if (frame.optString("format") == "rgba8888") RawScreenFrame.read(frame, source) else null
-        val encoded = encodeImage(source, meta, edge, maxBytes, raw)
+        val encoded = encodeImage(source, meta, edge, maxBytes, raw, sampleScreen = kind == "screen")
         if (kind == "screen") {
             encoded.image.getJSONObject("timings_ms").put("preview_encode_ms", SystemClock.elapsedRealtime() - startedElapsed)
             encoded.image.put("image_to_touch", FrameCoordinates.mapping(encoded.image))
@@ -564,7 +564,8 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
         return encoded.image.put("data", Base64.encodeToString(encoded.bytes, Base64.NO_WRAP))
     }
 
-    private fun encodeImage(source: File, meta: JSONObject, edge: Int, maxBytes: Int, raw: RawScreenFrame?): EncodedPreview {
+    private fun encodeImage(source: File, meta: JSONObject, edge: Int, maxBytes: Int, raw: RawScreenFrame?,
+        sampleScreen: Boolean = false): EncodedPreview {
         require(edge in 160..2048) { "max_edge 必须在 160 到 2048 之间" }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true }
         val decoded = if (raw != null) {
@@ -577,7 +578,7 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             require(bounds.outWidth > 0 && bounds.outHeight > 0 && bounds.outWidth.toLong() * bounds.outHeight <= 64_000_000L) { "图像尺寸无效或超过 6400 万像素" }
             var sample = 1
             // A screen baseline samples original pixels; preview size must not change its coordinates.
-            if (meta.getString("kind") != "screen")
+            if (!sampleScreen)
                 while (maxOf(bounds.outWidth, bounds.outHeight) / (sample * 2) >= edge) sample *= 2
             BitmapFactory.decodeFile(source.absolutePath, BitmapFactory.Options().apply {
                 inSampleSize = sample; inPreferredConfig = Bitmap.Config.ARGB_8888
@@ -613,11 +614,11 @@ internal class VisualManagerController(private val host: InProcessPluginUiHost) 
             val image = JSONObject(meta.toString()).put("mime_type", "image/jpeg").put("width", resized.width)
                 .put("height", resized.height)
             if (image.optString("kind") == "screen") image.put("image_to_touch", FrameCoordinates.mapping(image))
-            val bitmapSample = if (meta.getString("kind") == "screen")
+            val bitmapSample = if (sampleScreen)
                 VisualSample.sample(oriented.width, oriented.height) { x, y -> oriented.getPixel(x, y) } else null
             // Baseline and later observations must interpret the exact same RGBA bytes.
             // Keep the Bitmap comparison as evidence instead of hiding disagreement with a looser threshold.
-            val sample = if (meta.getString("kind") != "screen") null else if (raw != null) VisualSample.raw(raw, source) else {
+            val sample = if (!sampleScreen) null else if (raw != null) VisualSample.raw(raw, source) else {
                 val pixels = ByteBuffer.allocate(oriented.byteCount)
                 oriented.copyPixelsToBuffer(pixels)
                 VisualSample.rgba(oriented.width, oriented.height, oriented.rowBytes, pixels.array())
