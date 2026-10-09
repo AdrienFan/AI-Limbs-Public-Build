@@ -43,6 +43,24 @@ internal class KernelPluginAdminJsonServiceV1(
         operation: String,
         parameters: JSONObject
     ): JSONObject = when (operation.trim()) {
+        "self_export_uri" -> {
+            val file = com.ai.assistance.operit.plugins.self.SelfModuleService.migrationPackage(appContext)
+            val destination = Uri.parse(parameters.requireAdminText("uri"))
+            require(destination.scheme == "content") { "SELF_EXPORT_DOCUMENT_REQUIRED" }
+            val output = requireNotNull(appContext.contentResolver.openOutputStream(destination, "w")) { "SELF_EXPORT_OPEN_FAILED" }
+            output.use { stream -> file.inputStream().use { it.copyTo(stream) } }
+            JSONObject().put("success", true)
+        }
+        "self_status" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "status", parameters)
+        "self_request" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "request", parameters)
+        "self_cancel_request" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "cancel_request", parameters)
+        "self_install_uri" -> withUriPackage(parameters, ".ails") { file, _ ->
+            com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "install", JSONObject().put("package_path", file.absolutePath))
+        }
+        "self_request_uri" -> withUriPackage(parameters, ".ails") { file, _ ->
+            val args = JSONObject(parameters.getJSONObject("parameters").toString()).put("package_path", file.absolutePath)
+            com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "request", JSONObject().put("operation", parameters.getString("operation")).put("parameters", args))
+        }
         "snapshots" -> JSONObject().put(
             "plugins",
             JSONArray(manager.snapshots().map(::snapshotJson))
@@ -324,6 +342,7 @@ internal class KernelPluginAdminJsonServiceV1(
 
     private suspend fun <T> withUriPackage(
         parameters: JSONObject,
+        expectedExtension: String = ".ailp",
         block: suspend (File, String) -> T
     ): T {
         val sourceText = parameters.requireAdminText("uri").trim()
@@ -338,15 +357,15 @@ internal class KernelPluginAdminJsonServiceV1(
             "Unable to resolve selected plugin file name"
         )
 
-        if (!sourceName.lowercase().endsWith(".ailp")) {
+        if (!sourceName.lowercase().endsWith(expectedExtension)) {
             cleanupResidentStagedPackage(stagedSource)
             throw PluginInstallException(
                 "PACKAGE_EXTENSION_INVALID",
-                "Plugin package must use .ailp"
+                "Plugin package must use $expectedExtension"
             )
         }
 
-        val target = File(importDir, "import-${System.nanoTime()}.ailp")
+        val target = File(importDir, "import-${System.nanoTime()}$expectedExtension")
         try {
             val input = when {
                 stagedSource != null -> stagedSource.inputStream()

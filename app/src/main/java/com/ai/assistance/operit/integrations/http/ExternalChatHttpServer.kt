@@ -58,7 +58,7 @@ class ExternalChatHttpServer(
         AiLimbsExecutionSession(
             transport = AiLimbsExecutionTransport.EXTERNAL_HTTP,
             scopeId = "http-" + UUID.randomUUID()
-        )
+        ).also { it.attestAiIngress() }
     private val aiLimbsPolicyEngine =
         AiLimbsExecutionPolicyEngine(appContext, aiLimbsExecutionSession)
     private val aiLimbsIngressGateway =

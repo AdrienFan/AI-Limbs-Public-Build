@@ -17,6 +17,7 @@ object PluginManifestParser {
     fun parse(rawJson: String): PluginManifest {
         val root = runCatching { JSONObject(rawJson) }
             .getOrElse { throw PluginManifestException("MANIFEST_JSON_INVALID", "plugin.json is not valid JSON") }
+        if (root.optString("module_type") == "self") throw PluginManifestException("SELF_SPECIAL_ADMISSION_REQUIRED", "Self modules require .ails lifecycle admission")
         val format = root.requiredString("format")
         if (format != PluginAbi.FORMAT) {
             throw PluginManifestException("FORMAT_UNSUPPORTED", "Expected ${PluginAbi.FORMAT}, got $format")

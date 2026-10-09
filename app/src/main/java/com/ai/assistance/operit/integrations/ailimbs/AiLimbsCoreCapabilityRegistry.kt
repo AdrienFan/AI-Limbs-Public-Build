@@ -16,6 +16,66 @@ object AiLimbsCoreCapabilityRegistry {
 
     private val registrations: List<AiLimbsCoreCapabilityRegistration> = listOf(
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_STATUS),
+            catalogEntry = entry(
+                name = "ai_limbs.self.status",
+                displayName = "自我模块 · status",
+                description = "查询空白自我模块状态、历史版本和待审批请求",
+                parameters = listOf(),
+                keywords = listOf("自我模块", "self module", "ails", "生命周期")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_INSTALL),
+            catalogEntry = entry(
+                name = "ai_limbs.self.install",
+                displayName = "自我模块 · install",
+                description = "首次安装 .ails 空白自我模块",
+                parameters = listOf(ToolParameterSchema("package_path", "string", "Android Host 上的 .ails 文件绝对路径", true)),
+                keywords = listOf("自我模块", "self module", "ails", "生命周期")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_UPGRADE),
+            catalogEntry = entry(
+                name = "ai_limbs.self.upgrade",
+                displayName = "自我模块 · upgrade",
+                description = "可信 AI 自主升级同身份模块，保留数据",
+                parameters = listOf(ToolParameterSchema("package_path", "string", "Android Host 上的 .ails 升级包绝对路径", true)),
+                keywords = listOf("自我模块", "self module", "ails", "生命周期")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_ROLLBACK),
+            catalogEntry = entry(
+                name = "ai_limbs.self.rollback",
+                displayName = "自我模块 · rollback",
+                description = "可信 AI 回滚已安装的同身份旧程序版本",
+                parameters = listOf(ToolParameterSchema("target_version", "string", "已安装的旧程序版本，如 0.1.0", true)),
+                keywords = listOf("自我模块", "self module", "ails", "生命周期")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_MIGRATE),
+            catalogEntry = entry(
+                name = "ai_limbs.self.migrate",
+                displayName = "自我模块 · migrate",
+                description = "受控迁移：export、prepare、commit、activate、cancel、discard；封存源端后用签名凭据交接运行权",
+                parameters = listOf(ToolParameterSchema("phase", "string", "export/prepare/commit/activate/cancel/discard", true), ToolParameterSchema("target_device_id", "string", "export 必填：目标 self.status 返回的 device_id", false), ToolParameterSchema("package_path", "string", "prepare 必填：Android Host 上的迁移 .ails 包路径", false), ToolParameterSchema("receipt", "object", "commit 必填：目标 prepare 返回的 receipt", false), ToolParameterSchema("release", "object", "activate 必填：源 commit 返回的 release", false), ToolParameterSchema("abort", "object", "discard 必填：源 cancel 返回的 abort", false)),
+                keywords = listOf("自我模块", "self module", "ails", "生命周期")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_REVIEW),
+            catalogEntry = entry(
+                name = "ai_limbs.self.operation.review",
+                displayName = "自我模块 · operation.review",
+                description = "批准或拒绝一次人类申请；参数和状态绑定，终态不能重放",
+                parameters = listOf(ToolParameterSchema("request_id", "string", "self.status 返回的实际待审批 request_id", true), ToolParameterSchema("approve", "boolean", "true 批准，false 拒绝", true)),
+                keywords = listOf("自我模块", "self module", "ails", "生命周期")
+            )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.CAPABILITY_SEARCH),
             catalogEntry =
             entry(

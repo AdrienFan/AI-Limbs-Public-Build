@@ -21,6 +21,13 @@ data class AiLimbsExecutionSession(
         require(scopeId.isNotBlank()) { "AI Limbs execution scope_id must not be blank" }
         require(sourceTransportId.isNotBlank()) { "AI Limbs source transport id must not be blank" }
     }
+    // Not a constructor/JSON field: copied sessions and tool parameters cannot mint this receipt.
+    internal var hostAttestedAiIngress: Boolean = false
+        private set
+    internal fun attestAiIngress() {
+        check(transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME) { "Plugin execution is not an AI ingress" }
+        hostAttestedAiIngress = true
+    }
 }
 
 enum class AiLimbsPolicyOutcome {
@@ -167,6 +174,12 @@ object AiLimbsExecutionPolicyDescriptor {
         when (route) {
             is AiLimbsCoreRoute.Local ->
                 when (route.operation) {
+                    AiLimbsCoreLocalOperation.SELF_STATUS -> standardRead(AiLimbsDomain.STORAGE)
+                    AiLimbsCoreLocalOperation.SELF_INSTALL,
+                    AiLimbsCoreLocalOperation.SELF_UPGRADE,
+                    AiLimbsCoreLocalOperation.SELF_ROLLBACK,
+                    AiLimbsCoreLocalOperation.SELF_MIGRATE,
+                    AiLimbsCoreLocalOperation.SELF_REVIEW -> standard(AiLimbsEffect.PERSISTENT_WRITE, AiLimbsDomain.STORAGE)
                     AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ,
                     AiLimbsCoreLocalOperation.OPERATION_FEEDBACK_READ -> standardRead(AiLimbsDomain.CORE_PROTOCOL)
                     AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ,

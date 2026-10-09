@@ -618,7 +618,7 @@ internal class ResidentUiProxyClient(
         private const val TRANSIENT_TRANSPORT_RETRY_COUNT = 3
         private const val TRANSIENT_TRANSPORT_RETRY_DELAY_MS = 250L
         private const val CORE_RECOVERY_REQUEST_COOLDOWN_MS = 5_000L
-        private val PLUGIN_ADMIN_URI_OPERATIONS = setOf("inspect_uri", "install_uri")
+        private val PLUGIN_ADMIN_URI_OPERATIONS = setOf("inspect_uri", "install_uri", "self_install_uri", "self_request_uri")
     }
 }
 

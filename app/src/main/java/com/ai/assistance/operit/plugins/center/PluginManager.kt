@@ -103,6 +103,7 @@ internal class PluginManager(
         pluginId: String,
         adminAuthorized: Boolean = false
     ): PluginPersistentState = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         val version = state.activeVersion
         if (
@@ -122,6 +123,7 @@ internal class PluginManager(
         pluginId: String,
         version: String
     ): PluginPersistentState = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = activateVersionLocked(pluginId, version)
         pruneVersionsLocked(pluginId)
         autoBackupIfEligibleLocked(pluginId)
@@ -129,6 +131,7 @@ internal class PluginManager(
     }
 
     suspend fun rollback(pluginId: String): PluginPersistentState = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         val target = state.rollbackVersion ?: state.previousVersion
             ?: throw PluginInstallException("ROLLBACK_UNAVAILABLE", "No immediate rollback version is available for $pluginId")
@@ -146,6 +149,7 @@ internal class PluginManager(
     }
 
     suspend fun deleteVersion(pluginId: String, version: String): PluginPersistentState = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         if (version == state.activeVersion) throw PluginInstallException("ACTIVE_VERSION_DELETE_FORBIDDEN", "Cannot delete active plugin version")
         if (version == activeMounts[pluginId]?.version) throw PluginInstallException("MOUNTED_VERSION_DELETE_FORBIDDEN", "Cannot delete mounted plugin version")
@@ -162,6 +166,7 @@ internal class PluginManager(
         removeData: Boolean = false,
         adminAuthorized: Boolean = false
     ) = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         val version = state.activeVersion
         if (
@@ -208,10 +213,12 @@ internal class PluginManager(
     }
 
     suspend fun backup(pluginId: String): PluginBackupSnapshot = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         backupLocked(pluginId)
     }
 
     suspend fun restoreBackup(pluginId: String): PluginPersistentState = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         restoreBackupLocked(pluginId)
     }
 
@@ -246,6 +253,7 @@ internal class PluginManager(
     }
 
     internal suspend fun activeAuthorization(pluginId: String): PluginActiveAuthorization = locked {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         val version = state.activeVersion ?: throw PluginInstallException(
             "PLUGIN_ACTIVE_VERSION_MISSING",
@@ -381,6 +389,7 @@ internal class PluginManager(
                 managedPackage = managedPackage,
                 contentDir = store.contentIn(transaction)
             )
+            com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, verified.manifest.pluginId)
             val trust = trustVerifier.verify(
                 managedPackage = managedPackage,
                 contentDir = store.contentIn(transaction),
@@ -493,6 +502,7 @@ internal class PluginManager(
     }
 
     private suspend fun enableLocked(pluginId: String): PluginPersistentState {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         if (!state.enabled) usageStore.markEnabled(pluginId)
         val version = state.activeVersion
@@ -900,6 +910,7 @@ internal class PluginManager(
                 "RUNTIME_ADAPTER_MISSING",
                 "No runtime adapter is registered for ${manifest.runtime.kind}"
             )
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         stateRepository.write(
             state.copy(
@@ -1133,6 +1144,7 @@ internal class PluginManager(
         }.sorted()
 
     private fun backupLocked(pluginId: String): PluginBackupSnapshot {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.rejectOrdinaryOperation(appContext, pluginId)
         val state = requireState(pluginId)
         val version = state.activeVersion
             ?: throw PluginInstallException("ACTIVE_VERSION_MISSING", "No active version is selected for $pluginId")

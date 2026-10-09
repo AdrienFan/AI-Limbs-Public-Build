@@ -56,6 +56,7 @@ internal class PluginPackageVerifier(
                 entryCount += 1
                 if (entryCount > limits.maxEntries) throw PluginInstallException("PACKAGE_TOO_MANY_ENTRIES", "Plugin package has too many entries")
                 val normalized = PluginPackagePaths.requireSafeRelativePath(entry.name.removeSuffix("/"))
+                if (normalized == "self.json") throw PluginInstallException("SELF_SPECIAL_ADMISSION_REQUIRED", "Self modules require .ails lifecycle admission")
                 if (!seen.add(normalized)) throw PluginInstallException("PACKAGE_DUPLICATE_ENTRY", "Duplicate entry: $normalized")
                 if (entry.isDirectory) {
                     safeOutputFile(contentDir, normalized).mkdirs()

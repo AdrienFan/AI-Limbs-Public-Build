@@ -20,7 +20,13 @@ internal enum class AiLimbsCoreLocalOperation {
     POLICY_SESSION_RESET,
     STORAGE_SEARCH,
     STORAGE_DESCRIBE,
-    STORAGE_PROJECT_FILES
+    STORAGE_PROJECT_FILES,
+    SELF_STATUS,
+    SELF_INSTALL,
+    SELF_UPGRADE,
+    SELF_ROLLBACK,
+    SELF_MIGRATE,
+    SELF_REVIEW
 }
 
 internal sealed interface AiLimbsCoreRoute {

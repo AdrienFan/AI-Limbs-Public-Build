@@ -20,7 +20,7 @@ internal class ResidentCoreDispatcherRuntime(
     private val cycleRuntime: AiLimbsInteractionCycleRuntimeState =
         AiLimbsInteractionCycleRuntime.state(appContext)
 
-    fun invoke(payload: JSONObject): JSONObject {
+    fun invoke(payload: JSONObject, hostAttestedAi: Boolean = false): JSONObject {
         val sourceId = payload.getString("source_id").trim()
         require(sourceId.length in 1..256) { "Invalid AI Limbs ingress source id" }
         val sessionJson = payload.getJSONObject("execution_session")
@@ -37,7 +37,9 @@ internal class ResidentCoreDispatcherRuntime(
 
         val ingress = AiLimbsIngressSession(
             sourceId = sourceId,
-            executionSession = AiLimbsExecutionSession(transport, scopeId, sourceTransportId)
+            executionSession = AiLimbsExecutionSession(transport, scopeId, sourceTransportId).also {
+                if (hostAttestedAi && transport != AiLimbsExecutionTransport.PLUGIN_RUNTIME) it.attestAiIngress()
+            }
         )
         val gateway = AiLimbsIngressGateway.authoritativeCore(appContext, ingress, cycleRuntime)
         val result = runBlocking { gateway.invoke(tool, JSONObject(args.toString())) }

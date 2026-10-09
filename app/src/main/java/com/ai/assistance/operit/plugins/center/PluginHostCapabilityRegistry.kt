@@ -319,7 +319,7 @@ internal class PluginHostCapabilityRegistry(
                         transport = transport,
                         scopeId = "bridge:$providerId:$transportId",
                         sourceTransportId = transportId
-                    )
+                    ).also { it.attestAiIngress() }
                 )
             )
         }

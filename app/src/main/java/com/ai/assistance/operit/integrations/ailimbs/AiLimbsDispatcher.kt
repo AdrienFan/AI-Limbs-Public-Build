@@ -78,8 +78,10 @@ class AiLimbsDispatcher(
         )
     }
 
-    private fun withAttention(result: JSONObject): JSONObject =
-        HostAttentionRegistry.attachTo(result)
+    private fun withAttention(result: JSONObject): JSONObject {
+        com.ai.assistance.operit.plugins.self.SelfModuleService.refreshAttention(appContext)
+        return HostAttentionRegistry.attachTo(result)
+    }
 
     private suspend fun executeCapabilityRoute(
         invocation: AiLimbsNormalizedInvocation
@@ -117,6 +119,18 @@ class AiLimbsDispatcher(
         args: JSONObject
     ): JSONObject =
         when (operation) {
+            AiLimbsCoreLocalOperation.SELF_STATUS ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "status", args)
+            AiLimbsCoreLocalOperation.SELF_INSTALL ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "install", args)
+            AiLimbsCoreLocalOperation.SELF_UPGRADE ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "upgrade", args)
+            AiLimbsCoreLocalOperation.SELF_ROLLBACK ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "rollback", args)
+            AiLimbsCoreLocalOperation.SELF_MIGRATE ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "migrate", args)
+            AiLimbsCoreLocalOperation.SELF_REVIEW ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "review", args)
             AiLimbsCoreLocalOperation.OPERATION_FEEDBACK_READ ->
                 attachOperationFeedback(ok(), "screen_feedback_read", true)
             AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ ->

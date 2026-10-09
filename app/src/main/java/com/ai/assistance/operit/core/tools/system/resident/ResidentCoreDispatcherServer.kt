@@ -151,7 +151,12 @@ internal class ResidentCoreDispatcherServer(
                 check(request.getString("session_id") == coreSessionId) { "Stale Resident Core dispatch session" }
                 val dispatcher = checkNotNull(runtime) { "Resident Dispatcher runtime is stopping" }
                 val result = when (val operation = request.getString("operation")) {
-                    "invoke" -> dispatcher.invoke(request.optJSONObject("payload") ?: JSONObject())
+                    "invoke" -> {
+                        // Only the current Host peer may attest external AI origin. Same-UID workers
+                        // retain their delegated route, but cannot forge an external transport in JSON.
+                        val fence = checkNotNull(ResidentBusinessTakeoverFence.snapshot(appContext))
+                        dispatcher.invoke(request.optJSONObject("payload") ?: JSONObject(), peer.pid == fence.getInt("host_pid"))
+                    }
                     "plugin_delegate" -> {
                         requirePluginWorkerPeer(peer.pid)
                         dispatcher.invokePluginDelegated(request.optJSONObject("payload") ?: JSONObject())
