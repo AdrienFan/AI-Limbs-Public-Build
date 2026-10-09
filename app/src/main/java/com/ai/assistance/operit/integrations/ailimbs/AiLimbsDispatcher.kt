@@ -129,6 +129,8 @@ class AiLimbsDispatcher(
                 com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "rollback", args)
             AiLimbsCoreLocalOperation.SELF_MIGRATE ->
                 com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "migrate", args)
+            AiLimbsCoreLocalOperation.SELF_REVOKE ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "revoke", args)
             AiLimbsCoreLocalOperation.SELF_REVIEW ->
                 com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "review", args)
             AiLimbsCoreLocalOperation.OPERATION_FEEDBACK_READ ->

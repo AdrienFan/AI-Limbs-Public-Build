@@ -21,7 +21,7 @@ import java.util.zip.ZipFile
 import java.util.zip.ZipOutputStream
 
 /** Host lifecycle substrate only. Blank module data remains opaque to the host. */
-internal class SelfModuleStore(private val root: File) {
+internal class SelfModuleStore(private val root: File, private val clock: () -> Long = System::currentTimeMillis) {
     companion object {
         private val locks = ConcurrentHashMap<String, Any>()
         private const val FORMAT = "AIL_SELF_V1"
@@ -31,6 +31,8 @@ internal class SelfModuleStore(private val root: File) {
         private fun copyJson(value: JSONObject) = JSONObject(value.toString())
     }
     private var executingRequestId: String? = null
+    private var humanMigrationAuthorized = false
+    private val authorization by lazy { SelfModuleAuthorizationPolicy(root, clock, ::save) }
     private val slot get() = File(root, "slot.json")
     private val requests get() = File(root, "requests")
     private fun fail(code: String): Nothing = throw IllegalStateException(code)
@@ -180,13 +182,18 @@ internal class SelfModuleStore(private val root: File) {
     fun status(): JSONObject = locked {
         val pending = requests.listFiles()?.filter { it.extension == "json" }?.map { file ->
             val request = JSONObject(file.readText())
+            if (request.optString("status") == "GRANTING") {
+                request.put("status", if (authorization.applied(request.getString("request_id"))) "APPROVED_RECOVERED" else "RECOVERY_REQUIRED")
+                save(file, request)
+            }
             if (request.optString("status") == "EXECUTING") {
                 request.put("status", if (state()?.optString("last_completed_request_id") == request.getString("request_id")) "COMPLETED_RECOVERED" else "RECOVERY_REQUIRED")
                 save(file, request)
             }
             request
         } ?: emptyList()
-        JSONObject().put("success", true).put("device_id", deviceId(key().getString("public")))
+        val policy = authorization.snapshot(state())
+        JSONObject().put("authorizations", policy).put("success", true).put("device_id", deviceId(key().getString("public")))
             .put("module", state() ?: JSONObject.NULL).put("requests", JSONArray(pending))
             .put("migration_package_path", state()?.let { value -> if (value.optString("direction") == "outbound" && !value.isNull("migration_id")) File(root, "exports/${value.getString("migration_id")}.ails").absolutePath else JSONObject.NULL } ?: JSONObject.NULL)
             .put("versions", JSONArray(state()?.let { value -> File(root, "versions/${value.getString("identity_id")}").listFiles()?.map { it.nameWithoutExtension } } ?: emptyList<String>()))
@@ -261,7 +268,7 @@ internal class SelfModuleStore(private val root: File) {
             }
             val output = File(root, "exports/$migrationId.ails")
             writePack(output, manifest, files)
-            val sealed = copyJson(old).put("lifecycle_state", "SEALED").put("migration_id", migrationId)
+            val sealed = copyJson(old).put("human_migration_authorized", humanMigrationAuthorized).put("lifecycle_state", "SEALED").put("migration_id", migrationId)
                 .put("direction", "outbound").put("target_device_id", target).put("package_sha256", hash(output.readBytes()))
                 .put("transfer_committed", false).put("generation", UUID.randomUUID().toString())
             sealed.remove("abort")
@@ -290,7 +297,7 @@ internal class SelfModuleStore(private val root: File) {
             }
             history.forEach { persistProgram(it) }
             persistProgram(module)
-            val next = metadata(m, UUID.randomUUID().toString()).put("lifecycle_state", "SEALED")
+            val next = metadata(m, UUID.randomUUID().toString()).put("human_migration_authorized", humanMigrationAuthorized).put("lifecycle_state", "SEALED")
                 .put("migration_id", m.getString("migration_id")).put("direction", "inbound")
                 .put("source_device_id", m.getString("source_device_id")).put("package_sha256", pack.digest)
                 .put("target_nonce", UUID.randomUUID().toString())
@@ -324,7 +331,7 @@ internal class SelfModuleStore(private val root: File) {
                 release.getString("target_device_id") == deviceId(key().getString("public")), "SELF_RELEASE_MISMATCH")
             val next = copyJson(old).put("lifecycle_state", "ACTIVE").put("migration_id", JSONObject.NULL)
                 .put("generation", UUID.randomUUID().toString())
-            next.remove("prepared_receipt"); next.remove("direction")
+            next.remove("prepared_receipt"); next.remove("direction"); next.remove("human_migration_authorized")
             save(slot, next); copyJson(next).put("success", true)
         }
         "cancel" -> {
@@ -336,7 +343,7 @@ internal class SelfModuleStore(private val root: File) {
             val abort = sign(JSONObject().put("kind", "ABORTED").put("migration_id", old.getString("migration_id"))
                 .put("package_sha256", old.getString("package_sha256")))
             next.put("abort", abort)
-            next.remove("direction"); next.remove("transfer_committed"); save(slot, next)
+            next.remove("direction"); next.remove("transfer_committed"); next.remove("human_migration_authorized"); save(slot, next)
             JSONObject().put("success", true).put("abort", abort).put("module", next)
         }
         "discard" -> {
@@ -358,48 +365,139 @@ internal class SelfModuleStore(private val root: File) {
         else -> fail("SELF_OPERATION_INVALID")
     }
     fun autonomous(operation: String, args: JSONObject): JSONObject = locked { execute(operation, args) }
-    fun request(operation: String, args: JSONObject): JSONObject = locked {
+    private fun pin(operation: String, args: JSONObject, requestId: String): JSONObject {
         requireSelf(operation in setOf("upgrade", "rollback", "migrate"), "SELF_OPERATION_INVALID")
-        val requestId = UUID.randomUUID().toString()
         val pinned = copyJson(args)
-        if (pinned.has("package_path")) {
-            val source = File(pinned.getString("package_path")); val pack = readPack(source)
-            val staged = File(root, "requests/$requestId.ails")
-            atomic(staged, pack.bytes); pinned.put("package_path", staged.absolutePath)
-            pinned.put("package_sha256", pack.digest)
+        when (operation) {
+            "upgrade" -> requireSelf(pinned.has("package_path"), "SELF_PACKAGE_REQUIRED")
+            "rollback" -> requireSelf(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+$").matches(pinned.getString("target_version")), "SELF_VERSION_INVALID")
+            "migrate" -> when (pinned.getString("phase")) {
+                "export" -> requireSelf(Regex("^[a-f0-9]{64}$").matches(pinned.getString("target_device_id")), "SELF_MIGRATION_TARGET_INVALID")
+                "prepare" -> requireSelf(pinned.has("package_path"), "SELF_PACKAGE_REQUIRED")
+                "commit" -> pinned.getJSONObject("receipt")
+                "activate" -> pinned.getJSONObject("release")
+                "discard" -> pinned.getJSONObject("abort")
+                "cancel" -> Unit
+                else -> fail("SELF_MIGRATION_PHASE_INVALID")
+            }
         }
-        val request = JSONObject().put("request_id", requestId).put("operation", operation)
-            .put("parameters", pinned).put("status", "PENDING").put("created_at_ms", System.currentTimeMillis())
-            .put("state_fingerprint", hash((state()?.toString() ?: "EMPTY").toByteArray()))
-        save(File(requests, "$requestId.json"), request)
-        copyJson(request).put("success", true)
+        if (pinned.has("package_path")) {
+            val pack = readPack(File(pinned.getString("package_path")))
+            val staged = File(root, "requests/$requestId.ails")
+            atomic(staged, pack.bytes)
+            pinned.put("package_path", staged.absolutePath).put("package_sha256", pack.digest)
+        }
+        return pinned
+    }
+    private fun operationRequest(operation: String, args: JSONObject, reason: String = ""): JSONObject {
+        val requestId = UUID.randomUUID().toString()
+        return JSONObject().put("request_id", requestId).put("operation", operation)
+            .put("parameters", pin(operation, args, requestId)).put("status", "PENDING")
+            .put("request_kind", "OPERATION").put("requested_mode", "ONE_TIME").put("reason", reason)
+            .put("created_at_ms", clock()).put("state_fingerprint", hash((state()?.toString() ?: "EMPTY").toByteArray()))
+    }
+    fun request(operation: String, args: JSONObject): JSONObject = locked {
+        val value = operationRequest(operation, args)
+        save(File(requests, "${value.getString("request_id")}.json"), value)
+        copyJson(value).put("success", true)
+    }
+    /** One selected permission = one decision. Validate the entire form before making requests visible. */
+    fun requestBundle(args: JSONObject): JSONObject = locked {
+        val items = args.getJSONArray("items")
+        requireSelf(items.length() in 1..3, "SELF_APPLICATION_ITEMS_INVALID")
+        val mode = args.getString("mode")
+        requireSelf(mode in setOf("ONE_TIME", "TIMED", "LONG"), "SELF_AUTHORIZATION_MODE_INVALID")
+        val reason = args.getString("reason").trim()
+        requireSelf(reason.isNotEmpty() && reason.length <= 2000, "SELF_APPLICATION_REASON_REQUIRED")
+        val duration = if (mode == "TIMED") args.getLong("duration_seconds") else 0L
+        requireSelf(mode != "TIMED" || duration in 1..31536000L, "SELF_AUTHORIZATION_DURATION_INVALID")
+        val current = if (mode != "ONE_TIME") active() else state()
+        val seen = mutableSetOf<String>()
+        val batchId = UUID.randomUUID().toString()
+        val values = (0 until items.length()).map { index ->
+            val item = items.getJSONObject(index)
+            val operation = item.getString("operation")
+            requireSelf(operation in setOf("upgrade", "rollback", "migrate") && seen.add(operation), "SELF_APPLICATION_ITEMS_INVALID")
+            val value = if (mode == "ONE_TIME") operationRequest(operation, item.getJSONObject("parameters"), reason)
+            else JSONObject().put("request_id", UUID.randomUUID().toString()).put("operation", operation)
+                .put("request_kind", "AUTHORIZATION").put("status", "PENDING").put("parameters", JSONObject())
+                .put("identity_id", requireNotNull(current).getString("identity_id")).put("data_id", current.getString("data_id"))
+                .put("created_at_ms", clock()).put("reason", reason)
+            value.put("batch_id", batchId).put("requested_mode", mode)
+            if (mode == "TIMED") value.put("requested_duration_seconds", duration)
+            value
+        }
+        values.forEach { save(File(requests, "${it.getString("request_id")}.json"), it) }
+        JSONObject().put("success", true).put("batch_id", batchId).put("requests", JSONArray(values))
+    }
+    fun revoke(operation: String, reason: String): JSONObject = locked {
+        requireSelf(operation in setOf("upgrade", "rollback", "migrate"), "SELF_OPERATION_INVALID")
+        authorization.revoke(operation, reason)
+    }
+    /** Ongoing grants are checked again under the same lock as the lifecycle commit. */
+    fun humanExecute(operation: String, args: JSONObject): JSONObject = locked {
+        requireSelf(operation in setOf("upgrade", "rollback", "migrate"), "SELF_OPERATION_INVALID")
+        val current = state()
+        val continuation = operation == "migrate" && args.optString("phase") in setOf("commit", "activate", "cancel", "discard") &&
+            current?.optBoolean("human_migration_authorized") == true && current.optString("lifecycle_state") == "SEALED"
+        val grants = authorization.snapshot(current).getJSONArray("effective_grants")
+        requireSelf(continuation || (0 until grants.length()).any { grants.getJSONObject(it).getString("operation") == operation }, "SELF_HUMAN_AUTHORIZATION_REQUIRED")
+        val value = operationRequest(operation, args).put("authorized_by", if (continuation) "MIGRATION_TRANSACTION" else "ONGOING_GRANT")
+        val file = File(requests, "${value.getString("request_id")}.json")
+        save(file, value)
+        performApproved(file, value)
     }
     fun cancelRequest(id: String): JSONObject = locked {
         val file = File(requests, "${identity(id)}.json"); val value = JSONObject(file.readText())
         requireSelf(value.getString("status") == "PENDING", "SELF_REQUEST_TERMINAL")
         value.put("status", "CANCELLED"); save(file, value); copyJson(value).put("success", true)
     }
-    fun review(id: String, approve: Boolean): JSONObject = locked {
-        val file = File(requests, "${identity(id)}.json"); val request = JSONObject(file.readText())
+    fun review(id: String, approve: Boolean, decision: JSONObject = JSONObject()): JSONObject = locked {
+        val file = File(requests, "${identity(id)}.json")
+        val request = JSONObject(file.readText())
         requireSelf(request.getString("status") == "PENDING", "SELF_REQUEST_TERMINAL")
+        val reason = decision.optString("reason")
+        requireSelf(reason.length <= 2000, "SELF_APPROVAL_REASON_TOO_LONG")
+        request.put("review_reason", reason).put("reviewed_at_ms", clock())
         if (!approve) {
             request.put("status", "REJECTED"); save(file, request); copyJson(request).put("success", true)
+        } else if (request.optString("request_kind") == "AUTHORIZATION") {
+            val current = active()
+            requireSelf(current.getString("identity_id") == request.getString("identity_id") && current.getString("data_id") == request.getString("data_id"), "SELF_REQUEST_STALE")
+            val requested = request.getString("requested_mode")
+            val mode = decision.optString("mode", requested)
+            requireSelf(mode in setOf("TIMED", "LONG") && (requested == "LONG" || mode == "TIMED"), "SELF_APPROVAL_SCOPE_EXCEEDED")
+            val duration = if (mode == "TIMED") decision.optLong("duration_seconds", request.optLong("requested_duration_seconds", 0)) else 0L
+            requireSelf(mode != "TIMED" || duration in 1..31536000L, "SELF_AUTHORIZATION_DURATION_INVALID")
+            requireSelf(requested != "TIMED" || duration <= request.getLong("requested_duration_seconds"), "SELF_APPROVAL_SCOPE_EXCEEDED")
+            request.put("status", "GRANTING").put("approved_mode", mode)
+            if (mode == "TIMED") request.put("approved_duration_seconds", duration)
+            save(file, request)
+            val grant = authorization.approve(current, request.getString("operation"), mode, if (mode == "TIMED") duration else null, id, reason)
+            request.put("status", "APPROVED").put("grant", grant)
+            save(file, request)
+            JSONObject().put("success", true).put("request", request).put("grant", grant)
         } else {
-            requireSelf(request.getString("state_fingerprint") == hash((state()?.toString() ?: "EMPTY").toByteArray()), "SELF_REQUEST_STALE")
-            val args = request.getJSONObject("parameters")
-            if (args.has("package_path")) requireSelf(hash(File(args.getString("package_path")).readBytes()) == args.getString("package_sha256"), "SELF_REQUEST_PACKAGE_CHANGED")
-            request.put("status", "EXECUTING"); save(file, request)
-            executingRequestId = id
-            try {
-                val result = execute(request.getString("operation"), args)
-                request.put("status", "COMPLETED").put("result", result); save(file, request)
-                JSONObject().put("success", true).put("request", request).put("result", result)
-            } catch (error: Exception) {
-                request.put("status", if (state()?.optString("last_completed_request_id") == id) "COMPLETED_RECOVERED" else "FAILED")
-                    .put("error", error.message)
-                save(file, request); throw error
-            } finally { executingRequestId = null }
+            requireSelf(!decision.has("mode") || decision.getString("mode") == "ONE_TIME", "SELF_APPROVAL_SCOPE_EXCEEDED")
+            performApproved(file, request)
         }
+    }
+    private fun performApproved(file: File, request: JSONObject): JSONObject {
+        val id = request.getString("request_id")
+        requireSelf(request.getString("state_fingerprint") == hash((state()?.toString() ?: "EMPTY").toByteArray()), "SELF_REQUEST_STALE")
+        val args = request.getJSONObject("parameters")
+        if (args.has("package_path")) requireSelf(hash(File(args.getString("package_path")).readBytes()) == args.getString("package_sha256"), "SELF_REQUEST_PACKAGE_CHANGED")
+        request.put("status", "EXECUTING"); save(file, request)
+        executingRequestId = id
+        humanMigrationAuthorized = request.getString("operation") == "migrate"
+        try {
+            val result = execute(request.getString("operation"), args)
+            request.put("status", "COMPLETED").put("result", result); save(file, request)
+            return JSONObject().put("success", true).put("request", request).put("result", result)
+        } catch (error: Exception) {
+            request.put("status", if (state()?.optString("last_completed_request_id") == id) "COMPLETED_RECOVERED" else "FAILED").put("error", error.message)
+            save(file, request); throw error
+        } finally { executingRequestId = null; humanMigrationAuthorized = false }
     }
     // Ordinary plugin interfaces reject the module even when presented its durable identity.
     fun migrationPackage(): File = locked {

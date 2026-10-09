@@ -179,7 +179,8 @@ object AiLimbsExecutionPolicyDescriptor {
                     AiLimbsCoreLocalOperation.SELF_UPGRADE,
                     AiLimbsCoreLocalOperation.SELF_ROLLBACK,
                     AiLimbsCoreLocalOperation.SELF_MIGRATE,
-                    AiLimbsCoreLocalOperation.SELF_REVIEW -> standard(AiLimbsEffect.PERSISTENT_WRITE, AiLimbsDomain.STORAGE)
+                    AiLimbsCoreLocalOperation.SELF_REVIEW,
+                    AiLimbsCoreLocalOperation.SELF_REVOKE -> standard(AiLimbsEffect.PERSISTENT_WRITE, AiLimbsDomain.STORAGE)
                     AiLimbsCoreLocalOperation.MESSAGE_CONTEXT_READ,
                     AiLimbsCoreLocalOperation.OPERATION_FEEDBACK_READ -> standardRead(AiLimbsDomain.CORE_PROTOCOL)
                     AiLimbsCoreLocalOperation.ACCESS_CONTEXT_READ,

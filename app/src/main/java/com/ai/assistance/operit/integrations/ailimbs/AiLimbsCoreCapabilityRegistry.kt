@@ -20,7 +20,7 @@ object AiLimbsCoreCapabilityRegistry {
             catalogEntry = entry(
                 name = "ai_limbs.self.status",
                 displayName = "自我模块 · status",
-                description = "查询空白自我模块状态、历史版本和待审批请求",
+                description = "查询空白自我模块状态、历史版本、申请及实际有效的限时/长期授权",
                 parameters = listOf(),
                 keywords = listOf("自我模块", "self module", "ails", "生命周期")
             )
@@ -70,9 +70,19 @@ object AiLimbsCoreCapabilityRegistry {
             catalogEntry = entry(
                 name = "ai_limbs.self.operation.review",
                 displayName = "自我模块 · operation.review",
-                description = "批准或拒绝一次人类申请；参数和状态绑定，终态不能重放",
-                parameters = listOf(ToolParameterSchema("request_id", "string", "self.status 返回的实际待审批 request_id", true), ToolParameterSchema("approve", "boolean", "true 批准，false 拒绝", true)),
+                description = "逐项批准或拒绝人类申请。一次性执行绑定操作；限时/长期仅授予后续操作权限。可少批、缩短时限，不能扩大申请；终态不能重放",
+                parameters = listOf(ToolParameterSchema("request_id", "string", "self.status 返回的实际待审批 request_id", true), ToolParameterSchema("approve", "boolean", "true 批准，false 拒绝", true), ToolParameterSchema("mode", "string", "可选实际批准模式：ONE_TIME/TIMED/LONG；不能高于申请范围。LONG 可改为 TIMED", false), ToolParameterSchema("duration_seconds", "integer", "TIMED 的实际批准秒数，从批准时开始；不能超过人类申请时限", false), ToolParameterSchema("reason", "string", "逐项批准或拒绝理由", false)),
                 keywords = listOf("自我模块", "self module", "ails", "生命周期")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_REVOKE),
+            catalogEntry = entry(
+                name = "ai_limbs.self.authorization.revoke",
+                displayName = "自我模块 · 撤销持续授权",
+                description = "可信 AI 撤销 upgrade/migrate/rollback 的限时或长期授权；阻止新操作，已开始的迁移仍可安全收尾",
+                parameters = listOf(ToolParameterSchema("operation", "string", "upgrade/migrate/rollback", true), ToolParameterSchema("reason", "string", "撤销理由", false)),
+                keywords = listOf("自我模块", "self module", "ails", "授权", "撤销")
             )
         ),
         registration(

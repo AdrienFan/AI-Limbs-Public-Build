@@ -193,4 +193,93 @@ class SelfModuleStoreTest {
         expect("SELF_ARCHIVE_ENTRY_INVALID") { store("host").install(unsafe) }
         assertFalse(File(temp.root, "escape").exists())
     }
+
+    private fun bundle(host: SelfModuleStore, mode: String, operations: List<String>, seconds: Long = 7200): JSONArray {
+        val items = JSONArray(operations.map { JSONObject().put("operation", it).put("parameters", JSONObject()) })
+        return host.requestBundle(JSONObject().put("items", items).put("mode", mode).put("duration_seconds", seconds).put("reason", "生命周期测试申请"))
+            .getJSONArray("requests")
+    }
+    private fun effective(host: SelfModuleStore) = host.status().getJSONObject("authorizations").getJSONArray("effective_grants")
+    @Test fun multiSelectRequestsAreIndependentlyApprovedShortenedOrRejected() {
+        var now = 1000000L
+        val host = SelfModuleStore(File(temp.root, "host")) { now }; host.install(pack())
+        val items = bundle(host, "LONG", listOf("upgrade", "migrate", "rollback"))
+        assertEquals(3, items.length()); assertEquals(0, effective(host).length())
+        now += 5000
+        host.review(items.getJSONObject(0).getString("request_id"), true, JSONObject().put("mode", "LONG").put("reason", "允许升级"))
+        host.review(items.getJSONObject(1).getString("request_id"), false, JSONObject().put("reason", "本次不迁移"))
+        host.review(items.getJSONObject(2).getString("request_id"), true, JSONObject().put("mode", "TIMED").put("duration_seconds", 60))
+        val grants = effective(host)
+        assertEquals(2, grants.length())
+        val timed = (0 until grants.length()).map { grants.getJSONObject(it) }.first { it.getString("operation") == "rollback" }
+        assertEquals(now + 60000, timed.getLong("expires_at_ms"))
+        assertEquals("0.1.0", module(host).getString("module_version"))
+        expect("SELF_REQUEST_TERMINAL") { host.review(items.getJSONObject(0).getString("request_id"), true) }
+    }
+    @Test fun timedGrantsCannotBeExpandedAndExpireAtExecutionEvenWithoutUiRefresh() {
+        var now = 100000L
+        val host = SelfModuleStore(File(temp.root, "host")) { now }; host.install(pack())
+        val request = bundle(host, "TIMED", listOf("upgrade"), 60).getJSONObject(0).getString("request_id")
+        expect("SELF_APPROVAL_SCOPE_EXCEEDED") { host.review(request, true, JSONObject().put("mode", "LONG")) }
+        expect("SELF_APPROVAL_SCOPE_EXCEEDED") { host.review(request, true, JSONObject().put("mode", "TIMED").put("duration_seconds", 61)) }
+        host.review(request, true, JSONObject().put("mode", "TIMED").put("duration_seconds", 30))
+        now += 30000
+        expect("SELF_HUMAN_AUTHORIZATION_REQUIRED") { host.humanExecute("upgrade", upgrade(pack("0.1.1"))) }
+        assertEquals("0.1.0", module(host).getString("module_version"))
+        now -= 60000 // Once expired, a backward wall clock must never resurrect authority.
+        assertEquals(0, effective(host).length())
+    }
+    @Test fun ongoingGrantAllowsLaterHumanOperationsButNeverExecutesOldPendingRequests() {
+        val host = store("host"); host.install(pack())
+        val old = host.request("upgrade", upgrade(pack("0.1.2"))).getString("request_id")
+        val grant = bundle(host, "LONG", listOf("upgrade")).getJSONObject(0).getString("request_id")
+        host.review(grant, true)
+        assertEquals("0.1.0", module(host).getString("module_version"))
+        host.humanExecute("upgrade", upgrade(pack("0.1.1")))
+        assertEquals("0.1.1", module(host).getString("module_version"))
+        val pending = host.status().getJSONArray("requests")
+        assertEquals("PENDING", (0 until pending.length()).map { pending.getJSONObject(it) }.first { it.getString("request_id") == old }.getString("status"))
+    }
+    @Test fun revokedGrantsSurviveRestartAndProgramRollbackCannotRestoreThem() {
+        val host = store("host"); host.install(pack())
+        val items = bundle(host, "LONG", listOf("upgrade", "rollback"))
+        for (i in 0 until items.length()) host.review(items.getJSONObject(i).getString("request_id"), true)
+        host.humanExecute("upgrade", upgrade(pack("0.1.1")))
+        host.revoke("upgrade", "结束长期授权")
+        host.humanExecute("rollback", JSONObject().put("target_version", "0.1.0"))
+        val restarted = store("host")
+        assertEquals(1, effective(restarted).length())
+        expect("SELF_HUMAN_AUTHORIZATION_REQUIRED") { restarted.humanExecute("upgrade", upgrade(pack("0.1.2"))) }
+        assertEquals("0.1.0", module(restarted).getString("module_version"))
+    }
+    @Test fun migrationKeepsTransactionAuthorityAfterRevocationAndDestinationHasNoOngoingGrant() {
+        val source = store("source"); val target = store("target"); source.install(pack())
+        val approval = bundle(source, "LONG", listOf("migrate")).getJSONObject(0).getString("request_id")
+        source.review(approval, true)
+        val exported = source.humanExecute("migrate", phase("export").put("target_device_id", target.status().getString("device_id"))).getJSONObject("result")
+        source.revoke("migrate", "禁止后续迁移")
+        val incoming = target.request("migrate", phase("prepare").put("package_path", exported.getString("package_path")))
+        val prepared = target.review(incoming.getString("request_id"), true).getJSONObject("result")
+        val release = source.humanExecute("migrate", phase("commit").put("receipt", prepared.getJSONObject("receipt"))).getJSONObject("result")
+        target.humanExecute("migrate", phase("activate").put("release", release.getJSONObject("release")))
+        assertEquals("SEALED", module(source).getString("lifecycle_state"))
+        assertEquals("ACTIVE", module(target).getString("lifecycle_state"))
+        assertEquals(id, module(target).getString("identity_id"))
+        assertEquals(0, effective(target).length())
+        expect("SELF_HUMAN_AUTHORIZATION_REQUIRED") { target.humanExecute("migrate", phase("export").put("target_device_id", source.status().getString("device_id"))) }
+    }
+    @Test fun invalidBundleCannotExposePartialApplications() {
+        val host = store("host"); host.install(pack())
+        expect("SELF_APPLICATION_ITEMS_INVALID") { bundle(host, "LONG", listOf("upgrade", "upgrade")) }
+        assertEquals(0, host.status().getJSONArray("requests").length())
+        assertEquals(0, effective(host).length())
+    }
+    @Test fun ongoingAuthorizationNeverSkipsPackageIdentityOrRollbackSchemaChecks() {
+        val host = store("host"); host.install(pack())
+        val request = bundle(host, "LONG", listOf("upgrade")).getJSONObject(0).getString("request_id")
+        host.review(request, true)
+        expect("SELF_IDENTITY_MISMATCH") { host.humanExecute("upgrade", upgrade(pack("0.1.1", UUID.randomUUID().toString()))) }
+        expect("SELF_SCHEMA_INCOMPATIBLE") { host.humanExecute("upgrade", upgrade(pack("0.1.1", schema = 2))) }
+        assertEquals("0.1.0", module(host).getString("module_version"))
+    }
 }

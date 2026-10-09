@@ -64,3 +64,7 @@ Still required before release:
 Implementation and test source are prepared. No executable acceptance test is claimed as passed. No Android APK or .ailpsys has been built for this change.
 
 User steering: pause ALL git pushes, workflow dispatches and cloud compilation until the additional requirement has been integrated and the user resumes compilation. No current device was upgraded or installed during this source task.
+
+## Resumed authorization iteration
+
+User authorized implementation, push and cloud compilation on 2026-10-09. Add multi-select human applications, per-item AI decisions, TIMED/LONG authorization, revoke, persistent current-grant display and feedback attention. ONE_TIME remains exact-operation approval. Grants are host policy outside program versions/data; migration continuation retains transaction authorization, destination starts without ongoing grants. Update base to build115/code210 and Plugin Center to 1.3.42/code46. Run lifecycle/authority/grant regressions on Ubuntu GitHub Actions, package blank .ails and signed Plugin Center after successful cloud build. No local compilation.

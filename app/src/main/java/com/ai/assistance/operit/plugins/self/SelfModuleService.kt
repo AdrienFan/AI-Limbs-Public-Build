@@ -17,17 +17,34 @@ internal object SelfModuleService {
         val result = guarded { store(context).status() }
         val requests = result.optJSONArray("requests") ?: org.json.JSONArray()
         val count = (0 until requests.length()).count { requests.getJSONObject(it).optString("status") == "PENDING" }
+        val groups = org.json.JSONArray()
+        if (count > 0) groups.put(JSONObject().put("id", "lifecycle").put("label", "待审批")
+            .put("items", org.json.JSONArray().put(JSONObject().put("id", "requests")
+                .put("label", "请调用 ai_limbs.self.status 逐项审阅申请").put("count", count).put("semantic_tone", "warning"))))
+        val grants = result.optJSONObject("authorizations")?.optJSONArray("effective_grants") ?: org.json.JSONArray()
+        val items = org.json.JSONArray()
+        for (index in 0 until grants.length()) {
+            val grant = grants.getJSONObject(index)
+            val name = when (grant.getString("operation")) { "upgrade" -> "升级"; "rollback" -> "回滚"; else -> "迁移" }
+            val expiry = if (grant.getString("mode") == "LONG") "长期有效，至撤销" else {
+                val format = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss z", java.util.Locale.ROOT)
+                format.timeZone = java.util.TimeZone.getTimeZone("Asia/Shanghai")
+                "限时有效至 ${format.format(java.util.Date(grant.getLong("expires_at_ms")))}"
+            }
+            items.put(JSONObject().put("id", grant.getString("operation")).put("label", "$name：$expiry；请在本次回复提示有效授权")
+                .put("count", 1).put("semantic_tone", "info"))
+        }
+        if (items.length() > 0) groups.put(JSONObject().put("id", "authorizations").put("label", "当前有效授权").put("items", items))
         com.ai.assistance.operit.plugins.center.HostAttentionRegistry.publish("ai_limbs.self", JSONObject()
-            .put("label", "自我模块操作申请")
-            .put("groups", org.json.JSONArray().put(JSONObject().put("id", "lifecycle").put("label", "待审批")
-                .put("items", org.json.JSONArray().put(JSONObject().put("id", "requests").put("label", "请调用 ai_limbs.self.status 审阅")
-                    .put("count", count).put("semantic_tone", "warning")))))
+            .put("label", "自我模块").put("groups", groups))
     }
     fun human(context: Context, operation: String, args: JSONObject): JSONObject = guarded {
         when (operation) {
             "status" -> store(context).status()
             "install" -> store(context).install(File(args.getString("package_path")))
             "request" -> store(context).request(args.getString("operation"), args.getJSONObject("parameters"))
+            "submit" -> store(context).requestBundle(args)
+            "execute" -> store(context).humanExecute(args.getString("operation"), args.getJSONObject("parameters"))
             "cancel_request" -> store(context).cancelRequest(args.getString("request_id"))
             else -> error("SELF_HUMAN_DIRECT_OPERATION_FORBIDDEN")
         }
@@ -37,7 +54,8 @@ internal object SelfModuleService {
         when (operation) {
             "status" -> store(context).status()
             "install" -> store(context).install(File(args.getString("package_path")))
-            "review" -> store(context).review(args.getString("request_id"), args.getBoolean("approve"))
+            "review" -> store(context).review(args.getString("request_id"), args.getBoolean("approve"), args)
+            "revoke" -> store(context).revoke(args.getString("operation"), args.optString("reason"))
             "upgrade", "rollback", "migrate" -> store(context).autonomous(operation, args)
             else -> error("SELF_OPERATION_INVALID")
         }

@@ -52,14 +52,32 @@ internal class KernelPluginAdminJsonServiceV1(
             JSONObject().put("success", true)
         }
         "self_status" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "status", parameters)
+        "self_submit" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "submit", parameters)
+        "self_execute" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "execute", parameters)
         "self_request" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "request", parameters)
         "self_cancel_request" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "cancel_request", parameters)
         "self_install_uri" -> withUriPackage(parameters, ".ails") { file, _ ->
             com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "install", JSONObject().put("package_path", file.absolutePath))
         }
         "self_request_uri" -> withUriPackage(parameters, ".ails") { file, _ ->
-            val args = JSONObject(parameters.getJSONObject("parameters").toString()).put("package_path", file.absolutePath)
-            com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "request", JSONObject().put("operation", parameters.getString("operation")).put("parameters", args))
+            when (parameters.optString("command", "request")) {
+                "submit" -> {
+                    val form = JSONObject(parameters.toString())
+                    val items = form.getJSONArray("items")
+                    for (index in 0 until items.length()) {
+                        val item = items.getJSONObject(index)
+                        if (item.getString("operation") == "upgrade" || (item.getString("operation") == "migrate" && item.getJSONObject("parameters").optString("phase") == "prepare"))
+                            item.getJSONObject("parameters").put("package_path", file.absolutePath)
+                    }
+                    com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "submit", form)
+                }
+                "execute", "request" -> {
+                    val args = JSONObject(parameters.getJSONObject("parameters").toString()).put("package_path", file.absolutePath)
+                    com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, parameters.optString("command", "request"),
+                        JSONObject().put("operation", parameters.getString("operation")).put("parameters", args))
+                }
+                else -> error("SELF_OPERATION_INVALID")
+            }
         }
         "snapshots" -> JSONObject().put(
             "plugins",

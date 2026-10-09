@@ -26,7 +26,8 @@ internal enum class AiLimbsCoreLocalOperation {
     SELF_UPGRADE,
     SELF_ROLLBACK,
     SELF_MIGRATE,
-    SELF_REVIEW
+    SELF_REVIEW,
+    SELF_REVOKE
 }
 
 internal sealed interface AiLimbsCoreRoute {

@@ -41,4 +41,13 @@ class SelfModuleAuthorityTest {
         }
         Mockito.verifyNoInteractions(context)
     }
+
+    @Test fun humanAndPluginCannotMintOrRevokeOngoingAuthorization() {
+        val context = org.mockito.Mockito.mock(android.content.Context::class.java)
+        val forged = JSONObject().put("operation", "upgrade").put("mode", "LONG").put("initiator", "AI")
+        assertFalse(SelfModuleService.human(context, "revoke", forged).getBoolean("success"))
+        assertFalse(SelfModuleService.human(context, "review", forged).getBoolean("success"))
+        val plugin = AiLimbsExecutionSession(AiLimbsExecutionTransport.PLUGIN_RUNTIME, "plugin:test")
+        assertEquals("SELF_AI_TRUSTED_CHANNEL_REQUIRED", SelfModuleService.ai(context, plugin, "revoke", forged).getString("error_code"))
+    }
 }
