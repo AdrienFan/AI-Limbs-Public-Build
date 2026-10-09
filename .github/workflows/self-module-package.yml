@@ -8,9 +8,9 @@ on:
         required: false
         default: ''
       identity:
-        description: Existing persistent identity for this upgrade
-        required: true
-        default: 4d091ec7-a9db-43e8-b80b-d06b5bd03e30
+        description: Optional existing identity for an additional bound upgrade artifact
+        required: false
+        default: ''
   push:
     branches: [main, feat/visual-permission-lifecycle]
     paths:
@@ -34,7 +34,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Package independent blank self module
+      - name: Package fresh template and optional bound upgrade
         id: package
         env:
           REQUESTED_VERSION: ${{ inputs.version }}
@@ -45,18 +45,21 @@ jobs:
           from pathlib import Path
           version = os.environ.get('REQUESTED_VERSION') or json.loads(Path('self-module/blank.json').read_text())['module_version']
           if not re.fullmatch(r'[0-9]+\.[0-9]+\.[0-9]+', version): raise SystemExit('Invalid module version')
-          identity = str(uuid.UUID(os.environ.get('REQUESTED_IDENTITY') or '4d091ec7-a9db-43e8-b80b-d06b5bd03e30'))
-          target = 'self-module/artifacts/blank-self-' + version + '.ails'
-          subprocess.run([sys.executable, 'tools/package_self_module.py', '--output', target, '--version', version, '--identity', identity], check=True)
-          subprocess.run([sys.executable, 'tools/check_self_module_package.py', target, '--version', version, '--identity', identity], check=True)
+          identity = os.environ.get('REQUESTED_IDENTITY', '')
+          modes = [('fresh', [])]
+          if identity: modes.append(('upgrade', ['--identity', str(uuid.UUID(identity))]))
+          for label, extra in modes:
+              target = 'self-module/artifacts/blank-self-' + label + '-' + version + '.ails'
+              subprocess.run([sys.executable, 'tools/package_self_module.py', '--output', target, '--version', version] + extra, check=True)
+              subprocess.run([sys.executable, 'tools/check_self_module_package.py', target, '--version', version] + extra, check=True)
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output: output.write('version=' + version + '\n')
           PY
-      - name: Upload standalone module and validation report
+      - name: Upload standalone artifacts and validation reports
         uses: actions/upload-artifact@v4
         with:
           name: ai-limbs-self-${{ steps.package.outputs.version }}-${{ github.run_number }}
           path: |
             self-module/artifacts/*.ails
-            self-module/artifacts/package-report.json
+            self-module/artifacts/*.report.json
           if-no-files-found: error
           retention-days: 14

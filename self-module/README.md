@@ -1,4 +1,4 @@
-# Blank self module presentation 0.1.3
+# Blank self module presentation 0.1.4
 
 The .ails package owns its management page, compact summary, labels, application forms and interactions. It contains no memory, personality or learning logic. Host lifecycle and approval APIs remain authoritative.
 
@@ -45,3 +45,9 @@ Package with tools/package_self_module.py --output self-module/artifacts/blank-s
 The Self Module Package workflow packages .ails and validates its complete integrity map, UTF-8 pages, element references and script syntax. It never invokes Gradle or compiles the base APK. The Android base workflow no longer includes self-module artifacts. The module stays in its own self-module/ source boundary within this repository.
 
 Plugin Center 1.3.45 loads the page as a Base64 memory document. No virtual website, network cache, external resource resolver or new kernel UI semantics are required. Three cloud Android WebView regressions use these actual module pages and check management actions, forms, approval status and compact summary. Real-device verification remains separate from successful cloud checks.
+
+## 0.1.4 independent identities and registration
+
+New public packages default to CREATE templates and allocate an identity during installation. Existing identity-bound packages remain compatible; --identity explicitly builds a bound upgrade. Migration uses choose_export before approval, writes and verifies the selected SAF document, then offers upload_migration to a configured HTTPS registration endpoint. A matching acknowledgment releases the source installation slot but retains transfer/recovery material. No receiver database is implemented. See docs/TODO/self-module-identity-registration/index.md for protocol and checks.
+
+Install build117 and Plugin Center 1.3.51 before using CREATE templates or the new registration UI. Fresh templates also upgrade an installed identity without changing it.

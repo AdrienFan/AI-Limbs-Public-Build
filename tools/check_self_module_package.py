@@ -15,7 +15,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('package', type=Path)
     parser.add_argument('--version', required=True)
-    parser.add_argument('--identity', required=True)
+    parser.add_argument('--identity')
     args = parser.parse_args()
     with zipfile.ZipFile(args.package) as archive:
         names = archive.namelist()
@@ -24,7 +24,11 @@ def main():
     manifest = json.loads(files.pop('self.json'))
     assert manifest['format'] == 'AIL_SELF_V1' and manifest['module_type'] == 'self'
     assert manifest['package_kind'] == 'module'
-    assert manifest['identity_id'] == str(uuid.UUID(args.identity))
+    if args.identity:
+        assert manifest['identity_mode'] == 'BOUND'
+        assert manifest['identity_id'] == str(uuid.UUID(args.identity))
+    else:
+        assert manifest['identity_mode'] == 'CREATE' and manifest['identity_id'] is None
     assert manifest['module_version'] == args.version
     assert manifest['state_schema_version'] == 1 and 1 in manifest['compatible_state_schemas']
     assert manifest['integrity']['algorithm'] == 'sha256'
@@ -53,7 +57,7 @@ def main():
                   package_sha256=hashlib.sha256(args.package.read_bytes()).hexdigest(),
                   integrity_verified=True, page_syntax_verified=True,
                   android_build_required=False)
-    Path(args.package.parent, 'package-report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
+    Path(args.package.parent, args.package.stem + '.report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps(report, ensure_ascii=False))
 
 

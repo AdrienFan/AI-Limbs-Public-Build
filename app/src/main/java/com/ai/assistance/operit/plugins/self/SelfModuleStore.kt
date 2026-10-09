@@ -62,10 +62,16 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         } finally { temp.delete() }
     }
     private fun save(file: File, json: JSONObject) {
-        if (file == slot && executingRequestId != null) json.put("last_completed_request_id", executingRequestId)
+        if ((file == slot || file.parentFile == File(root, "departures")) && executingRequestId != null) json.put("last_completed_request_id", executingRequestId)
         atomic(file, json.toString().toByteArray())
     }
-    private fun state(): JSONObject? = if (slot.exists()) JSONObject(slot.readText()) else null
+    private fun state(): JSONObject? {
+        if (!slot.exists()) return null
+        val value = JSONObject(slot.readText())
+        // A crash after the durable retirement intent must finish the same slot release.
+        if (value.optBoolean("source_uninstalled")) { commitRetirement(value); return null }
+        return value
+    }
     private fun active(): JSONObject = (state() ?: fail("SELF_NOT_INSTALLED")).also {
         requireSelf(it.getString("lifecycle_state") == "ACTIVE", "SELF_NOT_ACTIVE")
     }
@@ -144,7 +150,10 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         val manifest = JSONObject(String(files.remove("self.json") ?: fail("SELF_MANIFEST_MISSING"), Charsets.UTF_8))
         requireSelf(manifest.getString("format") == FORMAT && manifest.getString("module_type") == "self" &&
             manifest.getInt("package_schema_version") == 1, "SELF_PACKAGE_TYPE_INVALID")
-        identity(manifest.getString("identity_id"))
+        val mode = manifest.optString("identity_mode", "BOUND")
+        requireSelf(mode in setOf("CREATE", "BOUND"), "SELF_IDENTITY_MODE_INVALID")
+        if (mode == "CREATE") requireSelf(manifest.getString("package_kind") == "module" && manifest.has("identity_id") && manifest.isNull("identity_id"), "SELF_TEMPLATE_IDENTITY_INVALID")
+        else identity(manifest.getString("identity_id"))
         requireSelf(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+$").matches(manifest.getString("module_version")), "SELF_VERSION_INVALID")
         val integrity = manifest.getJSONObject("integrity")
         requireSelf(integrity.getString("algorithm") == "sha256", "SELF_INTEGRITY_ALGORITHM_INVALID")
@@ -204,6 +213,22 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         }
         result
     }
+    /** Bind a fresh-program template to one durable instance; versions remain identity-bound. */
+    private fun bindProgram(pack: Pack, id: String): Pack {
+        if (pack.manifest.optString("identity_mode", "BOUND") != "CREATE") return pack
+        val manifest = copyJson(pack.manifest).put("identity_mode", "BOUND").put("identity_id", identity(id))
+        val file = File(root, "validation/${UUID.randomUUID()}.ails")
+        return try { writePack(file, manifest, pack.files); readPack(file) } finally { file.delete() }
+    }
+    private fun newInstance(pack: Pack): Pack {
+        if (pack.manifest.optString("identity_mode", "BOUND") != "CREATE") return pack
+        // Persist allocation before installation, so retrying a crashed install keeps its identity.
+        val allocation = File(root, "allocations/${pack.digest}.json")
+        val allocated = if (allocation.exists()) identity(JSONObject(allocation.readText()).getString("identity_id")) else null
+        val id = if (allocated != null && departures().none { it.getString("identity_id") == allocated }) allocated
+        else UUID.randomUUID().toString().also { save(allocation, JSONObject().put("identity_id", it)) }
+        return bindProgram(pack, id)
+    }
     private fun persistProgram(pack: Pack) {
         val target = File(root, "versions/${pack.manifest.getString("identity_id")}/${pack.manifest.getString("module_version")}.ails")
         if (target.exists()) requireSelf(hash(target.readBytes()) == pack.digest, "SELF_VERSION_DIGEST_CONFLICT")
@@ -215,6 +240,8 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         .put("state_schema_version", manifest.getInt("state_schema_version"))
         .put("lifecycle_state", "ACTIVE").put("migration_id", JSONObject.NULL)
         .put("generation", UUID.randomUUID().toString()).put("data_id", dataId)
+    private fun departures(): List<JSONObject> = File(root, "departures").listFiles()?.filter { it.extension == "json" }
+        ?.map { JSONObject(it.readText()) }?.filter { !it.optBoolean("cancelled") } ?: emptyList()
     fun status(): JSONObject = locked {
         val pending = requests.listFiles()?.filter { it.extension == "json" }?.map { file ->
             val request = JSONObject(file.readText())
@@ -223,21 +250,24 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
                 save(file, request)
             }
             if (request.optString("status") == "EXECUTING") {
-                request.put("status", if (state()?.optString("last_completed_request_id") == request.getString("request_id")) "COMPLETED_RECOVERED" else "RECOVERY_REQUIRED")
+                request.put("status", if (state()?.optString("last_completed_request_id") == request.getString("request_id") || departures().any { it.optString("last_completed_request_id") == request.getString("request_id") }) "COMPLETED_RECOVERED" else "RECOVERY_REQUIRED")
                 save(file, request)
             }
             request
         } ?: emptyList()
         val policy = authorization.snapshot(state())
         JSONObject().put("authorizations", policy).put("success", true).put("device_id", deviceId(key().getString("public")))
-            .put("module", state() ?: JSONObject.NULL).put("requests", JSONArray(pending))
+            .put("module", state() ?: JSONObject.NULL).put("outgoing_migrations", JSONArray(departures())).put("requests", JSONArray(pending))
             .put("migration_package_path", state()?.let { value -> if (value.optString("direction") == "outbound" && !value.isNull("migration_id")) File(root, "exports/${value.getString("migration_id")}.ails").absolutePath else JSONObject.NULL } ?: JSONObject.NULL)
             .put("versions", JSONArray(state()?.let { value -> File(root, "versions/${value.getString("identity_id")}").listFiles()?.map { it.nameWithoutExtension } } ?: emptyList<String>()))
     }
     fun install(file: File): JSONObject = locked {
         requireSelf(state() == null, "SELF_SLOT_OCCUPIED")
-        val pack = readPack(file)
-        requireSelf(pack.manifest.getString("package_kind") == "module", "SELF_MIGRATION_REQUIRES_PROTOCOL")
+        val incoming = readPack(file)
+        requireSelf(incoming.manifest.getString("package_kind") == "module", "SELF_MIGRATION_REQUIRES_PROTOCOL")
+        requireSelf(incoming.manifest.optString("identity_mode") != "BOUND", "SELF_BOUND_PACKAGE_REQUIRES_EXISTING_IDENTITY")
+        val pack = newInstance(incoming)
+        requireSelf(departures().none { it.getString("identity_id") == pack.manifest.getString("identity_id") }, "SELF_IDENTITY_ALREADY_DEPARTED")
         persistProgram(pack)
         val value = metadata(pack.manifest, UUID.randomUUID().toString())
         save(File(data(value), "state.json"), JSONObject().put("identity_id", value.getString("identity_id"))
@@ -253,7 +283,8 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
             File(root, "versions/${old.getString("identity_id")}/$version.ails")
         } else File(args.getString("package_path"))
         requireSelf(file.isFile, "SELF_HISTORY_UNAVAILABLE")
-        val pack = readPack(file)
+        val incoming = readPack(file)
+        val pack = bindProgram(incoming, old.getString("identity_id"))
         val manifest = pack.manifest
         requireSelf(manifest.getString("package_kind") == "module" && manifest.getString("identity_id") == old.getString("identity_id"), "SELF_IDENTITY_MISMATCH")
         fun version(raw: String) = raw.split('.').map { it.toLong() }
@@ -274,11 +305,24 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         val output = java.io.ByteArrayOutputStream()
         ZipOutputStream(output).use { zip ->
             (mapOf("self.json" to manifest.toString().toByteArray()) + files).forEach { (name, bytes) ->
-                zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry()
+                zip.putNextEntry(ZipEntry(name).apply { time = 0L }); zip.write(bytes); zip.closeEntry()
             }
         }
         requireSelf(output.size() <= MAX_BYTES, "SELF_PACKAGE_TOO_LARGE")
         atomic(file, output.toByteArray())
+    }
+    private fun departureFile(id: String) = File(root, "departures/${identity(id)}.json")
+    private fun migrationState(args: JSONObject): JSONObject {
+        if (!args.has("migration_id")) return state() ?: fail("SELF_NOT_INSTALLED")
+        val id = identity(args.getString("migration_id"))
+        state()?.let { if (it.optString("migration_id") == id) return it }
+        val file = departureFile(id)
+        requireSelf(file.isFile, "SELF_MIGRATION_UNKNOWN")
+        return JSONObject(file.readText()).also { requireSelf(!it.optBoolean("cancelled"), "SELF_MIGRATION_CANCELLED") }
+    }
+    private fun saveMigration(old: JSONObject, next: JSONObject) {
+        if (old.optBoolean("source_uninstalled")) save(departureFile(old.getString("migration_id")), next)
+        else save(slot, next)
     }
     private fun migrate(args: JSONObject): JSONObject = when (args.getString("phase")) {
         "export" -> {
@@ -307,7 +351,8 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
             val sealed = copyJson(old).put("human_migration_authorized", humanMigrationAuthorized).put("lifecycle_state", "SEALED").put("migration_id", migrationId)
                 .put("direction", "outbound").put("target_device_id", target).put("package_sha256", hash(output.readBytes()))
                 .put("transfer_committed", false).put("generation", UUID.randomUUID().toString())
-            sealed.remove("abort")
+            if (args.has("export_uri")) sealed.put("export_uri", args.getString("export_uri"))
+            sealed.remove("abort"); sealed.remove("saved_export"); sealed.remove("registration_receipt")
             save(slot, sealed)
             JSONObject().put("success", true).put("package_path", output.absolutePath).put("module", sealed)
         }
@@ -344,7 +389,7 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
             JSONObject().put("success", true).put("receipt", receipt).put("module", next)
         }
         "commit" -> {
-            val old = state() ?: fail("SELF_NOT_INSTALLED")
+            val old = migrationState(args)
             requireSelf(old.getString("lifecycle_state") == "SEALED" && old.getString("direction") == "outbound", "SELF_MIGRATION_NOT_OUTBOUND")
             if (old.optBoolean("transfer_committed")) {
                 // Re-read a durable release, never issue a second transfer to another target.
@@ -353,7 +398,7 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
                 val receipt = verify(args.getJSONObject("receipt"), old.getString("target_device_id"))
                 requireSelf(receipt.getString("kind") == "PREPARED" && receipt.getString("migration_id") == old.getString("migration_id") && receipt.getString("package_sha256") == old.getString("package_sha256"), "SELF_RECEIPT_MISMATCH")
                 val release = sign(copyJson(receipt).put("kind", "RELEASED").put("target_device_id", old.getString("target_device_id")))
-                save(slot, copyJson(old).put("transfer_committed", true).put("release", release)
+                saveMigration(old, copyJson(old).put("transfer_committed", true).put("release", release)
                     .put("generation", UUID.randomUUID().toString()))
                 JSONObject().put("success", true).put("release", release)
             }
@@ -371,15 +416,17 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
             save(slot, next); copyJson(next).put("success", true)
         }
         "cancel" -> {
-            val old = state() ?: fail("SELF_NOT_INSTALLED")
+            val old = migrationState(args)
             requireSelf(old.getString("lifecycle_state") == "SEALED" && !old.optBoolean("transfer_committed"), "SELF_COMMITTED_MIGRATION_CANNOT_CANCEL")
             requireSelf(old.getString("direction") == "outbound", "SELF_TARGET_CANCEL_REQUIRES_SOURCE_ABORT")
+            if (old.optBoolean("source_uninstalled")) requireSelf(state() == null, "SELF_SLOT_OCCUPIED")
             val next = copyJson(old).put("lifecycle_state", "ACTIVE").put("migration_id", JSONObject.NULL)
                 .put("generation", UUID.randomUUID().toString())
             val abort = sign(JSONObject().put("kind", "ABORTED").put("migration_id", old.getString("migration_id"))
                 .put("package_sha256", old.getString("package_sha256")))
             next.put("abort", abort)
-            next.remove("direction"); next.remove("transfer_committed"); next.remove("human_migration_authorized"); save(slot, next)
+            next.remove("source_uninstalled"); next.remove("registration_receipt"); next.remove("saved_export"); next.remove("export_uri"); next.remove("direction"); next.remove("transfer_committed"); next.remove("human_migration_authorized"); save(slot, next)
+            if (old.optBoolean("source_uninstalled")) save(departureFile(old.getString("migration_id")), copyJson(old).put("cancelled", true))
             JSONObject().put("success", true).put("abort", abort).put("module", next)
         }
         "discard" -> {
@@ -408,7 +455,10 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
             "upgrade" -> requireSelf(pinned.has("package_path"), "SELF_PACKAGE_REQUIRED")
             "rollback" -> requireSelf(Regex("^[0-9]+\\.[0-9]+\\.[0-9]+$").matches(pinned.getString("target_version")), "SELF_VERSION_INVALID")
             "migrate" -> when (pinned.getString("phase")) {
-                "export" -> requireSelf(Regex("^[a-f0-9]{64}$").matches(pinned.getString("target_device_id")), "SELF_MIGRATION_TARGET_INVALID")
+                "export" -> {
+                    requireSelf(Regex("^[a-f0-9]{64}$").matches(pinned.getString("target_device_id")), "SELF_MIGRATION_TARGET_INVALID")
+                    if (pinned.has("export_uri")) requireSelf(pinned.getString("export_uri").startsWith("content://"), "SELF_EXPORT_DOCUMENT_REQUIRED")
+                }
                 "prepare" -> requireSelf(pinned.has("package_path"), "SELF_PACKAGE_REQUIRED")
                 "commit" -> pinned.getJSONObject("receipt")
                 "activate" -> pinned.getJSONObject("release")
@@ -430,7 +480,7 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         return JSONObject().put("request_id", requestId).put("operation", operation)
             .put("parameters", pin(operation, args, requestId)).put("status", "PENDING")
             .put("request_kind", "OPERATION").put("requested_mode", "ONE_TIME").put("reason", reason)
-            .put("created_at_ms", clock()).put("state_fingerprint", hash((state()?.toString() ?: "EMPTY").toByteArray()))
+            .put("created_at_ms", clock()).put("state_fingerprint", hash((if (operation == "migrate" && args.has("migration_id")) migrationState(args).toString() else state()?.toString() ?: "EMPTY").toByteArray()))
     }
     fun request(operation: String, args: JSONObject, binding: JSONObject? = null): JSONObject = locked {
         checkProgramBinding(binding)
@@ -476,7 +526,7 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
     fun humanExecute(operation: String, args: JSONObject, binding: JSONObject? = null): JSONObject = locked {
         checkProgramBinding(binding)
         requireSelf(operation in setOf("upgrade", "rollback", "migrate"), "SELF_OPERATION_INVALID")
-        val current = state()
+        val current = if (operation == "migrate" && args.has("migration_id")) migrationState(args) else state()
         val continuation = operation == "migrate" && args.optString("phase") in setOf("commit", "activate", "cancel", "discard") &&
             current?.optBoolean("human_migration_authorized") == true && current.optString("lifecycle_state") == "SEALED"
         val grants = authorization.snapshot(current).getJSONArray("effective_grants")
@@ -524,8 +574,9 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
     }
     private fun performApproved(file: File, request: JSONObject): JSONObject {
         val id = request.getString("request_id")
-        requireSelf(request.getString("state_fingerprint") == hash((state()?.toString() ?: "EMPTY").toByteArray()), "SELF_REQUEST_STALE")
         val args = request.getJSONObject("parameters")
+        val relevant = if (request.getString("operation") == "migrate" && args.has("migration_id")) migrationState(args) else state()
+        requireSelf(request.getString("state_fingerprint") == hash((relevant?.toString() ?: "EMPTY").toByteArray()), "SELF_REQUEST_STALE")
         if (args.has("package_path")) requireSelf(hash(File(args.getString("package_path")).readBytes()) == args.getString("package_sha256"), "SELF_REQUEST_PACKAGE_CHANGED")
         request.put("status", "EXECUTING"); save(file, request)
         executingRequestId = id
@@ -535,7 +586,7 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
             request.put("status", "COMPLETED").put("result", result); save(file, request)
             return JSONObject().put("success", true).put("request", request).put("result", result)
         } catch (error: Exception) {
-            request.put("status", if (state()?.optString("last_completed_request_id") == id) "COMPLETED_RECOVERED" else "FAILED").put("error", error.message)
+            request.put("status", if (state()?.optString("last_completed_request_id") == id || departures().any { it.optString("last_completed_request_id") == id }) "COMPLETED_RECOVERED" else "FAILED").put("error", error.message)
             save(file, request); throw error
         } finally { executingRequestId = null; humanMigrationAuthorized = false }
     }
@@ -547,8 +598,52 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         requireSelf(file.isFile && hash(file.readBytes()) == value.getString("package_sha256"), "SELF_MIGRATION_PACKAGE_CORRUPT")
         file
     }
+    fun migrationRegistration(): JSONObject = locked {
+        val value = state() ?: fail("SELF_NOT_INSTALLED")
+        requireSelf(value.optString("direction") == "outbound" && value.optString("lifecycle_state") == "SEALED", "SELF_MIGRATION_NOT_OUTBOUND")
+        val file = File(root, "exports/${identity(value.getString("migration_id"))}.ails")
+        requireSelf(file.isFile && hash(file.readBytes()) == value.getString("package_sha256"), "SELF_MIGRATION_PACKAGE_CORRUPT")
+        JSONObject().put("protocol", "AIL_SELF_REGISTRATION_V1").put("identity_id", value.getString("identity_id"))
+            .put("migration_id", value.getString("migration_id")).put("package_sha256", value.getString("package_sha256"))
+            .put("package_size_bytes", file.length()).put("module_version", value.getString("module_version"))
+            .put("state_schema_version", value.getInt("state_schema_version"))
+            .put("source_device_id", deviceId(key().getString("public"))).put("target_device_id", value.getString("target_device_id"))
+            .put("saved_export", value.optBoolean("saved_export")).put("success", true)
+    }
+    fun markMigrationSaved(id: String, digest: String, uri: String): JSONObject = locked {
+        val value = state() ?: fail("SELF_NOT_INSTALLED")
+        requireSelf(value.optString("direction") == "outbound" && value.optString("lifecycle_state") == "SEALED" &&
+            value.getString("migration_id") == identity(id) && value.getString("package_sha256") == digest, "SELF_EXPORT_STALE")
+        requireSelf(uri.startsWith("content://"), "SELF_EXPORT_DOCUMENT_REQUIRED")
+        save(slot, copyJson(value).put("saved_export", true).put("export_uri", uri))
+        JSONObject().put("success", true).put("package_sha256", digest).put("identity_id", value.getString("identity_id"))
+    }
+    /** Only the trusted control plane invokes this after a verified HTTP acknowledgment. */
+    fun completeRegistration(receipt: JSONObject): JSONObject = locked {
+        val value = state() ?: fail("SELF_NOT_INSTALLED")
+        requireSelf(value.optString("direction") == "outbound" && value.optString("lifecycle_state") == "SEALED" &&
+            value.optBoolean("saved_export"), "SELF_EXPORT_SAVE_REQUIRED")
+        requireSelf(receipt.getString("protocol") == "AIL_SELF_REGISTRATION_V1" && receipt.getBoolean("received"), "SELF_UPLOAD_NOT_CONFIRMED")
+        for (field in listOf("identity_id", "migration_id", "package_sha256"))
+            requireSelf(receipt.getString(field) == value.getString(field), "SELF_UPLOAD_RECEIPT_MISMATCH")
+        requireSelf(receipt.getString("receipt_id").isNotBlank() && receipt.getString("receipt_id").length <= 256, "SELF_UPLOAD_RECEIPT_INVALID")
+        val file = File(root, "exports/${identity(value.getString("migration_id"))}.ails")
+        requireSelf(file.isFile && hash(file.readBytes()) == value.getString("package_sha256"), "SELF_MIGRATION_PACKAGE_CORRUPT")
+        val retired = copyJson(value).put("source_uninstalled", true).put("registration_receipt", receipt)
+        save(slot, retired)
+        commitRetirement(retired)
+        JSONObject().put("success", true).put("source_uninstalled", true).put("migration_id", value.getString("migration_id"))
+    }
+    private fun commitRetirement(value: JSONObject) {
+        // Moving the durable slot releases installation without destroying the only recovery copy.
+        val destination = departureFile(value.getString("migration_id"))
+        requireSelf(destination.parentFile.mkdirs() || destination.parentFile.isDirectory, "SELF_STORE_UNAVAILABLE")
+        Files.move(slot.toPath(), destination.toPath(), StandardCopyOption.ATOMIC_MOVE)
+        java.nio.channels.FileChannel.open(root.toPath(), java.nio.file.StandardOpenOption.READ).use { it.force(true) }
+        java.nio.channels.FileChannel.open(destination.parentFile.toPath(), java.nio.file.StandardOpenOption.READ).use { it.force(true) }
+    }
     fun isReservedIdentity(id: String): Boolean {
         if (!Regex("^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$").matches(id)) return false
-        return locked { state()?.optString("identity_id") == id }
+        return locked { state()?.optString("identity_id") == id || departures().any { it.optString("identity_id") == id } }
     }
 }

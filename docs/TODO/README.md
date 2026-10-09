@@ -75,3 +75,5 @@ For_Agent: 对项目大规模动工前按本规范协作
 ## 自我模块界面所有权
 
 - [包内自我模块界面](self-module-ui/index.md)：build116、总控台 1.3.44、自我模块 0.1.2，待云端验证。
+
+- [Self identity and migration registration](self-module-identity-registration/index.md): build117 / module 0.1.4.

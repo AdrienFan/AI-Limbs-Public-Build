@@ -10,11 +10,11 @@ from pathlib import Path
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
-    parser.add_argument("--identity", help="Existing identity UUID for upgrades; omitted creates a new identity")
-    parser.add_argument("--version", default="0.1.3")
+    parser.add_argument("--identity", help="Existing identity UUID for upgrades; omitted creates a fresh-install template")
+    parser.add_argument("--version", default="0.1.4")
     parser.add_argument("--without-presentation", action="store_true", help="Package legacy V0.1 lifecycle-only fixtures")
     args = parser.parse_args()
-    identity = str(uuid.UUID(args.identity)) if args.identity else str(uuid.uuid4())
+    identity = str(uuid.UUID(args.identity)) if args.identity else None
     if args.output.suffix.lower() != ".ails":
         parser.error("output must end with .ails")
     if len(args.version.split(".")) != 3 or not all(part.isdigit() for part in args.version.split(".")):
@@ -39,7 +39,8 @@ def main():
             files[path] = data
     manifest = {
         "format": "AIL_SELF_V1", "module_type": "self", "package_kind": "module",
-        "package_schema_version": 1, "identity_id": identity, "module_version": args.version,
+        "package_schema_version": 1, "identity_mode": "BOUND" if identity else "CREATE",
+        "module_id": "ai_limbs.self.blank", "identity_id": identity, "module_version": args.version,
         "state_schema_version": 1, "compatible_state_schemas": [1],
         "integrity": {"algorithm": "sha256", "entries": {name: hashlib.sha256(data).hexdigest() for name, data in files.items()}},
     }

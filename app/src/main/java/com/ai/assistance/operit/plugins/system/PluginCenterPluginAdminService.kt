@@ -43,14 +43,9 @@ internal class KernelPluginAdminJsonServiceV1(
         operation: String,
         parameters: JSONObject
     ): JSONObject = when (operation.trim()) {
-        "self_export_uri" -> {
-            val file = com.ai.assistance.operit.plugins.self.SelfModuleService.migrationPackage(appContext)
-            val destination = Uri.parse(parameters.requireAdminText("uri"))
-            require(destination.scheme == "content") { "SELF_EXPORT_DOCUMENT_REQUIRED" }
-            val output = requireNotNull(appContext.contentResolver.openOutputStream(destination, "w")) { "SELF_EXPORT_OPEN_FAILED" }
-            output.use { stream -> file.inputStream().use { it.copyTo(stream) } }
-            JSONObject().put("success", true)
-        }
+        "self_export_uri" -> com.ai.assistance.operit.plugins.self.SelfModuleService.exportMigration(appContext, parameters.requireAdminText("uri"))
+        "self_migration_registration" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "registration", parameters)
+        "self_complete_registration" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "complete_registration", parameters)
         "self_status" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "status", parameters)
         "self_resources" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "resources", parameters)
         "self_submit" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "submit", parameters)

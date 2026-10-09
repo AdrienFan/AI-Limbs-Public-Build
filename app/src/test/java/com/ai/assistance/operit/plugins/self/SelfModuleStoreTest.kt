@@ -19,12 +19,13 @@ class SelfModuleStoreTest {
     private val id = "4d091ec7-a9db-43e8-b80b-d06b5bd03e30"
     private fun store(name: String) = SelfModuleStore(File(temp.root, name))
     private fun hash(bytes: ByteArray) = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
-    private fun pack(version: String = "0.1.0", identity: String = id, schema: Int = 1): File {
+    private fun pack(version: String = "0.1.0", identity: String = id, schema: Int = 1, create: Boolean = false): File {
         val payload = JSONObject().put("entry", "blank").put("module_version", version).toString().toByteArray()
         val manifest = JSONObject().put("format", "AIL_SELF_V1").put("module_type", "self")
             .put("package_kind", "module").put("package_schema_version", 1).put("identity_id", identity)
             .put("module_version", version).put("state_schema_version", schema).put("compatible_state_schemas", JSONArray(listOf(schema)))
             .put("integrity", JSONObject().put("algorithm", "sha256").put("entries", JSONObject().put("program/blank.json", hash(payload))))
+        if (create) manifest.put("identity_mode", "CREATE").put("identity_id", JSONObject.NULL)
         val file = File(temp.root, "${UUID.randomUUID()}.ails")
         ZipOutputStream(file.outputStream()).use {
             it.putNextEntry(ZipEntry("self.json")); it.write(manifest.toString().toByteArray()); it.closeEntry()
@@ -38,6 +39,71 @@ class SelfModuleStoreTest {
     private fun module(store: SelfModuleStore) = store.status().getJSONObject("module")
     private fun upgrade(file: File) = JSONObject().put("package_path", file.absolutePath)
     private fun phase(name: String) = JSONObject().put("phase", name)
+    @Test fun oneTemplateCreatesIndependentDurableIdentitiesAcrossHosts() {
+        val template = pack(create = true)
+        val first = store("first"); val second = store("second")
+        first.install(template); second.install(template)
+        val id = module(first).getString("identity_id")
+        assertNotEquals(id, module(second).getString("identity_id"))
+        assertEquals(4, UUID.fromString(id).version())
+        first.autonomous("upgrade", upgrade(pack("0.1.1", create = true)))
+        first.autonomous("rollback", JSONObject().put("target_version", "0.1.0"))
+        assertEquals(id, module(store("first")).getString("identity_id"))
+    }
+    private fun acknowledgment(info: JSONObject) = JSONObject().put("protocol", "AIL_SELF_REGISTRATION_V1").put("received", true)
+        .put("identity_id", info.getString("identity_id")).put("migration_id", info.getString("migration_id"))
+        .put("package_sha256", info.getString("package_sha256")).put("receipt_id", "cloud-fixture-receipt")
+    @Test fun retirementRequiresSavedPackageAndMatchingAcknowledgment() {
+        val source = store("source"); val target = store("target"); source.install(pack())
+        source.autonomous("migrate", phase("export").put("target_device_id", target.status().getString("device_id")))
+        val info = source.migrationRegistration()
+        expect("SELF_EXPORT_SAVE_REQUIRED") { source.completeRegistration(acknowledgment(info)) }
+        source.markMigrationSaved(info.getString("migration_id"), info.getString("package_sha256"), "content://fixture/chosen.ails")
+        expect("SELF_UPLOAD_RECEIPT_MISMATCH") { source.completeRegistration(acknowledgment(info).put("package_sha256", "b".repeat(64))) }
+        expect("SELF_UPLOAD_NOT_CONFIRMED") { source.completeRegistration(acknowledgment(info).put("received", false)) }
+        assertEquals("SEALED", module(source).getString("lifecycle_state"))
+        assertTrue(source.migrationPackage().exists())
+    }
+    @Test fun confirmedUploadReleasesSlotButRetainsDataAndTransferCanFinish() {
+        val source = store("source"); val target = store("target"); source.install(pack(create = true))
+        val sourceIdentity = module(source).getString("identity_id")
+        val marker = File(temp.root, "source/data/${module(source).getString("data_id")}/marker.txt").apply { writeText("only-copy") }
+        val exported = source.autonomous("migrate", phase("export").put("target_device_id", target.status().getString("device_id")))
+        val info = source.migrationRegistration()
+        source.markMigrationSaved(info.getString("migration_id"), info.getString("package_sha256"), "content://fixture/chosen.ails")
+        source.completeRegistration(acknowledgment(info))
+        assertTrue(store("source").status().isNull("module")); assertTrue(marker.exists())
+        assertEquals(1, source.status().getJSONArray("outgoing_migrations").length())
+        val prepared = target.autonomous("migrate", phase("prepare").put("package_path", exported.getString("package_path")))
+        val committed = store("source").autonomous("migrate", phase("commit").put("migration_id", info.getString("migration_id")).put("receipt", prepared.getJSONObject("receipt")))
+        target.autonomous("migrate", phase("activate").put("release", committed.getJSONObject("release")))
+        assertEquals(sourceIdentity, module(target).getString("identity_id"))
+        assertEquals("only-copy", File(temp.root, "target/data/${module(target).getString("data_id")}/marker.txt").readText())
+    }
+    @Test fun departedIdentityCannotBeReinstalledAndSameTemplateCreatesANewIndividual() {
+        val source = store("source"); val target = store("target"); val template = pack(create = true)
+        source.install(template)
+        val previous = module(source).getString("identity_id")
+        source.autonomous("migrate", phase("export").put("target_device_id", target.status().getString("device_id")))
+        val info = source.migrationRegistration()
+        source.markMigrationSaved(info.getString("migration_id"), info.getString("package_sha256"), "content://fixture/chosen.ails")
+        source.completeRegistration(acknowledgment(info))
+        expect("SELF_IDENTITY_ALREADY_DEPARTED") { source.install(pack(identity = previous)) }
+        source.install(template)
+        assertNotEquals(previous, module(source).getString("identity_id"))
+        expect("SELF_SLOT_OCCUPIED") { source.autonomous("migrate", phase("cancel").put("migration_id", info.getString("migration_id"))) }
+    }
+    @Test fun uncommittedRetiredTransferCanRestoreOnlyIntoAnEmptySlot() {
+        val source = store("source"); val target = store("target"); source.install(pack())
+        source.autonomous("migrate", phase("export").put("target_device_id", target.status().getString("device_id")))
+        val info = source.migrationRegistration()
+        source.markMigrationSaved(info.getString("migration_id"), info.getString("package_sha256"), "content://fixture/chosen.ails")
+        source.completeRegistration(acknowledgment(info))
+        source.autonomous("migrate", phase("cancel").put("migration_id", info.getString("migration_id")))
+        assertEquals(id, module(source).getString("identity_id"))
+        assertEquals("ACTIVE", module(source).getString("lifecycle_state"))
+        assertEquals(0, source.status().getJSONArray("outgoing_migrations").length())
+    }
     @Test fun installAndSecondIdentityAdmission() {
         val host = store("host"); host.install(pack())
         assertEquals(id, module(host).getString("identity_id"))
@@ -293,6 +359,7 @@ class SelfModuleStoreTest {
             .put("package_schema_version", 1).put("identity_id", id).put("module_version", version)
             .put("state_schema_version", 1).put("compatible_state_schemas", JSONArray(listOf(1)))
             .put("integrity", JSONObject().put("algorithm", "sha256").put("entries", checks))
+        if (create) manifest.put("identity_mode", "CREATE").put("identity_id", JSONObject.NULL)
         val file = File(temp.root, "${UUID.randomUUID()}.ails")
         ZipOutputStream(file.outputStream()).use { zip ->
             zip.putNextEntry(ZipEntry("self.json")); zip.write(manifest.toString().toByteArray()); zip.closeEntry()
