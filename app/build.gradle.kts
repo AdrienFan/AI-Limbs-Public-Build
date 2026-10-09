@@ -422,7 +422,7 @@ android {
         applicationId = "com.ai.assistance.operit"
         minSdk = 26
         targetSdk = 34
-        versionCode = 212
+        versionCode = 213
 
         versionName = "0.8.0.19"
 
@@ -461,7 +461,7 @@ android {
         debug {
             // Stable Android package identity: keep this unchanged for in-place updates.
             applicationIdSuffix = ".ailimbs.stable"
-            versionNameSuffix = "-build117"
+            versionNameSuffix = "-build118"
 
             signingConfig = releaseSigningConfig ?: signingConfigs.getByName("debug")
             resValue("string", "app_name", "AI Limbs")
@@ -469,7 +469,7 @@ android {
         create("clone") {
             initWith(getByName("debug"))
             // Version-specific comparison package keeps existing versions installed side by side.
-            applicationIdSuffix = ".ailimbs.build117"
+            applicationIdSuffix = ".ailimbs.build118"
             if (releaseSigningConfig != null) {
                 signingConfig = releaseSigningConfig
             }

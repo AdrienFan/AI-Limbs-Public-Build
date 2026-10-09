@@ -74,3 +74,11 @@ The existing real-WebView and ordinary-plugin regression suites remain enabled.
 Versions: base build117 (versionCode 212), Plugin Center 1.3.51 (55), module 0.1.4.
 Module packaging remains a separate workflow with no Android base compilation.
 Implementation complete; cloud validation and real-device verification pending.
+
+## build118 compiler correction
+
+Run 37934893357 compiled production Kotlin, then failed compiling the UI-package test
+helper because CREATE-template initialization was mistakenly inserted into a helper
+without a create parameter. Remove only that stray statement; retain CREATE coverage
+in the intended pack helper. Base build118 (versionCode 213) keeps runtime behavior
+and module 0.1.4 unchanged. Cloud regression validation is pending.

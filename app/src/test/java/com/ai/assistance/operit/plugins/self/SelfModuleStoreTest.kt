@@ -359,7 +359,6 @@ class SelfModuleStoreTest {
             .put("package_schema_version", 1).put("identity_id", id).put("module_version", version)
             .put("state_schema_version", 1).put("compatible_state_schemas", JSONArray(listOf(1)))
             .put("integrity", JSONObject().put("algorithm", "sha256").put("entries", checks))
-        if (create) manifest.put("identity_mode", "CREATE").put("identity_id", JSONObject.NULL)
         val file = File(temp.root, "${UUID.randomUUID()}.ails")
         ZipOutputStream(file.outputStream()).use { zip ->
             zip.putNextEntry(ZipEntry("self.json")); zip.write(manifest.toString().toByteArray()); zip.closeEntry()
