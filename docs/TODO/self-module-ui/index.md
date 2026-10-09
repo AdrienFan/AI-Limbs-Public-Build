@@ -29,3 +29,9 @@ Added cloud regression cases cover opaque resource reads, resource admission cor
 Pending cloud and device checks: compile base and Plugin Center; run the selected regression suite; verify package hashes and both UI entries; install base/center/module in order; check wide/narrow/font-scaled layout, selectors, approvals, file pickers, native cancellation, stale pages, render failure recovery and source/target sealed migration. Ordinary-plugin regression checks remain required.
 
 Implementation details and stable page transport are documented in [the module contract](../../../self-module/README.md). This checkpoint is source-complete and awaits cloud validation.
+
+## Offline rendering repair and independent package 0.1.3
+
+The installed 0.1.2 page and compact card showed Android WebView error documents. The native recovery entry remained available and the module identity and ACTIVE metadata remained readable. Plugin Center 1.3.45 replaces the synthetic HTTPS document loader with a Base64 memory document, retaining network/file/navigation restrictions and native human transport. Cloud instrumentation exercises the actual module HTML on Android rather than relying on script syntax alone.
+
+The module version is now 0.1.3, same persistent identity and schema. A standalone self-module-package workflow owns package generation and validation. The base APK workflow stops embedding these artifacts; base program version remains build116 because no base runtime code changes. Source review is pending cloud rendering execution and real-device confirmation.

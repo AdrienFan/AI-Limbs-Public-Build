@@ -11,7 +11,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--identity", help="Existing identity UUID for upgrades; omitted creates a new identity")
-    parser.add_argument("--version", default="0.1.2")
+    parser.add_argument("--version", default="0.1.3")
     parser.add_argument("--without-presentation", action="store_true", help="Package legacy V0.1 lifecycle-only fixtures")
     args = parser.parse_args()
     identity = str(uuid.UUID(args.identity)) if args.identity else str(uuid.uuid4())

@@ -1,4 +1,4 @@
-# Blank self module presentation 0.1.2
+# Blank self module presentation 0.1.3
 
 The .ails package owns its management page, compact summary, labels, application forms and interactions. It contains no memory, personality or learning logic. Host lifecycle and approval APIs remain authoritative.
 
@@ -34,8 +34,14 @@ The base checks program binding under the same lock as human request creation, c
 
 ## Compatibility and recovery
 
-Use base build116, Plugin Center 1.3.44 and blank module 0.1.2 together. Base build115 deliberately rejects UI-bearing packages because its admission only accepts program/blank.json. Install the new base before upgrading the module.
+Use base build116, Plugin Center 1.3.45 and blank module 0.1.3 together. Base build115 deliberately rejects UI-bearing packages because its admission only accepts program/blank.json. Install the new base before upgrading the module.
 
 Plugin Center keeps a separate native installation/recovery surface. It supports initial install, requesting migration preparation, authorized upgrade or a one-time repair application, rollback to stored older programs, and sealed migration completion/abort with the existing signed receipts. It does not recreate the former module management page when resources are absent. Recovery follows the same existing authorization and lifecycle checks and does not reset identity or data.
 
-Package with tools/package_self_module.py --output self-module/artifacts/blank-self-0.1.2.ails --version 0.1.2 --identity <existing UUID>. Use --without-presentation only for legacy lifecycle fixtures. Do not generate a new identity for an upgrade.
+Package with tools/package_self_module.py --output self-module/artifacts/blank-self-0.1.3.ails --version 0.1.3 --identity <existing UUID>. Use --without-presentation only for legacy lifecycle fixtures. Do not generate a new identity for an upgrade.
+
+## Independent cloud packaging
+
+The Self Module Package workflow packages .ails and validates its complete integrity map, UTF-8 pages, element references and script syntax. It never invokes Gradle or compiles the base APK. The Android base workflow no longer includes self-module artifacts. The module stays in its own self-module/ source boundary within this repository.
+
+Plugin Center 1.3.45 loads the page as a Base64 memory document. No virtual website, network cache, external resource resolver or new kernel UI semantics are required. Three cloud Android WebView regressions use these actual module pages and check management actions, forms, approval status and compact summary. Real-device verification remains separate from successful cloud checks.

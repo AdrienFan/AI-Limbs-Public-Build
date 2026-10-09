@@ -16,6 +16,11 @@ on:
           - ':app:bundleRelease'
   push:
     branches: [main, v0.5.2-dev, fix/build72-visual-resident-restore, fix/build73-official-identity-resident-sync, fix/build74-visual-policy-routing]
+    paths-ignore:
+      - 'self-module/**'
+      - 'tools/package_self_module.py'
+      - 'tools/check_self_module_package.py'
+      - '.github/workflows/self-module-package.yml'
 
 concurrency:
   group: android-build-${{ github.event_name }}-${{ github.ref }}
@@ -301,13 +306,6 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-      - name: Package blank self modules
-        if: success()
-        run: |
-          python3 tools/package_self_module.py --output self-module/artifacts/blank-self-0.1.0.ails --version 0.1.0 --without-presentation --identity 4d091ec7-a9db-43e8-b80b-d06b5bd03e30
-          python3 tools/package_self_module.py --output self-module/artifacts/blank-self-0.1.1.ails --version 0.1.1 --without-presentation --identity 4d091ec7-a9db-43e8-b80b-d06b5bd03e30
-          python3 tools/package_self_module.py --output self-module/artifacts/blank-self-0.1.2.ails --version 0.1.2 --identity 4d091ec7-a9db-43e8-b80b-d06b5bd03e30
-
       - name: Upload successful Android outputs
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
@@ -316,6 +314,5 @@ jobs:
           path: |
             app/build/outputs/apk/**/*.apk
             app/build/outputs/bundle/**/*.aab
-            self-module/artifacts/*.ails
           if-no-files-found: error
           retention-days: 14
