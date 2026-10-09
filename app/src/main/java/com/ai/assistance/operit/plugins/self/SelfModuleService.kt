@@ -41,11 +41,12 @@ internal object SelfModuleService {
     fun human(context: Context, operation: String, args: JSONObject): JSONObject = guarded {
         when (operation) {
             "status" -> store(context).status()
+            "resources" -> store(context).resources(args)
             "install" -> store(context).install(File(args.getString("package_path")))
-            "request" -> store(context).request(args.getString("operation"), args.getJSONObject("parameters"))
+            "request" -> store(context).request(args.getString("operation"), args.getJSONObject("parameters"), args.optJSONObject("program_binding"))
             "submit" -> store(context).requestBundle(args)
-            "execute" -> store(context).humanExecute(args.getString("operation"), args.getJSONObject("parameters"))
-            "cancel_request" -> store(context).cancelRequest(args.getString("request_id"))
+            "execute" -> store(context).humanExecute(args.getString("operation"), args.getJSONObject("parameters"), args.optJSONObject("program_binding"))
+            "cancel_request" -> store(context).cancelRequest(args.getString("request_id"), args.optJSONObject("program_binding"))
             else -> error("SELF_HUMAN_DIRECT_OPERATION_FORBIDDEN")
         }
     }

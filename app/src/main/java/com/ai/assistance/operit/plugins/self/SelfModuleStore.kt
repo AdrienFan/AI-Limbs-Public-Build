@@ -153,7 +153,9 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         files.forEach { (name, data) -> requireSelf(hash(data) == checks.getString(name), "SELF_INTEGRITY_FAILED") }
         when (manifest.getString("package_kind")) {
             "module" -> {
-                requireSelf(files.keys == setOf("program/blank.json"), "SELF_BLANK_PROGRAM_ONLY")
+                // Program resources are opaque to the kernel; consumers define their own schemas.
+                requireSelf(files.keys.all { it == "program/blank.json" || it.startsWith("resources/") } &&
+                    files.containsKey("program/blank.json"), "SELF_BLANK_PROGRAM_ONLY")
                 val program = JSONObject(String(files.getValue("program/blank.json"), Charsets.UTF_8))
                 requireSelf(program.getString("entry") == "blank" && program.getString("module_version") == manifest.getString("module_version"), "SELF_PROGRAM_INVALID")
                 requireSelf(manifest.getInt("state_schema_version") > 0, "SELF_SCHEMA_INVALID")
@@ -168,6 +170,40 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
     }
     private fun program(state: JSONObject) = File(root, "versions/${state.getString("identity_id")}/${state.getString("module_version")}.ails")
     private fun data(state: JSONObject) = File(root, "data/${state.getString("data_id")}")
+    private fun programBinding(value: JSONObject, digest: String) = JSONObject()
+        .put("identity_id", value.getString("identity_id")).put("data_id", value.getString("data_id"))
+        .put("module_version", value.getString("module_version")).put("generation", value.getString("generation"))
+        .put("package_sha256", digest)
+    private fun checkProgramBinding(binding: JSONObject?) {
+        if (binding == null) return
+        val value = state() ?: fail("SELF_PROGRAM_BINDING_STALE")
+        for (field in listOf("identity_id", "data_id", "module_version", "generation"))
+            requireSelf(binding.optString(field).isNotEmpty() && binding.getString(field) == value.getString(field), "SELF_PROGRAM_BINDING_STALE")
+        requireSelf(binding.getString("package_sha256") == hash(program(value).readBytes()), "SELF_PROGRAM_BINDING_STALE")
+    }
+    /** Generic verified package-resource primitive. No HTML, UI schema or presentation semantics. */
+    fun resources(args: JSONObject = JSONObject()): JSONObject = locked {
+        checkProgramBinding(args.optJSONObject("program_binding"))
+        val value = state() ?: return@locked JSONObject().put("success", true).put("available", false)
+        val pack = readPack(program(value))
+        requireSelf(pack.manifest.getString("package_kind") == "module" && pack.manifest.getString("identity_id") == value.getString("identity_id") &&
+            pack.manifest.getString("module_version") == value.getString("module_version"), "SELF_RESOURCE_IDENTITY_MISMATCH")
+        val paths = pack.files.keys.filter { it.startsWith("resources/") }
+        val result = JSONObject().put("success", true).put("available", paths.isNotEmpty())
+            .put("binding", programBinding(value, pack.digest)).put("paths", JSONArray(paths)).put("encoding", "base64")
+        val requested = args.optJSONArray("paths")
+        if (paths.isNotEmpty() && requested != null) {
+            requireSelf(requested.length() in 1..16, "SELF_RESOURCE_REQUEST_INVALID")
+            val selected = (0 until requested.length()).map { requested.getString(it) }
+            requireSelf(selected.toSet().size == selected.size && selected.all { it in paths }, "SELF_RESOURCE_MISSING")
+            // Bound individual RPC payloads; large bundles can be read in separate explicit calls.
+            requireSelf(selected.sumOf { pack.files.getValue(it).size.toLong() } <= 512 * 1024L, "SELF_RESOURCE_RESPONSE_TOO_LARGE")
+            val content = JSONObject()
+            selected.forEach { path -> content.put(path, Base64.getEncoder().encodeToString(pack.files.getValue(path))) }
+            result.put("resources", content)
+        }
+        result
+    }
     private fun persistProgram(pack: Pack) {
         val target = File(root, "versions/${pack.manifest.getString("identity_id")}/${pack.manifest.getString("module_version")}.ails")
         if (target.exists()) requireSelf(hash(target.readBytes()) == pack.digest, "SELF_VERSION_DIGEST_CONFLICT")
@@ -396,13 +432,15 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
             .put("request_kind", "OPERATION").put("requested_mode", "ONE_TIME").put("reason", reason)
             .put("created_at_ms", clock()).put("state_fingerprint", hash((state()?.toString() ?: "EMPTY").toByteArray()))
     }
-    fun request(operation: String, args: JSONObject): JSONObject = locked {
+    fun request(operation: String, args: JSONObject, binding: JSONObject? = null): JSONObject = locked {
+        checkProgramBinding(binding)
         val value = operationRequest(operation, args)
         save(File(requests, "${value.getString("request_id")}.json"), value)
         copyJson(value).put("success", true)
     }
     /** One selected permission = one decision. Validate the entire form before making requests visible. */
     fun requestBundle(args: JSONObject): JSONObject = locked {
+        checkProgramBinding(args.optJSONObject("program_binding"))
         val items = args.getJSONArray("items")
         requireSelf(items.length() in 1..3, "SELF_APPLICATION_ITEMS_INVALID")
         val mode = args.getString("mode")
@@ -435,7 +473,8 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         authorization.revoke(operation, reason)
     }
     /** Ongoing grants are checked again under the same lock as the lifecycle commit. */
-    fun humanExecute(operation: String, args: JSONObject): JSONObject = locked {
+    fun humanExecute(operation: String, args: JSONObject, binding: JSONObject? = null): JSONObject = locked {
+        checkProgramBinding(binding)
         requireSelf(operation in setOf("upgrade", "rollback", "migrate"), "SELF_OPERATION_INVALID")
         val current = state()
         val continuation = operation == "migrate" && args.optString("phase") in setOf("commit", "activate", "cancel", "discard") &&
@@ -447,7 +486,8 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
         save(file, value)
         performApproved(file, value)
     }
-    fun cancelRequest(id: String): JSONObject = locked {
+    fun cancelRequest(id: String, binding: JSONObject? = null): JSONObject = locked {
+        checkProgramBinding(binding)
         val file = File(requests, "${identity(id)}.json"); val value = JSONObject(file.readText())
         requireSelf(value.getString("status") == "PENDING", "SELF_REQUEST_TERMINAL")
         value.put("status", "CANCELLED"); save(file, value); copyJson(value).put("success", true)

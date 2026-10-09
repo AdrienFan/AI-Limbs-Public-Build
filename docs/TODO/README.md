@@ -72,3 +72,6 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [Single-pass screen feedback primitives](single-pass-screen-feedback/index.md)
 
 - [通用 Host 队列与触控反馈 build113](host-visual-loop-build113/index.md)：请求唤醒、动作完成、反馈坐标及真实计时。
+## 自我模块界面所有权
+
+- [包内自我模块界面](self-module-ui/index.md)：build116、总控台 1.3.44、自我模块 0.1.2，待云端验证。

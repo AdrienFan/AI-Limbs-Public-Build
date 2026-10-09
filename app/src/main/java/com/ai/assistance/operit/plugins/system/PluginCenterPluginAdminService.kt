@@ -52,6 +52,7 @@ internal class KernelPluginAdminJsonServiceV1(
             JSONObject().put("success", true)
         }
         "self_status" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "status", parameters)
+        "self_resources" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "resources", parameters)
         "self_submit" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "submit", parameters)
         "self_execute" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "execute", parameters)
         "self_request" -> com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, "request", parameters)
@@ -74,7 +75,8 @@ internal class KernelPluginAdminJsonServiceV1(
                 "execute", "request" -> {
                     val args = JSONObject(parameters.getJSONObject("parameters").toString()).put("package_path", file.absolutePath)
                     com.ai.assistance.operit.plugins.self.SelfModuleService.human(appContext, parameters.optString("command", "request"),
-                        JSONObject().put("operation", parameters.getString("operation")).put("parameters", args))
+                        JSONObject().put("operation", parameters.getString("operation")).put("parameters", args)
+                            .apply { parameters.optJSONObject("program_binding")?.let { put("program_binding", it) } })
                 }
                 else -> error("SELF_OPERATION_INVALID")
             }

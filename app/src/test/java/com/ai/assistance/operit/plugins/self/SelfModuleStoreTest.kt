@@ -282,4 +282,76 @@ class SelfModuleStoreTest {
         expect("SELF_SCHEMA_INCOMPATIBLE") { host.humanExecute("upgrade", upgrade(pack("0.1.1", schema = 2))) }
         assertEquals("0.1.0", module(host).getString("module_version"))
     }
+    private fun page(host: SelfModuleStore): String = String(java.util.Base64.getDecoder().decode(
+        host.resources(JSONObject().put("paths", JSONArray(listOf("resources/index.html")))).getJSONObject("resources").getString("resources/index.html")), Charsets.UTF_8)
+    private fun uiPack(version: String, page: String, digestOverride: String? = null): File {
+        val program = JSONObject().put("entry", "blank").put("module_version", version).toString().toByteArray()
+        val files = linkedMapOf("program/blank.json" to program, "resources/index.html" to page.toByteArray(), "resources/summary.html" to "<html><head></head><body>summary</body></html>".toByteArray())
+        files["resources/presentation.json"] = JSONObject().put("api_version", 1).put("runtime", "html").put("entry", "resources/index.html").put("summary_entry", "resources/summary.html").toString().toByteArray()
+        val checks = JSONObject(); files.forEach { (name, bytes) -> checks.put(name, if (name == "resources/index.html" && digestOverride != null) digestOverride else hash(bytes)) }
+        val manifest = JSONObject().put("format", "AIL_SELF_V1").put("module_type", "self").put("package_kind", "module")
+            .put("package_schema_version", 1).put("identity_id", id).put("module_version", version)
+            .put("state_schema_version", 1).put("compatible_state_schemas", JSONArray(listOf(1)))
+            .put("integrity", JSONObject().put("algorithm", "sha256").put("entries", checks))
+        val file = File(temp.root, "${UUID.randomUUID()}.ails")
+        ZipOutputStream(file.outputStream()).use { zip ->
+            zip.putNextEntry(ZipEntry("self.json")); zip.write(manifest.toString().toByteArray()); zip.closeEntry()
+            files.forEach { (name, bytes) -> zip.putNextEntry(ZipEntry(name)); zip.write(bytes); zip.closeEntry() }
+        }
+        return file
+    }
+    @Test fun packagedUiFollowsProgramUpgradeRollbackAndPreservesOpaqueData() {
+        val host = store("ui-host"); host.install(pack("0.1.1"))
+        assertFalse(host.resources().getBoolean("available"))
+        val dataId = module(host).getString("data_id")
+        val marker = File(temp.root, "ui-host/data/$dataId/marker.txt"); marker.writeText("keep")
+        host.autonomous("upgrade", upgrade(uiPack("0.1.2", "<html><head></head><body>first UI</body></html>")))
+        assertTrue(page(host).contains("first UI"))
+        host.autonomous("upgrade", upgrade(uiPack("0.1.3", "<html><head></head><body>second UI</body></html>")))
+        assertTrue(page(host).contains("second UI"))
+        host.autonomous("rollback", JSONObject().put("target_version", "0.1.2"))
+        assertTrue(page(host).contains("first UI"))
+        host.autonomous("rollback", JSONObject().put("target_version", "0.1.1"))
+        assertFalse(host.resources().getBoolean("available"))
+        assertEquals(dataId, module(host).getString("data_id")); assertEquals("keep", marker.readText())
+    }
+    @Test fun kernelReadsResourcesAsOpaqueBytesWithoutUiInterpretation() {
+        val host = store("opaque-host")
+        val payload = "not HTML\u0000opaque"
+        host.install(uiPack("0.1.2", payload))
+        assertEquals(payload, page(host))
+        expect("SELF_RESOURCE_MISSING") { host.resources(JSONObject().put("paths", JSONArray(listOf("resources/missing")))) }
+    }
+    @Test fun corruptUiAdmissionDoesNotReplaceTheWorkingProgram() {
+        val host = store("host"); host.install(pack("0.1.1"))
+        expect("SELF_INTEGRITY_FAILED") { host.autonomous("upgrade", upgrade(uiPack("0.1.2", "changed", "0".repeat(64)))) }
+        assertEquals("0.1.1", module(host).getString("module_version"))
+    }
+    @Test fun staleUiCannotCreateRequestsOrConsumeOngoingGrantsAfterVersionSwitch() {
+        val host = store("host"); host.install(uiPack("0.1.2", "<html><head></head><body>UI</body></html>"))
+        val binding = host.resources().getJSONObject("binding")
+        val approval = bundle(host, "LONG", listOf("upgrade", "rollback"))
+        for (i in 0 until approval.length()) host.review(approval.getJSONObject(i).getString("request_id"), true)
+        host.humanExecute("upgrade", upgrade(uiPack("0.1.3", "<html><head></head><body>new UI</body></html>")), binding)
+        val count = host.status().getJSONArray("requests").length()
+        expect("SELF_PROGRAM_BINDING_STALE") { host.humanExecute("rollback", JSONObject().put("target_version", "0.1.2"), binding) }
+        expect("SELF_PROGRAM_BINDING_STALE") { host.request("rollback", JSONObject().put("target_version", "0.1.2"), binding) }
+        expect("SELF_PROGRAM_BINDING_STALE") { host.requestBundle(JSONObject().put("program_binding", binding).put("mode", "LONG").put("reason", "stale").put("items", JSONArray().put(JSONObject().put("operation", "rollback").put("parameters", JSONObject())))) }
+        assertEquals(count, host.status().getJSONArray("requests").length())
+        assertEquals("0.1.3", module(host).getString("module_version"))
+    }
+    @Test fun migratedUiRetainsContentButUsesTargetLocalBindingAndNoOngoingGrants() {
+        val source = store("source"); val target = store("target")
+        source.install(uiPack("0.1.2", "<html><head></head><body>portable UI</body></html>"))
+        val binding = source.resources().getJSONObject("binding")
+        val exported = source.autonomous("migrate", phase("export").put("target_device_id", target.status().getString("device_id")))
+        val prepared = target.autonomous("migrate", phase("prepare").put("package_path", exported.getString("package_path")))
+        assertTrue(page(target).contains("portable UI"))
+        val release = source.autonomous("migrate", phase("commit").put("receipt", prepared.getJSONObject("receipt")))
+        target.autonomous("migrate", phase("activate").put("release", release.getJSONObject("release")))
+        assertNotEquals(binding.getString("data_id"), target.resources().getJSONObject("binding").getString("data_id"))
+        expect("SELF_PROGRAM_BINDING_STALE") { target.request("rollback", JSONObject().put("target_version", "0.1.1"), binding) }
+        assertEquals(0, effective(target).length())
+    }
+
 }
