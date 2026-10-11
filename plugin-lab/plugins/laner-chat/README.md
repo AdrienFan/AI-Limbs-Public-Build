@@ -1,4 +1,4 @@
-# AI Limbs Laner Chat Plugin (v0.2.8)
+# AI Limbs Laner Chat Plugin (v0.2.11)
 
 Laner Chat owns its durable mailbox, sessions, priority, Assistant Turn, and chat-mode presentation. The Host supplies generic chat slots, selection, composer, and history delivery through the chat-mode protocol.
 
@@ -13,3 +13,5 @@ Version 0.2.8 lets the collapsed circle detect a drag while keeping a tap to ope
 Laner Chat now provides the top-bar launcher View, unread badge and on/off behavior to the Host page slot directly. The Host only positions that View; Plugin Center does not render it. The expanded panel's Close button and the launcher both remove Laner Chat's own window through `host.window.overlay@1`. Plugin Center stays on version 1.3.39.
 
 The launcher provider declares `ai_limbs.host_page_slot.v1=true`, `target_page_id=host:native.ai_chat` and `slot_id=top_bar_start`. Its `createView` supplies the complete button; the Host embeds the View in that named slot in Host and Resident modes.
+
+Version 0.2.11 publishes a non-executing `suggested_action` alongside the unread/pending attention summary: `plugin.chat.laner_bridge.inbox.fetch` with empty parameters. The Host only forwards this optional metadata (base build119+); it never fetches, marks messages, replies, or resolves them automatically.

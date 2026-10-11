@@ -449,6 +449,14 @@ class LanerChatEntry : InProcessPluginEntry {
                         .put("operation", "publish")
                         .put("label", "Laner Chat")
                         .put("groups", groups)
+                        // A discoverable option, not an instruction to auto-read the inbox.
+                        .put(
+                            "suggested_action",
+                            JSONObject()
+                                .put("label", "按需读取待处理消息正文（不自动回复）")
+                                .put("capability_id", "$LANER_CHAT_PLUGIN_ID.inbox.fetch")
+                                .put("parameters", JSONObject())
+                        )
                         .toString()
                 )
             )
