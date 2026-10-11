@@ -89,6 +89,26 @@ internal object HostAttentionRegistry {
                 .put("source", source)
                 .put("label", label)
                 .put("groups", outputGroups)
+        // Preserve a plugin-owned, non-executing action hint beside the attention summary.
+        // The Host only transports this metadata; policy checks still apply to any later invocation.
+        parameters.optJSONObject("suggested_action")?.let { hint ->
+            val capabilityId = hint.optString("capability_id").trim()
+            require(capabilityId.startsWith("$source.") && capabilityId.length <= 160) {
+                "attention suggested_action must belong to the publishing plugin"
+            }
+            val hintLabel = requiredLabel(hint.optString("label"), "suggested action")
+            val hintParameters = hint.optJSONObject("parameters") ?: JSONObject()
+            require(hintParameters.length() <= 8 && hintParameters.toString().length <= 2048) {
+                "attention suggested_action parameters exceed limit"
+            }
+            canonical.put(
+                "suggested_action",
+                JSONObject()
+                    .put("label", hintLabel)
+                    .put("capability_id", capabilityId)
+                    .put("parameters", JSONObject(hintParameters.toString()))
+            )
+        }
         sources[source] = canonical.toString()
         return JSONObject()
             .put("success", true)
