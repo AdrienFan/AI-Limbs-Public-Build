@@ -26,6 +26,38 @@ object AiLimbsCoreCapabilityRegistry {
             )
         ),
         registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_DATABASE_DESCRIBE),
+            catalogEntry = entry(
+                name = "ai_limbs.self.database.describe",
+                displayName = "自我模块 · 数据库状态",
+                description = "读取当前自我模块包声明的独立 SQLite 数据库、实际表与版本；不创建数据库",
+                keywords = listOf("自我模块", "数据库", "SQLite", "self database")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_DATABASE_INITIALIZE),
+            catalogEntry = entry(
+                name = "ai_limbs.self.database.initialize",
+                displayName = "自我模块 · 初始化数据库",
+                description = "执行自我模块包内的版本化迁移；保留已有数据，仅操作当前 ACTIVE 身份的独立数据目录",
+                keywords = listOf("自我模块", "数据库", "建表", "SQLite", "migration")
+            )
+        ),
+        registration(
+            route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_DATABASE_QUERY),
+            catalogEntry = entry(
+                name = "ai_limbs.self.database.query",
+                displayName = "自我模块 · 只读数据库查询",
+                description = "只读查询当前自我模块数据库；禁止连接其他库、写入、修改连接政策；超时五秒",
+                parameters = listOf(
+                    ToolParameterSchema("sql", "string", "SELECT 或 WITH 查询，不能修改数据或连接其他库", true),
+                    ToolParameterSchema("bindings", "array", "可选位置参数，元素为 string 或 null；默认空数组", false),
+                    ToolParameterSchema("limit", "integer", "最多返回 1 到 200 行，默认 100；truncated 明示还有更多行", false, "100")
+                ),
+                keywords = listOf("自我模块", "数据库", "SQL", "SQLite", "query")
+            )
+        ),
+        registration(
             route = AiLimbsCoreRoute.Local(AiLimbsCoreLocalOperation.SELF_INSTALL),
             catalogEntry = entry(
                 name = "ai_limbs.self.install",

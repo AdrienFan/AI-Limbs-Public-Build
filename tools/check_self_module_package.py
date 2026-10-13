@@ -9,6 +9,7 @@ import tempfile
 import uuid
 import zipfile
 from pathlib import Path
+from check_self_module_database import check as check_database
 
 
 def main():
@@ -52,11 +53,13 @@ def main():
             source = Path(temp, field + '.js')
             source.write_text('\n'.join(scripts))
             subprocess.run(['node', '--check', str(source)], check=True)
+    database_report = check_database(args.package)
     report = dict(package=args.package.name, module_version=args.version,
                   identity_id=manifest['identity_id'], state_schema_version=1,
                   package_sha256=hashlib.sha256(args.package.read_bytes()).hexdigest(),
                   integrity_verified=True, page_syntax_verified=True,
-                  android_build_required=False)
+                  android_build_required=False, required_base_build=120,
+                  database_schema_verified=True, database_checks=database_report)
     Path(args.package.parent, args.package.stem + '.report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2) + '\n')
     print(json.dumps(report, ensure_ascii=False))
 

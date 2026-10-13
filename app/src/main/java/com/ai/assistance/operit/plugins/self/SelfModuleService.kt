@@ -60,6 +60,9 @@ internal object SelfModuleService {
         val result = when (operation) {
             "status" -> store(context).status()
             "install" -> store(context).install(File(args.getString("package_path")))
+            "database_describe" -> SelfModuleDatabase(store(context)).describe()
+            "database_initialize" -> SelfModuleDatabase(store(context)).initialize()
+            "database_query" -> SelfModuleDatabase(store(context)).query(args)
             "review" -> store(context).review(args.getString("request_id"), args.getBoolean("approve"), args)
             "revoke" -> store(context).revoke(args.getString("operation"), args.optString("reason"))
             "upgrade", "rollback", "migrate" -> store(context).autonomous(operation, args)

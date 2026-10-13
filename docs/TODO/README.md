@@ -77,3 +77,7 @@ For_Agent: 对项目大规模动工前按本规范协作
 - [包内自我模块界面](self-module-ui/index.md)：build116、总控台 1.3.44、自我模块 0.1.2，待云端验证。
 
 - [Self identity and migration registration](self-module-identity-registration/index.md): build117 / module 0.1.4.
+
+## 自我模块经历数据库
+
+- [模块内数据库基础](self-module-database/index.md)：build120、自我模块 0.1.5，包内表结构与独立数据目录，云端与设备验证中。

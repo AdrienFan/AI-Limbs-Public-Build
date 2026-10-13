@@ -420,4 +420,29 @@ class SelfModuleStoreTest {
         assertEquals(0, effective(target).length())
     }
 
+
+    @Test fun databaseDataAccessIsModuleOwnedSealedAndPortable() {
+        val source = store("database-source"); val target = store("database-target")
+        source.install(pack(create = true))
+        val before = module(source)
+        source.withActiveData { metadata, directory, resources ->
+            assertEquals(before.getString("identity_id"), metadata.getString("identity_id"))
+            assertEquals(File(temp.root, "database-source/data/${metadata.getString("data_id")}").canonicalFile, directory)
+            assertTrue(resources.containsKey("program/blank.json"))
+            File(directory, "storage/fixture.sqlite3").apply { parentFile.mkdirs(); writeText("opaque-database-fixture") }
+        }
+        source.autonomous("upgrade", upgrade(pack("0.1.1", create = true)))
+        assertEquals(before.getString("data_id"), module(source).getString("data_id"))
+        val exported = source.autonomous("migrate", phase("export").put("target_device_id", target.status().getString("device_id")))
+        expect("SELF_NOT_ACTIVE") { source.withActiveData { _, _, _ -> fail("Sealed data must not open") } }
+        val prepared = target.autonomous("migrate", phase("prepare").put("package_path", exported.getString("package_path")))
+        val released = source.autonomous("migrate", phase("commit").put("receipt", prepared.getJSONObject("receipt")))
+        target.autonomous("migrate", phase("activate").put("release", released.getJSONObject("release")))
+        target.withActiveData { metadata, directory, _ ->
+            assertEquals(before.getString("identity_id"), metadata.getString("identity_id"))
+            assertNotEquals(before.getString("data_id"), metadata.getString("data_id"))
+            assertEquals("opaque-database-fixture", File(directory, "storage/fixture.sqlite3").readText())
+        }
+    }
+
 }

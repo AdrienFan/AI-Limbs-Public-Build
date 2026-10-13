@@ -179,6 +179,17 @@ internal class SelfModuleStore(private val root: File, private val clock: () -> 
     }
     private fun program(state: JSONObject) = File(root, "versions/${state.getString("identity_id")}/${state.getString("module_version")}.ails")
     private fun data(state: JSONObject) = File(root, "data/${state.getString("data_id")}")
+    /** Generic data access is serialized with upgrade, rollback, sealing and export. */
+    internal fun <T> withActiveData(block: (JSONObject, File, Map<String, ByteArray>) -> T): T = locked {
+        val value = active()
+        val pack = readPack(program(value))
+        requireSelf(pack.manifest.getString("package_kind") == "module" &&
+            pack.manifest.getString("identity_id") == value.getString("identity_id") &&
+            pack.manifest.getString("module_version") == value.getString("module_version"), "SELF_RESOURCE_IDENTITY_MISMATCH")
+        val directory = data(value).canonicalFile
+        requireSelf(directory.parentFile == File(root, "data").canonicalFile, "SELF_DATA_PATH_INVALID")
+        block(copyJson(value), directory, pack.files)
+    }
     private fun programBinding(value: JSONObject, digest: String) = JSONObject()
         .put("identity_id", value.getString("identity_id")).put("data_id", value.getString("data_id"))
         .put("module_version", value.getString("module_version")).put("generation", value.getString("generation"))

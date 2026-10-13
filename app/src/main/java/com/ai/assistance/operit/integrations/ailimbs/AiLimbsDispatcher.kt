@@ -121,6 +121,12 @@ class AiLimbsDispatcher(
         when (operation) {
             AiLimbsCoreLocalOperation.SELF_STATUS ->
                 com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "status", args)
+            AiLimbsCoreLocalOperation.SELF_DATABASE_DESCRIBE ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "database_describe", args)
+            AiLimbsCoreLocalOperation.SELF_DATABASE_INITIALIZE ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "database_initialize", args)
+            AiLimbsCoreLocalOperation.SELF_DATABASE_QUERY ->
+                com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "database_query", args)
             AiLimbsCoreLocalOperation.SELF_INSTALL ->
                 com.ai.assistance.operit.plugins.self.SelfModuleService.ai(appContext, policyEngine.session, "install", args)
             AiLimbsCoreLocalOperation.SELF_UPGRADE ->

@@ -1,6 +1,6 @@
-# Blank self module presentation 0.1.4
+# Self module presentation and storage foundation 0.1.5
 
-The .ails package owns its management page, compact summary, labels, application forms and interactions. It contains no memory, personality or learning logic. Host lifecycle and approval APIs remain authoritative.
+The .ails package owns its management page, compact summary, labels, application forms and interactions. It carries its own experience database schema and migrations. Automatic memory recording, personality and learning logic are not implemented. Host lifecycle and approval APIs remain authoritative.
 
 ## Package contract
 
@@ -51,3 +51,7 @@ Plugin Center 1.3.45 loads the page as a Base64 memory document. No virtual webs
 New public packages default to CREATE templates and allocate an identity during installation. Existing identity-bound packages remain compatible; --identity explicitly builds a bound upgrade. Migration uses choose_export before approval, writes and verifies the selected SAF document, then offers upload_migration to a configured HTTPS registration endpoint. A matching acknowledgment releases the source installation slot but retains transfer/recovery material. No receiver database is implemented. See docs/TODO/self-module-identity-registration/index.md for protocol and checks.
 
 Install build117 and Plugin Center 1.3.51 before using CREATE templates or the new registration UI. Fresh templates also upgrade an installed identity without changing it.
+
+## 0.1.5 experience database foundation
+
+The module owns its database descriptor and SQLite migration resources. Base build120 provides generic initialization/describe/read execution under the self lifecycle lock; database bytes reside in the module data directory. No experience or relationship schema is implemented in the Host. See [STORAGE.md](STORAGE.md) for ownership, compatibility and validation. The cloud package validator executes the packaged schema in isolated SQLite.

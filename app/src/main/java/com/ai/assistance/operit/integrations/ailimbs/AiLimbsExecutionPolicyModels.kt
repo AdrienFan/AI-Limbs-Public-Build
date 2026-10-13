@@ -130,7 +130,7 @@ internal data class AiLimbsPolicyDecision(
 
 object AiLimbsExecutionPolicyDescriptor {
     const val PROTOCOL_VERSION = 3
-    private const val POLICY_SCHEMA_REVISION = "execution-policy-v3.1"
+    private const val POLICY_SCHEMA_REVISION = "execution-policy-v3.2"
 
     private val readOnlyHostTools =
         setOf(
@@ -174,7 +174,10 @@ object AiLimbsExecutionPolicyDescriptor {
         when (route) {
             is AiLimbsCoreRoute.Local ->
                 when (route.operation) {
-                    AiLimbsCoreLocalOperation.SELF_STATUS -> standardRead(AiLimbsDomain.STORAGE)
+                    AiLimbsCoreLocalOperation.SELF_STATUS,
+                    AiLimbsCoreLocalOperation.SELF_DATABASE_DESCRIBE,
+                    AiLimbsCoreLocalOperation.SELF_DATABASE_QUERY -> standardRead(AiLimbsDomain.STORAGE)
+                    AiLimbsCoreLocalOperation.SELF_DATABASE_INITIALIZE -> standard(AiLimbsEffect.PERSISTENT_WRITE, AiLimbsDomain.STORAGE)
                     AiLimbsCoreLocalOperation.SELF_INSTALL,
                     AiLimbsCoreLocalOperation.SELF_UPGRADE,
                     AiLimbsCoreLocalOperation.SELF_ROLLBACK,

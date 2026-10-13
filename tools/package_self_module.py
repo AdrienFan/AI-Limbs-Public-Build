@@ -5,13 +5,14 @@ import hashlib
 import json
 import uuid
 import zipfile
+import sqlite3
 from pathlib import Path
 
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--identity", help="Existing identity UUID for upgrades; omitted creates a fresh-install template")
-    parser.add_argument("--version", default="0.1.4")
+    parser.add_argument("--version", default="0.1.5")
     parser.add_argument("--without-presentation", action="store_true", help="Package legacy V0.1 lifecycle-only fixtures")
     args = parser.parse_args()
     identity = str(uuid.UUID(args.identity)) if args.identity else None
@@ -37,6 +38,23 @@ def main():
                 parser.error("UI resources must be 1 byte to 512 KiB")
             data.decode("utf-8", errors="strict")
             files[path] = data
+    storage = source.parent / "storage"
+    files["resources/storage/database.json"] = (storage / "database.json").read_bytes()
+    descriptor = json.loads(files["resources/storage/database.json"])
+    for migration in descriptor["migrations"]:
+        path = migration["resource"]
+        sql = (storage / "migrations" / (f'{migration["version"]:03d}.sql')).read_text(encoding="utf-8")
+        statements = []
+        buffer = ""
+        for character in sql:
+            buffer += character
+            if character == ";" and sqlite3.complete_statement(buffer):
+                statements.append(buffer.strip())
+                buffer = ""
+        if buffer.strip():
+            parser.error("Incomplete SQL migration")
+        document = {"version": migration["version"], "statements": statements}
+        files[path] = json.dumps(document, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     manifest = {
         "format": "AIL_SELF_V1", "module_type": "self", "package_kind": "module",
         "package_schema_version": 1, "identity_mode": "BOUND" if identity else "CREATE",
