@@ -83,27 +83,8 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
             )
         )
 
-        val pageSlotService = host.services.resolve(
-            PLUGIN_CENTER_UI_ACCESSORY_SERVICE,
-            PLUGIN_CENTER_UI_ACCESSORY_API
-        )
-        if (pageSlotService?.metadata?.get("authority") == "plugin_center") {
-            runCatching {
-                pageSlotService.invoke(
-                    "register_page_slot_action",
-                    JSONObject()
-                        .put("action_id", PAGE_SLOT_ACTION_ID)
-                        .put("target_page_id", AI_CHAT_PAGE_ID)
-                        .put("slot_id", TOP_BAR_START_SLOT)
-                        .put("provider_id", PAGE_PROVIDER_ID)
-                        .put("icon_key", "terminal")
-                        .put("content_description", "系统环境中心")
-                        .put("priority", 100)
-                        .toString()
-                )
-            }
-        }
-
+        // Entry metadata is declarative. A presentation-only service must not gate
+        // mounting the environment's generic child extension point in either runtime.
         val pointHandle = host.childExtensions.publishPoint(
             point = SystemEnvironmentContract.EXTENSION_POINT,
             apiVersion = SystemEnvironmentContract.API_VERSION,
@@ -114,18 +95,6 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         )
 
         return InProcessPluginHandle {
-            runCatching {
-                val currentPageSlotService = host.services.resolve(
-                    PLUGIN_CENTER_UI_ACCESSORY_SERVICE,
-                    PLUGIN_CENTER_UI_ACCESSORY_API
-                )
-                if (currentPageSlotService?.metadata?.get("authority") == "plugin_center") {
-                    currentPageSlotService.invoke(
-                        "unregister_page_slot_action",
-                        JSONObject().put("action_id", PAGE_SLOT_ACTION_ID).toString()
-                    )
-                }
-            }
             pointHandle.close()
         }
     }
@@ -138,8 +107,6 @@ class SystemEnvironmentCenterEntry : InProcessPluginEntry {
         const val SYSTEM_ENVIRONMENT_CHILD_SLOT = "after"
         const val HOST_NETWORK_CAPABILITY = "host.network@1"
         const val HOST_RUNTIME_COMPONENTS_CAPABILITY = "host.runtime.components@1"
-        const val PLUGIN_CENTER_UI_ACCESSORY_SERVICE = "system.plugin_center.ui_accessories"
-        const val PLUGIN_CENTER_UI_ACCESSORY_API = 1
         const val PAGE_SLOT_ACTIONS_METADATA = "ai_limbs.page_slot_actions.v1"
         const val PAGE_SLOT_ACTION_ID = "system_environment_center"
         const val AI_CHAT_PAGE_ID = "host:native.ai_chat"

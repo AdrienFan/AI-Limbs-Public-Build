@@ -7,6 +7,8 @@ import android.widget.FrameLayout
 import android.widget.Toast
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -540,7 +542,7 @@ private fun EnvironmentConfigPage(
             .put("api", SystemEnvironmentContract.API_VERSION)
             .toString()
     }
-    Column(modifier = Modifier.fillMaxSize().background(Color.Black).padding(12.dp)) {
+    Column(modifier = Modifier.fillMaxSize().background(Color.Black).verticalScroll(rememberScrollState()).padding(12.dp)) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp),

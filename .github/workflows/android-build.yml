@@ -46,6 +46,8 @@ jobs:
           persist-credentials: false
       - name: Validate all plugin and child extension versions
         run: python3 tools/plugin_lab/source_provenance.py check --output dist/source-inventory.json
+      - name: Validate system environment lifecycle ownership
+        run: python3 tools/plugin_lab/verify_system_environment_center.py
       - name: Upload source inventory
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
@@ -664,7 +666,7 @@ jobs:
   system_environment:
     needs: source_inventory
     if: inputs.target == 'system-environment'
-    name: Build System Environment Center v0.2.13 only
+    name: Build System Environment Center v0.2.14 only
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
@@ -719,12 +721,24 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+      - name: Sign installable system environment center
+        env:
+          AILIMBS_PARENT_PLUGIN_PRIVATE_PEM: ${{ secrets.AILIMBS_PARENT_PLUGIN_PRIVATE_PEM }}
+        run: python3 tools/plugin_lab/package_system_environment.py
+      - name: Record exact parent source
+        run: >-
+          python3 tools/plugin_lab/source_provenance.py record
+          --manifest plugin-lab/packages/system-environment-center/plugin.json
+          --package dist/AI-Limbs-System-Environment-Center-v0.2.14.ailp
       - name: Upload system environment integration payloads
         if: success()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
-          name: system-environment-center-v0.2.13-${{ github.run_number }}
+          name: system-environment-center-v0.2.14-${{ github.run_number }}
           path: |
+            dist/AI-Limbs-System-Environment-Center-v0.2.14.ailp
+            dist/AI-Limbs-System-Environment-Center-v0.2.14.ailp.sha256
+            dist/AI-Limbs-System-Environment-Center-v0.2.14.ailp.source.json
             plugin-lab/plugins/system-environment-center/build/outputs/apk/debug/*.apk
             plugin-lab/packages/system-environment-center/plugin.json
           if-no-files-found: error

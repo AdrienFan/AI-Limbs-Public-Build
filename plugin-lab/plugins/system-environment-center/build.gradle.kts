@@ -10,11 +10,11 @@ android {
     namespace = "com.ai.limbs.plugins.systemenvironment"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.systemenvironment.center"
+        applicationId = "com.ai.limbs.payload.systemenvironment.center.v0214"
         minSdk = 26
         targetSdk = 34
-        versionCode = 15
-        versionName = "0.2.13"
+        versionCode = 16
+        versionName = "0.2.14"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
