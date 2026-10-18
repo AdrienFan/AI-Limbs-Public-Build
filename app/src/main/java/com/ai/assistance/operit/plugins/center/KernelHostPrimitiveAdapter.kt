@@ -62,7 +62,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         }
         return when (id) {
             "host.permission@1" -> HostPermissionBroker.invoke(appContext, ownerPluginId, op, parameters)
-            "host.network@1" -> invokeNetwork(op)
+            "host.network@1" -> invokeNetwork(op, parameters)
             "host.chat@1" -> when (op) {
                 "publish_assistant" -> publishAssistantMessage(parameters)
                 "publish_user" -> publishUserMessage(parameters)
@@ -216,9 +216,14 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
     }
 
 
-    private suspend fun invokeNetwork(operation: String): JSONObject = when (operation) {
+    private suspend fun invokeNetwork(operation: String, parameters: JSONObject): JSONObject = when (operation) {
         "listeners" -> snapshotTcpListeners()
         "direct_proxy" -> HostDirectEgressProxy.snapshot(appContext)
+        "egress_proxy" -> when (required(parameters, "route")) {
+            "SYSTEM" -> HostDirectEgressProxy.systemSnapshot(appContext)
+            "DIRECT" -> HostDirectEgressProxy.snapshot(appContext)
+            else -> error("Network egress route must be SYSTEM or DIRECT")
+        }
         else -> unsupported("host.network@1", operation)
     }
 
@@ -926,6 +931,7 @@ internal class KernelHostPrimitiveAdapter(context: Context, private val runtimeR
         val SUPPORTED = setOf(
             "host.network@1/listeners",
             "host.network@1/direct_proxy",
+            "host.network@1/egress_proxy",
             "host.chat@1/publish_assistant",
             "host.chat@1/publish_user",
             "host.chat@1/set_presentation",

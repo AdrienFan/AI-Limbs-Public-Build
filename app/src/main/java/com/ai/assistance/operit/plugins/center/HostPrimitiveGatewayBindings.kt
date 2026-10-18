@@ -218,7 +218,17 @@ internal object HostPrimitiveGatewayBindings {
             kernel("geometry"),
             kernel("stop")
         ),
-        "host.network@1" to primitive(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request"), tool("multipart", "multipart_request"), tool("cookies", "manage_cookies"), kernel("listeners"), kernel("direct_proxy"), pending("listen")),
+        "host.network@1" to primitive(
+            HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND,
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("http", "http_request")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("multipart", "multipart_request")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("cookies", "manage_cookies")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("listeners")),
+            owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("direct_proxy")),
+            owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("egress_proxy")),
+            pending("listen"),
+            enforceAffinity = true
+        ),
         "host.background.runtime@1" to primitive(HostGatewayExecutionAffinity.UNBOUND, pending("acquire_lease"), pending("update_lease"), pending("release_lease"), pending("status")),
         "host.notification@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("publish", "send_notification")), owned(HostGatewayExecutionAffinity.HOST_SERVICE, tool("observe", "get_notifications"))),
         "host.android.settings@1" to primitive(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, owned(HostGatewayExecutionAffinity.CORE_SAFE, tool("get", "get_system_setting")), owned(HostGatewayExecutionAffinity.CROSS_PROCESS_BACKEND, tool("set", "modify_system_setting"))),

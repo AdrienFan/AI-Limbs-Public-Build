@@ -34,6 +34,7 @@ internal object HostDirectEgressProxy {
 
     @Volatile
     private var running: Running? = null
+    @Volatile private var systemRunning: Running? = null
 
     private data class Candidate(
         val network: Network,
@@ -45,7 +46,7 @@ internal object HostDirectEgressProxy {
 
     private data class Running(
         val server: ServerSocket,
-        val network: Network,
+        val network: Network?,
         val networkHandle: Long,
         val transport: String,
         val validated: Boolean,
@@ -91,6 +92,41 @@ internal object HostDirectEgressProxy {
             .put("network_not_vpn", true)
             .put("bypass_verified", false)
             .put("updated_at_epoch_ms", System.currentTimeMillis())
+    }
+
+    /**
+     * Default Android sockets and DNS stay owned by the Host UID. Do not bind these
+     * sockets to a physical Network: doing so would bypass the user's VPN policy.
+     */
+    fun systemSnapshot(context: Context): JSONObject = synchronized(lock) {
+        val connectivity = context.applicationContext
+            .getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+        val network = connectivity.activeNetwork
+        val caps = network?.let(connectivity::getNetworkCapabilities)
+        if (network == null || caps == null || !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)) {
+            return JSONObject().put("available", false).put("route", "SYSTEM")
+                .put("scheme", "socks5h").put("host", LOOPBACK_HOST)
+                .put("reason", "Host default network is unavailable")
+                .put("updated_at_epoch_ms", System.currentTimeMillis())
+        }
+        val selected = systemRunning?.takeUnless { it.server.isClosed } ?: run {
+            val server = ServerSocket().apply {
+                reuseAddress = true
+                bind(InetSocketAddress(InetAddress.getByName(LOOPBACK_HOST), 0), BACKLOG)
+            }
+            Running(server, null, 0L, "system", true, true).also { state ->
+                systemRunning = state
+                workers.execute { acceptLoop(state) }
+            }
+        }
+        return JSONObject().put("available", true).put("route", "SYSTEM")
+            .put("scheme", "socks5h").put("host", LOOPBACK_HOST)
+            .put("port", selected.server.localPort).put("transport", "system")
+            .put("validated", caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED))
+            .put("metered", !caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED))
+            .put("network_handle", network.networkHandle)
+            .put("network_not_vpn", caps.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_VPN))
+            .put("bypass_verified", false).put("updated_at_epoch_ms", System.currentTimeMillis())
     }
 
     private fun selectDirectNetwork(connectivity: ConnectivityManager): Candidate? =
@@ -145,7 +181,7 @@ internal object HostDirectEgressProxy {
     }
 
     private fun acceptLoop(state: Running) {
-        while (!state.server.isClosed && running === state) {
+        while (!state.server.isClosed && (running === state || systemRunning === state)) {
             val client = try {
                 state.server.accept()
             } catch (_: Throwable) {
@@ -155,7 +191,7 @@ internal object HostDirectEgressProxy {
         }
     }
 
-    private fun handleClient(network: Network, client: Socket) {
+    private fun handleClient(network: Network?, client: Socket) {
         client.use { local ->
             local.tcpNoDelay = true
             val input = local.getInputStream()
@@ -220,12 +256,12 @@ internal object HostDirectEgressProxy {
         }
     }
 
-    private fun connect(network: Network, target: String, port: Int): Socket {
+    private fun connect(network: Network?, target: String, port: Int): Socket {
         require(port in 1..65535) { "Invalid target port" }
-        val addresses = network.getAllByName(target)
+        val addresses = if (network == null) InetAddress.getAllByName(target) else network.getAllByName(target)
         var lastError: Throwable? = null
         for (address in addresses) {
-            val socket = network.socketFactory.createSocket()
+            val socket = if (network == null) Socket() else network.socketFactory.createSocket()
             try {
                 socket.tcpNoDelay = true
                 socket.connect(InetSocketAddress(address, port), CONNECT_TIMEOUT_MS)

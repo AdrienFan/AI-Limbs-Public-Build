@@ -131,6 +131,10 @@ class HostPrimitiveAffinityRoutingTest {
         assertTrue(operations.containsKey("listeners"))
         assertTrue(operations.containsKey("direct_proxy"))
         assertFalse(HostPrimitiveGatewayBindings.requiresAndroidHost("host.network@1", "direct_proxy"))
+        assertTrue(operations.containsKey("egress_proxy"))
+        assertTrue(HostPrimitiveGatewayBindings.requiresAndroidHost("host.network@1", "egress_proxy"))
+        assertEquals(HostGatewayExecutionAffinity.HOST_SERVICE, operations.getValue("egress_proxy").affinity)
+        assertEquals(HostGatewayRouteKind.KERNEL, operations.getValue("egress_proxy").kind)
     }
 
     @Test
