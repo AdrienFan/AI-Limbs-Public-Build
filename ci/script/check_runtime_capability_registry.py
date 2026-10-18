@@ -289,6 +289,7 @@ def main() -> int:
     # build105 made permissions and camera lifecycle Host-framework operations.
     # Keep this explicit: unrelated primitives must not silently acquire Host affinity.
     allowed_affinity_ids = {
+        "host.network@1",
         "host.screen.capture@1",
         "host.chat@1",
         "host.window.overlay@1",
@@ -301,6 +302,19 @@ def main() -> int:
             "Operation affinity enforcement differs from the explicit architecture allowlist: "
             + f"expected={sorted(allowed_affinity_ids)}, actual={sorted(enforced_affinity_ids)}"
         )
+
+    network_start = host_gateway_text.index('"host.network@1" to primitive(')
+    network_tail = host_gateway_text[network_start:]
+    network_next = re.search(r'\n\s*"[^"]+"\s+to\s+primitive\(', network_tail[1:])
+    if network_next is None:
+        errors.append("Network operation ownership block has no following primitive")
+        network_block = ""
+    else:
+        network_block = network_tail[:network_next.start() + 1]
+    if 'owned(HostGatewayExecutionAffinity.HOST_SERVICE, kernel("egress_proxy"))' not in network_block:
+        errors.append("Default network egress must be owned by Android Host")
+    if 'owned(HostGatewayExecutionAffinity.CORE_SAFE, kernel("direct_proxy"))' not in network_block:
+        errors.append("Existing physical network egress ownership must remain compatible")
 
     # These operations own Android permission/camera resources. An allowlisted id alone
     # is insufficient: its operations must keep their enforced Host-framework bindings.
