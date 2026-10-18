@@ -269,4 +269,13 @@
     <string name="fullscreen_portrait">Portrait fullscreen</string>
     <string name="fullscreen_landscape">Landscape fullscreen</string>
     <string name="fullscreen_exit">Exit fullscreen</string>
+    <string name="network_settings_title">Network settings</string>
+    <string name="network_follow_host">Follow AI Limbs network</string>
+    <string name="network_follow_host_description">Follow the Host network and VPN routing when enabled. Use a non-VPN physical network when disabled. Explicit laner-net commands select a proxy separately.</string>
+    <string name="network_mode_host">Follow Host</string>
+    <string name="network_mode_direct">Physical network</string>
+    <string name="network_current_mode">Current mode: %1$s</string>
+    <string name="network_restart_required">Saved. Restart Ubuntu to apply.</string>
+    <string name="network_applies_at_start">Applied the next time Ubuntu starts</string>
+    <string name="network_mode_applied">Current setting is applied</string>
 </resources>

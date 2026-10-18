@@ -269,4 +269,13 @@
     <string name="fullscreen_portrait">竖屏全屏</string>
     <string name="fullscreen_landscape">横屏全屏</string>
     <string name="fullscreen_exit">退出全屏</string>
+    <string name="network_settings_title">网络设置</string>
+    <string name="network_follow_host">跟随 AI Limbs 网络</string>
+    <string name="network_follow_host_description">开启后跟随宿主的实际网络和 VPN 分流；关闭后默认使用非 VPN 物理网络。手动 laner-net 命令仍单独选择代理。</string>
+    <string name="network_mode_host">跟随宿主</string>
+    <string name="network_mode_direct">物理网络直连</string>
+    <string name="network_current_mode">当前模式：%1$s</string>
+    <string name="network_restart_required">已保存，重启 Ubuntu 后生效</string>
+    <string name="network_applies_at_start">下次启动 Ubuntu 时采用此设置</string>
+    <string name="network_mode_applied">当前设置已生效</string>
 </resources>

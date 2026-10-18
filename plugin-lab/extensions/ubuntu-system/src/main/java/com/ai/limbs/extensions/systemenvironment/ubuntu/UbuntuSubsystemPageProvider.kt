@@ -9,7 +9,18 @@ import android.view.View
 import android.view.WindowManager
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.Card
+import androidx.compose.material3.Switch
+import androidx.compose.material3.Text
+import androidx.compose.runtime.collectAsState
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.res.stringResource
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.darkColorScheme
@@ -92,6 +103,11 @@ private fun UbuntuConfigurationPanel(
     val coroutineScope = rememberCoroutineScope()
     var launching by remember { mutableStateOf(false) }
 
+    Column(
+        modifier = Modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
+    ) {
+    UbuntuNetworkConfiguration(terminal)
     StandardDevelopmentEnvironmentCard(
         enabled = !launching,
         onOpenGuide = {
@@ -120,6 +136,59 @@ private fun UbuntuConfigurationPanel(
             }
         }
     )
+    }
+}
+
+@Composable
+private fun UbuntuNetworkConfiguration(terminal: TerminalUiController) {
+    val network by terminal.ubuntuNetworkState.collectAsState()
+    val runtime by terminal.ubuntuRuntimeState.collectAsState()
+    val scope = rememberCoroutineScope()
+    val context = LocalContext.current
+    var saving by remember { mutableStateOf(false) }
+    Card(modifier = Modifier.fillMaxWidth()) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text(stringResource(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_settings_title),
+                style = MaterialTheme.typography.titleMedium)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text(stringResource(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_follow_host),
+                    modifier = Modifier.weight(1f))
+                Switch(
+                    checked = network.followHost,
+                    enabled = !saving && runtime.phase != UbuntuRuntimePhase.STARTING &&
+                        runtime.phase != UbuntuRuntimePhase.STOPPING,
+                    onCheckedChange = { enabled ->
+                        saving = true
+                        scope.launch {
+                            try {
+                                terminal.setFollowHostNetwork(enabled)
+                            } catch (error: Exception) {
+                                Toast.makeText(context, error.message, Toast.LENGTH_LONG).show()
+                            } finally {
+                                saving = false
+                            }
+                        }
+                    }
+                )
+            }
+            Text(stringResource(com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_follow_host_description),
+                style = MaterialTheme.typography.bodySmall)
+            network.activeFollowHost?.let { active ->
+                Text(stringResource(
+                    com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_current_mode,
+                    stringResource(if (active)
+                        com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_mode_host
+                    else com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_mode_direct)
+                ))
+            }
+            Text(stringResource(if (network.restartRequired)
+                com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_restart_required
+            else if (network.activeFollowHost == null)
+                com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_applies_at_start
+            else com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.R.string.network_mode_applied),
+                style = MaterialTheme.typography.bodySmall)
+        }
+    }
 }
 
 @Composable

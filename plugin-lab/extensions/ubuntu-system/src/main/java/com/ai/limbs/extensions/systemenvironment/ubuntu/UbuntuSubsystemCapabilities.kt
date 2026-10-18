@@ -287,6 +287,7 @@ internal object UbuntuSubsystemCapabilities {
             .put("state", runtime.phase.name)
             .put("detail", runtime.detail)
             .put("error", runtime.error ?: JSONObject.NULL)
+            .put("network", terminal.ubuntuNetworkState.value.toJson())
             .put("idle_mode", idle.mode.name)
             .put("custom_minutes", idle.customMinutes)
             .put("idle_timeout_minutes", idle.timeoutMinutes ?: JSONObject.NULL)

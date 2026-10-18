@@ -29,6 +29,9 @@ internal class UbuntuPresentationCommandHandler(
     override suspend fun invoke(command: String, parametersJson: String): String {
         val parameters = if (parametersJson.isBlank()) JSONObject() else JSONObject(parametersJson)
         val result = when (command) {
+            "settings.network.set" -> ok().put(
+                "network", terminal.setFollowHostNetwork(parameters.getBoolean("enabled")).toJson()
+            )
             "settings.snapshot" -> snapshot()
             "settings.cache.size" -> cacheSize()
             "settings.cache.clear" -> clearCache()
@@ -52,6 +55,7 @@ internal class UbuntuPresentationCommandHandler(
     private suspend fun snapshot(): JSONObject {
         val ssh = sshConfigManager.getConfig()
         return ok()
+            .put("network", terminal.ubuntuNetworkState.value.toJson())
             .put("ftp", ftpSnapshot())
             .put("sources", sourceSnapshot())
             .put("ssh_enabled", sshConfigManager.isEnabled())

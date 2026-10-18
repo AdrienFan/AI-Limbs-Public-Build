@@ -6,6 +6,7 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.Se
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.TerminalSessionData
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.TerminalState
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdleMode
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuNetworkState
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdlePolicy
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimeState
@@ -39,6 +40,17 @@ internal class UbuntuResidentPresentationController(
     override val terminalState: StateFlow<TerminalState> = mutableTerminalState.asStateFlow()
     private val mutableRuntime = MutableStateFlow(UbuntuRuntimeState())
     override val ubuntuRuntimeState: StateFlow<UbuntuRuntimeState> = mutableRuntime.asStateFlow()
+    private val mutableNetwork = MutableStateFlow(UbuntuNetworkState())
+    override val ubuntuNetworkState: StateFlow<UbuntuNetworkState> = mutableNetwork.asStateFlow()
+    override suspend fun setFollowHostNetwork(enabled: Boolean): UbuntuNetworkState {
+        val result = JSONObject(host.invokePresentationCommand(
+            "settings.network.set", JSONObject().put("enabled", enabled).toString()
+        ))
+        check(result.getBoolean("ok")) { "Ubuntu network settings were not saved" }
+        refresh()
+        return mutableNetwork.value
+    }
+
     private val mutableIdle = MutableStateFlow(UbuntuIdlePolicy())
     override val ubuntuIdlePolicy: StateFlow<UbuntuIdlePolicy> = mutableIdle.asStateFlow()
     private val mutableSharedHidden = MutableStateFlow(SharedHiddenTerminalState())
@@ -216,6 +228,7 @@ internal class UbuntuResidentPresentationController(
             detail = status.optString("detail"),
             error = status.nullableString("error")
         )
+        mutableNetwork.value = readUbuntuNetworkState(status.getJSONObject("network"))
         val mode = runCatching { UbuntuIdleMode.valueOf(status.optString("idle_mode")) }
             .getOrDefault(UbuntuIdleMode.KEEP_RUNNING)
         mutableIdle.value = UbuntuIdlePolicy(

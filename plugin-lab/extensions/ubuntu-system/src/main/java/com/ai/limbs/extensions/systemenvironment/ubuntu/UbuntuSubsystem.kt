@@ -19,6 +19,7 @@ internal class UbuntuSubsystem private constructor(
         hostListenerSync.close()
         processCapability.shutdown()
         terminal.prepareForMaintenance()
+        terminal.clearNetworkRoutePreparer()
     }
 
     companion object {
@@ -34,7 +35,8 @@ internal class UbuntuSubsystem private constructor(
                 nativeLibraryDir = nativeRuntime.directory,
             )
             val terminal = TerminalManager.getInstance(runtimeContext)
-            val hostListenerSync = UbuntuSubsystemHostListenerSync(host)
+            val hostListenerSync = UbuntuSubsystemHostListenerSync(host, terminal)
+            terminal.configureNetworkRoutePreparer(hostListenerSync::prepare)
             val hostComponentSync = UbuntuSubsystemHostComponentSync(host)
             val pageProvider = UbuntuSubsystemPageProvider(
                 host = host,

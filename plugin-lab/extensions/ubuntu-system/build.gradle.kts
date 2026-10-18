@@ -10,11 +10,11 @@ android {
     namespace = "com.ai.limbs.extensions.systemenvironment.ubuntu"
     compileSdk = 36
     defaultConfig {
-        applicationId = "com.ai.limbs.payload.systemenvironment.ubuntu.v0125"
+        applicationId = "com.ai.limbs.payload.systemenvironment.ubuntu.v0126"
         minSdk = 26
         targetSdk = 34
-        versionCode = 26
-        versionName = "0.1.25"
+        versionCode = 27
+        versionName = "0.1.26"
     }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

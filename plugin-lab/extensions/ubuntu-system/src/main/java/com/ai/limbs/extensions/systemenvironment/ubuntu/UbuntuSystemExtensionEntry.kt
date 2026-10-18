@@ -111,7 +111,7 @@ private fun ubuntuToolDiscovery(): ChildAiIngressDiscovery =
             .put("cleanup_install_artifacts_after_verified", true)
             .put(
                 "instruction",
-                "Ubuntu rules: tools -> ail-tool first; normal dynamically linked TCP commands use DIRECT; " +
+                "Ubuntu rules: tools -> ail-tool first; normal dynamically linked TCP commands follow the latched Ubuntu network setting (DIRECT by default, HOST when enabled); " +
                     "Use /root/laner/bin/laner-net only for explicit VPN access; do not retry DIRECT failures through VPN automatically. " +
                     "Laner/AI Limbs development -> /root/laner/bin/ail-source first. " +
                     "Do not guess source identity from /root/laner/projects directory names."

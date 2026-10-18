@@ -4,7 +4,13 @@ if [ "${LANER_NET_ACTIVE:-}" = "1" ] && [ "${LANER_EGRESS_MODE:-}" = "VPN" ]; th
     return
 fi
 ail_direct_library=/usr/local/lib/ai-limbs/libproxychains4.so
-ail_direct_config=/root/laner/tools/laner-net/direct-proxychains.conf
+ail_direct_config=/root/laner/tools/laner-net/egress-proxychains.conf
+ail_egress_mode_file=/root/laner/tools/laner-net/default-egress.env
+if [ ! -f "$ail_egress_mode_file" ]; then
+    printf '%s\n' 'AI Limbs: network policy is not prepared; restart Ubuntu.' >&2
+    exit 3
+fi
+. "$ail_egress_mode_file"
 
 if [ ! -f "$ail_direct_library" ]; then
     printf '%s\n' 'AI Limbs: DIRECT routing library is missing; refusing an unconfigured network session.' >&2
@@ -26,6 +32,5 @@ export PROXYCHAINS_CONF_FILE="$ail_direct_config"
 export PROXYCHAINS_QUIET_MODE=1
 export NO_PROXY=127.0.0.1,localhost,::1
 export no_proxy="$NO_PROXY"
-export LANER_EGRESS_MODE=DIRECT
 export LANER_DIRECT_SCOPE=dynamic_tcp
-unset ail_direct_library ail_direct_config
+unset ail_direct_library ail_direct_config ail_egress_mode_file

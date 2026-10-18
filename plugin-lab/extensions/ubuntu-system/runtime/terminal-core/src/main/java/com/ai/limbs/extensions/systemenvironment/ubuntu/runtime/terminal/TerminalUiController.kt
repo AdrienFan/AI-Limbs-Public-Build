@@ -2,6 +2,7 @@ package com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal
 
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.TerminalSessionData
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.TerminalState
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuNetworkState
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdlePolicy
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimeState
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuStopRequester
@@ -14,6 +15,8 @@ interface TerminalUiController {
     val coroutineScope: CoroutineScope
     val terminalState: StateFlow<TerminalState>
     val ubuntuRuntimeState: StateFlow<UbuntuRuntimeState>
+    val ubuntuNetworkState: StateFlow<UbuntuNetworkState>
+    suspend fun setFollowHostNetwork(enabled: Boolean): UbuntuNetworkState
     val ubuntuIdlePolicy: StateFlow<UbuntuIdlePolicy>
     val sharedHiddenTerminalState: StateFlow<SharedHiddenTerminalState>
     val localBusinessSettingsAvailable: Boolean get() = true
@@ -43,6 +46,8 @@ class LocalTerminalUiController(
     override val coroutineScope: CoroutineScope get() = terminal.coroutineScope
     override val terminalState: StateFlow<TerminalState> get() = terminal.terminalState
     override val ubuntuRuntimeState: StateFlow<UbuntuRuntimeState> get() = terminal.ubuntuRuntimeState
+    override val ubuntuNetworkState: StateFlow<UbuntuNetworkState> get() = terminal.ubuntuNetworkState
+    override suspend fun setFollowHostNetwork(enabled: Boolean) = terminal.setFollowHostNetwork(enabled)
     override val ubuntuIdlePolicy: StateFlow<UbuntuIdlePolicy> get() = terminal.ubuntuIdlePolicy
     override val sharedHiddenTerminalState: StateFlow<SharedHiddenTerminalState> get() = terminal.sharedHiddenTerminalState
 

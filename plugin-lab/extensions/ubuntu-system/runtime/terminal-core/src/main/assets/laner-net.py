@@ -167,13 +167,14 @@ def load_host_listener_ports() -> tuple[list[int], list[str]]:
             if 1 <= port <= 65535:
                 ports.add(port)
     result = sorted(ports)
-    direct = data.get("direct_proxy")
-    if isinstance(direct, dict) and direct.get("host") == SCAN_HOST:
-        direct_port = direct.get("port")
-        # A functioning DIRECT proxy is not a candidate for explicit VPN traffic.
-        if direct_port in result:
-            result.remove(direct_port)
-            notes.append(f"host_direct_proxy:excluded:{direct_port}")
+    for route_key in ("direct_proxy", "egress_proxy"):
+        direct = data.get(route_key)
+        if isinstance(direct, dict) and direct.get("host") == SCAN_HOST:
+            direct_port = direct.get("port")
+            # Host default/physical transports are not explicit VPN proxy candidates.
+            if direct_port in result:
+                result.remove(direct_port)
+                notes.append(f"host_{route_key}:excluded:{direct_port}")
     notes.append(f"host_listener_snapshot:fresh:{age_ms}ms:ports={len(result)}")
     return result, notes
 

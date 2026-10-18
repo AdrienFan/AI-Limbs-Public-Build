@@ -39,6 +39,7 @@ import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.Pa
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.SessionInitState
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UBUNTU_STOPPED_ERROR
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdleMode
+import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuNetworkState
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuIdlePolicy
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimePhase
 import com.ai.limbs.extensions.systemenvironment.ubuntu.runtime.terminal.data.UbuntuRuntimeState
@@ -133,6 +134,29 @@ class TerminalManager private constructor(
     val ubuntuRuntimeState: StateFlow<UbuntuRuntimeState> = _ubuntuRuntimeState.asStateFlow()
     private val _ubuntuIdlePolicy = MutableStateFlow(loadUbuntuIdlePolicy())
     val ubuntuIdlePolicy: StateFlow<UbuntuIdlePolicy> = _ubuntuIdlePolicy.asStateFlow()
+    private val _ubuntuNetworkState = MutableStateFlow(
+        UbuntuNetworkState(followHost = prefs.getBoolean("ubuntu_follow_host_network", false))
+    )
+    val ubuntuNetworkState: StateFlow<UbuntuNetworkState> = _ubuntuNetworkState.asStateFlow()
+    private var networkRoutePreparer: (suspend (Boolean) -> Unit)? = null
+
+    fun configureNetworkRoutePreparer(preparer: suspend (Boolean) -> Unit) {
+        check(networkRoutePreparer == null) { "Ubuntu network route preparer is already configured" }
+        networkRoutePreparer = preparer
+    }
+
+    fun clearNetworkRoutePreparer() { networkRoutePreparer = null }
+
+    suspend fun setFollowHostNetwork(enabled: Boolean): UbuntuNetworkState =
+        ubuntuLifecycleMutex.withLock {
+            // Saving intent never modifies routes or environments of running processes.
+            check(prefs.edit().putBoolean("ubuntu_follow_host_network", enabled).commit()) {
+                "Could not save Ubuntu network settings"
+            }
+            _ubuntuNetworkState.value = _ubuntuNetworkState.value.copy(followHost = enabled)
+            _ubuntuNetworkState.value
+        }
+
     private val activeHiddenUbuntuOperations = AtomicInteger(0)
     private val aiLimbsDevelopmentPromptAllowed = AtomicBoolean(false)
     private val aiLimbsDevelopmentPromptOffered = AtomicBoolean(false)
@@ -364,6 +388,9 @@ class TerminalManager private constructor(
                 if (!initializeEnvironment()) {
                     throw IllegalStateException("Ubuntu environment preparation failed.")
                 }
+                val followHost = _ubuntuNetworkState.value.followHost
+                _ubuntuNetworkState.value = _ubuntuNetworkState.value.copy(activeFollowHost = followHost)
+                checkNotNull(networkRoutePreparer) { "Ubuntu network routing is not configured" }(followHost)
                 createNewSessionInternal(
                     title = "Local",
                     terminalType = TerminalType.LOCAL,
@@ -1147,6 +1174,7 @@ class TerminalManager private constructor(
         closingSessions.clear()
         sessionInitializationFailures.clear()
         sessionInitializationOutput.clear()
+        _ubuntuNetworkState.value = _ubuntuNetworkState.value.copy(activeFollowHost = null)
     }
 
     suspend fun initializeEnvironment(): Boolean {
@@ -1750,6 +1778,11 @@ EOF
           "${'$'}BIN/busybox" cp "${'$'}HOME/proxychains-GPL-2.txt" "${'$'}AI_LIB_DIR/proxychains-GPL-2.txt"
           "${'$'}BIN/busybox" mkdir -p "${'$'}UBUNTU_PATH/etc/profile.d"
           "${'$'}BIN/busybox" cp "${'$'}HOME/ai_limbs_direct_profile.sh" "${'$'}UBUNTU_PATH/etc/profile.d/ai-limbs-direct.sh"
+          "${'$'}BIN/busybox" mkdir -p "${'$'}LANER_ROOT/tools/laner-net"
+          for AIL_NETWORK_FILE in host-listeners.json direct-proxychains.conf egress-proxychains.conf default-egress.env; do
+            "${'$'}BIN/busybox" cp "${'$'}HOME/network-egress/${'$'}AIL_NETWORK_FILE" "${'$'}LANER_ROOT/tools/laner-net/.${'$'}AIL_NETWORK_FILE.install" || return 1
+            "${'$'}BIN/busybox" mv "${'$'}LANER_ROOT/tools/laner-net/.${'$'}AIL_NETWORK_FILE.install" "${'$'}LANER_ROOT/tools/laner-net/${'$'}AIL_NETWORK_FILE" || return 1
+          done
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-status.sh" "${'$'}LANER_BIN/ail-status"
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-preflight.sh" "${'$'}LANER_BIN/ail-preflight"
           "${'$'}BIN/busybox" cp "${'$'}HOME/ail-cloud-build.sh" "${'$'}LANER_BIN/ail-cloud-build"
