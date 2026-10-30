@@ -32,7 +32,7 @@ internal object ArtMagneticSelection {
         return o
     }
     fun info()=JSONObject().put("softSelection",ArtSoftSelection.info()).put("modes",JSONObject(ArtSoftSelection.modes)).put("defaults",defaults()).put("pending",JSONArray(pending))
-        .put("phoneStages","绘制→闭合调整→确认；闭合后可拖动、增删锚点，确认前保留原选区，取消不写历史；最终确认后不持久保存磁性锚点")
+        .put("phoneStages","绘制→闭合调整→确认；提交后持久保存锚点、参数与此前选区组合，可载入原参数重新编辑，确认替换原磁性操作；取消不写历史")
         .put("maxAnchors",MAX_ANCHORS).put("maxSearchPixels",MAX_SEARCH_PIXELS).put("maxPathPoints",MAX_PATH_POINTS)
         .put("maxReferencePixels",ArtRasterSelection.MAX_PIXELS).put("algorithm","RGBA Sobel/scale-normalized LoG, lazy 64px tiles (128 cached), eight-neighbor A* live wire")
     fun image(snapshot: JSONObject,bitmap: Bitmap,p: JSONObject): Image {
@@ -43,6 +43,13 @@ internal object ArtMagneticSelection {
             o.getString("reference"),o.getInt("filterRadius"),rect,edges,referenceKey(o))
     }
     fun referenceKey(options:JSONObject)=options.getString("reference")+":"+options.getJSONArray("colorLabels").toString()+":"+options.getString("edgeModel")
+
+    fun anchors(raw:JSONArray):List<Point> {
+        require(raw.length() in 1..MAX_ANCHORS) {"磁性路径需要1–128锚点"}
+        return (0 until raw.length()).map {i->val q=raw.getJSONArray(i);require(q.length()==2)
+            Point(q.getDouble(0),q.getDouble(1)).also {require(it.x.isFinite() && it.y.isFinite())}}
+    }
+    fun json(points:List<Point>)=JSONArray().apply {points.forEach {put(JSONArray().put(it.x).put(it.y))}}
 
     private data class Visit(val index: Int,val cost: Float,val rank: Float)
     fun segment(image: Image,a: Point,b: Point,p: JSONObject,cancelled: ()->Boolean={false}): List<Point> {
