@@ -98,6 +98,7 @@ internal object ArtColorizeSolver {
         val selection=state.optJSONObject("selection")?.let {
             Region().apply {setPath(ArtSelection.path(it),Region(0,0,state.getInt("width"),state.getInt("height")))}
         }
+        val coverage=state.optJSONObject("selection")?.let {ArtSoftSelection.Sampler(it)}
         val allowed=BooleanArray(n) {i -> barrier[i].toInt()==0 &&
             (selection==null || selection.contains(area.left+i%w,area.top+i/w))}
         val labels=IntArray(n) {-1};val seeds=IntArray(n) {-1};val distances=IntArray(n) {Int.MAX_VALUE}
@@ -153,7 +154,8 @@ internal object ArtColorizeSolver {
             val c=colors[label];if(c.getBoolean("transparent"))continue
             val pixel=if(c.has("linearRGBA"))ArtFloatPixels.color(c.getJSONArray("linearRGBA")) else ArtFloatPixels.color(Color.parseColor(c.getString("color")))
             // Tint bright/transparent areas above the source. Dark line pixels remain visible.
-            val amount=(255-(rawHeight[i].toInt() and 255))/255f
+            val amount=(255-(rawHeight[i].toInt() and 255))/255f*
+                ((coverage?.at(area.left+i%w+.5,area.top+i/w+.5) ?: 255)/255f)
             for(channel in 0..3)output[i*4+channel]=pixel[channel]*amount
             if(output[i*4+3]>0)filled++
         }

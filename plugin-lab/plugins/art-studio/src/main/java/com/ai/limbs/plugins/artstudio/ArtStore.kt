@@ -1517,7 +1517,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         val snap=selectionToolRequest(p);val o=ArtMagneticSelection.options(p)
         val request=JSONObject(p.toString());o.keys().forEach {request.put(it,o.get(it))}
         val bounds=ArtColorSelection.bounds(snap.getJSONObject("state"),request)
-        val bitmap=selectionReference(snap,request,bounds.width().toLong()*bounds.height()*16+ArtMagneticSelection.MAX_SEARCH_PIXELS*64L)
+        val bitmap=selectionReference(snap,request,bounds.width().toLong()*bounds.height()*32+ArtMagneticSelection.MAX_SEARCH_PIXELS*64L)
         try {ArtMagneticSelection.image(snap,bitmap,request)} finally {bitmap.recycle()}
     }
     fun magneticTrace(p: JSONObject): JSONObject = locked {
@@ -1693,6 +1693,9 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         require(!mask.getBoolean("locked") && mask.getBoolean("visible")) {"蒙版已锁定或隐藏"}
         ArtPixelCoordinates.inverse(state,mask)
         val source=ArtColorize.source(state,mask.getJSONObject("colorize").getString("sourceLayerId"))
+        require(ArtMenuOperations.subtree(state,source.getString("id")).none {it.getString("id")==mask.getString("id")}) {
+            "上色蒙版不能位于自身的线稿源组内，请将蒙版移到该线稿组外"
+        }
         val view=snap
         // The full render and a conservative solver reservation coexist; do not estimate them independently.
         val bitmap=selectionReference(snap,JSONObject().put("layerId",source.getString("id")).put("reference","current"),0)
@@ -2464,7 +2467,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
             require(file.isFile) { "工程不存在" }
             ZipFile(file).use { zip ->
                 val entry = requireNotNull(zip.getEntry("project.json")) { "工程缺少 project.json" }
-                val bytes = zip.getInputStream(entry).use { it.readNBytes(32 * 1024 * 1024 + 1) }
+                val bytes = zip.getInputStream(entry).use { it.artReadUpTo(32 * 1024 * 1024 + 1) }
                 require(bytes.size <= 32 * 1024 * 1024) { "工程数据过大" }
                 val doc = JSONObject(String(bytes, Charsets.UTF_8))
                 require(doc.getString("id") == id && doc.getInt("format") == 1)
@@ -2475,7 +2478,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                     validateId(name)
                     require(asset.size in 0..MAX_ASSET_BYTES.toLong()) { "工程图片资源大小无效" }
                     ArtImagePolicy.requireBytes(asset.size * 2, "读取工程图片资源")
-                    val content = zip.getInputStream(asset).use { it.readNBytes(MAX_ASSET_BYTES + 1) }
+                    val content = zip.getInputStream(asset).use { it.artReadUpTo(MAX_ASSET_BYTES + 1) }
                     require(content.size <= MAX_ASSET_BYTES)
                     atomicBytes(assetFile(name), content)
                 }
@@ -2505,7 +2508,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                 when {
                     path == "project.json" -> {
                         require(project == null) { "工程数据重复" }
-                        val data = zip.readNBytes(32 * 1024 * 1024 + 1)
+                        val data = zip.artReadUpTo(32 * 1024 * 1024 + 1)
                         require(data.size <= 32 * 1024 * 1024)
                         project = JSONObject(String(data, Charsets.UTF_8))
                     }
@@ -2516,7 +2519,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
                         require(asset !in importedAssets) { "工程资源重复" }
                         val available = minOf(MAX_ASSET_BYTES.toLong(), archiveAssetBudget - importedAssetBytes)
                             .coerceAtLeast(0).toInt()
-                        val data = zip.readNBytes(available + 1)
+                        val data = zip.artReadUpTo(available + 1)
                         require(data.size <= available) { "工程图片资源超过当前读取预算" }
                         importedAssetBytes += data.size
                         importedAssets[asset] = data

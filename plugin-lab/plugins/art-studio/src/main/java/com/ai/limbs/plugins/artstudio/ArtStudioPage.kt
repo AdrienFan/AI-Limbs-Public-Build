@@ -1092,7 +1092,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         if(uri!=null && captured!=null && item!=null) scope.launch {
             try {
                 val encoded=withContext(Dispatchers.IO) {
-                    val bytes=context.contentResolver.openInputStream(uri)?.use { it.readNBytes(8*1024*1024+1) }
+                    val bytes=context.contentResolver.openInputStream(uri)?.use { it.artReadUpTo(8*1024*1024+1) }
                         ?: error("无法读取图像文件")
                     require(bytes.size<=8*1024*1024) { "图片大小上限为 8 MB" }
                     android.util.Base64.encodeToString(bytes,android.util.Base64.NO_WRAP)
@@ -1108,7 +1108,7 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
         val captured=referenceImportContext
         referenceImportContext=null
         if(uri!=null && captured!=null) perform { confirmation ->
-            val bytes=context.contentResolver.openInputStream(uri)?.use { it.readNBytes(8*1024*1024+1) }
+            val bytes=context.contentResolver.openInputStream(uri)?.use { it.artReadUpTo(8*1024*1024+1) }
                 ?: error("无法读取参考图像")
             require(bytes.size<=8*1024*1024) { "参考图像输入上限8 MiB" }
             val name=context.contentResolver.query(uri,arrayOf(android.provider.OpenableColumns.DISPLAY_NAME),
@@ -1148,10 +1148,10 @@ private fun Studio(host: InProcessPluginUiHost, menuBridge: StudioMenuBridge,
                 if (cursor.moveToFirst()) cursor.getString(0) else null
             } ?: "未命名图像"
             val bytes = context.contentResolver.openInputStream(uri)?.use { input ->
-                val header = input.readNBytes(4)
+                val header = input.artReadUpTo(4)
                 val projectFile = header.size >= 4 && header[0] == 0x50.toByte() && header[1] == 0x4b.toByte()
                 val limit = if (projectFile) 64 * 1024 * 1024 else 8 * 1024 * 1024
-                val body = input.readNBytes(limit + 1 - header.size)
+                val body = input.artReadUpTo(limit + 1 - header.size)
                 require(body.size + header.size <= limit) {
                     if (projectFile) "工程文件超过 64 MB" else "图片大小上限为 8 MB"
                 }

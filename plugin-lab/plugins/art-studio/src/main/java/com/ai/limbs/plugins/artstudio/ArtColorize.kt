@@ -42,7 +42,8 @@ internal object ArtColorize {
             it.getString("id")==mask.getJSONObject("colorize").getString("sourceLayerId")
         } ?: return false
         return source.getString("kind") in setOf("paint","image","group") &&
-            ArtMove.visibility(state,source)>0 && ArtMove.visibility(state,mask)>0 && !ArtMenuOperations.isLocked(state,mask)
+            ArtMove.visibility(state,source)>0 && ArtMove.visibility(state,mask)>0 && !ArtMenuOperations.isLocked(state,mask) &&
+            ArtMenuOperations.subtree(state,source.getString("id")).none {it.getString("id")==mask.getString("id")}
     }
     fun source(state: JSONObject,id: String): JSONObject {
         val source=ArtMenuOperations.layers(state).firstOrNull {it.getString("id")==id} ?: error("关联线稿源已删除")

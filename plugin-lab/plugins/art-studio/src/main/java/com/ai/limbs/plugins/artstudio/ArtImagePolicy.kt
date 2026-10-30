@@ -199,7 +199,7 @@ internal object ArtImagePolicy {
 
     fun assetPixels(file: File): Long {
         if(isExr(file)) {
-            val header=ArtOpenExr.header(file.inputStream().use {it.readNBytes(1024*1024)})
+            val header=ArtOpenExr.header(file.inputStream().use {it.artReadUpTo(1024*1024)})
             return header.width.toLong()*header.height
         }
         val bounds = BitmapFactory.Options().apply { inJustDecodeBounds = true; inScaled = false }
@@ -208,9 +208,9 @@ internal object ArtImagePolicy {
         return bounds.outWidth.toLong() * bounds.outHeight
     }
 
-    private fun isExr(file:File)=file.inputStream().use {ArtOpenExr.matches(it.readNBytes(4))}
+    private fun isExr(file:File)=file.inputStream().use {ArtOpenExr.matches(it.artReadUpTo(4))}
     fun bounds(file:File):BitmapFactory.Options {
-        if(isExr(file)) {val h=ArtOpenExr.header(file.inputStream().use {it.readNBytes(1024*1024)})
+        if(isExr(file)) {val h=ArtOpenExr.header(file.inputStream().use {it.artReadUpTo(1024*1024)})
             return BitmapFactory.Options().apply {outWidth=h.width;outHeight=h.height}}
         return BitmapFactory.Options().apply {inJustDecodeBounds=true;inScaled=false;BitmapFactory.decodeFile(file.absolutePath,this)}
     }

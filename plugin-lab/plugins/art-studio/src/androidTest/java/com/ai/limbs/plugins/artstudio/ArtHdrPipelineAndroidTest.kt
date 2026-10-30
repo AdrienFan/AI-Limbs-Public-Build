@@ -100,4 +100,44 @@ class ArtHdrPipelineAndroidTest {
         assertRgba(floatArrayOf(4f,2f,.5f,1f),pixel(snap,15,15))
         snap=store.history("AWEI",false);assertRgba(floatArrayOf(4f,2f,.5f,1f),pixel(snap,15,15))
     }
+    @Test fun rotatedBezierAndIndependentMaskRetainEditableNodes() {
+        var snap=store.create(32,32,"#00000000")
+        snap=store.bezierSelectionCreate("AWEI",request(snap).put("nodes",JSONArray("[{\"x\":4,\"y\":4},{\"x\":16,\"y\":4},{\"x\":16,\"y\":16},{\"x\":4,\"y\":16}]")))
+        snap=store.rotateSelection("AWEI",request(snap).put("degrees",30))
+        val nodes=ArtBezierSelection.nodes(ArtBezierSelection.component(snap.getJSONObject("state").getJSONObject("selection"),0))
+        assertEquals(4,nodes.size)
+        snap=store.selectionMask("AWEI",request(snap).put("action","save").put("name","rotated"))
+        val mask=ArtMenuOperations.layers(snap.getJSONObject("state")).first {it.getString("kind")=="selection_mask"}.getString("id")
+        snap=store.apply("AWEI","SELECTION_CLEAR",request(snap))
+        snap=store.selectionMask("AWEI",request(snap).put("action","activate").put("id",mask))
+        val restored=ArtBezierSelection.nodes(ArtBezierSelection.component(snap.getJSONObject("state").getJSONObject("selection"),0))
+        for(i in nodes.indices) {assertEquals(nodes[i].point.x,restored[i].point.x,.001);assertEquals(nodes[i].point.y,restored[i].point.y,.001)}
+    }
+    @Test fun magneticReeditReplacesOriginalContributionAndPreservesEarlierSelection() {
+        var snap=store.create(20,20,"#00000000");val layer=snap.getJSONObject("state").getString("selectedLayerId")
+        snap=store.basicSelection("AWEI",request(snap).put("shape","rect").put("x",1).put("y",1).put("width",2).put("height",2).put("antialias",0))
+        fun commit(points:String,reedit:Boolean) {
+            snap=store.magneticCommit("AWEI",request(snap).put("layerId",layer).put("mode","add").put("antialias",0)
+                .put("points",JSONArray(points)).put("anchors",JSONArray(points)).put("reedit",reedit))
+        }
+        commit("[[4,4],[8,4],[8,8],[4,8]]",false)
+        commit("[[10,10],[14,10],[14,14],[10,14]]",true)
+        val selection=snap.getJSONObject("state").getJSONObject("selection")
+        val coverage=ArtSoftSelection.Sampler(selection)
+        assertEquals(255,coverage.at(2.0,2.0));assertEquals(0,coverage.at(6.0,6.0));assertEquals(255,coverage.at(12.0,12.0))
+        assertTrue(selection.has("magneticSource"))
+    }
+    @Test fun multiscaleColorizeKeepsNativeResolutionAndHDRAcrossTileSeams() {
+        var snap=store.create(1025,1025,"#00000000");val source=snap.getJSONObject("state").getString("selectedLayerId")
+        snap=store.colorizeCreate("AWEI",request(snap).put("sourceLayerId",source));val mask=snap.getJSONObject("state").getString("selectedLayerId")
+        snap=store.colorizeStroke("AWEI",request(snap).put("maskId",mask).put("points",JSONArray("[[10,10]]")).put("width",3)
+            .put("color","#FFFFFFFF").put("linearRGBA",JSONArray("[4,2,1,1]")))
+        snap=store.colorizeUpdate("AWEI",request(snap).put("maskId",mask))
+        assertTrue(snap.getJSONObject("colorizeResult").getInt("coarseScale")>1)
+        val image=render(snap)
+        try {
+            assertEquals(1025,image.width);assertEquals(1025,image.height)
+            for(x in listOf(10,511,512,1024))assertRgba(floatArrayOf(4f,2f,1f,1f),ArtFloatPixels.read(image,Rect(x,x,x+1,x+1)))
+        } finally {image.recycle()}
+    }
 }
