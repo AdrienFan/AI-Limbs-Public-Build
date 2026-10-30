@@ -139,6 +139,27 @@ class ArtHdrPipelineAndroidTest {
         layer.put("contentOrder",JSONArray().put(ArtPixelCoordinates.stamp(JSONObject().put("kind","paste").put("asset",id).put("x",8).put("y",8),state,layer)))
         assertRgba(floatArrayOf(8f,1f,2f,1f),pixel(snapshot,8,8))
     }
+    @Test fun nestedHDRGroupsApplyOpacityOnceAndRetainCropClip() {
+        val snapshot=openHdr();val state=snapshot.getJSONObject("state");val layers=state.getJSONArray("layers")
+        val image=layers.getJSONObject(0)
+        fun group(parent:String)=JSONObject(image.toString()).put("id",UUID.randomUUID().toString()).put("kind","group")
+            .put("asset","").put("parentId",parent).put("opacity",.5)
+        val outer=group("");val inner=group(outer.getString("id"))
+        outer.put("cropClip",JSONArray("[[4,4],[12,4],[12,12],[4,12]]"))
+        image.put("parentId",inner.getString("id"))
+        val overlay=ArtFloatPixels.from(32,32,FloatArray(32*32*4) {floatArrayOf(4f,.5f,1f,.5f)[it%4]})
+        val asset=UUID.randomUUID().toString()
+        try {store.assetFile(asset).writeBytes(ArtImagePolicy.encodeAsset(overlay,100000))} finally {overlay.recycle()}
+        val sibling=JSONObject(image.toString()).put("id",UUID.randomUUID().toString()).put("asset",asset)
+        layers.put(sibling).put(inner).put(outer)
+        val output=render(snapshot)
+        try {
+            val alpha=(127f/255)*(127f/255)
+            // Compose the two children first: (4,.5,1,.5) over (4,2,.5,1).
+            assertRgba(floatArrayOf(6*alpha,1.5f*alpha,1.25f*alpha,alpha),ArtFloatPixels.read(output,Rect(8,8,9,9)))
+            assertRgba(floatArrayOf(0f,0f,0f,0f),ArtFloatPixels.read(output,Rect(2,2,3,3)))
+        } finally {output.recycle()}
+    }
     @Test fun colorizeHDRPaletteAndAnimationCelsPreserveSeparateFloatOutputs() {
         var snap=store.create(20,20,"#00000000")
         val source=snap.getJSONObject("state").getString("selectedLayerId")

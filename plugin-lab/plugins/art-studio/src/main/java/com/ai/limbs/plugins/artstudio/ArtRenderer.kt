@@ -59,6 +59,14 @@ internal object ArtRenderer {
                 else -> android.graphics.BlendMode.SRC_OVER
             }
         }
+        fun compositeViewport(target:Canvas,buffer:Bitmap,paint:Paint) {
+            target.save()
+            try {
+                // Pixels already carry the document transform; keep the device-space clip.
+                target.setMatrix(Matrix())
+                target.drawBitmap(buffer,0f,0f,paint)
+            } finally {target.restore()}
+        }
         fun drawChildren(target: Canvas, parentId: String, depth: Int, draw: (Canvas, String, Int) -> Unit) {
             require(depth <= layers.length()) { "图层组存在循环引用" }
             for (i in 0 until layers.length()) {
@@ -83,10 +91,15 @@ internal object ArtRenderer {
                     }
                 }
                 if (layer.getString("kind") == "group") {
-                    // Isolate the complete group before applying opacity or blend once.
-                    target.saveLayer(null, paint)
-                    draw(target, layer.getString("id"), depth + 1)
-                    target.restore()
+                    // Android 14's implicit saveLayer surface clips extended values in the
+                    // HDR group regression. Own the F16 surface and composite the group once.
+                    val groupBuffer=ArtFloatPixels.bitmap(renderWidth,renderHeight)
+                    try {
+                        val groupCanvas=Canvas(groupBuffer)
+                        groupCanvas.setMatrix(target.matrix)
+                        draw(groupCanvas,layer.getString("id"),depth+1)
+                        compositeViewport(target,groupBuffer,paint)
+                    } finally {groupBuffer.recycle()}
                 } else {
                     val buffer = ArtFloatPixels.bitmap(renderWidth,renderHeight)
                     try {
@@ -163,11 +176,7 @@ internal object ArtRenderer {
                                 }
                             }
                         }
-                        target.save()
-                        try {
-                            target.setMatrix(Matrix())
-                            target.drawBitmap(buffer,0f,0f,paint)
-                        } finally {target.restore()}
+                        compositeViewport(target,buffer,paint)
                     } finally { buffer.recycle() }
                 }
                 target.restore()
