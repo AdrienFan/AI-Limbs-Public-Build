@@ -45,9 +45,18 @@ jobs:
           sdkmanager --install "platform-tools" "platforms;android-34" "platforms;android-36" "build-tools;35.0.0" "ndk;27.0.12077973" "cmake;3.31.0" "emulator" "system-images;android-34;google_apis;x86_64" "system-images;android-29;google_apis;x86_64"
           printf 'sdk.dir=%s\n' "$ANDROID_HOME" > local.properties
       - name: Test view lifecycle and capability help
+        id: unit_tests
         run: |
           chmod +x ./gradlew
           ./gradlew :art-studio-plugin:testDebugUnitTest --stacktrace --no-daemon
+      - name: Restore native compiler outputs
+        id: native_cache
+        uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            plugin-lab/plugins/art-studio/.cxx
+            plugin-lab/plugins/art-studio/build/intermediates/cxx
+          key: ${{ runner.os }}-art-studio-ndk27-cmake331-${{ hashFiles('plugin-lab/plugins/art-studio/src/main/cpp/**', 'plugin-lab/plugins/art-studio/third_party/harfbuzz/*.tar.xz') }}
       - name: Compile plugin payload
         run: |
           chmod +x ./gradlew
@@ -66,7 +75,7 @@ jobs:
           mkdir -p dist
           for api in 29 34; do
             printf 'no\n' | avdmanager create avd --force --name art-studio-hdr --path "$ANDROID_AVD_HOME/art-studio-hdr.avd" --package "system-images;android-$api;google_apis;x86_64" --device pixel_2
-            "$ANDROID_HOME/emulator/emulator" -list-avds | rg --fixed-strings --line-regexp art-studio-hdr
+            "$ANDROID_HOME/emulator/emulator" -list-avds | grep --fixed-strings --line-regexp art-studio-hdr
             "$ANDROID_HOME/emulator/emulator" -avd art-studio-hdr -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -memory 2048 > "dist/art-studio-emulator-api$api.log" 2>&1 &
             emulator_pid=$!
             trap 'if kill -0 "$emulator_pid" 2>/dev/null; then kill "$emulator_pid"; fi' EXIT
@@ -111,3 +120,11 @@ jobs:
             dist/art-studio-emulator-api*.log
             dist/android-tests-api*/
           if-no-files-found: warn
+      - name: Save native compiler outputs
+        if: always() && steps.native_cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@0057852bfaa89a56745cba8c7296529d2fc39830 # v4.3.0
+        with:
+          path: |
+            plugin-lab/plugins/art-studio/.cxx
+            plugin-lab/plugins/art-studio/build/intermediates/cxx
+          key: ${{ runner.os }}-art-studio-ndk27-cmake331-${{ hashFiles('plugin-lab/plugins/art-studio/src/main/cpp/**', 'plugin-lab/plugins/art-studio/third_party/harfbuzz/*.tar.xz') }}
