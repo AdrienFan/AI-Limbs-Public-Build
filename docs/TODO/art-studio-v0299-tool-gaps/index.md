@@ -36,6 +36,10 @@
 3. API29及API34 Android模拟器执行真实Skia／JNI，用例覆盖低于8位量化间隔的16位PNG差值、HDR导入／合成／围合／撤销重做／工程归档重导入／EXR匯出、分组变换写回、动画上色蒙版与修补。
 4. 四ABI APK、签名.ailp与来源证明；验证报告一起上传。手机上的手势、复杂分格、分块交界和旧作品重开仍需安装后验收。
 
-当前状态：源码与验证用例就绪，待本轮云流程结果；不得将“写了用例”表述为“测试通过”。
+云端第71轮：JVM回归、四ABI APK编译和独立OpenEXR读取验证通过；API29实际运行10项Android测试，8项在原生F16格式检查处失败，API34未执行。Android 10的`android::bitmap::imageInfo`没有F16分支，真实F16位图会报告`FORMAT_NONE`，原先仅接受NDK格式枚举的检查误拒绝了有效位图。
+
+修正：所有API统一用公开`Bitmap.getConfig()`验证F16，用NDK元数据验证尺寸／行跨度后锁定同一份原始像素，不做色深转换。补充对照公开`copyPixelsToBuffer`的half位元／局部矩形读取，以及非F16格式与不可修改位图拒写的Android回归。待修正后云流程验证，不得将“写了用例”表述为“测试通过”。
+
+根因源码：[AOSP Android 10 Bitmap.cpp的imageInfo](https://android.googlesource.com/platform/frameworks/base/+/android-10.0.0_r47/core/jni/android/graphics/Bitmap.cpp)。
 
 实现保持普通插件职责，没有新增宿主插件ID特判。Krita参考只用于交互及算法职责辨析；不引入Qt或Krita运行时。HDR依据Android RGBA_F16及OpenEXR公开格式实现。

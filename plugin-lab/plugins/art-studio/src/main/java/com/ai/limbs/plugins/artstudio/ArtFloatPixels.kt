@@ -61,8 +61,8 @@ internal object ArtNativePixels {
     private var loaded=false
     @Synchronized fun configure(root:java.io.File) {if(!loaded)directory=root}
     @Synchronized private fun load() {if(!loaded) {ArtNativeLibrary.load(requireNotNull(directory) {"高位深模块尚未绑定画室目录"},"artstudio_pixels_0299");loaded=true}}
-    fun read(bitmap:Bitmap,x:Int,y:Int,width:Int,height:Int):FloatArray {load();return readNative(bitmap,x,y,width,height)}
-    fun write(bitmap:Bitmap,pixels:FloatArray) {load();writeNative(bitmap,pixels)}
+    fun read(bitmap:Bitmap,x:Int,y:Int,width:Int,height:Int):FloatArray {require(!bitmap.isRecycled);load();return readNative(bitmap,x,y,width,height)}
+    fun write(bitmap:Bitmap,pixels:FloatArray) {require(!bitmap.isRecycled && bitmap.isMutable) {"高位深写入需要可修改位图"};load();writeNative(bitmap,pixels)}
     private external fun readNative(bitmap:Bitmap,x:Int,y:Int,width:Int,height:Int):FloatArray
     private external fun writeNative(bitmap:Bitmap,pixels:FloatArray)
 }

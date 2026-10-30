@@ -29,7 +29,21 @@ uint16_t pack(float value) {
 struct Locked {
     JNIEnv* env;jobject image;void* pixels=nullptr;AndroidBitmapInfo info{};
     Locked(JNIEnv* e,jobject b):env(e),image(b) {
-        if(AndroidBitmap_getInfo(e,b,&info)!=ANDROID_BITMAP_RESULT_SUCCESS||info.format!=ANDROID_BITMAP_FORMAT_RGBA_F16) {error(e,"需要RGBA_F16软件位图");return;}
+        // API 29's NDK imageInfo omits F16 and reports FORMAT_NONE for valid F16
+        // storage. Use the public Java Config on every API; keep getInfo for stride.
+        auto bitmapClass=e->FindClass("android/graphics/Bitmap");if(!bitmapClass)return;
+        auto configClass=e->FindClass("android/graphics/Bitmap$Config");if(!configClass)return;
+        auto getConfig=e->GetMethodID(bitmapClass,"getConfig","()Landroid/graphics/Bitmap$Config;");if(!getConfig)return;
+        auto f16Field=e->GetStaticFieldID(configClass,"RGBA_F16","Landroid/graphics/Bitmap$Config;");if(!f16Field)return;
+        auto actual=e->CallObjectMethod(b,getConfig);if(e->ExceptionCheck())return;
+        auto expected=e->GetStaticObjectField(configClass,f16Field);if(e->ExceptionCheck())return;
+        bool isF16=e->IsSameObject(actual,expected);
+        e->DeleteLocalRef(actual);e->DeleteLocalRef(expected);
+        e->DeleteLocalRef(configClass);e->DeleteLocalRef(bitmapClass);
+        if(!isF16) {error(e,"需要RGBA_F16软件位图");return;}
+        int result=AndroidBitmap_getInfo(e,b,&info);if(e->ExceptionCheck())return;
+        if(result!=ANDROID_BITMAP_RESULT_SUCCESS||info.width==0||info.height==0||
+           uint64_t(info.stride)<uint64_t(info.width)*8||info.stride%sizeof(uint16_t)!=0) {error(e,"高位深位图尺寸或行跨度无效");return;}
         if(AndroidBitmap_lockPixels(e,b,&pixels)!=ANDROID_BITMAP_RESULT_SUCCESS)error(e,"无法锁定高位深位图");
     }
     ~Locked() {if(pixels)AndroidBitmap_unlockPixels(env,image);}
@@ -42,7 +56,7 @@ Java_com_ai_limbs_plugins_artstudio_ArtNativePixels_readNative(JNIEnv* env,jobje
     auto result=env->NewFloatArray(width*height*4);if(!result)return nullptr;
     auto values=env->GetFloatArrayElements(result,nullptr);if(!values)return nullptr;
     for(int row=0;row<height;++row) {
-        auto source=reinterpret_cast<const uint16_t*>(static_cast<uint8_t*>(image.pixels)+(y+row)*image.info.stride)+x*4;
+        auto source=reinterpret_cast<const uint16_t*>(static_cast<uint8_t*>(image.pixels)+size_t(y+row)*image.info.stride)+size_t(x)*4;
         for(int n=0;n<width*4;++n)values[row*width*4+n]=unpack(source[n]);
     }
     env->ReleaseFloatArrayElements(result,values,0);return result;
@@ -57,7 +71,7 @@ Java_com_ai_limbs_plugins_artstudio_ArtNativePixels_writeNative(JNIEnv* env,jobj
         env->ReleaseFloatArrayElements(input,values,JNI_ABORT);error(env,"像素超出有限RGBA_F16范围");return;
     }
     for(uint32_t row=0;row<image.info.height;++row) {
-        auto target=reinterpret_cast<uint16_t*>(static_cast<uint8_t*>(image.pixels)+row*image.info.stride);
+        auto target=reinterpret_cast<uint16_t*>(static_cast<uint8_t*>(image.pixels)+size_t(row)*image.info.stride);
         for(uint32_t n=0;n<image.info.width*4;++n)target[n]=pack(values[size_t(row)*image.info.width*4+n]);
     }
     env->ReleaseFloatArrayElements(input,values,JNI_ABORT);

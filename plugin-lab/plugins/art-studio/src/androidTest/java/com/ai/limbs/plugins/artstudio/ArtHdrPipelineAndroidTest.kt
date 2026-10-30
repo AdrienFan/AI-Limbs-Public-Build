@@ -10,6 +10,8 @@ import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
 import java.io.File
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.util.UUID
 
 /** Real Android/Skia and packaged JNI: no mock Bitmap can prove HDR preservation. */
@@ -39,6 +41,40 @@ class ArtHdrPipelineAndroidTest {
             val bytes=ArtImagePolicy.encodeAsset(image,1024*1024);assertTrue(ArtOpenExr.matches(bytes))
             val decoded=ArtImagePolicy.decodeAssetBytes(bytes)
             try {assertRgba(expected,ArtFloatPixels.read(decoded))} finally {decoded.recycle()}
+        } finally {image.recycle()}
+    }
+    @Test fun nativeFloatAccessMatchesRawHalfStorageAndSubrect() {
+        val expected=floatArrayOf(
+            4f,-.25f,2f,.5f, 8f,3f,1f,1f, .125f,.25f,.5f,1f,
+            65504f,-65504f,0.000000059604645f,1f, 2f,-1f,4f,0f, 1.00048828125f,1.00146484375f,1f,.5f)
+        val image=ArtFloatPixels.from(3,2,expected)
+        try {
+            // Public raw-copy API independently checks the JNI layout and half rounding.
+            val raw=ByteBuffer.allocate(image.byteCount).order(ByteOrder.nativeOrder())
+            image.copyPixelsToBuffer(raw)
+            for(y in 0..1)for(x in 0..2)for(c in 0..3)
+                assertEquals(ArtHalf.half(expected[(y*3+x)*4+c]),raw.getShort(y*image.rowBytes+x*8+c*2))
+            assertArrayEquals(FloatArray(expected.size) {ArtHalf.float(ArtHalf.half(expected[it]))},ArtFloatPixels.read(image),0f)
+            val wanted=FloatArray(8) {ArtHalf.float(ArtHalf.half(expected[16+it]))}
+            assertArrayEquals(wanted,ArtNativePixels.read(image,1,1,2,1),0f)
+        } finally {image.recycle()}
+    }
+    @Test fun nativeFloatAccessRejectsOtherFormatsAndImmutableWrites() {
+        for(config in listOf(Bitmap.Config.ARGB_8888,Bitmap.Config.ALPHA_8,Bitmap.Config.RGB_565)) {
+            val image=Bitmap.createBitmap(3,2,config)
+            try {
+                assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.read(image,0,0,3,2)}
+                assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.write(image,FloatArray(24))}
+            } finally {image.recycle()}
+        }
+        val image=ArtFloatPixels.from(3,2,FloatArray(24) {if(it%4==3)1f else 4f})
+        try {
+            assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.read(image,2,1,2,1)}
+            val immutable=image.copy(Bitmap.Config.RGBA_F16,false)
+            try {
+                assertEquals(4f,ArtNativePixels.read(immutable,0,0,1,1)[0],0f)
+                assertThrows(IllegalArgumentException::class.java) {ArtNativePixels.write(immutable,FloatArray(24))}
+            } finally {immutable.recycle()}
         } finally {image.recycle()}
     }
     @Test fun sixteenBitPngDecoderRetainsDifferencesBelowEightBitQuantization() {
