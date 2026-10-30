@@ -9,7 +9,7 @@ internal object ArtToolCatalog {
         Triple("select_contiguous","连续区域选区（基础）","◈"),
         Triple("select_similar","相似色选区（基础）","◎"),
         Triple("select_magnetic","磁性套索选区（基础）","⊙"),
-        Triple("comic_panel","漫画分格编辑（直边）","▤"),
+        Triple("comic_panel","漫画分格编辑（路径）","▤"),
         Triple("select_bezier","贝塞尔曲线选区（基础）","♧"),
         Triple("enclose_fill","围合填充（基础）","⬟"),
         Triple("colorize_mask","上色蒙版编辑（基础）","▦"),

@@ -38,6 +38,11 @@ internal fun StudioEncloseFillOptions(store:ArtStore,settings: JSONObject,busy: 
             if(id=="all")next.put("gapClose",0)
             onSettings(next)
         },label={Text(label)})}
+    if(settings.getString("mode") in ArtEncloseFill.surroundedModes) {
+        FilterChip(selected=settings.getBoolean("includeSurrounding"),enabled=enabled,
+            onClick={set("includeSurrounding",!settings.getBoolean("includeSurrounding"))},label={Text("包含包围颜色本身")})
+        Text("从圈线边缘向内寻找外部区域，到包围颜色或透明区域停止；填充剩下的内部区域。条件颜色指包围颜色，不是内部颜色。")
+    }
     for((key,label) in listOf("includeContour" to "包含碰到围合边缘的区域","invert" to "反选填充区域","erase" to "擦除模式")) {
         FilterChip(selected=settings.getBoolean(key),enabled=enabled,onClick={val next=JSONObject(settings.toString()).put(key,!settings.getBoolean(key))
             if(key=="erase" && next.getBoolean("erase"))next.put("blend","normal")
@@ -60,7 +65,7 @@ internal fun StudioEncloseFillOptions(store:ArtStore,settings: JSONObject,busy: 
     }
     Text("可见参考包括图层透明度和混合方式；不包括文档背景、参考图像、尺规和蒙版编辑线索。结果只写当前绘画或图像层。")
     TextButton(enabled=enabled,onClick=onColor) {Text("填充颜色：$color")}
-    if(settings.getString("mode") !in setOf("all","transparent","not_transparent")) {
+    if(settings.getString("mode") !in setOf("all","transparent","not_transparent","surrounded_transparent")) {
         var regionColor by remember(settings.getString("regionColor")) {mutableStateOf(settings.getString("regionColor"))}
         OutlinedTextField(regionColor,{value->
             regionColor=value.uppercase().take(9)

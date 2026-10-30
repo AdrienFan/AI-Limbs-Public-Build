@@ -19,7 +19,7 @@ internal object ArtMagneticSelection {
     fun defaults()=JSONObject().put("mode","replace").put("reference","visible").put("filterRadius",1)
         .put("searchRadius",16).put("threshold",24).put("strength",8.0).put("anchorGap",40)
         .put("precision",0.75).put("limitToSelection",false).put("antialias",1).put("feather",0).put("expand",0)
-    val pending=listOf("完成后的磁性锚点重编辑","颜色标签参考","Krita全部高级滤波模型")
+    val pending=listOf("提交后恢复磁性锚点编辑","颜色标签参考","LoG边缘预处理及分块缓存")
     fun options(p: JSONObject): JSONObject {
         val o=defaults();o.keys().forEach {if(p.has(it))o.put(it,p.get(it))}
         require(o.getString("mode") in ArtBezierSelection.modes && o.getString("reference") in setOf("current","visible"))
@@ -31,6 +31,7 @@ internal object ArtMagneticSelection {
         return o
     }
     fun info()=JSONObject().put("softSelection",ArtSoftSelection.info()).put("modes",JSONObject(ArtSoftSelection.modes)).put("defaults",defaults()).put("pending",JSONArray(pending))
+        .put("phoneStages","绘制→闭合调整→确认；闭合后可拖动、增删锚点，确认前保留原选区，取消不写历史；最终确认后不持久保存磁性锚点")
         .put("maxAnchors",MAX_ANCHORS).put("maxSearchPixels",MAX_SEARCH_PIXELS).put("maxPathPoints",MAX_PATH_POINTS)
         .put("maxReferencePixels",ArtRasterSelection.MAX_PIXELS).put("algorithm","RGBA Sobel contrast + eight-neighbor A* live wire")
     fun image(snapshot: JSONObject,bitmap: Bitmap,p: JSONObject): Image {

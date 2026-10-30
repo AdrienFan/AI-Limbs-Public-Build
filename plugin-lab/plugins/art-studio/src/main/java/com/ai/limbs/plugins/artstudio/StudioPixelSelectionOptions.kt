@@ -75,14 +75,17 @@ internal fun StudioMagneticSelectionOptions(settings: JSONObject,busy: Boolean,h
     onSettings: (JSONObject)->Unit,onCommand: (String)->Unit) {
     fun set(key: String,value: Any) {onSettings(JSONObject(settings.toString()).put(key,value))}
     val enabled=!busy && !hasDraft
-    Text("点击放置锚点，或按住拖动沿轮廓追加锚点；路径自动吸附真实图像边缘。点击首个锚点、Enter 或完成按钮闭合。")
+    Text("点击或拖动沿轮廓放置锚点。点击首点、Enter 或闭合按钮后进入调整阶段；再次按Enter、点击首点或确认选区才提交。")
     Text(if(prepared)"边缘参考已准备" else "正在准备边缘参考；准备完成后即可放置锚点",color=if(prepared)Color.Unspecified else Color.Gray)
     Row {
-        TextButton(enabled=!busy && hasDraft,onClick={onCommand("finish")}) {Text("完成")}
+        TextButton(enabled=!busy && hasDraft,onClick={onCommand("close")}) {Text("闭合路径")}
+        TextButton(enabled=!busy && hasDraft,onClick={onCommand("apply")}) {Text("确认选区")}
+    }
+    Row {
         TextButton(enabled=!busy && hasDraft,onClick={onCommand("back")}) {Text("撤销锚点")}
         TextButton(enabled=hasDraft,onClick={onCommand("cancel")}) {Text("取消")}
     }
-    Text("已放置的锚点可拖动，拖出参考范围可删除。Esc／右键／双指取消；完成时只记录一次选区。")
+    Text("闭合后仍可拖动锚点，点击边缘插入锚点，拖出参考范围删除。确认前不改变原选区；Esc／右键／双指取消，确认只记录一次选区。")
     SelectionToolModes(settings,enabled,::set)
     StudioSoftSelectionControls(settings,enabled,::set)
     if(hasDraft)Text("这条路径使用开始时的参考和参数；完成或取消后再修改参数。",color=Color.Gray)

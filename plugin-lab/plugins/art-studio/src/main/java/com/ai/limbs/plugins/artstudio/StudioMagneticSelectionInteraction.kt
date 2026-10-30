@@ -14,7 +14,7 @@ import org.json.JSONObject
 import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.*
 
-/** Background live-wire preview, captured source and a single commit on completion. */
+/** Closed paths remain editable drafts; only explicit confirmation commits a selection. */
 internal class StudioMagneticSelectionInteraction(private val view: View) {
     private var scope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
     private var job: Job?=null
@@ -32,6 +32,8 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
     private var downX=0f
     private var downY=0f
     private var finishing=false
+    private var closedDraft=false
+    private var closedReady=false
     private var lastPreview=0L
     private var commit: (JSONObject)->Unit = {}
     var onDraft: (Boolean)->Unit = {}
@@ -39,7 +41,7 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
     fun source(image: ArtMagneticSelection.Image?) {
         if(source!==image) {cancel();source=image}
     }
-    fun cancel() {val existed=hasDraft;serial++;job?.cancel();job=null;capture=null;frozenImage=null;anchors.clear();cache=ConcurrentHashMap();points=emptyList();editing=-1;finishing=false;if(existed)onDraft(false);view.invalidate()}
+    fun cancel() {val existed=hasDraft;serial++;job?.cancel();job=null;capture=null;frozenImage=null;anchors.clear();cache=ConcurrentHashMap();points=emptyList();editing=-1;finishing=false;closedDraft=false;closedReady=false;if(existed)onDraft(false);view.invalidate()}
     fun dispose() {cancel();scope.cancel();source=null}
     private fun same(m: Matrix): Boolean {
         val a=FloatArray(9);val b=FloatArray(9);m.getValues(a);matrix.getValues(b)
@@ -61,6 +63,7 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
         val settings=JSONObject(p.toString());val segmentCache=cache;val requestId=++serial;job?.cancel()
         if(!scope.isActive)scope=CoroutineScope(SupervisorJob()+Dispatchers.Default)
         finishing=closed
+        closedDraft=closed;closedReady=false
         job=scope.launch {
             try {
                 val owner=coroutineContext[Job]!!
@@ -68,12 +71,7 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
                 ensureActive()
                 view.post {
                     if(serial==requestId && capture!=null) {
-                        points=result;view.invalidate()
-                        if(closed) {
-                            val resolved=JSONObject(settings.toString()).put("points",ArtMagneticSelection.json(result))
-                                .put("anchors",ArtMagneticSelection.json(guide))
-                            val callback=commit;cancel();callback(resolved)
-                        }
+                        points=result;finishing=false;closedReady=closed;view.invalidate()
                     }
                 }
             } catch(error: CancellationException) {throw error}
@@ -86,18 +84,43 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
             }
         }
     }
+    private fun confirm() {
+        val settings=capture ?: error("请先放置磁性锚点")
+        require(closedDraft && closedReady && !finishing) {"请先闭合路径并等待边缘计算完成，再确认选区"}
+        val resolved=JSONObject(settings.toString()).put("points",ArtMagneticSelection.json(points))
+            .put("anchors",ArtMagneticSelection.json(anchors))
+        val callback=commit;cancel();callback(resolved)
+    }
+    /** Hit actual cached live-wire segments, rather than straight chords between anchors. */
+    private fun insertClosed(q:ArtMagneticSelection.Point,x:Float,y:Float) {
+        require(closedReady && anchors.size<ArtMagneticSelection.MAX_ANCHORS) {"请等待闭合路径，锚点最多128个"}
+        var best=Double.POSITIVE_INFINITY;var insert=-1
+        for(i in anchors.indices) {
+            val segment=requireNotNull(cache[anchors[i] to anchors[(i+1)%anchors.size]]) {"闭合边缘缓存已失效，请重新计算"}
+            for(k in 0 until segment.lastIndex) {
+                val a=screen(segment[k]);val b=screen(segment[k+1]);val dx=(b[0]-a[0]).toDouble();val dy=(b[1]-a[1]).toDouble()
+                val length=dx*dx+dy*dy
+                val t=if(length==0.0)0.0 else (((x-a[0])*dx+(y-a[1])*dy)/length).coerceIn(0.0,1.0)
+                val d=hypot(x-a[0]-t*dx,y-a[1]-t*dy)
+                if(d<best) {best=d;insert=i+1}
+            }
+        }
+        require(insert>=0 && best<=20*view.resources.displayMetrics.density) {"请点击闭合边缘附近以插入锚点"}
+        anchors.add(insert,q);editing=insert;cache.clear();request(true)
+    }
     fun command(action: String) {
         when(action) {
             "cancel"->cancel()
-            "back"->{if(anchors.isNotEmpty())anchors.removeAt(anchors.lastIndex);cache.clear();if(anchors.isEmpty())cancel() else request(false)}
-            "finish"->request(true)
+            "back"->{if(anchors.isNotEmpty())anchors.removeAt(anchors.lastIndex);cache.clear();if(anchors.isEmpty())cancel() else request(closedDraft && anchors.size>=3)}
+            "close"->request(true)
+            "apply"->confirm()
+            "finish"->if(closedDraft)confirm() else request(true)
             else->error("未知磁性套索命令")
         }
     }
     fun touch(event: MotionEvent,documentId: String,revision: Int,layerId: String,m: Matrix,busy: Boolean,
         options: JSONObject,onCommit: (JSONObject)->Unit): Boolean {
         if(busy || event.actionMasked==MotionEvent.ACTION_CANCEL || event.buttonState and MotionEvent.BUTTON_SECONDARY!=0) {cancel();return true}
-        if(finishing)return true
         if(event.actionMasked==MotionEvent.ACTION_DOWN && capture==null) {
             val image=source ?: error("磁性参考正在准备，请稍候")
             require(image.documentId==documentId && image.revision==revision && image.layerId==layerId) {"参考已变化，请等待重新准备"}
@@ -127,26 +150,34 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
                 require(inBounds(q));downX=event.x;downY=event.y;dragged=false
                 editing=anchors.indices.minByOrNull {i->val xy=screen(anchors[i]);hypot(xy[0]-event.x,xy[1]-event.y)}
                     ?.takeIf {i->val xy=screen(anchors[i]);hypot(xy[0]-event.x,xy[1]-event.y)<=12*view.resources.displayMetrics.density} ?: -1
-                if(editing<0){append();request(false)}
+                if(editing<0) {
+                    if(closedDraft) {
+                        if(!closedReady)return true
+                        insertClosed(q,event.x,event.y)
+                    } else {append();request(false)}
+                }
             }
             MotionEvent.ACTION_MOVE -> {
                 if(hypot(event.x-downX,event.y-downY)>4f)dragged=true
                 if(editing>=0) {
-                    if(inBounds(q)){anchors[editing]=q;cache.clear();request(false)}
-                } else if(inBounds(q)) {
+                    if(inBounds(q)){anchors[editing]=q;cache.clear();request(closedDraft)}
+                } else if(!closedDraft && inBounds(q)) {
                     val last=screen(anchors.last())
                     if(hypot(last[0]-event.x,last[1]-event.y)>=p.getInt("anchorGap")){append();request(false)}
                     else if(android.os.SystemClock.uptimeMillis()-lastPreview>=80){lastPreview=android.os.SystemClock.uptimeMillis();request(false,q)}
                 }
             }
             MotionEvent.ACTION_UP -> {
-                if(editing==0 && !dragged && anchors.size>=3){request(true);return true}
+                if(editing==0 && !dragged && anchors.size>=3){
+                    if(closedDraft) {if(closedReady)confirm()} else request(true)
+                    return true
+                }
                 if(editing>=0 && !inBounds(q)) {anchors.removeAt(editing);cache.clear()}
-                else if(editing<0 && dragged && inBounds(q))append()
+                else if(!closedDraft && editing<0 && dragged && inBounds(q))append()
                 editing=-1
-                if(anchors.isEmpty())cancel() else request(false)
+                if(anchors.isEmpty())cancel() else request(closedDraft && anchors.size>=3)
             }
-            MotionEvent.ACTION_HOVER_MOVE -> if(inBounds(q) && android.os.SystemClock.uptimeMillis()-lastPreview>=80) {
+            MotionEvent.ACTION_HOVER_MOVE -> if(!closedDraft && inBounds(q) && android.os.SystemClock.uptimeMillis()-lastPreview>=80) {
                 lastPreview=android.os.SystemClock.uptimeMillis();request(false,q)
             }
         }
@@ -156,6 +187,7 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
         if(capture==null)return
         val path=Path()
         points.forEachIndexed {i,q->val v=screen(q);if(i==0)path.moveTo(v[0],v[1]) else path.lineTo(v[0],v[1])}
+        if(closedDraft && closedReady)path.close()
         canvas.drawPath(path,Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.rgb(80,210,230);style=Paint.Style.STROKE;strokeWidth=2f*view.resources.displayMetrics.density})
         val paint=Paint(Paint.ANTI_ALIAS_FLAG).apply {color=Color.rgb(245,180,65)}
         anchors.forEachIndexed {i,q->val v=screen(q);canvas.drawCircle(v[0],v[1],(if(i==0)6f else 4f)*view.resources.displayMetrics.density,paint)}
