@@ -146,6 +146,7 @@ internal class StudioMagneticSelectionInteraction(private val view: View) {
             val mode=when {shift && alt->"intersect";ctrl->"replace"
                 shift->"add";alt->"subtract";else->o.getString("mode")}
             capture=o.put("documentId",documentId).put("expectedRevision",revision).put("layerId",layerId).put("mode",mode)
+                .put("bounds",ArtMagneticSelection.bounds(image.rect))
             commit=onCommit;onDraft(true)
         }
         val p=capture ?: return true

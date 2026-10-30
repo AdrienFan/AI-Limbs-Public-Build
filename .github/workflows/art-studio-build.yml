@@ -61,14 +61,22 @@ jobs:
         run: |
           set -euo pipefail
           sudo chmod 666 /dev/kvm
+          export ANDROID_AVD_HOME="$RUNNER_TEMP/art-studio-avds"
+          mkdir -p "$ANDROID_AVD_HOME"
           mkdir -p dist
           for api in 29 34; do
-            printf 'no\n' | avdmanager create avd --force --name art-studio-hdr --package "system-images;android-$api;google_apis;x86_64" --device pixel_2
-            "$ANDROID_HOME/emulator/emulator" -avd art-studio-hdr -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader_indirect -memory 2048 > "dist/art-studio-emulator-api$api.log" 2>&1 &
+            printf 'no\n' | avdmanager create avd --force --name art-studio-hdr --path "$ANDROID_AVD_HOME/art-studio-hdr.avd" --package "system-images;android-$api;google_apis;x86_64" --device pixel_2
+            "$ANDROID_HOME/emulator/emulator" -list-avds | rg --fixed-strings --line-regexp art-studio-hdr
+            "$ANDROID_HOME/emulator/emulator" -avd art-studio-hdr -no-window -no-audio -no-snapshot -no-boot-anim -gpu swiftshader -memory 2048 > "dist/art-studio-emulator-api$api.log" 2>&1 &
             emulator_pid=$!
             trap 'if kill -0 "$emulator_pid" 2>/dev/null; then kill "$emulator_pid"; fi' EXIT
-            timeout 300 adb wait-for-device
-            timeout 300 bash -c 'until [[ "$(adb shell getprop sys.boot_completed | tr -d "\r")" == 1 ]]; do sleep 2; done'
+            studio_booted=0
+            for attempt in $(seq 1 150); do
+              if ! kill -0 "$emulator_pid" 2>/dev/null; then cat "dist/art-studio-emulator-api$api.log"; exit 1; fi
+              if studio_boot_status="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" && [[ "$studio_boot_status" == 1 ]]; then studio_booted=1; break; fi
+              sleep 2
+            done
+            if [[ "$studio_booted" != 1 ]]; then cat "dist/art-studio-emulator-api$api.log"; exit 1; fi
             ./gradlew :art-studio-plugin:connectedDebugAndroidTest --stacktrace --no-daemon
             cp -r plugin-lab/plugins/art-studio/build/reports/androidTests "dist/android-tests-api$api"
             adb emu kill

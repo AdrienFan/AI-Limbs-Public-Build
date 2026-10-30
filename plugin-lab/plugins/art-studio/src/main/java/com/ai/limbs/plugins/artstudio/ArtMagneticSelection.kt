@@ -22,6 +22,7 @@ internal object ArtMagneticSelection {
     val pending=emptyList<String>()
     fun options(p: JSONObject): JSONObject {
         val o=defaults();o.keys().forEach {if(p.has(it))o.put(it,p.get(it))}
+        if(p.has("bounds"))o.put("bounds",JSONObject(p.getJSONObject("bounds").toString()))
         require(o.getString("mode") in ArtBezierSelection.modes && o.getString("reference") in setOf("current","visible","labels"))
         ArtLayerLabels.parse(o.getJSONArray("colorLabels"));require(o.getString("edgeModel") in setOf("sobel","log"))
         require(o.getInt("filterRadius") in 1..4 && o.getInt("searchRadius") in 2..64 && o.getInt("threshold") in 0..255)
@@ -42,7 +43,8 @@ internal object ArtMagneticSelection {
         return Image(snapshot.getString("id"),snapshot.getInt("revision"),p.getString("layerId"),
             o.getString("reference"),o.getInt("filterRadius"),rect,edges,referenceKey(o))
     }
-    fun referenceKey(options:JSONObject)=options.getString("reference")+":"+options.getJSONArray("colorLabels").toString()+":"+options.getString("edgeModel")
+    fun referenceKey(options:JSONObject)=options.getString("reference")+":"+options.getJSONArray("colorLabels").toString()+":"+options.getString("edgeModel")+":"+(options.optJSONObject("bounds")?.toString() ?: "auto")
+    fun bounds(rect:Rect)=JSONObject().put("x",rect.left).put("y",rect.top).put("width",rect.width()).put("height",rect.height())
 
     fun anchors(raw:JSONArray):List<Point> {
         require(raw.length() in 1..MAX_ANCHORS) {"磁性路径需要1–128锚点"}

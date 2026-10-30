@@ -1528,7 +1528,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
     fun magneticCreate(actor: String,p: JSONObject): JSONObject = locked {
         val image=magneticReference(p)
         val points=ArtMagneticSelection.trace(image,ArtMagneticSelection.anchors(p.getJSONArray("anchors")),p,true)
-        magneticCommit(actor,JSONObject(p.toString()).put("points",ArtMagneticSelection.json(points)))
+        magneticCommit(actor,JSONObject(p.toString()).put("points",ArtMagneticSelection.json(points)).put("bounds",ArtMagneticSelection.bounds(image.rect)))
     }
     fun magneticCommit(actor: String,p: JSONObject): JSONObject = locked {
         val snap=selectionToolRequest(p);val o=ArtMagneticSelection.options(p)
@@ -1544,7 +1544,7 @@ internal class ArtStore(private val root: File, private val ephemeral: Boolean =
         } else state.optJSONObject("selection")
         val selection=ArtCurveSoftSelection.append(previous,mask,o.getString("mode"),w,h)
         val saved=JSONObject(o.toString()).put("anchors",ArtMagneticSelection.json(ArtMagneticSelection.anchors(p.getJSONArray("anchors"))))
-            .put("layerId",p.getString("layerId"))
+            .put("layerId",p.getString("layerId")).put("bounds",ArtMagneticSelection.bounds(ArtColorSelection.bounds(state,p)))
         if(previous!=null)saved.put("beforeSelection",JSONObject(previous.toString()).apply {remove("magneticSource")})
         selection.put("magneticSource",saved)
         apply(actor,"SELECTION_TOOL",JSONObject().put("documentId",snap.getString("id")).put("expectedRevision",snap.getInt("revision"))

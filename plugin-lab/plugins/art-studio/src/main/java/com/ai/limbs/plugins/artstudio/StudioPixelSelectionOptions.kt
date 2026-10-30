@@ -94,6 +94,7 @@ internal fun StudioMagneticSelectionOptions(settings: JSONObject,busy: Boolean,h
         }
         Text("已提交锚点随工程保存。重新编辑会在确认时替换原磁性操作，保留该操作之前的选区组合；取消不改变当前选区。")
     }
+    if(settings.has("bounds"))TextButton(enabled=enabled,onClick={onSettings(JSONObject(settings.toString()).apply {remove("bounds")})}) {Text("重置已保存的参考范围")}
     Row {
         listOf("sobel" to "对比边缘","log" to "LoG边缘").forEach {(id,label)->
             FilterChip(selected=settings.getString("edgeModel")==id,enabled=enabled,onClick={set("edgeModel",id)},label={Text(label)})}

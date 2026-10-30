@@ -140,4 +140,15 @@ class ArtHdrPipelineAndroidTest {
             for(x in listOf(10,511,512,1024))assertRgba(floatArrayOf(4f,2f,1f,1f),ArtFloatPixels.read(image,Rect(x,x,x+1,x+1)))
         } finally {image.recycle()}
     }
+    @Test fun reopeningMagneticAnchorsUsesOriginalBoundsRatherThanTheSmallerResult() {
+        var snap=store.create(20,20,"#00000000");val layer=snap.getJSONObject("state").getString("selectedLayerId")
+        snap=store.basicSelection("AWEI",request(snap).put("shape","rect").put("x",0).put("y",0).put("width",20).put("height",20).put("antialias",0))
+        snap=store.magneticCommit("AWEI",request(snap).put("layerId",layer).put("mode","replace").put("antialias",0).put("limitToSelection",true)
+            .put("bounds",JSONObject().put("x",0).put("y",0).put("width",20).put("height",20))
+            .put("anchors",JSONArray("[[4,4],[8,4],[8,8],[4,8]]")).put("points",JSONArray("[[4,4],[8,4],[8,8],[4,8]]")))
+        val options=ArtMagneticSelection.options(snap.getJSONObject("state").getJSONObject("selection").getJSONObject("magneticSource"))
+        val p=request(snap).put("layerId",layer);options.keys().forEach {p.put(it,options.get(it))}
+        val image=store.magneticReference(p)
+        assertEquals(Rect(0,0,20,20),image.rect)
+    }
 }
